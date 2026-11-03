@@ -167,12 +167,15 @@ def _request_bars(day: date, *, feed: str, symbols: list[str], start_minute: int
 
 
 def warmup(day: date, *, root: Path = DATA_DIR, fetch: Callable = _request_bars,
-           stocks: dict[str, str] | None = None) -> dict:
+           stocks: dict[str, str] | None = None, now: Callable = lambda: datetime.now(ET)) -> dict:
     """Pre-open: persist exactly 20 prior opening-volume windows in each feed."""
     if day.isoformat() not in SESSIONS:
         raise StudyError("Date is outside the frozen 20-session cohort.")
     stock_map = stocks or load_universe()
     prior_days = _previous_sessions(day)
+    # A historical opening is ready on both feeds after the SIP delay.
+    if now().astimezone(ET) < datetime.combine(prior_days[-1], wall_time(10, 0), ET):
+        raise StudyError("The previous session's historical opening window is not ready.")
     symbols = sorted(set(stock_map) | set(stock_map.values()))
     profiles = {}
     for feed in ("iex", "sip"):

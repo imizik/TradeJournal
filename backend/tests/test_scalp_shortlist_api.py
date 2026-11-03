@@ -108,7 +108,7 @@ def test_collector_choice_and_recap_use_the_same_session(tmp_path, monkeypatch):
     app = FastAPI()
     app.include_router(api.router, prefix=PATH)
     client = TestClient(app)
-    collector.warmup(day, root=tmp_path, fetch=bars, stocks=stocks)
+    collector.warmup(day, root=tmp_path, fetch=bars, stocks=stocks, now=lambda: now)
     collector.capture_live(day, root=tmp_path, now=lambda: now, fetch=bars, stocks=stocks)
     assert client.get(PATH).json()["live"]["picks"][0]["direction"] == "down"
     assert client.post(CHOICES, json={"symbol": "TEST", "choice": "take"}).json()["timely"]

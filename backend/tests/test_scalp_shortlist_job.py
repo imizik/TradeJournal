@@ -12,8 +12,12 @@ from app.engine.scalp_shortlist import (
     load_universe,
     make_recap,
     rank_picks,
-    warmup,
+    warmup as run_warmup,
 )
+
+
+def warmup(day, **kwargs):
+    return run_warmup(day, now=lambda: datetime.fromisoformat(f"{day.isoformat()}T08:50:00-05:00"), **kwargs)
 
 
 def bars(returns=None, volume=100):
@@ -168,3 +172,11 @@ def test_feed_wide_delayed_exit_can_be_recovered(tmp_path):
         make_recap(day, root=tmp_path, now=clock, fetch=delayed, stocks=stocks)
     assert not (tmp_path / day.isoformat() / "recap.json").exists()
     assert make_recap(day, root=tmp_path, now=clock, fetch=fetch, stocks=stocks)["eligible"] == 1
+
+
+def test_future_warmup_cannot_freeze_a_partial_prior_session(tmp_path):
+    with pytest.raises(StudyError, match="historical opening window"):
+        run_warmup(date(2026, 11, 5), root=tmp_path,
+                   now=lambda: datetime.fromisoformat("2026-11-04T09:35:00-05:00"),
+                   fetch=lambda *a, **kw: pytest.fail("a partial session must not be fetched"))
+    assert list(tmp_path.iterdir()) == []

@@ -97,3 +97,35 @@ test("changing the study morning ignores a late response for the previous mornin
   await expect(panel.getByLabel("Study morning")).toHaveValue(other);
   await expect(panel.getByTestId("scalp-recap")).toContainText("MU UP");
 });
+
+test("Practice keeps a pending paper decision attached to its morning", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-11-04T14:40:30Z") });
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => { finish = resolve; });
+  await page.route("**/scalp-shortlist**", async (route) => {
+    if (route.request().method() === "POST") await pending;
+    return route.fulfill({ json: body() });
+  });
+  await page.goto("/practice#scalp-shortlist");
+  const panel = page.getByTestId("scalp-shortlist");
+  await panel.getByTestId("scalp-pick-ANET").getByRole("button", { name: "Take" }).click();
+  try {
+    await expect(panel.getByLabel("Study morning")).toBeDisabled();
+  } finally {
+    finish();
+  }
+  await expect(panel.getByLabel("Study morning")).toBeEnabled();
+});
+
+test("a temporary read failure recovers while the morning card is open", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-11-04T14:40:05Z") });
+  let reads = 0;
+  await page.route("**/scalp-shortlist**", (route) => ++reads === 1
+    ? route.fulfill({ status: 503, json: { detail: "Temporarily unavailable" } })
+    : route.fulfill({ json: body() }));
+  await page.goto("/practice#scalp-shortlist");
+  const panel = page.getByTestId("scalp-shortlist");
+  await expect(panel.getByRole("alert")).toContainText("503");
+  await page.clock.fastForward(11_000);
+  await expect(panel.getByTestId("scalp-pick-ANET")).toBeVisible();
+});

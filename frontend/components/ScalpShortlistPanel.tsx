@@ -55,13 +55,14 @@ export default function ScalpShortlistPanel({ history = false }: { history?: boo
     const id = window.setInterval(() => {
       const minute = minuteET();
       const today = newYorkToday();
-      if (!study?.sessions.includes(today) || minute < 9 * 60 + 35 || minute > 10 * 60 + 50
+      if ((study && !study.sessions.includes(today)) || today < "2026-11-04" || today > "2026-12-02"
+          || minute < 9 * 60 + 35 || minute > 10 * 60 + 50
           || (history && selectedDay && selectedDay !== today)) return;
       setNow(Date.now());
       if (document.visibilityState === "visible") void load(history ? (selectedDay || undefined) : undefined);
     }, 10_000);
     return () => window.clearInterval(id);
-  }, [history, load, selectedDay, study?.sessions]);
+  }, [history, load, selectedDay, study]);
 
   async function decide(symbol: string, choice: Decision["choice"]) {
     if (!study || saving) return;
@@ -99,7 +100,7 @@ export default function ScalpShortlistPanel({ history = false }: { history?: boo
 
   return <section className="min-w-0 rounded-lg border border-primary/30 bg-card" aria-label="9:40 scalp shortlist" data-testid="scalp-shortlist">
     <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5">
-      <div><h2 className="text-[13.5px] font-semibold tracking-tight">9:40 scalp shortlist</h2><p className="mt-0.5 text-xs text-muted-foreground">20-session paper study · Morning {Math.max(1, sessionIndex + 1)} of 20</p></div>
+      <div><h2 className="text-[13.5px] font-semibold tracking-tight">9:40 scalp shortlist</h2><p className="mt-0.5 text-xs text-muted-foreground">20-session paper study{sessionIndex >= 0 ? ` · Morning ${sessionIndex + 1} of 20` : ""}</p></div>
       {history && <Link href="/" className="inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Dashboard →</Link>}
     </div>
     <div className="space-y-3 p-4">
@@ -107,7 +108,8 @@ export default function ScalpShortlistPanel({ history = false }: { history?: boo
       {!error && (!study || !current) && <p role="status" className="text-sm text-muted-foreground">Loading {history && selectedDay ? `${date}` : "today’s"} paper study…</p>}
       {study && <>
         {history && <label className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">Study morning
-          <select aria-label="Study morning" value={selectedDay || study.day} onChange={(event) => setSelectedDay(event.target.value)} className="min-h-11 rounded-md border bg-background px-2 text-sm text-foreground">
+          <select aria-label="Study morning" disabled={saving !== null} value={selectedDay || study.day} onChange={(event) => { setNotice(""); setSelectedDay(event.target.value); }} className="min-h-11 rounded-md border bg-background px-2 text-sm text-foreground">
+            {!study.sessions.includes(selectedDay || study.day) && <option value={selectedDay || study.day}>Choose a study morning</option>}
             {[...study.sessions].filter((day) => day <= study.today).reverse().map((day) => <option key={day} value={day}>{day}</option>)}
           </select>
         </label>}
