@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Account, api, Fill, FillWriteInput } from "@/lib/api";
 
@@ -25,6 +25,8 @@ type ManualFillFormProps = {
   initialFill?: Fill;
   successHref?: string;
   cancelHref?: string;
+  onSaved?: (message: string) => void;
+  onCancel?: () => void;
 };
 
 type FillFormState = {
@@ -91,6 +93,8 @@ export default function ManualFillForm({
   initialFill,
   successHref,
   cancelHref,
+  onSaved,
+  onCancel,
 }: ManualFillFormProps) {
   const router = useRouter();
   const [form, setForm] = useState<FillFormState>(
@@ -165,8 +169,10 @@ export default function ManualFillForm({
         ? ` ${result.anomalies.length} anomaly/anomalies logged.`
         : "";
 
-      setMsg(`${actionLabel}. Rebuilt ${result.trades_rebuilt} trade${result.trades_rebuilt === 1 ? "" : "s"}.${anomalySuffix}`);
+      const message = `${actionLabel}. Rebuilt ${result.trades_rebuilt} trade${result.trades_rebuilt === 1 ? "" : "s"}.${anomalySuffix}`;
+      setMsg(message);
       setStatus("done");
+      onSaved?.(message);
 
       if (mode === "create") {
         resetForm();
@@ -384,6 +390,15 @@ export default function ManualFillForm({
                 Cancel
               </a>
             )}
+            {onCancel && (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm font-medium hover:bg-secondary sm:min-h-9"
+              >
+                Cancel
+              </button>
+            )}
             <button
               type="submit"
               disabled={busy || accounts.length === 0}
@@ -415,6 +430,37 @@ export default function ManualFillForm({
         )}
       </form>
     </section>
+  );
+}
+
+/** The Fills page header with a folded "Add manual fill": adding a fill is rare, so the history leads and the form opens on demand. */
+export function AddManualFill({ accounts, children }: { accounts: Account[]; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (wasOpen.current && !open) button.current?.focus(); // closing the form hands focus back to its button
+    wasOpen.current = open;
+  }, [open]);
+  return (
+    <>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>{children}</div>
+        {!open && (
+          <button
+            ref={button}
+            type="button"
+            onClick={() => { setSaved(null); setOpen(true); }}
+            className="inline-flex min-h-11 shrink-0 items-center rounded-md border px-3 text-sm font-medium hover:bg-secondary sm:min-h-9"
+          >
+            Add manual fill
+          </button>
+        )}
+      </div>
+      <p role="status" className="text-sm text-foreground empty:hidden">{!open && saved}</p>
+      {open && <ManualFillForm accounts={accounts} onSaved={(message) => { setSaved(message); setOpen(false); }} onCancel={() => setOpen(false)} />}
+    </>
   );
 }
 

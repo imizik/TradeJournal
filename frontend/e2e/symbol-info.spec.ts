@@ -696,18 +696,13 @@ test("Overview is compact at the dock's width: one source line, one row per fact
   expect(cut).toEqual([]);
   expect(await info.evaluate((root) => root.scrollWidth <= root.clientWidth)).toBe(true);
   expect((await info.boundingBox())!.width).toBeLessThan(300);
-  // Seven tabs share one row at this width; the open one is marked.
-  const tops = await info.getByRole("tab").evaluateAll((tabs) => tabs.map((tab) => Math.round(tab.getBoundingClientRect().top)));
-  expect(new Set(tops).size).toBe(1);
-  expect(tops).toHaveLength(7);
-  await expect(info.getByRole("tab", { name: "Overview", exact: true })).toHaveAttribute("aria-selected", "true");
-  // A tab that scrolled out of the row is brought back when it is chosen.
-  await info.getByRole("tab", { name: "You", exact: true }).click();
-  const inRow = await info.getByRole("tab", { name: "You", exact: true }).evaluate((tab) => {
+  // Seven tabs, all in sight: the row wraps at this width rather than scrolling; the open one is marked.
+  const tabs = await info.getByRole("tab").evaluateAll((tabs) => tabs.map((tab) => {
     const row = tab.parentElement!.getBoundingClientRect(), box = tab.getBoundingClientRect();
     return box.left >= row.left - 1 && box.right <= row.right + 1;
-  });
-  expect(inRow).toBe(true);
+  }));
+  expect(tabs).toEqual(Array(7).fill(true));
+  await expect(info.getByRole("tab", { name: "Overview", exact: true })).toHaveAttribute("aria-selected", "true");
   await info.getByRole("tab", { name: "Overview", exact: true }).click();
   await expect(ownership).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 2200 }); // the whole tab in one picture
@@ -788,20 +783,20 @@ test("Overview blocks are edged and foldable, Peers sit last and stay folded, an
   expect(await info.evaluate((root) => root.scrollWidth <= root.clientWidth)).toBe(true);
 });
 
-test("a mouse wheel over the tab row scrolls it sideways, then hands back to the dock at the end", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.route("**/api/backend/charts/symbol/*/overview", (route) => route.fulfill({ json: overview("NVDA") }));
-  await page.goto("/charts");
-  const row = panel(page).getByRole("tablist", { name: "Symbol info tabs" });
-  await row.getByRole("tab", { name: "Overview", exact: true }).click();
-  const left = () => row.evaluate((list) => list.scrollLeft);
-  expect(await row.evaluate((list) => list.scrollWidth > list.clientWidth)).toBe(true); // the dock is narrower than the row
-  await row.hover();
-  await page.mouse.wheel(0, 100);
-  await expect.poll(left).toBeGreaterThan(0);
-  await page.mouse.wheel(0, 2000);
-  const end = await row.evaluate((list) => list.scrollWidth - list.clientWidth);
-  await expect.poll(left).toBeGreaterThanOrEqual(end - 1);
-  await page.mouse.wheel(0, -2000);
-  await expect.poll(left).toBe(0);
-});
+for (const [width, height] of [[1440, 900], [1280, 800]]) {
+  test(`every tab name is in sight in the narrow dock at ${width}px, with the last tab open`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await page.route("**/api/backend/charts/symbol/*/overview", (route) => route.fulfill({ json: overview("NVDA") }));
+    await page.goto("/charts");
+    const row = panel(page).getByRole("tablist", { name: "Symbol info tabs" });
+    await row.getByRole("tab", { name: "You", exact: true }).click();
+    // The row wraps, so nothing scrolls out of sight and every tab sits inside it.
+    await expect.poll(() => row.evaluate((list) => {
+      const box = list.getBoundingClientRect();
+      return list.scrollWidth <= list.clientWidth && [...list.children].every((tab) => {
+        const tabBox = tab.getBoundingClientRect();
+        return tabBox.left >= box.left - 1 && tabBox.right <= box.right + 1;
+      });
+    })).toBe(true);
+  });
+}

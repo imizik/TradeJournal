@@ -183,7 +183,7 @@ function shownHref(href: string, owner: boolean, enabled: boolean, journal: bool
   return owner || ["/", "/charts", "/daily", ...(journal ? ["/trades", "/fills", "/analytics"] : [])].includes(href);
 }
 
-/** The phone tab bar's pages; everything else is under More. The owner lands on Today (Dashboard stays in More); an assistant keeps Dashboard. */
+/** The phone tab bar's pages; everything else is under More. The owner gets Today (or Desk), Dashboard, Charts and Trades, with Daily Review under More; an assistant keeps Daily Review. */
 const TABS = [
   { href: "/today", label: "Today", icon: Sun },
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -382,7 +382,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
 
       {/* Phone: the pages used most are one tap away at the bottom; More opens the full menu. */}
       <nav aria-label="Main tabs" className="fixed inset-x-0 bottom-0 z-40 flex border-t bg-card pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:hidden">
-        {withDesk(TABS, copilot).filter(({ href }) => shownHref(href, access.owner, enabled, journalOn, access.grants.market_decision_write) && !(href === "/" && access.owner)).map(({ href, label, icon: Icon }) => {
+        {withDesk(TABS, copilot).filter(({ href }) => shownHref(href, access.owner, enabled, journalOn, access.grants.market_decision_write) && !(href === "/daily" && access.owner)).map(({ href, label, icon: Icon }) => {
           const active = pathname === href || (href !== "/" && pathname.startsWith(href));
           return (
             <Link key={href} href={href} aria-current={active ? "page" : undefined}
@@ -392,7 +392,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
               <Pending corner />
             </Link>
           );
-        }).flatMap((tab, i) => i === 1 ? [tab, <PlanTab key="plan" />] : [tab])}
+        }).flatMap((tab) => tab.key === "/charts" ? [tab, <PlanTab key="plan" />] : [tab])}
         <MoreTab open={menuOpen} onOpen={() => setMenuOpen(true)} owner={owner} />
       </nav>
 
