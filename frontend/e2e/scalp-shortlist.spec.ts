@@ -129,3 +129,14 @@ test("a temporary read failure recovers while the morning card is open", async (
   await page.clock.fastForward(11_000);
   await expect(panel.getByTestId("scalp-pick-ANET")).toBeVisible();
 });
+
+test("private frontend forwards the study and paper decisions to the actual backend", async ({ request }) => {
+  const path = "/api/backend/scalp-shortlist";
+  const sessionView = await request.get(path, { params: { day: session } });
+  expect(sessionView.status()).toBe(200);
+  expect(await sessionView.json()).toMatchObject({ day: session, sessions: expect.arrayContaining([session]) });
+  // An out-of-study day exercises the decision handler without recording a choice.
+  const rejected = await request.post(`${path}/2026-11-03/decisions`, { data: { symbol: "NVDA", choice: "pass" } });
+  expect(rejected.status()).toBe(404);
+  expect(await rejected.json()).toEqual({ detail: "Outside the study" });
+});
