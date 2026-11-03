@@ -17,6 +17,7 @@ import JoTodayLine from "./JoTodayLine";
 import RadarPreview from "./RadarPreview";
 import ExitHabits from "./ExitHabits";
 import PlansCard from "./PlansCard";
+import ScalpShortlistPanel from "@/components/ScalpShortlistPanel";
 import { DashboardCard, SummaryFigure, dashboardLink, pnlTone } from "./DashboardCard";
 
 type Params = { account?: string; type?: string; decision?: string; practice_run?: string };
@@ -38,6 +39,7 @@ export function OwnerDashboardShell({ today, journal, attention }: { today: stri
         <div className="flex flex-wrap items-center gap-2"><PlanATrade origin="dashboard" /><ReviewMyWeek practice /><DashboardActions /></div></div>
     </header>
     <JoTodayLine today={today} />
+    <ScalpShortlistPanel />
     <PlansCard />
     <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
       <aside className="min-w-0 xl:col-start-2 xl:row-start-1" aria-label="Attention and data status">

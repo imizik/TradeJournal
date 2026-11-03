@@ -534,3 +534,14 @@ controlled response delays; it makes no provider calls. Chart and Tradier quote 
 is in `backend/app/engine/market_http.py`, with credential/timeout/no-cookie-reuse
 coverage in `backend/tests/test_market_http.py`. `scripts/benchmark_chart_json.py`
 measures how long chart responses stall the API's event loop.
+
+### 9:40 ET owner paper shortlist
+
+Dashboard, Today and Desk surface the finite morning study; `/practice#scalp-shortlist`
+holds the session history. The page polls for the captured 9:40 slate. An owner
+can record Take or Pass once per shown symbol through `POST /scalp-shortlist/{day}/decisions`.
+The API uses its own receipt time. Choices before 9:41 ET are timely, choices
+from 9:41 to before 9:51 are late, and unanswered names remain unanswered.
+`GET /scalp-shortlist` reads stored slates, choices and outcomes. The capture
+works separately from the page and from the Codex study files.
+See the [paper study timers](../../deploy/README.md#940-et-paper-shortlist).

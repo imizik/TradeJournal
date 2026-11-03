@@ -13,6 +13,7 @@ import { copilotLabHref } from "@/lib/copilot";
 import { money } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import WatchDayLink from "@/components/replay/WatchDayLink";
+import ScalpShortlistPanel from "@/components/ScalpShortlistPanel";
 
 // GET /today (backend/app/routers/today.py): every section is built on its own; a failed one reads { state: "unavailable" }.
 type Unavailable = { state: "unavailable" };
@@ -205,6 +206,7 @@ export default function TodayView() {
     {error && !body ? <p role="status" className="text-sm text-red-400">Today could not load: {error}</p>
       : !body ? <p role="status" className="text-sm text-muted-foreground">Reading what matters now…</p>
       : <>
+        <ScalpShortlistPanel />
         <ActNow section={body.act_now} lab={lab} />
         <Plans section={body.plans} lab={lab} />
         <NewSince section={body.new} lab={lab} />
