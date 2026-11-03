@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import Link from "next/link";
+import { ChartCandlestick } from "lucide-react";
 import PlanLadder, { daysTo } from "@/components/copilot/PlanLadder";
 import { getThreadPlan, HORIZONS, type DeskHorizon, type DeskPosition, type DeskThreadPlan, type DeskThreadRef } from "@/lib/desk";
 import type { PlanBoardRow } from "@/lib/copilot";
@@ -119,7 +121,8 @@ export function ThreadHead({ thread, data, draft = false, horizon = null, onHori
   stage?: string | null; adopted?: boolean;
 }) {
   const chip = chipOf(data, draft, stage, adopted), meta = stage ? "Position closed" : metaOf(data);
-  const symbol = thread.symbol ?? data?.plan?.symbol ?? thread.title;
+  const chartSymbol = thread.symbol ?? data?.plan?.symbol ?? null;
+  const symbol = chartSymbol ?? thread.title;
   const thesis = data?.position?.plan?.thesis ?? data?.plan?.thesis ?? null;
   return (
     <header role="group" aria-label="Thread header" className="flex flex-wrap items-start gap-x-6 gap-y-3">
@@ -129,7 +132,9 @@ export function ThreadHead({ thread, data, draft = false, horizon = null, onHori
           {horizon && onHorizon && !draft && !stage && <HorizonPick horizon={horizon} onChange={onHorizon} />}
           {meta && <span>{meta}</span>}
         </div>
-        <h2 className="text-3xl font-semibold leading-none tracking-tight text-foreground">{symbol}</h2>
+        <h2 className="text-3xl font-semibold leading-none tracking-tight text-foreground">
+          {chartSymbol ? <Link href={`/charts?symbol=${encodeURIComponent(chartSymbol)}`} aria-label={`Open ${chartSymbol} chart`} title={`Open ${chartSymbol} in Charts`} className="inline-flex items-baseline gap-1.5 decoration-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">{symbol}<ChartCandlestick size={15} aria-hidden className="self-center text-muted-foreground" /></Link> : symbol}
+        </h2>
         {thesis && <p className="max-w-[60ch] truncate text-sm text-muted-foreground" title={thesis}>{thesis}</p>}
       </div>
       {data && <div className="sm:pt-5"><PriceBlock symbol={symbol} position={data.position} plan={data.plan} /></div>}

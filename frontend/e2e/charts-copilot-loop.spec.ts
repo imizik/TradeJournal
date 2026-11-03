@@ -77,7 +77,7 @@ async function stubLab(page: Page, reads: string[], chat = sse([{ type: "text", 
 async function openPanel(page: Page) {
   await page.goto("/charts?symbol=MRVL");
   await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
-  await page.getByRole("button", { name: "Copilot", exact: true }).click();
+  await page.getByRole("button", { name: "Ask Copilot", exact: true }).click();
   const panel = page.getByTestId("copilot-panel");
   await expect(panel.getByTestId("copilot-loop")).toBeVisible();
   return panel;
@@ -132,7 +132,7 @@ test("the symbol's position, plans and what is new sit above the conversation an
   await expect(position).toHaveCount(0);
   await page.reload();
   await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
-  if (!(await page.getByTestId("copilot-loop").isVisible())) await page.getByRole("button", { name: "Copilot", exact: true }).click();
+  if (!(await page.getByTestId("copilot-loop").isVisible())) await page.getByRole("button", { name: "Ask Copilot", exact: true }).click();
   await expect(page.getByTestId("copilot-loop")).toBeVisible();
   await expect(header(page.getByTestId("copilot-panel"), "MRVL open position")).toHaveAttribute("aria-expanded", "false");
   await expect(header(page.getByTestId("copilot-panel"), "MRVL armed plans")).toHaveAttribute("aria-expanded", "true");
@@ -150,6 +150,47 @@ test("Plan a trade fills the box with the chart's interval, last price and neare
   expect(value).toMatch(/nearest automatic levels: above [\d.,]+ \(Prior day high\), below [\d.,]+ \(Prior day low\)\n\n$/);
   expect(value).not.toContain("Week high");
   await expect(page).toHaveURL(/\/charts\?symbol=MRVL/);
+});
+
+test("the chart draft survives Layers, and Continue in Desk keeps its symbol and words", async ({ page }) => {
+  await stubLab(page, []);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const panel = await openPanel(page);
+  const message = panel.getByLabel("Message");
+  await message.fill("Check whether MRVL is holding the gap.");
+
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Layers" })).toBeVisible();
+  await page.getByRole("button", { name: "Ask Copilot", exact: true }).click();
+  await expect(panel.getByLabel("Message")).toHaveValue("Check whether MRVL is holding the gap.");
+
+  await page.getByRole("link", { name: "Continue in Desk" }).click();
+  await expect(page).toHaveURL(/\/copilot-lab\?[^#]*symbol=MRVL/);
+  await expect(page.getByLabel("Message")).toHaveValue("Check whether MRVL is holding the gap.");
+  await page.reload();
+  await expect(page.getByLabel("Message")).toHaveValue("Check whether MRVL is holding the gap.");
+  await page.getByRole("link", { name: "Open MRVL chart", exact: true }).click();
+  await expect(page).toHaveURL(/\/charts\?symbol=MRVL$/);
+  await expect(page.getByLabel("Chart symbol")).toHaveValue("MRVL");
+});
+
+test("Continue in Desk reopens the saved chart investigation with the unsent addition", async ({ page }) => {
+  await stubLab(page, []);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const panel = await openPanel(page);
+  await header(panel, "MRVL armed plans").click();
+  await panel.getByRole("button", { name: "Open the MRVL plan (long)" }).click();
+  await expect(panel.getByText("Armed: entry 95.90, invalidation 91.50.")).toBeVisible();
+  await panel.getByLabel("Message").fill("Compare this setup with the group trend.");
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await page.getByRole("button", { name: "Ask Copilot", exact: true }).click();
+  await expect(panel.getByText("Armed: entry 95.90, invalidation 91.50.")).toBeVisible();
+  await expect(panel.getByLabel("Message")).toHaveValue("Compare this setup with the group trend.");
+
+  await page.getByRole("link", { name: "Continue in Desk" }).click();
+  await expect(page).toHaveURL(new RegExp(`/copilot-lab\\?[^#]*thread=${PLAN_A}`));
+  await expect(page.getByLabel("Message")).toHaveValue("Compare this setup with the group trend.");
+  await expect(page.getByText("Armed: entry 95.90, invalidation 91.50.")).toBeVisible();
 });
 
 test("the plan card's contract pick list fits the narrow dock", async ({ page }) => {

@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Menu, MessagesSquare, PanelLeft, PanelRight, Plus, Search } from "lucide-react";
+import Link from "next/link";
+import { ChartCandlestick, Menu, MessagesSquare, PanelLeft, PanelRight, Plus, Search } from "lucide-react";
 import { openNavMenu, useFoldedNav } from "@/components/Nav";
 import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
@@ -418,12 +419,11 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
           ) : !thread && link?.symbol && !link.investigation ? (
             <div className="mb-4 space-y-3">
               {/* No conversation, so no thread header: the symbol's horizon sits on its own line. */}
-              {linkRow?.horizon && (
-                <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">{link.symbol}</span>
-                  <HorizonPick horizon={linkRow.horizon} onChange={horizon => changeHorizon(link.symbol, horizon)} />
-                </p>
-              )}
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Link href={`/charts?symbol=${encodeURIComponent(link.symbol)}`} aria-label={`Open ${link.symbol} chart`} title={`Open ${link.symbol} in Charts`}
+                  className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-2 hover:text-primary hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">{link.symbol}<ChartCandlestick size={13} aria-hidden className="text-muted-foreground" /></Link>
+                {linkRow?.horizon && <HorizonPick horizon={linkRow.horizon} onChange={horizon => changeHorizon(link.symbol, horizon)} />}
+              </p>
               {fills.bar(link.symbol)}
               <DecisionBar key={link.symbol} symbol={link.symbol} {...barFor(link.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
               <ThreadAlertAnswers symbol={link.symbol} rows={alertRows} />

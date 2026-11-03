@@ -88,6 +88,7 @@ test("an option: its own mark and P&L, the underlying labelled, and the plan lad
   await expect(head).toContainText("In position");
   await expect(head).toContainText("100C · Nov 21 · 29 days left");
   await expect(head.getByRole("heading", { name: "NBIS" })).toBeVisible();
+  await expect(head.getByRole("link", { name: "Open NBIS chart" })).toHaveAttribute("href", "/charts?symbol=NBIS");
   const thesis = head.getByText(NBIS_THESIS);
   await expect(thesis).toHaveAttribute("title", NBIS_THESIS);
   expect(await thesis.evaluate(el => getComputedStyle(el).textOverflow)).toBe("ellipsis");

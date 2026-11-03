@@ -7,6 +7,7 @@ import {
   BRIEFING_TITLE, type TurnSource,
 } from "@/lib/copilot";
 import Link from "next/link";
+import { chartDraftThread, draftKey, readDraft, rememberChartDraft, storeDraft, type CopilotDraft } from "@/lib/copilotDraft";
 import { Eye, ImagePlus, Loader2, MoreHorizontal, Plus, Reply, X } from "lucide-react";
 import MarkPlanDone from "@/components/copilot/MarkPlanDone";
 import { useAppAccess } from "@/components/AccessProvider";
@@ -429,7 +430,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const panel = variant === "panel";
   // Where this question is asked from, recorded with its turn: the desk page, the Charts dock, a Radar drawer, or another panel.
   const source: TurnSource = !panel ? "desk" : link?.origin?.kind === "radar_event" ? "radar" : pageSymbol ? "charts" : "panel";
-  const { owner } = useAppAccess();
+  const { owner, identifier } = useAppAccess();
   const opening = link?.context && !link.investigation ? `Context: ${link.context}\n\n` : panel && pageContext ? `Context: ${pageContext}\n\n` : "";
   const [status, setStatus] = useState<CopilotStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -491,6 +492,43 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const shown = useRef(0); // messages on screen
   const typed = useRef(false); // the draft holds the owner's own words
   const lookOnSend = useRef(false); // the next Send attaches the page's chart (a strip's start with ``chart``)
+  const [draftSlot, setDraftSlot] = useState<string | null>(null);
+  const activeSlot = useRef<string | null>(null);
+  const selection = useRef(0);
+  const edits = useRef(0);
+  useEffect(() => () => { activeSlot.current = null; selection.current++; }, []);
+  const keyFor = (target: string, id?: string | null, entry?: PanelLink | null) =>
+    draftKey(identifier, target, id, entry && (entry.context || entry.image || entry.radar || entry.plan || entry.origin || entry.investigation)
+      ? JSON.stringify(entry) : "");
+
+  function draftSnapshot(): CopilotDraft {
+    return { text: draft, images: attached, typed: typed.current, spoken, origin, drawn, captureChart: lookOnSend.current };
+  }
+
+  function activateDraft(key: string, text = "", entry?: PanelLink | null) {
+    const saved = readDraft(key);
+    selection.current++;
+    activeSlot.current = key;
+    setDraftSlot(key);
+    setDraft(saved?.text ?? text);
+    setAttached(saved?.images ?? (entry?.image ? [{ id: entry.image, url: imageUrl(entry.image) }] : []));
+    typed.current = saved?.typed ?? false;
+    setSpoken(saved?.spoken ?? false);
+    setAttaching(null);
+    setOrigin(saved?.origin ?? planOrigin(entry?.origin, entry?.context));
+    setDrawn(saved?.drawn ?? entry?.plan ?? null);
+    lookOnSend.current = saved?.captureChart ?? false;
+  }
+
+  // Commit the editor to its own slot before a navigation can unmount it. A pristine chart hint
+  // is regenerated from the next chart; a sent message has no draft to restore.
+  useLayoutEffect(() => {
+    if (!draftSlot || !owner || !status?.enabled) return;
+    const keep = attached.length || (draft && (typed.current || spoken || drawn || lookOnSend.current || origin.kind !== "copilot"));
+    storeDraft(draftSlot, keep ? draftSnapshot() : null);
+    if (keep && panel && pageSymbol === symbol) rememberChartDraft(identifier, symbol, current?.id ?? null);
+  }, [draftSlot, owner, status?.enabled, draft, attached, spoken, origin, drawn, panel, pageSymbol, symbol, identifier, current?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- the refs are changed with the editor
+
   // The newest conversation, for saving it if the panel is closed mid-turn.
   const latest = useRef<{ messages: LabMessage[]; current: Current | null; symbol: string }>({ messages: [], current: null, symbol: "" });
   useEffect(() => {
@@ -513,10 +551,10 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     }, ms));
   }
 
-  function open(saved: Investigation) {
+  function open(saved: Investigation, entry?: PanelLink | null) {
+    activateDraft(keyFor(saved.symbol ?? "", saved.id, entry), entry?.investigation ? entry.context || whatChangedPrompt(saved.id) : "", entry);
     following.current = panel;
     if (desk && (saved.symbol || saved.title !== BRIEFING_TITLE)) landOnLatest();
-    lookOnSend.current = false; // a saved conversation is not the strip's: its Send attaches nothing unasked
     setMenu(false);
     pendingOutcomes.current.clear();
     pendingRatings.current.clear();
@@ -550,8 +588,20 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
    * answer, the result is dropped rather than replacing a conversation mid-turn.
    */
   async function follow(target: string, signal?: AbortSignal, automatic = false) {
+    const request = ++selection.current;
+    const edited = edits.current;
     const asked = turns.current;
-    const stale = () => signal?.aborted || running.current || turns.current !== asked || (automatic && shown.current > 0);
+    const stale = () => request !== selection.current || signal?.aborted || running.current || turns.current !== asked
+      || (automatic && (shown.current > 0 || edits.current !== edited));
+    const last = chartDraftThread(identifier, target);
+    if (last && readDraft(keyFor(target, last))) {
+      try {
+        const saved = await getInvestigation(last);
+        if (stale()) return;
+        if (saved.symbol === target) { open(saved); return; }
+      } catch { /* A removed thread no longer owns this chart's editor. */ }
+    }
+    if (readDraft(keyFor(target))) { if (!stale()) fresh(target); return; }
     let found: InvestigationSummary | undefined;
     try { found = (await listInvestigations(target)).find(item => item.status === "open" && item.symbol === target); } catch { /* start fresh */ }
     if (stale()) return;
@@ -576,18 +626,20 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     setConclusion("");
     setSaveState(null);
     setSymbol(target);
-    if (!typed.current) setDraft(pageContext ? `Context: ${pageContext}\n\n` : "");
+    activateDraft(keyFor(target), pageContext ? `Context: ${pageContext}\n\n` : "");
     remember(null);
-    setOrigin(planOrigin(null));
-    setDrawn(null);
-    lookOnSend.current = false;
   }
 
-  async function resume(id: string) {
+  async function resume(id: string, text?: string) {
     if (busy) return;
-    setOrigin(planOrigin(null));
-    setDrawn(null);
-    try { open(await getInvestigation(id)); } catch (error) {
+    const request = ++selection.current;
+    try {
+      const saved = await getInvestigation(id);
+      if (request !== selection.current) return;
+      open(saved);
+      if (text) fill(text);
+    } catch (error) {
+      if (request !== selection.current) return;
       setSaveState({ state: "error", message: error instanceof Error ? error.message : "Could not open that investigation." });
     }
   }
@@ -599,8 +651,14 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       setStatus(next);
       setModel(pickedModel(next));
       setBackend(pickedBackend(next));
-      if (!next.enabled) return;
-      if (panel && !link) { void follow(pageSymbol || symbol, controller.signal, true); return; }
+      if (!next.enabled || !owner) return;
+      if (panel && !link) {
+        // Mark this destination before the asynchronous follow so early typing stays with the visible symbol.
+        activateDraft(keyFor(symbol), opening);
+        void follow(pageSymbol || symbol, controller.signal, true);
+        return;
+      }
+      activateDraft(keyFor(symbol, null, link), link?.image ? opening + IMAGE_PREFILL : opening, link);
       if (panel) return; // Radar's drawer: a new investigation from its link
       void refreshRecent();
       let id: string | null = null;
@@ -612,13 +670,12 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       }
       else if (link) id = null; // a symbol or context link starts fresh rather than reopening the last investigation
       if (link && !link.investigation) remember(null);
-      else if (id) getInvestigation(id).then(saved => {
-        if (controller.signal.aborted) return;
-        open(saved);
-        // From an alert's link: the question is ready, but a turn costs money, so it is not sent.
-        // A plan alert's link carries the owner's own question instead.
-        if (link?.investigation) setDraft(link.context || whatChangedPrompt(saved.id));
-      }).catch(() => remember(null));
+      else if (id) {
+        const request = ++selection.current;
+        getInvestigation(id).then(saved => {
+          if (!controller.signal.aborted && request === selection.current) open(saved, link?.investigation ? link : null);
+        }).catch(() => { if (!controller.signal.aborted && request === selection.current) remember(null); });
+      }
     }).catch(error => {
       if (!controller.signal.aborted) setStatusError(error instanceof Error ? error.message : "Copilot Lab is unavailable.");
     });
@@ -628,11 +685,19 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   /** Save the whole investigation: created on its first answer, then updated against the revision it was read at. */
   async function persist(next: Partial<Pick<Current, "status" | "conclusion">> = {}) {
     if (!messages.length) return;
+    const slotAtSave = activeSlot.current;
     const fields = savedFields(messages, current, symbol, next);
     setSaveState({ state: "saving" });
     persisting.current = true;
     try {
       const saved = current ? await updateInvestigation(current.id, current.revision, fields) : await createInvestigation(fields);
+      if (activeSlot.current !== slotAtSave) return;
+      if (!current && slotAtSave) {
+        // Words typed during the first save now belong to the assigned investigation.
+        storeDraft(slotAtSave, null);
+        activeSlot.current = keyFor(saved.symbol ?? "", saved.id);
+        setDraftSlot(activeSlot.current);
+      }
       setCurrent(saved);
       remember(saved.id);
       setSaveState({ state: "saved" });
@@ -734,7 +799,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   }, [pin, status?.enabled]);
 
   // The page's symbol changed: an empty panel simply follows; a conversation is never retargeted, only offered.
-  const engaged = messages.length > 0 || current !== null;
+  const engaged = messages.length > 0 || current !== null || (typed.current && !!draft.trim()) || attached.length > 0;
   const offer = panel && !link && !!pageSymbol && status?.enabled === true && pageSymbol !== symbol && kept !== pageSymbol;
   useEffect(() => {
     if (!offer || engaged || busy || !pageSymbol) return;
@@ -747,9 +812,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   useEffect(() => {
     const command = desk?.command;
     if (!command || busy || status?.enabled !== true) return;
-    if (command.kind === "open") void resume(command.id).then(() => { if (command.text) fill(command.text); });
+    if (command.kind === "open") void resume(command.id, command.text);
     else if (command.kind === "fill") fill(command.text);
-    else if (command.kind === "home") startNew();
+    else if (command.kind === "home") startNew("");
     else { setSymbol(""); void send(command.text, ""); }
   }, [desk?.command]); // eslint-disable-line react-hooks/exhaustive-deps -- each command acts once, when it arrives
 
@@ -771,6 +836,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
 
   /** Words in the message box, unsent, with the cursor after them (the decision bar's Ask why, a suggestion). */
   function fill(text: string) {
+    edits.current++;
     typed.current = true;
     setDraft(text.slice(0, 4000));
     window.setTimeout(() => { const el = box.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 0);
@@ -803,7 +869,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   /** One turn about ``about`` (the symbol box unless given; empty means no symbol). */
   async function send(text: string, about = symbol, shots = attached) {
     const content = text.trim() || (shots.length ? IMAGE_PREFILL : "");
-    if (!content || busy || running.current || !status?.enabled) return;
+    if (!content || busy || running.current || !status?.enabled || attaching?.state === "busy") return;
+    selection.current++;
     stopLanding();
     following.current = true; // the owner's own message: show it and follow the answer
     if (lookOnSend.current && look && shots.length < MAX_IMAGES) {
@@ -894,17 +961,28 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
    * words of the owner's own in the box yet, the box gets a starting question. */
   async function attach(files: File[]) {
     const room = files.slice(0, MAX_IMAGES - attached.length);
-    if (!room.length) return;
+    const slot = activeSlot.current;
+    if (!slot || !room.length) return;
+    edits.current++;
+    const initial = draftSnapshot();
+    const prefill = (text: string) => text.replace(/^Context: [^\n]*\n+/, "").trim() ? text : text + IMAGE_PREFILL;
     setAttaching({ state: "busy" });
     try {
       for (const file of room) {
         const stored = await uploadImage(file);
-        setAttached(list => [...list, { id: stored.id, url: URL.createObjectURL(file) }].slice(0, MAX_IMAGES));
+        const image = { id: stored.id, url: URL.createObjectURL(file) };
+        if (activeSlot.current === slot) {
+          setAttached(list => [...list, image].slice(0, MAX_IMAGES));
+          setDraft(prefill);
+        } else {
+          // An upload may finish after a switch or unmount. It still belongs to the original editor.
+          const saved = readDraft(slot) ?? initial;
+          storeDraft(slot, { ...saved, text: prefill(saved.text), images: [...saved.images, image].slice(0, MAX_IMAGES) });
+        }
       }
-      setAttaching(null);
-      setDraft(current => current.replace(/^Context: [^\n]*\n+/, "").trim() ? current : `${current}${IMAGE_PREFILL}`);
+      if (activeSlot.current === slot) setAttaching(null);
     } catch (error) {
-      setAttaching({ state: "error", message: error instanceof Error ? error.message : "The screenshot could not be attached." });
+      if (activeSlot.current === slot) setAttaching({ state: "error", message: error instanceof Error ? error.message : "The screenshot could not be attached." });
     }
   }
 
@@ -912,17 +990,20 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
    * owner's own words from the box when there are some. */
   async function lookAtChart(see = look) {
     if (!see || busy) return;
+    const slot = activeSlot.current;
     if (attached.length >= MAX_IMAGES) { setAttaching({ state: "error", message: "Two screenshots are attached; remove one to add the chart." }); return; }
     setAttaching({ state: "busy" });
     try {
       const { image, line } = await see();
+      if (activeSlot.current !== slot) return;
       const stored = await uploadImage(image);
+      if (activeSlot.current !== slot) return;
       setAttaching(null);
       const own = draft.replace(/^Context: [^\n]*\n+/, "").trim();
       await send(own ? `Context: ${line}.\n\n${own}` : `Context: ${line}. What do you see?`, symbol,
         [...attached, { id: stored.id, url: URL.createObjectURL(image) }]);
     } catch (error) {
-      setAttaching({ state: "error", message: error instanceof Error ? error.message : "The chart could not be read." });
+      if (activeSlot.current === slot) setAttaching({ state: "error", message: error instanceof Error ? error.message : "The chart could not be read." });
     }
   }
 
@@ -947,17 +1028,16 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     return { image, line: `${symbol} today's minute chart, with the plan's entry and invalidation lines` };
   }
 
-  function startNew() {
+  function startNew(target = symbol) {
     if (busy) return;
+    activateDraft(keyFor(target));
+    setSymbol(target);
     setMenu(false);
     setMessages([]);
     setCurrent(null);
     setConclusion("");
     setSaveState(null);
     remember(null);
-    setOrigin(planOrigin(null));
-    setDrawn(null);
-    lookOnSend.current = false;
   }
 
   /** From the page's strip: a new conversation on the page's symbol, ``context`` ready in the box and nothing sent.
@@ -965,7 +1045,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   function begin(context: string, from?: LinkOrigin | null, plan?: DrawnPlan | null, chart = false) {
     if (busy) return;
     turns.current += 1; // like a send: a follow still reading drops its result rather than replacing this one
-    const own = typed.current ? draft.replace(/^Context: [^\n]*\n+/, "") : "";
+    const own = typed.current && (!pageSymbol || pageSymbol === symbol) ? draft.replace(/^Context: [^\n]*\n+/, "") : "";
     setKept(null);
     fresh(pageSymbol || symbol);
     typed.current = !!own.trim();
@@ -982,13 +1062,17 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     if (busy) return;
     try {
       const result = await getInvestigation(id);
-      startNew();
-      if (result.symbol) setSymbol(result.symbol);
+      startNew(result.symbol ?? symbol);
       const gist = result.conclusion || result.findings?.summary || "";
       setDraft(`Context: background research "${result.title}" (saved ${shortTime(result.created_at)} ET)${gist ? `: ${gist}` : ""}`.slice(0, 600) + "\n\n");
     } catch (error) {
       setSaveState({ state: "error", message: error instanceof Error ? error.message : "Could not open that result." });
     }
+  }
+
+  function changeScope(target: string) {
+    if (!current && target !== symbol) activateDraft(keyFor(target));
+    setSymbol(target);
   }
 
   // The question a deeper job starts from: the latest one asked here, without its pasted context line.
@@ -997,6 +1081,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   // Spoken words join whatever is in the box (a context line, or what was typed) and, with auto-send on and no turn
   // running, go straight out; otherwise they wait in the box for a look and Send.
   const voice = useVoiceInput({ status, disabled: status?.enabled !== true, onText: (text, now) => {
+    edits.current++;
     const next = `${draft}${draft && !/\s$/.test(draft) ? " " : ""}${text}`.slice(0, 4000);
     typed.current = true;
     if (now && !busy) { void send(next); return; }
@@ -1018,7 +1103,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     </span>
   );
   const messageBox = (
-    <textarea ref={box} value={draft} onChange={e => { typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={small ? 1 : 3} wrap={small ? "off" : undefined} disabled={!enabled}
+    <textarea ref={box} value={draft} onChange={e => { edits.current++; typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={small ? 1 : 3} wrap={small ? "off" : undefined} disabled={!enabled}
       onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft); } }}
       placeholder={enabled ? "Ask, challenge, or ask for a plan…" : "Copilot Lab is off"} aria-label="Message"
       className={cn("block w-full resize-none bg-transparent px-3 text-base", small ? "min-h-[2.625rem] min-w-0 flex-1 py-2" : "min-h-[4.75rem] pb-1 pt-2.5", " leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 sm:text-sm")} />
@@ -1064,6 +1149,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     !current && !messages.length && symbol && { label: "Plan a trade", run: () => void send(`Plan a trade on ${symbol}.`) },
   ];
   const suggestions = offered.filter((item): item is Suggestion => !!item).slice(0, 5);
+  const handoffPending = busy || attaching?.state === "busy" || saveState?.state === "saving" || (!current && messages.length > 0);
   return (
     <div className={panel ? "space-y-2 p-2 text-sm" : "space-y-3"} ref={root} data-testid={panel ? "copilot-panel" : undefined}>
       {panel && (
@@ -1073,8 +1159,16 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           <span className="ml-auto flex items-center gap-1">
             <button type="button" onClick={() => { if (!busy) { setKept(null); fresh(pageSymbol || symbol); } }} disabled={busy || (!messages.length && !current)}
               title="Leave this conversation saved and start fresh" className="min-h-11 rounded border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 sm:min-h-0">New</button>
-            <Link href={current ? `/copilot-lab?investigation=${current.id}` : "/copilot-lab"}
+            {!pageSymbol ? <Link href={current ? `/copilot-lab?investigation=${current.id}` : "/copilot-lab"}
               className="inline-flex min-h-11 items-center rounded border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Open in lab</Link>
+            : handoffPending ? <button type="button" disabled title="The conversation must finish saving before it can open in Desk."
+              className="min-h-11 rounded border px-2 py-0.5 text-xs text-muted-foreground opacity-50 sm:min-h-0">Continue in Desk</button>
+            : <Link href={current ? `/copilot-lab?thread=${encodeURIComponent(current.id)}` : `/copilot-lab?symbol=${encodeURIComponent(symbol)}`}
+              onClick={() => {
+                // Transfer the current unsent editor, including pristine chart context, to the ordinary Desk entry.
+                if (draft.trim() || attached.length) storeDraft(keyFor(symbol, current?.id), { ...draftSnapshot(), typed: true });
+              }}
+              className="inline-flex min-h-11 items-center rounded border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Continue in Desk</Link>}
             {onClose && <button type="button" onClick={onClose} aria-label="Close copilot" className="inline-flex min-h-11 items-center rounded border px-1.5 text-muted-foreground hover:text-foreground sm:min-h-0"><X size={14} /></button>}
           </span>
         </div>
@@ -1087,7 +1181,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           <span className="ml-auto flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
             {saveState?.state !== "error" && saving}
             {current?.status === "closed" && <span>Closed</span>}
-            <button type="button" onClick={startNew} disabled={busy || (!messages.length && !current)} title="Leave this conversation saved and start a new one"
+            <button type="button" onClick={() => startNew()} disabled={busy || (!messages.length && !current)} title="Leave this conversation saved and start a new one"
               className="min-h-11 rounded px-2 hover:text-foreground disabled:opacity-40 sm:min-h-7">New</button>
             {current && (
               <div ref={menuBox} className="relative">
@@ -1142,10 +1236,10 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       {!panel && !desk && <div className="flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
           Symbol
-          <input value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase().replace(/[^A-Z0-9.\-]/g, "").slice(0, 10))}
+          <input value={symbol} onChange={e => changeScope(e.target.value.toUpperCase().replace(/[^A-Z0-9.\-]/g, "").slice(0, 10))}
             className="w-24 rounded border bg-background px-2 py-1 text-base uppercase text-foreground sm:text-sm" aria-label="Investigation symbol" />
         </label>
-        <button type="button" onClick={startNew} disabled={busy || (!messages.length && !current)}
+        <button type="button" onClick={() => startNew()} disabled={busy || (!messages.length && !current)}
           className="min-h-11 rounded border px-2 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 sm:min-h-0">New investigation</button>
         {saving}
       </div>}
@@ -1282,6 +1376,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       )}
       {/* One box: (on the desk, what the conversation is about,) the text, then a toolbar inside it. The text area gets the
           full width at every size, even in a narrow dock; a phone desk keeps attach and read-aloud behind "+". */}
+      {lookOnSend.current && !look && <p className="text-xs text-muted-foreground">Your chart context is in the draft. Send from Charts to include its image.</p>}
       <form onSubmit={e => { e.preventDefault(); void send(draft); }}
         className={cn("rounded-xl border bg-background transition-colors focus-within:border-primary/50", small && "flex items-center")}>
         {desk && (
@@ -1289,7 +1384,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
               {symbol ? (
                 <span className="inline-flex items-center gap-0.5 rounded-full bg-muted py-0.5 pl-2 pr-0.5 text-foreground" data-testid="copilot-scope">
                   About {symbol}
-                  <button type="button" onClick={() => setSymbol("")} disabled={busy} aria-label="Ask across everything"
+                  <button type="button" onClick={() => changeScope("")} disabled={busy} aria-label="Ask across everything"
                     title={`Ask across everything, not just ${symbol}`}
                     className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground hover:text-foreground disabled:opacity-40">
                     <X size={12} />
@@ -1297,7 +1392,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
                 </span>
               ) : scoping ? (
                 <input autoFocus aria-label="Investigation symbol" placeholder="Symbol" disabled={busy}
-                  onBlur={e => { setSymbol(e.target.value); setScoping(false); }}
+                  onBlur={e => { changeScope(e.target.value); setScoping(false); }}
                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); box.current?.focus(); } if (e.key === "Escape") { e.currentTarget.value = ""; setScoping(false); } }}
                   onChange={e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9.\-]/g, "").slice(0, 10); }}
                   className="w-24 rounded border bg-background px-2 py-0.5 text-base uppercase text-foreground sm:text-xs" />

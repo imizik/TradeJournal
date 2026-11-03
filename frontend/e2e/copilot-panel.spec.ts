@@ -75,7 +75,7 @@ async function stubLab(page: Page, lab: Lab, enabled = true) {
 }
 
 const openPanel = async (page: Page) => {
-  await page.getByRole("button", { name: "Copilot", exact: true }).click();
+  await page.getByRole("button", { name: "Ask Copilot", exact: true }).click();
   const panel = page.getByTestId("copilot-panel");
   await expect(panel).toBeVisible();
   return panel;
@@ -109,8 +109,8 @@ test("the Charts copilot opens on the chart's symbol, saves a turn, and the lab 
   expect(lab.chats[0].symbol).toBe("MRVL");
   expect(lab.chats[0].messages[0].content).toMatch(/^Context: Charts · MRVL \S+ chart\n\nIs MRVL leading its group\?$/);
   await page.screenshot({ path: test.info().outputPath("charts-copilot-desktop.png") });
-  await panel.getByRole("link", { name: "Open in lab" }).click();
-  await expect(page).toHaveURL(new RegExp(`/copilot-lab\\?investigation=${MRVL}`));
+  await panel.getByRole("link", { name: "Continue in Desk" }).click();
+  await expect(page).toHaveURL(new RegExp(`/copilot-lab\\?thread=${MRVL}`));
   await expect(page.getByText(ANSWER)).toBeVisible();
   await expect(page.getByTestId("copilot-scope")).toHaveText("About MRVL");
 });
@@ -245,7 +245,7 @@ test("a follow that answers after the owner has sent is dropped: the turn and a 
   expect(lab.chats.map((chat) => chat.symbol)).toEqual(["MRVL"]);
 });
 
-test("following to a new symbol keeps a draft the owner typed", async ({ page }) => {
+test("changing the chart symbol keeps the typed draft with its original ticker", async ({ page }) => {
   const lab: Lab = { saved: new Map(), chats: [] };
   await stubLab(page, lab);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -253,7 +253,13 @@ test("following to a new symbol keeps a draft the owner typed", async ({ page })
   const panel = await openPanel(page);
   await panel.getByLabel("Message").fill("My own question");
   await chartSymbol(page, "AMD");
+  await expect(panel.getByRole("heading", { name: "Copilot · MRVL" })).toBeVisible();
+  await expect(panel.getByLabel("Message")).toHaveValue("My own question");
+  await panel.getByRole("button", { name: "Switch to AMD" }).click();
   await expect(panel.getByRole("heading", { name: "Copilot · AMD" })).toBeVisible();
+  await expect(panel.getByLabel("Message")).not.toHaveValue("My own question");
+  await chartSymbol(page, "MRVL");
+  await expect(panel.getByRole("heading", { name: "Copilot · MRVL" })).toBeVisible();
   await expect(panel.getByLabel("Message")).toHaveValue("My own question");
 });
 
@@ -269,7 +275,7 @@ test("closing the panel mid-turn stops the turn and saves what was asked", async
   await panel.getByLabel("Message").fill("Is MRVL leading?");
   await panel.getByRole("button", { name: "Send" }).click();
   await expect(panel.getByRole("button", { name: "Stop" })).toBeVisible(); // mid-turn
-  await page.getByRole("button", { name: "Copilot", exact: true }).click(); // close the dock tab
+  await page.getByRole("button", { name: "Ask Copilot", exact: true }).click(); // close the dock panel
   await expect(page.getByTestId("copilot-panel")).toHaveCount(0);
   await aborted; // the turn stopped
   await expect.poll(() => lab.posts?.length ?? 0).toBe(1);
