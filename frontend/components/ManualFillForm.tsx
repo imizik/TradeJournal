@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Account, api, Fill, FillWriteInput } from "@/lib/api";
 
@@ -437,12 +437,19 @@ export default function ManualFillForm({
 export function AddManualFill({ accounts, children }: { accounts: Account[]; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (wasOpen.current && !open) button.current?.focus(); // closing the form hands focus back to its button
+    wasOpen.current = open;
+  }, [open]);
   return (
     <>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>{children}</div>
         {!open && (
           <button
+            ref={button}
             type="button"
             onClick={() => { setSaved(null); setOpen(true); }}
             className="inline-flex min-h-11 shrink-0 items-center rounded-md border px-3 text-sm font-medium hover:bg-secondary sm:min-h-9"
@@ -451,7 +458,7 @@ export function AddManualFill({ accounts, children }: { accounts: Account[]; chi
           </button>
         )}
       </div>
-      {saved && !open && <p role="status" className="text-sm text-foreground">{saved}</p>}
+      <p role="status" className="text-sm text-foreground empty:hidden">{!open && saved}</p>
       {open && <ManualFillForm accounts={accounts} onSaved={(message) => { setSaved(message); setOpen(false); }} onCancel={() => setOpen(false)} />}
     </>
   );

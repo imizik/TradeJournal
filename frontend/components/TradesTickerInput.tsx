@@ -7,6 +7,12 @@ import { useRouter } from "next/navigation";
 export default function TradesTickerInput({ initial }: { initial: string }) {
   const router = useRouter();
   const [value, setValue] = useState(initial);
+  // A link to /trades with another ticker (or none) keeps this box mounted: follow the URL unless it is our own typing.
+  const [shown, setShown] = useState(initial);
+  if (initial !== shown) {
+    setShown(initial);
+    if (initial !== value.trim().toUpperCase()) setValue(initial);
+  }
   useEffect(() => {
     const timer = setTimeout(() => {
       const sp = new URLSearchParams(window.location.search);
