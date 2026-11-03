@@ -191,3 +191,13 @@ def test_a_paused_search_over_the_cap_stops_with_the_reason():
     adapter = Priced((search(0), "pause_turn", usage(41_000)))
     events = turn(adapter)
     assert [e["message"] for e in events if e["type"] == "error"] == ["Stopped: this turn reached its $0.40 API spend cap."]
+
+
+def test_a_turn_whose_last_round_still_paused_ends_with_an_error_not_a_blank_answer():
+    adapter = Rounds(*[(search(n), "pause_turn") for n in range(4)])
+    events = turn(adapter, cfg=replace(_cfg(backend="anthropic", evidence="live"), max_rounds=2))
+    assert not copilot_text(events) and [e["code"] for e in events if e["type"] == "error"] == ["rounds"]
+
+
+def copilot_text(events):
+    return "".join(e.get("delta", "") for e in events if e["type"] == "text")

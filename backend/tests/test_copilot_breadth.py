@@ -126,3 +126,45 @@ def test_the_fixture_turns_read_both_tools():
     assert "get_breadth" in [e["name"] for e in breadth if e["type"] == "tool"] and "Breadth" in _text(breadth)
     fear = _turn([{"role": "user", "content": "Is fear priced in? What does SPY skew say?"}], copilot.FakeAdapter(0))
     assert "get_positioning" in [e["name"] for e in fear if e["type"] == "tool"] and "VIX curve" in _text(fear)
+
+
+def test_before_the_open_the_day_counts_are_unknown_not_zero(monkeypatch):
+    b._cache.clear()
+    monkeypatch.setattr(b, "members", lambda: ({"AAA": "Tech", "BBB": "Energy"}, "2026-11-02"))
+    flat = {"AAA": SimpleNamespace(raw=quote(100, 100, top=101)), "BBB": SimpleNamespace(raw=quote(50, 50, top=80))}
+    monkeypatch.setattr(tradier, "get_quotes_once", lambda symbols, greeks=False: flat)
+    early = b.live_breadth(datetime(2026, 11, 3, 9, 8, tzinfo=ET))
+    assert early["advancers"] is None and early["median_day_pct"] is None and early["new_52w_highs"] is None
+    assert early["by_sector"]["Tech"]["decliners"] is None and early["within_5pct_of_52w_high"] == 0.5 and "09:30" in early["session"]
+    opened = b.live_breadth(datetime(2026, 11, 3, 9, 31, tzinfo=ET))  # the open does not reuse the pre-market read
+    assert opened["advancers"] == 0 and opened["decliners"] == 0 and "session" not in opened
+    b._cache.clear()
+
+
+def test_no_quotes_at_all_is_unavailable_and_not_cached(monkeypatch):
+    b._cache.clear()
+    monkeypatch.setattr(b, "members", lambda: ({"AAA": "Tech"}, "2026-11-02"))
+    monkeypatch.setattr(tradier, "get_quotes_once", lambda symbols, greeks=False: {})
+    assert b.live_breadth(NOW)["state"] == "unavailable" and not b._cache
+
+
+def test_an_expiry_with_nothing_on_the_primary_root_is_left_out_not_a_crash():
+    spx_monthly = SimpleNamespace(expiration=date(2026, 12, 18), contracts=[replace(contract("call", 100, 0.2, 0.5, 1, 1), root="SPX")])
+    assert b.chain_stats(spx_monthly, 100.0, date(2026, 11, 2), "SPXW") is None
+
+
+def test_an_index_is_priced_from_the_same_tradier_request(monkeypatch):
+    from app.engine import quotes as quotes_module
+    from app.engine.options_feed import options_feed
+    seen = []
+
+    def quotes(symbols, greeks=False):
+        seen.append(symbols)
+        return {"VIX": SimpleNamespace(raw={"last": 20.0}, last=20.0), "SPX": SimpleNamespace(raw={"last": 100.0}, last=100.0)}
+    monkeypatch.setattr(tradier, "get_quotes_once", quotes)
+    monkeypatch.setattr(quotes_module, "get_stock_quotes", lambda symbols: pytest.fail("the stock path cannot price SPX"))
+    chain = SimpleNamespace(expiration=date(2026, 12, 4), contracts=[
+        replace(contract("call", 100, 0.20, 0.52, 10, 10), root="SPXW"), replace(contract("put", 100, 0.22, -0.48, 10, 10), root="SPXW")])
+    monkeypatch.setattr(options_feed, "chains", lambda symbol, pick: ([SimpleNamespace(value=chain, fetched=NOW.timestamp())], None))
+    out = b.live_positioning("SPX", NOW)
+    assert seen == [[*b.VOL_INDEXES, "SPX"]] and out["spot"] == 100.0 and out["state"] == "ok" and out["expiries"][0]["atm_iv_pct"] == 21.0

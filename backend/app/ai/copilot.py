@@ -102,7 +102,7 @@ and nearby headlines) and the latest pass's leaders and laggards; cite an event 
 and age of every figure you quote (the caches are a day old; short interest is about two weeks behind). When the \
 owner asks whether the alerts, plans or pings are helping, read get_proof (scope week, or symbol for one name) and \
 quote its verdicts and counts as they stand, "not enough data" included; never turn a count into a judgement of them.
-- When web_search is offered (at most three searches a turn), use it for what the app's tools do not carry: macro and \
+- When web_search is offered (three searches a turn: stop after the third), use it for what the app's tools do not carry: macro and \
 policy (the Fed, rates, Treasury supply, fiscal), politics and elections, geopolitics, industry news, and what a company \
 or its customers said. A gap, bounce or selloff today ("do we buy this bounce", "why is SMH up") needs its cause: search \
 for the catalyst (earnings, guidance, deals, analyst calls, headlines) before judging whether the move holds. Prices, \
@@ -1794,6 +1794,8 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                     if (proposal := proposal_event(event)) is not None:
                         yield proposal
                 messages.append({"role": "user", "content": results})
+            else:  # every round went to a paused search or a tool call: no round was left for the answer
+                yield {"type": "error", "code": "rounds", "message": "The turn ran out of rounds before it finished an answer."}
     except CopilotError as exc:
         yield {"type": "error", "code": exc.code, "message": exc.message}
     except TimeoutError:
