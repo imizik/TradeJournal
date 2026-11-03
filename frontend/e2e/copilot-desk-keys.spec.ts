@@ -163,6 +163,51 @@ test("Threads stay out of the first view, open on request, and preserve a saved 
   expect(chats).toEqual([]);
 });
 
+test("an unsent draft stays with its saved thread when switching tickers", async ({ page }) => {
+  const { chats } = await lab(page);
+  const thread = conversation(page);
+  const message = page.getByRole("textbox", { name: "Message" });
+  await page.keyboard.press("j");
+  await expect(thread.getByText("NBIS answer: hold above 92.30.")).toBeVisible();
+  await message.fill("Recheck NBIS above the 92.30 invalidation.");
+
+  await page.getByRole("navigation", { name: "Thread list" }).getByRole("button", { name: /^CRWV/ }).click();
+  await expect(thread.getByText("CRWV answer: short under 99.00.")).toBeVisible();
+  await expect(message).toHaveValue("");
+
+  await page.getByRole("navigation", { name: "Thread list" }).getByRole("button", { name: /^NBIS/ }).click();
+  await expect(thread.getByText("NBIS answer: hold above 92.30.")).toBeVisible();
+  await expect(message).toHaveValue("Recheck NBIS above the 92.30 invalidation.");
+  expect(chats).toEqual([]);
+});
+
+test("sending a saved-thread draft clears it and switching back does not restore sent words", async ({ page }) => {
+  await lab(page);
+  const sent: unknown[] = [];
+  const answer = [
+    { type: "text", delta: "A fixed fixture reply." },
+    { type: "done", metrics: { backend: "fake", evidence: "fixture", model: "fake-scripted", first_text_ms: 1, total_ms: 2,
+      rounds: 1, tool_calls: [], usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, cost_usd: 0 } },
+  ].map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
+  await page.route("**/copilot/chat", route => {
+    sent.push(route.request().postDataJSON());
+    return route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: answer });
+  });
+
+  const thread = conversation(page);
+  const message = page.getByRole("textbox", { name: "Message" });
+  await page.keyboard.press("j");
+  await expect(thread.getByText("NBIS answer: hold above 92.30.")).toBeVisible();
+  await message.fill("Send this NBIS follow-up once.");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(thread.getByText("A fixed fixture reply.")).toBeVisible();
+  await expect(message).toHaveValue("");
+  await page.getByRole("navigation", { name: "Thread list" }).getByRole("button", { name: /^CRWV/ }).click();
+  await page.getByRole("navigation", { name: "Thread list" }).getByRole("button", { name: /^NBIS/ }).click();
+  await expect(message).toHaveValue("");
+  expect(sent).toHaveLength(1);
+});
+
 test("J and K open the next and previous thread in list order; keys typed in the message box are ignored", async ({ page }) => {
   const { chats } = await lab(page);
   const thread = conversation(page);

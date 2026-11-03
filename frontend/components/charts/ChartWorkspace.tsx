@@ -1758,9 +1758,8 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   // The dock's tabs: a press opens that panel, a second press closes the dock. A phone's top row has room for two;
   // its strike ladder opens from the More menu.
   const dockTabs = ([["watchlist", "Watchlist", List, "Watchlist, levels and your latest fills"], ["layers", "Layers", LayersIcon, "Layers: show, hide, lock and delete what the charts draw"],
-    ["options", "Strike ladder", Rows3, "Strike ladder: open interest, volume and gamma by strike"], ["level2", "Level 2", ListOrdered, "Level 2: a manual depth session and heatmap"],
-    ["copilot", "Copilot", MessagesSquare, "Copilot: ask about this chart; nothing is sent until you press Send"]] as const)
-    .filter(([tab]) => (!narrow || (tab !== "options" && tab !== "level2")) && (tab !== "level2" || owner) && (tab !== "copilot" || copilotOn)).map(([tab, name, Icon, hint]) =>
+    ["options", "Strike ladder", Rows3, "Strike ladder: open interest, volume and gamma by strike"], ["level2", "Level 2", ListOrdered, "Level 2: a manual depth session and heatmap"]] as const)
+    .filter(([tab]) => (!narrow || (tab !== "options" && tab !== "level2")) && (tab !== "level2" || owner)).map(([tab, name, Icon, hint]) =>
     <button key={tab} aria-label={name} aria-expanded={dockShown && dock.tab === tab} title={hint} onClick={() => toggleDock(tab)} className={`${plain(dockShown && dock.tab === tab, opened)} ${control}`}><Icon size={14} /></button>);
   const level2Button = (close: () => void) => owner && !isMacroSymbol(symbol) && <button aria-label="Level 2" title="Level 2: a manual depth session and heatmap" onClick={() => { close(); showDock("level2"); }}
     className={`${plain(false)} ${control} text-[11px]`}><ListOrdered size={13} /><span>Level 2</span></button>;
@@ -2005,6 +2004,11 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   });
   const planATrade = !isMacroSymbol(symbol) && <PlanATrade symbol={symbol} origin="chart" line={`${symbol} from the ${settings.intervals[0]} chart${planAt == null ? "" : ` at ${price(planAt)}`}`}
     className={`${PLAN_BUTTON} ${narrow ? "h-11 px-2.5" : "h-7 px-2.5"}`} />;
+  const askCopilot = copilotOn && <button type="button" aria-label="Ask Copilot" title="Ask Copilot about this chart; nothing is sent until you press Send"
+    aria-expanded={dockShown && dock.tab === "copilot"} onClick={() => toggleDock("copilot")}
+    className={`${plain(dockShown && dock.tab === "copilot", opened)} ${narrow ? "h-11 w-11" : "h-7 gap-1.5 px-2"}`}>
+    <MessagesSquare size={14} aria-hidden /><span className={narrow ? "sr-only" : ""}>Ask Copilot</span>
+  </button>;
 
   const alerts = [
     current?.context_pending && <p key="context" role="status" aria-label="Chart context loading" className="text-xs text-amber-300">
@@ -2035,12 +2039,13 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
           <button onClick={dismissRadar} className="min-h-9 text-muted-foreground">Dismiss Radar context</button>
         </div>
       </section>}
-      <header aria-label="Chart toolbar" className={`flex flex-wrap items-center gap-1 ${fill ? "shrink-0 border-b border-border bg-background px-2 py-1" : "pb-1"} ${immersive ? "pt-[max(0.25rem,env(safe-area-inset-top))]" : ""}`}>
+      <header aria-label="Chart toolbar" className={`flex flex-wrap items-center gap-1 min-[1024px]:max-[1439px]:gap-x-0.5 ${fill ? "shrink-0 border-b border-border bg-background px-2 py-1" : "pb-1"} ${immersive ? "pt-[max(0.25rem,env(safe-area-inset-top))]" : ""}`}>
         <h1 className="sr-only">Charts</h1>
         <form onSubmit={submitSymbol} className={`relative flex shrink-0 items-center rounded-md border border-border bg-background ${narrow ? "h-11" : "h-8"}`}>
-          <button type="button" aria-label="Open symbol search" title="Search symbols (⌘K / Ctrl+K)" onClick={() => setPalette(0)} className={`${plain(false)} ${tap}`}><Search size={14} /></button><input aria-label="Chart symbol" value={symbolInput} placeholder={settings.symbol} onChange={(e) => setSymbolInput(e.target.value.toUpperCase())} maxLength={15} className="w-20 bg-transparent px-1 text-sm font-semibold uppercase text-foreground outline-none placeholder:text-foreground" />
+          <button type="button" aria-label="Open symbol search" title="Search symbols (⌘K / Ctrl+K)" onClick={() => setPalette(0)} className={`${plain(false)} ${tap}`}><Search size={14} /></button><input aria-label="Chart symbol" value={symbolInput} placeholder={settings.symbol} onChange={(e) => setSymbolInput(e.target.value.toUpperCase())} maxLength={15} className="w-20 bg-transparent px-1 text-sm font-semibold uppercase text-foreground outline-none placeholder:text-foreground min-[1024px]:max-[1439px]:w-14" />
           <button type="submit" aria-label="Load symbol" className={`${plain(false)} ${tap}`}><ArrowUpRight size={14} /></button>
         </form>
+        {askCopilot}
         <LiveQuote live={live} quote={selected} candle={latestCandle} market={market} />
         {planATrade}
         {/* A phone keeps the dock's buttons beside the quote; the intervals get a row of their own that scrolls sideways. */}

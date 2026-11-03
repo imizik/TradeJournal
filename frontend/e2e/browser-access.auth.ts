@@ -311,7 +311,7 @@ test("an assistant sees no copilot anywhere, even with the lab reported on", asy
     fallbacks: false, key_configured: false, plan_configured: false, tools: [], limits: { max_rounds: 4, max_tool_calls: 8, tool_timeout_s: 10, turn_timeout_s: 120 } } }));
   await page.goto("/charts?symbol=NVDA");
   await expect(page.getByRole("button", { name: "Watchlist", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Copilot", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Ask Copilot", exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Copilot", exact: true })).toHaveCount(0);
   await expect(page.getByTestId("copilot-panel")).toHaveCount(0);
   await expect(page.getByText(/^Ask copilot/)).toHaveCount(0);

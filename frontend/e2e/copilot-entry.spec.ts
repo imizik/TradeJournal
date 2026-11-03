@@ -29,7 +29,7 @@ async function noLinkOnceAnswered(page: Page, answered: Promise<unknown>) {
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   // Neither the link, the drawer button, the Charts dock tab nor the nav item.
   await expect(page.getByText(/^Ask copilot/)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Copilot", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Ask Copilot", exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Copilot", exact: true })).toHaveCount(0);
 }
 
@@ -107,6 +107,12 @@ test("Charts' Overview offers Ask copilot for the current symbol", async ({ page
   const info = page.getByRole("region", { name: "Symbol info", exact: true });
   await info.getByRole("tab", { name: "Overview", exact: true }).click();
   await expect(info.getByRole("link", { name: "Ask copilot · MU" })).toHaveAttribute("href", "/copilot-lab?symbol=MU");
+});
+
+test("a fresh-symbol Desk view links its ticker straight to Charts", async ({ page }) => {
+  await labOn(page);
+  await page.goto("/copilot-lab?symbol=NBIS&context=Review%20NBIS");
+  await expect(page.getByRole("link", { name: "Open NBIS chart" })).toHaveAttribute("href", "/charts?symbol=NBIS");
 });
 
 test("the lab fits a 375 px phone without sideways scrolling", async ({ page }) => {

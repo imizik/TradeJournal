@@ -88,17 +88,15 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
       template wording), cut to 300 characters. It leaves the sheet unsaved.
   - **Nav:** "Copilot" opens `/copilot-lab`. It is owner-only, shown only
     while the lab is on.
-  - **Charts:** a "Copilot" tab in the side dock, beside the watchlist, layers
-    and ladder. It uses the dock's width and divider, and on a phone it is
-    the dock's bottom sheet.
+  - **Charts:** **Ask Copilot** beside the chart symbol opens the existing side dock, or its bottom sheet on a phone.
     - It opens on the chart's symbol, resuming that symbol's latest open
       investigation, or starting one with `Context: Charts · <symbol>
       <interval> chart` in the message box.
     - When the chart's symbol changes, an empty panel follows. A
       conversation is never retargeted: the panel offers "Switch to <symbol>"
       or "Keep <symbol>" (Switch waits for a turn in progress).
-    - A follow still loading when the owner sends is dropped, and a draft
-      the owner typed is never replaced.
+    - An unsent question stays with its investigation, or its ticker until the first answer is saved. The browser tab keeps it when switching threads or dock panels. If the chart changes symbols while a draft is open, **Switch** and **Keep** choose which conversation to show.
+    - **Continue in Desk** opens the same saved conversation or the fresh symbol with its unsent text and attached screenshot IDs. A ticker heading on the Desk links back to that symbol in Charts. Navigation sends no turn.
     - Closing a panel mid-turn (the dock tab, the sheet, Radar's drawer, or
       leaving the page) stops the turn and saves what had arrived.
     - Above the conversation, for the chart's symbol only
