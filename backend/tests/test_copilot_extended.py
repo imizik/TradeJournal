@@ -161,3 +161,21 @@ def test_an_empty_past_read_is_not_remembered(feed):
     x.extended(["SPY"], at(TUE, "08:10"))
     feed["days"][("SPY", MON)] = rows(MON, ("15:59", 700.0, 100))
     assert x.extended(["SPY"], at(TUE, "08:20"))["symbols"]["SPY"]["premarket"]["change_pct"] == 2.0
+
+
+def test_a_long_result_sheds_detail_instead_of_being_cut_mid_json(feed):
+    names = [f"S{i}" for i in range(8)]
+    for s in names:
+        feed["days"][(s, MON)] = rows(MON, ("15:59", 123.45, 100), ("16:30", 124.56, 2000))
+        feed["days"][(s, TUE)] = rows(TUE, ("04:01", 126.78, 100))
+    full = {"other": "y" * 3000, "extended": x.extended(names, at(TUE, "08:00"))}
+    out = x.fit(full, 4000)
+    assert len(json.dumps(out, separators=(",", ":"))) <= 4000 and "previous_session" in out["extended"]["trimmed"]
+    assert all("previous_session" not in r for r in out["extended"]["symbols"].values()) and out["extended"]["symbols"]
+    seen = set()
+    for limit in range(3300, 6001, 100):
+        fitted = x.fit({"other": "y" * 3000, "extended": x.extended(names, at(TUE, "08:00"))}, limit)
+        assert len(json.dumps(fitted, separators=(",", ":"))) <= limit
+        seen.add(fitted["extended"].get("trimmed") or fitted["extended"].get("state"))
+    assert {"left_out", "previous_session, ranges and the last symbols left out to fit"} <= seen
+    assert x.fit({"a": 1}, 10) == {"a": 1}

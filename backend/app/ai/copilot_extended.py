@@ -203,3 +203,35 @@ def premarket_scan(radar_store_path: str | None, today: date) -> dict:
             "note": ("The Radar universe's pre-market moves at the checkpoint against the previous close; vs_spy_pts is "
                      "the move minus SPY's. flagged met the pilot's frozen rule (3 points, $250k traded, a trade within "
                      "10 minutes). A record, not an alert.")}
+
+
+def fit(out: dict, limit: int) -> dict:
+    """Shrink ``out["extended"]`` until ``out`` is at most ``limit`` characters of JSON, so a long result is never cut
+    mid-JSON: drop last evening's after-hours, then the ranges, then the last symbols, saying what was left out."""
+    import json
+
+    def size() -> int:
+        return len(json.dumps(out, default=str, separators=(",", ":")))
+    block = out.get("extended")
+    if not block or size() <= limit:
+        return out
+    rows = block["symbols"]
+    for row in rows.values():
+        row.pop("previous_session", None)
+    block["trimmed"] = "previous_session left out to fit"
+    if size() > limit:
+        for row in rows.values():
+            for part in row.values():
+                if isinstance(part, dict):
+                    for summary_ in (part, part.get("after_hours")):
+                        if isinstance(summary_, dict):
+                            summary_.pop("high", None)
+                            summary_.pop("low", None)
+        block["trimmed"] = "previous_session and ranges left out to fit"
+    while size() > limit and len(rows) > 1:
+        rows.pop(next(reversed(rows)))
+        block["trimmed"] = "previous_session, ranges and the last symbols left out to fit"
+    if size() > limit:
+        out["extended"] = {"phase": block["phase"], "state": "left_out",
+                           "reason": "The off-hours detail did not fit in this result; ask for fewer names."}
+    return out

@@ -2376,7 +2376,9 @@ out for today before 04:00 (Tradier refuses a start in the future, which would
 cool the chart feed down). Tradier has no overnight (20:00-04:00) trading.
 
 `get_quotes` carries it for its names (up to 8, one or two reads each) and
-`get_market_regime` for SPY, QQQ, IWM, SMH and the symbol. Before the open
+`get_market_regime` for SPY, QQQ, IWM, SMH and the symbol. A result that would
+pass the tool limit sheds last evening's after-hours, then the ranges, then
+the last names (`trimmed` says which), rather than being cut mid-JSON. Before the open
 `get_radar_today` adds `premarket_scan`: the Radar pre-market pilot's latest
 recorded scan (08:50 or 09:20, when `RADAR_PREMARKET_ENABLED` is on), the
 universe's moves against SPY, up and down counts and the flagged names. The
