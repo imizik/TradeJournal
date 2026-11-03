@@ -20,6 +20,7 @@ import ArmChecklist from "@/components/copilot/ArmChecklist";
 import BriefingExtras from "@/components/copilot/BriefingExtras";
 import SessionTape, { DeskStatus, useDeskSession } from "@/components/copilot/SessionTape";
 import ThreadRail from "@/components/copilot/ThreadRail";
+import { ScalpShortlistNudge } from "@/components/ScalpShortlistPanel";
 import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { BRIEFING_TITLE, WHAT_MATTERS_PROMPT, copilotLabHref, type InvestigationSummary } from "@/lib/copilot";
@@ -352,6 +353,7 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
         )}
         <h1 className={styles.title}><MessagesSquare size={17} aria-hidden />Desk</h1>
         {on && <DeskStatus data={session.data} />}
+        {on && <ScalpShortlistNudge />}
         {on && (
           <div className={styles.barActions}>
             <button type="button" onClick={toggleThreads} aria-pressed={threadsShown}

@@ -3,6 +3,7 @@ import { requireAccess } from "@/lib/accessServer";
 import { api } from "@/lib/serverApi";
 import PracticeRoutine from "@/components/PracticeRoutine";
 import PracticeDecisions from "@/components/PracticeDecisions";
+import ScalpShortlistPanel from "@/components/ScalpShortlistPanel";
 
 type PracticeParams = { decision?: string; practice_run?: string };
 
@@ -27,6 +28,7 @@ export default async function PracticePage({ searchParams }: { searchParams: Pro
       <p className="mt-3 text-sm text-muted-foreground">Revisit two frozen moments from an invented options trade. Save your decision before revealing what followed.</p>
       <a href="/practice/replay" className="mt-3 inline-flex min-h-11 items-center rounded-md border px-4 py-2 text-sm font-medium hover:bg-secondary">Open a replay</a>
     </section>
+    <div id="scalp-shortlist" className="scroll-mt-4"><ScalpShortlistPanel history /></div>
     <div id="daily-practice" className="scroll-mt-4"><PracticeRoutine /></div>
     <div id="saved-decisions" className="scroll-mt-4"><PracticeDecisions records={decisions} focusId={decision} /></div>
   </div>;

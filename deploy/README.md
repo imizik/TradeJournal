@@ -1075,3 +1075,38 @@ required. Restart the verifiers together after any mode or identity change.
 Do not repoint the synthetic account, change production configuration or copy
 provider/model credentials. Historical replay is available only in the browser.
 Activation and real Jo/restart acceptance remain a separate manual demo step.
+
+## 9:40 ET paper shortlist
+
+The private owner app can run the November 4–December 2, 2026 study independently
+of Codex. The release packages three **opt-in** timers. On the 20 study dates
+they prepare same-feed opening-volume history at 08:50 ET, capture the live
+slate at 09:40:03 ET, and build the full-market recap at 10:20 ET. The timer
+for a live slate skips missed starts. A release or installation does not
+enable the timers.
+
+After an approved release and activation, enable these units on the private
+app host before the first warmup. They use the existing backend Alpaca
+market-data credentials and persistent backend data directory.
+
+```sh
+sudo systemctl enable --now tradejournal-scalp-shortlist-warmup.timer tradejournal-scalp-shortlist-live.timer tradejournal-scalp-shortlist-recap.timer
+systemctl list-timers 'tradejournal-scalp-shortlist-*' --all
+```
+
+Check the corresponding `tradejournal-scalp-shortlist@warmup.service`,
+`@live.service`, and `@recap.service` journals for collection failures. To
+recover a missed baseline or recap for a study date, run the same CLI as the
+service with `warmup --day YYYY-MM-DD` followed by `recap --day YYYY-MM-DD`
+once the recap is due, using the service user, backend directory and environment.
+A live slate must be recorded in its real window.
+
+The app reads and writes `backend/data/scalp_shortlist` (or the shared absolute
+`SCALP_SHORTLIST_DIR` configured for both API and collector). It stores market
+receipts and paper decisions independently of fills and account records.
+The morning card labels its feed. When recent SIP bars are unavailable under
+the existing entitlement, the IEX preview uses IEX history. The recap shows
+the signed stock move between the 09:41 and 09:51 opening prints for each
+displayed name and the separate full-market SIP picks and Movers. A missing
+price stays unavailable. Percentages are before execution costs. Chat and
+in-app paper decisions are independent.

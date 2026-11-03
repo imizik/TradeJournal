@@ -1,0 +1,19 @@
+[Unit]
+Description=TradeJournal 9:40 paper shortlist (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=tradejournal
+Group=tradejournal
+WorkingDirectory=/opt/tradejournal/current/backend
+EnvironmentFile=/etc/tradejournal/backend.env
+ExecStart=/opt/tradejournal/current/backend/.venv/bin/python -m app.engine.scalp_shortlist %i
+TimeoutStartSec=15min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tradejournal
