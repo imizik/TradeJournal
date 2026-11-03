@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 FRED_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
 FRED_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "fred"
 FRED_TTL_S = 6 * 3600
+FRED_RETRY_S = 15 * 60  # after a failed fetch a series waits this long before trying FRED again
 # (id, label, kind): a rate or spread changes in basis points, a level in percent, an index by its difference.
 SERIES = (
     ("DGS2", "2-year Treasury yield, %", "rate"),
@@ -58,7 +59,9 @@ BASE_RATE_NOTE = ("An episode starts the first close at least threshold_pct belo
                   "ends once the drawdown has recovered to half the threshold (the last one is marked ongoing until then). "
                   "Forward returns are close to close on split-adjusted closes, dividends left out. baseline is every day's forward return over the same history, so "
                   "an episode's figure means something only beside it. Overlapping market regimes and fewer than 10 "
-                  "episodes make these anecdotes, not odds.")
+                  "episodes make these anecdotes, not odds. recovered_high counts episodes with 63 later closes; its "
+                  "median_days is over the ones that regained the high only, so of minus recovered is the rest. During the "
+                  "session the last bar is today's live price, not a close (current.intraday).")
 
 
 # --------------------------------------------------------------------------- FRED
@@ -72,17 +75,25 @@ def _fetch(series_id: str, start: date) -> str:
     return text
 
 
+_failed: dict[str, float] = {}  # series id -> when its last fetch failed, so a FRED outage is not waited out on every read
+
+
 def _cached(series_id: str, start: date, now: float) -> tuple[str | None, float | None]:
     """The series' CSV and when it was fetched: fresh from disk, else fetched, else the stale file, else (None, None)."""
     path = FRED_DIR / f"{series_id}.csv"
     stamp = path.stat().st_mtime if path.exists() else None
     if stamp is not None and now - stamp < FRED_TTL_S:
         return path.read_text(), stamp
+    stale = (path.read_text(), stamp) if stamp is not None else (None, None)
+    if now - _failed.get(series_id, float("-inf")) < FRED_RETRY_S:
+        return stale
     try:
         text = _fetch(series_id, start)
     except Exception as exc:  # noqa: BLE001 - a stale file or a missing series beats failing the whole read
         log.warning("FRED %s unavailable: %s", series_id, type(exc).__name__)
-        return (path.read_text(), stamp) if stamp is not None else (None, None)
+        _failed[series_id] = now
+        return stale
+    _failed.pop(series_id, None)
     FRED_DIR.mkdir(parents=True, exist_ok=True)
     part = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.part")
     part.write_text(text)
@@ -140,9 +151,12 @@ def macro(now: float, until: date | None = None, fetch=_cached) -> dict:
     rows = [r for r, _ in got]
     stamps = [s for _, s in got if s is not None]
     ok = [r for r in rows if r.get("state") != "unavailable"]
-    return {"state": "ok" if len(ok) == len(rows) else "partial" if ok else "unavailable",
+    stale = [r["id"] for r in rows if r.get("stale")]
+    return {"state": "ok" if len(ok) == len(rows) and not stale else "partial" if ok else "unavailable",
             "fetched_at": datetime.fromtimestamp(min(stamps), ET).isoformat(timespec="minutes") if stamps else None,
-            "latest_date": max((r["date"] for r in ok), default=None), "series": rows, "note": MACRO_NOTE}
+            "latest_date": max((r["date"] for r in ok), default=None), "series": rows, "note": MACRO_NOTE,
+            **({"stale_series": stale, "reason": "FRED could not be reached; these series are from an older cached read."}
+               if stale else {})}
 
 
 def live_macro(now: datetime) -> dict:
@@ -161,7 +175,8 @@ def _uncached(series_id: str, start: date, now: float) -> tuple[str | None, floa
 def replay_macro(at: datetime) -> dict:
     """Cut before the replay's day: FRED publishes a day's value the next business day."""
     day = at.astimezone(ET).date()
-    return {**macro(time.time(), until=day, fetch=_uncached), "cut": f"values dated before {day}"}
+    return {**macro(time.time(), until=day, fetch=_uncached),
+            "cut": f"values dated before {day}, from FRED's current vintage (later revisions included)"}
 
 
 def fixture_macro() -> dict:
@@ -256,7 +271,10 @@ def history_bars(symbol: str, today: date, live: bool = True) -> list[dict]:
     bars = list(chart_feed.daily.entry(symbol, today, info).bars)
     if live and bars:
         from app.engine.desk_context import daily_bars
-        bars += [b for b in daily_bars(symbol) if b["time"] > bars[-1]["time"]]
+        try:
+            bars += [b for b in daily_bars(symbol) if b["time"] > bars[-1]["time"]]
+        except Exception as exc:  # noqa: BLE001 - completed days still answer; only today's bar is missing
+            log.warning("base rates: today's %s bar unavailable: %s", symbol, type(exc).__name__)
     return bars
 
 
@@ -265,8 +283,12 @@ SOURCE_NOTE = "Tradier daily history through the chart feed, split-adjusted, div
 
 def live_base_rates(symbol: str, drawdown_pct: float | None) -> dict:
     now = datetime.now(ET)
-    return {**base_rates(symbol, history_bars(symbol, now.date()), drawdown_pct), "source_note": SOURCE_NOTE,
-            "as_of": now.isoformat(timespec="minutes")}
+    out = {**base_rates(symbol, history_bars(symbol, now.date()), drawdown_pct), "source_note": SOURCE_NOTE,
+           "as_of": now.isoformat(timespec="minutes")}
+    current = out.get("current")
+    if current and current["date"] == now.date().isoformat() and now.hour < 16:
+        current["intraday"] = True  # today's bar is the live price: an episode it starts is not confirmed by a close
+    return out
 
 
 def replay_base_rates(symbol: str, drawdown_pct: float | None, at: datetime) -> dict:

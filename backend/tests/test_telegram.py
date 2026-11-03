@@ -480,3 +480,17 @@ def test_a_typed_question_past_the_daily_budget_is_refused_before_any_turn(case,
     monkeypatch.setattr(copilot, "adapter_for", lambda cfg: pytest.fail("a turn was built past the budget"))
     replies = telegram_replies.Replies(db_engine, call=Bot())
     assert run(replies.question_text("hi", None)) == "Today's copilot API budget ($1.50) is spent."
+
+
+def test_a_card_the_chat_cannot_show_is_named_with_a_pointer_to_the_desk(case, monkeypatch):
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    from app.ai import copilot_spend
+
+    async def scripted(*args, **kwargs):
+        yield {"type": "text", "delta": "Verdict: Wait. A deeper read would help."}
+        yield {"type": "proposal", "kind": "revisit", "question": "Is the AI trade topping?", "horizon_days": 0}
+        yield {"type": "done"}
+    monkeypatch.setattr(copilot_spend, "recorded_turn", scripted)
+    answer = run(telegram_replies.Replies(db_engine, call=Bot()).turn("Is this the top?", None))
+    assert answer.startswith("Verdict: Wait.") and "only be confirmed on the desk: Is the AI trade topping?" in answer

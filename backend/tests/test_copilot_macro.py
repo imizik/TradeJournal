@@ -121,3 +121,54 @@ def test_the_fixture_turns_read_both_tools():
     assert "base rates" in _text(rates) and "baseline" in _text(rates)
     macro = _turn([{"role": "user", "content": "What are credit spreads and yields doing?"}], copilot.FakeAdapter(0))
     assert "get_macro" in [e["name"] for e in macro if e["type"] == "tool"] and "FRED" in _text(macro)
+
+
+def test_a_failed_fred_fetch_waits_before_trying_again_and_says_stale(tmp_path, monkeypatch):
+    monkeypatch.setattr(m, "FRED_DIR", tmp_path)
+    monkeypatch.setattr(m, "_failed", {})
+    (tmp_path / "DGS10.csv").write_text(csv([(date(2026, 10, 30), 4.94)]))
+    old = (tmp_path / "DGS10.csv").stat().st_mtime
+    tries = []
+
+    def down(series_id, start):
+        tries.append(series_id)
+        raise OSError("no network")
+    monkeypatch.setattr(m, "_fetch", down)
+    later = old + m.FRED_TTL_S + 1
+    assert m._cached("DGS10", date(2025, 9, 1), later)[1] == old
+    assert m._cached("DGS10", date(2025, 9, 1), later + 60)[1] == old and tries == ["DGS10"]  # no second wait inside 15 minutes
+    m._cached("DGS10", date(2025, 9, 1), later + m.FRED_RETRY_S + 1)
+    assert tries == ["DGS10", "DGS10"]
+
+
+def test_a_stale_series_makes_the_read_partial_and_is_named():
+    now = datetime(2026, 11, 2, 12, tzinfo=ET).timestamp()
+    good = csv([(date(2026, 10, 1), 3.0), (date(2026, 10, 30), 3.4)])
+    out = m.macro(now, fetch=lambda series_id, start, at: (good, at - m.FRED_TTL_S - 5 if series_id == "DGS2" else at))
+    assert out["state"] == "partial" and out["stale_series"] == ["DGS2"] and "older cached read" in out["reason"]
+
+
+def test_todays_live_price_is_marked_intraday(monkeypatch):
+    closes = [100.0] * 400 + [70.0]
+    monkeypatch.setattr(m, "history_bars", lambda symbol, today, live=True: bars(closes, end=date(2026, 10, 30)))
+
+    class At(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 30, 11, tzinfo=ET)
+    monkeypatch.setattr(m, "datetime", At)
+    assert m.live_base_rates("XYZ", None)["current"]["intraday"] is True
+    At.now = classmethod(lambda cls, tz=None: datetime(2026, 10, 30, 16, 5, tzinfo=ET))
+    assert "intraday" not in m.live_base_rates("XYZ", None)["current"]
+
+
+def test_today_bar_failure_still_answers_from_completed_days(monkeypatch):
+    from app.engine import chart_feed as feed_module, desk_context
+    history = bars([100.0] * 400)
+    monkeypatch.setattr(feed_module.chart_feed, "daily", type("D", (), {"entry": staticmethod(lambda *a: type("E", (), {"bars": history})())})())
+    monkeypatch.setattr(feed_module.chart_feed, "splits", None)
+
+    def broken(symbol):
+        raise RuntimeError("workspace down")
+    monkeypatch.setattr(desk_context, "daily_bars", broken)
+    assert m.history_bars("XYZ", date(2026, 10, 30)) == history
