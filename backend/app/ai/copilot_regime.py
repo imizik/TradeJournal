@@ -23,6 +23,7 @@ RADAR_NOTE = ("day_pct is versus the previous close from the latest recorded Rad
               "about 15 minutes earlier (null without one). Recorded sampled observations, not live quotes.")
 VIX_NOTE = "VIX in index points; US10Y is the 10-year yield in percent (TNX / 10), change in basis points."
 UNREADABLE = "The Radar file could not be read right now."
+OFF_HOURS_INDEXES = ("SPY", "QQQ", "IWM", "SMH")  # the market's off-hours move, from their own pre- and after-hours trades
 
 
 def _iso(value: float) -> str:
@@ -139,6 +140,10 @@ def live_regime(symbol: str | None, now: datetime) -> dict:
             log.warning("copilot regime radar unreadable: %s", exc)
             out["radar"] = {"state": "error", "reason": UNREADABLE}
     out["vix"], out["us10y"] = index_quotes()
+    from app.ai import copilot_extended
+    off_hours = copilot_extended.extended([*OFF_HOURS_INDEXES, *([symbol] if symbol else [])], now)
+    if off_hours:
+        out["extended"] = off_hours  # before the open Radar has no pass yet and VIX reads its last close
     out["macro"] = macro(today)
     out["earnings"] = earnings_from_cache(symbol, today) if symbol else None
     out["note"] = VIX_NOTE
@@ -160,8 +165,11 @@ def live_radar_today(group: str | None, limit: int, now: datetime, most: int) ->
     from app.routers import radar
     today = now.astimezone(ET).date()
     store, reason = radar._store(read_only=True)
+    from app.ai import copilot_extended
+    early = copilot_extended.phase(now) == "pre-market"
     if store is None:
-        return {"state": "off", "reason": reason, "session": today.isoformat(), "events": [], "movers": None}
+        out = {"state": "off", "reason": reason, "session": today.isoformat(), "events": [], "movers": None}
+        return {**out, "premarket_scan": copilot_extended.premarket_scan(None, today)} if early else out
     try:
         session, prior = pick_session(store, today)
         out = radar_today.feed(store, session, None, group=group, limit=limit)
@@ -170,6 +178,8 @@ def live_radar_today(group: str | None, limit: int, now: datetime, most: int) ->
         return {"state": "error", "reason": UNREADABLE, "session": today.isoformat(), "events": [], "movers": None}
     if prior:
         out["prior_session"] = True
+    if early:  # Radar's first pass is at the open; the pilot's scans are the pre-market's
+        out["premarket_scan"] = copilot_extended.premarket_scan(str(store.path), today)
     return radar_today.bounded(out, most)
 
 

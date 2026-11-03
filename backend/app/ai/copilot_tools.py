@@ -65,7 +65,9 @@ TOOLS: list[dict] = [
     {
         "name": "get_quotes",
         "description": "Current quotes for up to 8 tickers from one read: last price, day change % versus the previous close, "
-                       "volume and the trade time. Use get_market_regime for the market's backdrop.",
+                       "volume and the trade time. Outside 09:30-16:00 New York those are the regular session's, and "
+                       "`extended` adds the pre-market, after-hours or last evening's move from 1-minute trades. Use "
+                       "get_market_regime for the market's backdrop.",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbols"],
                          "properties": {"symbols": {"type": "array", "items": _SYMBOL_SCHEMA}}},
     },
@@ -938,7 +940,10 @@ class LiveEvidence:
             return {"fetched_at": _now(), "state": "ok", "prices": get_stock_quotes(symbols), "quotes": {},
                     "source_note": f"quote engine (60 s cache), price only: {exc}"}
         found = {r["symbol"]: r for r in rows}
+        from app.ai import copilot_extended
+        off_hours = copilot_extended.extended([s for s in symbols if s in found], datetime.now(UTC))
         return {"fetched_at": _stamp(stamp), "state": "ok" if found else "unavailable", **({"issue": issue} if issue else {}),
+                **({"extended": off_hours} if off_hours else {}),
                 "prices": {s: found[s].get("last") if s in found else None for s in symbols},
                 "quotes": {s: {"last": r.get("last"), "change_pct": _pct(r.get("change_percentage")), "volume": r.get("volume"),
                                "prev_close": r.get("previous_close"), "day_high": r.get("day_high"), "day_low": r.get("day_low"),
