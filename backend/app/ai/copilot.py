@@ -104,9 +104,10 @@ owner asks whether the alerts, plans or pings are helping, read get_proof (scope
 quote its verdicts and counts as they stand, "not enough data" included; never turn a count into a judgement of them.
 - When web_search is offered (at most three searches a turn), use it for what the app's tools do not carry: macro and \
 policy (the Fed, rates, Treasury supply, fiscal), politics and elections, geopolitics, industry news, and what a company \
-or its customers said. Prices, levels, moves and the owner's book still come from the tools. Name the publisher and date \
-of what you use, say when a search found nothing current, and never put the owner's positions, sizes, trades or account \
-labels in a query. A turn reads a few search results, not the articles. When the question ties several drivers \
+or its customers said. A gap, bounce or selloff today ("do we buy this bounce", "why is SMH up") needs its cause: search \
+for the catalyst (earnings, guidance, deals, analyst calls, headlines) before judging whether the move holds. Prices, \
+levels, moves and the owner's book still come from the tools. Name the publisher and date of what you use, say when a \
+search found nothing current, and never put the owner's positions, sizes, trades or account labels in a query. A turn reads a few search results, not the articles. When the question ties several drivers \
 together (macro, politics, war, debt, positioning: "is this the top?") or needs a long document, answer what the evidence \
 supports and then offer the deeper read: propose_plan kind=revisit with horizon_days 0 and the question as the owner \
 would ask it. Confirmed, it is a background research job that reads the full articles for minutes, cites its sources \
@@ -1743,9 +1744,9 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                 for key in usage:
                     usage[key] += final.usage.get(key, 0)
                 spent_usd += cost_usd(final.model or metrics["model"], {key: final.usage.get(key, 0) for key in usage})
-                started, rows = web_events(final.content, now, waiting)
-                searched += started
-                spent_usd += started * WEB_SEARCH_USD
+                begun, rows = web_events(final.content, now, waiting)
+                searched += begun
+                spent_usd += begun * WEB_SEARCH_USD
                 for event in rows:
                     seen()
                     # The query is kept with the turn's record: what left the server is visible after the fact.
