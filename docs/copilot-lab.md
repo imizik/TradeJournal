@@ -2301,19 +2301,23 @@ to research jobs and the shadow book:
   and three months (rates and spreads in basis points, the dollar and oil in
   percent, NFCI as a difference) and where it sits in its one-year range.
   Series are fetched in parallel and cached six hours in `backend/data/fred/`;
-  a failed fetch uses the stale file (marked `stale`) or leaves that series
-  unavailable, and the rest stand. FRED publishes a day's value the next
+  a failed fetch uses the stale file (marked `stale`, listed in
+  `stale_series`, state `partial`) or leaves that series unavailable, and the
+  rest stand. A series whose fetch failed waits 15 minutes before trying FRED
+  again, so an outage does not stall every read. FRED publishes a day's value the next
   business day, so each series carries its own date.
 - **`get_base_rates(symbol, drawdown_pct?)`** counts what followed past
   drawdowns in the symbol's own daily history: the chart feed's whole Tradier
   series (split-adjusted, dividends left out; SPY from 1996, QQQ from 2000,
-  SMH from 2012) plus today's bar. An episode starts at the first close at
+  SMH from 2012) plus today's bar, which during the session is the live price,
+  not a close (`current.intraday`). An episode starts at the first close at
   least `drawdown_pct` (default today's depth, whole percent; 3-80) below the
   trailing 252-day closing high and ends once the drawdown recovers to half
   that; the last is marked `ongoing` until then. It returns forward returns
   at 5, 21, 63 and 126 trading days (n, median, share up, worst, best) beside
   the same history's every-day baseline, the further drop within 63 days, how
-  many regained the high they fell from and how fast, and the ten most recent
+  many regained the high they fell from and how fast (the median is over the
+  ones that did), and the ten most recent
   episodes with dates. Counts of the past, not odds; the prompt says to give n
   and the baseline with every figure and to call fewer than 10 episodes an
   anecdote.
@@ -2321,7 +2325,7 @@ to research jobs and the shadow book:
 The prompt reads `get_macro` for rates, credit, dollar and oil questions and
 `get_base_rates` (the symbol, and SPY or QQQ for the market) for "how does
 this usually end" or "is this the top". Replay cuts both before the frozen
-day; the fixture serves fixed macro rows and a simulated price history.
+day (macro from FRED's current vintage, revisions included); the fixture serves fixed macro rows and a simulated price history.
 Tests: `backend/tests/test_copilot_macro.py`.
 
 ## Breadth and positioning
@@ -2338,14 +2342,18 @@ says they are unavailable; the fixture serves fixed numbers.
   share up, the median and equal-weight day change, new 52-week highs and
   lows (today's high or low reaching the provider's 52-week figure), the share
   within 5% of the 52-week high and the share 20% or more below it, overall
-  and by GICS sector. Cached three minutes in memory.
+  and by GICS sector. Cached three minutes in memory. Before the 09:30 ET open
+  the provider's last price is the previous close, so the day's counts,
+  changes and new highs and lows are null and `session` says why; the
+  off-high shares stand as of that close.
 - **`get_positioning(symbol = SPY)`** asks how afraid the options market is:
   the Cboe volatility indexes (VIX9D, VIX, VIX3M, VIX6M, VVIX, SKEW) with the
   curve called contango, backwardation or mixed, and for the symbol the
   nearest expiry at least five days out and the one nearest 30 days, read
   through the options feed's cached chains: at-the-money IV, the 25-delta
   put and call IV and their difference (skew, in vol points), and put/call
-  volume and open interest. IV and greeks are ORATS figures refreshed hourly.
+  volume and open interest, on the symbol's primary root (an expiry with none,
+  an SPX AM monthly, is left out and said). IV and greeks are ORATS figures refreshed hourly.
 
 The prompt reads `get_breadth` before calling a move a selloff, a rotation or
 a narrow rally, and `get_positioning` for "is fear priced in" or "are puts
@@ -2382,7 +2390,10 @@ ends reads "search failed (no result)". Each query is logged at INFO
 - **Cost.** A cent a search on top of tokens. A turn that may search gets a cap
   of `COPILOT_TURN_BUDGET_USD` plus `copilot.WEB_TURN_EXTRA_USD` ($0.15), since
   search results add input; the daily budget is unchanged. A `pause_turn` (a
-  long server-side search) is sent back to resume, within that cap.
+  long server-side search) is sent back to resume, within that cap; a turn
+  whose last round still paused ends with a `rounds` error, not a blank answer.
+  Telegram cannot show a card, so a proposed card is named at the end of the
+  reply with a pointer to the desk.
 - **Research now.** When a question needs more than a turn can read, the
   prompt has the model answer what the evidence supports and then propose
   `propose_plan kind=revisit` with `horizon_days 0`: a **Proposed research**

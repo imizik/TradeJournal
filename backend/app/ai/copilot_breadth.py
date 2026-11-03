@@ -29,6 +29,9 @@ BEAR = 0.20
 BREADTH_NOTE = ("One quote per S&P 500 member from the hand-kept list (list_as_of). day_pct is against the previous "
                 "close; a new high or low is today's high or low reaching the provider's 52-week figure. Equal weight: "
                 "every member counts once, so this is the average stock, not the index.")
+DAY_FIELDS = ("advancers", "decliners", "up_share", "median_day_pct", "equal_weight_day_pct", "new_52w_highs", "new_52w_lows")
+PRE_MARKET = ("Before the 09:30 ET open the provider's last price is the previous close, so today's advancers, decliners, "
+              "changes and new highs or lows are not known yet (null); the off-high shares are as of that close.")
 VOL_INDEXES = ("VIX9D", "VIX", "VIX3M", "VIX6M", "VVIX", "SKEW")
 POSITIONING_NOTE = ("VIX9D < VIX < VIX3M (contango) is the calm shape; front above back (backwardation) is stress now. "
                     "skew_25d is the 25-delta put's implied volatility minus the 25-delta call's, in vol points: higher "
@@ -88,10 +91,17 @@ def breadth(quotes: dict[str, dict], index: dict[str, str]) -> dict:
     return {**_tally(rows), "by_sector": by_sector}
 
 
+def _before_open(now: datetime) -> bool:
+    et = now.astimezone(ET)
+    return et.weekday() < 5 and (et.hour, et.minute) < (9, 30)
+
+
 def live_breadth(now: datetime) -> dict:
     from app.engine import tradier
+    early = _before_open(now)
+    key = "breadth:pre" if early else "breadth"  # the open does not wait out a pre-market read's cache
     with _lock:
-        hit = _cache.get("breadth")
+        hit = _cache.get(key)
         if hit and time.time() - hit[0] < BREADTH_TTL_S:
             return hit[1]
     index, as_of = members()
@@ -100,10 +110,16 @@ def live_breadth(now: datetime) -> dict:
     except tradier.TradierError as exc:
         return {"state": "unavailable", "reason": f"Tradier quotes could not be read: {exc}"[:200]}
     rows = {s: (quoted.get(_provider(s)).raw or {}) for s in index if quoted.get(_provider(s))}
+    if not rows:
+        return {"state": "unavailable", "reason": "Tradier returned no S&P 500 quotes."}
     out = {"state": "ok" if len(rows) >= 0.95 * len(index) else "partial", "as_of": now.astimezone(ET).isoformat(timespec="minutes"),
            "list_as_of": as_of, **breadth(rows, index), "note": BREADTH_NOTE}
+    if early:
+        for part in (out, *out["by_sector"].values()):
+            part.update(dict.fromkeys(DAY_FIELDS))
+        out["session"] = PRE_MARKET
     with _lock:
-        _cache["breadth"] = (time.time(), out)
+        _cache[key] = (time.time(), out)
     return out
 
 
@@ -115,9 +131,12 @@ def _nearest(contracts, target: float):
     return found if found is not None and abs(abs(found.delta) - target) <= DELTA_TOLERANCE else None
 
 
-def chain_stats(chain, spot: float, today: date, root: str | None = None) -> dict:
-    """One expiry's at-the-money IV, 25-delta skew and put/call ratios, over one root (SPX and SPXW never merge)."""
+def chain_stats(chain, spot: float, today: date, root: str | None = None) -> dict | None:
+    """One expiry's at-the-money IV, 25-delta skew and put/call ratios, over one root (SPX and SPXW never merge); None when
+    the expiry lists nothing on that root (an SPX AM monthly carries only SPX)."""
     contracts = [c for c in chain.contracts if root is None or c.root == root]
+    if not contracts:
+        return None
     calls = [c for c in contracts if c.option_type == "call"]
     puts = [c for c in contracts if c.option_type == "put"]
     both = {c.strike for c in calls if c.iv} & {c.strike for c in puts if c.iv}  # an ATM IV is the call and put's mean
@@ -161,11 +180,16 @@ def live_positioning(symbol: str, now: datetime) -> dict:
     from app.engine.quotes import get_stock_quotes
     today = now.astimezone(ET).date()
     out: dict = {"symbol": symbol, "as_of": now.astimezone(ET).isoformat(timespec="minutes"), "note": POSITIONING_NOTE}
+    spot = None
     try:
-        out["vol_indexes"] = vol_indexes({k: q.raw or {} for k, q in tradier.get_quotes_once(list(VOL_INDEXES)).items()})
+        # The symbol rides along with the volatility indexes: Tradier quotes an index (SPX, NDX) the stock path cannot.
+        quoted = tradier.get_quotes_once([*VOL_INDEXES, symbol])
+        out["vol_indexes"] = vol_indexes({k: q.raw or {} for k, q in quoted.items()})
+        spot = quoted[symbol].last if symbol in quoted else None
     except tradier.TradierError as exc:
         out["vol_indexes"] = {"state": "unavailable", "reason": str(exc)[:160]}
-    spot = get_stock_quotes([symbol]).get(symbol)
+    if not isinstance(spot, (int, float)) or not spot > 0:
+        spot = get_stock_quotes([symbol]).get(symbol)
     if not isinstance(spot, (int, float)) or not spot > 0:
         return {**out, "state": "partial", "expiries": [], "reason": f"No current {symbol} price, so strikes cannot be placed."}
     try:
@@ -173,7 +197,10 @@ def live_positioning(symbol: str, now: datetime) -> dict:
     except ValueError:
         return {**out, "state": "partial", "expiries": [], "reason": f"{symbol} is not an optionable underlying symbol."}
     from app.engine.options_positioning import primary_root
-    expiries = [chain_stats(read.value, float(spot), today, primary_root(symbol)) for read in reads if read.value.contracts]
+    stats = [chain_stats(read.value, float(spot), today, primary_root(symbol)) for read in reads]
+    expiries = [s for s in stats if s is not None]
+    if len(expiries) < len(stats):
+        issue = "; ".join(filter(None, [issue, f"an expiry had no {primary_root(symbol)} contracts and is left out"]))
     out.update(spot=round(float(spot), 2), expiries=expiries, state="ok" if expiries and not issue else "partial")
     if issue:
         out["reason"] = issue

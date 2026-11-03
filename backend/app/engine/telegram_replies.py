@@ -296,6 +296,7 @@ class Replies:
         now = datetime.now(ET)
         parts: list[str] = []
         errors: list[str] = []
+        cards: list[str] = []
         try:
             turn = copilot_spend.recorded_turn(history, symbol, cfg, adapter, evidence, now, kind=None, source="telegram",
                                                web=True)
@@ -305,10 +306,14 @@ class Replies:
                         parts.append(event.get("delta") or "")
                     elif event.get("type") == "error":
                         errors.append(event.get("message") or "")
+                    elif event.get("type") == "proposal":
+                        cards.append(str(next((event[k] for k in ("label", "question", "thesis", "text") if event.get(k)), event.get("kind") or "a card"))[:160])
         finally:
             if hasattr(adapter, "aclose"):
                 await adapter.aclose()
         answer = "".join(parts).strip()
+        if cards:  # a card is confirmed on the desk, and a chat cannot show one: say so rather than leave "confirm it" dangling
+            answer += "\n\nProposed here, but a card can only be confirmed on the desk: " + "; ".join(cards) + ". Ask there to set it up."
         if errors:
             answer = (answer + "\n\n" if answer else "") + " ".join(errors)
         answer = answer or "The copilot gave no answer."
