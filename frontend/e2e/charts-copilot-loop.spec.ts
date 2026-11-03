@@ -171,7 +171,7 @@ test("the chart draft survives Layers, and Continue in Desk keeps its symbol and
   await expect(page.getByLabel("Message")).toHaveValue("Check whether MRVL is holding the gap.");
   await page.getByRole("link", { name: "Open MRVL chart", exact: true }).click();
   await expect(page).toHaveURL(/\/charts\?symbol=MRVL$/);
-  await expect(page.getByLabel("Chart symbol")).toHaveValue("MRVL");
+  await expect(page.getByRole("region", { name: "MRVL 5m chart", exact: true })).toBeVisible();
 });
 
 test("Continue in Desk reopens the saved chart investigation with the unsent addition", async ({ page }) => {
@@ -191,6 +191,35 @@ test("Continue in Desk reopens the saved chart investigation with the unsent add
   await expect(page).toHaveURL(new RegExp(`/copilot-lab\\?[^#]*thread=${PLAN_A}`));
   await expect(page.getByLabel("Message")).toHaveValue("Compare this setup with the group trend.");
   await expect(page.getByText("Armed: entry 95.90, invalidation 91.50.")).toBeVisible();
+});
+
+test("a screenshot uploading while Layers opens returns to the selected plan conversation", async ({ page }) => {
+  await stubLab(page, []);
+  let complete!: () => void;
+  const pending = new Promise<void>(resolve => { complete = resolve; });
+  await page.route("**/copilot/images", async route => {
+    await pending;
+    return route.fulfill({ status: 201, json: { id: "d".repeat(32), width: 1, height: 1, bytes: 70 } });
+  });
+  const panel = await openPanel(page);
+  await header(panel, "MRVL armed plans").click();
+  await panel.getByRole("button", { name: "Open the MRVL plan (long)" }).click();
+  const answer = "Armed: entry 95.90, invalidation 91.50.";
+  await expect(panel.getByText(answer)).toBeVisible();
+  await panel.getByTestId("copilot-image-input").setInputFiles({ name: "chart.png", mimeType: "image/png",
+    buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64") });
+  await expect(panel.getByText("Attaching…")).toBeVisible();
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await page.getByRole("button", { name: "Ask Copilot", exact: true }).click();
+  await expect(panel.getByText(answer)).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Continue in Desk" })).toBeDisabled();
+  await panel.getByLabel("Message").fill("Compare this chart to the saved plan.");
+  complete();
+  await expect(panel.getByRole("img", { name: "Attached screenshot" })).toBeVisible();
+  await panel.getByRole("link", { name: "Continue in Desk" }).click();
+  await expect(page).toHaveURL(new RegExp(`/copilot-lab\\?[^#]*thread=${PLAN_A}`));
+  await expect(page.getByRole("img", { name: "Attached screenshot" })).toBeVisible();
+  await expect(page.getByLabel("Message")).toHaveValue("Compare this chart to the saved plan.");
 });
 
 test("the plan card's contract pick list fits the narrow dock", async ({ page }) => {

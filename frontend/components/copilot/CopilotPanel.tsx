@@ -37,6 +37,8 @@ export const remember = (id: string | null) => {
 export const rememberedThread = () => { try { return window.localStorage.getItem(CURRENT_KEY); } catch { return null; } };
 const fromAnotherDay = () => { try { const day = window.localStorage.getItem(CURRENT_DAY_KEY); return !!day && day !== nyDay(); } catch { return false; } };
 const shortTime = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+// The picker may finish after its chart dock is closed. A remounted editor can join the same upload.
+const uploads = new Map<string, Promise<void>>();
 const MAX_CHARS = 4000, MAX_MESSAGES = 23, MAX_TOTAL = 38_000;
 const clip = (text: string) => text.length <= MAX_CHARS ? text : `${text.slice(0, MAX_CHARS - 12)} [clipped]`;
 const UNAVAILABLE = new Set(["off", "unavailable", "failed", "error", "ungrouped", "not_configured"]);
@@ -514,7 +516,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     setAttached(saved?.images ?? (entry?.image ? [{ id: entry.image, url: imageUrl(entry.image) }] : []));
     typed.current = saved?.typed ?? false;
     setSpoken(saved?.spoken ?? false);
-    setAttaching(null);
+    const pending = uploads.get(key);
+    if (pending) watchUpload(key, pending); else setAttaching(null);
     setOrigin(saved?.origin ?? planOrigin(entry?.origin, entry?.context));
     setDrawn(saved?.drawn ?? entry?.plan ?? null);
     lookOnSend.current = saved?.captureChart ?? false;
@@ -594,14 +597,14 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     const stale = () => request !== selection.current || signal?.aborted || running.current || turns.current !== asked
       || (automatic && (shown.current > 0 || edits.current !== edited));
     const last = chartDraftThread(identifier, target);
-    if (last && readDraft(keyFor(target, last))) {
+    if (last && (uploads.has(keyFor(target, last)) || readDraft(keyFor(target, last)))) {
       try {
         const saved = await getInvestigation(last);
         if (stale()) return;
         if (saved.symbol === target) { open(saved); return; }
       } catch { /* A removed thread no longer owns this chart's editor. */ }
     }
-    if (readDraft(keyFor(target))) { if (!stale()) fresh(target); return; }
+    if (uploads.has(keyFor(target)) || readDraft(keyFor(target))) { if (!stale()) fresh(target); return; }
     let found: InvestigationSummary | undefined;
     try { found = (await listInvestigations(target)).find(item => item.status === "open" && item.symbol === target); } catch { /* start fresh */ }
     if (stale()) return;
@@ -957,33 +960,43 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     }
   }
 
-  /** Screenshots from the picker (the phone's camera roll or camera): stored by the server for the next message. With no
-   * words of the owner's own in the box yet, the box gets a starting question. */
-  async function attach(files: File[]) {
+  function watchUpload(slot: string, upload: Promise<void>) {
+    setAttaching({ state: "busy" });
+    const finish = (failure?: string) => {
+      if (activeSlot.current !== slot) return;
+      const saved = readDraft(slot);
+      if (saved) { setAttached(saved.images); setDraft(saved.text); }
+      setAttaching(failure ? { state: "error", message: failure } : null);
+    };
+    void upload.then(() => finish(), error => finish(error instanceof Error ? error.message : "The screenshot could not be attached."));
+  }
+
+  /** Keep the selection with the editor that started the upload, even if the dock unmounts meanwhile. */
+  function attach(files: File[]) {
     const room = files.slice(0, MAX_IMAGES - attached.length);
     const slot = activeSlot.current;
-    if (!slot || !room.length) return;
+    if (!slot || !room.length || uploads.has(slot)) return;
     edits.current++;
     const initial = draftSnapshot();
-    const prefill = (text: string) => text.replace(/^Context: [^\n]*\n+/, "").trim() ? text : text + IMAGE_PREFILL;
-    setAttaching({ state: "busy" });
-    try {
-      for (const file of room) {
-        const stored = await uploadImage(file);
-        const image = { id: stored.id, url: URL.createObjectURL(file) };
-        if (activeSlot.current === slot) {
-          setAttached(list => [...list, image].slice(0, MAX_IMAGES));
-          setDraft(prefill);
-        } else {
-          // An upload may finish after a switch or unmount. It still belongs to the original editor.
-          const saved = readDraft(slot) ?? initial;
-          storeDraft(slot, { ...saved, text: prefill(saved.text), images: [...saved.images, image].slice(0, MAX_IMAGES) });
+    if (panel && pageSymbol === symbol) rememberChartDraft(identifier, symbol, current?.id ?? null);
+    const upload = (async () => {
+      const images: CopilotDraft["images"] = [];
+      try {
+        for (const file of room) {
+          const stored = await uploadImage(file);
+          images.push({ id: stored.id, url: URL.createObjectURL(file) });
+        }
+      } finally {
+        // Read the latest words when the uploads land: the owner may still be typing.
+        if (images.length) {
+          const saved = readDraft(slot) ?? { ...initial, text: initial.typed ? "" : initial.text, images: [] };
+          const text = saved.text.replace(/^Context: [^\n]*\n+/, "").trim() ? saved.text : saved.text + IMAGE_PREFILL;
+          storeDraft(slot, { ...saved, text, images: [...saved.images, ...images].slice(0, MAX_IMAGES) });
         }
       }
-      if (activeSlot.current === slot) setAttaching(null);
-    } catch (error) {
-      if (activeSlot.current === slot) setAttaching({ state: "error", message: error instanceof Error ? error.message : "The screenshot could not be attached." });
-    }
+    })().finally(() => uploads.delete(slot));
+    uploads.set(slot, upload);
+    watchUpload(slot, upload);
   }
 
   /** "Look at my chart": the page's chart joins any attached screenshot (two at most) and goes out at once, with the
@@ -1110,7 +1123,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   );
   const sendButton = busy
     ? <button type="button" onClick={() => abort.current?.abort()} className="min-h-11 rounded-lg border px-4 text-sm md:min-h-9">Stop</button>
-    : <button type="submit" disabled={!enabled || (!draft.trim() && !attached.length)} className={cn("min-h-11 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-40 md:min-h-9", small && "max-md:hidden")}>Send</button>;
+    : <button type="submit" disabled={!enabled || attaching?.state === "busy" || (!draft.trim() && !attached.length)} className={cn("min-h-11 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-40 md:min-h-9", small && "max-md:hidden")}>Send</button>;
   const attachButton = (
     <button type="button" aria-label="Attach a screenshot" title="Attach a screenshot (up to 2)" data-testid="copilot-attach"
       onClick={() => picker.current?.click()} disabled={!enabled || busy || attaching?.state === "busy" || attached.length >= MAX_IMAGES}

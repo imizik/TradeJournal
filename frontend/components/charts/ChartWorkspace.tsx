@@ -2039,10 +2039,10 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
           <button onClick={dismissRadar} className="min-h-9 text-muted-foreground">Dismiss Radar context</button>
         </div>
       </section>}
-      <header aria-label="Chart toolbar" className={`flex flex-wrap items-center gap-1 ${fill ? "shrink-0 border-b border-border bg-background px-2 py-1" : "pb-1"} ${immersive ? "pt-[max(0.25rem,env(safe-area-inset-top))]" : ""}`}>
+      <header aria-label="Chart toolbar" className={`flex flex-wrap items-center gap-1 min-[1024px]:max-[1439px]:gap-x-0.5 ${fill ? "shrink-0 border-b border-border bg-background px-2 py-1" : "pb-1"} ${immersive ? "pt-[max(0.25rem,env(safe-area-inset-top))]" : ""}`}>
         <h1 className="sr-only">Charts</h1>
         <form onSubmit={submitSymbol} className={`relative flex shrink-0 items-center rounded-md border border-border bg-background ${narrow ? "h-11" : "h-8"}`}>
-          <button type="button" aria-label="Open symbol search" title="Search symbols (⌘K / Ctrl+K)" onClick={() => setPalette(0)} className={`${plain(false)} ${tap}`}><Search size={14} /></button><input aria-label="Chart symbol" value={symbolInput} placeholder={settings.symbol} onChange={(e) => setSymbolInput(e.target.value.toUpperCase())} maxLength={15} className="w-20 bg-transparent px-1 text-sm font-semibold uppercase text-foreground outline-none placeholder:text-foreground" />
+          <button type="button" aria-label="Open symbol search" title="Search symbols (⌘K / Ctrl+K)" onClick={() => setPalette(0)} className={`${plain(false)} ${tap}`}><Search size={14} /></button><input aria-label="Chart symbol" value={symbolInput} placeholder={settings.symbol} onChange={(e) => setSymbolInput(e.target.value.toUpperCase())} maxLength={15} className="w-20 bg-transparent px-1 text-sm font-semibold uppercase text-foreground outline-none placeholder:text-foreground min-[1024px]:max-[1439px]:w-14" />
           <button type="submit" aria-label="Load symbol" className={`${plain(false)} ${tap}`}><ArrowUpRight size={14} /></button>
         </form>
         {askCopilot}
