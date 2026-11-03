@@ -262,13 +262,17 @@ function Legend({ jo }: { jo: JoMonths | null }) {
       <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-red-500/30" aria-hidden />Closed red</span>
       <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden />Reviewed</span>
       <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-primary" aria-hidden />Review needs refresh</span>
-      <span>Darker means a bigger day. Click a day to open its review.</span>
-      {jo && <span className="basis-full" data-testid="jo-calendar-legend">
-        Jo (last {JO_MONTHS} months): <span className="text-primary">Jo !</span> missed or late briefing or read, or a refused watch ·{" "}
-        <span className="text-foreground">Jo ◉</span> a price watch triggered · <span className="text-foreground">Jo ✓</span> briefing and reads on time ·{" "}
-        Jo ? a record is unknown, not fine. No mark: no Jo record.
-        {jo.failed.length > 0 && <span className="text-red-400"> Couldn&apos;t load {jo.failed.join(", ")}, so those marks are missing.</span>}
-      </span>}
+      {/* The explanations fold away; the colour key above stays one line. */}
+      <details className="open:basis-full">
+        <summary className="cursor-pointer list-none underline decoration-dotted underline-offset-2 hover:text-foreground [&::-webkit-details-marker]:hidden">What the marks mean</summary>
+        <p className="mt-1">Darker means a bigger day. Click a day to open its review.</p>
+        {jo && <p className="mt-1" data-testid="jo-calendar-legend">
+          Jo (last {JO_MONTHS} months): <span className="text-primary">Jo !</span> missed or late briefing or read, or a refused watch ·{" "}
+          <span className="text-foreground">Jo ◉</span> a price watch triggered · <span className="text-foreground">Jo ✓</span> briefing and reads on time ·{" "}
+          Jo ? a record is unknown, not fine. No mark: no Jo record.
+        </p>}
+      </details>
+      {jo && jo.failed.length > 0 && <span className="basis-full text-red-400">Couldn&apos;t load Jo&apos;s {jo.failed.join(", ")}, so those marks are missing.</span>}
     </div>
   );
 }

@@ -788,20 +788,19 @@ test("Overview blocks are edged and foldable, Peers sit last and stay folded, an
   expect(await info.evaluate((root) => root.scrollWidth <= root.clientWidth)).toBe(true);
 });
 
-test("a mouse wheel over the tab row scrolls it sideways, then hands back to the dock at the end", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.route("**/api/backend/charts/symbol/*/overview", (route) => route.fulfill({ json: overview("NVDA") }));
-  await page.goto("/charts");
-  const row = panel(page).getByRole("tablist", { name: "Symbol info tabs" });
-  await row.getByRole("tab", { name: "Overview", exact: true }).click();
-  const left = () => row.evaluate((list) => list.scrollLeft);
-  expect(await row.evaluate((list) => list.scrollWidth > list.clientWidth)).toBe(true); // the dock is narrower than the row
-  await row.hover();
-  await page.mouse.wheel(0, 100);
-  await expect.poll(left).toBeGreaterThan(0);
-  await page.mouse.wheel(0, 2000);
-  const end = await row.evaluate((list) => list.scrollWidth - list.clientWidth);
-  await expect.poll(left).toBeGreaterThanOrEqual(end - 1);
-  await page.mouse.wheel(0, -2000);
-  await expect.poll(left).toBe(0);
-});
+for (const [width, height] of [[1440, 900], [1280, 800]]) {
+  test(`every tab name is in sight in the narrow dock at ${width}px, whichever tab was last open`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await page.route("**/api/backend/charts/symbol/*/overview", (route) => route.fulfill({ json: overview("NVDA") }));
+    await page.goto("/charts");
+    const row = panel(page).getByRole("tablist", { name: "Symbol info tabs" });
+    await row.getByRole("tab", { name: "You", exact: true }).click();
+    expect(await row.evaluate((list) => list.scrollWidth <= list.clientWidth)).toBe(true); // the row wraps, nothing scrolls out of sight
+    const box = (await row.boundingBox())!;
+    for (const tab of await row.getByRole("tab").all()) {
+      const tabBox = (await tab.boundingBox())!;
+      expect(tabBox.x).toBeGreaterThanOrEqual(box.x - 1);
+      expect(tabBox.x + tabBox.width).toBeLessThanOrEqual(box.x + box.width + 1);
+    }
+  });
+}

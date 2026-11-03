@@ -1,6 +1,6 @@
 import { api } from "@/lib/serverApi";
 import type { Account, Fill } from "@/lib/api";
-import ManualFillForm from "@/components/ManualFillForm";
+import { AddManualFill } from "@/components/ManualFillForm";
 import { cn } from "@/lib/utils";
 import { wallClockET } from "@/lib/format";
 
@@ -38,11 +38,9 @@ export default async function FillsPage() {
   const [fills, accounts] = await Promise.all([api.fills(), api.accounts()]);
   const accountMap = Object.fromEntries(accounts.map((account: Account) => [account.id, account]));
 
-  // On a phone the fill list comes first; the long manual-entry form is
-  // reordered below it rather than making every visit scroll past it.
   return (
-    <div className="flex flex-col space-y-4">
-      <div>
+    <div className="space-y-4">
+      <AddManualFill accounts={accounts}>
         <div className="flex items-baseline gap-2">
           <h1 className="text-xl font-semibold">Fills</h1>
           <span className="text-sm tabular-nums text-muted-foreground">{fills.length} recorded</span>
@@ -51,13 +49,9 @@ export default async function FillsPage() {
           Fills from your broker emails arrive here automatically. Add a manual fill for anything Gmail never had:
           transferred positions, missing cost basis or older starter lots.
         </p>
-      </div>
+      </AddManualFill>
 
-      <div className="order-3 sm:order-none">
-        <ManualFillForm accounts={accounts} />
-      </div>
-
-      <section className="order-2 overflow-hidden rounded-lg border bg-card sm:order-none">
+      <section className="overflow-hidden rounded-lg border bg-card">
         <div className="border-b px-3.5 py-2.5">
           <h2 className="text-[13.5px] font-semibold tracking-tight">
             Fill History

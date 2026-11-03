@@ -1,6 +1,7 @@
 import { api } from "@/lib/serverApi";
 import type { Account } from "@/lib/api";
 import TradesTable from "@/components/TradesTable";
+import TradesTickerInput from "@/components/TradesTickerInput";
 import { newYorkToday } from "@/lib/format";
 import { filterTradesByAccount } from "@/lib/tradeFilters";
 
@@ -51,20 +52,12 @@ export default async function TradesPage({
         {ticker && <p className="text-sm text-muted-foreground">Ticker {ticker}</p>}
       </div>
 
-      <form action="/trades" method="get" className="flex flex-wrap items-end gap-2" aria-label="Search trades">
+      {/* Filters: one wrapping row so the table starts high, even on a phone. */}
+      <form action="/trades" method="get" className="flex flex-wrap items-center gap-x-5 gap-y-1" aria-label="Search trades">
         {p.status && <input type="hidden" name="status" value={p.status} />}
         {p.account && <input type="hidden" name="account" value={p.account} />}
         {p.account_id && <input type="hidden" name="account_id" value={p.account_id} />}
         {p.type && <input type="hidden" name="type" value={p.type} />}
-        <label className="grid gap-1 text-xs text-muted-foreground">Ticker
-          <input name="ticker" defaultValue={p.ticker ?? ""} placeholder="All tickers" className="h-9 w-48 rounded-md border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground" />
-        </label>
-        <button className="min-h-11 rounded-md border px-3 text-sm hover:bg-secondary sm:min-h-9" type="submit">Apply ticker</button>
-        {ticker && <a className="inline-flex min-h-9 items-center px-2 text-sm text-muted-foreground hover:text-foreground" href={filterUrl({ ticker: "" })}>Clear ticker</a>}
-      </form>
-
-      {/* Filter bar */}
-      <div className="flex flex-wrap gap-4 text-sm">
         <FilterGroup label="Status">
           {["all", "open", "closed", "expired"].map((s) => (
             <FilterPill key={s} href={filterUrl({ status: s })}
@@ -84,7 +77,8 @@ export default async function TradesPage({
               active={(p.type ?? "all") === t}>{t}</FilterPill>
           ))}
         </FilterGroup>
-      </div>
+        <TradesTickerInput initial={ticker ?? ""} />
+      </form>
 
       <TradesTable returnTo={filterUrl({}) === "/trades" ? undefined : filterUrl({})} trades={trades} accountMap={accountMap} thisYear={Number(newYorkToday().slice(0, 4))} />
     </div>
@@ -93,24 +87,20 @@ export default async function TradesPage({
 
 function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-muted-foreground font-medium mr-0.5">{label}:</span>
+    <div className="flex flex-wrap items-center gap-x-1">
+      <span className="mr-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
       {children}
     </div>
   );
 }
 
+/** A filter chip; the link is taller than the chip so it stays easy to tap. */
 function FilterPill({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
   return (
-    <a
-      href={href}
-      className={`inline-flex min-h-11 items-center rounded-full px-2.5 text-xs font-medium capitalize transition-colors sm:min-h-9 ${
-        active
-          ? "bg-foreground text-background"
-          : "bg-secondary text-muted-foreground hover:bg-secondary/80"
-      }`}
-    >
-      {children}
+    <a href={href} aria-current={active ? "true" : undefined} className="group inline-flex min-h-9 items-center">
+      <span className={`inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium capitalize transition-colors ${
+        active ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground group-hover:text-foreground"
+      }`}>{children}</span>
     </a>
   );
 }

@@ -23,7 +23,6 @@ for (const width of [390, 1440]) {
     await expect(pnlHeader).toHaveAttribute("aria-sort", "descending");
     await expect(page.getByLabel("Ticker", { exact: true })).toHaveValue("AAPL");
     await page.getByLabel("Ticker", { exact: true }).fill("RNXT");
-    await page.getByRole("button", { name: "Apply ticker" }).click();
     await expect(page).toHaveURL(/ticker=RNXT/);
     await expect(page.getByRole("table").getByRole("link", { name: "AAPL", exact: true })).toHaveCount(0);
     await page.goto("/trades?ticker=AAPL");

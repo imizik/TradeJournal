@@ -110,7 +110,7 @@ test("on a phone: Today is the first tab, rows are thumb-sized, nothing scrolls 
   }
   await fits(page);
   await page.screenshot({ path: test.info().outputPath("today-375.png"), fullPage: true });
-  // Dashboard stays one menu away.
+  // The menu lists every page, Dashboard included.
   await tabs.getByRole("button", { name: "Open menu" }).click();
   await expect(page.getByRole("dialog", { name: "Menu" }).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
   await page.getByRole("button", { name: "Close menu" }).click();
