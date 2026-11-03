@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Menu, MessagesSquare, PanelRight, Plus, Search } from "lucide-react";
+import { Menu, MessagesSquare, PanelLeft, PanelRight, Plus, Search } from "lucide-react";
 import { openNavMenu, useFoldedNav } from "@/components/Nav";
 import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
@@ -22,12 +22,13 @@ import ThreadRail from "@/components/copilot/ThreadRail";
 import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { BRIEFING_TITLE, WHAT_MATTERS_PROMPT, copilotLabHref, type InvestigationSummary } from "@/lib/copilot";
-import { afterClose, deskSymbolThread, nyDay, saveHorizon, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
+import { afterClose, deskSymbolThread, needingCount, nyDay, saveHorizon, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import styles from "./CopilotLab.module.css";
 
 const TABS: { id: DeskTab; label: string }[] = [{ id: "now", label: "Threads" }, { id: "thread", label: "Thread" }, { id: "context", label: "Context" }];
 const CONTEXT_KEY = "desk.context.v1";
+const THREADS_KEY = "desk.threads.v1";
 /** The close pass in progress (its New York day), kept for this tab: a thread with no conversation opens by its link. */
 const CLOSING_KEY = "desk.closing.v1";
 /** "Plan a trade" with nothing known: the owner names the ticker. The thread list's own button makes the same link. */
@@ -63,10 +64,10 @@ function typing(target: EventTarget | null) {
 }
 
 /**
- * The Copilot desk, the full-page lab: the thread list (``ThreadRail``), the conversation and the inspector
- * side by side, so what is live stays in view while a conversation runs. A phone shows one at a time behind three tabs.
+ * The Copilot desk: the active conversation opens first, with Threads and Context available as side panes.
+ * A phone shows one pane at a time behind three tabs.
  * While the lab is off only the conversation shows, saying so. ⌘K (Ctrl+K) or Jump to… opens the palette; while not
- * typing, J / K open the next or previous thread, N starts a plan and ] hides or shows the Context pane.
+ * typing, J / K open the next or previous thread, N starts a plan, [ toggles Threads and ] toggles Context.
  */
 export default function CopilotLab({ link = null, close = false }: { link?: PanelLink | null; close?: boolean }) {
   const on = useCopilotOn();
@@ -78,15 +79,22 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
   const [command, setCommand] = useState<DeskCommand | null>(null);
   const [thread, setThread] = useState<DeskThreadRef | null>(null);
   const [rows, setRows] = useState<DeskThread[]>([]);
+  const needYouCount = needingCount(rows, nyDay());
   const [saved, setSaved] = useState<InvestigationSummary[]>([]);
   const [palette, setPalette] = useState(false);
-  // Hidden or shown is remembered in this browser; a blocked store keeps the pane shown.
-  const [contextShown, setContextShown] = useState(true);
+  // Side panes open on request; explicit choices are remembered in this browser.
+  const [contextShown, setContextShown] = useState(false);
+  const [threadsShown, setThreadsShown] = useState(false);
   useEffect(() => {
-    try { setContextShown(window.localStorage.getItem(CONTEXT_KEY) !== "hidden"); } catch { /* shown */ } // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+    try { setContextShown(window.localStorage.getItem(CONTEXT_KEY) === "shown"); } catch { /* hidden */ } // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+    try { setThreadsShown(window.localStorage.getItem(THREADS_KEY) === "shown"); } catch { /* hidden */ } // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
   }, []);
   const toggleContext = useCallback(() => setContextShown(shown => {
     try { window.localStorage.setItem(CONTEXT_KEY, shown ? "hidden" : "shown"); } catch { /* this visit only */ }
+    return !shown;
+  }), []);
+  const toggleThreads = useCallback(() => setThreadsShown(shown => {
+    try { window.localStorage.setItem(THREADS_KEY, shown ? "hidden" : "shown"); } catch { /* this visit only */ }
     return !shown;
   }), []);
   const jumpKey = useJumpKey();
@@ -245,8 +253,8 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
   const closeStep = answering ? steps[0] : undefined;
   useEffect(() => { if (answering && !steps.length) setAnswering(false); }, [answering, steps.length]); // eslint-disable-line react-hooks/set-state-in-effect -- the last answer ends the pass
 
-  // The thread list's phase button: before the open on a weekday, Arm today's plans (a checklist of the armed plans in
-  // the conversation pane; nothing is armed, sized or sent from it); after 16:00, Close the day.
+  // The desk bar's phase action: before the open on a weekday, Arm today's plans (a checklist of the armed plans in the
+  // conversation pane; nothing is armed, sized or sent from it); after 16:00, Close the day.
   const [arming, setArming] = useState(false);
   useEffect(() => { setArming(false); setAnswering(false); }, [thread?.id]); // eslint-disable-line react-hooks/set-state-in-effect -- opening a thread leaves the checklist or the pass
   const phaseAction = dayPhase === "pre" ? { label: "Arm today's plans", hint: "Each armed plan: still good, change or drop. Nothing is sent." }
@@ -290,6 +298,7 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
       }
       if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
       if (key === "j" || key === "k") { event.preventDefault(); step(key === "j" ? 1 : -1); }
+      else if (event.key === "[") { event.preventDefault(); toggleThreads(); }
       else if (key === "n" && !event.repeat) {
         // A new plan leaves this conversation: never over words not yet sent.
         const box = desk.current?.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message']");
@@ -302,7 +311,7 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [on, step, planTrade, toggleContext]);
+  }, [on, step, planTrade, toggleContext, toggleThreads]);
 
   // The open symbol's row in the thread list (a position or a plan): its close question and horizon, as the list shows them.
   const deskRow = useCallback((symbol: string | null | undefined) =>
@@ -331,7 +340,7 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
   const context = useMemo(() => thread ?? (linkSymbol ? deskSymbolThread(linkSymbol) : null), [thread, linkSymbol]);
 
   return (
-    <div ref={desk} className={styles.desk} data-on={on} data-tab={tab} data-context={contextShown ? "shown" : "hidden"}>
+    <div ref={desk} className={styles.desk} data-on={on} data-tab={tab} data-context={contextShown ? "shown" : "hidden"} data-threads={threadsShown ? "shown" : "hidden"}>
       <header className={styles.bar}>
         {/* A wide screen folds the app's navigation into this button, so the desk has the full width; a phone keeps its tabs. */}
         {navFolded && (
@@ -344,6 +353,12 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
         {on && <DeskStatus data={session.data} />}
         {on && (
           <div className={styles.barActions}>
+            <button type="button" onClick={toggleThreads} aria-pressed={threadsShown}
+              aria-label={`Threads${!phaseAction && needYouCount > 0 ? `, ${needYouCount} need you` : ""}`} title="Show or hide the thread list ( [ )"
+              className={cn(styles.paneToggle, "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground", threadsShown && "bg-secondary")}>
+              <PanelLeft size={15} aria-hidden /><span>Threads</span>
+              {!phaseAction && needYouCount > 0 && <span className="tabular-nums text-primary">{needYouCount}</span>}
+            </button>
             <button type="button" onClick={() => setPalette(true)} aria-label="Jump to a thread or command" aria-haspopup="dialog"
               className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md border bg-card px-2.5 text-xs text-muted-foreground hover:text-foreground sm:min-h-8">
               {/* A phone keeps the bar on one line: icons only, as the button's label already says. */}
@@ -353,9 +368,11 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
               className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-semibold text-background hover:bg-foreground/90 sm:min-h-8">
               <Plus size={14} aria-hidden /><span className="sr-only sm:not-sr-only">New plan</span>
             </button>
-            <button type="button" onClick={toggleContext} aria-pressed={contextShown} aria-label="Context pane" title="Show or hide the Context pane ( ] )"
-              className={cn(styles.contextToggle, "inline-flex h-8 w-8 items-center justify-center rounded-md border text-muted-foreground hover:text-foreground", !contextShown && "bg-secondary")}>
-              <PanelRight size={15} aria-hidden />
+            {phaseAction && <button type="button" onClick={runPhase} title={phaseAction.hint}
+              className="inline-flex min-h-11 items-center rounded-md border px-2.5 text-xs font-medium text-foreground hover:bg-secondary md:min-h-8">{phaseAction.label}</button>}
+            <button type="button" onClick={toggleContext} aria-pressed={contextShown} aria-label="Context pane" title="Show or hide market context ( ] )"
+              className={cn(styles.contextToggle, "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground", contextShown && "bg-secondary")}>
+              <PanelRight size={15} aria-hidden /><span>Context</span>
             </button>
           </div>
         )}
@@ -374,15 +391,8 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
           <aside aria-label="Threads" className={styles.rail}>
             <ThreadRail actions={actions} active={thread?.id ?? null} activeSymbol={thread ? thread.symbol : link?.symbol ?? null} main={main && (!thread || thread.title === BRIEFING_TITLE)}
               pick={pick} onRows={setRows} onWalk={setWalk} onSaved={setSaved} refresh={refresh}
-              toAnswer={(session.data?.to_answer?.alerts?.count ?? 0) + (session.data?.to_answer?.radar?.count ?? 0)} phase={(phaseAction || fills.waiting.length > 0) && <div className="space-y-1.5">
-              {phaseAction && (
-                <button type="button" onClick={runPhase} title={phaseAction.hint}
-                  className="min-h-11 w-full rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 sm:min-h-8">
-                  {phaseAction.label}
-                </button>
-              )}
-              <FillsToLink count={fills.waiting.length} onStart={fills.start} />
-            </div>} />
+              toAnswer={(session.data?.to_answer?.alerts?.count ?? 0) + (session.data?.to_answer?.radar?.count ?? 0)}
+              phase={fills.waiting.length > 0 && <FillsToLink count={fills.waiting.length} onStart={fills.start} />} />
           </aside>
         )}
         <section aria-label="Conversation" className={styles.thread}>

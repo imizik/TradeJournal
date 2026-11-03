@@ -1,16 +1,42 @@
 import { expect, test } from "@playwright/test";
+import { filterTradesByAccount } from "../lib/tradeFilters";
+
+test("same-type accounts stay isolated by ID while legacy type links include both", () => {
+  const accountMap = { first: { type: "individual" }, second: { type: "individual" } };
+  const trades = [{ account_id: "first", ticker: "AAPL" }, { account_id: "second", ticker: "MSFT" }];
+  expect(filterTradesByAccount(trades, accountMap, "first").map((trade) => trade.ticker)).toEqual(["AAPL"]);
+  expect(filterTradesByAccount(trades, accountMap, undefined, "individual").map((trade) => trade.ticker)).toEqual(["AAPL", "MSFT"]);
+});
 
 for (const width of [390, 1440]) {
   test(`trade filters survive status changes and a detail round trip at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
     await page.goto("/trades?ticker=AAPL");
+    const openFilter = page.getByRole("link", { name: /^open$/i });
+    expect((await openFilter.boundingBox())?.height).toBeGreaterThanOrEqual(36);
+    const pnlHeader = page.getByRole("columnheader", { name: /P&L/ }).first();
+    const pnlSort = pnlHeader.getByRole("button", { name: /P&L/ });
+    await pnlSort.focus();
+    await page.keyboard.press("Enter");
+    await expect(pnlHeader).toHaveAttribute("aria-sort", "ascending");
+    await page.keyboard.press("Enter");
+    await expect(pnlHeader).toHaveAttribute("aria-sort", "descending");
+    await expect(page.getByLabel("Ticker", { exact: true })).toHaveValue("AAPL");
+    await page.getByLabel("Ticker", { exact: true }).fill("RNXT");
+    await page.getByRole("button", { name: "Apply ticker" }).click();
+    await expect(page).toHaveURL(/ticker=RNXT/);
+    await expect(page.getByRole("table").getByRole("link", { name: "AAPL", exact: true })).toHaveCount(0);
+    await page.goto("/trades?ticker=AAPL");
     await page.getByRole("link", { name: /^open$/i }).click();
     await expect(page).toHaveURL(/ticker=AAPL/);
     await expect(page.getByRole("table").getByRole("link", { name: "RNXT", exact: true })).toHaveCount(0);
-    await page.getByRole("link", { name: "Individual", exact: true }).click();
+    const individual = page.getByRole("link", { name: "Individual", exact: true });
+    await expect(individual).toHaveAttribute("href", /account_id=/);
+    const accountId = new URL((await individual.getAttribute("href"))!, "http://localhost").searchParams.get("account_id");
+    await individual.click();
     await page.getByRole("link", { name: /^option$/i }).click();
     const filtered = new URL(page.url());
-    expect(Object.fromEntries(filtered.searchParams)).toEqual({ status: "open", account: "individual", type: "option", ticker: "AAPL" });
+    expect(Object.fromEntries(filtered.searchParams)).toEqual({ status: "open", type: "option", account_id: accountId ?? "", ticker: "AAPL" });
     const returnTo = filtered.pathname + filtered.search;
     const row = page.getByRole("table").getByRole("link", { name: "AAPL", exact: true });
     await expect(row).toHaveCount(1);
@@ -26,5 +52,8 @@ for (const width of [390, 1440]) {
     await page.goto("/trades");
     await page.getByRole("table").getByRole("link", { name: "AAPL", exact: true }).first().click();
     await expect(page.getByRole("link", { name: "Back to Trades", exact: true })).toHaveAttribute("href", "/trades");
+
+    await page.goto("/trades?account=individual");
+    await expect(page.getByRole("table").getByRole("link", { name: "AAPL", exact: true })).toBeVisible();
   });
 }

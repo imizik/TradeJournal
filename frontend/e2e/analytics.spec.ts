@@ -1,5 +1,14 @@
 import { expect, test } from "@playwright/test";
 
+import { analyticsTradePage } from "../components/AnalyticsExplorer";
+
+test("a retained trade opens on its new page when another close changes its position", () => {
+  const trades = Array.from({ length: 25 }, (_, i) => ({ id: String(i) }));
+  expect(analyticsTradePage(trades, "24", 0, 25)).toBe(0);
+  expect(analyticsTradePage([{ id: "new" }, ...trades], "24", 0, 25)).toBe(1);
+  expect(analyticsTradePage(trades, "gone", 1, 25)).toBe(0);
+});
+
 const API = `http://127.0.0.1:${Number(process.env.E2E_BACKEND_PORT || 8099)}`;
 
 test("analytics drills into groups and winning outliers", async ({ page }, testInfo) => {
@@ -9,21 +18,42 @@ test("analytics drills into groups and winning outliers", async ({ page }, testI
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: testInfo.outputPath("analytics-phone.png"), fullPage: true });
   await page.setViewportSize({ width: 1280, height: 720 });
+  await page.getByLabel("Sort by").selectOption("count");
+  await page.getByLabel("Minimum trades").selectOption("10");
+  await page.getByLabel("Minimum trades").selectOption("1");
   const breakdown = page.getByRole("table", { name: "Analytics breakdown" });
   await breakdown.getByRole("button", { name: "NVDA", exact: true }).click();
+  await expect(page).toHaveURL(/group=NVDA/);
+  await expect(page.getByRole("heading", { name: "Ticker: NVDA", exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/analytics\?sort=count&minimum=1$/);
+  await expect(page.getByRole("heading", { name: "Trades in this selection", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Sort by")).toHaveValue("count");
+  await expect(page.getByLabel("Minimum trades")).toHaveValue("1");
+  await page.goForward();
+  await expect(page).toHaveURL(/group=NVDA/);
   await expect(page.getByRole("heading", { name: "Ticker: NVDA", exact: true })).toBeVisible();
   const trades = page.getByRole("table", { name: "Analytics trades" });
   await expect(trades.locator("tbody tr")).toHaveCount(1);
   await expect(trades.getByRole("link", { name: "NVDA", exact: true })).toBeVisible();
   await expect(trades.getByRole("link", { name: "TSLA", exact: true })).toHaveCount(0);
+  await trades.getByRole("link", { name: "NVDA", exact: true }).click();
+  await expect(page).toHaveURL(/\/trades\/[0-9a-f-]+\?/);
+  await page.getByRole("link", { name: "Back to Ticker: NVDA", exact: true }).click();
+  await expect(page).toHaveURL(/\/analytics\?.*#trades$/);
+  await expect(page.getByRole("heading", { name: "Ticker: NVDA", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Sort by")).toHaveValue("count");
+  await expect(page.getByLabel("Minimum trades")).toHaveValue("1");
+  await expect(trades.getByRole("link", { name: "TSLA", exact: true })).toHaveCount(0);
+  const inspected = new URL(page.url()).searchParams.get("trade");
+  await expect(page.locator(`#analytics-trade-${inspected}`)).toHaveClass(/bg-primary\/10/);
   await page.getByRole("button", { name: "Show all selected trades" }).click();
   await expect(trades.getByRole("link", { name: "TSLA", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Inspect winners" }).first().click();
   await expect(page.getByRole("heading", { name: "Best 1 winning trades" })).toBeVisible();
   await expect(trades.locator("tbody tr")).toHaveCount(1);
-  await trades.getByRole("link", { name: "NVDA", exact: true }).click();
-  await expect(page).toHaveURL(/\/trades\/[0-9a-f-]+$/);
+  await expect(trades.getByRole("link", { name: "NVDA", exact: true })).toBeVisible();
 });
 
 test("date, exact account, and instrument filters affect the same population", async ({ page, request }) => {
@@ -44,7 +74,9 @@ test("date, exact account, and instrument filters affect the same population", a
   const links = page.getByRole("table", { name: "Analytics trades" }).locator("tbody a");
   await expect(links).toHaveCount(expected.trades.length);
   for (const trade of expected.trades) {
-    await expect(page.locator(`table[aria-label="Analytics trades"] a[href="/trades/${trade.id}"]`)).toBeVisible();
+    const link = page.locator(`table[aria-label="Analytics trades"] a[href^="/trades/${trade.id}?"]`);
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute("href", new RegExp(`^/trades/${trade.id}\\?returnTo=`));
   }
   await page.getByRole("link", { name: "Reset", exact: true }).click();
   await expect(page).toHaveURL(/\/analytics$/);
@@ -62,6 +94,11 @@ test("group selection, sample filters, and empty results stay honest", async ({ 
   await page.getByLabel("Minimum trades", { exact: true }).selectOption("1");
   await page.getByLabel("Group by", { exact: true }).selectOption("tag");
   await expect(breakdown.getByRole("button", { name: "Untagged", exact: true })).toBeVisible();
+  await page.goto("/analytics?group=ARCHIVED&page=9");
+  await expect(page.getByRole("heading", { name: "Ticker: ARCHIVED" })).toBeVisible();
+  await expect(page.getByRole("table", { name: "Analytics trades" })).toContainText("No closed trades in this selection.");
+  await page.goto("/analytics?page=9");
+  await expect(page.getByRole("table", { name: "Analytics trades" }).getByRole("link")).toHaveCount(3);
   await page.goto("/analytics?start=2099-01-01");
   await expect(page.getByLabel("Data coverage")).toContainText("0 of 0");
   await expect(page.getByRole("table", { name: "Analytics trades" })).toContainText("No closed trades in this selection.");

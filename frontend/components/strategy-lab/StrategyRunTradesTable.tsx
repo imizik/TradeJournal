@@ -170,7 +170,31 @@ export default function StrategyRunTradesTable({
           No simulated trades match these filters.
         </div>
       ) : (
-        <div className={`overflow-x-auto transition-opacity ${loading ? "opacity-60" : ""}`}>
+        <>
+          <div className={`divide-y divide-border sm:hidden ${loading ? "opacity-60" : ""}`}>
+            {page.items.map(trade => <details key={trade.id} className="group">
+              <summary className="flex min-h-11 cursor-pointer items-center gap-2 px-4 py-3 text-sm">
+                <span className="font-medium">#{trade.trade_number} · {trade.direction}</span>
+                <span className="text-xs text-muted-foreground">{outcomeLabel(trade)}</span>
+                <span className={`ml-auto tabular-nums ${pnlClass(trade.net_pnl)}`}>{formatMoney(trade.net_pnl, currency)}</span>
+                <span aria-hidden className="text-muted-foreground group-open:rotate-90">›</span>
+              </summary>
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 px-4 pb-4 text-xs">
+                {[
+                  ["Entry", formatStrategyDateTime(trade.entry_at, sourceTimezone)],
+                  ["Exit", formatStrategyDateTime(trade.exit_at, sourceTimezone)],
+                  ["Entry price", formatMoney(trade.entry_price, currency, 4)],
+                  ["Exit price", formatMoney(trade.exit_price, currency, 4)],
+                  ["Quantity", formatDecimal(trade.quantity, 6)],
+                  ["Return", formatPercentPoints(trade.return_pct, 2)],
+                  ["MFE", formatMoney(trade.mfe, currency)], ["MAE", formatMoney(trade.mae, currency)],
+                  ["Hold", formatDurationMinutes(trade.duration_minutes)],
+                  ["Entry signal", trade.entry_signal ?? "—"], ["Exit signal", trade.exit_signal ?? "—"],
+                ].map(([label, value]) => <div key={label} className="contents"><dt className="text-muted-foreground">{label}</dt><dd className="break-words">{value}</dd></div>)}
+              </dl>
+            </details>)}
+          </div>
+        <div className={`hidden overflow-x-auto transition-opacity sm:block ${loading ? "opacity-60" : ""}`}>
           <table className="w-full min-w-[1380px] text-sm">
             <thead className="border-b text-xs font-medium text-muted-foreground">
               <tr>
@@ -231,6 +255,7 @@ export default function StrategyRunTradesTable({
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       <div className="flex items-center justify-between gap-3 border-t px-5 py-3">

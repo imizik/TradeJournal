@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openDeskThreads } from "./desk-fixtures";
 
 // "What changed?" on a reopened investigation. Every lab route is stubbed in the browser and the turn is a fixed SSE
 // stream, so no model runs.
@@ -45,6 +46,7 @@ async function lab(page: Page, url = "/copilot-lab") {
   await page.route("**/charts/alerts", (route) => route.fulfill({ json: { alerts: [], phone: true } }));
   await page.route("**/copilot/research-jobs?*", (route) => route.fulfill({ json: { jobs: [], queue_enabled: false, daily_budget_usd: 2, spent_today_usd: 0 } }));
   await page.goto(url);
+  await openDeskThreads(page);
   return chats;
 }
 

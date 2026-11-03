@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openDeskThreads } from "./desk-fixtures";
 
 // Linking a new fill to its plan on the desk (docs/copilot-lab.md § The desk, Link a fill where you are): the bar at the
 // thread top, "N fills to link" opening each in turn, Link with Undo through the existing capture link routes, and No
@@ -86,6 +87,7 @@ async function lab(page: Page) {
     return route.fulfill({ json: {} });
   });
   await page.goto("/copilot-lab");
+  await openDeskThreads(page);
   await expect(page.getByRole("navigation", { name: "Thread list" }).getByTestId("desk-day")).toBeVisible();
   return { linked, unlinked, chats };
 }

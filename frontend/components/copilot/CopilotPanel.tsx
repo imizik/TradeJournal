@@ -1205,7 +1205,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           </p>
         )}
         {messages.map((message, i) => message.role === "user" ? (
-          <div key={i} data-turn={i === messages.map(m => m.role).lastIndexOf("user") ? "latest" : undefined} className="ml-auto scroll-mt-10 w-fit max-w-[85%] whitespace-pre-wrap rounded-xl rounded-br-sm bg-secondary px-3 py-2 text-sm text-foreground">
+          <div key={i} data-turn={i === messages.map(m => m.role).lastIndexOf("user") ? "latest" : undefined} className={cn("ml-auto scroll-mt-10 w-fit whitespace-pre-wrap rounded-xl rounded-br-sm bg-secondary px-3 py-2 text-sm text-foreground", desk ? "max-w-[75ch]" : "max-w-[85%]")}>
             {message.images?.length ? (
               <span className="mb-1.5 flex flex-wrap justify-end gap-1.5">
                 {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL */}
@@ -1215,7 +1215,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             {message.content}
           </div>
         ) : (
-          <div key={i} className="max-w-[95%]">
+          <div key={i} className={desk ? "max-w-[75ch]" : "max-w-[95%]"}>
             {message.content && !(busy && i === messages.length - 1 && verdictPending(message.content)) ? <Answer text={message.content}
               onPushBack={busy && i === messages.length - 1 ? undefined : line => fill(pushBackText(line))} /> : !message.error && !message.metrics && (
               <p className="text-sm italic text-muted-foreground" aria-label="Progress">{message.progress || waiting(message.tools ?? [])}</p>

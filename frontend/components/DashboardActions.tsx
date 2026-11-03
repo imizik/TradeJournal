@@ -1,7 +1,7 @@
 "use client";
 
 import { startTransition, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   CheckCircle2,
@@ -143,6 +143,8 @@ function SyncStatusIndicator({ summary }: { summary: SyncSummary | null }) {
 export default function DashboardActions() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [initialJob, setInitialJob] = useState<string | null>(null);
+  const search = useSearchParams();
   const [summary, setSummary] = useState<SyncSummary | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const refreshAfterSyncRef = useRef(false);
@@ -161,10 +163,12 @@ export default function DashboardActions() {
   useEffect(() => {
     const url = new URL(window.location.href);
     if (url.searchParams.get("sync") !== "open") return;
+    setInitialJob(url.searchParams.get("job"));
     setOpen(true);
     url.searchParams.delete("sync");
+    url.searchParams.delete("job");
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-  }, []);
+  }, [search]);
 
   async function refreshSummary() {
     try {
@@ -200,8 +204,10 @@ export default function DashboardActions() {
         Sync
       </button>
       <SyncCenterDrawer
+        key={initialJob ?? "sync"}
+        initialJob={initialJob}
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={() => { setOpen(false); setInitialJob(null); }}
         onSummaryChange={handleSummaryChange}
         onSyncQueued={() => {
           refreshAfterSyncRef.current = true;
@@ -212,11 +218,12 @@ export default function DashboardActions() {
 }
 
 function SyncCenterDrawer({
-  open,
+  initialJob, open,
   onClose,
   onSummaryChange,
   onSyncQueued,
 }: {
+  initialJob: string | null;
   open: boolean;
   onClose: () => void;
   onSummaryChange: (summary: SyncSummary) => void;
@@ -228,7 +235,8 @@ function SyncCenterDrawer({
   const [summary, setSummary] = useState<SyncSummary | null>(null);
   const [range, setRange] = useState<EnrichRange>("week");
   const [forceAll, setForceAll] = useState(false);
-  const [details, setDetails] = useState<string | null>(null);
+  const [details, setDetails] = useState<string | null>(initialJob);
+  const jobToReveal = useRef(initialJob);
   const [message, setMessage] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -262,6 +270,14 @@ function SyncCenterDrawer({
       pollRef.current = null;
     };
   }, [open, tab, running]);
+
+  useEffect(() => {
+    if (!open || !jobToReveal.current || !jobs.length) return;
+    const row = document.getElementById(`sync-job-${jobToReveal.current}`);
+    row?.scrollIntoView({ block: "center" });
+    row?.focus({ preventScroll: true });
+    jobToReveal.current = null;
+  }, [jobs, open]);
 
   async function runPipeline() {
     setBusyAction("pipeline");
@@ -627,7 +643,7 @@ function SyncJobRow({
   const waiting = activeWaitSeconds(job) != null;
 
   return (
-    <section className="rounded-lg border border-border bg-card p-3">
+    <section id={`sync-job-${job.job_type}`} tabIndex={-1} className="rounded-lg border border-border bg-card p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

@@ -71,10 +71,18 @@ function ReasonList({ items, tone }: { items: string[]; tone: "for" | "against" 
 
 export default async function SignalDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ alertId: string }>;
+  searchParams: Promise<{ returnTo?: string | string[] }>;
 }) {
   const { alertId } = await params;
+  const { returnTo: requestedReturnTo } = await searchParams;
+  const returnFilter = typeof requestedReturnTo === "string" && requestedReturnTo.startsWith("/signals") && !requestedReturnTo.startsWith("//")
+    && new URL(requestedReturnTo, "http://localhost").pathname === "/signals"
+    ? new URL(requestedReturnTo, "http://localhost").searchParams.get("filter") : null;
+  const validFilter = ["tradeable", "pending", "skipped", "error"].includes(returnFilter ?? "") ? returnFilter : null;
+  const backHref = validFilter ? `/signals?filter=${validFilter}` : "/signals";
 
   let alert: TradingViewAlertDetail;
   try {
@@ -88,8 +96,8 @@ export default async function SignalDetailPage({
   return (
     <div className="space-y-4">
       <div>
-        <Link href="/signals" className="text-sm text-muted-foreground hover:text-foreground">
-          ← Signals
+        <Link href={backHref} className="text-sm text-muted-foreground hover:text-foreground">
+          ← {validFilter ? `Back to ${validFilter} alerts` : "Signals"}
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <h1 className="text-xl font-semibold">

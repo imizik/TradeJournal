@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openDeskThreads } from "./desk-fixtures";
 
 // The desk's keyboard: the ⌘K palette, J / K through the threads, N for a plan, ] for the Context pane, and the
 // Briefing's session timeline. Every lab route is stubbed in the browser (the e2e backend runs with the lab off), so no
@@ -60,7 +61,7 @@ const ANSWER: Record<string, [string, string]> = {
   [NBIS]: ["NBIS", "NBIS answer: hold above 92.30."], [CRWV]: ["CRWV", "CRWV answer: short under 99.00."], [APLD]: ["APLD", "APLD answer: enter at 31.00."],
 };
 
-async function lab(page: Page, { time = NOW, session = SESSION, threads = () => DESK as unknown, path = "/copilot-lab" }: { time?: Date; session?: unknown; threads?(): unknown; path?: string } = {}) {
+async function lab(page: Page, { time = NOW, session = SESSION, threads = () => DESK as unknown, path = "/copilot-lab", showThreads = true }: { time?: Date; session?: unknown; threads?(): unknown; path?: string; showThreads?: boolean } = {}) {
   const chats: unknown[] = [];
   await page.clock.install({ time });
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
@@ -75,7 +76,8 @@ async function lab(page: Page, { time = NOW, session = SESSION, threads = () => 
   await page.route("**/copilot/time-stops?*", (route) => route.fulfill({ json: { time_stops: [], enabled: true } }));
   await page.route("**/copilot/research-jobs?*", (route) => route.fulfill({ json: { jobs: [], queue_enabled: false, daily_budget_usd: 2, spent_today_usd: 0 } }));
   await page.goto(path);
-  await expect(page.getByRole("navigation", { name: "Thread list" }).getByTestId("desk-day")).toBeVisible();
+  if (showThreads) await openDeskThreads(page);
+  if (showThreads) await expect(page.getByRole("navigation", { name: "Thread list" }).getByTestId("desk-day")).toBeVisible();
   return { chats };
 }
 
@@ -117,7 +119,7 @@ test("Plan a trade from the palette opens a new plan, unsent; after 16:00 Close 
     session: { ...SESSION, now: epoch("2026-10-23T21:00:00Z"), phase: "post", time_stops: [] } });
   await expect(page.getByTestId("desk-status")).toContainText("Closed 16:00");
   // The thread list's phase button puts the same question in the box, unsent.
-  await page.getByRole("navigation", { name: "Thread list" }).getByRole("button", { name: "Close the day" }).click();
+  await page.getByRole("button", { name: "Close the day" }).click();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Close the day: /);
   await page.getByRole("textbox", { name: "Message" }).fill("");
   await page.getByRole("textbox", { name: "Message" }).blur();
@@ -139,6 +141,28 @@ test("Plan a trade from the palette opens a new plan, unsent; after 16:00 Close 
   expect(chats).toEqual([]);
 });
 
+test("Threads stay out of the first view, open on request, and preserve a saved thread and unsent words", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { chats } = await lab(page, { showThreads: false });
+  const rail = page.getByRole("navigation", { name: "Thread list" });
+  const toggle = page.getByRole("button", { name: "Threads, 1 need you" });
+  await expect(rail).toBeHidden();
+  await toggle.click();
+  await expect(rail).toBeVisible();
+  await page.keyboard.press("j");
+  await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible();
+  const message = page.getByRole("textbox", { name: "Message" });
+  await message.fill("Keep this thought unsent");
+  await toggle.click();
+  await expect(rail).toBeHidden();
+  await expect(message).toHaveValue("Keep this thought unsent");
+  await page.screenshot({ path: test.info().outputPath("desk-conversation-rail-closed-1440.png") });
+  await toggle.click();
+  await expect(rail).toBeVisible();
+  await expect(message).toHaveValue("Keep this thought unsent");
+  expect(chats).toEqual([]);
+});
+
 test("J and K open the next and previous thread in list order; keys typed in the message box are ignored", async ({ page }) => {
   const { chats } = await lab(page);
   const thread = conversation(page);
@@ -151,6 +175,7 @@ test("J and K open the next and previous thread in list order; keys typed in the
   await page.keyboard.press("k");
   await expect(thread.getByText("CRWV answer: short under 99.00.")).toBeVisible();
   await expect(page.getByRole("button", { name: "CRWV, Plan armed" })).toHaveClass(/ring-1/);
+  await page.getByRole("button", { name: "Context pane" }).click();
 
   const message = page.getByRole("textbox", { name: "Message" });
   await message.click();
@@ -162,25 +187,25 @@ test("J and K open the next and previous thread in list order; keys typed in the
   expect(chats).toEqual([]);
 });
 
-test("] hides the Context pane on a wide desk and the choice is remembered; the toggle does the same", async ({ page }) => {
+test("Context stays out of the first view, opens on request, and remembers the choice", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await lab(page);
   const context = page.getByRole("complementary", { name: "Context" });
   const toggle = page.getByRole("button", { name: "Context pane" });
-  await expect(context).toBeVisible();
-  await expect(toggle).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("]");
   await expect(context).toBeHidden();
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
-  await page.screenshot({ path: test.info().outputPath("desk-context-hidden-1440.png") });
+  await page.keyboard.press("]");
+  await expect(context).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await page.screenshot({ path: test.info().outputPath("desk-context-open-1440.png") });
+  await page.reload();
+  await expect(page.getByTestId("session-tape")).toBeVisible();
+  await expect(context).toBeVisible();
+  await toggle.click();
+  await expect(context).toBeHidden();
   await page.reload();
   await expect(page.getByTestId("session-tape")).toBeVisible();
   await expect(context).toBeHidden();
-  await toggle.click();
-  await expect(context).toBeVisible();
-  await page.reload();
-  await expect(page.getByTestId("session-tape")).toBeVisible();
-  await expect(context).toBeVisible();
 });
 
 test("the phone keeps its tabs: no pane toggle, and the Jump to button still opens the palette", async ({ page }) => {
@@ -239,6 +264,75 @@ test("before the open the strip waits and the prep line leads; a closed day says
   await expect(tape).toContainText("No regular session today.");
 });
 
+test("phase actions follow the clock while the owner stays on the desk", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await lab(page, { time: new Date("2026-10-23T13:29:00Z"), showThreads: false });
+  const arm = page.getByRole("button", { name: "Arm today's plans" });
+  await expect(arm).toBeVisible();
+  await page.clock.fastForward(61_000);
+  await expect(arm).toBeHidden();
+  await page.clock.fastForward((6 * 60 + 30) * 60_000);
+  await expect(page.getByRole("button", { name: /Close the day/ })).toBeVisible();
+});
+
+test("the conversation remains reachable with either, both, or neither side pane", async ({ page }) => {
+  await lab(page, { showThreads: false });
+  for (const width of [900, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const threads = page.getByRole("button", { name: /^Threads(?:,|$)/ });
+    const context = page.getByRole("button", { name: "Context pane" });
+    for (const [showThreads, showContext] of [[false, false], [true, false], [true, true], [false, true], [false, false]]) {
+      if ((await threads.getAttribute("aria-pressed") === "true") !== showThreads) await threads.click();
+      if ((await context.getAttribute("aria-pressed") === "true") !== showContext) await context.click();
+      const rail = page.getByRole("complementary", { name: "Threads" });
+      const inspector = page.getByRole("complementary", { name: "Context" });
+      await expect(rail).toBeVisible({ visible: showThreads });
+      await expect(inspector).toBeVisible({ visible: showContext });
+      const composer = page.getByRole("textbox", { name: "Message" });
+      await composer.scrollIntoViewIfNeeded();
+      await expect(composer).toBeInViewport();
+      const rect = (await composer.boundingBox())!;
+      for (const side of [rail, inspector]) {
+        if (!(await side.isVisible())) continue;
+        const panel = (await side.boundingBox())!;
+        expect(rect.x + rect.width <= panel.x + 1 || panel.x + panel.width <= rect.x + 1).toBe(true);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    }
+  }
+});
+
+test("pre-open action stays available below 760 px and on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await lab(page, { time: new Date("2026-10-23T12:00:00Z") }); // 08:00 New York
+  const arm = page.getByRole("button", { name: "Arm today's plans" });
+  await expect(arm).toBeVisible();
+  await page.setViewportSize({ width: 700, height: 900 });
+  await expect(arm).toBeVisible(); // a narrow desk pane still has its own-width layout
+  await arm.click();
+  await expect(page.getByRole("region", { name: "Arm today's plans" })).toBeVisible();
+});
+
+test("the phase action stays visible in a narrow desk container on a desktop viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await lab(page, { time: new Date("2026-10-23T12:00:00Z") }); // 08:00 New York
+  const desk = page.locator('[data-on="true"][data-threads="shown"]');
+  await desk.evaluate(element => { element.style.width = "700px"; element.style.maxWidth = "700px"; });
+  await expect.poll(() => desk.evaluate(element => element.getBoundingClientRect().width)).toBeLessThan(760);
+  await expect(page.getByRole("button", { name: "Arm today's plans" })).toBeVisible();
+});
+
+test("close-day action stays available below 760 px and on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await lab(page, { time: new Date("2026-10-23T21:00:00Z"), session: { ...SESSION, now: epoch("2026-10-23T21:00:00Z"), phase: "post", time_stops: [] } });
+  const close = page.getByRole("button", { name: "Close the day", exact: true });
+  await expect(close).toBeVisible();
+  await page.setViewportSize({ width: 700, height: 900 });
+  await expect(close).toBeVisible();
+  await close.click();
+  await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Close the day: /);
+});
+
 test("before the open Arm today's plans is a checklist: still good logs, drop asks first, change fills the plan's box", async ({ page }) => {
   const DAY = "2026-10-23";
   const level = (price: number, extra: Record<string, unknown> = {}) => ({ price, condition: "crosses", interval: null, state: "armed", ...extra });
@@ -269,7 +363,7 @@ test("before the open Arm today's plans is a checklist: still good logs, drop as
     { id: "a1", symbol: "CRWV", price: 99, source_id: CRWV, plan_role: "entry", state: "active", condition: "crosses" }] } }));
   await page.route("**/charts/alerts/a1", (route) => { removed.push(route.request().method()); return route.fulfill({ json: { alerts: [], phone: true } }); });
 
-  const arm = page.getByRole("navigation", { name: "Thread list" }).getByRole("button", { name: "Arm today's plans" });
+  const arm = page.getByRole("button", { name: "Arm today's plans" });
   await expect(page.getByTestId("session-facts")).toContainText("Next: the open 9:30");
   await arm.click();
   const list = page.getByTestId("arm-checklist");
@@ -334,7 +428,7 @@ test("the evening review ping's link (?close=1) opens the desk on Close the day"
 test("the close link with nothing left to review, or before the close, opens the desk as usual", async ({ page }) => {
   await lab(page, { time: new Date("2026-10-23T20:30:00Z"), path: "/copilot-lab?close=1", // 16:30 New York, no close question
     session: { ...SESSION, now: epoch("2026-10-23T20:30:00Z"), phase: "post", time_stops: [] } });
-  await expect(page.getByRole("navigation", { name: "Thread list" }).getByRole("button", { name: "Close the day", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Close the day", exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue("");
   await expect(page).toHaveURL(/\/copilot-lab\?close=1$/);
   await page.clock.setSystemTime(NOW); // 11:00 New York
@@ -403,7 +497,7 @@ test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip 
   await page.screenshot({ path: test.info().outputPath("close-the-day-1440.png") });
 
   const review = page.getByRole("region", { name: "Close of day" });
-  await rail.getByRole("button", { name: "Close the day · 3 to review" }).click();
+  await page.getByRole("button", { name: "Close the day · 3 to review" }).click();
   await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible(); // the first unreviewed thread
   await expect(review).toContainText("Review: did you follow the plan?");
   await review.getByRole("button", { name: "Answer" }).click();
@@ -420,7 +514,7 @@ test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip 
   await review.getByRole("button", { name: "Skip" }).click();
   await expect(review).toHaveCount(0);
   await expect(conversation(page).getByText("CRWV answer: short under 99.00.")).toBeVisible(); // the last one: the pass ends here
-  await expect(rail.getByRole("button", { name: "Close the day", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Close the day", exact: true })).toBeVisible();
 
   await page.keyboard.press("j"); // J / K still walk the threads
   await expect(conversation(page).getByText("APLD answer: enter at 31.00.")).toBeVisible();
@@ -471,14 +565,14 @@ test("after the close questions, Close the day asks today's alerts, Radar hits a
   const rail = page.getByRole("navigation", { name: "Thread list" });
   // One close question, one alert and one Radar hit from today still unanswered, one fill to link; one alert already answered.
   await expect(page.getByTestId("briefing-reviewed")).toHaveText("1 of 5 done");
-  await rail.getByRole("button", { name: "Close the day · 4 to review" }).click();
+  await page.getByRole("button", { name: "Close the day · 4 to review" }).click();
   await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible();
   await page.getByRole("region", { name: "Close of day" }).getByRole("button", { name: "Skip" }).click();
 
   const pass = page.getByRole("region", { name: "Close the day" });
   await expect(pass.getByTestId("alert-answer")).toContainText("Give-back · NBIS 10/23/26 100C");
   await expect(pass.getByTestId("close-pass-done")).toHaveText("1 of 5 done");
-  await expect(rail.getByRole("button", { name: "Close the day · 3 to review" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Close the day · 3 to review" })).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("close-the-day-alert-1440.png") });
   await pass.getByRole("button", { name: "Prompted a review" }).click();
 
@@ -490,7 +584,7 @@ test("after the close questions, Close the day asks today's alerts, Radar hits a
   await expect(fill).toContainText("Bought AMD 10/23/26 150C");
   await fill.getByRole("button", { name: "No plan" }).click();
   await expect(pass).toHaveCount(0); // the last one ends the pass
-  await expect(rail.getByRole("button", { name: "Close the day", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Close the day", exact: true })).toBeVisible();
   expect(writes).toEqual([`alert ${GIVEBACK.id} prompted_review`]);
   expect(chats).toEqual([]);
 });

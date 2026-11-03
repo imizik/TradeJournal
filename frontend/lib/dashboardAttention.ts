@@ -1,4 +1,5 @@
 import type { DecisionRecord, GmailHealth, PositionQuote, SyncJob, TradePhoneAlert } from "@/lib/api";
+import { quantity } from "@/lib/format";
 import type { LevelAlert } from "@/lib/alerts";
 import type { Earnings } from "@/lib/symbolInfo";
 import { getCurrentMark, type OpenPositionRow } from "@/lib/dashboard";
@@ -13,6 +14,7 @@ export type AttentionItem = {
   id: string;
   priority: AttentionPriority;
   title: string;
+  position?: string;
   detail: string;
   /** Short time cue at the right edge ("Today", "10/16", "2h ago"). */
   when: string;
@@ -24,6 +26,7 @@ export type AttentionItem = {
 /** How each source arrived. `null` means the request failed. */
 export type AttentionInputs = {
   rows: OpenPositionRow[];
+  accountNames: Record<string, string>;
   quotes: Record<string, PositionQuote>;
   quoteError: boolean;
   today: string; // ET calendar date, YYYY-MM-DD
@@ -95,32 +98,36 @@ export function buildAttention(input: AttentionInputs): AttentionResult {
 
   for (const row of rows) {
     const { trade, meta } = row;
+    const unit = trade.instrument_type === "option" ? "contract" : "share";
+    const account = input.accountNames[trade.account_id] ?? "Unknown account";
+    const position = `${account} · ${quantity(meta.qtyLeft)} ${unit}${meta.qtyLeft === 1 ? "" : "s"} open`;
+    const addPosition = (item: AttentionItem) => items.push({ ...item, position });
     const expiration = trade.instrument_type === "option" ? trade.expiration?.slice(0, 10) ?? null : null;
     if (trade.instrument_type === "option" && !expiration) {
-      items.push({ id: `no-expiry:${trade.id}`, priority: "integrity", title: `${trade.ticker} option has no expiration`,
+      addPosition({ id: `no-expiry:${trade.id}`, priority: "integrity", title: `${trade.ticker} option has no expiration`,
         detail: "The record is open without an expiration date, so expiry checks cannot run for it.", when: "Record",
         href: tradeHref(trade.id), sortKey: "" });
     } else if (expiration && expiration < today) {
-      items.push({ id: `expired-open:${trade.id}`, priority: "integrity", title: `${contract(row)} still open after expiry`,
+      addPosition({ id: `expired-open:${trade.id}`, priority: "integrity", title: `${contract(row)} still open after expiry`,
         detail: `Expired ${shortDate(expiration)} but the journal still shows ${meta.qtyLeft} open. Check its fills; a rebuild may be needed.`,
-        when: "Record", href: tradeHref(trade.id), sortKey: expiration });
+        when: "Record", href: `${tradeHref(trade.id)}#fills`, sortKey: expiration });
     }
     // A failed quote request is already disclosed above the panel; listing
     // every position again would bury the rest of the list.
     const expired = expiration != null && expiration < today;
     if (!input.quoteError && !expired && getCurrentMark(trade, quotes[trade.id]) == null) {
-      items.push({ id: `no-price:${trade.id}`, priority: "integrity", title: `${contract(row)} has no price`,
+      addPosition({ id: `no-price:${trade.id}`, priority: "integrity", title: `${contract(row)} has no price`,
         detail: "No current mark, so its unrealized P&L is left out of the total.", when: "Now",
         href: tradeHref(trade.id), sortKey: trade.ticker });
     }
     if (meta.avgCostLeft == null || meta.direction === "unknown") {
-      items.push({ id: `no-basis:${trade.id}`, priority: "integrity", title: `${contract(row)} has no cost basis`,
+      addPosition({ id: `no-basis:${trade.id}`, priority: "integrity", title: `${contract(row)} has no cost basis`,
         detail: "Its fills do not add up to a remaining cost, so its P&L cannot be computed.", when: "Record",
-        href: tradeHref(trade.id), sortKey: trade.ticker });
+        href: `${tradeHref(trade.id)}#fills`, sortKey: trade.ticker });
     }
     if (expiration && expiration >= today && expiration <= addDays(today, EXPIRY_WINDOW_DAYS)) {
       const isToday = expiration === today;
-      items.push({ id: `expiring:${trade.id}`, priority: "soon", title: `${contract(row)} expires ${isToday ? "today" : shortDate(expiration)}`,
+      addPosition({ id: `expiring:${trade.id}`, priority: "soon", title: `${contract(row)} expires ${isToday ? "today" : shortDate(expiration)}`,
         detail: `${meta.qtyLeft} contract${meta.qtyLeft === 1 ? "" : "s"} open.`, when: isToday ? "Today" : shortDate(expiration),
         href: tradeHref(trade.id), sortKey: expiration });
     }
@@ -130,7 +137,7 @@ export function buildAttention(input: AttentionInputs): AttentionResult {
       && new Date(alert.detected_at * 1000).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) === today)
       .sort((a, b) => b.detected_at - a.detected_at)[0];
     if (giveback) {
-      items.push({ id: `giveback:${giveback.id}`, priority: "alert", title: `${contract(row)} gave back its gain`,
+      addPosition({ id: `giveback:${giveback.id}`, priority: "alert", title: `${contract(row)} gave back its gain`,
         detail: `Peak ${money(giveback.peak_gain)} (${percent(giveback.peak_gain_pct)}), ${money(giveback.gain)} (${percent(giveback.gain_pct)}) at the alert. ${meta.qtyLeft} open now.`,
         when: ago(now, giveback.detected_at * 1000), href: `${tradeHref(trade.id)}?alert=${encodeURIComponent(giveback.id)}`,
         sortKey: String(1e10 - giveback.detected_at).padStart(11, "0") });
@@ -140,7 +147,7 @@ export function buildAttention(input: AttentionInputs): AttentionResult {
       const next = earnings?.state === "ready" ? earnings.next : null;
       if (next && next.date >= today && next.date <= expiration) {
         const sameDay = next.date === expiration;
-        items.push({ id: `earnings:${trade.id}`, priority: "soon",
+        addPosition({ id: `earnings:${trade.id}`, priority: "soon",
           title: `${trade.ticker} earnings ${shortDate(next.date)}, ${sameDay ? "on" : "before"} expiry`,
           detail: `${contract(row)} expires ${shortDate(expiration)}. Report date ${next.status}${sameDay ? "; time of day is not published" : ""} (${earnings!.source}).`,
           when: next.date === today ? "Today" : shortDate(next.date), href: `/charts?symbol=${encodeURIComponent(trade.ticker)}`, sortKey: next.date });
@@ -166,7 +173,7 @@ export function buildAttention(input: AttentionInputs): AttentionResult {
     items.push({ id: `job:${job.job_type}`, priority: "data", title: `${job.label} failed`,
       detail: job.error_summary || job.message || "The last run ended with an error.", when: at ? ago(now, Date.parse(at)) : "Last run",
       // Newest failure first; Gmail ("0"/"1") still leads the data tier.
-      href: "/?sync=open", sortKey: `2${String(1e13 - (at ? Date.parse(at) : 0)).padStart(14, "0")}` });
+      href: `/?sync=open&job=${encodeURIComponent(job.job_type)}`, sortKey: `2${String(1e13 - (at ? Date.parse(at) : 0)).padStart(14, "0")}` });
   }
 
   if (input.alerts == null) unavailable.push("Price alerts");

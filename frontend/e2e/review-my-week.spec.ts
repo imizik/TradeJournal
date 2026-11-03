@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openDeskThreads } from "./desk-fixtures";
 
 // "Review my week": a button on the Dashboard, on a Friday's Daily Review and on the Copilot Lab home. The e2e backend
 // runs with the lab off, so these tests stand in for its status read and its lab routes. The Dashboard and Daily Review
@@ -75,6 +76,7 @@ test("Daily Review offers it on a Friday, naming that week, and not on other day
 test("the Briefing's Review my week sends one turn and shows the week review tool", async ({ page }) => {
   const chats = await labOn(page);
   await page.goto("/copilot-lab");
+  await openDeskThreads(page);
   const home = page.getByRole("navigation", { name: "Thread list" });
   await expect(home.getByTestId("desk-day")).toBeVisible();
   expect(chats).toHaveLength(0);

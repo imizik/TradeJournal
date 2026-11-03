@@ -79,9 +79,9 @@
 }
 
 .desk[data-on="true"] .panes {
-  grid-template-columns: 300px minmax(0, 1fr);
-  grid-template-areas: "rail thread" "inspector thread";
-  grid-template-rows: auto 1fr;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "thread";
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .rail,
@@ -112,9 +112,21 @@
 }
 
 @container (min-width: 1100px) {
-  .desk[data-on="true"] .panes {
-    grid-template-columns: 300px minmax(0, 1fr) 340px;
+  .desk[data-on="true"][data-threads="shown"][data-context="shown"] .panes {
+    grid-template-columns: 260px minmax(0, 1fr) 320px;
     grid-template-areas: "rail thread inspector";
+    grid-template-rows: auto;
+  }
+
+  .desk[data-on="true"][data-threads="shown"][data-context="hidden"] .panes {
+    grid-template-columns: 260px minmax(0, 1fr);
+    grid-template-areas: "rail thread";
+    grid-template-rows: auto;
+  }
+
+  .desk[data-on="true"][data-threads="hidden"][data-context="shown"] .panes {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-areas: "thread inspector";
     grid-template-rows: auto;
   }
 
@@ -137,6 +149,26 @@
 
   .thread {
     padding: 24px 32px 0;
+  }
+}
+
+@container (min-width: 760px) and (max-width: 1099px) {
+  .desk[data-on="true"][data-threads="shown"][data-context="shown"] .panes {
+    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-areas: "rail thread" "inspector thread";
+    grid-template-rows: minmax(0, 1fr) minmax(0, 40%);
+  }
+
+  .desk[data-on="true"][data-threads="shown"][data-context="hidden"] .panes {
+    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-areas: "rail thread";
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .desk[data-on="true"][data-threads="hidden"][data-context="shown"] .panes {
+    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-areas: "inspector thread";
+    grid-template-rows: minmax(0, 1fr);
   }
 }
 
@@ -196,21 +228,32 @@
   }
 }
 
-/* ] (or the desk bar's toggle) hides the Context pane where the panes sit side by side; a phone keeps its tabs. */
+/* Desktop side panes are opt-in, leaving the active conversation the full width at first. */
 @container (min-width: 760px) {
+  .desk[data-on="true"][data-threads="hidden"][data-context="hidden"] .thread {
+    width: 100%;
+    max-width: 58rem;
+    margin-inline: auto;
+  }
+
+  .desk[data-threads="hidden"] .rail {
+    display: none;
+  }
+
   .desk[data-context="hidden"] .inspector {
     display: none;
   }
 }
 
 @container (min-width: 1100px) {
-  .desk[data-on="true"][data-context="hidden"] .panes {
-    grid-template-columns: 300px minmax(0, 1fr);
-    grid-template-areas: "rail thread";
+  .desk[data-on="true"][data-threads="hidden"][data-context="hidden"] .panes {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "thread";
   }
 }
 
 @container (max-width: 759px) {
+  .paneToggle,
   .contextToggle {
     display: none !important;
   }
@@ -254,6 +297,7 @@
   }
 
   @container (min-width: 760px) {
+    .desk[data-on="true"][data-threads="hidden"] .panes,
     .desk[data-on="true"][data-context="hidden"] .panes {
       grid-template-rows: minmax(0, 1fr);
     }

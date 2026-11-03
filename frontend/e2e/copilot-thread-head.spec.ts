@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openDeskThreads } from "./desk-fixtures";
 
 // The desk's thread header and plan ladder above the conversation. Every lab route is stubbed in the browser (the e2e
 // backend runs with the lab off), so no model runs and nothing is sent. The clock is fixed at 11:00 ET on Oct 23 2026.
@@ -162,6 +163,7 @@ test("a position the copilot adopted: its row and header say Adopted while the p
       value: null, status: { text: "Adopted · draft plan to confirm", tone: "info" }, meter: null, investigation_id: SOUN, trade_id: "t-soun",
       radar_event_id: null, path: null, changed_at: null, horizon: "day", close: null, fill_to_link: null, adopted: true }] } }));
   await page.reload();
+  await openDeskThreads(page);
   await expect(page.getByText("Adopted · draft plan to confirm").first()).toBeVisible();
   const head = conversation(page).getByRole("group", { name: "Thread header" });
   await expect(head).toContainText("Adopted");

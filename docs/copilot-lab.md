@@ -280,7 +280,7 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   `tests/test_copilot_plans.py`.
 - **Plans card on the Dashboard** (`components/dashboard/PlansCard.tsx`),
   near the top of the owner Dashboard above Exit habits, owner-only and shown
-  only while the lab is on. One row per open position (Webull left out): the
+  only while the lab is on. The collapsed summary shows plan coverage, fired give-backs, hit invalidations, time stops and recent alert counts. Refresh and pricing warnings stay visible. Expand **View positions** for one row per open position (Webull left out): the
   contract, open P&L in $ and %, then the plan it was entered under:
   "Invalidation 92.30 · 2.1% away" (or "hit"), "Time stop 15:30 · 41 min",
   "planned late" when the plan was saved after the fill, and the give-back
@@ -872,7 +872,8 @@ the line leads with whether the pre-market prep is written; after the close it
 shows the whole day; a closed day says so. The desk bar shows the same read
 beside its title: **Live** (green dot) in the regular session, **Pre-market**,
 or **Closed 16:00** (the calendar's close) after it, and on a wide screen SPY,
-QQQ and VIX's change. At the top of the thread list sits a phase button:
+QQQ and VIX's change. The desk bar keeps the phase action available at every
+width, whether Threads is open or not:
 **Arm today's plans** before 9:30 on a weekday, and **Close the day** after
 16:00, which walks each thread's close question (see Close of day).
 
@@ -925,13 +926,13 @@ to the thread before it and a reload stays on it. The bare address reopens the
 last thread only on the New York day it was open; on a new day the desk starts
 on Main. While not typing in a field: J / K open the next or previous
 conversation as the list shows it (those under Main, then each ticker's
-subthreads when shown, else its newest; folded ones are skipped), N opens Plan a trade (not while the message box holds unsent words), and `]` hides or shows the Context pane
-where the panes sit side by side (remembered in this browser; the desk bar's
-pane button does the same, and a phone keeps its tabs). No desk key fires in an
+subthreads when shown, else its newest; folded ones are skipped), N opens Plan a trade (not while the message box holds unsent words), `[` hides or shows Threads, and `]` hides or shows Context
+(both choices are remembered in this browser; the labelled desk-bar buttons do
+the same, and a phone keeps its tabs). No desk key fires in an
 input, text area or editable field, ⌘K included, and no other browser shortcut
 is taken. A one-line key hint sits at the foot of the thread list on a wide
 screen. Browser proof: `frontend/e2e/copilot-desk-keys.spec.ts` (palette,
-J/K order, `]` remembered, keys ignored while typing, the timeline at 1440 and
+J/K order, pane choices remembered, keys ignored while typing, the timeline at 1440 and
 375 px).
 
 The panes follow the desk's own width: three from 1100 px, two below that
@@ -947,8 +948,13 @@ width; it opens the labelled menu (every page, sync, the plan streak), whose
 browser with the same key as Charts' expanded rail (its Collapse folds it
 back). A phone keeps its tab bar. Every icon in the Charts rail names itself
 on hover or focus (`NavHint`), the sync dot included.
-The desk bar holds Menu, Jump to… (⌘K), New plan and the Context toggle; the
-read-only note sits under the message box.
+The desk bar holds Menu, Jump to… (⌘K), New plan and labelled Threads and
+Context toggles. A new desk opens with the active conversation; both panes stay
+closed until requested, preserving access to saved conversations, outstanding
+work and the chart without putting them in the first view. Threads carries one
+outstanding-work count when no phase action is present; the phase action itself
+shows the close-review count. Both pane choices are remembered in this browser.
+The read-only note sits under the message box.
 
 **The desk is home.** While the lab is on, the desk takes the Today screen's
 place: it is first in the menu and the phone's first tab ("Desk",
@@ -1019,12 +1025,16 @@ Briefing's day).
   week review or an explicit "more", "why" or "go deeper" gets the room it
   needs. Length is the wait: after a tool result, Sonnet 5.5 sends the whole
   answer at once at about 100 tokens a second (§ Live measurements).
-- **The answer format.** The first line of every answer is
+- **The answer format.** Market reads, trade ideas, position reviews, plans
+  and other trading decisions start with
   `Verdict: <word> — <headline>`, for example
   `Verdict: Hold — The thesis has not broken.`, with the word from a fixed
   set: Hold, Wait, Pass, Focus, Draft, Pattern, Broken (the plan's
   invalidation or the thesis broke: what the plan says, never an order) and
-  Unclear. Then the body in short paragraphs or bullets, and, when one thing
+  Unclear. For app capability or navigation questions, definitions and other
+  general information, the answer is direct prose without a Verdict line.
+  This avoids presenting an informational answer as a trading action. Then
+  the body in short paragraphs or bullets, and, when one thing
   would change the answer, a last line `Changes if: …`. The frontend parses
   the structure rather than guessing it from prose (`lib/copilot.ts`
   `answerParts`, `VERDICTS`): the verdict as a small tag, the headline in

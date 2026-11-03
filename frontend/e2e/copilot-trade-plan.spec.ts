@@ -103,6 +103,7 @@ async function lab(page: Page, server: Server, { alertsSupported = true, default
 
 /** The Context pane's Timeline tab, opened. */
 async function timeline(page: Page) {
+  await page.getByRole("button", { name: "Context pane" }).click();
   const pane = page.getByRole("complementary", { name: "Context" });
   await pane.getByRole("tab", { name: "Timeline" }).click();
   return pane.getByRole("list", { name: "Timeline" });

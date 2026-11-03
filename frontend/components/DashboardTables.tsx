@@ -86,8 +86,8 @@ function AccountBadge({ accountMap, accountId }: { accountMap: Record<string, Ac
 }
 
 function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
-  if (!active) return <span className="ml-1 text-xs text-muted-foreground/30">-</span>;
-  return <span className="ml-1 text-xs">{dir === "asc" ? "^" : "v"}</span>;
+  if (!active) return <span aria-hidden className="ml-1 text-xs text-muted-foreground/60">↕</span>;
+  return <span aria-hidden className="ml-1 text-xs">{dir === "asc" ? "↑" : "↓"}</span>;
 }
 
 /** One account in the rows: its badge on every row says nothing, so the column goes. */
@@ -111,15 +111,16 @@ function Th<K extends string>({
   return (
     <th
       className={cn(
-        "cursor-pointer select-none whitespace-nowrap px-2 py-2 text-left font-medium hover:text-foreground/80 sm:px-4",
+        "whitespace-nowrap text-left font-medium",
         // Phones keep the few columns worth reading at a glance; the ticker
         // still opens the trade for everything else.
         wide && "hidden sm:table-cell"
       )}
-      onClick={() => onSort(sortKey)}
+      aria-sort={currentSort === sortKey ? (dir === "asc" ? "ascending" : "descending") : undefined}
     >
-      {children}
-      <SortIcon active={currentSort === sortKey} dir={dir} />
+      <button type="button" onClick={() => onSort(sortKey)} className="min-h-11 w-full px-2 text-left hover:text-foreground sm:min-h-8 sm:px-4">
+        {children}<SortIcon active={currentSort === sortKey} dir={dir} />
+      </button>
     </th>
   );
 }

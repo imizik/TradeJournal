@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openDeskThreads } from "./desk-fixtures";
 
 // The lab's home: the desk's thread list beside the conversation. Every lab route is stubbed in the browser and the one
 // turn is a fixed SSE stream, so no model runs. Opening the lab reads /copilot/desk/threads and sends nothing; only a
@@ -56,6 +57,7 @@ async function lab(page: Page) {
   await page.route("**/charts/alerts", (route) => route.fulfill({ json: { alerts: [], phone: true } }));
   await page.route("**/copilot/research-jobs?*", (route) => route.fulfill({ json: { jobs: [], queue_enabled: false, daily_budget_usd: 2, spent_today_usd: 0 } }));
   await page.goto("/copilot-lab");
+  await openDeskThreads(page);
   return { chats, saves, reads: () => reads };
 }
 
@@ -111,6 +113,7 @@ test("the list says so when its read fails, and the Briefing and Review my week 
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.goto("/copilot-lab");
+  await openDeskThreads(page);
   const threads = list(page);
   await expect(threads).toContainText("Threads unavailable: Copilot Lab is off.");
   await expect(briefing(page).getByRole("button", { name: "What matters right now?" })).toBeEnabled();
