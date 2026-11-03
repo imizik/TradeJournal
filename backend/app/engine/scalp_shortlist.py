@@ -276,6 +276,8 @@ def make_recap(day: date, *, root: Path = DATA_DIR, fetch: Callable = _request_b
     stock_map = stocks or load_universe()
     bars = fetch(day, feed="sip", symbols=sorted(set(stock_map) | set(stock_map.values())),
                  start_minute=0, end_minute=21)
+    if not all(any(minute in row for row in bars.values()) for minute in (11, 21)):
+        raise StudyError("The SIP feed has not returned the full scoring window; retry the recap.")
     baseline_path = root / "baseline" / "sip" / f"{day.isoformat()}.json"
     if not baseline_path.exists():
         raise StudyError("Official SIP result is unavailable because its same-feed baseline is missing.")

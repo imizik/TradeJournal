@@ -105,7 +105,7 @@ export default function ScalpShortlistPanel({ history = false }: { history?: boo
     <div className="space-y-3 p-4">
       {error && <p role="alert" className="text-sm text-amber-300">{error}</p>}
       {!error && (!study || !current) && <p role="status" className="text-sm text-muted-foreground">Loading {history && selectedDay ? `${date}` : "today’s"} paper study…</p>}
-      {study && current && sessionIndex >= 0 && <>
+      {study && <>
         {history && <label className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">Study morning
           <select aria-label="Study morning" value={selectedDay || study.day} onChange={(event) => setSelectedDay(event.target.value)} className="min-h-11 rounded-md border bg-background px-2 text-sm text-foreground">
             {[...study.sessions].filter((day) => day <= study.today).reverse().map((day) => <option key={day} value={day}>{day}</option>)}

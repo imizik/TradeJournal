@@ -148,3 +148,23 @@ def test_provider_keeps_exact_bar_bounds_and_distinguishes_entitlement(monkeypat
         with pytest.raises(expected) as caught:
             study._request_bars(day, feed="sip", symbols=["TEST"], start_minute=0, end_minute=9)
         assert type(caught.value) is expected
+
+
+def test_feed_wide_delayed_exit_can_be_recovered(tmp_path):
+    day = date(2026, 11, 4)
+    stocks = {"ABC": "SPY"}
+    def fetch(*args, **kwargs):
+        return bars({"ABC": .04, "SPY": 0})
+    def delayed(*args, **kwargs):
+        result = fetch()
+        for minutes in result.values():
+            minutes.pop(21)
+        return result
+
+    warmup(day, root=tmp_path, fetch=fetch, stocks=stocks)
+    def clock():
+        return datetime.fromisoformat("2026-11-04T10:20:00-05:00")
+    with pytest.raises(StudyError, match="scoring window"):
+        make_recap(day, root=tmp_path, now=clock, fetch=delayed, stocks=stocks)
+    assert not (tmp_path / day.isoformat() / "recap.json").exists()
+    assert make_recap(day, root=tmp_path, now=clock, fetch=fetch, stocks=stocks)["eligible"] == 1

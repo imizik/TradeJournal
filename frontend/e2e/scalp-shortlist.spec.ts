@@ -30,7 +30,8 @@ test("dashboard records one timely paper choice per shown direction", async ({ p
   const panel = page.getByTestId("scalp-shortlist");
   await expect(panel.getByText("ANET")).toBeVisible();
   await expect(panel.getByText("DOWN")).toBeVisible();
-  await expect(panel.getByText("Live IEX preview")).toBeVisible();
+  await expect(panel.getByText(/Live IEX preview/).first()).toBeVisible();
+  await page.getByTestId("scalp-pick-ANET").screenshot({ path: test.info().outputPath("scalp-shortlist-live-card.png") });
   await panel.getByTestId("scalp-pick-ANET").getByRole("button", { name: "Take" }).click();
   await expect(panel.getByText("Take · before 9:41")).toBeVisible();
   await panel.getByTestId("scalp-pick-MU").getByRole("button", { name: "Pass" }).click();
@@ -58,6 +59,7 @@ test("Practice opens the official and shown outcomes for the selected morning", 
   await expect(panel.getByTestId("scalp-recap")).toContainText("MU DOWN · no response · not an official pick");
   await expect(panel.getByTestId("scalp-recap")).toContainText("+0.82%");
   await expect(panel.getByTestId("scalp-recap")).toContainText("Biggest movers · MU DOWN +0.40%");
+  await panel.getByTestId("scalp-recap").screenshot({ path: test.info().outputPath("scalp-shortlist-recap.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).resolves.toBeTruthy();
   await page.screenshot({ path: test.info().outputPath("scalp-shortlist-recap-phone.png"), animations: "disabled" });
