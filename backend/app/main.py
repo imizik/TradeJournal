@@ -257,6 +257,14 @@ async def _maybe_start_market_watch(app_: FastAPI):
     return asyncio.create_task(loop())
 
 
+def _maybe_start_premarket_archive():
+    if os.environ.get("PREMARKET_ARCHIVE_ENABLED", "").lower() != "true" or os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    # The isolated trial overlay does not ship this private collector.
+    from app.engine.premarket_archive_job import run
+    return asyncio.create_task(run())
+
+
 async def _maybe_start_radar(app_: FastAPI):
     """Radar's once-a-minute quote recorder (PR 1); off unless RADAR_ENABLED."""
     if os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
@@ -432,8 +440,7 @@ async def lifespan(_app: FastAPI):
     telegram_replies = await _maybe_start_telegram_replies(_app)
     market_watch = await _maybe_start_market_watch(_app)
     radar = await _maybe_start_radar(_app)
-    from app.engine import premarket_archive_job
-    archive = premarket_archive_job.start()
+    archive = _maybe_start_premarket_archive()
     jo_morning = await _maybe_start_jo_morning(_app)
     research = await _maybe_start_research_queue(_app)
     thesis_watch = await _maybe_start_thesis_watch(_app)

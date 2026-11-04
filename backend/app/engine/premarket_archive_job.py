@@ -1,20 +1,15 @@
 """Prepare the dated roster before 09:00, then capture exactly one SIP snapshot pass."""
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 import logging
 import os
 
 import httpx
 
-from app.engine.premarket_archive import ET, ROOT, Market, at, ranking, save
+from app.engine.premarket_archive import ET, ROOT, Market, at, inputs, rank_inputs, read_minutes, save
 
 log = logging.getLogger(__name__)
-
-
-def start():
-    if os.environ.get("PREMARKET_ARCHIVE_ENABLED", "").lower() != "true" or os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
-        return None
-    return asyncio.create_task(run())
 
 
 def now():
@@ -26,26 +21,34 @@ def prepare(day):
         market = Market(client, os.environ)
         days = market.calendar(day - timedelta(days=14), day)
         if days[-1] == day:
-            return days[-2], market.symbols(day)
+            symbols = market.symbols(day)
+            # Finish historical setup ahead of the time-critical 09:00 batch.
+            through = at(day, 9) - timedelta(minutes=16)
+            closes, totals = inputs(market, day, days[-2], symbols, through)
+            return symbols, closes, totals
     return None
 
 
-def capture(day, prior, symbols, market, root, clock=now):
+def capture(day, symbols, closes, totals, market, root, clock=now):
     cutoff = at(day, 9)
     deadline = cutoff + timedelta(minutes=1)
     started = clock()
     if not cutoff <= started < deadline or (root / f"{day}.json").exists():
         return
-    snapshots = market.snapshots(symbols)
-    finished = clock()
-    if finished >= deadline:
-        raise ValueError("09:00 snapshot window expired")
-    record = ranking(market, day, prior, symbols, snapshots)
-    saved = clock()
-    if saved >= cutoff + timedelta(minutes=30):
-        raise ValueError("Archive was not ready before the regular session")
-    record.update(snapshot_started_at=started.isoformat(), snapshot_finished_at=finished.isoformat(),
-                  saved_at=saved.isoformat())
+    # Both independent read passes start at the checkpoint. The warmed-up
+    # minute accumulator contains only 04:00..08:44. Never accept a late floor.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        tail = pool.submit(read_minutes, market, symbols, cutoff - timedelta(minutes=15),
+                           cutoff - timedelta(minutes=1), totals)
+        snapshots = market.snapshots(symbols)
+        snapshot_end = clock()
+        tail.result()
+    observed = clock()
+    if observed >= deadline:
+        raise ValueError("09:00 market-data window expired")
+    record = rank_inputs(day, symbols, closes, totals, snapshots)
+    record.update(snapshot_started_at=started.isoformat(), snapshot_finished_at=snapshot_end.isoformat(),
+                  inputs_finished_at=observed.isoformat(), saved_at=clock().isoformat())
     return save(root, day, record)
 
 
@@ -71,7 +74,7 @@ async def run():
         cutoff = at(day, 9)
         await sleep_until(cutoff - timedelta(minutes=15))
         try:
-            if not (ROOT / f"{day}.json").exists():
+            if now() < cutoff and not (ROOT / f"{day}.json").exists():
                 prepared = await asyncio.to_thread(prepare, day)
                 if prepared:
                     await sleep_until(cutoff)

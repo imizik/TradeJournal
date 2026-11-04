@@ -83,8 +83,9 @@ any report append; they cannot become silently frozen missing-data scores.
 
 The private backend job prepares the day's roster from 08:45 ET, confirms the
 session and preceding trading date against Alpaca's exchange calendar, and
-starts one batched SIP snapshot pass at 09:00. All snapshot batches must
-finish before 09:01, and the receipt must be ready before 09:30. Enablement requires the API process running with
+preloads prior closes, split factors and minutes through 08:44. At 09:00 it
+starts one batched SIP snapshot pass alongside the 08:45–08:59 minute reads.
+Both passes must finish before 09:01. Enablement requires the API process running with
 `PREMARKET_ARCHIVE_ENABLED=true` (default off), existing Polygon reference
 access, Alpaca paper-calendar access and **real-time SIP snapshot and bar
 entitlement**. A denied or missed capture leaves the day open for explicitly
@@ -97,10 +98,10 @@ effective-dated records, which the provider can correct retrospectively.
 [Point-in-time listing reference](https://massive.com/docs/rest/stocks/tickers/all-tickers)
 
 Both modes use raw SIP minutes from 04:00 through 08:59 ET inclusive. Price is
-the last completed minute close. The live job uses the snapshot minute close
-when it matches that interval. Snapshot daily bars provide the prior regular
-close only if stamped with the preceding exchange session. Missing closes and
-split-day closes use an explicitly raw historical SIP daily bar. The close is
+the last completed minute close. For each listing meeting the dollar floor,
+the live job requires a snapshot minute stamped with that exact interval and
+uses its price. Missing or conflicting minute evidence withholds the whole day.
+Both modes use the preceding exchange session’s raw SIP daily close, which is
 converted to current share units for splits effective that morning. A listing
 without a previous-session close is excluded and counted. Dollar volume is
 the sum of each minute's VWAP times its reported share volume. Price **≥ $2**

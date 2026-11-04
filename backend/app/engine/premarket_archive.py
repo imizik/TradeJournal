@@ -130,70 +130,59 @@ class Market:
             params["page_token"] = token
 
 
-def summarize(day, pages, snapshots=None):
-    opening, cutoff = at(day, 4), at(day, 9)
-    totals = {}
-    for symbol, rows in pages:
-        for row in rows:
-            when = timestamp(row)
-            if not opening <= when < cutoff or when.second or when.microsecond:
-                raise ValueError("Bar outside pre-market window")
-            old_time, _, volume, dollars = totals.get(symbol, (None, None, 0, Decimal(0)))
-            if old_time and when <= old_time:
-                raise ValueError("Repeated or unordered SIP minute")
-            size = row["v"]
-            if type(size) is not int or size <= 0:
-                raise ValueError("Invalid bar volume")
-            totals[symbol] = when, positive(row["c"]), volume + size, dollars + size * positive(row["vw"])
-    moves = {}
-    for symbol, (when, price, volume, dollars) in totals.items():
-        if snapshots is not None:
-            # Use the sampled minute when it represents the same last completed
-            # interval. A later snapshot minute must never leak into the ranking.
-            minute = (snapshots.get(symbol) or {}).get("minuteBar")
-            if minute and timestamp(minute) == when:
-                price = positive(minute["c"])
-        if price >= MIN_PRICE and dollars >= MIN_DOLLARS:
-            moves[symbol] = price, volume, dollars
-    return moves
+def read_minutes(market, symbols, start, end, totals):
+    """Accumulate only fully closed minutes inside this specific request window."""
+    for i in range(0, len(symbols), BATCH):
+        for symbol, rows in market.bars(symbols[i:i+BATCH], "1Min", start, end, start.date()):
+            for row in rows:
+                when = timestamp(row)
+                if not start <= when <= end or when.second or when.microsecond:
+                    raise ValueError("Bar outside pre-market window")
+                old_time, _, volume, dollars = totals.get(symbol, (None, None, 0, Decimal(0)))
+                if old_time and when <= old_time:
+                    raise ValueError("Repeated or unordered SIP minute")
+                size = row["v"]
+                if type(size) is not int or size <= 0:
+                    raise ValueError("Invalid bar volume")
+                totals[symbol] = when, positive(row["c"]), volume + size, dollars + size * positive(row["vw"])
 
 
-def ranking(market, day, prior, symbols, snapshots=None):
-    rows = []
+def inputs(market, day, prior, symbols, through):
     factors = market.splits(day)
-    without_close = 0
+    closes = {}
     for i in range(0, len(symbols), BATCH):
         group = symbols[i:i+BATCH]
-        moves = summarize(day, market.bars(group, "1Min", at(day, 4), at(day, 9) - timedelta(minutes=1), day), snapshots)
-        if not moves:
+        for symbol, bars in market.bars(group, "1Day", at(prior, 0), at(prior, 23), day):
+            for bar in bars:
+                if timestamp(bar).date() != prior or symbol in closes:
+                    raise ValueError("Invalid previous daily bar")
+                closes[symbol] = positive(bar["c"]) * factors.get(symbol, 1)
+    totals = {}
+    read_minutes(market, symbols, at(day, 4), through, totals)
+    return closes, totals
+
+
+def rank_inputs(day, symbols, closes, totals, snapshots=None):
+    rows = []
+    without_close = 0
+    for symbol, (when, price, volume, dollars) in totals.items():
+        if dollars < MIN_DOLLARS:
             continue
-        closes = {}
-        for symbol in moves:
-            if snapshots is not None:
-                snap = snapshots.get(symbol)
-                if not snap:
-                    raise ValueError("Qualifying stock missing from snapshot")
-                if symbol in factors:
-                    continue  # Use an explicitly raw historical close for split conversions.
-                for name in ("dailyBar", "prevDailyBar"):
-                    bar = snap.get(name)
-                    if bar and timestamp(bar).date() == prior:
-                        closes[symbol] = positive(bar["c"])
-                        break
-        missing = sorted(moves.keys() - closes.keys())
-        if missing:
-            for symbol, bars in market.bars(missing, "1Day", at(prior, 0), at(prior, 23), day):
-                for bar in bars:
-                    if timestamp(bar).date() != prior or symbol in closes:
-                        raise ValueError("Invalid previous daily bar")
-                    closes[symbol] = positive(bar["c"])
-        without_close += len(moves.keys() - closes.keys())
-        for symbol, close in closes.items():
-            price, volume, dollars = moves[symbol]
-            close *= factors.get(symbol, 1)
-            change = (price / close - 1) * 100
-            rows.append(dict(symbol=symbol, price=float(price), prior_regular_close=float(close),
-                             volume=volume, dollar_volume=float(dollars), pct_change=float(change)))
+        if snapshots is not None:
+            # A stale/missing snapshot cannot establish even the price-floor decision.
+            minute = (snapshots.get(symbol) or {}).get("minuteBar")
+            if not minute or timestamp(minute) != when:
+                raise ValueError("Snapshot does not confirm the last pre-market minute")
+            price = positive(minute["c"])
+        if price < MIN_PRICE:
+            continue
+        if symbol not in closes:
+            without_close += 1
+            continue
+        close = closes[symbol]
+        change = (price / close - 1) * 100
+        rows.append(dict(symbol=symbol, price=float(price), prior_regular_close=float(close),
+                         volume=volume, dollar_volume=float(dollars), pct_change=float(change)))
     if not rows:
         raise ValueError("No eligible market data")
     gainers = sorted((r for r in rows if r["pct_change"] > 0), key=lambda r: (-r["pct_change"], r["symbol"]))
@@ -203,6 +192,11 @@ def ranking(market, day, prior, symbols, snapshots=None):
                 ranking_basis="pct_vs_prior_regular_close", universe_size=len(symbols), eligible=len(rows),
                 missing_prior_close=without_close, min_price=MIN_PRICE, min_dollar_volume=MIN_DOLLARS,
                 gainers=gainers[:25], losers=losers[:25])
+
+
+def reconstruct(market, day, prior, symbols):
+    closes, totals = inputs(market, day, prior, symbols, at(day, 9) - timedelta(minutes=1))
+    return rank_inputs(day, symbols, closes, totals)
 
 
 def save(root, day, record):

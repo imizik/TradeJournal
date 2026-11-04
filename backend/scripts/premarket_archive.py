@@ -8,7 +8,7 @@ from pathlib import Path
 from dotenv import dotenv_values
 import httpx
 
-from app.engine.premarket_archive import ET, ROOT, Market, at, baseline, ranking, save
+from app.engine.premarket_archive import ET, ROOT, Market, at, baseline, reconstruct, save
 
 
 def main():
@@ -42,7 +42,7 @@ def main():
                 record = json.loads(path.read_text())
             else:
                 symbols = market.symbols(day)
-                record = save(args.root, day, ranking(market, day, prior, symbols))
+                record = save(args.root, day, reconstruct(market, day, prior, symbols))
             if (record.get("source") not in ("contemporaneous", "reconstructed-sip")
                     or record.get("as_of") != at(day, 9).isoformat() or record.get("feed") != "sip"
                     or record.get("whole_market") is not True or record.get("ranking_basis") != "pct_vs_prior_regular_close"):

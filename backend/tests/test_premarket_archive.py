@@ -2,6 +2,8 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from decimal import Decimal
+import sys
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -29,50 +31,57 @@ class FixtureMarket:
     def splits(self, day):
         return {"LOSS": Decimal(2)}
 
+    amounts = {"GAIN": (8, 150_000, 4), "LOSS": (2, 300_000, 2), "CHEAP": (1.99, 500_000, 2),
+               "SMALL": (8, 149_999, 4), "IPO": (3, 200_000, 3)}
+
     def snapshots(self, symbols):
-        return {s: {"dailyBar": {"t": arch.at(PRIOR, 0).isoformat(), "c": 4},
-                    # Already into the next minute; do not use it for 09:00.
+        return {s: {"minuteBar": bar(CUT - timedelta(minutes=1), *self.amounts[s]),
                     "latestTrade": {"p": 100, "t": (CUT + timedelta(seconds=3)).isoformat()}}
-                for s in symbols if s != "IPO"} | {"IPO": {"dailyBar": None}}
+                for s in symbols}
 
     def bars(self, group, timeframe, start, end, asof):
         self.calls.append((set(group), timeframe, start, end, asof))
-        if timeframe == "1Day":
-            return ((s, [{"t": arch.at(PRIOR, 0).isoformat(), "c": 4}]) for s in group if s != "IPO")
-        return ((s, [bar(arch.at(DAY, 4), 4, 100_000, 4), bar(end, price, size, vw)])
-                for s, price, size, vw in [("GAIN", 8, 150_000, 4), ("LOSS", 2, 300_000, 2),
-                                           ("CHEAP", 1.99, 500_000, 2), ("SMALL", 8, 149_999, 4),
-                                           ("IPO", 3, 200_000, 3)] if s in group)
+        for symbol in group:
+            if timeframe == "1Day":
+                if symbol != "IPO":
+                    yield symbol, [{"t": arch.at(PRIOR, 0).isoformat(), "c": 4}]
+                continue
+            rows = [bar(arch.at(DAY, 4), 4, 100_000, 4), bar(CUT - timedelta(minutes=1), *self.amounts[symbol])]
+            yield symbol, [row for row in rows if start <= arch.timestamp(row) <= end]
+
+    def warmup(self):
+        return arch.inputs(self, DAY, PRIOR, self.symbols, CUT - timedelta(minutes=16))
 
 
 def test_snapshot_and_reconstruction_agree_on_boundaries_and_split(tmp_path):
     m = FixtureMarket()
-    historical = arch.ranking(m, DAY, PRIOR, m.symbols)
-    live = job.capture(DAY, PRIOR, m.symbols, m, tmp_path, clock=lambda: CUT)
+    historical = arch.reconstruct(m, DAY, PRIOR, m.symbols)
+    live = job.capture(DAY, m.symbols, *m.warmup(), m, tmp_path, clock=lambda: CUT)
     assert historical["source"] == "reconstructed-sip" and live["source"] == "contemporaneous"
     assert live["gainers"] == historical["gainers"] == [
         dict(symbol="GAIN", price=8, prior_regular_close=4, volume=250_000, dollar_volume=1_000_000, pct_change=100)]
     assert live["losers"] == historical["losers"] == [
         dict(symbol="LOSS", price=2, prior_regular_close=8, volume=400_000, dollar_volume=1_000_000, pct_change=-75)]
     assert live["missing_prior_close"] == 1 and live["universe_size"] == 5
-    assert all(start == arch.at(DAY, 4) and end == CUT - timedelta(minutes=1) and asof == DAY
-               for _, frame, start, end, asof in m.calls if frame == "1Min")
+    assert [(start, end, asof) for _, frame, start, end, asof in m.calls if frame == "1Min"] == [
+        (arch.at(DAY, 4), CUT - timedelta(minutes=1), DAY),
+        (arch.at(DAY, 4), CUT - timedelta(minutes=16), DAY),
+        (CUT - timedelta(minutes=15), CUT - timedelta(minutes=1), DAY)]
     assert CUT.utcoffset() != arch.at(PRIOR, 9).utcoffset()
     assert arch.save(tmp_path, DAY, historical) == live
 
 
 def test_no_late_partial_or_failed_snapshot(tmp_path):
     m = FixtureMarket()
-    assert job.capture(DAY, PRIOR, m.symbols, m, tmp_path, lambda: CUT + timedelta(minutes=1)) is None
-    times = iter([CUT, CUT + timedelta(minutes=1)])
-    with pytest.raises(ValueError, match="expired"):
-        job.capture(DAY, PRIOR, m.symbols, m, tmp_path, lambda: next(times))
-    times = iter([CUT, CUT, CUT + timedelta(minutes=30)])
-    with pytest.raises(ValueError, match="before the regular session"):
-        job.capture(DAY, PRIOR, m.symbols, m, tmp_path, lambda: next(times))
+    assert job.capture(DAY, m.symbols, *m.warmup(), m, tmp_path, lambda: CUT + timedelta(minutes=1)) is None
+    for instants in ([CUT, CUT + timedelta(minutes=1), CUT + timedelta(minutes=1)],
+                     [CUT, CUT, CUT + timedelta(minutes=1)]):
+        times = iter(instants)
+        with pytest.raises(ValueError, match="expired"):
+            job.capture(DAY, m.symbols, *m.warmup(), m, tmp_path, lambda: next(times))
     m.snapshots = lambda symbols: {}
-    with pytest.raises(ValueError, match="missing from snapshot"):
-        job.capture(DAY, PRIOR, m.symbols, m, tmp_path, lambda: CUT)
+    with pytest.raises(ValueError, match="does not confirm"):
+        job.capture(DAY, m.symbols, *m.warmup(), m, tmp_path, lambda: CUT)
     assert list(tmp_path.iterdir()) == []
 
 
@@ -135,19 +144,23 @@ def test_baseline_exports_scorecard_shape_and_rejects_short_sides():
 
 
 def test_refuses_later_or_duplicate_minutes():
+    rows = [bar(CUT, 4, 2, 4)]
+    m = SimpleNamespace(bars=lambda *args: [("X", rows)])
     with pytest.raises(ValueError, match="outside"):
-        arch.summarize(DAY, [("X", [bar(CUT, 4, 2, 4)])])
-    rows = [bar(arch.at(DAY, 8), 4, 2, 4)] * 2
+        arch.read_minutes(m, ["X"], arch.at(DAY, 4), CUT - timedelta(minutes=1), {})
+    rows[:] = [bar(arch.at(DAY, 8), 4, 2, 4)] * 2
     with pytest.raises(ValueError, match="unordered"):
-        arch.summarize(DAY, [("X", rows)])
+        arch.read_minutes(m, ["X"], arch.at(DAY, 4), CUT - timedelta(minutes=1), {})
 
 
 def test_disabled_by_default_and_in_trial(monkeypatch):
+    from app.main import _maybe_start_premarket_archive
+    monkeypatch.setitem(sys.modules, "app.engine.premarket_archive_job", None)
     monkeypatch.delenv("PREMARKET_ARCHIVE_ENABLED", raising=False)
-    assert job.start() is None
+    assert _maybe_start_premarket_archive() is None
     monkeypatch.setenv("PREMARKET_ARCHIVE_ENABLED", "true")
     monkeypatch.setenv("TJ_DOT_TRIAL_ENABLED", "true")
-    assert job.start() is None
+    assert _maybe_start_premarket_archive() is None
 
 
 def test_prepare_only_on_confirmed_exchange_session(monkeypatch):
@@ -163,11 +176,14 @@ def test_prepare_only_on_confirmed_exchange_session(monkeypatch):
 
 
 def test_snapshot_minute_supplies_price_only_inside_matching_cutoff():
-    rows = [("UP", [bar(CUT - timedelta(minutes=1), 10, 100_000, 10)])]
-    matching = {"UP": {"minuteBar": bar(CUT-timedelta(minutes=1), 11, 100_000, 10)}}
-    assert arch.summarize(DAY, rows, matching)["UP"][0] == 11
-    matching["UP"]["minuteBar"] = bar(CUT, 12, 100_000, 10)
-    assert arch.summarize(DAY, rows, matching)["UP"][0] == 10
+    when = CUT - timedelta(minutes=1)
+    totals = {"UP": (when, Decimal("10"), 100_000, Decimal("1000000"))}
+    matching = {"UP": {"minuteBar": bar(when, 11, 100_000, 10)}}
+    assert arch.rank_inputs(DAY, ["UP"], {"UP": Decimal("9")}, totals, matching)["gainers"][0]["price"] == 11
+    for stale_or_late in (when - timedelta(minutes=1), CUT):
+        matching["UP"]["minuteBar"] = bar(stale_or_late, 12, 100_000, 10)
+        with pytest.raises(ValueError, match="does not confirm"):
+            arch.rank_inputs(DAY, ["UP"], {"UP": Decimal("9")}, totals, matching)
 
 
 def test_assistant_refused_and_owner_reads_frozen_day(boundary, tmp_path, monkeypatch):
