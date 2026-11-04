@@ -257,6 +257,14 @@ async def _maybe_start_market_watch(app_: FastAPI):
     return asyncio.create_task(loop())
 
 
+def _maybe_start_premarket_archive():
+    if os.environ.get("PREMARKET_ARCHIVE_ENABLED", "").lower() != "true" or os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    # The isolated trial overlay does not ship this private collector.
+    from app.engine.premarket_archive_job import run
+    return asyncio.create_task(run())
+
+
 async def _maybe_start_radar(app_: FastAPI):
     """Radar's once-a-minute quote recorder (PR 1); off unless RADAR_ENABLED."""
     if os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
@@ -432,6 +440,7 @@ async def lifespan(_app: FastAPI):
     telegram_replies = await _maybe_start_telegram_replies(_app)
     market_watch = await _maybe_start_market_watch(_app)
     radar = await _maybe_start_radar(_app)
+    archive = _maybe_start_premarket_archive()
     jo_morning = await _maybe_start_jo_morning(_app)
     research = await _maybe_start_research_queue(_app)
     thesis_watch = await _maybe_start_thesis_watch(_app)
@@ -453,6 +462,8 @@ async def lifespan(_app: FastAPI):
             await asyncio.wait({research}, timeout=10)
         if market_watch is not None:
             market_watch.cancel()
+        if archive is not None:
+            archive.cancel()
         if radar is not None:
             radar.cancel()
         if telegram_replies is not None:
@@ -510,6 +521,8 @@ app.include_router(charts.router, prefix="/charts", tags=["charts"])
 app.include_router(symbol_info.router, prefix="/charts", tags=["charts"])
 app.include_router(level_alerts_router.router, prefix="/charts", tags=["charts"])
 if os.environ.get("TJ_DOT_TRIAL_ENABLED") != "true":
+    from app.routers import premarket_archive
+    app.include_router(premarket_archive.router, tags=["pre-market archive"])
     from app.routers import scanner as scanner_router
     app.include_router(scanner_router.router, prefix="/scanner", tags=["scanner"])
     from app.routers import radar as radar_router

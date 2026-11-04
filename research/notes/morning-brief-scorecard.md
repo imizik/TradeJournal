@@ -5,11 +5,10 @@ Retrospective research of every saved morning-brief version from October 19,
 session dates. No brief was saved for October 28. Three versions arrived after
 09:30; their returns are descriptive, excluded from morning-available totals.
 
-The owner confirmed there is no known archived 09:00 whole-market ranking.
-**Baseline comparison, top-gapper coverage, and catalyst coverage are therefore
-unavailable.** A bounded news sample, today's screener, or the tickers already
-named in a brief cannot substitute for the day's top gainers/losers. No claim
-that the brief beats the baseline is supported by this report.
+The original November 3 scorecard had no archived 09:00 ranking. Its weekly
+tables remain the record of that first run. The dated supplement below uses
+historical SIP minutes and a date-effective listing universe. Catalyst coverage
+still requires a separate audit of pre-09:00 source reports.
 
 Scoring definitions:
 
@@ -80,15 +79,63 @@ write any VPS file. Private bars and results are cached locally outside git.
 Raw inputs have a private SHA256 receipt. Provider errors fail the run before
 any report append; they cannot become silently frozen missing-data scores.
 
-If an existing contemporaneous ranking archive becomes available, optional
-`--baselines` accepts a private JSON object keyed by session date, with `feed:
-"sip"`, `whole_market: true`, `as_of` exactly 09:00 ET, a source reference,
-`ranking_basis: "pct_vs_prior_regular_close"`, and 10 distinct ticker strings
-in each of `gainers` and `losers` (20 total). This trusts the archive's ranking;
-it does not reconstruct a universe from today's survivors. Both groups use the
-same absolute excess-return score as the briefs. Catalyst assessment stays
-unavailable until a manual comparison with archived pre-09:00 source reports
-exists; keyword matches cannot establish that a brief named the right catalyst.
+### 09:00 ET market archive
+
+The private backend job prepares the day's roster from 08:45 ET, confirms the
+session and preceding trading date against Alpaca's exchange calendar, and
+preloads prior closes, split factors and minutes through 08:44. At 09:00 it
+starts one batched SIP snapshot pass alongside the 08:45–08:59 minute reads.
+Both passes must finish before 09:01. Enablement requires the API process running with
+`PREMARKET_ARCHIVE_ENABLED=true` (default off), existing Polygon reference
+access, Alpaca paper-calendar access and **real-time SIP snapshot and bar
+entitlement**. A denied or missed capture leaves the day open for explicitly
+labelled reconstruction. The isolated assistant trial does not run this job.
+
+The universe is the paginated US stocks market's CS and ETF types marked
+active **on that session date** by Polygon/Massive. It includes listings since
+delisted and excludes the provider's separate OTC market. These are
+effective-dated records, which the provider can correct retrospectively.
+[Point-in-time listing reference](https://massive.com/docs/rest/stocks/tickers/all-tickers)
+
+Both modes use raw SIP minutes from 04:00 through 08:59 ET inclusive. Price is
+the last completed minute close. Before filtering, the live job cross-checks
+every pre-market snapshot minute against the last historical minute by time,
+close, volume and VWAP. Every listing meeting the dollar floor needs a matching
+snapshot. A snapshot-only minute or conflicting input withholds the whole day.
+Both modes use the preceding exchange session’s raw SIP daily close, which is
+converted to current share units for splits effective that morning. A listing
+without a previous-session close is excluded and counted. Dollar volume is
+the sum of each minute's VWAP times its reported share volume. Price **≥ $2**
+and pre-market dollar volume **≥ $1 million** are inclusive. The archive saves
+up to 25 positive and 25 negative percentage changes, descending and ascending
+respectively, with alphabetical ticker ties. A flat name belongs to neither
+side. [SIP snapshots](https://docs.alpaca.markets/us/reference/stocksnapshots-1)
+and [historical bars](https://docs.alpaca.markets/us/reference/stockbars).
+
+The API reads `GET /premarket/archive/{date}` from the ignored local
+`backend/data/premarket_archive` directory. Each complete daily JSON file is
+published once, including across competing live/backfill runs. An absent date
+returns 404. The endpoint never collects data. Live receipts retain their
+actual snapshot and publication timestamps. Backfills always use
+`reconstructed-sip`. No archived day or per-symbol score belongs in git.
+
+From the backend directory, use the existing market-data credentials and a
+private destination outside the repository:
+
+```sh
+python -m scripts.premarket_archive --start 2026-10-19 --end 2026-11-03 \
+  --credentials /existing/checkout/backend/.env \
+  --baselines /tmp/morning-brief-scorecard-private/r6-baselines.json
+```
+
+Add `--baselines /tmp/morning-brief-scorecard-private/r6-baselines.json` to
+the scorecard command above. Add `--append-baselines` for the supplementary
+columns on previously published weeks. The export is keyed by session date.
+Each entry contains `feed: "sip"`, `whole_market: true`, `as_of` at exactly
+09:00 ET, `source`, `ranking_basis: "pct_vs_prior_regular_close"`, and ten
+distinct ticker strings on each side in `gainers` and `losers`. Both sides
+use the same absolute excess-return score as the briefs. Gapper coverage
+counts how many of those 20 names appeared in that saved brief version.
 
 Weeks are append-only snapshots. Repeating identical evidence is a no-op;
 changed evidence for the same week/cutoff is refused. The current partial week
@@ -145,3 +192,29 @@ Morning-available ticker mentions: ≥3pp first hour 3/4; session 4/4. Repeated 
 No saved brief on confirmed sessions: none.
 
 - Gap: Archived whole-market 09:00 SIP top-10 gainers AND top-10 losers unavailable: baseline, gapper coverage and catalyst coverage unscored.
+
+## Baseline supplement 2026-10-19 through 2026-11-03
+
+Morning-available versions with a baseline, pooled on the same dates and versions.
+Each cell counts hits over tickers with both endpoints. Repeated mentions count again.
+
+| Week of | Timely versions compared | Brief first hour | Baseline first hour | Brief session | Baseline session |
+|---|---:|---:|---:|---:|---:|
+| 2026-10-19 | 4 | 6/29 | 46/78 | 9/30 | 58/80 |
+| 2026-10-26 | 4 | 5/35 | 49/77 | 8/37 | 55/78 |
+| 2026-11-02 | 1 | 3/4 | 12/20 | 4/4 | 17/20 |
+
+| Day / version | Source | Baseline ≥3pp first hour | Baseline ≥3pp session | Gappers mentioned |
+|---|---|---:|---:|---:|
+| 2026-10-19 / 1 | reconstructed-sip | 14/18 | 16/20 | 0/20 |
+| 2026-10-19 / 2 | reconstructed-sip | 14/18 | 16/20 | 0/20 |
+| 2026-10-20 / 1 | reconstructed-sip | 14/20 | 16/20 | 0/20 |
+| 2026-10-21 / 1 | reconstructed-sip | 7/20 | 11/20 | 0/20 |
+| 2026-10-22 / 1 | reconstructed-sip | 14/18 | 16/20 | 0/20 |
+| 2026-10-23 / 1 | reconstructed-sip | 11/20 | 15/20 | 0/20 |
+| 2026-10-26 / 1 | reconstructed-sip | 12/19 | 16/19 | 0/20 |
+| 2026-10-27 / 1 | reconstructed-sip | 11/20 | 10/19 | 0/20 |
+| 2026-10-29 / 1 | reconstructed-sip | 13/19 | 14/20 | 0/20 |
+| 2026-10-30 / 1 | reconstructed-sip | 13/19 | 15/20 | 0/20 |
+| 2026-11-02 / 1 | reconstructed-sip | 10/18 | 16/20 | 0/20 |
+| 2026-11-03 / 1 | reconstructed-sip | 12/20 | 17/20 | 0/20 |
