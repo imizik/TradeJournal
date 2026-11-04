@@ -149,3 +149,22 @@ def test_untrusted_baseline_refused(brief, tmp_path):
     baseline = dict(feed="iex", whole_market=True, as_of=scorer.at(DAY, "09:00").isoformat(), gainers=[], losers=[])
     with pytest.raises(ValueError, match="baseline"):
         scorer.score([brief], scorer.Minutes(tmp_path), {DAY: "16:00"}, {DAY: baseline})
+
+
+def test_reconstructed_baseline_supplement_is_private_append_only(brief, tmp_path):
+    baseline = dict(feed="sip", whole_market=True, as_of=scorer.at(DAY, "09:00").isoformat(),
+                    source="reconstructed-sip", ranking_basis="pct_vs_prior_regular_close",
+                    gainers=["G" + chr(65+i) for i in range(10)], losers=["L" + chr(65+i) for i in range(10)])
+    results = scorer.score([brief], scorer.Minutes(tmp_path), {DAY: "16:00"}, {DAY: baseline})
+    output = tmp_path / "report.md"
+    output.write_text("Original weekly evidence.\n")
+    scorer.append_baselines(output, results, DAY, DAY)
+    first = output.read_text()
+    assert first.startswith("Original weekly evidence.\n") and "| reconstructed-sip |" in first
+    assert baseline["gainers"][0] not in first and "Revenue" not in first
+    assert "(reconstructed-sip)" in scorer.render_week(DAY, results, {DAY: "16:00"}, DAY, DAY)
+    scorer.append_baselines(output, results, DAY, DAY)
+    assert output.read_text() == first
+    results[0]["overlap"] = 1
+    with pytest.raises(ValueError, match="different evidence"):
+        scorer.append_baselines(output, results, DAY, DAY)

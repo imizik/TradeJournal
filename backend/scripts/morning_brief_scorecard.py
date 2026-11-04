@@ -175,7 +175,7 @@ def score(briefs, minutes, sessions, baselines, reviewed_mentions=None):
             names = sorted(names)
         baseline = baselines.get(day)
         if baseline:
-            # Only a contemporaneous archived whole-market ranking is accepted.
+            # Historical reconstructions retain distinct provenance in the public report.
             if (baseline["feed"] != "sip" or baseline["whole_market"] is not True
                     or stamp(baseline["as_of"]) != at(day, "09:00")
                     or not baseline.get("source")
@@ -192,6 +192,8 @@ def score(briefs, minutes, sessions, baselines, reviewed_mentions=None):
         results.append(dict(day=day, saved_at=brief["saved_at"], redacted=bool(brief.get("redacted")),
                             eligible=stamp(brief["saved_at"]) < at(day, "09:30"),
                             values={s: values[s] for s in names}, baseline={s: values[s] for s in baseline_names},
+                            baseline_source=(baseline["source"] if baseline["source"] in ("contemporaneous", "reconstructed-sip")
+                                             else "archived") if baseline else None,
                             overlap=len(set(names) & set(baseline_names)),
                             error=minutes.errors.get(day), session=close))
     return results
@@ -217,6 +219,8 @@ def render_week(week, results, sessions, start, end):
         counts[day] = counts.get(day, 0) + 1
         saved = stamp(r["saved_at"]).astimezone(ET).strftime("%H:%M:%S")
         baseline = f"{ratio(r['baseline'], 0)} / {ratio(r['baseline'], 1)}" if r["baseline"] else "unavailable"
+        if r["baseline"]:
+            baseline += f" ({r['baseline_source']})"
         coverage = f"{r['overlap']}/20 / unavailable" if r["baseline"] else "unavailable"
         lines.append(f"| {day} / {counts[day]} | {saved} | {'redacted' if r['redacted'] else 'yes' if r['eligible'] else 'late'} | {len(r['values'])} | {ratio(r['values'], 0)} | {ratio(r['values'], 1)} | {baseline} | {coverage} |")
     missing = [d for d in sessions if week <= d <= min(end, (date.fromisoformat(week) + timedelta(days=6)).isoformat())
@@ -241,13 +245,52 @@ def append_weeks(output, results, sessions, start, end):
         cutoff = min(end, (week + timedelta(days=4)).isoformat())
         heading = f"## Week of {label} (through {cutoff})\n"
         if heading in existing:
-            old = existing.split(heading, 1)[1].split("\n## Week of ", 1)[0]
+            old = existing.split(heading, 1)[1].split("\n## ", 1)[0]
             if (heading + old).strip() != section.strip():
                 raise ValueError(f"Week {label} already exists with different evidence; preserve it and append an explicitly reviewed correction")
         else:
             existing = existing.rstrip() + "\n\n" + section
         week += timedelta(days=7)
     output.write_text(existing)
+
+
+def append_baselines(output, results, start, end):
+    """Append an aggregate-only supplement to the original, immutable weekly tables."""
+    existing = output.read_text()
+    heading = f"## Baseline supplement {start} through {end}"
+    lines = [heading, "", "Morning-available versions with a baseline, pooled on the same dates and versions.",
+             "Each cell counts hits over tickers with both endpoints. Repeated mentions count again.", "",
+             "| Week of | Timely versions compared | Brief first hour | Baseline first hour | Brief session | Baseline session |",
+             "|---|---:|---:|---:|---:|---:|"]
+    by_week = {}
+    for row in results:
+        day = date.fromisoformat(row["day"])
+        week = day - timedelta(days=day.weekday())
+        by_week.setdefault(week, [])
+        if row["eligible"] and not row["redacted"] and row["baseline"]:
+            by_week[week].append(row)
+    for week, rows in sorted(by_week.items()):
+        briefs = {(i, s): v for i, row in enumerate(rows) for s, v in row["values"].items()}
+        baselines = {(i, s): v for i, row in enumerate(rows) for s, v in row["baseline"].items()}
+        lines.append(f"| {week} | {len(rows)} | {ratio(briefs, 0)} | {ratio(baselines, 0)} | "
+                     f"{ratio(briefs, 1)} | {ratio(baselines, 1)} |")
+    lines.extend(["", "| Day / version | Source | Baseline ≥3pp first hour | Baseline ≥3pp session | Gappers mentioned |",
+                  "|---|---|---:|---:|---:|"])
+    counts = {}
+    for row in results:
+        day = row["day"]
+        counts[day] = counts.get(day, 0) + 1
+        values = row["baseline"]
+        source = row["baseline_source"] or "unavailable"
+        overlap = f"{row['overlap']}/20" if values and not row["redacted"] else "unavailable"
+        lines.append(f"| {day} / {counts[day]} | {source} | {ratio(values, 0)} | {ratio(values, 1)} | {overlap} |")
+    section = "\n".join(lines)
+    if heading in existing:
+        old = existing.split(heading, 1)[1].split("\n## ", 1)[0]
+        if (heading + old).strip() != section:
+            raise ValueError("Baseline supplement exists with different evidence")
+    else:
+        output.write_text(existing.rstrip() + "\n\n" + section + "\n")
 
 
 def main():
@@ -265,6 +308,7 @@ def main():
     parser.add_argument("--sip-cache", type=Path, help="Existing alpaca_cache/stocks/1Min/sip root, read-only")
     parser.add_argument("--credentials", type=Path, help="Existing .env; only Alpaca market-data keys are used; enables GETs")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--append-baselines", action="store_true", help="Append baseline columns for existing weeks")
     args = parser.parse_args()
     if args.start > args.end:
         parser.error("start must not follow end")
@@ -292,7 +336,12 @@ def main():
     private = root / f"scores-{args.start}-{args.end}.json"
     private.write_text(json.dumps(dict(input_sha256=hashlib.sha256(json.dumps(briefs, sort_keys=True).encode()).hexdigest(), results=results), default=str, indent=2))
     private.chmod(0o600)
-    append_weeks(args.output, results, sessions, args.start, args.end)
+    if args.append_baselines:
+        if not baselines:
+            parser.error("--append-baselines requires --baselines")
+        append_baselines(args.output, results, args.start, args.end)
+    else:
+        append_weeks(args.output, results, sessions, args.start, args.end)
     print(f"{len(results)} saved versions scored; {sum(not r['eligible'] for r in results)} late; "
           f"{sum(bool(r['baseline']) for r in results)} with baseline; {len(minutes.errors)} SIP failures")
 
