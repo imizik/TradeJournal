@@ -93,6 +93,10 @@ def test_live_slate_falls_back_to_same_feed_and_is_immutable(tmp_path):
         return datetime.fromisoformat("2026-11-04T09:40:05-05:00")
     record = capture_live(day, root=tmp_path, now=now, fetch=fetch, stocks=stocks)
     assert record["feed"] == "iex" and record["picks"][0]["symbol"] == "ABC"
+    assert record["picks"][0]["opening_bars"] == [
+        {"o": 100, "h": 100, "l": 100, "c": 100}, *([None] * 8),
+        {"o": 100, "h": 102, "l": 100, "c": 102},
+    ]
     def stale_fetch(*_args, **_kwargs):
         pytest.fail("published picks must never be recomputed")
     assert capture_live(day, root=tmp_path, now=now, fetch=stale_fetch, stocks=stocks) == record

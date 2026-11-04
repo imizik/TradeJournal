@@ -539,6 +539,9 @@ measures how long chart responses stall the API's event loop.
 
 Dashboard, Today and Desk surface the finite morning study; `/practice#scalp-shortlist`
 holds the session history. The page polls for the captured 9:40 slate. An owner
+can inspect the same-feed 9:30–9:39 ET candles saved with each new pick. Missing
+minutes remain gaps. The ticker opens Charts in a separate tab so the decision
+stays available. Past mornings link to the opening window. An owner
 can record Take or Pass once per shown symbol through `POST /scalp-shortlist/{day}/decisions`.
 The API uses its own receipt time. Choices before 9:41 ET are timely, choices
 from 9:41 to before 9:51 are late, and unanswered names remain unanswered.

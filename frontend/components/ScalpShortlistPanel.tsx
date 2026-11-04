@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { apiUrl } from "@/lib/api";
+import { chartLink } from "@/lib/chartJournal";
 import { newYorkToday, timeET } from "@/lib/format";
 
-type Pick = { symbol: string; direction: "up" | "down"; relative_volume?: number; sector_lead_pct?: number; return_pct?: number | null };
+type Candle = { o: number; h: number; l: number; c: number };
+type Pick = { symbol: string; direction: "up" | "down"; relative_volume?: number; sector_lead_pct?: number; return_pct?: number | null; opening_bars?: (Candle | null)[] };
 type Decision = { symbol: string; choice: "take" | "pass"; decided_at: string; timely: boolean };
 type Study = {
   day: string; today: string; now: string; sessions: string[];
@@ -25,6 +27,30 @@ async function readStudy(day?: string): Promise<Study> {
   const response = await fetch(apiUrl(`/scalp-shortlist${day ? `?day=${encodeURIComponent(day)}` : ""}`), { cache: "no-store" });
   if (!response.ok) throw new Error(`Study could not load (${response.status}).`);
   return response.json();
+}
+
+function OpeningChart({ pick }: { pick: Pick }) {
+  const bars = pick.opening_bars;
+  const observed = bars?.filter((bar): bar is Candle => bar !== null);
+  if (!bars || !observed?.length) return <span className="text-xs text-muted-foreground">Opening chart unavailable</span>;
+  const low = Math.min(...observed.map(bar => bar.l));
+  const high = Math.max(...observed.map(bar => bar.h));
+  const y = (price: number) => high === low ? 20 : 37 - (price - low) / (high - low) * 34;
+  const range = `$${low}–$${high}`;
+  return <figure className="w-fit">
+    <svg viewBox="0 0 100 40" width="100" height="40" role="img" aria-label={`${pick.symbol}, 9:30–9:39 ET, ${observed.length} one-minute candles, range ${range}`}>
+      {bars.map((bar, index) => {
+        if (!bar) return null;
+        const x = 5 + index * 10;
+        return <g key={index} className={bar.c >= bar.o ? "text-emerald-400" : "text-red-400"}>
+          <title>{`9:${30 + index} ET · O ${bar.o} H ${bar.h} L ${bar.l} C ${bar.c}`}</title>
+          <line x1={x} x2={x} y1={y(bar.h)} y2={y(bar.l)} stroke="currentColor" />
+          <rect x={x - 3} y={y(Math.max(bar.o, bar.c))} width="6" height={Math.max(1, Math.abs(y(bar.o) - y(bar.c)))} fill="currentColor" />
+        </g>;
+      })}
+    </svg>
+    <figcaption className="text-xs text-muted-foreground">9:30–9:39 ET · {range}{observed.length < 10 && ` · ${observed.length}/10 bars`}</figcaption>
+  </figure>;
 }
 
 export default function ScalpShortlistPanel({ history = false }: { history?: boolean }) {
@@ -121,8 +147,14 @@ export default function ScalpShortlistPanel({ history = false }: { history?: boo
           <p className="text-xs">{shown.feed === "iex" ? "Live IEX preview" : "Official SIP picks"} · captured {timeET(shown.captured_at, { seconds: true })} · {shown.eligible} stocks eligible</p>
           {shown.picks.length ? <ul className="divide-y divide-border">{shown.picks.map((pick) => {
             const decision = decisions.find((item) => item.symbol === pick.symbol);
+            const captureMinute = Math.floor(Date.parse(shown.captured_at) / 60_000) * 60;
+            const chartHref = date === study.today ? `/charts?symbol=${encodeURIComponent(pick.symbol)}`
+              : chartLink({ symbol: pick.symbol, from: captureMinute - 600, to: captureMinute - 60 });
             return <li key={pick.symbol} className="flex flex-wrap items-center justify-between gap-3 py-2.5" data-testid={`scalp-pick-${pick.symbol}`}>
-              <div className="min-w-28"><p className="text-sm font-semibold">{pick.symbol} <span className={pick.direction === "up" ? "text-emerald-400" : "text-red-400"}>{pick.direction.toUpperCase()}</span></p><p className="text-xs text-muted-foreground">{pick.relative_volume?.toFixed(1)}× usual volume · {pick.sector_lead_pct?.toFixed(2)} pt sector lead</p></div>
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+                <div><p className="text-sm font-semibold"><a href={chartHref} target="_blank" rel="noopener" aria-label={`Open ${pick.symbol} chart in a new tab`} className="inline-flex min-h-11 items-center text-primary underline underline-offset-2 sm:min-h-0">{pick.symbol} ↗</a> <span className={pick.direction === "up" ? "text-emerald-400" : "text-red-400"}>{pick.direction.toUpperCase()}</span></p><p className="text-xs text-muted-foreground">{pick.relative_volume?.toFixed(1)}× usual volume · {pick.sector_lead_pct?.toFixed(2)} pt sector lead</p></div>
+                <OpeningChart pick={pick} />
+              </div>
               {decision ? <p className="text-xs text-muted-foreground">{choiceText(decision.choice)} · {decision.timely ? "before 9:41" : "late"} · {timeET(decision.decided_at)}</p>
                 : canDecide ? <div className="flex gap-2"><button type="button" disabled={saving !== null} onClick={() => void decide(pick.symbol, "take")} className="min-h-11 rounded-md border border-emerald-500/40 px-3 text-sm hover:bg-emerald-500/10 disabled:opacity-50">Take</button><button type="button" disabled={saving !== null} onClick={() => void decide(pick.symbol, "pass")} className="min-h-11 rounded-md border px-3 text-sm hover:bg-secondary disabled:opacity-50">Pass</button></div>
                 : <span className="text-xs text-muted-foreground">{minute < 9 * 60 + 40 ? "Decision opens at 9:40" : minute >= 9 * 60 + 51 ? "No choice saved by 9:51" : "Waiting for the first picks"}</span>}
