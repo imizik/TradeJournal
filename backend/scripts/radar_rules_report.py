@@ -86,7 +86,9 @@ def variant(spec: str) -> radar_rules.Thresholds:
     return replace(radar_rules.V0, version=f"{radar_rules.RULE_VERSION}+{spec}", **values)
 
 
-def changes(t: radar_rules.Thresholds) -> list[tuple[str, object, object]]:
+def changes(t: radar_rules.Rules) -> list[tuple[str, object, object]]:
+    if isinstance(t, radar_rules.OpeningDrive):
+        return []  # separate detector, not a variant of the window thresholds
     return [(f.name, getattr(radar_rules.V0, f.name), getattr(t, f.name)) for f in fields(t)
             if f.name != "version" and getattr(t, f.name) != getattr(radar_rules.V0, f.name)]
 
@@ -99,10 +101,10 @@ class Session:
         for row in store.quotes(session_date=day):
             self.quotes.setdefault(row["pass_id"], {})[row["symbol"]] = row
         self.recorded = store.events(day)
-        self._replays: dict[radar_rules.Thresholds, list] = {}
+        self._replays: dict[radar_rules.Rules, list] = {}
         self.last = self.passes[-1]["started_at"] if self.passes else None
 
-    def replay(self, t: radar_rules.Thresholds) -> list[tuple[dict, list[dict]]]:
+    def replay(self, t: radar_rules.Rules) -> list[tuple[dict, list[dict]]]:
         if t not in self._replays:
             self._replays[t] = radar_rules.replay(self.universe, self.passes, self.quotes, t) if self.passes else []
         return self._replays[t]
@@ -177,7 +179,7 @@ def survives(event: dict, saved) -> bool:
                and abs(_minutes(e["first_seen_at"], event["first_seen_at"])) <= SURVIVE_MINUTES for e, _ in saved)
 
 
-def build_report(store: RadarStore, versions: list[radar_rules.Thresholds], sessions: list[str] | None = None,
+def build_report(store: RadarStore, versions: list[radar_rules.Rules], sessions: list[str] | None = None,
                  universe: dict | None = None, title: str = "Radar rules report") -> str:
     universe = universe or load_universe()
     days = sorted(sessions or store.sessions())
@@ -199,6 +201,10 @@ def build_report(store: RadarStore, versions: list[radar_rules.Thresholds], sess
 
     out += ["## Versions", "", "| Version | Thresholds |", "| --- | --- |"]
     for t in versions:
+        if isinstance(t, radar_rules.OpeningDrive):
+            out.append(f"| {_short(t.version)} | Opening drive: {t.open_relative_pct} pp vs SPY from open "
+                       f"and {t.five_minute_relative_pct} pp same way over 5 min |")
+            continue
         diff = changes(t)
         text = ", ".join(f"{n} {old} → {new}" for n, old, new in diff) if diff else (
             f"30-min window; vs SPY {t.spy_relative_pct}, vs sector {t.sector_relative_pct}, own move "

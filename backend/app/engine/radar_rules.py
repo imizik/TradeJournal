@@ -6,7 +6,8 @@ revisions, and returns the new events and revisions to append. Replaying the sam
 passes in order gives the same event ids and revisions, so the live runner, a
 restart and ``scripts/radar_replay.py`` all agree.
 
-Three kinds, all over a window W ending at the pass and starting at the recorded
+V2 detects an opening drive against SPY and is opt-in. V0 and V1 use
+three kinds, all over a window W ending at the pass and starting at the recorded
 pass about W minutes earlier (never the open, so an opening gap alone never
 qualifies):
 
@@ -36,6 +37,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import logging
+from math import isfinite
 import os
 import re
 from statistics import median
@@ -75,16 +77,28 @@ V0 = Thresholds(windows=(30,), spy_relative_pct=4.5, sector_relative_pct=4.5, ow
                 group_relative_pct=2.0, group_min_members=4, group_agreement=0.6, persist_passes=3,
                 extend_step_pct=1.5, group_extend_step_pct=1.0, cooldown_minutes=30)
 V1 = replace(V0, version="radar-rules-v1", spy_relative_pct=4.0, persist_passes=2)
-VERSIONS = {t.version: t for t in (V0, V1)}
 
 
-def thresholds_for(name: str) -> Thresholds:
+@dataclass(frozen=True)
+class OpeningDrive:
+    """C06 from the registered historical search. One sighting per stock and side."""
+    open_relative_pct: float = 2.0
+    five_minute_relative_pct: float = 0.5
+    version: str = "radar-rules-v2"
+
+
+V2 = OpeningDrive()
+Rules = Thresholds | OpeningDrive
+VERSIONS = {t.version: t for t in (V0, V1, V2)}
+
+
+def thresholds_for(name: str) -> Rules:
     """``v1`` or ``radar-rules-v1``; KeyError for an unknown version."""
     name = name.strip()
     return VERSIONS[name if name.startswith("radar-rules-") else f"radar-rules-{name}"]
 
 
-def from_env() -> Thresholds:
+def from_env() -> Rules:
     """The version ``RADAR_RULES_VERSION`` names (default ``v0``); an unknown name keeps v0 and logs."""
     name = os.environ.get("RADAR_RULES_VERSION", "").strip() or "v0"
     try:
@@ -153,8 +167,10 @@ def _persist_indexes(passes: list[dict], end: int, k: int) -> list[int] | None:
     return idx
 
 
-def needed_pass_ids(passes: list[dict], end: int, thresholds: Thresholds = V0) -> set[int]:
+def needed_pass_ids(passes: list[dict], end: int, thresholds: Rules = V0) -> set[int]:
     """Every pass id whose quotes ``detect`` reads for ``passes[end]``."""
+    if isinstance(thresholds, OpeningDrive):
+        return {passes[i]["id"] for i in _drive_indexes(passes, end)}
     ids = set()
     for i in _persist_indexes(passes, end, thresholds.persist_passes) or [end]:
         ids.add(passes[i]["id"])
@@ -410,13 +426,88 @@ def _event_key(event: dict) -> tuple[str, str, str]:
     return (event["kind"], event["group"] if event["kind"] == "group_move" else event["symbols"][0], event["direction"])
 
 
+def _drive_indexes(passes, end):
+    """The opening minute, exact trailing minute and now, from the same roster."""
+    p = passes[end]
+    at = datetime.fromtimestamp(_epoch(p["started_at"]), ET)
+    minute = at.hour * 60 + at.minute - REGULAR_OPEN
+    if not 6 <= minute <= 390:
+        return []
+    current_slot = int(at.timestamp() // 60)
+    wanted = (current_slot - minute + 1, current_slot - 5)
+    found = {}
+    for i in range(end):
+        q = passes[i]
+        slot = int(_epoch(q["started_at"]) // 60)
+        if slot in wanted and q["universe_version"] == p["universe_version"]:
+            found[slot] = i
+    if any(slot not in found for slot in wanted):
+        return []
+    return [found[wanted[0]], found[wanted[1]], end]
+
+
+def _opening_drive(universe, passes, end, quotes, saved, t):
+    indexes = _drive_indexes(passes, end)
+    if not indexes:
+        return []
+    opening, trailing, current = [quotes.get(passes[i]["id"], {}) for i in indexes]
+
+    def returns(symbol):
+        first, prior, now = (rows.get(symbol) for rows in (opening, trailing, current))
+        if not all(usable(q) for q in (first, prior, now)):
+            return None
+        prices = (first.get("open"), prior["last"], now["last"])
+        if not all(isinstance(v, (int, float)) and isfinite(v) and v > 0 for v in prices):
+            return None
+        return _ret(prices[0], prices[2]), _ret(prices[1], prices[2])
+
+    spy = returns("SPY")
+    if spy is None:
+        return []
+    seen = {_event_key(e) for e, _ in saved if e["rule_version"] == t.version}
+    events = []
+    for row in universe["symbols"]:
+        sym = row["symbol"]
+        if row["kind"] != "stock" or row["benchmark"]:
+            continue
+        own = returns(sym)
+        if own is None:
+            continue
+        rel, recent = own[0] - spy[0], own[1] - spy[1]
+        sign = 1 if rel > 0 else -1
+        direction = "up" if sign > 0 else "down"
+        if sign * rel < t.open_relative_pct or sign * recent < t.five_minute_relative_pct:
+            continue
+        kind = "relative_to_spy"
+        if (kind, sym, direction) in seen:
+            continue
+        p = passes[end]
+        events.append({
+            "event_id": event_id(p["session_date"], kind, sym, direction, 1, t.version),
+            "session_date": p["session_date"], "rule_version": t.version, "universe_version": p["universe_version"],
+            "kind": kind, "direction": direction, "symbols": [sym], "group": None, "benchmark": "SPY",
+            "first_seen_at": p["finished_at"],
+            "summary": f"{sym} {_pct(rel)} vs SPY from the open and {_pct(recent)} over the last 5 minutes",
+            "measures": {"relative_pct": round(rel, 3), "change_pct": round(own[0], 3),
+                         "benchmark_change_pct": round(spy[0], 3), "five_minute_relative_pct": round(recent, 3),
+                         "open_price": opening[sym]["open"], "spy_open_price": opening["SPY"]["open"],
+                         "day_change_pct": _day_change(quotes, p["id"], sym)},
+            "evidence": [q for i in dict.fromkeys(indexes) for q in _evidence(passes, quotes, i, [sym, "SPY"])],
+            "coverage": _coverage(passes, end, []),
+            "chart": {"symbol": sym, "from": passes[indexes[0]]["started_at"], "to": p["finished_at"]},
+        })
+    return events
+
+
 def detect(universe: dict, passes: list[dict], end: int, quotes: dict[int, dict[str, dict]],
-           saved: list[tuple[dict, list[dict]]], thresholds: Thresholds = V0) -> tuple[list[RadarEvent], list[RadarEventRevision]]:
+           saved: list[tuple[dict, list[dict]]], thresholds: Rules = V0) -> tuple[list[RadarEvent], list[RadarEventRevision]]:
     """New events and revisions for ``passes[end]``.
 
     ``passes`` is ``session_passes`` for one session, ``quotes`` maps pass id to {symbol: quote row} for at least
     ``needed_pass_ids``, and ``saved`` is the session's events (in saved order) with their revisions.
     """
+    if isinstance(thresholds, OpeningDrive):
+        return _opening_drive(universe, passes, end, quotes, saved, thresholds), []
     t = thresholds
     states: dict[tuple, list[_State]] = {}
     for event, revisions in saved:
@@ -458,7 +549,7 @@ def detect(universe: dict, passes: list[dict], end: int, quotes: dict[int, dict[
 
 
 def replay(universe: dict, passes: list[dict], quotes: dict[int, dict[str, dict]],
-           thresholds: Thresholds = V0) -> list[tuple[dict, list[dict]]]:
+           thresholds: Rules = V0) -> list[tuple[dict, list[dict]]]:
     """Every event (with its revisions) the rules write over one session's passes, in order."""
     saved: list[tuple[dict, list[dict]]] = []
     by_id: dict[str, list[dict]] = {}

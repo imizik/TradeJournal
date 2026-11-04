@@ -281,9 +281,8 @@ connection and never writes the live file):
 ssh ubuntu@100.121.251.15 "sudo python3 -c 'import sqlite3; s = sqlite3.connect(\"file:/var/lib/tradejournal/radar/radar.sqlite?mode=ro\", uri=True); d = sqlite3.connect(\"/tmp/radar-snapshot.sqlite\"); s.backup(d); d.close()' && sudo chown ubuntu /tmp/radar-snapshot.sqlite" && scp ubuntu@100.121.251.15:/tmp/radar-snapshot.sqlite /tmp/radar-snapshot.sqlite && ssh ubuntu@100.121.251.15 rm /tmp/radar-snapshot.sqlite && cd backend && .venv/bin/python scripts/radar_rules_report.py /tmp/radar-snapshot.sqlite --try sector_relative_pct=3.5 --try group_min_members=3 --try group_relative_pct=1.75 --title "Radar rules v1 candidate — October 26, 2026" --out reports/radar_rules_v1_2026-10-26.md
 ```
 
-**Setting:** `RADAR_RULES_VERSION` in the VPS `backend.env` (`v0` by default,
-or `v1`; an unknown name keeps v0 and logs an error) selects the version the
-recorder runs, read at startup. Each event records its `rule_version` (the
+At startup the recorder reads `RADAR_RULES_VERSION` from the VPS `backend.env`.
+It defaults to `v0` and accepts `v1` or `v2` explicitly. An unknown name keeps v0 and logs an error. Each event records its `rule_version` (the
 store's existing column and payload field), so `/radar/proof`, which scores
 only the newest version, starts over at v1 and never pools the two. Switch
 between sessions, never mid-session: a version switched on mid-session never
@@ -820,8 +819,8 @@ test after the premarket pilot is scored. See
 The recorder is off unless both variables are set in the VPS `backend.env`
 (set since October 22 with Isaac's OK). The rules have no on/off flag of their
 own: wherever the recorder runs, detection runs with it and writes events to the
-screen, under v0 unless `RADAR_RULES_VERSION` names v1
-([Rules v1 candidate](#rules-v1-candidate-october-26-2026)); switching is Isaac's call. Phone alerts have their own `RADAR_ALERTS_ENABLED`, off by default
+screen. The default is v0. Isaac can choose [v1](#rules-v1-candidate-october-26-2026)
+or the [v2 opening drive](../research/notes/radar-v2-search-2026-11-04.md) explicitly. Phone alerts have their own `RADAR_ALERTS_ENABLED`, off by default
 ([Phone alerts](#phone-alerts-off-by-default)), and the premarket pilot its
 own `RADAR_PREMARKET_ENABLED`, also off, and the shadow book its own
 `SHADOW_BOOK_ENABLED`, also off ([Shadow book](#shadow-book-off-by-default)),
