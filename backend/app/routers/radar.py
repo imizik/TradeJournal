@@ -24,7 +24,7 @@ from app.engine.chart_math import ET, session_windows
 from app.engine.radar_comparison import compare_group, empty_comparison
 from app.engine.radar_entry import resolve_entry, compare_resolved_entry
 from app.engine.radar_movers import build_movers, earlier_pass, event_movers_tags
-from app.engine import radar_proof
+from app.engine import radar_proof, radar_outside_scan
 from app.engine.radar_runner import enabled
 from app.engine.radar_store import RadarStore, load_universe
 
@@ -159,13 +159,23 @@ def feed(session: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
     if since:
         _valid_time(since, "since")
     store, reason = _store()
-    if store is None:
-        return _off(reason, session)
+    outside = radar_outside_scan.enabled()
+    extra_sessions = radar_outside_scan.feed_sessions() if outside else []
     try:
-        return _read_feed(store, session, since, now)
-    except (sqlite3.Error, ValueError, KeyError, OSError) as exc:  # a busy or damaged file must not become a 500
+        if store is None:
+            result = _off(reason, session)
+        else:
+            if extra_sessions and not session:
+                session = max(extra_sessions[0], next(iter(store.sessions()), ""))
+            result = _read_feed(store, session, since, now)
+    except (sqlite3.Error, ValueError, KeyError, OSError) as exc:
         log.warning("radar feed unreadable: %s", exc)
-        return _off("The Radar file could not be read right now.", session)
+        result = _off("The Radar file could not be read right now.", session)
+    if outside:
+        day = result["session"] or next(iter(extra_sessions), datetime.fromtimestamp(now, ET).date().isoformat())
+        result.update(session=day, sessions=sorted(set(result.get("sessions", [])) | set(extra_sessions), reverse=True)[:30],
+                      outside_list=radar_outside_scan.checkpoints(day))
+    return result
 
 
 def _read_feed(store: RadarStore, session: str | None, since: str | None, now: float) -> dict:

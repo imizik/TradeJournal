@@ -265,6 +265,15 @@ def _maybe_start_premarket_archive():
     return asyncio.create_task(run())
 
 
+def _maybe_start_radar_outside_scan():
+    if os.getenv("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    from app.engine import radar_outside_scan
+    if radar_outside_scan.enabled():
+        return asyncio.create_task(radar_outside_scan.run())
+    return None
+
+
 async def _maybe_start_radar(app_: FastAPI):
     """Radar's once-a-minute quote recorder (PR 1); off unless RADAR_ENABLED."""
     if os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
@@ -441,6 +450,7 @@ async def lifespan(_app: FastAPI):
     market_watch = await _maybe_start_market_watch(_app)
     radar = await _maybe_start_radar(_app)
     archive = _maybe_start_premarket_archive()
+    outside_scan = _maybe_start_radar_outside_scan()
     jo_morning = await _maybe_start_jo_morning(_app)
     research = await _maybe_start_research_queue(_app)
     thesis_watch = await _maybe_start_thesis_watch(_app)
@@ -462,6 +472,8 @@ async def lifespan(_app: FastAPI):
             await asyncio.wait({research}, timeout=10)
         if market_watch is not None:
             market_watch.cancel()
+        if outside_scan is not None:
+            outside_scan.cancel()
         if archive is not None:
             archive.cancel()
         if radar is not None:

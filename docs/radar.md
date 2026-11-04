@@ -125,6 +125,32 @@ Clearing the filter shows all rows; phone/chart links always show the linked
 event, even if it was on Movers. An all-filtered feed explains how to show it.
 The filter does not change the Movers panel, detection or outcome scoring.
 
+### Outside your list
+
+With `RADAR_WHOLE_MARKET_ENABLED=true`, the owner feed also reads the selected
+session’s separate checkpoint files from `backend/data/radar_outside_list/`.
+The scan defaults off. On exchange sessions it samples at 09:45, 10:30, 12:00
+and 14:00 New York time, skipping checkpoints at or after an early close.
+
+The dated common-stock roster and split references come from R6’s Polygon
+reader. Raw SIP daily VWAP times volume must average at least $20M across
+all 20 preceding exchange sessions. The collector excludes every Radar roster
+symbol before requesting batched SIP snapshots, apart from SPY as the benchmark.
+At each checkpoint it compares the last completed minute’s close to the
+split-comparable previous close for the stock and SPY. Stocks priced at least
+$5 and at least 4.5 percentage points ahead of or behind SPY qualify. At most
+ten rows are saved, ranked by absolute relative move, with alphabetical ties.
+Day dollar volume uses the snapshot’s daily VWAP times volume. Sector comes
+from the local S&P 500 reference when available.
+
+The section shows the number of stocks with fresh data over those requested.
+A missed or denied SIP read appears as unavailable when attempted. The worker
+does not backfill missed checkpoints after a restart. Entries use kind
+`outside_list` in a separate feed field, outside the recorder, phone delivery,
+ratings and frozen rule evaluations. The [90-session research replay](../research/notes/radar-whole-market-2026-11-04.md) measures the frozen
+rolling 30-minute v0 rule minute by minute on each day’s closing top 20.
+The four checkpoint rankings measure moves since the previous close.
+
 ## Alert rules (radar-rules-v0, provisional)
 
 `backend/app/engine/radar_rules.py` is pure arithmetic over recorded passes. After

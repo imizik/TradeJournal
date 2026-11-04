@@ -196,3 +196,23 @@ def test_owner_only(boundary, tmp_path):  # noqa: F811
                          ("GET", "/radar/groups/compare?symbol=NVDA&trade_id=00000000-0000-0000-0000-000000000001"), ("GET", f"/radar/events/{EVENT_ID}"), ("POST", "/radar/visits"),
                          ("POST", f"/radar/events/{EVENT_ID}/feedback")]:
         assert boundary.public.request(method, path, json={"rating": "useful"} if method == "POST" else None).status_code == 403
+
+
+def test_outside_checkpoints_are_separate_from_radar_events_and_follow_session(api, tmp_path, monkeypatch):
+    from app.engine import radar_outside_scan as scan
+    from app.engine.scalp_shortlist_store import publish_once
+    _seed(api)
+    monkeypatch.setattr(scan, "ROOT", tmp_path / "outside")
+    slot = datetime.fromisoformat("2026-10-21T09:45:00-04:00")
+    row = {"kind": "outside_list", "symbol": "OUT"}
+    record = dict(as_of=slot.isoformat(), status="ok", covered=1, requested=1, rows=[row])
+    publish_once(scan.archive_path(slot), record)
+    assert "outside_list" not in api.client.get("/radar/feed").json()
+    monkeypatch.setenv("RADAR_WHOLE_MARKET_ENABLED", "true")
+    body = api.client.get("/radar/feed").json()
+    assert body["session"] == "2026-10-21" and body["sessions"] == ["2026-10-21", SESSION]
+    assert body["events"] == [] and body["outside_list"] == [record]
+    older = api.client.get(f"/radar/feed?session={SESSION}").json()
+    assert older["outside_list"] == [] and older["events"][0]["event_id"] == EVENT_ID
+    monkeypatch.delenv("RADAR_ENABLED")
+    assert api.client.get("/radar/feed").json()["outside_list"] == [record]

@@ -253,3 +253,29 @@ test("Shadow book folds events below the bar into one line on phone", async ({ p
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await section.screenshot({ path: test.info().outputPath("shadow-book-filtered-phone.png") });
 });
+
+for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 390, 844]] as const) {
+  test(`outside-list checkpoint coverage, rows and earlier failure on ${size}`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await page.route("**/radar/feed*", async route => {
+      const response = await route.fetch();
+      await route.fulfill({ json: { ...await response.json(), outside_list: [
+        { as_of: "2026-10-20T10:30:00-04:00", status: "ok", covered: 827, requested: 830,
+          rows: [{ kind: "outside_list", symbol: "OUT", price: 23, move_vs_spy_pp: -7.13, dollar_volume: 32100000, sector: "Utilities" }] },
+        { as_of: "2026-10-20T09:45:00-04:00", status: "unavailable", rows: [] },
+      ] } });
+    });
+    await page.goto("/radar");
+    const panel = page.getByRole("region", { name: "Outside your list" });
+    await expect(panel.getByRole("cell", { name: "−7.13 pp" })).toBeVisible();
+    await expect(panel).toContainText("827/830 stocks with fresh data");
+    await expect(panel).toContainText("$32.1M");
+    await expect(panel).toContainText("Utilities");
+    await expect(panel).toContainText("9:45 AM ET · SIP scan unavailable");
+    await panel.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: test.info().outputPath(`radar-outside-${size}.png`) });
+    await panel.getByText(/10:30 AM ET/).click();
+    await expect(panel.getByRole("cell", { name: "−7.13 pp" })).toBeHidden();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  });
+}
