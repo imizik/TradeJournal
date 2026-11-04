@@ -435,6 +435,22 @@ async function investigationRequest<T>(path: string, init?: RequestInit): Promis
   return response.json();
 }
 
+/** A Main chat's name for people: "Main chat · Wed, Nov 4"; a later part of a long day adds "(continued)". */
+export function mainChatLabel(chat: { title: string; main_day?: string | null }) {
+  if (!chat.main_day) return chat.title;
+  const day = new Date(`${chat.main_day}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
+  return `Main chat · ${day}${/ · Part \d+$/.test(chat.title) ? " (continued)" : ""}`;
+}
+
+/** A plan card in one line: "Long calls · entry 95.90 · invalidation 92.30 · out by 15:30". The time stop is the
+ * card's own words; a bare clock time reads "out by 15:30". */
+export function tradePlanLine(plan: TradePlan) {
+  const side = `${plan.direction} ${plan.instrument}`;
+  const stop = plan.time_stop?.trim();
+  return [side[0].toUpperCase() + side.slice(1), `entry ${plan.entry_trigger.price.toFixed(2)}`,
+    `invalidation ${plan.invalidation.price.toFixed(2)}`, stop && (/^\d{1,2}:\d{2}$/.test(stop) ? `out by ${stop}` : stop)].filter(Boolean).join(" · ");
+}
+
 export const openDailyMain = (signal?: AbortSignal) => request<Investigation>("/copilot/main-chat", { method: "POST", signal });
 export const appendMainExchange = (id: string, fields: InvestigationFields) =>
   request<Investigation>(`/copilot/main-chat/${encodeURIComponent(id)}/exchange`, { method: "POST", body: JSON.stringify(fields) });

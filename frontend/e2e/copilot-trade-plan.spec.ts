@@ -98,7 +98,7 @@ async function lab(page: Page, server: Server, { alertsSupported = true, default
     ];
     return route.fulfill({ json: { state: "ok", symbol: "NBIS", unavailable: [], recent_days: 7, count: rows.length, rows } });
   });
-  await page.goto("/copilot-lab?view=briefing");
+  await page.goto("/copilot-lab?view=new");
 }
 
 /** The Context pane's Timeline tab, opened. */
@@ -609,8 +609,11 @@ test("a Main plan keeps option sizing inputs and an in-flight follow-up survives
   await expect(page.getByText("Saving…", { exact: true })).toBeVisible();
   await box.fill("Follow up after lunch");
   release();
-  await expect(page.getByRole("heading", { name: successor.title })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Main chat · Sat, Oct 24 (continued)" })).toBeVisible();
   await expect(box).toHaveValue("Follow up after lunch");
+  // The button carries the plan's levels, so the gist reads without opening it.
+  await expect(page.getByRole("button", { name: /Review NBIS plan in its own thread/ }))
+    .toContainText("Long calls · entry 95.90 · invalidation 92.30 · out by 15:30 if the entry has not worked");
   await page.getByRole("button", { name: /Review NBIS plan in its own thread/ }).click();
   const card = page.getByRole("region", { name: "Proposed trade plan" });
   await card.getByLabel("Contract").selectOption("Nov 13 '26 95C");

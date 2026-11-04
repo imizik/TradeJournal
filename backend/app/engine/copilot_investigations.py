@@ -260,7 +260,8 @@ def main_chat(db: Session, day: date) -> dict:
 
 
 def main_history(db: Session, before: datetime | None = None) -> list[dict]:
-    query = select(CopilotInvestigation).where(CopilotInvestigation.main_day.is_not(None))
+    # A day the Desk was only opened on has an empty segment; the archive lists days with something said.
+    query = select(CopilotInvestigation).where(CopilotInvestigation.main_day.is_not(None), CopilotInvestigation.transcript_json != "[]")
     if before:
         query = query.where(CopilotInvestigation.created_at < before)
     return [summary(row) for row in db.exec(query.order_by(CopilotInvestigation.created_at.desc()).limit(30))]

@@ -40,7 +40,7 @@ const meta = (id: string, title: string) => ({ id, source: "copilot", title, sym
 const summary = (record: Record_) => ({ ...record, message_count: record.transcript.length });
 const cards = (server: Server) => server.records.get(INV)!.transcript.flatMap((m) => m.proposals ?? []);
 
-async function lab(page: Page, server: Server, path = "/copilot-lab?view=briefing") {
+async function lab(page: Page, server: Server, path = "/copilot-lab?view=new") {
   const post = (path: string, route: Route) => server.posts.push({ path, body: route.request().postDataJSON() });
   await page.route("**/copilot/status", (route) => route.fulfill({ json: STATUS }));
   await page.route("**/copilot/threads", (route) => route.fulfill({ json: THREADS }));

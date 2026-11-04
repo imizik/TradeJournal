@@ -161,7 +161,7 @@ test("daily Main reopens across devices, keeps drafts in their tab and opens ear
     for (const chat of [prior, today]) await p.route(`**/copilot/investigations/${chat.id}`, route => route.fulfill({ json: chat }));
     await p.route("**/copilot/chat", route => { sends++; return route.abort(); });
     await p.goto("/copilot-lab");
-    await expect(p.getByRole("heading", { name: today.title })).toBeVisible();
+    await expect(p.getByRole("heading", { name: "Main chat · Fri, Oct 23" })).toBeVisible();
     await expect(p).toHaveURL(`/copilot-lab?thread=${today.id}`);
   }
   await fixture(page);
@@ -176,22 +176,27 @@ test("daily Main reopens across devices, keeps drafts in their tab and opens ear
     await mobile.getByRole("link", { name: "Today’s briefing", exact: true }).click();
     await expect(mobile.getByRole("button", { name: "What matters right now?" })).toBeVisible();
   } finally { await phone.close(); }
+  await expect(page.getByRole("link", { name: "Main chat", exact: true }).first()).toHaveAttribute("aria-current", "page");
   await page.getByRole("link", { name: "Today’s briefing", exact: true }).click();
   await expect(page.getByRole("button", { name: "What matters right now?" })).toBeVisible();
+  // The briefing has no message box of its own: it points to Main chat, and marks itself as the open view.
+  await expect(page.getByTestId("briefing-to-main")).toContainText("Ask in Main chat →");
+  await expect(page.getByLabel("Message")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Today’s briefing", exact: true })).toHaveAttribute("aria-current", "page");
   await page.getByRole("link", { name: "Main chat", exact: true }).first().click();
   await expect(page.getByLabel("Message")).toHaveValue("Follow up after lunch");
   await page.getByText("Previous days", { exact: true }).click();
-  await page.getByRole("button", { name: prior.title }).click();
-  await expect(page.getByRole("heading", { name: prior.title })).toBeVisible();
+  await page.getByRole("button", { name: "Main chat · Thu, Oct 22" }).click();
+  await expect(page.getByRole("heading", { name: "Main chat · Thu, Oct 22" })).toBeVisible();
   await page.goBack();
-  await expect(page.getByRole("heading", { name: today.title })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Main chat · Fri, Oct 23" })).toBeVisible();
   await page.reload();
   await expect(page.getByLabel("Message")).toHaveValue("Follow up after lunch");
   await page.getByText("Previous days", { exact: true }).click();
-  await page.getByRole("button", { name: prior.title }).click();
-  await expect(page.getByRole("heading", { name: prior.title })).toBeVisible();
+  await page.getByRole("button", { name: "Main chat · Thu, Oct 22" }).click();
+  await expect(page.getByRole("heading", { name: "Main chat · Thu, Oct 22" })).toBeVisible();
   await page.getByRole("link", { name: "Main chat", exact: true }).first().click();
-  await expect(page.getByRole("heading", { name: today.title })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Main chat · Fri, Oct 23" })).toBeVisible();
   expect(sends).toBe(0);
   await page.screenshot({ path: test.info().outputPath("daily-main-desktop.png") });
 });
@@ -219,7 +224,7 @@ test("two devices keep their own exchange and feedback targets when both opened 
       return r.fulfill({ json: shared });
     });
     await p.goto("/copilot-lab");
-    await expect(p.getByRole("heading", { name: shared.title })).toBeVisible();
+    await expect(p.getByRole("heading", { name: "Main chat · Fri, Oct 23" })).toBeVisible();
   }
   const other = await browser.newContext({ baseURL: test.info().project.use.baseURL });
   try {

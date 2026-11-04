@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronRight, Home } from "lucide-react";
+import { ChevronDown, ChevronRight, Home, MessagesSquare } from "lucide-react";
 import { KBD, useJumpKey } from "@/components/copilot/CommandPalette";
 import PlanATrade from "@/components/copilot/PlanATrade";
 import PlanList from "@/components/copilot/PlanList";
@@ -236,8 +236,8 @@ function DayLine({ data, needYou }: { data: DeskThreads; needYou: number }) {
  * shows them (under Main, then each ticker: its subthreads when shown, else its newest); ``onSaved`` the saved conversations, for
  * the breadcrumb. All | Plans switches to the Plans view (``PlanList``) from the same read, remembered in this browser.
  */
-export default function ThreadRail({ actions, active = null, activeSymbol = null, main = false, onRows, onWalk, onSaved, phase = null, refresh = 0, toAnswer = 0, pick }: {
-  actions: HomeActions; active?: string | null; activeSymbol?: string | null; main?: boolean; onRows?(rows: DeskThread[]): void; onWalk?(ids: string[]): void;
+export default function ThreadRail({ actions, active = null, activeSymbol = null, main = false, mainChat = false, onRows, onWalk, onSaved, phase = null, refresh = 0, toAnswer = 0, pick }: {
+  actions: HomeActions; active?: string | null; activeSymbol?: string | null; main?: boolean; mainChat?: boolean; onRows?(rows: DeskThread[]): void; onWalk?(ids: string[]): void;
   onSaved?(saved: InvestigationSummary[]): void; phase?: ReactNode; refresh?: number; toAnswer?: number; pick(row: DeskThread): void;
 }) {
   const [data, setData] = useState<DeskThreads | null>(null);
@@ -352,11 +352,15 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
       </div>
       {view === "plans" ? data && <PlanList plans={data.plans} actions={actions} active={active} /> : (
         <>
-          <Link href="/copilot-lab" className="flex min-h-11 items-center rounded-md px-3 py-2 font-semibold hover:bg-secondary">Main chat</Link>
+          {/* Main chat and the briefing read as one pair; only the open one is filled in. */}
+          <Link href="/copilot-lab" aria-current={mainChat ? "page" : undefined} className={cn(box(mainChat), "flex items-center gap-1.5 border")}>
+            <MessagesSquare size={14} aria-hidden className="shrink-0 text-muted-foreground" />
+            <span className="font-semibold text-foreground">Main chat</span>
+          </Link>
           {/* Pinned where the list scrolls on its own: the conversations under it scroll away, Main does not. */}
           <section aria-label="Today’s briefing" className="z-10 bg-background lg:sticky lg:top-0 lg:shadow-[0_-12px_0_0_hsl(var(--background)),0_6px_0_0_hsl(var(--background))]">
             <button type="button" onClick={() => { setOpened(null); mark(radar); actions.home(); }} aria-current={main ? "page" : undefined}
-              title="The day, Radar hits to rate, alerts to answer and Review my week" className={cn(box(main), "border", !main && "bg-card")}>
+              title="The day, Radar hits to rate, alerts to answer and Review my week" className={cn(box(main), "border")}>
               <span className="flex items-center gap-1.5">
                 <Home size={14} aria-hidden className="shrink-0 text-muted-foreground" />
                 <span className="font-semibold text-foreground">Today’s briefing</span>

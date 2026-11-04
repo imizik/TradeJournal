@@ -321,7 +321,7 @@ test("phase actions follow the clock while the owner stays on the desk", async (
 });
 
 test("the conversation remains reachable with either, both, or neither side pane", async ({ page }) => {
-  await lab(page, { showThreads: false });
+  await lab(page, { showThreads: false, path: "/copilot-lab?view=new" });
   for (const width of [900, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     const threads = page.getByRole("button", { name: /^Threads(?:,|$)/ });

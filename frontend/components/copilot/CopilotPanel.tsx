@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type R
 import {
   AUTO_WEEK_REVIEW_TITLE, answerParts, asOfText, verdictPending, copilotStatus, pickedModel, rememberModel, pickedBackend, rememberBackend, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, saveOutcome, saveRating, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt, IMAGE_PREFILL, MAX_IMAGES, imageUrl, spokenText, uploadImage,
   type Backend, type Compare, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ProposalOutcome, type Rating, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates, type DrawnPlan,
-  appendMainExchange, mainPlanThread, openDailyMain, BRIEFING_TITLE, type TurnSource,
+  appendMainExchange, mainPlanThread, openDailyMain, tradePlanLine, BRIEFING_TITLE, type TurnSource,
 } from "@/lib/copilot";
 import Link from "next/link";
 import { chartDraftThread, draftKey, readDraft, rememberChartDraft, storeDraft, type CopilotDraft } from "@/lib/copilotDraft";
@@ -423,10 +423,10 @@ function savedFields(messages: LabMessage[], current: Current | null, symbol: st
  * ``desk`` (page only) is the Copilot desk's hand-off: its thread list opens investigations or asks through
  * ``command``, the open investigation goes up through ``onThread``, and its activity shows in the desk's inspector.
  */
-function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose, home, strip, look, desk, daily = false }: {
+function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose, home, strip, look, desk, daily = false, briefing = false }: {
   link?: PanelLink | null; variant?: "page" | "panel"; pageSymbol?: string; pageContext?: string; onClose?(): void;
   home?: (actions: HomeActions) => ReactNode; strip?: (actions: PanelActions) => ReactNode; look?: () => Promise<ChartLook>;
-  desk?: DeskHooks; daily?: boolean;
+  desk?: DeskHooks; daily?: boolean; briefing?: boolean;
 }) {
   const panel = variant === "panel";
   const [openingMain, setOpeningMain] = useState(daily || !!link?.investigation);
@@ -796,6 +796,11 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   }, [stopLanding, status?.enabled]); // the conversation renders once the status read says the lab is on
   // On the desk the idle message box is one line, in the same row as its tools; a word in it, or a tap, opens it.
   const small = !!desk && !composing && !draft.trim() && !attached.length && !attaching && !tray;
+  // The briefing view before any of its buttons starts a thread: no second message box beside Main chat. Once a
+  // button has put words in the box (Close the day), the box stays, even if they are cleared.
+  const [boxKept, setBoxKept] = useState(false);
+  if (briefing && !boxKept && (draft.trim() || messages.length || current)) setBoxKept(true);
+  const toMain = briefing && !!desk && !boxKept && !draft.trim() && !messages.length && !current && !attached.length && !busy;
   useEffect(() => {
     if (!composing) return;
     // After the click, not on the press: the page shifts as the box shrinks, and a click must land where it was aimed.
@@ -1341,7 +1346,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       })}
 
       <div className={panel ? "space-y-4 py-1" : "space-y-5 py-2"} aria-live="polite">
-        {!messages.length && !current?.findings && !openingMain && (
+        {!messages.length && !current?.findings && !openingMain && !toMain && (
           <p className="text-sm text-muted-foreground">
             {current?.main_day ? "What’s on your mind today?" : <>Ask about an opportunity, push back on the read, then ask for a plan. Try: “{symbol || "NBIS"} looks like it might recover. Is the whole group confirming?”</>}
           </p>
@@ -1366,7 +1371,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             {(message.tools ?? []).filter(t => t.lessons).slice(-1).map(t => <ExitLessons key={t.id} lessons={t.lessons!} />)}
             {(message.tools ?? []).filter(t => t.long_holds).slice(-1).map(t => <LongHolds key={t.id} holds={t.long_holds!} />)}
             {(!current?.main_day || i < current.message_count) && message.proposals?.map(proposal => proposal.kind === "trade_plan" && current?.main_day ? (
-              <button key={proposal.id} type="button" disabled={busy} className="my-2 min-h-11 rounded-md border px-3 text-sm"
+              <button key={proposal.id} type="button" disabled={busy} className="my-2 block min-h-11 max-w-full rounded-md border border-primary/30 bg-card px-3 py-2 text-left text-sm hover:bg-secondary disabled:opacity-50"
                 onClick={() => { const selected = ++selection.current; void mainPlanThread(current.id, proposal.id)
                   .then(plan => {
                     if (selected !== selection.current) return;
@@ -1375,7 +1380,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
                     if (message.tools?.length) setMessages(list => list.map(m => m.plan_context ? { ...m, tools: message.tools } : m));
                   })
                   .catch(() => { if (selected === selection.current) setSaveState({ state: "error", message: "Could not open that plan thread. Try again." }); }); }}>
-                Review {proposal.symbol} plan in its own thread →
+                <span className="block font-medium text-foreground">Review {proposal.symbol} plan in its own thread →</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">{tradePlanLine(proposal)}</span>
               </button>
             ) : proposal.kind === "trade_plan" ? (
               <TradePlanCard key={proposal.id} plan={proposal} investigationId={current?.id ?? null} origin={origin} drawn={drawn}
@@ -1437,7 +1443,13 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       {/* One box: (on the desk, what the conversation is about,) the text, then a toolbar inside it. The text area gets the
           full width at every size, even in a narrow dock; a phone desk keeps attach and read-aloud behind "+". */}
       {lookOnSend.current && !look && <p className="text-xs text-muted-foreground">Your chart context is in the draft. Send from Charts to include its image.</p>}
-      <form onSubmit={e => { e.preventDefault(); void send(draft); }}
+      {/* The briefing has no message box of its own until one of its buttons starts a thread: questions go to Main chat. */}
+      {toMain ? (
+        <div data-testid="briefing-to-main" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-card px-3 py-2.5 text-sm">
+          <span className="text-muted-foreground">Questions about your day go in Main chat.</span>
+          <Link href="/copilot-lab" className="inline-flex min-h-11 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 sm:min-h-8">Ask in Main chat →</Link>
+        </div>
+      ) : <form onSubmit={e => { e.preventDefault(); void send(draft); }}
         className={cn("rounded-xl border bg-background transition-colors focus-within:border-primary/50", small && "flex items-center")}>
         {desk && !current?.main_day && (
             <div className={cn("flex min-h-7 items-center px-2 text-xs", small ? cn("shrink-0", !symbol && !scoping && "max-md:hidden") : "pt-1.5")}>
@@ -1478,9 +1490,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           {sendButton}
         </div>
         {pickerInput}
-      </form>
-      {desk && !small && <p className="px-1 text-[11px] text-muted-foreground">Research on read-only evidence. No orders: a plan, watch or revisit exists only once you confirm it.</p>}
-      {(voice.available || speak.available) && !small && (
+      </form>}
+      {desk && !small && !toMain && <p className="px-1 text-[11px] text-muted-foreground">Research on read-only evidence. No orders: a plan, watch or revisit exists only once you confirm it.</p>}
+      {(voice.available || speak.available) && !small && !toMain && (
         <div className="flex flex-wrap items-center justify-between gap-x-3">
           {spoken ? <span role="status" className="text-xs text-foreground">Heard you. Review the message, then Send.</span> : <span />}
           <span className={cn("flex flex-wrap items-center gap-x-3", desk && !tray && "max-md:hidden")}>{voice.setting}{speak.setting}</span>

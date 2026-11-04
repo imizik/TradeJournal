@@ -24,7 +24,7 @@ import ThreadRail from "@/components/copilot/ThreadRail";
 import { ScalpShortlistNudge } from "@/components/ScalpShortlistPanel";
 import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
-import { BRIEFING_TITLE, WHAT_MATTERS_PROMPT, copilotLabHref, type InvestigationSummary } from "@/lib/copilot";
+import { BRIEFING_TITLE, WHAT_MATTERS_PROMPT, copilotLabHref, mainChatLabel, type InvestigationSummary } from "@/lib/copilot";
 import { afterClose, deskSymbolThread, needingCount, nyDay, saveHorizon, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import styles from "./CopilotLab.module.css";
@@ -72,13 +72,13 @@ function typing(target: EventTarget | null) {
  * While the lab is off only the conversation shows, saying so. ⌘K (Ctrl+K) or Jump to… opens the palette; while not
  * typing, J / K open the next or previous thread, N starts a plan, [ toggles Threads and ] toggles Context.
  */
-export default function CopilotLab({ link = null, close = false, daily = false, briefing = false }: { link?: PanelLink | null; close?: boolean; daily?: boolean; briefing?: boolean }) {
+export default function CopilotLab({ link = null, close = false, daily = false, briefing = false, fresh = false }: { link?: PanelLink | null; close?: boolean; daily?: boolean; briefing?: boolean; fresh?: boolean }) {
   const on = useCopilotOn();
   const router = useRouter();
   const navFolded = useFoldedNav();
   const session = useDeskSession(on);
   // A deep link (a ping, a Radar row, a chip) opens on its conversation, so a phone's composer is on the first screen.
-  const [tab, setTab] = useState<DeskTab>(link || daily || briefing ? "thread" : "now");
+  const [tab, setTab] = useState<DeskTab>(link || daily || briefing || fresh ? "thread" : "now");
   const [command, setCommand] = useState<DeskCommand | null>(null);
   const [thread, setThread] = useState<DeskThreadRef | null>(null);
   const [rows, setRows] = useState<DeskThread[]>([]);
@@ -336,6 +336,8 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
   // (a deep link naming a symbol waits for its thread instead).
   const day = thread ? !thread.symbol : !link?.symbol;
   const main = day && !arming && !closeStep;
+  const onMainChat = !!thread?.mainDay || (!thread && daily && !command);
+  const onBriefing = !!main && ((!thread && briefing) || thread?.title === BRIEFING_TITLE);
   // A deep link naming a symbol shows its Context by the symbol until a conversation is saved, then by that conversation.
   const linkSymbol = link?.symbol;
   const context = useMemo(() => thread ?? (linkSymbol ? deskSymbolThread(linkSymbol) : null), [thread, linkSymbol]);
@@ -355,8 +357,11 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
         {on && <ScalpShortlistNudge />}
         {on && (
           <div className={styles.barActions}>
-            <Link href="/copilot-lab" className="inline-flex min-h-11 items-center rounded-md border px-2 text-xs sm:min-h-8">Main chat</Link>
-            <Link href="/copilot-lab?view=briefing" className="inline-flex min-h-11 items-center rounded-md border px-2 text-xs sm:min-h-8">Today’s briefing</Link>
+            {/* The two daily places; the one on screen is marked, like the pane toggles beside them. */}
+            <Link href="/copilot-lab" aria-current={onMainChat ? "page" : undefined}
+              className={cn("inline-flex min-h-11 items-center rounded-md border px-2 text-xs sm:min-h-8", onMainChat ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground")}>Main chat</Link>
+            <Link href="/copilot-lab?view=briefing" aria-current={onBriefing ? "page" : undefined}
+              className={cn("inline-flex min-h-11 items-center rounded-md border px-2 text-xs sm:min-h-8", onBriefing ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground")}>Today’s briefing</Link>
             <button type="button" onClick={toggleThreads} aria-pressed={threadsShown}
               aria-label={`Threads${!phaseAction && needYouCount > 0 ? `, ${needYouCount} need you` : ""}`} title="Show or hide the thread list ( [ )"
               className={cn(styles.paneToggle, "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground", threadsShown && "bg-secondary")}>
@@ -393,7 +398,7 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
       <div className={styles.panes}>
         {on && (
           <aside aria-label="Threads" className={styles.rail}>
-            <ThreadRail actions={actions} active={thread?.id ?? null} activeSymbol={thread ? thread.symbol : link?.symbol ?? null} main={main && ((!thread && briefing) || thread?.title === BRIEFING_TITLE)}
+            <ThreadRail actions={actions} active={thread?.id ?? null} activeSymbol={thread ? thread.symbol : link?.symbol ?? null} main={onBriefing} mainChat={onMainChat}
               pick={pick} onRows={setRows} onWalk={setWalk} onSaved={setSaved} refresh={refresh}
               toAnswer={(session.data?.to_answer?.alerts?.count ?? 0) + (session.data?.to_answer?.radar?.count ?? 0)}
               phase={fills.waiting.length > 0 && <FillsToLink count={fills.waiting.length} onStart={fills.start} />} />
@@ -402,7 +407,7 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
         <section aria-label="Conversation" className={styles.thread}>
           {on && thread?.mainDay && (
             <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
-              <h2 className="text-lg font-semibold">{thread.title}</h2><PreviousDays active={thread.id} open={actions.open} />
+              <h2 className="text-lg font-semibold">{mainChatLabel({ title: thread.title, main_day: thread.mainDay })}</h2><PreviousDays active={thread.id} open={actions.open} />
             </div>
           )}
           {on && !thread?.mainDay && (thread || briefing || link) && <Breadcrumb thread={thread} link={link} saved={saved} onMain={actions.home} />}
@@ -441,7 +446,7 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
               <>{fills.bar(thread.symbol)}<DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} {...barFor(thread.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
                 <ThreadAlertAnswers symbol={thread.symbol ?? null} rows={alertRows} /></>} />
           ) : null)}
-          <CopilotPanel variant="page" link={link} desk={hooks} daily={daily} />
+          <CopilotPanel variant="page" link={link} desk={hooks} daily={daily} briefing={briefing && !link && !close} />
         </section>
         {on && <aside aria-label="Context" className={styles.inspector}><Inspector thread={context} day={day} /></aside>}
       </div>
