@@ -218,25 +218,30 @@ class Ticket:
 
 
 def decide(db: Session, *, sender: str, source_id: str, kind: str, title: str, body: str, now: float,
-           anchor: str | None = None, symbol: str | None = None, trade_id: uuid.UUID | None = None) -> Ticket:
+           anchor: str | None = None, symbol: str | None = None, trade_id: uuid.UUID | None = None, new_only: bool = False) -> Ticket:
     """Send now, merge, or hold this ping; the decision is recorded once per (sender, source_id).
-    Never raises: when the policy cannot be read or written the answer is to send."""
+    new_only claims a short-lived alert once, including across restarts. It fails closed.
+    Other senders keep their own outboxes and fail open if the policy is unavailable."""
     try:
         return _decide(db, sender=sender, source_id=source_id, kind=kind, title=title, body=body, now=now,
-                       anchor=anchor, symbol=symbol, trade_id=trade_id)
+                       anchor=anchor, symbol=symbol, trade_id=trade_id, new_only=new_only)
     except Exception:  # noqa: BLE001 - the ping matters more than its bookkeeping
-        log.warning("Notification policy unavailable; sending %s from %s unjudged", kind, sender, exc_info=True)
+        log.warning("Notification policy unavailable for %s from %s", kind, sender, exc_info=True)
         try:
             db.rollback()
         except Exception:  # noqa: BLE001
             pass
+        if new_only:
+            return Ticket("hold", "Could not claim this alert.")
         return Ticket("send", "The notification policy could not be read, so the ping was sent unjudged.")
 
 
 def _decide(db: Session, *, sender: str, source_id: str, kind: str, title: str, body: str, now: float,
-            anchor: str | None, symbol: str | None, trade_id: uuid.UUID | None) -> Ticket:
+            anchor: str | None, symbol: str | None, trade_id: uuid.UUID | None, new_only: bool = False) -> Ticket:
     held = db.exec(select(PhonePing).where(PhonePing.sender == sender, PhonePing.source_id == source_id)).first()
     if held is not None:
+        if new_only:
+            return Ticket("hold", "Already judged.")
         if held.decision == "sent":
             return Ticket("send", held.reason or "", _appended(db, held), held.id)
         return Ticket("merge" if held.decision == "merged" else "hold", held.reason or "", "", held.id)

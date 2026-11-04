@@ -222,3 +222,20 @@ reservation survives model timeout/process death; uncertain completion is not
 retried. Interrupted jobs retain contexts and require an explicit linked
 assisted revision. Neither job failure nor disabled preparation changes the
 API-owned A2 watcher. See [the A3 contract](a3-implementation-contract.md).
+
+### SPY/QQQ first-pullback phone alert
+
+Set `FIRST_PULLBACK_ALERTS_ENABLED=true` on the private backend and restart it to
+enable this watcher. It uses the shared live Tradier chart feed, exchange
+calendar and configured Telegram or ntfy destination. With the flag off it
+performs no reads. It runs independently of an open chart or position.
+
+The watcher checks the first trend and pullback per ETF using the
+[frozen signal rules](../../research/notes/spy-qqq-scalp-v1/spec.md).
+It can notify on either ETF, including both if both confirm. It checks fresh
+completed candles from 09:47 to 10:59 New York time, allowing 30 seconds for
+the bar to settle. Each alert identifies CALL or PUT, the trigger close, the ETF
+stop at the pullback extreme, and a 1.5R target measured from the trigger close.
+The actual entry and option premium are unknown. Expired signals are skipped.
+The phone policy records a unique claim per ETF/day before sending. A crash
+after the claim or an uncertain send can lose a ping but cannot repeat it.
