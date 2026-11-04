@@ -11,6 +11,10 @@ stay on ntfy and never come here.
 which Telegram's extends) with the same at-most-once meaning on either transport. On Telegram ``more`` becomes extra
 link buttons beside Open, unless the ping has reply ``buttons``: then ``more`` holds ntfy's answer links for the same
 answers, and the buttons replace them. A picture whose text is too long for a photo caption goes as text alone.
+
+On Telegram every factual ping also gets a Why? button (``ask:<kind>``): a tap asks copilot about that ping's own text
+(``telegram_replies``). The AI-written summaries and the companion, which answer or ask for themselves, do not, and a
+ping that already has its own Why? (an open-trade alert's ``why:``) keeps just that one.
 """
 
 import logging
@@ -20,6 +24,14 @@ from app.engine import ntfy, ping_images, telegram
 log = logging.getLogger(__name__)
 
 SendError = ntfy.NtfyError
+NO_WHY = frozenset({"prep", "week_review", "day_replay", "evening_review", "companion_adopt", "companion_update"})
+
+
+def with_why(kind: str, buttons: tuple[tuple[str, str], ...]) -> tuple[tuple[str, str], ...]:
+    """``buttons`` plus a Why? for ``kind``, unless it is an AI summary or already has one."""
+    if kind in NO_WHY or any(data.startswith(("why:", "ask:")) for _, data in buttons):
+        return tuple(buttons)
+    return (*buttons, ("Why?", f"ask:{kind}"[:64]))
 
 
 def configured() -> bool:
@@ -35,7 +47,8 @@ def send(title: str, message: str, *, kind: str, path: str = "", buttons: tuple[
     """Send one ping of ``kind`` (the policy's kind, for the log); see the module docstring. ``reply_to`` (a Telegram
     message id) and ``open_label`` are Telegram's only: ntfy has no threads, and its Open is its own."""
     if telegram.configured():
-        options = {"path": path, "buttons": tuple(buttons), "priority": 4 if priority is None else priority,
+        # The ping's own answer buttons replace its answer links; the added Why? does not.
+        options = {"path": path, "buttons": with_why(kind, tuple(buttons)), "priority": 4 if priority is None else priority,
                    "links": () if buttons else tuple(ntfy_options.get("more", ())), "reply_to": reply_to, "open_label": open_label}
         if image is not None and telegram.caption_fits(title, message):
             try:
