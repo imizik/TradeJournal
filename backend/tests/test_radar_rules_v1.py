@@ -20,7 +20,7 @@ def test_v1_changes_only_the_spy_threshold_and_persistence():
                for f in radar_rules.Thresholds.__dataclass_fields__ if getattr(radar_rules.V0, f) != getattr(radar_rules.V1, f)}
     assert changed == {"version": ("radar-rules-v0", "radar-rules-v1"), "spy_relative_pct": (4.5, 4.0),
                        "persist_passes": (3, 2)}
-    assert list(radar_rules.VERSIONS) == ["radar-rules-v0", "radar-rules-v1"]
+    assert list(radar_rules.VERSIONS) == ["radar-rules-v0", "radar-rules-v1", "radar-rules-v2"]
 
 
 def test_v1_fires_a_pass_earlier_with_its_own_id_and_version():

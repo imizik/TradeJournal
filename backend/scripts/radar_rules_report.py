@@ -64,6 +64,8 @@ def match_key(event: dict) -> str:
 
 def outcome(event: dict, revisions: list[dict], last: str | None = None) -> str:
     """How the event went; ``last`` is the session's last recorded pass, so a too-recent event reads unresolved."""
+    if event.get("rule_version") == radar_rules.V2.version:
+        return "untracked"
     for r in revisions:
         if r["status"] in ("faded", "reversed"):
             late = _minutes(event["first_seen_at"], r["recorded_at"]) > QUICK_MINUTES
@@ -86,7 +88,9 @@ def variant(spec: str) -> radar_rules.Thresholds:
     return replace(radar_rules.V0, version=f"{radar_rules.RULE_VERSION}+{spec}", **values)
 
 
-def changes(t: radar_rules.Thresholds) -> list[tuple[str, object, object]]:
+def changes(t: radar_rules.Rules) -> list[tuple[str, object, object]]:
+    if isinstance(t, radar_rules.OpeningDrive):
+        return []  # separate detector, not a variant of the window thresholds
     return [(f.name, getattr(radar_rules.V0, f.name), getattr(t, f.name)) for f in fields(t)
             if f.name != "version" and getattr(t, f.name) != getattr(radar_rules.V0, f.name)]
 
@@ -99,10 +103,10 @@ class Session:
         for row in store.quotes(session_date=day):
             self.quotes.setdefault(row["pass_id"], {})[row["symbol"]] = row
         self.recorded = store.events(day)
-        self._replays: dict[radar_rules.Thresholds, list] = {}
+        self._replays: dict[radar_rules.Rules, list] = {}
         self.last = self.passes[-1]["started_at"] if self.passes else None
 
-    def replay(self, t: radar_rules.Thresholds) -> list[tuple[dict, list[dict]]]:
+    def replay(self, t: radar_rules.Rules) -> list[tuple[dict, list[dict]]]:
         if t not in self._replays:
             self._replays[t] = radar_rules.replay(self.universe, self.passes, self.quotes, t) if self.passes else []
         return self._replays[t]
@@ -177,7 +181,7 @@ def survives(event: dict, saved) -> bool:
                and abs(_minutes(e["first_seen_at"], event["first_seen_at"])) <= SURVIVE_MINUTES for e, _ in saved)
 
 
-def build_report(store: RadarStore, versions: list[radar_rules.Thresholds], sessions: list[str] | None = None,
+def build_report(store: RadarStore, versions: list[radar_rules.Rules], sessions: list[str] | None = None,
                  universe: dict | None = None, title: str = "Radar rules report") -> str:
     universe = universe or load_universe()
     days = sorted(sessions or store.sessions())
@@ -199,6 +203,10 @@ def build_report(store: RadarStore, versions: list[radar_rules.Thresholds], sess
 
     out += ["## Versions", "", "| Version | Thresholds |", "| --- | --- |"]
     for t in versions:
+        if isinstance(t, radar_rules.OpeningDrive):
+            out.append(f"| {_short(t.version)} | Opening drive: {t.open_relative_pct} pp vs SPY from open "
+                       f"and {t.five_minute_relative_pct} pp same way over 5 min |")
+            continue
         diff = changes(t)
         text = ", ".join(f"{n} {old} → {new}" for n, old, new in diff) if diff else (
             f"30-min window; vs SPY {t.spy_relative_pct}, vs sector {t.sector_relative_pct}, own move "
@@ -210,16 +218,21 @@ def build_report(store: RadarStore, versions: list[radar_rules.Thresholds], sess
     out += ["## Events per session", "",
             "| Session | Version | Events | vs SPY up / down | vs sector up / down | Group up / down | Revisions | Quick fade | Extended | Unresolved |",
             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+    def outcome_cells(rule, counts):
+        if isinstance(rule, radar_rules.OpeningDrive):
+            return "untracked | untracked | untracked"
+        return f"{counts['quick']} | {counts['extended']} | {counts['unresolved']}"
+
     totals = {n: Counter() for n in names}
     for s in data:
         for t, n in zip(versions, names):
             c = _counts(s.replay(t), s.last)
             totals[n].update({k: c[k] for k in ("events", "revisions", "quick", "extended", "unresolved")})
             out.append(f"| {s.label} | {n} | {c['events']} | {c['spy']} | {c['sector']} | {c['group']} | {c['revisions']} "
-                       f"| {c['quick']} | {c['extended']} | {c['unresolved']} |")
-    for n in names:
-        t = totals[n]
-        out.append(f"| **All** | {n} | {t['events']} | | | | {t['revisions']} | {t['quick']} | {t['extended']} | {t['unresolved']} |")
+                       f"| {outcome_cells(t, c)} |")
+    for t, n in zip(versions, names):
+        c = totals[n]
+        out.append(f"| **All** | {n} | {c['events']} | | | | {c['revisions']} | {outcome_cells(t, c)} |")
     out.append("")
 
     for t, n in zip(versions, names):

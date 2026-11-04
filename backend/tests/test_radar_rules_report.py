@@ -134,3 +134,10 @@ def test_no_ratings_says_so(tmp_path):
 def test_unknown_try_field_is_refused():
     with pytest.raises(SystemExit):
         report.variant("version=x")
+
+
+def test_opening_drive_revision_outcomes_are_untracked(store):
+    text = _build(store)
+    rows = [line for line in text.splitlines() if " | v2 | " in line and "untracked" in line]
+    assert len(rows) == 3 and all(line.endswith("| 0 | untracked | untracked | untracked |") for line in rows)
+    assert report.outcome({"rule_version": radar_rules.V2.version}, [], None) == "untracked"

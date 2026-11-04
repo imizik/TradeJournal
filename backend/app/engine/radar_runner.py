@@ -55,7 +55,7 @@ class RadarRunner:
                  quotes: Callable[[list[str]], dict] = tradier.get_quotes_once,
                  clock: Callable[[], float] = time.time, news: radar_news.NewsReader = radar_news.fetch,
                  premarket: radar_premarket.PremarketScanner | None = None, alerts: radar_alerts.RadarAlerts | None = None,
-                 rules: radar_rules.Thresholds = radar_rules.V0, dip: radar_dip.DipThresholds | None = None,
+                 rules: radar_rules.Rules = radar_rules.V0, dip: radar_dip.DipThresholds | None = None,
                  dip_alerts: bool = False, daily: Callable[[list[str], str], dict] = radar_dip.fetch_daily):
         self.store = store
         self.calendar = calendar
