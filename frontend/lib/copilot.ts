@@ -124,7 +124,7 @@ export type AnswerScorecard = {
 export const unavailable = (part: unknown): part is { state: "unavailable" } => !!part && typeof part === "object" && (part as { state?: string }).state === "unavailable";
 /** Where a question is asked from; recorded with its turn. */
 export type TurnSource = "desk" | "charts" | "radar" | "panel";
-export type LabMessage = { exchange_id?: string; role: "user" | "assistant"; content: string; rating?: Rating; savedMetrics?: SavedMetrics; images?: string[]; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics; turnId?: string;
+export type LabMessage = { plan_context?: true; exchange_id?: string; role: "user" | "assistant"; content: string; rating?: Rating; savedMetrics?: SavedMetrics; images?: string[]; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics; turnId?: string;
   /** The server's id for the evidence this answer read, sent with the next message; never saved. */
   carry?: string };
 
@@ -420,7 +420,7 @@ export type InvestigationSummary = {
   revision: number; message_count: number; created_at: string; updated_at: string;
 };
 export type Investigation = InvestigationSummary & {
-  transcript: { exchange_id?: string; role: "user" | "assistant"; content: string; proposals?: Proposal[]; rating?: Rating; metrics?: SavedMetrics }[]; evidence: EvidenceRef[]; findings: Findings | null;
+  transcript: { plan_context?: true; exchange_id?: string; role: "user" | "assistant"; content: string; proposals?: Proposal[]; rating?: Rating; metrics?: SavedMetrics }[]; evidence: EvidenceRef[]; findings: Findings | null;
 };
 export type InvestigationFields = Pick<Investigation, "title" | "symbol" | "status" | "conclusion" | "transcript" | "evidence">;
 
@@ -518,7 +518,7 @@ export async function uploadImage(file: Blob): Promise<SharedImage> {
  * tools it used and how old their data was. A proposal is not evidence, so propose_plan is left out of the evidence. */
 export function toSaved(messages: LabMessage[]): Pick<InvestigationFields, "transcript" | "evidence"> {
   return {
-    transcript: messages.map(m => ({ role: m.role, content: spokenText(m), ...(m.exchange_id ? { exchange_id: m.exchange_id } : {}),
+    transcript: messages.map(m => ({ role: m.role, content: spokenText(m), ...(m.exchange_id ? { exchange_id: m.exchange_id } : {}), ...(m.plan_context ? { plan_context: true } : {}),
       ...(m.role === "assistant" && m.rating ? { rating: m.rating } : {}),
       ...(m.role === "assistant" && savedMetrics(m) ? { metrics: savedMetrics(m) } : {}),
       // A card from the stream still carries its event type, which is not part of the proposal.

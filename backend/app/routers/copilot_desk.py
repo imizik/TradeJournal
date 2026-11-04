@@ -173,7 +173,7 @@ def _investigations(db: Session) -> dict:
     pages, so only the owner's own conversations bring theirs (``copilot_context._investigations``' rule)."""
     from app.engine import copilot_investigations
     from app.models import CopilotInvestigation
-    found = db.exec(select(CopilotInvestigation).where(CopilotInvestigation.status == "open")
+    found = db.exec(select(CopilotInvestigation).where(CopilotInvestigation.status == "open", col(CopilotInvestigation.main_day).is_(None))
                     .order_by(col(CopilotInvestigation.updated_at).desc()).limit(MAX_INVESTIGATIONS)).all()
     rows = []
     for r in map(copilot_investigations.summary, found):
@@ -200,7 +200,8 @@ def _drafts(db: Session) -> dict:
     rows = []
     for row in found:
         waiting = [card for message in json.loads(row.transcript_json) if message.get("role") == "assistant"
-                   for card in message.get("proposals") or () if card.get("kind") in DRAFT_KINDS and not card.get("outcome")]
+                   for card in message.get("proposals") or () if card.get("kind") in DRAFT_KINDS and not card.get("outcome")
+                   and not (row.main_day and card.get("kind") == "trade_plan")]
         if waiting:
             rows.append({"id": str(row.id), "symbol": row.symbol or waiting[0].get("symbol"), "title": row.title,
                          "cards": [_card_text(card) for card in waiting], "updated_at": row.updated_at.isoformat() + "Z"})

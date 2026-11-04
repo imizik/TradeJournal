@@ -1257,9 +1257,19 @@ def test_investigations_without_a_rating_or_metrics_still_load_and_bad_ones_are_
             assert r.status_code == 422, bad
 
 
-def test_daily_main_resolves_once_across_devices_rolls_over_and_keeps_archive(monkeypatch):
+def test_daily_main_resolves_once_across_devices_rolls_over_and_keeps_archive(monkeypatch, tmp_path):
     from concurrent.futures import ThreadPoolExecutor
     from app.routers import copilot as routes
+
+    from sqlmodel import Session, SQLModel, create_engine
+    engine = create_engine(f"sqlite:///{tmp_path / 'desk.db'}", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+
+    def isolated_session():
+        with Session(engine) as db:
+            yield db
+
+    monkeypatch.setitem(app.dependency_overrides, routes.get_session, isolated_session)
 
     class Clock(datetime):
         day_in_new_york = 1
@@ -1299,7 +1309,21 @@ def test_daily_main_resolves_once_across_devices_rolls_over_and_keeps_archive(mo
             assert plan["symbol"] == card["symbol"] and not plan["main_day"] and len(plan["transcript"]) == 2
             assert client.post(open_plan).json()["id"] == plan["id"]
             plans.append(plan["id"])
+        from datetime import UTC, timedelta
+        from app.routers.copilot_desk import _drafts
+        from app.engine import copilot_scorecard, jo_research
         assert len(set(plans)) == 2
+        with Session(engine) as db:
+            assert {r["id"] for r in _drafts(db)["rows"]} == set(plans)
+        for plan_id, m, outcome in zip(plans, kept["transcript"][1::2], ["dismissed", "confirmed"], strict=True):
+            assert client.put(f"/copilot/investigations/{plan_id}/proposals/{m['proposals'][0]['id']}/outcome",
+                              json={"state": outcome}).status_code == 200
+        with Session(engine) as db:
+            assert not _drafts(db)["rows"]
+            assert len(copilot_scorecard._answers(db, datetime.utcnow() - timedelta(hours=1), {})) == 2
+            audited = jo_research.audit_context(db, datetime.now(UTC))["plans"]
+            assert {r["plan_id"]: r["card"] for r in audited} == dict(zip(plans, ["dismissed", "confirmed"], strict=True))
+            assert len(audited) == 2
         assert client.put(url, json={"revision": kept["revision"], **exchange("NBIS")}).status_code == 409
         # Fill by text size in eight exchanges rather than seeding a different storage path.
         long_turn = {"title": "ignored", "transcript": [{"role": role, "content": "x" * 20000} for role in ["user", "assistant"]]}

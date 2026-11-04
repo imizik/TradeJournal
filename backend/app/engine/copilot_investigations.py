@@ -131,6 +131,7 @@ class AnswerMetrics(_Strict):
 
 
 class SavedMessage(_Strict):
+    plan_context: Literal[True] | None = None  # copied context for a plan; not another model answer
     exchange_id: str | None = Field(None, pattern=r"^[A-Za-z0-9_-]{8,64}$")  # replay key for a daily answer
     role: Literal["user", "assistant"]
     content: str = Field(max_length=20_000)
@@ -405,6 +406,14 @@ def append_main(db: Session, key: str, exchange: InvestigationFields) -> dict:
     # Model card IDs can repeat in different simultaneous turns. Their saved positions never move.
     for i, card in enumerate(incoming[1].get("proposals", [])):
         card["id"] = f"main-{len(old) + 1}-{i}"
+        if card.get("kind") == "trade_plan":
+            # Store the actionable draft once, under the identity that confirmations, alerts and the board use.
+            plan_key = uuid.uuid5(row.id, "plan:" + card["id"])
+            child = CopilotInvestigation(id=plan_key, title=f"{card['symbol']} plan · {row.main_day}", transcript_json="[]", evidence_json="[]")
+            _fill(child, InvestigationFields(title=child.title, symbol=card["symbol"], transcript=[incoming[0],
+                  {"role": "assistant", "content": incoming[1]["content"], "plan_context": True, "proposals": [card]}],
+                  evidence=exchange.evidence))
+            db.add(child)
     evidence += [{**e.model_dump(exclude_none=True), "message": len(old) + e.message} for e in exchange.evidence]
     try:
         fields = InvestigationFields(title=row.title, transcript=old + incoming, evidence=evidence)
@@ -426,29 +435,7 @@ def main_plan_thread(db: Session, key: str, proposal_id: str) -> dict:
     if not row.main_day:
         raise InvestigationError("not_found", "No such Main chat.")
     thread_id = uuid.uuid5(row.id, "plan:" + proposal_id)
-    existing = db.get(CopilotInvestigation, thread_id)
-    if existing:
-        return full(existing)
-    said = json.loads(row.transcript_json)
-    for index, message in enumerate(said):
-        card = next((c for c in message.get("proposals", []) if c["id"] == proposal_id and c["kind"] == "trade_plan"), None)
-        if not card or index == 0:
-            continue
-        # The plan's originating exchange and evidence, without duplicating another plan, answer rating or spend record.
-        answer = {"role": "assistant", "content": message["content"], "proposals": [card]}
-        refs = [{**e, "message": 1} for e in json.loads(row.evidence_json) if e["message"] == index]
-        fields = InvestigationFields(title=f"{card['symbol']} plan · {row.main_day}", symbol=card["symbol"],
-                                     transcript=[said[index - 1], answer], evidence=refs)
-        child = CopilotInvestigation(id=thread_id, title=fields.title, transcript_json="[]", evidence_json="[]")
-        _fill(child, fields)
-        db.add(child)
-        try:
-            db.commit()
-        except IntegrityError:
-            db.rollback()
-            child = _row(db, thread_id)
-        return full(child)
-    raise InvestigationError("not_found", "No such saved plan card.")
+    return full(_row(db, thread_id))
 
 
 def set_outcome(investigation_id: str | uuid.UUID, proposal_id: str, outcome: ProposalOutcome,

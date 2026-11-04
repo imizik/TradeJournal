@@ -712,8 +712,17 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         setDraftSlot(activeSlot.current);
       }
       if (current?.main_day) {
-        if (saved.id !== current.id) activateDraft(keyFor("", saved.id));
-        const server = fromSaved(saved);
+        if (saved.id !== current.id && slotAtSave) {
+          const nextSlot = keyFor("", saved.id);
+          const pending = readDraft(slotAtSave);
+          if (pending) { storeDraft(nextSlot, pending); storeDraft(slotAtSave, null); }
+          activateDraft(nextSlot);
+        }
+        const live = new Map(messages.filter(m => m.exchange_id).map(m => [m.exchange_id, m]));
+        const server = fromSaved(saved).map(m => {
+          const earlier = m.exchange_id && live.get(m.exchange_id);
+          return earlier ? { ...m, tools: earlier.tools, carry: earlier.carry } : m;
+        });
         const last = messages.at(-1)!;
         // Keep this turn's live evidence and follow-up context, but use the committed card IDs and answer index.
         const placed = server.findIndex(m => m.exchange_id === last.exchange_id);
@@ -1359,7 +1368,12 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             {(!current?.main_day || i < current.message_count) && message.proposals?.map(proposal => proposal.kind === "trade_plan" && current?.main_day ? (
               <button key={proposal.id} type="button" disabled={busy} className="my-2 min-h-11 rounded-md border px-3 text-sm"
                 onClick={() => { const selected = ++selection.current; void mainPlanThread(current.id, proposal.id)
-                  .then(plan => { if (selected === selection.current) open(plan); })
+                  .then(plan => {
+                    if (selected !== selection.current) return;
+                    open(plan);
+                    // The saved references do not contain premiums/level history. Retain the live tools in this tab.
+                    if (message.tools?.length) setMessages(list => list.map(m => m.plan_context ? { ...m, tools: message.tools } : m));
+                  })
                   .catch(() => { if (selected === selection.current) setSaveState({ state: "error", message: "Could not open that plan thread. Try again." }); }); }}>
                 Review {proposal.symbol} plan in its own thread →
               </button>
@@ -1374,7 +1388,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
                 onOutcome={outcome => recordOutcome(proposal.id, outcome)} />
             ))}
             <Sources tools={message.tools ?? []} metrics={message.metrics} />
-            {message.content && (!current?.main_day || i < current.message_count) && !(busy && i === messages.length - 1) && <RateAnswer rating={message.rating} onRate={next => rateAnswer(i, next)} />}
+            {message.content && !message.plan_context && (!current?.main_day || i < current.message_count) && !(busy && i === messages.length - 1) && <RateAnswer rating={message.rating} onRate={next => rateAnswer(i, next)} />}
           </div>
         ))}
         <div ref={end} />

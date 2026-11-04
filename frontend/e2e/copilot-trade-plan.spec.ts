@@ -582,3 +582,42 @@ test("a thin or unknown setup shows no record lines", async ({ page }) => {
   await expect(card.getByLabel("Invalidation (crosses)")).toHaveValue("92.3");
   await expect(card.getByLabel("Your record for this NBIS setup")).toHaveCount(0);
 });
+
+test("a Main plan keeps option sizing inputs and an in-flight follow-up survives segment rollover", async ({ page }) => {
+  const server: Server = { alerts: [], posts: [] };
+  await lab(page, server);
+  const initial = { ...record, symbol: null, main_day: "2026-10-24", title: "Main chat · 2026-10-24", message_count: 0, transcript: [] };
+  const successor = { ...initial, id: "55555555-5555-4555-8555-555555555555", title: initial.title + " · Part 2" };
+  let release!: () => void;
+  const wait = new Promise<void>(r => { release = r; });
+  await page.route("**/copilot/main-chat", route => route.fulfill({ json: initial }));
+  await page.route("**/copilot/chat", route => route.fulfill({ contentType: "text/event-stream", body: turnWith(PLAN, SIZED) }));
+  await page.route("**/main-chat/*/exchange", async route => {
+    const { transcript, evidence } = route.request().postDataJSON();
+    transcript[1].proposals[0].id = "main-1-0";
+    const part = { ...successor, message_count: 2, transcript, evidence };
+    await page.route(`**/investigations/${part.id}`, r => r.fulfill({ json: part }));
+    await page.route("**/main-chat/*/plans/main-1-0", r => r.fulfill({ json: { ...record,
+      transcript: [transcript[0], { ...transcript[1], plan_context: true }], evidence } }));
+    await wait;
+    return route.fulfill({ json: part });
+  });
+  await page.goto("/copilot-lab");
+  const box = page.getByLabel("Message");
+  await box.fill("Check the NBIS calls");
+  await box.press("Enter");
+  await expect(page.getByText("Saving…", { exact: true })).toBeVisible();
+  await box.fill("Follow up after lunch");
+  release();
+  await expect(page.getByRole("heading", { name: successor.title })).toBeVisible();
+  await expect(box).toHaveValue("Follow up after lunch");
+  await page.getByRole("button", { name: /Review NBIS plan in its own thread/ }).click();
+  const card = page.getByRole("region", { name: "Proposed trade plan" });
+  await card.getByLabel("Contract").selectOption("Nov 13 '26 95C");
+  await card.getByLabel("Risk $").fill("700");
+  await expect(card.getByLabel("Size it for me")).toContainText("$692 of premium");
+  expect(server.posts).toEqual([]);
+  await page.goBack();
+  await page.reload();
+  await expect(box).toHaveValue("Follow up after lunch");
+});

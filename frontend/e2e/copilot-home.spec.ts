@@ -187,6 +187,11 @@ test("daily Main reopens across devices, keeps drafts in their tab and opens ear
   await expect(page.getByRole("heading", { name: today.title })).toBeVisible();
   await page.reload();
   await expect(page.getByLabel("Message")).toHaveValue("Follow up after lunch");
+  await page.getByText("Previous days", { exact: true }).click();
+  await page.getByRole("button", { name: prior.title }).click();
+  await expect(page.getByRole("heading", { name: prior.title })).toBeVisible();
+  await page.getByRole("link", { name: "Main chat", exact: true }).first().click();
+  await expect(page.getByRole("heading", { name: today.title })).toBeVisible();
   expect(sends).toBe(0);
   await page.screenshot({ path: test.info().outputPath("daily-main-desktop.png") });
 });

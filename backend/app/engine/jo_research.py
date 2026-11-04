@@ -252,9 +252,11 @@ def audit_context(db: Session, now: datetime) -> dict:
             if message["role"] != "assistant":
                 continue
             lines = _lines(message["content"])
-            if "verdict" in lines:
+            if "verdict" in lines and not message.get("plan_context"):
                 words[lines["verdict"].removeprefix("Verdict:").strip().split(" ", 1)[0].strip("—-:")] += 1
             cards = [p for p in message.get("proposals") or () if p.get("kind") == "trade_plan"]
+            if row.main_day and cards:
+                continue  # the original counts as an answer; the ticker thread owns each plan and its outcome
             for card in cards:
                 outcome = card.get("outcome") or {}
                 fields = outcome.get("fields") or {}
