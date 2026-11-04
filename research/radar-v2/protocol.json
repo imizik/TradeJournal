@@ -1,0 +1,46 @@
+{
+  "study": "Historical Radar v2 search on #665's fixed roster, minute-end SIP clock and price snapshot.",
+  "design": ["2026-06-15", "2026-08-31"],
+  "confirm": ["2026-09-01", "2026-10-21"],
+  "units": "For each nonbenchmark stock and direction d (+1 or -1), all features below are signed by d. Returns are arithmetic percent returns, relative returns subtract the benchmark's return on the same interval (pp). No forward fill. P[t] is the last completed minute close, t=1 at 09:31 ET. Only completed regular-session minutes through t=390. First qualifying minute per stock/direction/session; unions emit once. Missing operands invalidate only their clause.",
+  "features": {
+    "G": "Relative opening gap vs SPY: previous split-comparable close to first regular-minute open; both first-minute bars required.",
+    "D": "Previous split-comparable close to current close vs SPY.",
+    "O": "First regular-minute open to current close vs SPY.",
+    "M5,M15": "Exact 5- and 15-minute trailing close-to-close relative moves vs SPY.",
+    "S15": "Exact trailing 15-minute move vs assigned sector ETF.",
+    "B": "At least one fixed group containing the stock has >=4 other members with M15 available, of whom >=75% have signed M15 >=0.5. Stock must independently show strength. No target credit for silent members.",
+    "V": "At minute t-1 volume was >=3 times the positive arithmetic mean of raw SIP share volume in that same minute on the previous 20 scheduled sessions. All 20 observations and the t-1 volume required. No zero imputation. Prior raw share counts are not split-normalized.",
+    "M1": "Exact trailing one-minute relative return vs SPY."
+  },
+  "clauses": {
+    "hold": "5 <= t <= 45 and G >= 2 and D >= 0.8*G and O >= -0.25",
+    "surge": "V and M1 >= 0.35 and M5 >= 0.75",
+    "sector": "S15 >= 1.25 and M15 >= 0.75",
+    "group": "B and M15 >= 1",
+    "reverse": "t <= 120 and G <= -2 and O >= 1.75 and M5 >= 0.5",
+    "drive": "t >= 5 and O >= 2 and M5 >= 0.5",
+    "day": "D >= 2.5",
+    "drift": "M15 >= 1.25 and M5 >= 0.4"
+  },
+  "candidates": {
+    "C01": "hold",
+    "C02": "surge",
+    "C03": "sector",
+    "C04": "group",
+    "C05": "reverse",
+    "C06": "drive",
+    "C07": "day",
+    "C08": "drift",
+    "C09": "surge AND sector",
+    "C10": "sector AND group",
+    "C11": "hold OR drive OR reverse",
+    "C12": "day OR drive",
+    "C13": "hold OR sector OR group OR surge",
+    "C14": "day OR drift OR reverse"
+  },
+  "labels": "Rank the top 20 absolute returns vs SPY, ties alphabetical after #665 rounding to four decimals. Close-to-close uses #665's split-comparable previous and raw daily close. Open-to-close uses raw daily open and raw daily close for both stock and SPY. Zero signed return cannot be caught. Daily outcome data never enters the detector. Hit = first stock flag in the target direction by 16:00, denominator 20/session. Positive shared lead = Movers first minute minus candidate first minute on a shared directional top-20 catch.",
+  "precision": "For each target definition separately: share of all emitted flags that either hit its directional top 20 or have signed excess return vs SPY >=2pp at exactly +60. Unavailable +60 never earns continuation credit. For v0 use all #665 events (including repeats and group events); groups earn no top-20 credit, and continuation is the equal-weight mean of all flagged members. Movers uses #665 first appearance per symbol/side. Distinct top-20 catches counted only once. Report all flags/session, and signed mean and positive fraction at +30/+60/+120 with scored denominators; missing exact endpoint or outside session excluded only from that horizon.",
+  "selection": "Compute F1 separately per label from pooled hit rate and precision as defined above (zero if either zero), rank descending by the smaller F1, then larger mean F1, then ascending candidate ID. Commit the DESIGN top 3, in order, before opening CONFIRM. Freeze the DESIGN champion even on failed confirmation as an inactive research version. Run all candidates and baselines together once on CONFIRM; only the champion is the primary comparison. Runners-up are secondary and others descriptive. No reselection.",
+  "win": "On CONFIRM the champion must strictly exceed both v0 and Movers on F1 for each label to claim a balanced historical win. Separately say whether it exceeded both in hit rate on both labels. Timing and continuation are descriptive, not alternate success criteria. This is historical, observational and unadjusted for roster selection or prior publication of #665."
+}
