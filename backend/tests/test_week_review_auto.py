@@ -272,11 +272,11 @@ def test_the_fake_backend_reviews_the_week_end_to_end(monkeypatch):
 
 
 def test_a_held_ping_is_recorded_not_sent(engine, phone, monkeypatch):
-    monkeypatch.setenv("PING_DAILY_CAP", "0")
+    monkeypatch.setenv("PING_BUDGET_PREP", "0")
     reviews(engine, Clock(at("16:45")), Turn()).run()
     assert phone == []
     [row] = rows(engine)
-    assert row.delivery == "held" and "cap 0" in row.last_error
+    assert row.delivery == "held" and "0 pings" in row.last_error
     with Session(engine) as db:  # noqa: F811
         [ping] = db.exec(select(PhonePing)).all()
     assert (ping.sender, ping.kind, ping.decision) == ("week_review_auto", "week_review", "over_cap")

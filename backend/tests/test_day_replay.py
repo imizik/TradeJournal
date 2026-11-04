@@ -392,10 +392,10 @@ def test_off_by_default_on_a_closed_day_and_a_no_fill_day_sends_nothing(engine, 
 
 def test_a_held_ping_is_recorded_and_not_sent(engine, storage, monkeypatch):
     monkeypatch.setenv("DAY_REPLAY_ENABLED", "true")
-    monkeypatch.setenv("PING_DAILY_CAP", "0")
+    monkeypatch.setenv("PING_BUDGET_PREP", "0")
     phone = Phone(monkeypatch)
     seed_day(engine)
     job(engine, Clock(at("16:20"))).run()
     (row,) = rows(engine)
-    assert row.delivery == "held" and "cap" in row.last_error and phone.sent == []
+    assert row.delivery == "held" and "spent" in row.last_error and phone.sent == []
     assert (storage / "2026-10-23" / "NBIS.png").exists()  # the clips are kept: the page still opens them

@@ -1,5 +1,5 @@
-"""The notification policy for the app's own phone pings (docs/copilot-lab.md § Phone ping policy): the daily cap with
-its priority order, the per-position quiet window (merge or suppress), the flag, the New York day, the fail-open gate;
+"""The notification policy for the app's own phone pings (docs/copilot-lab.md § Phone ping policy): independent per-kind budgets,
+priority order, the per-position quiet window (merge or suppress), the flag, the New York day, the fail-open gate;
 each copilot-side sender adopting it; and what the owner did after each ping, read from the fills and plan links."""
 
 import asyncio
@@ -137,7 +137,7 @@ def test_the_priority_order_and_what_the_cap_never_drops():
     assert policy.rank("companion_adopt") == policy.rank("nudge")
     assert policy.rank("week_review") == policy.rank("day_replay") == policy.rank("prep")
     assert policy.rank("radar_something") == 15  # an unknown kind goes last
-    assert policy.enabled() and policy.daily_cap() == 12 and policy.quiet_seconds() == 600 and policy.preopen_allowance() == 2
+    assert policy.enabled() and policy.quiet_seconds() == 600 and policy.preopen_allowance() == 2
     assert {k: policy.budget(k) for k in policy.BUDGETS} == {"interrupt": 4, "companion_update": 12, "nudge": 2, "prep": 1, "radar_event": 4,
                                                              "radar_digest": 2, "thesis_watch": 2, "research": 1}
     assert policy.budget("companion_adopt") == 2
@@ -157,7 +157,7 @@ def test_a_pattern_interrupt_ranks_below_the_one_hour_alert_and_has_its_own_budg
         assert decide(db, "nudge", "n0", anchor="p1").held  # merged into the interrupt still being sent
 
 
-def test_each_low_kind_spends_only_its_own_budget_and_the_ceiling_holds_the_rest(engine):
+def test_each_low_kind_spends_only_its_own_budget_without_a_shared_ceiling(engine):
     with Session(engine) as db:
         for i in range(4):
             assert decide(db, "radar_event", f"r{i}", anchor=f"sym-{i}").action == "send"
@@ -172,16 +172,16 @@ def test_each_low_kind_spends_only_its_own_budget_and_the_ceiling_holds_the_rest
         assert decide(db, "week_review", "w1", anchor=None).reason == "Not sent: The prep and review pings' 1 ping for today is spent."
         assert decide(db, "research", "q1", anchor=None).action == "send"
         assert decide(db, "research", "q2", anchor=None).reason == "Not sent: Research's 1 ping for today is spent."
-        for i in range(3):  # 9 sent; the ceiling of 12 holds the time stop and one-hour alerts too
+        for i in range(3):  # other traffic cannot consume Radar or position capacity
             assert decide(db, "hold_hour", f"h{i}", anchor=f"p{i}").action == "send"
-        assert decide(db, "radar_digest", "d2", anchor=None).reason == "Not sent: 12 pings already went out today (cap 12)."
-        assert decide(db, "time_stop", "t1", anchor="p-t1").action == "hold"
-        assert decide(db, "expiry_eve", "e1", anchor="p-e1").action == "hold"
-        for kind in ("giveback", "invalidation", "expiry_final", "evening_review"):  # never over the ceiling
+        assert decide(db, "radar_digest", "d2", anchor=None).action == "send"
+        assert decide(db, "time_stop", "t1", anchor="p-t1").action == "send"
+        assert decide(db, "expiry_eve", "e1", anchor="p-e1").action == "send"
+        for kind in ("giveback", "invalidation", "expiry_final", "evening_review"):  # no shared ceiling
             assert decide(db, kind, f"top-{kind}", anchor=f"p-{kind}" if kind != "evening_review" else None).action == "send"
     decisions = [(r.kind, r.decision) for r in rows(engine)]
     assert decisions.count(("radar_event", "sent")) == 4 and ("evening_review", "sent") in decisions
-    assert sum(d == "sent" for _, d in decisions) == 16 and sum(d == "over_cap" for _, d in decisions) == 7
+    assert sum(d == "sent" for _, d in decisions) == 19 and sum(d == "over_cap" for _, d in decisions) == 4
 
 
 def test_the_position_companion_adopts_on_the_nudge_budget_and_updates_on_its_own(engine, monkeypatch):
@@ -200,16 +200,16 @@ def test_the_position_companion_adopts_on_the_nudge_budget_and_updates_on_its_ow
         assert decide(db, "companion_update", "u14", anchor="p-q").reason.startswith("Merged into the give-back ping")
 
 
-def test_companion_updates_never_fill_the_ceiling_for_another_kind(engine, monkeypatch):
+def test_companion_updates_and_other_kinds_have_independent_budgets(engine, monkeypatch):
     with Session(engine) as db:
         for i in range(12):
             assert decide(db, "companion_update", f"u{i}", anchor=f"p-u{i}").action == "send"
         for kind in ("time_stop", "entry", "hold_hour", "expiry_eve"):  # ranked above the companion: not crowded out
             assert decide(db, kind, f"x-{kind}", anchor=f"p-{kind}").action == "send"
         assert decide(db, "radar_event", "r1", anchor="s-1").action == "send"  # nor is Radar: no October 29 again
-        # It counts toward the ceiling only for itself: 17 sent, cap 12.
+        # Raising its own budget permits another update, regardless of total traffic.
         monkeypatch.setenv("PING_BUDGET_COMPANION_UPDATE", "40")
-        assert decide(db, "companion_update", "u12", anchor="p-u12").reason == "Not sent: 17 pings already went out today (cap 12)."
+        assert decide(db, "companion_update", "u12", anchor="p-u12").action == "send"
 
 
 def test_before_the_open_the_budgeted_kinds_share_the_pre_open_allowance(engine, monkeypatch):
@@ -330,12 +330,12 @@ def test_the_flag_off_passes_everything_through_but_still_records(engine, monkey
     assert policy.enabled()
 
 
-def test_the_cap_counts_a_new_york_day_not_a_utc_one(engine):
+def test_budgets_count_a_new_york_day_not_a_utc_one(engine):
     with Session(engine) as db:
-        for i in range(12):  # 19:00 New York is 23:00 UTC
-            assert decide(db, "hold_hour", f"h{i}", anchor=f"p{i}", now=at("19:00") + i).action == "send"
-        assert decide(db, "hold_hour", "late", anchor="p-late", now=at("20:30")).action == "hold"  # 00:30 UTC: still Wednesday in New York
-        assert decide(db, "hold_hour", "next", anchor="p-next", now=at("00:05", date(2026, 10, 22))).action == "send"
+        for i in range(2):  # 19:00 New York is 23:00 UTC
+            assert decide(db, "nudge", f"n{i}", anchor=f"p{i}", now=at("19:00") + i).action == "send"
+        assert decide(db, "nudge", "late", anchor="p-late", now=at("20:30")).action == "hold"
+        assert decide(db, "nudge", "next", anchor="p-next", now=at("00:05", date(2026, 10, 22))).action == "send"
     start, end = policy.day_bounds(at("20:30"))
     assert (start, end) == (utc(at("00:00")), utc(at("00:00", date(2026, 10, 22))))
 
@@ -344,18 +344,18 @@ def test_settings_are_read_from_the_environment(engine, monkeypatch):
     monkeypatch.setenv("PING_DAILY_CAP", "2")
     monkeypatch.setenv("PING_QUIET_MINUTES", "1")
     monkeypatch.setenv("PING_BUDGET_NUDGE", "0")
-    assert policy.daily_cap() == 2 and policy.quiet_seconds() == 60 and policy.budget("nudge") == 0
+    assert policy.quiet_seconds() == 60 and policy.budget("nudge") == 0
     with Session(engine) as db:
         assert decide(db, "nudge", "n1", now=at("10:00")).reason == "Not sent: Plan nudges' 0 pings for today are spent."
         assert decide(db, "hold_hour", "h1", anchor="p1", now=at("10:00")).action == "send"
         assert decide(db, "hold_hour", "h2", anchor="p2", now=at("10:00")).action == "send"
-        assert decide(db, "hold_hour", "h3", anchor="p3", now=at("10:00")).action == "hold"
+        assert decide(db, "hold_hour", "h3", anchor="p3", now=at("10:00")).action == "send"
         assert decide(db, "giveback", "g1", anchor="p1", now=at("10:00") + 30).action == "send"  # more important than the one-hour alert
         assert decide(db, "giveback", "g2", anchor="p1", now=at("10:00") + 45).action == "hold"  # its duplicate, 15 s later
         assert decide(db, "giveback", "g3", anchor="p1", now=at("10:02")).action == "send"  # the 1-minute window has passed
     monkeypatch.setenv("PING_DAILY_CAP", "lots")
     monkeypatch.setenv("PING_BUDGET_NUDGE", "some")
-    assert policy.daily_cap() == 12 and policy.budget("nudge") == 2
+    assert policy.budget("nudge") == 2
 
 
 def test_a_broken_policy_table_sends_the_ping_unjudged(engine):
@@ -381,22 +381,24 @@ def position_alert(engine, kind, when="10:00", source_key="gmail:1", generation=
         return row.id
 
 
-def test_position_alerts_hold_a_one_hour_alert_over_the_cap_and_never_a_give_back(engine, phone, monkeypatch):
+def test_position_alerts_ignore_the_removed_shared_cap_and_send_once(engine, phone, monkeypatch):
     monkeypatch.setenv("PING_DAILY_CAP", "0")
     clock = Clock(at("10:01"))
     watcher = PositionAlerts(engine, Calendar(), clock=clock, quotes=lambda symbols: {})
     hold = position_alert(engine, "hold_hour")
-    give = position_alert(engine, "giveback", when="10:00")
+    give = position_alert(engine, "giveback", when="10:00", source_key="gmail:2")
     watcher.deliver()
     with Session(engine) as db:
         held, sent = db.get(PositionAlert, hold), db.get(PositionAlert, give)
-        assert held.delivery == "held" and "cap 0" in held.last_error and held.attempts == 0
+        assert held.delivery == "sent" and held.delivered_at is not None
         assert sent.delivery == "sent" and sent.delivered_at is not None
         pings = {p.source_id: p for p in db.exec(select(PhonePing)).all()}
-        assert pings[str(hold)].decision == "over_cap" and pings[str(give)].decision == "sent"
-        assert pings[str(give)].anchor == f"{ROTH}:gmail:1" and pings[str(give)].delivered_at is not None
+        assert pings[str(hold)].decision == "sent" and pings[str(give)].decision == "sent"
+        assert pings[str(give)].anchor == f"{ROTH}:gmail:2" and pings[str(give)].delivered_at is not None
         assert pings[str(give)].sender == "position_alerts" and pings[str(give)].symbol == "SNDK"
-    assert [title for title, _, _ in phone] == ["SNDK 10/23/26 230C: give-back triggered"]
+    watcher.deliver()
+    assert len(phone) == 2
+    assert "SNDK 10/23/26 230C: give-back triggered" in [title for title, _, _ in phone]
 
 
 def test_a_failed_send_keeps_its_decision_and_carries_a_merged_ping_on_the_retry(engine, monkeypatch):
@@ -444,8 +446,8 @@ def test_plan_nudges_and_link_pings_ride_the_same_policy(engine, phone, monkeypa
         assert nudge.delivery == "sent" and ping.kind == "nudge" and ping.anchor == anchor and ping.sender == "plan_nudges"
         assert ping.trade_id == trade_id and ping.delivered_at is not None
     assert phone[0][0] == "SNDK 10/23 230C: no plan yet"
-    # Over the cap: held with the reason, the nudge's own daily cap untouched.
-    monkeypatch.setenv("PING_DAILY_CAP", "1")
+    # Over its category budget: held with the reason, the sender's own cap untouched.
+    monkeypatch.setenv("PING_BUDGET_NUDGE", "1")
     with Session(engine) as db:
         db.add(PlanNudge(account_id=ROTH, source_key="gmail:other", trade_id=trade_id, ticker="SNDK", contract="SNDK 10/23/26 230C",
                          side="buy_to_open", contracts=2, price=310, opened_at=datetime.combine(WED, datetime.strptime("09:50", "%H:%M").time()),
@@ -454,7 +456,7 @@ def test_plan_nudges_and_link_pings_ride_the_same_policy(engine, phone, monkeypa
     nudges.deliver()
     with Session(engine) as db:
         held = db.exec(select(PlanNudge).where(PlanNudge.source_key == "gmail:other")).one()
-        assert held.delivery == "held" and held.last_error == "Not sent: 1 ping already went out today (cap 1)."
+        assert held.delivery == "held" and held.last_error == policy.budget_reason("nudge", 1)
     assert len(phone) == 1
 
 
@@ -510,8 +512,10 @@ def test_an_entry_trigger_without_a_position_is_anchored_to_the_symbol(engine, p
 
 
 def test_a_held_plan_ping_is_recorded_on_the_event_and_not_retried(engine, phone, monkeypatch):
-    monkeypatch.setenv("PING_DAILY_CAP", "0")
     with Session(engine) as db:
+        earlier = decide(db, "entry", "earlier-entry", anchor="symbol:NBIS", now=at("10:40"))
+        policy.delivered(db, earlier, at("10:40"))
+        db.commit()
         alert_id = create_alert(db, symbol="NBIS", price=95.9, reference=94.0, condition="crosses", interval=None, session="regular",
                                 source_kind="copilot", source_id=INV, label="NBIS entry", now=at("10:00"), plan_role="entry").id
     monitor = LevelAlertMonitor(engine, None, clock=lambda: at("10:42"))
@@ -521,7 +525,7 @@ def test_a_held_plan_ping_is_recorded_on_the_event_and_not_retried(engine, phone
     monitor.deliver()
     with Session(engine) as db:
         event = db.exec(select(LevelAlertEvent)).one()
-        assert event.delivery == "held" and "cap 0" in event.last_error and event.attempts == 0
+        assert event.delivery == "held" and "quiet window" in event.last_error and event.attempts == 0
     assert phone == []
 
 

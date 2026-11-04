@@ -47,7 +47,7 @@ const SESSION = {
     { kind: "decision", at: epoch("2026-10-23T14:44:00Z"), symbol: "NBIS", text: "NBIS · Holding" },
   ],
   time_stops: [{ symbol: "CRWV", at: epoch("2026-10-23T18:30:00Z"), clock: "14:30" }],
-  pings: { sent: 4, held: 1, cap: 12 }, prep: { at: epoch("2026-10-23T12:30:00Z"), line: "NBIS 100C expires Friday." },
+  pings: { sent: 14, held: 1, cap: null }, prep: { at: epoch("2026-10-23T12:30:00Z"), line: "NBIS 100C expires Friday." },
   indices: [{ symbol: "SPY", last: 580.1, change_pct: 0.42 }, { symbol: "QQQ", last: 500.2, change_pct: -0.31 }], quote_issue: null,
   sections: { hours: "ok", phase: "ok", fills: "ok", pings: "ok", radar: "ok", decisions: "ok", time_stops: "ok", prep: "ok", indices: "ok" },
 };
@@ -280,7 +280,7 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
     await expect(tape.getByTestId("session-now")).toHaveAttribute("style", /left: 23\.07/);
     await expect(tape.getByTestId("session-labels")).toHaveText("9:3011:0012:3014:0016:00");
     await expect(tape.getByTestId("briefing-numbers")).toHaveText(
-      "Positions1Needs you1Nearest triggerCRWV · 0.6% to entry 99.00Pings today4 of 12 · 1 held");
+      "Positions1Needs you1Nearest triggerCRWV · 0.6% to entry 99.00Pings today14 sent · 1 held");
     await expect(tape.getByTestId("session-facts")).toHaveText("Next: CRWV time stop 14:30 · Practicing: wait for the 15m close · 3 of 5 this week");
     // The desk bar: live, with the indices on a wide screen only.
     await expect(page.getByTestId("desk-status")).toContainText("Live");

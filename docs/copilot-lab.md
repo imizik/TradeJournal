@@ -307,7 +307,7 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   - **New since you looked**: Radar events since the last Radar visit,
     thesis-watch triggers fired today and today's pre-market prep.
   - **Held back**: pings the notification policy held today (merged, quiet
-    window or over the cap), with their text.
+    window or over a category budget), with their text.
   - **Your week so far**: this week's planned/total entries and the streak.
   - Then **Plan a trade** and **Review my week**.
 
@@ -863,7 +863,7 @@ one before the open or after the close sits faded at the edge), and the plan
 time stops still ahead as hollow amber ticks, amber being for what still needs
 you; then a numbers row: open positions and how many need a decision (from
 the thread list's rows), the nearest armed trigger (the first Near a trigger
-row, "CRWV · 0.6% to entry 99.00"), and pings sent today against the daily cap
+row, "CRWV · 0.6% to entry 99.00"), and counts of pings sent and held today
 (with how many were held); then one quiet line: **Next:** the nearest time
 stop, else the open (before it) or the close (during the session), and the
 practice goal's line. Before the open the strip waits (no marker) and
@@ -898,7 +898,7 @@ read, `GET /copilot/desk/session` (owner only, refused while the lab is off),
 once a minute while the page is visible, read once by the desk
 (`useDeskSession`) for its bar and the Briefing, composed in `copilot_desk.py` from readers
 that already exist: `day_replay.traded` (Webull left out), the notification
-policy's `PhonePing` rows and `daily_cap`, the Radar store's events for today,
+policy's `PhonePing` rows, the Radar store's events for today,
 `decision` day-journal entries, scheduled `PlanTimeStop` rows, `today._prep`
 and one `chart_feed.quote_rows` read of SPY, QQQ and VIX (the feed's index
 mapping). Under `to_answer` it adds the position alerts and Radar hits still
@@ -1915,14 +1915,11 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   it comes after early thesis-watch pings, which would otherwise spend both.
   A held ping's reason names
   the budget: "Not sent: Radar's 4 single pings for today are spent."
-- **Daily ceiling:** at most `PING_DAILY_CAP` (default 12) pings a New York day
-  across every kind (the companion's updates count toward it only for themselves). Priority order: last-day final > invalidation > give-back
-  > time stop (and the 90-minute last-day and day-before-expiry alerts) > entry
-  trigger > hold-hour > pattern interrupt > companion update > nudge/link/companion adopt > prep > evening review > Radar single >
-  Radar digest > thesis watch > research. The first three are never over the
-  ceiling; time stop, entry, hold-hour and the budgeted kinds are held once it
-  is reached. The evening review is never held, by the ceiling or the quiet
-  window: it is the ping that reports what was held.
+- **No shared daily ceiling:** categories spend only their own budgets. Position
+  alerts without a category budget remain subject to their sender's own firing,
+  delivery and expiry rules and the per-position quiet window. Early prep,
+  research and thesis traffic cannot spend Radar or position-alert capacity.
+  `PING_DAILY_CAP` is obsolete and ignored. The evening review is never held.
 - **Quiet window:** a second ping anchored to the same position within
   `PING_QUIET_MINUTES` (default 10) of one that was sent is not sent on its own:
   a different kind whose predecessor is still being resent (its send failed) is
@@ -2024,9 +2021,7 @@ long theses, reviewed weekly. Nothing here places, changes or suggests an order,
   most 80 words, with the plan's invalidation and the live option mark in the question. Saved as messages on the
   adopted investigation, so the desk shows them in the thread (and its Timeline lists each ping), and sent as a
   Telegram reply to the adopt message, so one thread holds the position, with **Closed it** / **Holding** (recorded
-  on the row, nothing else). Kind `companion_update`, ranked just below the one-hour alert, budget 12; it counts
-  toward the daily ceiling only for itself, so it never holds another kind (a busy day can therefore send more than
-  the ceiling: its pings plus up to 12 updates).
+  on the row, nothing else). Kind `companion_update`, ranked just below the one-hour alert, budget 12; its updates never consume another category's budget.
 - **Close.** When the exits bring the position to zero: one last turn writes the exit note (what the plan said,
   what he did, where the underlying and the option mark went), saved as the investigation's conclusion with status
   `closed`, and sent as the thread's last reply. It waits out the quiet window (so a give-back just before the sale
@@ -2093,8 +2088,7 @@ dropped. The policy kind is `interrupt`, below hold-hour, with its own budget
 (`PING_BUDGET_INTERRUPT`, default 4 a day); the quiet window is per position,
 so a plan nudge right after an interrupt for the same position yields to it,
 and so does a second interrupt (an add below cost) within 10 minutes. Up to 4
-interrupts a day count toward the shared ceiling of 12, so on a busy day they
-can leave fewer pings for Radar. A fill whose email arrives after a later
+interrupts a day spend only their own budget, leaving Radar capacity intact. A fill whose email arrives after a later
 entry's stays on the same position; known limit, as for position alerts: a
 message sent before that earlier fill arrived links the trade id of that
 moment, which the rebuild replaces, so that link no longer opens.
@@ -2530,7 +2524,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `COPILOT_TURN_BUDGET_USD` | `0.25` | Estimated API spend at which a turn stops between rounds (output is also capped at 4,000 tokens per round). A turn that may [search the web](#web-search) gets $0.15 more. |
 | `COPILOT_FALLBACKS` | on | Sends the server-side refusal fallback (`fallbacks: "default"`). `off` disables it. |
 | `ALERT_POLICY_ENABLED` | `true` | The [phone ping policy](#phone-ping-policy) for the app's own pings. `false` passes every ping through. |
-| `PING_DAILY_CAP` | `12` | Pings a New York day across every kind; last-day final, invalidation and give-back are never over it. |
+| `PING_DAILY_CAP` | ignored | Obsolete; there is no shared daily phone-ping ceiling. |
 | `PING_QUIET_MINUTES` | `10` | A second ping for the same position inside this window is merged or suppressed. |
 | `PREMARKET_PREP_ENABLED` | unset (off) | `true` sends the [morning brief](#pre-market-prep) ping on trading mornings (needs `COPILOT_ENABLED` and `NTFY_URL`). `PREMARKET_PREP_AT` (`HH:MM` New York, default `09:00`) sets its time. |
 | `WEEK_REVIEW_AUTO_ENABLED` | unset (off) | `true` runs [Review my week](#review-my-week) by itself once a week and pings it (needs `COPILOT_ENABLED` and `NTFY_URL`). `WEEK_REVIEW_AUTO_AT` (`HH:MM` New York, default `16:45`) sets its time on the week's last trading day. |

@@ -71,7 +71,7 @@ def replay(monkeypatch):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("ALERT_POLICY_ENABLED", "true")
     monkeypatch.setenv("PREMARKET_PREP_ENABLED", "true")
-    assert policy.daily_cap() == 12
+    monkeypatch.setenv("PING_DAILY_CAP", "0")  # obsolete settings cannot restore the shared cap
     with engine.connect() as connection:
         connection.exec_driver_sql("BEGIN")
         with Session(bind=connection, join_transaction_mode="create_savepoint") as db:
@@ -117,7 +117,7 @@ def test_gap_day_position_alerts_are_not_starved_by_other_kinds(replay):
 def test_gap_day_evening_review_is_immediate_even_after_the_cap(replay):
     rows, _, _ = replay
     evening = next(row for row in rows if row.kind == "evening_review")
-    assert sum(row.decision == "sent" and row.decided_at < evening.decided_at for row in rows) > policy.daily_cap()
+    assert sum(row.decision == "sent" and row.decided_at < evening.decided_at for row in rows) > 12
     assert evening.decision == "sent"
     assert evening.decided_at == evening.delivered_at == utc(at("16:30"))
 
@@ -130,9 +130,7 @@ def test_gap_day_budgets_quiet_window_and_retry_ledger(replay):
     for first, retried in retries:
         assert (first.id, first.action, first.reason, first.append) == (retried.id, retried.action, retried.reason, retried.append)
     spent = Counter(policy.canonical(row.kind) for row in rows if row.decision == "sent")
-    # Companion updates are themselves subject to the ceiling; earlier prep
-    # and thesis traffic can legitimately leave fewer than their own 12 slots.
-    assert spent["companion_update"] > 0
+    assert spent["companion_update"] == policy.budget("companion_update")
     for kind in policy.BUDGETS:
         assert spent[kind] <= policy.budget(kind)
     preopen = [row for row in rows if row.decided_at < utc(at("09:30")) and row.decision == "sent"]

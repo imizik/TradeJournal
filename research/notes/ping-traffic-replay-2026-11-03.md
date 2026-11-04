@@ -35,7 +35,7 @@ after 10 updates because two pre-open pings already counted toward their ceiling
 
 This is consistent with the current documented ceiling, but it fails the stronger
 requested guarantee that Radar and position alerts survive unrelated traffic.
-Policy changes require a separate owner decision. This PR deliberately leaves
+Policy changes require a separate owner decision. Replay-only PR #661 deliberately leaves
 the acceptance failures visible, without skips, xfails, cap increases or changes
 to `notification_policy.py`.
 
@@ -51,3 +51,11 @@ Run from `backend/`:
 ```sh
 python -m pytest -q tests/test_ping_traffic_replay.py tests/test_notification_policy.py
 ```
+
+## Follow-up: owner requested shared-cap removal
+
+The separate `codex/remove-shared-ping-cap` branch removes the shared ceiling,
+retains category budgets, pre-open allowance, quiet windows and retry semantics,
+and runs the same non-starvation acceptance assertions. The replay explicitly
+sets the obsolete `PING_DAILY_CAP=0` to prove it cannot re-enable starvation.
+The original findings above describe the unchanged policy in replay-only PR #661.

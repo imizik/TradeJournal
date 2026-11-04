@@ -1,5 +1,5 @@
 """The Briefing's session timeline (GET /copilot/desk/session): today's regular session, its fills, phone pings, Radar
-events and logged decisions, the time stops still ahead, the pings against the daily cap, the prep and SPY/QQQ/VIX, composed
+events and logged decisions, the time stops still ahead, the phone-ping counts, the prep and SPY/QQQ/VIX, composed
 from readers that already exist. Owner-only, refused while the lab is off, read-only. No network."""
 
 from datetime import UTC, datetime, timedelta
@@ -42,7 +42,7 @@ def test_a_quiet_day_is_the_session_and_the_indices(desk, quotes):  # noqa: F811
     assert (body["phase"], body["open"], body["close"], body["day"]) == ("regular", OPEN, CLOSE, "2026-10-21")
     assert body["now"] == at(289)  # 14:49
     assert (body["events"], body["time_stops"], body["prep"]) == ([], [], None)
-    assert body["pings"] == {"sent": 0, "held": 0, "cap": 12}
+    assert body["pings"] == {"sent": 0, "held": 0, "cap": None}
     assert body["indices"] == [{"symbol": "SPY", "last": 580.1, "change_pct": 0.42}, {"symbol": "QQQ", "last": 500.2, "change_pct": -0.31},
                                {"symbol": "VIX", "last": 16.9, "change_pct": 3.1}]
     assert body["sections"]["radar"] == "off" and set(body["sections"].values()) <= {"ok", "off"}
@@ -76,7 +76,7 @@ def test_the_days_events_in_time_order_and_the_time_stops_ahead(desk, engine, tm
     [radar] = [e for e in body["events"] if e["kind"] == "radar"]
     assert (radar["symbol"], radar["at"]) == ("MU", at(12) + 4) and radar["text"] == "Radar · MU vs sector"
     assert body["time_stops"] == [{"symbol": "NBIS", "at": at(330), "clock": "15:30"}]
-    assert body["pings"] == {"sent": 1, "held": 1, "cap": 12}
+    assert body["pings"] == {"sent": 1, "held": 1, "cap": None}
     assert body["prep"] == {"at": at(-90), "line": "NBIS 100C expires Friday."}
     with Session(engine) as db:
         assert len(db.exec(select(PhonePing)).all()) == 2  # read-only: no ping written
