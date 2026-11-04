@@ -150,7 +150,11 @@ test("a busy portfolio leaves attention visible until the owner asks for positio
 test("the full journal P&L fits its summary cell at a tablet width", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 820 });
   await page.goto("/");
-  await page.getByTestId("journal-details").locator("summary").first().click();
+  // The streamed disclosure can be attached while hidden; loading cards can then move it mid-click.
+  // Wait until it can receive focus and use native keyboard activation for this sizing test.
+  const summary = page.getByTestId("journal-details").locator(":scope > summary");
+  await expect(summary).toBeVisible();
+  await summary.press("Enter");
   const figure = page.getByLabel("Journal summary").getByText("+$1,019.00", { exact: true });
   await expect(figure).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
