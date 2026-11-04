@@ -19,6 +19,9 @@ A button's callback data is ``<verb>:<id>[:<answer>]``, at most 64 bytes:
 - ``why:<position alert id>``: one bounded copilot turn on the alert (``position_alerts.ask_context``, the configured
   backend and its turn and daily budgets), answered in the chat with the Verdict line and body cut to 1,500
   characters; with Copilot Lab off the reply says so. One turn runs at a time, and a message's Why? is asked once.
+- ``ask:<kind>``: the Why? ``phone.send`` adds to every other factual ping (Radar, thesis watch, research, plan and
+  level pings, interrupts): the same bounded turn, asked about the ping's own text, as a typed reply to it is. A
+  ping too old for Telegram to show its text again says so instead.
 
 A typed message is a question for copilot: one bounded turn, as Why? runs, answered as a reply to it. Sent as a
 reply to a ping, the ping is its context: a position alert's (found from the ping's ``fb:``/``why:``/``done:`` button) is
@@ -53,6 +56,7 @@ QUESTION_MAX = 1000
 HELP = ("I send TradeJournal's phone pings. Tap a ping's buttons to answer it, or type a question for copilot. "
         "Reply to a ping to ask about that alert.")
 BUSY = "Copilot is still answering the last question; ask again in a moment."
+WHY_QUESTION = "Why does this matter for me right now, and what should I check before acting?"
 FEEDBACK_LABELS = {"prompted_review": "Prompted review", "already_aware": "Already aware", "too_late": "Too late",
                    "not_useful": "Not useful"}
 RADAR_LABELS = {"useful": "Useful", "already_knew": "Already knew", "too_late": "Too late", "irrelevant": "Not useful"}
@@ -126,7 +130,7 @@ class Replies:
             from app.engine import position_companion
             companion_id, _, tail = rest.partition(":")
             reply, chosen = await asyncio.to_thread(position_companion.answer, self.engine, companion_id, *tail.partition(":")[::2])
-        elif verb == "why":
+        elif verb in ("why", "ask"):
             if message.get("message_id") in self._asked:  # once per message
                 reply, chosen = "Already asked; the answer comes in the chat.", None
             elif self._tasks:  # one turn at a time
@@ -134,7 +138,7 @@ class Replies:
             else:
                 self._asked.add(message.get("message_id"))
                 reply, chosen = "Asking copilot…", WHY
-                task = asyncio.create_task(self._why(rest, message))
+                task = asyncio.create_task(self._why(rest, message) if verb == "why" else self._ask_ping(message))
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
         elif verb == DONE:
@@ -227,6 +231,18 @@ class Replies:
             log.exception("Telegram Why? turn failed")
             text = "The copilot turn failed unexpectedly."
         await asyncio.to_thread(self._reply, message, text)
+
+    async def _ask_ping(self, message: dict) -> None:
+        """Why? on a ping that is not an open-trade alert: copilot on the ping's own text."""
+        try:
+            if not str(message.get("text") or message.get("caption") or "").strip():
+                answer = "Telegram no longer shows that ping's text to the bot; reply to it with your question instead."
+            else:
+                answer = await self.question_text(WHY_QUESTION, message)
+        except Exception:  # noqa: BLE001 - the owner hears that it failed, never silence
+            log.exception("Telegram Why? turn failed")
+            answer = "The copilot turn failed unexpectedly."
+        await asyncio.to_thread(self._reply, message, answer)
 
     async def _ask(self, text: str, message: dict) -> None:
         try:
@@ -352,7 +368,7 @@ class Replies:
             elif chosen == WHY:
                 edited.append([{"text": "✓ Why? (answer below)", "callback_data": done} if b is tapped else b for b in row])
             else:  # the answers give way to the saved one; Why? stays
-                kept = [b for b in row if str(b.get("callback_data", "")).startswith(("why:", DONE)) and b is not tapped]
+                kept = [b for b in row if str(b.get("callback_data", "")).startswith(("why:", "ask:", DONE)) and b is not tapped]
                 edited.append([{"text": f"✓ {chosen}", "callback_data": done}, *kept])
         if edited == rows:
             return

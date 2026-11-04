@@ -153,11 +153,22 @@ def test_phone_prefers_telegram_and_carries_buttons_and_links(bot, monkeypatch):
                                 more=(("Plan", "/plans/1"),))
     assert (receipt, state) == ("77", "attached")
     keyboard = json.loads(bot[0]["data"]["reply_markup"])["inline_keyboard"]
-    assert keyboard == [[{"text": "Open", "url": "https://journal.example/p"}, {"text": "Plan", "url": "https://journal.example/plans/1"}]]
+    # A factual ping gets Why?; the added button does not take the ping's links away.
+    assert keyboard == [[{"text": "Why?", "callback_data": "ask:nudge"}],
+                        [{"text": "Open", "url": "https://journal.example/p"}, {"text": "Plan", "url": "https://journal.example/plans/1"}]]
     # Reply buttons answer in place, so ntfy's answer links for the same answers are left off.
-    phone.send("T", "m", kind="giveback", path="/p", buttons=(("Useful", "rr:a:useful"),), more=(("Useful", "/radar?rate=useful"),))
-    assert bot[1]["json"]["reply_markup"]["inline_keyboard"] == [[{"text": "Useful", "callback_data": "rr:a:useful"}],
-                                                                [{"text": "Open", "url": "https://journal.example/p"}]]
+    phone.send("T", "m", kind="radar_event", path="/p", buttons=(("Useful", "rr:a:useful"),), more=(("Useful", "/radar?rate=useful"),))
+    assert bot[1]["json"]["reply_markup"]["inline_keyboard"] == [
+        [{"text": "Useful", "callback_data": "rr:a:useful"}, {"text": "Why?", "callback_data": "ask:radar_event"}],
+        [{"text": "Open", "url": "https://journal.example/p"}]]
+
+
+def test_why_goes_on_factual_pings_once_and_never_on_ai_summaries():
+    assert phone.with_why("thesis_watch", ()) == (("Why?", "ask:thesis_watch"),)
+    assert phone.with_why("giveback", (("Prompted", "fb:a:prompted_review"), ("Why?", "why:a"))) == (("Prompted", "fb:a:prompted_review"), ("Why?", "why:a"))
+    for kind in ("prep", "week_review", "day_replay", "evening_review", "companion_adopt", "companion_update"):
+        assert phone.with_why(kind, ()) == ()
+    assert len(phone.with_why("x" * 80, ())[0][1].encode()) <= telegram.CALLBACK_MAX
 
 
 def test_phone_sends_text_when_the_caption_is_too_long_or_the_picture_is_refused(bot, monkeypatch):
@@ -494,3 +505,65 @@ def test_a_card_the_chat_cannot_show_is_named_with_a_pointer_to_the_desk(case, m
     monkeypatch.setattr(copilot_spend, "recorded_turn", scripted)
     answer = run(telegram_replies.Replies(db_engine, call=Bot()).turn("Is this the top?", None))
     assert answer.startswith("Verdict: Wait.") and "only be confirmed on the desk: Is the AI trade topping?" in answer
+
+
+def ping(data: str, text: str | None, update_id=1, keyboard=None) -> dict:
+    update = tap(data, update_id=update_id, keyboard=keyboard)
+    if text is not None:
+        update["callback_query"]["message"]["text"] = text
+    return update
+
+
+def test_why_on_any_ping_asks_copilot_about_that_pings_text(case, monkeypatch):
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    bot = Bot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+    asked = []
+
+    async def turn(question, symbol):
+        asked.append((question, symbol))
+        return "Verdict: Watch. The group is moving with it."
+    monkeypatch.setattr(replies, "turn", turn)
+    keyboard = [[{"text": "Useful", "callback_data": "rr:9:useful"}, {"text": "Why?", "callback_data": "ask:radar_event"}]]
+    text = "Radar: AMD +4.2% vs SPY\nSemis leading; first seen 10:05"
+
+    async def go():
+        assert await replies.handle(ping("ask:radar_event", text, keyboard=keyboard)) == "ask"
+        await replies.handle(ping("ask:radar_event", text, update_id=2, keyboard=keyboard))  # a double tap: one turn
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    [(question, symbol)] = asked
+    assert question.startswith(text) and telegram_replies.WHY_QUESTION in question and symbol is None
+    [reply] = bot.named("sendMessage")
+    assert reply["text"].startswith("Verdict: Watch.") and reply["reply_parameters"]["message_id"] == 55
+    assert [a["text"] for a in bot.named("answerCallbackQuery")] == ["Asking copilot…", "Already asked; the answer comes in the chat."]
+    row = bot.named("editMessageReplyMarkup")[0]["reply_markup"]["inline_keyboard"][0]
+    assert row == [{"text": "Useful", "callback_data": "rr:9:useful"}, {"text": "✓ Why? (answer below)", "callback_data": "done:radar_event"}]
+
+
+def test_a_rated_radar_ping_keeps_its_why(case):
+    db_engine, _ = case
+    bot = Bot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+    keyboard = [[{"text": "Useful", "callback_data": "rr:00000000-0000-0000-0000-000000000000:useful"},
+                 {"text": "Why?", "callback_data": "ask:radar_event"}]]
+    replies._mark({"message_id": 55, "reply_markup": {"inline_keyboard": keyboard}}, keyboard[0][0]["callback_data"], "Useful")
+    row = bot.named("editMessageReplyMarkup")[0]["reply_markup"]["inline_keyboard"][0]
+    assert row[1] == {"text": "Why?", "callback_data": "ask:radar_event"}
+
+
+def test_why_on_a_ping_too_old_to_read_says_so(case, monkeypatch):
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    bot = Bot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+    monkeypatch.setattr(replies, "turn", lambda *a: pytest.fail("no turn without the ping's text"))
+
+    async def go():
+        await replies.handle(ping("ask:thesis_watch", None))
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    assert "no longer shows that ping's text" in bot.named("sendMessage")[0]["text"]

@@ -699,7 +699,8 @@ digests a session, and only a strong one is pinged on its own:
   one more tap and the latest rating wins. ntfy shows three actions: Open app,
   Useful, Not useful. With Telegram set up ([deploy/README.md](../deploy/README.md#telegram))
   the ping goes there instead, and Useful and Not useful are reply buttons that
-  save the rating in place without opening the app.
+  save the rating in place without opening the app; a Why? button beside them
+  (on digests too) asks copilot about the ping and answers in the chat.
 - **Only a new event pings.** Revisions (extended, faded, reversed) never do.
   Regular hours only: the recorder detects only inside the session and sends
   pending pings only on a pass.
