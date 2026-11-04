@@ -52,6 +52,7 @@ from sqlmodel import Session, select
 
 from app.engine import notification_policy, ntfy, phone, ping_images, radar_dip, telegram_replies
 from app.engine.chart_math import ET
+from app.engine.radar_movers import event_movers_tags
 from app.models import RadarAlert
 
 log = logging.getLogger(__name__)
@@ -68,6 +69,7 @@ DIGEST_WINDOW_MINUTES = 15
 DIGEST_LINES = 12
 SINGLE_MIN_RELATIVE_PCT = 7.0
 SINGLE_MIN_GROUP_PCT = 3.0
+ALSO_ON_MOVERS = "Also on Movers: "
 # Singles that count toward the hourly rule: waiting to be tried, or tried. A held or skipped single and an event that
 # rode a digest were never tried (attempts 0).
 SINGLE = (RadarAlert.kind != DIGEST) & or_(RadarAlert.delivery.in_(("pending", "sending")), RadarAlert.attempts > 0)
@@ -75,6 +77,10 @@ SINGLE = (RadarAlert.kind != DIGEST) & or_(RadarAlert.delivery.in_(("pending", "
 
 def enabled() -> bool:
     return os.environ.get("RADAR_ALERTS_ENABLED", "").lower() == "true"
+
+
+def lead_unseen() -> bool:
+    return os.environ.get("RADAR_ALERTS_LEAD_UNSEEN", "").lower() == "true"
 
 
 def _number(name: str, default: float) -> float:
@@ -181,11 +187,19 @@ def digest_line(event: dict) -> str:
 
 
 def digest_message(lines: list[str], since: str) -> tuple[str, str]:
-    """The digest's title and body: the lines newest first (the caller's order), at most ``DIGEST_LINES``, then +N more."""
+    """Newest-first detail lines (at most ``DIGEST_LINES``), then overflow and a short saved Movers footer."""
     title = f"Radar digest: {len(lines)} event{'' if len(lines) == 1 else 's'} since {since}"
-    shown = lines[:DIGEST_LINES]
-    more = len(lines) - len(shown)
-    return title, "\n".join(shown + ([f"+{more} more"] if more else []))
+    # A saved prefix preserves routing at alert-write time without changing the Radar store or schema.
+    unseen = [line for line in lines if not line.startswith(ALSO_ON_MOVERS)]
+    also = [line.removeprefix(ALSO_ON_MOVERS) for line in lines if line.startswith(ALSO_ON_MOVERS)]
+    shown = unseen[:DIGEST_LINES]
+    more = len(unseen) - len(shown)
+    if more:
+        shown.append(f"+{more} more")
+    if also:
+        shown.append(ALSO_ON_MOVERS + "; ".join(also[:DIGEST_LINES])
+                     + (f"; +{len(also) - DIGEST_LINES} more" if len(also) > DIGEST_LINES else ""))
+    return title, "\n".join(shown)
 
 
 def event_path(event_id: str, rating: str | None = None) -> str:
@@ -205,6 +219,7 @@ class RadarAlerts:
         """One outbox row per new event: a strong one is a single ping, the rest wait for the digest (``digest``, the
         body its digest line). An event already written is left alone."""
         now = self.clock()
+        tags = event_movers_tags(self.store, events) if lead_unseen() and self.store is not None else {}
         written = []
         with Session(self.engine) as db:
             for event in events:
@@ -214,7 +229,9 @@ class RadarAlerts:
                 alert = RadarAlert(event_id=event["event_id"], session_date=event["session_date"], rule_version=event["rule_version"],
                                    kind=event["kind"], subject=subject(event), title=title, body=body,
                                    first_seen_at=_utc(_parse(event["first_seen_at"])), detected_at=_utc(now))
-                if event["kind"] != radar_dip.KIND and not strong(event):
+                if tags.get(event["event_id"]) is True:
+                    alert.delivery, alert.body = DIGEST, ALSO_ON_MOVERS + subject(event)
+                elif event["kind"] != radar_dip.KIND and not strong(event):
                     alert.delivery, alert.body = DIGEST, digest_line(event)
                 elif reason := self._hour_reason(db, alert, now):
                     alert.delivery, alert.body, alert.last_error = DIGEST, digest_line(event), reason

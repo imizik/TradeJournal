@@ -39,7 +39,7 @@ def engine():
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
-    for name in ("RADAR_ALERTS_ENABLED", "RADAR_DIGEST_AT", "RADAR_SINGLE_MIN_RELATIVE_PCT", "RADAR_SINGLE_MIN_GROUP_PCT", "ALERT_APP_URL",
+    for name in ("RADAR_ALERTS_ENABLED", "RADAR_ALERTS_LEAD_UNSEEN", "RADAR_DIGEST_AT", "RADAR_SINGLE_MIN_RELATIVE_PCT", "RADAR_SINGLE_MIN_GROUP_PCT", "ALERT_APP_URL",
                  "COPILOT_ENABLED", "ALERT_POLICY_ENABLED", "PING_DAILY_CAP", "PING_QUIET_MINUTES", "PING_PREOPEN_ALLOWANCE",
                  "PING_BUDGET_RADAR_EVENT", "PING_BUDGET_RADAR_DIGEST"):
         monkeypatch.delenv(name, raising=False)
@@ -132,6 +132,65 @@ def test_without_alerts_the_recorder_stays_silent(tmp_path, engine, monkeypatch)
     sent_to(monkeypatch, sent)
     _runner(store, 37, None).run_once()
     assert len(store.events(DAY)) == 1 and sent == [] and rows(engine) == []
+
+
+@pytest.mark.parametrize("flag", [None, "false", "true"])
+def test_lead_unseen_routes_original_movers_to_digest_without_changing_detection(tmp_path, engine, monkeypatch, flag):
+    if flag is not None:
+        monkeypatch.setenv("RADAR_ALERTS_LEAD_UNSEEN", flag)
+    monkeypatch.setenv("RADAR_SINGLE_MIN_RELATIVE_PCT", "5")
+    monkeypatch.setenv("RADAR_DIGEST_AT", "14:00")
+    store = _store_with(tmp_path, 36)
+    sent = []
+    sent_to(monkeypatch, sent)
+    alerts = RadarAlerts(engine, store=store)
+    _runner(store, 37, alerts).run_once()
+    [event] = store.events(DAY)
+    [row] = rows(engine)
+    assert event["event_id"] == EVENT and "on_movers" not in event
+    assert store.detection_evidence()[0][37]["event_ids"] == [EVENT]
+    if flag == "true":
+        assert not sent and row.delivery == "digest" and row.body == "Also on Movers: AAA"
+        alerts.clock = lambda: at(270)
+        alerts.deliver()
+        assert sent[0]["title"] == "Radar digest: 1 event since the open"
+        assert sent[0]["body"] == "Also on Movers: AAA"
+    else:
+        assert row.delivery == "sent" and len(sent) == 1
+
+
+@pytest.mark.parametrize("flag", ["false", "true"])
+def test_unseen_events_keep_singles_and_digest_logic_and_lead_the_digest(engine, monkeypatch, flag):
+    monkeypatch.setenv("RADAR_ALERTS_LEAD_UNSEEN", flag)
+    monkeypatch.setattr(radar_alerts, "event_movers_tags", lambda store, events: {e["event_id"]: e["event_id"] == "listed" for e in events})
+    alerts = RadarAlerts(engine, store=object(), clock=Clock(at(15)))
+    events = [_event("unseen", "AAA", 10, relative=5), _event("listed", "BBB", 14, relative=5),
+              _event("single", "CCC", 15)]
+    written = alerts.record(events)
+    assert [r.delivery for r in written] == ["digest", "digest", "pending"]
+    alerts.clock = lambda: at(30)
+    digest = alerts.digest()
+    if flag == "true":
+        assert digest.body == "AAA up 5.0% vs SPY · 9:40 AM\nAlso on Movers: BBB"
+    else:
+        assert digest.body == "BBB up 5.0% vs SPY · 9:44 AM\nAAA up 5.0% vs SPY · 9:40 AM"
+
+
+@pytest.mark.parametrize("kind", ["relative_to_spy", "relative_to_sector", "group_move", "dip_turn"])
+def test_listed_events_never_get_singles_including_strong_groups_and_dips(engine, monkeypatch, kind):
+    monkeypatch.setenv("RADAR_ALERTS_LEAD_UNSEEN", "true")
+    monkeypatch.setattr(radar_alerts, "event_movers_tags", lambda store, events: {"e": True})
+    event = _event("e", "AAA", 10, kind=kind, group="Chips" if kind == "group_move" else None, median=4, same=5)
+    event["measures"].update(spy_relative_pct=8, low_change_pct=-5)
+    [row] = RadarAlerts(engine, store=object(), clock=Clock(at(10))).record([event])
+    assert row.delivery == "digest" and row.attempts == 0
+
+
+def test_digest_caps_unseen_lines_before_short_movers_footer():
+    lines = ["Also on Movers: TOP"] + [f"unseen-{i}" for i in range(15)] + ["Also on Movers: LOW"]
+    title, body = radar_alerts.digest_message(lines, "the open")
+    assert title == "Radar digest: 17 events since the open"
+    assert body.splitlines() == [f"unseen-{i}" for i in range(12)] + ["+3 more", "Also on Movers: TOP; LOW"]
 
 
 def test_startup_wires_alerts_only_when_switched_on(monkeypatch, tmp_path):

@@ -107,6 +107,24 @@ here; with no events it shows the empty state with coverage. Events whose
 `rule_version` is `radar-rules-v0` carry a small "v0 · provisional rules" tag,
 and dip-rule events (`radar-dip-v0`) a "dip · discovery rule" tag.
 
+The **Not on Movers** filter is on by default. Each row carries **On Movers**
+or **Not on Movers**, comparing the event's original evidence pass against
+`radar_movers.build_movers`'s top-10 leaders and laggards (either side counts).
+Stock-vs-sector events check the stock, not its benchmark ETF. Group events
+are on Movers only when every curated member is listed, including members
+not listed in the event's same-direction summary. This describes membership
+when first seen, not whether Movers had caught it at an earlier time.
+
+These are presentation annotations reconstructed from the original pass's
+quotes and frozen detector universe; neither event payloads nor detection
+receipts are rewritten. Legacy passes without a frozen universe use the
+current universe only if its version matches. If the original pass, quotes
+(including after retention pruning), SPY baseline or matching universe is
+unavailable, the tag says **Movers unavailable** and the row stays visible.
+Clearing the filter shows all rows; phone/chart links always show the linked
+event, even if it was on Movers. An all-filtered feed explains how to show it.
+The filter does not change the Movers panel, detection or outcome scoring.
+
 ## Alert rules (radar-rules-v0, provisional)
 
 `backend/app/engine/radar_rules.py` is pure arithmetic over recorded passes. After
@@ -664,6 +682,20 @@ written events to `backend/app/engine/radar_alerts.py`, on the `NTFY_URL` topic
 and `ALERT_APP_URL` position alerts use. Since October 29, 2026 (the day the
 shared ping cap held all twelve Radar pings) most events reach the phone in two
 digests a session, and only a strong one is pinged on its own:
+
+`RADAR_ALERTS_LEAD_UNSEEN` is **off by default**. With it off, single/digest
+routing is unchanged. With `RADAR_ALERTS_LEAD_UNSEEN=true`, newly written
+alert rows compare their event's original pass as above: **On Movers** events
+never get a single ping, including strong groups and dip events. They wait
+for a digest under one short **Also on Movers: AAA; BBB** footer. Other
+events retain today's strong-event/hourly/digest logic and lead the digest,
+newest first, up to 12 detail lines then `+N more`; the footer lists up to 12
+subjects then its own overflow count. An all-Movers digest contains only the
+footer. Unavailable comparisons retain existing alert routing. The decision
+is saved in the outbox body at write time, so toggling the switch does not
+reroute already-written rows. This does not enable alerts, activate a service,
+or modify `notification_policy.py`, the recorder, Radar store, frozen rules,
+or the live 20-session experiment's scoring.
 
 - **Digests:** at each `RADAR_DIGEST_AT` time (default `10:00,14:00` New York)
   one ping (policy kind `radar_digest`), `Radar digest: 5 events since the

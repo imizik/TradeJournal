@@ -86,6 +86,7 @@ def test_feed_serves_event_with_latest_status_and_default_session(api):
     [event] = body["events"]
     assert event["event_id"] == EVENT_ID and event["latest_status"] == "extended" and event["rating"] is None
     assert event["summary"] == FIXTURE["event"]["summary"]
+    assert event["on_movers"] is None  # the synthetic event's original pass 101 is not in this file
     assert api.client.get("/radar/feed?session=2026-10-19").json()["events"] == []
     assert api.client.get("/radar/feed?session=not-a-date").status_code == 422
 

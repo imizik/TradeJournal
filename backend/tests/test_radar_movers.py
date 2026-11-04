@@ -6,6 +6,7 @@ import pytest
 
 from app.engine.chart_math import ET
 from app.engine.radar_movers import build_movers as _build_movers
+from app.engine.radar_movers import event_movers_tags
 from app.engine.radar_store import RadarStore
 from app.main import app
 from app.routers import radar
@@ -196,3 +197,40 @@ def test_quote_outside_pass_is_omitted_and_nonfinite_reference_is_missing():
     quotes[4]['prev_close'] = float('inf')
     out = build_movers(UNIVERSE, quotes, None)
     assert set(out['missing']) == {'AAA', 'BBB', 'DDD'}
+
+
+def test_event_tags_use_original_pass_and_frozen_universe_without_writes(tmp_path):
+    store = RadarStore(tmp_path / "tags.sqlite")
+    universe = {"version": "radar-universe-v2", "symbols": [_etf("SPY")] + [_stock(f"S{i:02d}") for i in range(25)],
+                "groups": [{"name": "All listed", "members": ["S24", "S00"]},
+                           {"name": "Some listed", "members": ["S24", "S12"]}]}
+    quotes = [_q("SPY", 100)] + [_q(f"S{i:02d}", 100 + i) for i in range(25)]
+    original = store.append_pass(_pass("14:34"), quotes)
+    store.append_detection(original, universe=universe, rules={}, hours=None, status="ok", event_ids=[], recorded_at=_stamp("14:34"))
+    def event(id, kind, symbols, group=None):
+        return {"event_id": id, "kind": kind, "symbols": symbols, "group": group,
+                "session_date": SESSION, "universe_version": universe["version"],
+                "evidence": [{"pass_id": original, "symbol": s} for s in symbols]}
+    events = [event("leader", "relative_to_spy", ["S24"]), event("laggard", "relative_to_spy", ["S00"]),
+              event("middle", "relative_to_spy", ["S12"]), event("sector-listed", "relative_to_sector", ["S24"]),
+              event("sector-middle", "relative_to_sector", ["S12"]), event("dip", "dip_turn", ["S00"]),
+              event("group-all", "group_move", ["S24"], "All listed"),
+              event("group-some", "group_move", ["S24"], "Some listed")]
+    expected = {"leader": True, "laggard": True, "middle": False, "sector-listed": True,
+                "sector-middle": False, "dip": True, "group-all": True, "group-some": False}
+    assert event_movers_tags(store, events, universe) == expected
+    # A later ranking and a changed current universe cannot turn the original middle into a leader.
+    store.append_pass(_pass("14:35"), [_q("SPY", 100, minute="14:35"), _q("S12", 150, minute="14:35")])
+    before = store.path.read_bytes()
+    assert event_movers_tags(store, events, {"version": "new", "symbols": [], "groups": []}) == expected
+    assert store.path.read_bytes() == before
+
+
+def test_event_tags_do_not_claim_unseen_when_original_comparison_is_unavailable(tmp_path):
+    store = RadarStore(tmp_path / "tags.sqlite")
+    pass_id = store.append_pass({**_pass("14:34"), "universe_version": UNIVERSE["version"]}, [_q("AAA", 120)])  # no SPY, so no ranking
+    event = {"event_id": "e", "kind": "relative_to_spy", "symbols": ["AAA"], "session_date": SESSION,
+             "universe_version": UNIVERSE["version"], "evidence": [{"pass_id": pass_id}]}
+    assert event_movers_tags(store, [event], UNIVERSE) == {"e": None}
+    event["evidence"] = [{"pass_id": 999}]
+    assert event_movers_tags(store, [event], UNIVERSE) == {"e": None}

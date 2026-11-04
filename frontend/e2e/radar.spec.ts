@@ -178,6 +178,54 @@ test("Radar empty events and stale rankings remain explicit on phone", async ({ 
   await page.screenshot({ path: test.info().outputPath("radar-empty-stale-phone.png") });
 });
 
+for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 375, 812]] as const) {
+  test(`Radar defaults to unseen, toggles Movers and opens linked events on ${size}`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", error => errors.push(error.message));
+    await page.setViewportSize({ width, height });
+    await page.route("**/radar/feed*", async route => {
+      const response = await route.fetch();
+      const body = await response.json();
+      const sample = body.events[0];
+      await route.fulfill({ json: { ...body, events: [
+        { ...sample, event_id: "unseen", on_movers: false, summary: "Unseen development" },
+        { ...sample, event_id: "unknown", on_movers: null, summary: "Original Movers quotes unavailable" },
+        { ...sample, on_movers: true, summary: "Already on Movers" },
+      ] } });
+    });
+    await page.goto("/radar");
+    const filter = page.getByRole("checkbox", { name: "Not on Movers", exact: true });
+    await expect(filter).toBeChecked();
+    await expect(page.getByTestId("radar-event")).toHaveCount(2);
+    await expect(page.getByTestId("radar-movers-tag")).toHaveText(["Movers unavailable", "Not on Movers"]);
+    await page.screenshot({ path: test.info().outputPath(`radar-unseen-${size}.png`) });
+    await filter.uncheck();
+    await expect(page.getByTestId("radar-event")).toHaveCount(3);
+    await expect(page.getByTestId("radar-movers-tag").first()).toHaveText("On Movers");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+    await page.screenshot({ path: test.info().outputPath(`radar-all-movers-${size}.png`) });
+    await page.goto(`/radar?event=${EVENT}&rate=useful`);
+    await expect(filter).toBeChecked();
+    await expect(page.getByRole("region", { name: "Original evidence" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Useful", exact: true })).toHaveAttribute("aria-pressed", "true");
+    expect(errors).toEqual([]);
+  });
+}
+
+test("Radar explains when all events are hidden by the Movers filter", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.route("**/radar/feed*", async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({ json: { ...body, events: body.events.map((event: object) => ({ ...event, on_movers: true })) } });
+  });
+  await page.goto("/radar");
+  await expect(page.getByText("All developments were on Movers when first seen.", { exact: false })).toBeVisible();
+  await expect(page.getByTestId("radar-event")).toHaveCount(0);
+  await page.getByRole("checkbox", { name: "Not on Movers", exact: true }).uncheck();
+  await expect(page.getByTestId("radar-event")).toHaveCount(1);
+});
+
 test("Shadow book folds events below the bar into one line on phone", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const event = (symbol: string, at: string) => ({ kind: "relative_to_spy", direction: "up", symbols: [symbol], first_seen_at: at,
