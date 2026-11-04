@@ -169,6 +169,10 @@ function EventCard({ event, fresh, open, linked, onToggle, onRated }: {
           <span className={cn("inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium", direction.className)}>{direction.label}</span>
           <span className="text-sm font-semibold text-foreground">{event.symbols.join(", ")}</span>
           <span className="text-xs text-muted-foreground">{KIND[event.kind]} · {against}</span>
+          <span className="inline-flex h-[22px] items-center rounded-md bg-secondary px-2 text-[11.5px] text-muted-foreground"
+            data-testid="radar-movers-tag" title="Movers top 10 leaders or laggards at the event's first-seen pass">
+            {event.on_movers === true ? "On Movers" : event.on_movers === false ? "Not on Movers" : "Movers unavailable"}
+          </span>
           {fresh && <span className="inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium bg-primary/15 text-primary">New</span>}
           {RULE_TAGS[event.rule_version] && (
             <span className="inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium bg-secondary text-muted-foreground" data-testid="radar-rules-tag">
@@ -198,6 +202,7 @@ export default function RadarFeedView() {
   const [sessionReady, setSessionReady] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [linked, setLinked] = useState<string | null>(null); // the event a phone alert's tap asked for
+  const [unseenOnly, setUnseenOnly] = useState(true);
   useEffect(() => {
     let live = true;
     (async () => {
@@ -263,8 +268,10 @@ export default function RadarFeedView() {
 
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
   const fresh = new Set(feed.since_last_visit);
-  const newEvents = feed.events.filter((e) => fresh.has(e.event_id)).reverse();
-  const earlier = feed.events.filter((e) => !fresh.has(e.event_id)).reverse();
+  // A phone/chart deep link must still open its event while the default filter is on.
+  const visible = feed.events.filter((e) => !unseenOnly || e.on_movers !== true || e.event_id === linked);
+  const newEvents = visible.filter((e) => fresh.has(e.event_id)).reverse();
+  const earlier = visible.filter((e) => !fresh.has(e.event_id)).reverse();
   const rated = (id: string) => (rating: RadarRating) =>
     setFeed((f) => f && { ...f, events: f.events.map((e) => e.event_id === id ? { ...e, rating } : e) });
   const card = (e: RadarFeedEvent) => (
@@ -295,7 +302,19 @@ export default function RadarFeedView() {
       {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
       {notice && <p role="alert" className="text-xs text-red-400">{notice}</p>}
 
-      {feed.state !== "off" && <h2 className="text-[13.5px] font-semibold tracking-tight">Developments</h2>}
+      {feed.state !== "off" && <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-[13.5px] font-semibold tracking-tight">Developments</h2>
+        <label className="flex min-h-11 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+          <input type="checkbox" checked={unseenOnly} onChange={(e) => setUnseenOnly(e.target.checked)} />
+          Not on Movers
+        </label>
+      </div>}
+      {unseenOnly && feed.events.length > 0 && <p className="text-xs text-muted-foreground">
+        Movers membership when first seen. Unavailable comparisons and linked events remain visible.
+      </p>}
+      {feed.events.length > 0 && visible.length === 0 && <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+        All developments were on Movers when first seen. Clear Not on Movers to show them.
+      </p>}
 
       {feed.state !== "off" && feed.events.length === 0 && (
         <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">

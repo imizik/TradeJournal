@@ -26,6 +26,7 @@ export type RadarHeadline = {
 };
 export type RadarNews = { status: "found" | "none_found" | "unavailable"; checked_at: string; headlines: RadarHeadline[] };
 export type RadarFeedEvent = RadarEvent & {
+  on_movers: boolean | null;
   latest_status: RadarRevision["status"] | null; revision_count: number; rating: RadarRating | null; news: RadarNews | null;
 };
 export type RadarCoverage = {

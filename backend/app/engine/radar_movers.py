@@ -8,10 +8,49 @@ from statistics import median
 from math import isfinite
 
 from app.engine.radar_comparison import _endpoint
+from app.engine.radar_store import RadarStore, load_universe
 
 LOOKBACK_SECONDS = 15 * 60
 LOOKBACK_TOLERANCE_SECONDS = 120
 TOP = 10
+
+
+def event_movers_tags(store: RadarStore, events: list[dict], universe: dict | None = None) -> dict[str, bool | None]:
+    """Presentation only: membership at the event's original pass, never today's ranking.
+
+    None means that the original quotes/universe cannot be recovered (including pruned quotes).
+    The detector, recorder, event payloads and experiment receipts are never modified.
+    """
+    if not events:
+        return {}
+    universe = universe or load_universe()
+    receipts, configs = store.detection_evidence()
+    passes = {p["id"]: p for day in {e["session_date"] for e in events} for p in store.passes(day)}
+    rankings = {}
+    tags = {}
+    for event in events:
+        pass_id = max((r["pass_id"] for r in event.get("evidence", [])), default=None)
+        record = passes.get(pass_id)
+        tags[event["event_id"]] = None
+        if record is None or record["status"] not in ("ok", "partial"):
+            continue
+        receipt = receipts.get(pass_id, {})
+        frozen = configs.get(receipt.get("config_digest"), {}).get("universe", universe)
+        if frozen["version"] != event["universe_version"] or record["universe_version"] != event["universe_version"]:
+            continue
+        if pass_id not in rankings:
+            movers = build_movers(frozen, store.quotes(pass_id=pass_id), None, latest=record)
+            rankings[pass_id] = ({r["symbol"] for r in movers["leaders"] + movers["laggards"]}
+                                 if movers["header"] is not None else None)
+        listed = rankings[pass_id]
+        if listed is None:
+            continue
+        members = event["symbols"]
+        if event["kind"] == "group_move":
+            # The event lists only same-direction members; require the whole curated group.
+            members = next((g["members"] for g in frozen["groups"] if g["name"] == event["group"]), [])
+        tags[event["event_id"]] = bool(members) and all(s in listed for s in members)
+    return tags
 
 
 def _epoch(value: str) -> float:

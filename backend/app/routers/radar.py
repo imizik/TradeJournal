@@ -23,7 +23,7 @@ from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_math import ET, session_windows
 from app.engine.radar_comparison import compare_group, empty_comparison
 from app.engine.radar_entry import resolve_entry, compare_resolved_entry
-from app.engine.radar_movers import build_movers, earlier_pass
+from app.engine.radar_movers import build_movers, earlier_pass, event_movers_tags
 from app.engine import radar_proof
 from app.engine.radar_runner import enabled
 from app.engine.radar_store import RadarStore, load_universe
@@ -179,9 +179,12 @@ def _read_feed(store: RadarStore, session: str | None, since: str | None, now: f
     last_visit = store.last_visit()
     baseline = since or last_visit
     events = []
-    for event in store.events(session):
+    saved = store.events(session)
+    movers_tags = event_movers_tags(store, saved)
+    for event in saved:
         revisions = store.revisions(event["event_id"])
-        events.append({**event, "latest_status": _revision_status(revisions), "revision_count": len(revisions),
+        events.append({**event, "on_movers": movers_tags[event["event_id"]],
+                       "latest_status": _revision_status(revisions), "revision_count": len(revisions),
                        "rating": ratings.get(event["event_id"]), "news": _news_block(news.get(event["event_id"]))})
     new = [e["event_id"] for e in events if baseline is None or _parse(e["first_seen_at"]) > _parse(baseline)]
     return {"state": _state(coverage, passes_total, now), "reason": None, "session": session, "sessions": sessions[:30],
