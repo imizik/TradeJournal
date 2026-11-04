@@ -1682,7 +1682,8 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
     the next turn sends back). ``images`` are the owner's shared screenshots as image blocks (``copilot_images.block``),
     sent with their message; ``carry_id`` names the evidence the conversation's previous turn kept. ``live``, when
     given, is the dict the metrics are kept in as the turn runs, so a consumer that stops early still sees what it spent.
-    ``web`` lets a turn the owner asked search the web (live evidence on the API only); background turns never do."""
+    ``web`` lets a turn the owner asked, or the morning brief, search the web (live evidence on the API only); other
+    background turns never do."""
     started = time.monotonic()
     messages = [dict(m) for m in history]
     replay = getattr(evidence, "label", "") == "replay"

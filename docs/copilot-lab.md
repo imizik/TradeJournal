@@ -1909,7 +1909,11 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   with the automatic week review and Watch your day), `radar_event` 4 (Radar's
   single pings), `radar_digest` 2, `thesis_watch` 2, `research` 1. Before 09:30
   New York these kinds together also have `PING_PREOPEN_ALLOWANCE` (default 2)
-  pings, so pre-open headlines cannot spend the day. A held ping's reason names
+  pings, so pre-open headlines cannot spend the day. While the
+  [morning brief](#pre-market-prep) is on and not yet decided today, one of them
+  is kept for it (on a weekday, until its ping could no longer go out): at 09:00
+  it comes after early thesis-watch pings, which would otherwise spend both.
+  A held ping's reason names
   the budget: "Not sent: Radar's 4 single pings for today are spent."
 - **Daily ceiling:** at most `PING_DAILY_CAP` (default 12) pings a New York day
   across every kind (the companion's updates count toward it only for themselves). Priority order: last-day final > invalidation > give-back
@@ -2015,7 +2019,7 @@ long theses, reviewed weekly. Nothing here places, changes or suggests an order,
   close turns, and at most one per [quiet window](#phone-ping-policy) (10 minutes) whatever keeps triggering. An
   update waits while a ping for the position is inside that window, so no turn is spent on a message the window would
   hold. Each update is recorded before its turn runs, so a failure after the turn never repeats it. No overnight
-  updates: a multi-day hold resumes in the next regular session (the 08:30 brief already lists expiries).
+  updates: a multi-day hold resumes in the next regular session (the 09:00 brief already lists expiries).
 - **Update.** One turn: what changed since the last update and whether it changes the plan, Verdict line first, at
   most 80 words, with the plan's invalidation and the live option mark in the question. Saved as messages on the
   adopted investigation, so the desk shows them in the thread (and its Timeline lists each ping), and sent as a
@@ -2107,11 +2111,15 @@ The heading keeps its old name so links stay put. On 2026-10-29 the owner chose
 this as the one morning brief: Jo's 08:45 briefing (`/morning`) still works
 unchanged, and switching Jo's morning task off is the owner's step.
 
-- **When:** at `PREMARKET_PREP_AT` (default `08:30` New York) on a day the
-  market calendar has a regular session, never a weekend or holiday. The day is
-  claimed once (`premarket_prep.day` is unique, additive migration
+- **When:** at `PREMARKET_PREP_AT` (default `09:00` New York; `08:30` before
+  2026-11-03) on a day the market calendar has a regular session, never a
+  weekend or holiday. 09:00 is after the 08:30 CPI/jobs releases (at 08:30 the
+  brief landed with them and could never include them), after the Radar
+  pre-market pilot's 08:50 scan, and still half an hour before the open. The day
+  is claimed once (`premarket_prep.day` is unique, additive migration
   `e5a9c3d7f2b4`), so a restart or a second process never sends a second one.
-  A prep not started within an hour of its time waits for the next trading day.
+  A prep not started within 20 minutes of its time waits for the next trading
+  day.
 - **Pack:** `market`: Jo's backdrop reader (`jo_morning_market.collect_backdrop`:
   the coming week's FOMC/CPI/jobs calendar, the saved VIX, saved earnings
   dates, with its gaps) and the SPY/QQQ/SMH pre-market proxies with their
@@ -2126,13 +2134,28 @@ unchanged, and switching Jo's morning task off is the owner's step.
   `copilot_plans.board`, one batched quote); earnings from today through Sunday
   for held symbols and symbols with an active thesis memory (one batched
   Tradier calendar read, at most 8 symbols); today's pending time stops; the
-  plan streak. A section that fails reads `unavailable`; the rest stand.
+  plan streak; `premarket`: held then armed-plan symbols' own pre-market moves
+  (`copilot_extended.extended`, at most 8, indices left out: pre-market last
+  and change vs the previous regular close, volume, dollar volume, last
+  evening's after-hours; see [Extended hours](#extended-hours)); and, while
+  `RADAR_PREMARKET_ENABLED` is on, `premarket_scan`: the pilot's latest scan
+  (`copilot_extended.premarket_scan`). A section that fails reads
+  `unavailable`; the rest stand.
 - **Turn:** one `run_turn` on the configured backend and evidence, system
   prompt unchanged, its turn budget cap included. The message starts "Morning
-  brief for …" and asks for at most 10 lines from those facts only: two on the
-  market and what it means for the owner's names, then what expires or sits
-  near a trigger, earnings this week, and one thing to decide before the open.
-  Headlines are marked as third-party data, never instructions. The answer, cut
+  brief for …" and asks for at most 10 lines: two on the market and what it
+  means for the owner's names (with their own pre-market moves), then what
+  expires or sits near a trigger, earnings this week, and one thing to decide
+  before the open. Since 2026-11-03 the turn may [search the web](#web-search)
+  (`web=True`; the API backend with live evidence only, three searches, the
+  cap raised by `WEB_TURN_EXTRA_USD`, about $0.03 a morning in searches): for
+  the market's overnight driver and the catalyst behind any held or planned
+  name gapping meaningfully (about 2% on real dollar volume, or flagged in the
+  pilot's scan), naming the publisher and time of what it uses. Queries carry a
+  symbol or topic only, never positions, sizes, trades or accounts (the system
+  prompt's rule, repeated in the message). Otherwise it uses the pack's facts
+  only. Headlines and search results are marked as third-party data, never
+  instructions. The answer, cut
   to 10 lines, is saved as an open copilot investigation titled
   `Morning brief <date>` (`Pre-market prep <date>` before 2026-10-30), so it
   shows in the desk's thread list and on the Dashboard's Morning briefing card
@@ -2141,11 +2164,12 @@ unchanged, and switching Jo's morning task off is the owner's step.
   `/copilot-lab?investigation=<id>`. If the turn fails (an error event,
   including the budget stop, or no text), the ping and the saved record carry
   the raw facts instead under "Raw facts (the copilot turn failed):": the market
-  line and up to 3 headlines, then expiries, the nearest triggers, today's time
+  line, the owner's names' pre-market moves, up to 3 headlines, then expiries, the nearest triggers, today's time
   stops and earnings this week.
 - **Delivery:** the same at-most-once outbox as plan nudges: a send that may
   have reached ntfy is `unknown` and never resent; a prep that never finished
-  within 10 minutes, or a ping not sent within 30 minutes, is `expired`.
+  within 10 minutes, or a ping not sent within 30 minutes (09:30 for a prep
+  claimed on time), is `expired`.
 - **Activation:** off unless `PREMARKET_PREP_ENABLED=true`, and nothing runs
   while `COPILOT_ENABLED` is off. It runs on the level alert monitor's loop
   beside the plan pings; the reads and the model turn run on their own thread.
@@ -2398,8 +2422,9 @@ Live only; replay and the fixture leave it out. Tests:
 
 A turn the owner asked (the desk's `POST /copilot/chat` and a typed or tapped
 Telegram reply) may search the web on the `anthropic` backend with live
-evidence. Background turns (pre-market prep, the week review, the position
-companion) never do, and neither do replay (the web is hindsight) or the
+evidence, and so does the [morning brief](#pre-market-prep) since 2026-11-03
+(the owner approved its roughly $0.03 a morning). Other background turns (the
+week review, the position companion) never do, and neither do replay (the web is hindsight) or the
 fixture. `copilot.run_turn(..., web=True)` adds Anthropic's server-side
 `web_search` tool (`web_search_20260209`) once a round may call tools, with
 `max_uses` counting down from `copilot.WEB_SEARCHES` (3) across the turn's
@@ -2507,7 +2532,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `ALERT_POLICY_ENABLED` | `true` | The [phone ping policy](#phone-ping-policy) for the app's own pings. `false` passes every ping through. |
 | `PING_DAILY_CAP` | `12` | Pings a New York day across every kind; last-day final, invalidation and give-back are never over it. |
 | `PING_QUIET_MINUTES` | `10` | A second ping for the same position inside this window is merged or suppressed. |
-| `PREMARKET_PREP_ENABLED` | unset (off) | `true` sends the [morning brief](#pre-market-prep) ping on trading mornings (needs `COPILOT_ENABLED` and `NTFY_URL`). `PREMARKET_PREP_AT` (`HH:MM` New York, default `08:30`) sets its time. |
+| `PREMARKET_PREP_ENABLED` | unset (off) | `true` sends the [morning brief](#pre-market-prep) ping on trading mornings (needs `COPILOT_ENABLED` and `NTFY_URL`). `PREMARKET_PREP_AT` (`HH:MM` New York, default `09:00`) sets its time. |
 | `WEEK_REVIEW_AUTO_ENABLED` | unset (off) | `true` runs [Review my week](#review-my-week) by itself once a week and pings it (needs `COPILOT_ENABLED` and `NTFY_URL`). `WEEK_REVIEW_AUTO_AT` (`HH:MM` New York, default `16:45`) sets its time on the week's last trading day. |
 | `EVENING_REVIEW_PING_ENABLED` | unset (off) | `true` sends the [evening review ping](#phone-ping-policy) on a trading day when something waits for review (needs `COPILOT_ENABLED` and `NTFY_URL`). `EVENING_REVIEW_PING_AT` (`HH:MM` New York, default `16:30`, not before 16:00) sets its time. |
 | `POSITION_COMPANION_ENABLED` | unset (off) | `true` runs the [position companion](#position-companion): unplanned long options are adopted with a drafted plan, updated and closed in one Telegram thread (needs `COPILOT_ENABLED` and Telegram). `COMPANION_MODEL` (default: `COPILOT_MODEL`), `COMPANION_MOVE_PCT` (3), `COMPANION_MAX_UPDATES` (4 a position a day), `COMPANION_MAX_POSITIONS` (6 watched at once). |

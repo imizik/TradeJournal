@@ -68,6 +68,7 @@ class _Wednesday(date):
 def settings(monkeypatch):
     monkeypatch.setattr(reconstructor, "date", _Wednesday)
     for name in ("ALERT_POLICY_ENABLED", "PING_DAILY_CAP", "PING_QUIET_MINUTES", "PLAN_NUDGE_DAILY_CAP", "PING_PREOPEN_ALLOWANCE",
+                 "PREMARKET_PREP_ENABLED", "PREMARKET_PREP_AT",
                  *(f"PING_BUDGET_{kind.upper()}" for kind in policy.BUDGETS)):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("RADAR_ENABLED", "false")
@@ -228,6 +229,29 @@ def test_before_the_open_the_budgeted_kinds_share_the_pre_open_allowance(engine,
     with Session(engine) as db:
         assert decide(db, "research", "q1", anchor=None, now=at("09:00")).action == "hold"
         assert decide(db, "research", "q2", anchor=None, now=at("10:00")).action == "send"
+
+
+def test_one_pre_open_ping_is_kept_for_the_09_00_morning_brief_until_it_is_decided(engine, monkeypatch):
+    """At 09:00 the brief comes after early thesis-watch pings; with the brief on, they leave it one of the two."""
+    monkeypatch.setenv("PREMARKET_PREP_ENABLED", "true")
+    with Session(engine) as db:
+        assert decide(db, "thesis_watch", "t1", anchor="symbol:NBIS", now=at("08:41")).action == "send"
+        held = decide(db, "thesis_watch", "t2", anchor="symbol:SNDK", now=at("08:55"))
+        assert held.action == "hold" and held.reason.endswith("before 9:30 AM New York are spent (one is kept for the morning brief).")
+        assert decide(db, "prep", "prep1", anchor=None, now=at("09:01")).action == "send"
+        assert decide(db, "radar_event", "r1", anchor="symbol:LAD", now=at("09:10")).action == "hold"  # both spent
+        assert decide(db, "radar_event", "r2", anchor="symbol:LAD", now=at("09:31")).action == "send"
+    monkeypatch.setenv("PREMARKET_PREP_AT", "08:30")  # the brief's window (08:30 + 20 + 30 min to send) has passed
+    with Session(engine) as db:
+        db.exec(text("DELETE FROM phone_ping"))
+        db.commit()
+        assert decide(db, "thesis_watch", "t3", anchor="symbol:NBIS", now=at("09:20")).action == "send"
+        assert decide(db, "thesis_watch", "t4", anchor="symbol:AMD", now=at("09:25")).action == "send"
+    monkeypatch.delenv("PREMARKET_PREP_AT")
+    with Session(engine) as db:  # a weekend morning keeps nothing back
+        sat = date(2026, 10, 24)
+        assert decide(db, "thesis_watch", "t5", anchor="symbol:NBIS", now=at("08:41", sat)).action == "send"
+        assert decide(db, "thesis_watch", "t6", anchor="symbol:AMD", now=at("08:55", sat)).action == "send"
 
 
 def test_october_29_pre_open_pings_no_longer_hold_radar_or_the_evening_review(engine):

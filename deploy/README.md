@@ -516,7 +516,8 @@ before ntfy: `ALERT_POLICY_ENABLED` (default `true`, since it only reduces
 pings), `PING_DAILY_CAP` (default 12 a New York day; last-day final,
 invalidation, give-back and the evening review are never over it), a budget per
 low-priority kind (`PING_BUDGET_<KIND>`, e.g. `PING_BUDGET_RADAR_EVENT=4`),
-`PING_PREOPEN_ALLOWANCE` (default 2 before 09:30 New York) and
+`PING_PREOPEN_ALLOWANCE` (default 2 before 09:30 New York; one is kept for the
+morning brief until it is decided while `PREMARKET_PREP_ENABLED=true`) and
 `PING_QUIET_MINUTES` (default 10, per position). Each sender's own switch below still decides whether it runs
 at all; Jo's senders are not gated. Held pings are recorded, never lost silently.
 

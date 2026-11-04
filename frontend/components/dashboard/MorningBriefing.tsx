@@ -75,7 +75,7 @@ function DeliveryStatus({ delivery, pending, day }: { delivery: MorningDelivery;
   </section>;
 }
 
-/** The copilot's 08:30 morning brief for ``day`` (backend/app/engine/premarket_prep.py), found by its saved title among the
+/** The copilot's 09:00 morning brief for ``day`` (backend/app/engine/premarket_prep.py), found by its saved title among the
  * latest saved conversations; null when there is none or the lab is off (the shared status read, so a lab-off backend is
  * never asked for its conversations). Earlier days were titled "Pre-market prep". */
 async function getCopilotBrief(day: string, signal: AbortSignal): Promise<InvestigationSummary | null> {
