@@ -1597,7 +1597,7 @@ end of that candle.
   chart's study row reads *RVol 2.6× for 10:17 AM* for the hovered (or latest)
   candle and names the sessions the baseline covers (*RVol vs 20 sessions
   Sep 4 – Oct 1*, or *vs 18 of 20* when two never traded), or says *RVol
-  baseline not built yet* or *RVol unavailable* with the reason on hover. A
+  building* or *RVol unavailable* with the reason on hover. A
   regular-session candle of today without a value reads *RVol —*, with why on
   hover. A smaller chart's row is too tight beside its countdown, so there a
   candle with RVol shows *RVol 2.6×* in place of its volume, and the volume,

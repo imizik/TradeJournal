@@ -149,7 +149,7 @@ export function buildAttention(input: AttentionInputs): AttentionResult {
         const sameDay = next.date === expiration;
         addPosition({ id: `earnings:${trade.id}`, priority: "soon",
           title: `${trade.ticker} earnings ${shortDate(next.date)}, ${sameDay ? "on" : "before"} expiry`,
-          detail: `${contract(row)} expires ${shortDate(expiration)}. Report date ${next.status}${sameDay ? "; time of day is not published" : ""} (${earnings!.source}).`,
+          detail: `${contract(row)} expires ${shortDate(expiration)}. ${next.status === "estimated" ? "Report date is an estimate, not yet confirmed" : "Report date confirmed"}${sameDay ? "; time of day is not published" : ""}.`,
           when: next.date === today ? "Today" : shortDate(next.date), href: `/charts?symbol=${encodeURIComponent(trade.ticker)}`, sortKey: next.date });
       }
     }

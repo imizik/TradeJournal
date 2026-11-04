@@ -209,8 +209,8 @@ function CandleValues({ id, symbol, main, pending, bars, hover, interval, indica
             {emas.map((key) => <span key={key} style={{ color: colors[key] }}>{key.toUpperCase()} {formatPrice(bar?.[key])}</span>)}</span>
         </span>}
         {rvolValue}
-        {showRvol && rvol && <span role="note" aria-label="Relative volume baseline" title={rvol.message ?? undefined} className={rvol.state === "ready" ? "text-muted-foreground" : "text-amber-300/80"}>
-          {rvol.state === "ready" ? rvolCoverage(rvol) : rvol.state === "building" ? "RVol baseline not built yet" : "RVol unavailable"}</span>}
+        {showRvol && rvol && <span role="note" aria-label="Relative volume baseline" title={rvol.message ?? (rvol.state === "building" ? "The relative-volume baseline is not built yet." : undefined)} className={rvol.state === "ready" ? "text-muted-foreground" : "text-amber-300/80"}>
+          {rvol.state === "ready" ? rvolCoverage(rvol) : rvol.state === "building" ? "RVol building" : "RVol unavailable"}</span>}
       </div>}
     </div>
   );

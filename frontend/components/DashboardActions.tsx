@@ -134,7 +134,9 @@ function SyncStatusIndicator({ summary }: { summary: SyncSummary | null }) {
 
   return (
     <span className="hidden items-center gap-1.5 rounded border border-border px-2.5 py-1.5 text-xs text-muted-foreground sm:inline-flex">
-      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+      {summary.last_success_at
+        ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+        : <Clock3 className="h-3.5 w-3.5" />}
       {fmtRelative(summary.last_success_at)}
     </span>
   );

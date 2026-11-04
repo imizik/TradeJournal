@@ -60,6 +60,10 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* Native checkboxes and radios take the app's accent, not the browser's default blue. */
+  input[type="checkbox"], input[type="radio"] {
+    accent-color: hsl(var(--primary));
+  }
   /* Every number set in tabular-nums is in Plex Mono, as on the desk. A table or box that carries the class for its
      digit alignment keeps the text face; its number cells opt in on their own. */
   .tabular-nums:not(table):not(div) {
