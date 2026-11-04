@@ -60,3 +60,24 @@ def test_shortlist_ranks_by_weaker_label_then_mean_then_id():
         return {"cc": {"f1": cc}, "oc": {"f1": oc}}
     assert search.ranking({"C01": f1(.3, .9), "C03": f1(.4, .6), "C02": f1(.4, .6),
                            "C04": f1(.4, .7), "Movers": f1(1, 1)}) == ["C04", "C02", "C03", "C01"]
+
+
+def test_missing_previous_close_only_disables_dependent_clauses_and_label():
+    symbols = ["SPY"] + [f"S{i:02}" for i in range(21)]
+    new = symbols[-1]
+    universe = {"symbols": [{"symbol": s, "kind": "stock", "benchmark": s == "SPY"} for s in symbols],
+                "groups": []}
+    bars = {s: {"0": [100, 100], "5": [100, 104 if s == new else 100]} for s in symbols}
+    last, opening, prices = search.candidate_prices(bars, symbols)
+    prev = np.full(len(symbols), 100.)
+    prev[-1] = np.nan
+    flags = search.candidates(universe, symbols, last, opening, prev, last, [last] * 20,
+                              {"C06": "drive", "C07": "day"})
+    assert flags["C06"] == [Flag(6, "C06", "up", (new,))]
+    assert flags["C07"] == []
+    assert prices[6][new] == 104
+    daily = {"raw": {s: {"today": {"o": 100, "c": prices[6][s]}} for s in symbols}}
+    closing = search.raw_daily_prices(daily, "today", "c")
+    cc = search.targets(symbols[1:], dict.fromkeys(symbols[:-1], 100), closing)
+    oc = search.targets(symbols[1:], search.raw_daily_prices(daily, "today", "o"), closing)
+    assert (new, "up") in oc and (new, "up") not in cc

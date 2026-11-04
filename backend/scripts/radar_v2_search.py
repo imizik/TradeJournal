@@ -97,6 +97,29 @@ def candidates(universe, symbols, last, opening, previous, vol, past, definition
     return events
 
 
+def candidate_prices(bars, symbols):
+    """Independent minute inputs, including current-session data for newly listed stocks."""
+    last = np.full((390, len(symbols)), np.nan)
+    opening = np.full(len(symbols), np.nan)
+    prices = {minute: {} for minute in range(1, 391)}
+    for j, symbol in enumerate(symbols):
+        for offset, (bar_open, close) in bars[symbol].items():
+            i = int(offset)
+            if not 0 <= i < 390:
+                raise ValueError("Bar outside regular hours")
+            if i == 0 and replay.positive(bar_open):
+                opening[j] = bar_open
+            if replay.positive(close):
+                last[i, j] = close
+                prices[i + 1][symbol] = close
+    return last, opening, prices
+
+
+def raw_daily_prices(daily, day, field):
+    return {s: bs[day][field] for s, bs in daily["raw"].items()
+            if day in bs and replay.positive(bs[day].get(field))}
+
+
 def targets(stocks, base, closing):
     values = {s: _rel(s, 1, base, closing) for s in stocks}
     eligible = sorted((s for s in stocks if values[s] is not None), key=lambda s: (-abs(values[s]), s))
@@ -187,17 +210,16 @@ def run(split, root, volume, out):
         day = sessions[i]
         vol = volume_matrix(read(volume, f"{day}.json.gz", volume_hash), symbols)
         if day >= start:
-            previous, closing = replay.daily_inputs(daily, sessions[i - 1], day)
+            previous, _ = replay.daily_inputs(daily, sessions[i - 1], day)
             bars = read(root, f"{day}.json.gz", price_hash)
             passes, quotes = replay.reconstruct(day, universe, bars, previous)
-            prices = {m: {s: q["last"] for s, q in qs.items()} for m, qs in quotes.items()}
-            last = np.array([[qs.get(s, np.nan) for s in symbols] for qs in prices.values()])
-            opening = np.array([quotes[1].get(s, {}).get("open") or np.nan for s in symbols])
+            last, opening, prices = candidate_prices(bars, symbols)
             prev = np.array([previous.get(s, np.nan) for s in symbols])
             events = candidates(universe, symbols, last, opening, prev, vol, past, protocol["candidates"])
             events["v0"], events["Movers"] = replay.flags(universe, passes, quotes)
             movers = first_flags(events["Movers"])
-            raw_open = {s: bs[day]["o"] for s, bs in daily["raw"].items() if day in bs and replay.positive(bs[day]["o"])}
+            raw_open = raw_daily_prices(daily, day, "o")
+            closing = raw_daily_prices(daily, day, "c")
             labels = {k: targets(stocks, base, closing) for k, base in zip(LABELS, [previous, raw_open])}
             methods = {name: score(events[name], labels, movers, prices)
                        for name in ["v0", "Movers", *protocol["candidates"]]}

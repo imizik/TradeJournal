@@ -64,6 +64,8 @@ def match_key(event: dict) -> str:
 
 def outcome(event: dict, revisions: list[dict], last: str | None = None) -> str:
     """How the event went; ``last`` is the session's last recorded pass, so a too-recent event reads unresolved."""
+    if event.get("rule_version") == radar_rules.V2.version:
+        return "untracked"
     for r in revisions:
         if r["status"] in ("faded", "reversed"):
             late = _minutes(event["first_seen_at"], r["recorded_at"]) > QUICK_MINUTES
@@ -216,16 +218,21 @@ def build_report(store: RadarStore, versions: list[radar_rules.Rules], sessions:
     out += ["## Events per session", "",
             "| Session | Version | Events | vs SPY up / down | vs sector up / down | Group up / down | Revisions | Quick fade | Extended | Unresolved |",
             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+    def outcome_cells(rule, counts):
+        if isinstance(rule, radar_rules.OpeningDrive):
+            return "untracked | untracked | untracked"
+        return f"{counts['quick']} | {counts['extended']} | {counts['unresolved']}"
+
     totals = {n: Counter() for n in names}
     for s in data:
         for t, n in zip(versions, names):
             c = _counts(s.replay(t), s.last)
             totals[n].update({k: c[k] for k in ("events", "revisions", "quick", "extended", "unresolved")})
             out.append(f"| {s.label} | {n} | {c['events']} | {c['spy']} | {c['sector']} | {c['group']} | {c['revisions']} "
-                       f"| {c['quick']} | {c['extended']} | {c['unresolved']} |")
-    for n in names:
-        t = totals[n]
-        out.append(f"| **All** | {n} | {t['events']} | | | | {t['revisions']} | {t['quick']} | {t['extended']} | {t['unresolved']} |")
+                       f"| {outcome_cells(t, c)} |")
+    for t, n in zip(versions, names):
+        c = totals[n]
+        out.append(f"| **All** | {n} | {c['events']} | | | | {c['revisions']} | {outcome_cells(t, c)} |")
     out.append("")
 
     for t, n in zip(versions, names):
