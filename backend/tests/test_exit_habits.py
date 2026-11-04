@@ -1,6 +1,7 @@
 """Exit habits: what happened after each phone alert, and the audit's four exit habits vs. baseline. Read-only."""
 
 from datetime import UTC, date, datetime
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import FastAPI
@@ -10,13 +11,15 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.database import get_session
-from app.engine import reconstructor
+from app.engine import exit_habits, reconstructor
 from app.engine.chart_math import ET
 from app.engine.exit_habits import follow_up, habit_flags, scorecard, verdict
 from app.models import Account, Fill, FillMarketContext, PositionAlert, Trade, TradeFill, TradePathMetrics
 from app.routers import exit_habits as exit_habits_router
 from app.routers.fills import _rebuild_trades
 from tests.test_browser_access import boundary  # noqa: F401  (the shared access fixture)
+
+ROOT = Path(__file__).resolve().parents[2]
 
 ROTH = UUID(int=1)
 WED = date(2026, 10, 21)
@@ -278,7 +281,23 @@ def test_the_endpoint_reads_alerts_by_source_identity_and_habits(engine):
     assert habits["opened_green"]["baseline"] == {"n": 1, "trades": 1, "excluded": 0, "pct": 1.0, "pnl": -20.0}
     assert habits["held_hour_lost"]["baseline"]["n"] == 1
     assert body["responses"] == {"expired": 1, "closed_15m": 1, "unmatched": 1} and body["alerts_total"] == 3
+    since = {r["kind"]: r["since"] for r in body["before_after"]["rows"]}
+    assert since == {"giveback": {"n": 1, "of": 1, "pct": 1.0, "left_out": 1}, "hold_hour": {"n": 0, "of": 1, "pct": 0.0, "left_out": 0},
+                     "expiry_first": {"n": 0, "of": 0, "pct": None, "left_out": 0}}  # the never-sent expiry alert is not listed
     assert body["verdict"]["verdict"] == "not_enough_data"
+
+
+def test_before_after_counts_settled_alerts_against_the_frozen_baseline():
+    alerts = [{"kind": "giveback", "response": r} for r in ("closed_15m", "trimmed_15m", "held_overnight", "still_open", "rolled", None)]
+    alerts += [{"kind": "wrong_way", "response": "closed_15m"}]  # no baseline: not a row
+    out = exit_habits.before_after(alerts)
+    rows = {r["kind"]: r for r in out["rows"]}
+    assert list(rows) == ["giveback", "hold_hour", "expiry_first"]
+    assert rows["giveback"]["since"] == {"n": 2, "of": 3, "pct": 2 / 3, "left_out": 3}  # open, rolled and unmatched left out
+    assert rows["giveback"]["before"] == {"n": 55, "of": 247, "pct": 55 / 247}
+    assert rows["hold_hour"]["before"]["n"] == 54 and rows["expiry_first"]["before"]["n"] == 7
+    assert rows["hold_hour"]["since"] == {"n": 0, "of": 0, "pct": None, "left_out": 0}
+    assert (ROOT / out["source"]).is_file()
 
 
 def test_owner_only(boundary):  # noqa: F811

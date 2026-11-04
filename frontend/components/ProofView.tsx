@@ -72,6 +72,27 @@ function Counts({ title, rows, counts }: { title: string; rows: [string, string]
   </div>;
 }
 
+const BEFORE_AFTER_KIND: Record<string, string> = { giveback: "Gave back its gain", hold_hour: "Held an hour", expiry_first: "Expires today (90 min left)" };
+
+function BeforeAfter({ data, goLive }: { data: NonNullable<ExitHabitsBody["before_after"]>; goLive: string }) {
+  const cell = (n: number, of: number, pct: number | null) => of ? <><span className="font-medium">{share(pct)}</span> <span className="whitespace-nowrap text-muted-foreground">· {n} of {of}</span></> : <span className="text-muted-foreground">none yet</span>;
+  const leftOut = data.rows.reduce((sum, r) => sum + r.since.left_out, 0);
+  return <div className="space-y-1.5" data-testid="proof-alert-before-after">
+    <h3 className="text-[13.5px] font-semibold tracking-tight">Acted within 15 minutes: before alerts and since</h3>
+    <table className="w-full text-xs">
+      <thead><tr className="text-left text-muted-foreground"><th className="py-0.5 font-normal">Moment</th><th className="py-0.5 font-normal">Before alerts</th><th className="py-0.5 font-normal">Since {new Date(`${goLive}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}</th></tr></thead>
+      <tbody>{data.rows.map(r => <tr key={r.kind} data-testid={`before-after-${r.kind}`} className="border-t border-border/50">
+        <td className="py-1 pr-2 text-muted-foreground">{BEFORE_AFTER_KIND[r.kind] ?? r.kind.replace(/_/g, " ")}</td>
+        <td className="py-1 pr-2 tabular-nums">{cell(r.before.n, r.before.of, r.before.pct)}</td>
+        <td className="py-1 tabular-nums">{cell(r.since.n, r.since.of, r.since.pct)}</td>
+      </tr>)}</tbody>
+    </table>
+    <p className="text-xs text-muted-foreground">Closed or trimmed within 15 minutes of the moment. Before: every closed option trade from Jul 2025 to Oct 19, 2026
+      where that moment came, from a frozen study ({data.source}). Since: alerts actually sent, once the position settled{leftOut ? `; ${leftOut} still open, rolled or unmatched left out` : ""}.
+      A difference does not show that the alerts caused it.</p>
+  </div>;
+}
+
 function Status({ error, what }: { error: boolean; what: string }) {
   return <p role="status" className={`text-sm ${error ? "text-red-400" : "text-muted-foreground"}`}>{error ? `${what} could not load.` : `Loading ${what.toLowerCase()}…`}</p>;
 }
@@ -92,6 +113,7 @@ function AlertsProof() {
       </div>}
       <Counts title={`What you did after ${body.alerts_total} alert${body.alerts_total === 1 ? "" : "s"}`}
         rows={[...Object.entries(RESPONSE), ["unmatched", "Not matched to fills"]]} counts={body.responses} />
+      {body.before_after && <BeforeAfter data={body.before_after} goLive={body.go_live} />}
       <div className="border-t pt-3"><ExitHabitsView body={body} alertsShown={5} /></div>
     </div> : <Status error={error} what="Alert follow-up" />}
   </DashboardCard>;

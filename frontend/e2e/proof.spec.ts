@@ -22,6 +22,15 @@ for (const [size, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844
     await expect(alerts).toContainText("2 standard errors");
     const card = page.getByRole("region", { name: "Exit habits and alert follow-up" });
     await expect(card).toContainText("What you did after 3 alerts");
+    // Before and after: the frozen baseline beside the seeded alerts once settled (AAPL's trim counts though the rest is open).
+    const beforeAfter = card.getByTestId("proof-alert-before-after");
+    await expect(beforeAfter.getByTestId("before-after-giveback")).toContainText("22% · 55 of 247");
+    await expect(beforeAfter.getByTestId("before-after-giveback")).toContainText("100% · 1 of 1");
+    await expect(beforeAfter.getByTestId("before-after-hold_hour")).toContainText("11% · 54 of 485");
+    await expect(beforeAfter.getByTestId("before-after-hold_hour")).toContainText("0% · 0 of 1");
+    await expect(beforeAfter.getByTestId("before-after-expiry_first")).toContainText("13% · 7 of 53");
+    await expect(beforeAfter).toContainText("Since Oct 21");
+    await expect(beforeAfter).toContainText("does not show that the alerts caused it");
     await expect(card).toContainText("does not establish that alerts caused a change");
     await expect(card).toContainText("not a guaranteed exit price");
     await expect(page.getByTestId("proof-alert-feedback")).toContainText("of 3 alerts have feedback.");
