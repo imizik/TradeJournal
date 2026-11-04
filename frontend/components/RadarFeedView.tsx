@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   MEASURE_LABELS, RATINGS, RULE_TAGS, STATUS_TEXT, coverageLine, getEvent, getFeed, headlineMeta, measureText, newsLine, nyTime, rateEvent,
-  recordVisit, radarEventChartHref, radarEventId, radarRating, radarSession, type RadarDetail, type RadarFeed, type RadarFeedEvent, type RadarNews, type RadarRating,
+  recordVisit, radarEventChartHref, radarEventId, radarRating, radarSession, type OutsideCheckpoint, type RadarDetail, type RadarFeed, type RadarFeedEvent, type RadarNews, type RadarRating,
 } from "@/lib/radar";
 import AskCopilot from "@/components/copilot/AskCopilot";
 import PlanATrade from "@/components/copilot/PlanATrade";
@@ -18,6 +18,27 @@ const DIRECTION = {
   down: { label: "Down", className: "bg-red-500/10 text-red-400" },
 };
 const KIND = { relative_to_spy: "vs SPY", relative_to_sector: "vs sector", group_move: "Group move", dip_turn: "Dip turning up" };
+
+function OutsideList({ checkpoints }: { checkpoints: OutsideCheckpoint[] }) {
+  return <section aria-label="Outside your list" className="rounded-lg border bg-card p-3.5">
+    <h2 className="text-[13.5px] font-semibold">Outside your list</h2>
+    <p className="mt-1 text-xs text-muted-foreground">Liquid stocks beyond Radar’s 169. Largest moves of at least 4.5 points vs SPY since the previous close.</p>
+    {!checkpoints.length && <p className="mt-2 text-xs">No checkpoint saved for this session.</p>}
+    {checkpoints.map((scan, i) => <details key={scan.as_of} open={i === 0} className="mt-2 border-t">
+      <summary className="cursor-pointer py-2 text-xs font-medium">
+        {nyTime(scan.as_of)} ET · {scan.status === "unavailable" ? "SIP scan unavailable" : `${scan.rows.length} shown · ${scan.covered}/${scan.requested} stocks with fresh data`}
+      </summary>
+      {scan.status === "ok" && (scan.rows.length ? <table className="w-full text-xs">
+        <thead className="text-muted-foreground"><tr><th className="text-left">Stock</th><th className="text-right">vs SPY</th><th className="text-right">Day $ volume</th></tr></thead>
+        <tbody>{scan.rows.map(r => <tr key={r.symbol} className="border-t">
+          <td className="py-1.5 font-medium">{r.symbol}{r.sector && <span className="block text-muted-foreground">{r.sector}</span>}</td>
+          <td className="text-right tabular-nums">{r.move_vs_spy_pp > 0 ? "+" : "−"}{Math.abs(r.move_vs_spy_pp).toFixed(2)} pp</td>
+          <td className="text-right tabular-nums">${(r.dollar_volume / 1_000_000).toFixed(1)}M</td>
+        </tr>)}</tbody>
+      </table> : <p className="text-xs text-muted-foreground">No observed stock met the move and price floors.</p>)}
+    </details>)}
+  </section>;
+}
 
 function Evidence({ rows }: { rows: RadarDetail["event"]["evidence"] }) {
   return (
@@ -256,7 +277,7 @@ export default function RadarFeedView() {
     return () => controller.abort();
   }, [load, session, sessionReady]);
 
-  const live = feed?.coverage?.live;
+  const live = feed?.coverage?.live || (feed?.outside_list !== undefined && !session);
   useEffect(() => {
     if (!live) return;
     const timer = setInterval(() => void load(session), 60_000);
@@ -283,7 +304,7 @@ export default function RadarFeedView() {
     <div className="space-y-4">
       <div className="rounded-lg border bg-card px-3.5 py-2.5" role="status" data-testid="radar-coverage">
         <p className={cn("text-sm", STATE_TONE[feed.state])}>{coverageLine(feed)}</p>
-        {feed.session && feed.state !== "off" && (
+        {feed.session && (feed.state !== "off" || feed.outside_list !== undefined) && (
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <label htmlFor="radar-session">Session</label>
             <select id="radar-session" value={feed.session} onChange={(e) => { setOpen(null); setSession(e.target.value);
@@ -333,6 +354,7 @@ export default function RadarFeedView() {
           <ul className="space-y-2">{earlier.map(card)}</ul>
         </section>
       )}
+      {feed.outside_list && <OutsideList checkpoints={feed.outside_list} />}
       {feed.state !== "off" && <RadarMovers session={session ?? feed.session ?? undefined} />}
     </div>
   );

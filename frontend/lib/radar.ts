@@ -33,7 +33,12 @@ export type RadarCoverage = {
   passes_recorded: number; passes_expected: number; passes_failed: number; last_ok_pass_at: string | null;
   symbols_tracked: number; symbols_missing: string[]; universe_version: string; live: boolean;
 };
+export type OutsideCheckpoint = {
+  as_of: string; status: "ok" | "unavailable"; covered?: number; requested?: number;
+  rows: { kind: "outside_list"; symbol: string; price: number; move_vs_spy_pp: number; dollar_volume: number; sector: string | null }[];
+};
 export type RadarFeed = {
+  outside_list?: OutsideCheckpoint[];
   state: "off" | "no_data" | "recording" | "stale"; reason: string | null; session: string | null; sessions?: string[];
   events: RadarFeedEvent[]; since_last_visit: string[]; last_visit_at: string | null; coverage: RadarCoverage | null; generated_at: string | null;
 };

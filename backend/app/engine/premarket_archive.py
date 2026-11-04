@@ -60,11 +60,11 @@ class Market:
             raise ValueError("Missing or invalid exchange calendar")
         return days
 
-    def symbols(self, day):
+    def symbols(self, day, kinds=("CS", "ETF")):
         """Date-effective published CS/ETF list, including subsequently delisted listings."""
         url = "https://api.polygon.io/v3/reference/tickers"
         symbols = set()
-        for kind in ("CS", "ETF"):
+        for kind in kinds:
             params = dict(date=day.isoformat(), market="stocks", active="true", type=kind, limit=1000)
             seen = set()
             while True:
@@ -88,13 +88,15 @@ class Market:
                 params = {"cursor": cursor}
         return sorted(symbols)
 
-    def splits(self, day):
+    def splits(self, day, symbols=None):
         page = self.get("https://api.polygon.io/stocks/v1/splits",
                         dict(execution_date=day.isoformat(), limit=1000), self.reference)
         if page["status"] != "OK" or page.get("next_url"):
             raise ValueError("Incomplete split reference")
         factors = {}
         for row in page.get("results", []):
+            if symbols is not None and row["ticker"] not in symbols:
+                continue
             if row["execution_date"] != day.isoformat() or row["ticker"] in factors:
                 raise ValueError("Unexpected split record")
             factors[row["ticker"]] = positive(row["split_from"]) / positive(row["split_to"])
