@@ -247,7 +247,10 @@ function FeedStatus({ live, paused, delayed, hasData, failed, loading, sample = 
   const streaming = useStream(live, (_, state) => state.key === live.key && state.status === "connected");
   return <div className="flex shrink-0 items-center gap-1.5 text-muted-foreground" role="status">
     <span className={`h-1.5 w-1.5 rounded-full ${paused || failed || stale || delayed ? "bg-amber-400" : hasData ? "bg-foreground/70" : "bg-muted-foreground/40"}`} />
-    {sample ? "Simulated chart snapshot" : paused ? "Updates paused" : delayed ? "Tradier sandbox · delayed" : isMacroSymbol(live.symbol) ? "Tradier index observations · 60s polling" : streaming ? "Tradier stream · studies refresh 15s" : "Tradier · 15s refresh"}
+    {/* The source's detail lives in the tooltip; the strip names only the state. */}
+    {streaming && !sample && !paused && !delayed && !isMacroSymbol(live.symbol)
+      ? <span title="Tradier stream · studies refresh 15s">Live stream</span>
+      : sample ? "Simulated chart snapshot" : paused ? "Updates paused" : delayed ? "Tradier sandbox · delayed" : isMacroSymbol(live.symbol) ? "Tradier index observations · 60s polling" : "Tradier · 15s refresh"}
     {loading && <Loader2 size={12} className="animate-spin" />}
   </div>;
 }
@@ -261,8 +264,11 @@ function LiveFooter({ live, quote, candle, market, asOf, brief = false }: { live
   const age = useClock((now) => shown.at ? Math.max(0, Math.floor(now - shown.at)) : null);
   // Outside every session no candle is forming; without the calendar it may be.
   const closed = useClock((now) => !!market && marketSessionAt(now, market) === null);
+  const today = useClock((now) => etTime(now, true));
   return <>
-    {!brief && <span className="min-w-0 truncate">{minute ? `Last minute candle ${etTime(minute, true)} ${etTime(minute)} ET${closed ? "" : " · latest candle may be forming"}` : "New York time"}</span>}
+    {/* Today's date is left out of the strip; the tooltip keeps the full stamp. */}
+    {!brief && <span className="min-w-0 truncate" title={minute ? `Last minute candle ${etTime(minute, true)} ${etTime(minute)} ET${closed ? "" : " · the latest candle may still be forming"}` : undefined}>
+      {minute ? `Last 1m candle ${etTime(minute, true) === today ? "" : `${etTime(minute, true)} `}${etTime(minute)} ET${closed ? "" : " · may be forming"}` : "New York time"}</span>}
     <span className="shrink-0">{age !== null ? `${shown.source} ${age < 60 ? `${age}s` : `${Math.floor(age / 60)}m`} ago` : "No price timestamp"}</span>
   </>;
 }

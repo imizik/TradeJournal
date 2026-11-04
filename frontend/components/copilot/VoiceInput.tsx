@@ -281,7 +281,7 @@ export function useVoiceInput({ status, disabled, onText }: {
 
   const setting = !available ? null : (
     <label className="inline-flex min-h-11 items-center gap-2 text-xs text-muted-foreground">
-      <input type="checkbox" checked={autoSend} className="h-4 w-4"
+      <input type="checkbox" checked={autoSend} className="h-3.5 w-3.5"
         onChange={event => {
           setAutoSend(event.target.checked);
           try { window.localStorage.setItem(AUTO_SEND_KEY, event.target.checked ? "on" : "off"); } catch { /* this visit only */ }

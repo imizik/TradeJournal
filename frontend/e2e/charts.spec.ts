@@ -829,7 +829,7 @@ test("a holiday from the market calendar reads Market closed and names the closu
   await expect(page.getByLabel("Market hours")).toHaveText("Market is closed for Thanksgiving Day");
   // With no session open, no candle is forming, and the status strip does not say one may be.
   const status = page.locator("footer[aria-label='Chart status']");
-  await expect(status).toContainText("Last minute candle");
+  await expect(status).toContainText("Last 1m candle");
   await expect(status).not.toContainText("may be forming");
 });
 
@@ -1073,7 +1073,7 @@ test("a tick re-renders only the charts whose candles moved; the clock and the c
   let historyReads = 0;
   page.on("request", (request) => { if (request.url().includes("/api/backend/charts/history?")) historyReads += 1; });
   await openAt(page, TUESDAY_1032, (url) => currentFixture(url, TUESDAY_1032));
-  await expect(page.getByText("Tradier stream · studies refresh 15s")).toBeVisible();
+  await expect(page.getByTitle("Tradier stream · studies refresh 15s")).toHaveText("Live stream");
   await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("2:40");
   const renders = () => page.evaluate(() => Object.fromEntries((window as RenderWindow).__tjRenders!));
   const settled = async () => { await page.waitForTimeout(300); return renders(); };
@@ -4216,7 +4216,7 @@ const proportionsOn = (server: SettingsStore, id?: string) => {
 };
 const sidePanel = (page: Page) => page.getByRole("complementary", { name: "Side panel" });
 /** A click on the status strip's plain text: somewhere that is not a chart, a field or a control. */
-const clickAway = (page: Page) => page.locator("footer[aria-label='Chart status']").getByText(/New York time|Last minute candle/).click();
+const clickAway = (page: Page) => page.locator("footer[aria-label='Chart status']").getByText(/New York time|Last 1m candle/).click();
 /** The studies are in the toolbar's Indicators menu; this opens it when it is closed. */
 async function indicator(page: Page, name: string) {
   const menu = page.getByRole("group", { name: "Chart indicators" });
@@ -4710,7 +4710,7 @@ test("a divider drag re-renders no chart while it moves, saves once when release
   await stub(page, () => { requests++; });
   await page.goto("/charts");
   await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
-  await expect(page.getByText("Tradier stream · studies refresh 15s")).toBeVisible();
+  await expect(page.getByTitle("Tradier stream · studies refresh 15s")).toHaveText("Live stream");
   await markCharts(page);
   await page.waitForTimeout(600);
   const renders = () => page.evaluate(() => Object.fromEntries((window as LiveWindow).__tjRenders!));
@@ -5516,7 +5516,7 @@ test("without a baseline the chart says so and shades nothing", async ({ page })
   await page.goto("/charts");
   await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
   const note = page.getByRole("note", { name: "Relative volume baseline" });
-  await expect(note).toHaveText("RVol baseline not built yet");
+  await expect(note).toHaveText("RVol building");
   await expect(note).toHaveAttribute("title", BUILDING.message!);
   await expect(page.getByLabel("main study values").getByText("RVol —")).toHaveAttribute("title", BUILDING.message!);
   expect(new Set(await volumeColors(page, "main", 240))).toEqual(new Set(["#2bc9a43d"]));
@@ -5563,7 +5563,7 @@ test("older sessions from history pages read their own RVol and baseline, and on
   const box = (await drawn(page, "main").boundingBox())!;
   await page.mouse.move(box.x + await candleX(page, "main", bars[77].time), box.y + box.height * 0.4);
   const note = studies.getByRole("note", { name: "Relative volume baseline" });
-  await expect(note).toHaveText("RVol baseline not built yet");
+  await expect(note).toHaveText("RVol building");
   await expect(note).toHaveAttribute("title", waiting);
   await expect(studies.getByText("RVol —")).toHaveAttribute("title", waiting);
   expect((await volumeColors(page, "main", 79))[0]).toBe("#2bc9a43d");
