@@ -254,6 +254,14 @@ def capture_live(day: date, *, root: Path = DATA_DIR, now: Callable = lambda: da
     eligible, picks, movers = rank_picks(bars, baseline["opening_volumes"], stock_map)
     if eligible == 0:
         raise StudyError("No eligible stocks in the live data response.")
+    # Freeze only the displayed stocks' opening candles, on the selection feed.
+    # Keep missing minutes in place so the card never implies a trade occurred.
+    for pick in picks:
+        opening = bars[pick["symbol"]]
+        pick["opening_bars"] = [
+            {key: opening[minute][key] for key in ("o", "h", "l", "c")} if minute in opening else None
+            for minute in range(10)
+        ]
     saved_at = now().astimezone(ET)
     if saved_at >= datetime.combine(day, wall_time(9, 41), ET):
         raise StudyError("Market data returned after the 9:41 selection cutoff.")

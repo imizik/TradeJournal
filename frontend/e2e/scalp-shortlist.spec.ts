@@ -2,7 +2,9 @@ import { expect, test } from "@playwright/test";
 
 const session = "2026-11-04";
 const picks = [
-  { symbol: "ANET", direction: "up", relative_volume: 2.5, sector_lead_pct: 1.2 },
+  { symbol: "ANET", direction: "up", relative_volume: 2.5, sector_lead_pct: 1.2,
+    opening_bars: [102, 101, 102, null, 102, 103, 102, 103, 104, 105].map((o, i) =>
+      o === null ? null : { o, h: o + 1, l: o - 1, c: o + (i % 3 === 1 ? -0.8 : 0.5) }) },
   { symbol: "MU", direction: "down", relative_volume: 2.1, sector_lead_pct: 0.8 },
 ];
 
@@ -31,7 +33,19 @@ test("dashboard records one timely paper choice per shown direction", async ({ p
   await expect(panel.getByText("ANET")).toBeVisible();
   await expect(panel.getByText("DOWN")).toBeVisible();
   await expect(panel.getByText(/Live IEX preview/).first()).toBeVisible();
+  const candles = panel.getByRole("img", { name: /ANET, 9:30–9:39 ET, 9 one-minute candles/ });
+  await expect(candles.locator("rect")).toHaveCount(9);
+  await expect(candles.locator("rect").nth(3)).toHaveAttribute("x", "42");
+  await expect(panel.getByTestId("scalp-pick-MU")).toContainText("Opening chart unavailable");
+  const popup = page.waitForEvent("popup");
+  await panel.getByRole("link", { name: "Open ANET chart in a new tab" }).click();
+  const chart = await popup;
+  await expect(chart).toHaveURL(/\/charts\?symbol=ANET$/);
+  await expect(chart.getByRole("textbox", { name: "Chart symbol", exact: true })).toHaveAttribute("placeholder", "ANET");
+  await chart.close();
   await page.getByTestId("scalp-pick-ANET").screenshot({ path: test.info().outputPath("scalp-shortlist-live-card.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await panel.screenshot({ path: test.info().outputPath("scalp-shortlist-live-phone.png") });
   await panel.getByTestId("scalp-pick-ANET").getByRole("button", { name: "Take" }).click();
   await expect(panel.getByText("Take · before 9:41")).toBeVisible();
   await panel.getByTestId("scalp-pick-MU").getByRole("button", { name: "Pass" }).click();
@@ -50,11 +64,14 @@ test("Practice opens the official and shown outcomes for the selected morning", 
     shown: [{ symbol: "ANET", direction: "up", return_pct: 0.82 }, { symbol: "MU", direction: "down", return_pct: -0.4 }],
     official: [{ symbol: "ANET", direction: "up", return_pct: 0.82 }],
     movers: [{ symbol: "MU", direction: "down", return_pct: 0.4 }] };
-  await page.route("**/scalp-shortlist**", (route) => route.fulfill({ json: body({ recap,
+  await page.route("**/scalp-shortlist**", (route) => route.fulfill({ json: body({ recap, today: "2026-11-05",
     decisions: [{ symbol: "ANET", choice: "take", decided_at: `${session}T09:40:45-05:00`, timely: true }] }) }));
   await page.goto("/practice#scalp-shortlist");
   const panel = page.getByTestId("scalp-shortlist");
   await expect(panel.getByLabel("Study morning")).toBeVisible();
+  const open = Date.parse(`${session}T09:30:00-05:00`) / 1000;
+  await expect(panel.getByRole("link", { name: "Open ANET chart in a new tab" }))
+    .toHaveAttribute("href", `/charts?symbol=ANET&from=${open}&to=${open + 9 * 60}`);
   await expect(panel.getByTestId("scalp-recap")).toContainText("ANET UP · Take · also an official pick");
   await expect(panel.getByTestId("scalp-recap")).toContainText("MU DOWN · no response · not an official pick");
   await expect(panel.getByTestId("scalp-recap")).toContainText("+0.82%");
