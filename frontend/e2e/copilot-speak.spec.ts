@@ -214,6 +214,7 @@ test("at 375 px the speaker waits behind + on the mic's row, the box takes the f
   await page.setViewportSize({ width: 375, height: 812 });
   await lab(page);
   await page.goto("/copilot-lab?view=briefing");
+  await page.getByRole("tab", { name: "Threads", exact: true }).click();
   await expect(page.getByText("Nothing open. Plan a trade to start a ticker.")).toBeVisible();
   await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click(); // a phone shows the conversation on its own tab
   await expect(speaker(page)).toBeHidden(); // attach and read-aloud wait behind "+"
