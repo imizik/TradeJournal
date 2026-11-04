@@ -75,7 +75,7 @@ test("Daily Review offers it on a Friday, naming that week, and not on other day
 
 test("the Briefing's Review my week sends one turn and shows the week review tool", async ({ page }) => {
   const chats = await labOn(page);
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await openDeskThreads(page);
   const home = page.getByRole("navigation", { name: "Thread list" });
   await expect(home.getByTestId("desk-day")).toBeVisible();
@@ -101,7 +101,7 @@ test("the week review shows your exit lessons, each opening its plan's thread", 
   await page.unroute("**/copilot/chat");
   await page.route("**/copilot/chat", (route) =>
     route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turn }));
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await page.getByRole("region", { name: "Conversation" }).getByRole("button", { name: "Review my week" }).click();
   const block = page.getByRole("region", { name: "Your exit lessons this week" });
   await expect(block).toContainText("2 of 3 exits reviewed");
@@ -125,7 +125,7 @@ test("the week review lists your long holds, each asking whether it is still the
   await page.unroute("**/copilot/chat");
   await page.route("**/copilot/chat", (route) =>
     route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turn }));
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await page.getByRole("region", { name: "Conversation" }).getByRole("button", { name: "Review my week" }).click();
   const block = page.getByRole("region", { name: "Your long holds" });
   await expect(block).toContainText("2 held, not asked about day to day");

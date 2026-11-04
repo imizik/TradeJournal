@@ -69,7 +69,7 @@ async function labOn(page: Page) {
 }
 
 async function reviewToCard(page: Page) {
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await openDeskThreads(page);
   const home = page.getByRole("navigation", { name: "Thread list" });
   await expect(home.getByTestId("desk-day")).toBeVisible();
@@ -103,7 +103,7 @@ test("a practice card is edited, confirmed, remembered, and its line appears on 
   expect(posts.memories[0]).toMatchObject({ kind: "lesson", symbol: null, source: "owner_statement", status: "active", owner_confirmed: true,
     original_text: "Be out within 15 minutes when my invalidation breaks, every time.", source_reference: `copilot:${INVESTIGATION}` });
 
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await expect(page.getByTestId("session-facts")).toContainText("Practicing: exit at my invalidation · 2 of 3 this week");
   await page.goto("/");
   const link = page.getByTestId("owner-dashboard").getByRole("link", { name: /Review my week/ });

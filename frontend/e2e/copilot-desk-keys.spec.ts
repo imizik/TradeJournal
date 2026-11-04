@@ -61,7 +61,7 @@ const ANSWER: Record<string, [string, string]> = {
   [NBIS]: ["NBIS", "NBIS answer: hold above 92.30."], [CRWV]: ["CRWV", "CRWV answer: short under 99.00."], [APLD]: ["APLD", "APLD answer: enter at 31.00."],
 };
 
-async function lab(page: Page, { time = NOW, session = SESSION, threads = () => DESK as unknown, path = "/copilot-lab", showThreads = true }: { time?: Date; session?: unknown; threads?(): unknown; path?: string; showThreads?: boolean } = {}) {
+async function lab(page: Page, { time = NOW, session = SESSION, threads = () => DESK as unknown, path = "/copilot-lab?view=briefing", showThreads = true }: { time?: Date; session?: unknown; threads?(): unknown; path?: string; showThreads?: boolean } = {}) {
   const chats: unknown[] = [];
   await page.clock.install({ time });
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
@@ -268,7 +268,7 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
   test(`the Briefing opens on today's session at ${width} px`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await lab(page);
-    if (width < 760) await page.getByRole("tab", { name: "Main" }).click();
+    if (width < 760) await page.getByRole("tab", { name: "Briefing" }).click();
     const tape = page.getByTestId("session-tape");
     await expect(tape).toBeVisible();
     await expect(tape).toContainText("Market open");
@@ -463,7 +463,7 @@ test("the evening review ping's link (?close=1) opens the desk on Close the day"
   await page.route("**/copilot/symbol/*", (route) => route.fulfill({ json: { symbol: "NBIS", as_of: "2026-10-23T20:30:00Z", positions: { state: "ok", rows: [{ symbol: "NBIS" }] },
     plans: { state: "ok", rows: [] }, new: { radar: { state: "off" }, thesis: { state: "ok", count: 0, rows: [] } }, quotes_at: null, quote_issue: null } }));
   await page.route("**/day-journal/2026-10-23", (route) => route.fulfill({ json: { day: "2026-10-23", entries: [], trade_plans: {} } }));
-  const { chats } = await lab(page, { time: new Date("2026-10-23T20:30:00Z"), threads: asking, path: "/copilot-lab?close=1", // 16:30 New York
+  const { chats } = await lab(page, { time: new Date("2026-10-23T20:30:00Z"), threads: asking, showThreads: false, path: "/copilot-lab?close=1", // 16:30 New York
     session: { ...SESSION, now: epoch("2026-10-23T20:30:00Z"), phase: "post", time_stops: [] } });
   await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible(); // the first unreviewed thread
   await expect(page.getByRole("region", { name: "Close of day" })).toContainText("Review: did you follow the plan?");

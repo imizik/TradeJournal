@@ -1255,3 +1255,87 @@ def test_investigations_without_a_rating_or_metrics_still_load_and_bad_ones_are_
         for bad in ({"rating": "meh"}, {"metrics": {"total_ms": -1}}, {"metrics": {"model": "x" * 200}}, {"metrics": {"extra": 1}}):
             r = client.post("/copilot/investigations", json={"title": "Bad", "transcript": [{"role": "assistant", "content": "A", **bad}]})
             assert r.status_code == 422, bad
+
+
+def test_daily_main_resolves_once_across_devices_rolls_over_and_keeps_archive(monkeypatch, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from app.routers import copilot as routes
+
+    from sqlmodel import Session, SQLModel, create_engine
+    engine = create_engine(f"sqlite:///{tmp_path / 'desk.db'}", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+
+    def isolated_session():
+        with Session(engine) as db:
+            yield db
+
+    monkeypatch.setitem(app.dependency_overrides, routes.get_session, isolated_session)
+
+    class Clock(datetime):
+        day_in_new_york = 1
+
+        @classmethod
+        def now(cls, tz):
+            assert tz == routes.ET
+            return cls(2026, 11, cls.day_in_new_york, 0, 5, tzinfo=tz)
+
+    monkeypatch.setattr(routes, "datetime", Clock)
+    with TestClient(app) as client:
+        monkeypatch.setenv("COPILOT_ENABLED", "false")
+        assert client.post("/copilot/main-chat").status_code == 503
+        monkeypatch.setenv("COPILOT_ENABLED", "true")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            devices = list(pool.map(lambda _: client.post("/copilot/main-chat").json(), range(2)))
+        first = devices[0]
+        assert first["id"] == devices[1]["id"] and first["main_day"] == "2026-11-01"
+        url = f"/copilot/investigations/{first['id']}"
+        def exchange(symbol):
+            return {"title": "ignored", "transcript": [{"role": "user", "content": symbol}, {"role": "assistant",
+                    "content": f"Plan for {symbol}", "exchange_id": f"question-{symbol}", "proposals": [{**PLAN_CARD, "symbol": symbol}]}],
+                    "evidence": [{"tool": "get_quote", "message": 1}]}
+        daily_url = f"/copilot/main-chat/{first['id']}"
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            writes = list(pool.map(lambda symbol: client.post(daily_url + "/exchange", json=exchange(symbol)), ["NBIS", "AAPL"]))
+        assert all(r.status_code == 200 for r in writes)
+        kept = client.get(url).json()
+        assert {m["content"] for m in kept["transcript"][::2]} == {"NBIS", "AAPL"}
+        assert [e["message"] for e in kept["evidence"]] == [1, 3]
+        assert client.post(daily_url + "/exchange", json=exchange("NBIS")).json()["message_count"] == 4
+        plans = []
+        for m in kept["transcript"][1::2]:
+            card = m["proposals"][0]
+            open_plan = daily_url + "/plans/" + card["id"]
+            plan = client.post(open_plan).json()
+            assert plan["symbol"] == card["symbol"] and not plan["main_day"] and len(plan["transcript"]) == 2
+            assert client.post(open_plan).json()["id"] == plan["id"]
+            plans.append(plan["id"])
+        from datetime import UTC, timedelta
+        from app.routers.copilot_desk import _drafts
+        from app.engine import copilot_scorecard, jo_research
+        assert len(set(plans)) == 2
+        with Session(engine) as db:
+            assert {r["id"] for r in _drafts(db)["rows"]} == set(plans)
+        for plan_id, m, outcome in zip(plans, kept["transcript"][1::2], ["dismissed", "confirmed"], strict=True):
+            assert client.put(f"/copilot/investigations/{plan_id}/proposals/{m['proposals'][0]['id']}/outcome",
+                              json={"state": outcome}).status_code == 200
+        with Session(engine) as db:
+            assert not _drafts(db)["rows"]
+            assert len(copilot_scorecard._answers(db, datetime.utcnow() - timedelta(hours=1), {})) == 2
+            audited = jo_research.audit_context(db, datetime.now(UTC))["plans"]
+            assert {r["plan_id"]: r["card"] for r in audited} == dict(zip(plans, ["dismissed", "confirmed"], strict=True))
+            assert len(audited) == 2
+        assert client.put(url, json={"revision": kept["revision"], **exchange("NBIS")}).status_code == 409
+        # Fill by text size in eight exchanges rather than seeding a different storage path.
+        long_turn = {"title": "ignored", "transcript": [{"role": role, "content": "x" * 20000} for role in ["user", "assistant"]]}
+        for index in range(8):
+            long_turn["transcript"][1]["exchange_id"] = f"long-turn-{index}"
+            assert client.post(daily_url + "/exchange", json=long_turn).status_code == 200
+        assert client.get(url).json()["main_at_capacity"]
+        second = client.post("/copilot/main-chat").json()
+        assert second["id"] != first["id"] and second["main_day"] == first["main_day"]
+        Clock.day_in_new_york = 2
+        today = client.post("/copilot/main-chat").json()
+        assert today["main_day"] == "2026-11-02"
+        history = client.get("/copilot/main-chat/history").json()["chats"]
+        assert [row["id"] for row in history[:3]] == [today["id"], second["id"], first["id"]]
+        assert client.get(url).json()["transcript"][:4] == kept["transcript"]

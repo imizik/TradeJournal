@@ -33,7 +33,7 @@ const TURN = [
     usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, cost_usd: 0 } },
 ].map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
 
-async function lab(page: Page, url = "/copilot-lab") {
+async function lab(page: Page, url = "/copilot-lab?view=briefing") {
   const chats: { messages: { role: string; content: string }[] }[] = [];
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: DESK }));

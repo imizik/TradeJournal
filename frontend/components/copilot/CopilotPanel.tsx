@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type R
 import {
   AUTO_WEEK_REVIEW_TITLE, answerParts, asOfText, verdictPending, copilotStatus, pickedModel, rememberModel, pickedBackend, rememberBackend, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, saveOutcome, saveRating, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt, IMAGE_PREFILL, MAX_IMAGES, imageUrl, spokenText, uploadImage,
   type Backend, type Compare, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ProposalOutcome, type Rating, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates, type DrawnPlan,
-  BRIEFING_TITLE, type TurnSource,
+  appendMainExchange, mainPlanThread, openDailyMain, BRIEFING_TITLE, type TurnSource,
 } from "@/lib/copilot";
 import Link from "next/link";
 import { chartDraftThread, draftKey, readDraft, rememberChartDraft, storeDraft, type CopilotDraft } from "@/lib/copilotDraft";
@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils";
 const CURRENT_KEY = "tradejournal.copilot-lab.current.v2";
 /** The New York day it was last open: the desk reopens it that day only; the next day starts on Main. */
 const CURRENT_DAY_KEY = "tradejournal.copilot-lab.current-day.v1";
-type Current = Pick<Investigation, "id" | "revision" | "title" | "status" | "conclusion" | "source" | "findings" | "created_at">;
+type Current = Pick<Investigation, "id" | "revision" | "title" | "status" | "conclusion" | "source" | "findings" | "created_at" | "main_day" | "main_at_capacity" | "message_count">;
 export const remember = (id: string | null) => {
   try {
     if (id) { window.localStorage.setItem(CURRENT_KEY, id); window.localStorage.setItem(CURRENT_DAY_KEY, nyDay()); }
@@ -35,7 +35,6 @@ export const remember = (id: string | null) => {
   } catch { /* convenience only */ }
 };
 export const rememberedThread = () => { try { return window.localStorage.getItem(CURRENT_KEY); } catch { return null; } };
-const fromAnotherDay = () => { try { const day = window.localStorage.getItem(CURRENT_DAY_KEY); return !!day && day !== nyDay(); } catch { return false; } };
 const shortTime = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 // The picker may finish after its chart dock is closed. A remounted editor can join the same upload.
 const uploads = new Map<string, Promise<void>>();
@@ -424,12 +423,13 @@ function savedFields(messages: LabMessage[], current: Current | null, symbol: st
  * ``desk`` (page only) is the Copilot desk's hand-off: its thread list opens investigations or asks through
  * ``command``, the open investigation goes up through ``onThread``, and its activity shows in the desk's inspector.
  */
-function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose, home, strip, look, desk }: {
+function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose, home, strip, look, desk, daily = false }: {
   link?: PanelLink | null; variant?: "page" | "panel"; pageSymbol?: string; pageContext?: string; onClose?(): void;
   home?: (actions: HomeActions) => ReactNode; strip?: (actions: PanelActions) => ReactNode; look?: () => Promise<ChartLook>;
-  desk?: DeskHooks;
+  desk?: DeskHooks; daily?: boolean;
 }) {
   const panel = variant === "panel";
+  const [openingMain, setOpeningMain] = useState(daily || !!link?.investigation);
   // Where this question is asked from, recorded with its turn: the desk page, the Charts dock, a Radar drawer, or another panel.
   const source: TurnSource = !panel ? "desk" : link?.origin?.kind === "radar_event" ? "radar" : pageSymbol ? "charts" : "panel";
   const { owner, identifier } = useAppAccess();
@@ -555,6 +555,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   }
 
   function open(saved: Investigation, entry?: PanelLink | null) {
+    setOpeningMain(false);
     activateDraft(keyFor(saved.symbol ?? "", saved.id, entry), entry?.investigation ? entry.context || whatChangedPrompt(saved.id) : "", entry);
     following.current = panel;
     if (desk && (saved.symbol || saved.title !== BRIEFING_TITLE)) landOnLatest();
@@ -661,6 +662,13 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         void follow(pageSymbol || symbol, controller.signal, true);
         return;
       }
+      if (daily && !threadInUrl()) {
+        const request = ++selection.current;
+        openDailyMain(controller.signal).then(saved => {
+          if (!controller.signal.aborted && request === selection.current) open(saved);
+        }).catch(error => { if (!controller.signal.aborted) setSaveState({ state: "error", message: String(error) }); });
+        return;
+      }
       activateDraft(keyFor(symbol, null, link), link?.image ? opening + IMAGE_PREFILL : opening, link);
       if (panel) return; // Radar's drawer: a new investigation from its link
       void refreshRecent();
@@ -668,16 +676,17 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       try { id = window.localStorage.getItem(CURRENT_KEY); } catch { /* start fresh */ }
       if (link?.investigation) id = link.investigation; // ?investigation=<id> opens that one
       else if (desk && !link) { // the desk's address names its thread; else the last one, if it was open today
-        id = threadInUrl() ?? (fromAnotherDay() ? null : id);
+        id = threadInUrl();
         if (!id) remember(null);
       }
       else if (link) id = null; // a symbol or context link starts fresh rather than reopening the last investigation
       if (link && !link.investigation) remember(null);
       else if (id) {
+        setOpeningMain(true);
         const request = ++selection.current;
         getInvestigation(id).then(saved => {
           if (!controller.signal.aborted && request === selection.current) open(saved, link?.investigation ? link : null);
-        }).catch(() => { if (!controller.signal.aborted && request === selection.current) remember(null); });
+        }).catch(() => { if (!controller.signal.aborted && request === selection.current) setSaveState({ state: "error", message: "Could not open this conversation." }); });
       }
     }).catch(error => {
       if (!controller.signal.aborted) setStatusError(error instanceof Error ? error.message : "Copilot Lab is unavailable.");
@@ -693,7 +702,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     setSaveState({ state: "saving" });
     persisting.current = true;
     try {
-      const saved = current ? await updateInvestigation(current.id, current.revision, fields) : await createInvestigation(fields);
+      const saved = current?.main_day ? await appendMainExchange(current.id, savedFields(messages.slice(-2), null, ""))
+        : current ? await updateInvestigation(current.id, current.revision, fields) : await createInvestigation(fields);
       if (activeSlot.current !== slotAtSave) return;
       if (!current && slotAtSave) {
         // Words typed during the first save now belong to the assigned investigation.
@@ -701,13 +711,33 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         activeSlot.current = keyFor(saved.symbol ?? "", saved.id);
         setDraftSlot(activeSlot.current);
       }
+      if (current?.main_day) {
+        if (saved.id !== current.id && slotAtSave) {
+          const nextSlot = keyFor("", saved.id);
+          const pending = readDraft(slotAtSave);
+          if (pending) { storeDraft(nextSlot, pending); storeDraft(slotAtSave, null); }
+          activateDraft(nextSlot);
+        }
+        const live = new Map(messages.filter(m => m.exchange_id).map(m => [m.exchange_id, m]));
+        const server = fromSaved(saved).map(m => {
+          const earlier = m.exchange_id && live.get(m.exchange_id);
+          return earlier ? { ...m, tools: earlier.tools, carry: earlier.carry } : m;
+        });
+        const last = messages.at(-1)!;
+        // Keep this turn's live evidence and follow-up context, but use the committed card IDs and answer index.
+        const placed = server.findIndex(m => m.exchange_id === last.exchange_id);
+        if (placed > 0) {
+          server[placed - 1] = messages.at(-2)!;
+          server[placed] = { ...server[placed], ...last, rating: server[placed].rating, proposals: server[placed].proposals };
+        }
+        setMessages(server);
+      }
       setCurrent(saved);
       remember(saved.id);
       setSaveState({ state: "saved" });
       void refreshRecent();
       const pending = [...pendingOutcomes.current];
       pendingOutcomes.current.clear();
-    pendingRatings.current.clear();
       for (const [id, outcome] of pending) sendOutcome(saved.id, id, outcome);
       const ratings = [...pendingRatings.current];
       pendingRatings.current.clear();
@@ -727,7 +757,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     const { messages: said, current: saved, symbol: about } = latest.current;
     if (!said.length) return;
     const fields = savedFields(said, saved, about);
-    void (saved ? updateInvestigation(saved.id, saved.revision, fields) : createInvestigation(fields)).catch(() => { /* best effort */ });
+    if (saved?.main_day && said.length <= saved.message_count) return;
+    void (saved?.main_day ? appendMainExchange(saved.id, savedFields(said.slice(-2), null, "")) : saved ? updateInvestigation(saved.id, saved.revision, fields) : createInvestigation(fields)).catch(() => { /* best effort */ });
   }, []);
 
   useEffect(() => {
@@ -824,8 +855,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   // The desk's inspector follows the open investigation.
   const onThread = desk?.onThread;
   useEffect(() => {
-    onThread?.(current ? { id: current.id, symbol: symbol || null, title: current.title, refreshKey: linkedKey } : null);
-  }, [onThread, current?.id, current?.title, symbol, linkedKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the reported fields, not the whole record
+    onThread?.(current ? { id: current.id, symbol: symbol || null, title: current.title, refreshKey: linkedKey, mainDay: current.main_day } : null);
+  }, [onThread, current?.id, current?.title, current?.main_day, symbol, linkedKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the reported fields, not the whole record
 
   // The thread menu closes on a press outside it or Escape.
   useEffect(() => {
@@ -853,7 +884,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   function recordOutcome(id: string, outcome: ProposalOutcome) {
     setMessages(list => list.map(m => m.proposals?.some(p => p.id === id)
       ? { ...m, proposals: m.proposals.map(p => p.id === id ? { ...p, outcome } : p) } : m));
-    if (!current || running.current || unsaved.current || persisting.current) pendingOutcomes.current.set(id, outcome);
+    if (!current || (!current.main_day && (running.current || unsaved.current || persisting.current))) pendingOutcomes.current.set(id, outcome);
     else sendOutcome(current.id, id, outcome);
   }
   const sendOutcome = (investigation: string, id: string, outcome: ProposalOutcome) =>
@@ -863,7 +894,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   /** Helped / Didn't on answer ``index``: kept in the conversation, and saved at once when the conversation is saved. */
   function rateAnswer(index: number, rating: Rating | null) {
     setMessages(list => list.map((m, i) => i === index ? { ...m, rating: rating ?? undefined } : m));
-    if (!current || running.current || unsaved.current || persisting.current) pendingRatings.current.set(index, rating);
+    if (!current || (!current.main_day && (running.current || unsaved.current || persisting.current))) pendingRatings.current.set(index, rating);
     else sendRating(current.id, index, rating);
   }
   const sendRating = (investigation: string, index: number, rating: Rating | null) =>
@@ -872,7 +903,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   /** One turn about ``about`` (the symbol box unless given; empty means no symbol). */
   async function send(text: string, about = symbol, shots = attached) {
     const content = text.trim() || (shots.length ? IMAGE_PREFILL : "");
-    if (!content || busy || running.current || !status?.enabled || attaching?.state === "busy") return;
+    if (openingMain || (current?.main_day && messages.length > current.message_count) || current?.main_at_capacity || !content || busy || running.current || !status?.enabled || attaching?.state === "busy") return;
     selection.current++;
     stopLanding();
     following.current = true; // the owner's own message: show it and follow the answer
@@ -918,8 +949,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     turns.current += 1;
     running.current = true;
     typed.current = false;
-    setMessages(current => [...current, { role: "user", content, ...(shots.length ? { images: shots.map(s => s.url) } : {}) },
-      { role: "assistant", content: "", tools: [] }]);
+    const exchangeId = current?.main_day ? newClientId() : null;
+    setMessages(list => [...list, { role: "user", content, ...(shots.length ? { images: shots.map(s => s.url) } : {}) },
+      { role: "assistant", content: "", tools: [], ...(exchangeId ? { exchange_id: exchangeId } : {}) }]);
     setDraft("");
     setAttached([]);
     setSpoken(false);
@@ -1116,9 +1148,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     </span>
   );
   const messageBox = (
-    <textarea ref={box} value={draft} onChange={e => { edits.current++; typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={small ? 1 : 3} wrap={small ? "off" : undefined} disabled={!enabled}
+    <textarea ref={box} value={draft} onChange={e => { edits.current++; typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={small ? 1 : 3} wrap={small ? "off" : undefined} disabled={!enabled || openingMain || current?.main_at_capacity}
       onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft); } }}
-      placeholder={enabled ? "Ask, challenge, or ask for a plan…" : "Copilot Lab is off"} aria-label="Message"
+      placeholder={!enabled ? "Copilot Lab is off" : openingMain ? "Opening conversation…" : current?.main_day ? "Message Main chat…" : "Ask, challenge, or ask for a plan…"} aria-label="Message"
       className={cn("block w-full resize-none bg-transparent px-3 text-base", small ? "min-h-[2.625rem] min-w-0 flex-1 py-2" : "min-h-[4.75rem] pb-1 pt-2.5", " leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 sm:text-sm")} />
   );
   const sendButton = busy
@@ -1156,7 +1188,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       run: () => void lookAtChart(deskChart) },
     planned && { label: "Size it", title: "Put a sizing question in the box, unsent: you add the dollars at risk",
       run: () => fill("Size it: with this plan's entry and invalidation, how many shares or contracts keep the loss at the invalidation to $") },
-    current?.status === "open" && messages.length > 0 && { label: "Close with a lesson", title: "Write the one-line lesson, then close the thread",
+    !current?.main_day && current?.status === "open" && messages.length > 0 && { label: "Close with a lesson", title: "Write the one-line lesson, then close the thread",
       run: () => { setMenu(true); window.setTimeout(() => lesson.current?.focus(), 0); } },
     !current && !messages.length && symbol && { label: `Is ${symbol}'s group confirming?`, run: () => void send(`Is ${symbol}'s group confirming the move?`) },
     !current && !messages.length && symbol && { label: "Plan a trade", run: () => void send(`Plan a trade on ${symbol}.`) },
@@ -1196,7 +1228,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             {current?.status === "closed" && <span>Closed</span>}
             <button type="button" onClick={() => startNew()} disabled={busy || (!messages.length && !current)} title="Leave this conversation saved and start a new one"
               className="min-h-11 rounded px-2 hover:text-foreground disabled:opacity-40 sm:min-h-7">New</button>
-            {current && (
+            {current && !current.main_day && (
               <div ref={menuBox} className="relative">
                 <button type="button" onClick={() => setMenu(open => !open)} aria-expanded={menu} aria-haspopup="true" aria-label="Thread actions"
                   className="flex min-h-11 min-w-11 items-center justify-center rounded hover:text-foreground sm:min-h-7 sm:min-w-7">
@@ -1236,6 +1268,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       )}
       {/* A failed save says so on its own line, where a long message can wrap. */}
       {desk && saveState?.state === "error" && saving}
+      {current?.main_day && messages.length > current.message_count && saveState?.state === "error" && <button type="button" className="text-sm underline" onClick={() => { if (!persisting.current) void persist(); }}>Retry saving this exchange</button>}
+      {openingMain && saveState?.state === "error" && <button type="button" className="text-sm underline" onClick={() => window.location.reload()}>Retry opening chat</button>}
+      {current?.main_at_capacity && <a className="text-sm underline" href="/copilot-lab">This conversation is full. Continue in today’s Main chat →</a>}
       {offer && engaged && pageSymbol && (
         <div role="status" aria-label="Symbol changed" className="flex flex-wrap items-center gap-2 rounded border border-amber-500/30 bg-amber-500/5 p-2 text-xs">
           <span className="text-foreground">The page is now on {pageSymbol}; this conversation is about {symbol}.</span>
@@ -1306,9 +1341,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       })}
 
       <div className={panel ? "space-y-4 py-1" : "space-y-5 py-2"} aria-live="polite">
-        {!messages.length && !current?.findings && (
+        {!messages.length && !current?.findings && !openingMain && (
           <p className="text-sm text-muted-foreground">
-            Ask about an opportunity, push back on the read, then ask for a plan. Try: “{symbol || "NBIS"} looks like it might recover. Is the whole group confirming?”
+            {current?.main_day ? "What’s on your mind today?" : <>Ask about an opportunity, push back on the read, then ask for a plan. Try: “{symbol || "NBIS"} looks like it might recover. Is the whole group confirming?”</>}
           </p>
         )}
         {messages.map((message, i) => message.role === "user" ? (
@@ -1330,7 +1365,19 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             {message.error && <p role="alert" className="mt-1 text-sm text-rose-300">{message.error.message}</p>}
             {(message.tools ?? []).filter(t => t.lessons).slice(-1).map(t => <ExitLessons key={t.id} lessons={t.lessons!} />)}
             {(message.tools ?? []).filter(t => t.long_holds).slice(-1).map(t => <LongHolds key={t.id} holds={t.long_holds!} />)}
-            {message.proposals?.map(proposal => proposal.kind === "trade_plan" ? (
+            {(!current?.main_day || i < current.message_count) && message.proposals?.map(proposal => proposal.kind === "trade_plan" && current?.main_day ? (
+              <button key={proposal.id} type="button" disabled={busy} className="my-2 min-h-11 rounded-md border px-3 text-sm"
+                onClick={() => { const selected = ++selection.current; void mainPlanThread(current.id, proposal.id)
+                  .then(plan => {
+                    if (selected !== selection.current) return;
+                    open(plan);
+                    // The saved references do not contain premiums/level history. Retain the live tools in this tab.
+                    if (message.tools?.length) setMessages(list => list.map(m => m.plan_context ? { ...m, tools: message.tools } : m));
+                  })
+                  .catch(() => { if (selected === selection.current) setSaveState({ state: "error", message: "Could not open that plan thread. Try again." }); }); }}>
+                Review {proposal.symbol} plan in its own thread →
+              </button>
+            ) : proposal.kind === "trade_plan" ? (
               <TradePlanCard key={proposal.id} plan={proposal} investigationId={current?.id ?? null} origin={origin} drawn={drawn}
                 history={historyFor(message.tools ?? [], proposal)} candidates={candidatesFor(message.tools ?? [], proposal)}
                 alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)}
@@ -1341,7 +1388,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
                 onOutcome={outcome => recordOutcome(proposal.id, outcome)} />
             ))}
             <Sources tools={message.tools ?? []} metrics={message.metrics} />
-            {message.content && !(busy && i === messages.length - 1) && <RateAnswer rating={message.rating} onRate={next => rateAnswer(i, next)} />}
+            {message.content && !message.plan_context && (!current?.main_day || i < current.message_count) && !(busy && i === messages.length - 1) && <RateAnswer rating={message.rating} onRate={next => rateAnswer(i, next)} />}
           </div>
         ))}
         <div ref={end} />
@@ -1392,7 +1439,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       {lookOnSend.current && !look && <p className="text-xs text-muted-foreground">Your chart context is in the draft. Send from Charts to include its image.</p>}
       <form onSubmit={e => { e.preventDefault(); void send(draft); }}
         className={cn("rounded-xl border bg-background transition-colors focus-within:border-primary/50", small && "flex items-center")}>
-        {desk && (
+        {desk && !current?.main_day && (
             <div className={cn("flex min-h-7 items-center px-2 text-xs", small ? cn("shrink-0", !symbol && !scoping && "max-md:hidden") : "pt-1.5")}>
               {symbol ? (
                 <span className="inline-flex items-center gap-0.5 rounded-full bg-muted py-0.5 pl-2 pr-0.5 text-foreground" data-testid="copilot-scope">

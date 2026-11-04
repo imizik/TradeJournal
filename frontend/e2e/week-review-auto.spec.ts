@@ -52,7 +52,7 @@ async function labOn(page: Page) {
 
 test("Friday's saved review shows in the thread list and opens with its practice card", async ({ page }) => {
   const posts = await labOn(page);
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await openDeskThreads(page);
   const home = page.getByRole("navigation", { name: "Thread list" });
   const thread = home.getByRole("link", { name: TITLE });

@@ -40,7 +40,7 @@ const meta = (id: string, title: string) => ({ id, source: "copilot", title, sym
 const summary = (record: Record_) => ({ ...record, message_count: record.transcript.length });
 const cards = (server: Server) => server.records.get(INV)!.transcript.flatMap((m) => m.proposals ?? []);
 
-async function lab(page: Page, server: Server) {
+async function lab(page: Page, server: Server, path = "/copilot-lab?view=briefing") {
   const post = (path: string, route: Route) => server.posts.push({ path, body: route.request().postDataJSON() });
   await page.route("**/copilot/status", (route) => route.fulfill({ json: STATUS }));
   await page.route("**/copilot/threads", (route) => route.fulfill({ json: THREADS }));
@@ -89,7 +89,7 @@ async function lab(page: Page, server: Server) {
     post("alerts", route);
     return route.fulfill({ json: { alerts: [], phone: true } });
   });
-  await page.goto("/copilot-lab");
+  await page.goto(path);
   await openDeskThreads(page);
 }
 
@@ -205,8 +205,7 @@ test("a week review's practice card kept in an earlier answer is not added again
     { role: "user", content: "Review my week" }, { role: "assistant", content: "Your week.", proposals: [{ ...PRACTICE, outcome: { state: "dismissed" } }] },
     { role: "user", content: "And NBIS?" }, { role: "assistant", content: "NBIS lagged its group." }] } as Record_);
   await page.route("**/copilot/practice?*", (route) => route.fulfill({ json: { goal: null, this_week: null, proposed: PRACTICE } }));
-  await page.addInitScript((id) => window.localStorage.setItem("tradejournal.copilot-lab.current.v2", id), INV);
-  await lab(page, server);
+  await lab(page, server, `/copilot-lab?thread=${INV}`);
   await expect(page.getByText("NBIS lagged its group.")).toBeVisible();
   await expect(page.getByRole("region", { name: "Proposed practice" })).toHaveCount(0);
   await page.getByLabel("Message").fill("Anything else?");

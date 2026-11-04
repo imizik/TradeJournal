@@ -10,7 +10,7 @@ that turn ends, or after 24 hours if it is never sent.
 """
 import asyncio
 import contextlib
-from datetime import datetime
+from datetime import UTC, datetime
 import json
 import logging
 import time
@@ -277,7 +277,37 @@ def answer_scorecard(days: int = Query(7, ge=1, le=90), session: Session = Depen
 
 
 def _http(exc: investigations.InvestigationError) -> HTTPException:
-    return HTTPException({"not_found": 404, "stale": 409, "too_long": 413}[exc.code], str(exc))
+    return HTTPException({"not_found": 404, "stale": 409, "too_long": 413, "invalid": 422}[exc.code], str(exc))
+
+
+@router.post("/main-chat")
+def open_main_chat(session: Session = Depends(get_session)):
+    _enabled()
+    return investigations.main_chat(session, datetime.now(ET).date())
+
+
+@router.post("/main-chat/{investigation_id}/exchange")
+def append_main_chat(investigation_id: str, body: investigations.InvestigationFields, session: Session = Depends(get_session)):
+    _enabled()
+    try:
+        return investigations.append_main(session, investigation_id, body)
+    except investigations.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post("/main-chat/{investigation_id}/plans/{proposal_id}")
+def open_main_plan(investigation_id: str, proposal_id: str, session: Session = Depends(get_session)):
+    _enabled()
+    try:
+        return investigations.main_plan_thread(session, investigation_id, proposal_id)
+    except investigations.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.get("/main-chat/history")
+def main_chat_history(before: datetime | None = None, session: Session = Depends(get_session)):
+    _enabled()
+    return {"chats": investigations.main_history(session, before.astimezone(UTC).replace(tzinfo=None) if before and before.tzinfo else before)}
 
 
 @router.get("/investigations")

@@ -28,7 +28,6 @@ type Queue = { enabled: boolean; jobs: ReturnType<typeof job>[]; reads: number; 
 
 async function lab(page: Page, queue: Queue, withResult = () => false) {
   await page.clock.install({ time: new Date("2026-10-24T14:10:00Z") });
-  await page.addInitScript((id) => window.localStorage.setItem("tradejournal.copilot-lab.current.v2", id), SOURCE);
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) =>
     route.fulfill({ json: { investigations: withResult() ? [result, record(SOURCE)] : [record(SOURCE)] } }));
@@ -44,7 +43,7 @@ async function lab(page: Page, queue: Queue, withResult = () => false) {
     (queue.urls ??= []).push(route.request().url());
     return route.fulfill({ json: { jobs: queue.jobs, queue_enabled: queue.enabled, daily_budget_usd: 2, spent_today_usd: 0 } });
   });
-  await page.goto("/copilot-lab");
+  await page.goto(`/copilot-lab?thread=${SOURCE}`);
   await expect(page.getByRole("button", { name: "Thread actions" })).toBeVisible(); // the saved investigation is open
 }
 

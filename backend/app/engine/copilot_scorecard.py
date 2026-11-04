@@ -88,7 +88,7 @@ def _answers(db: Session, since: datetime, turns: dict[str, CopilotTurn]) -> lis
         except ValueError:
             continue
         for i, message in enumerate(transcript):
-            if message.get("role") != "assistant":
+            if message.get("role") != "assistant" or message.get("plan_context"):
                 continue
             metrics = message.get("metrics") or {}
             turn = turns.get(str(metrics.get("turn_id") or ""))
