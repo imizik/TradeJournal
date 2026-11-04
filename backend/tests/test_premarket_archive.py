@@ -177,13 +177,32 @@ def test_prepare_only_on_confirmed_exchange_session(monkeypatch):
 
 def test_snapshot_minute_supplies_price_only_inside_matching_cutoff():
     when = CUT - timedelta(minutes=1)
-    totals = {"UP": (when, Decimal("10"), 100_000, Decimal("1000000"))}
+    totals = {"UP": arch.MinuteTotal(when, Decimal("11"), 100_000, Decimal("10"), 100_000, Decimal("1000000"))}
     matching = {"UP": {"minuteBar": bar(when, 11, 100_000, 10)}}
     assert arch.rank_inputs(DAY, ["UP"], {"UP": Decimal("9")}, totals, matching)["gainers"][0]["price"] == 11
     for stale_or_late in (when - timedelta(minutes=1), CUT):
         matching["UP"]["minuteBar"] = bar(stale_or_late, 12, 100_000, 10)
-        with pytest.raises(ValueError, match="does not confirm"):
+        with pytest.raises(ValueError, match="does not confirm|outside the checkpoint"):
             arch.rank_inputs(DAY, ["UP"], {"UP": Decimal("9")}, totals, matching)
+
+
+@pytest.mark.parametrize("missing,offset,size,vwap,price", [
+    (True, 0, 100_000, 11, 11),     # Snapshot-only $1.1M.
+    (False, -1, 2_000, 10, 10),     # A new $20k minute after $990k.
+    (False, 0, 100_000, 10, 10),    # Same minute, corrected volume.
+    (False, 0, 99_000, 11, 10),     # Same volume, corrected VWAP.
+    (False, 0, 99_000, 10, 12),     # Same volume and VWAP, corrected close.
+])
+def test_conflicting_snapshot_before_floor_filter_withholds_rank(missing, offset, size, vwap, price):
+    when = CUT - timedelta(minutes=1)
+    totals = {"UP": arch.MinuteTotal(when, Decimal(12), 100_000, Decimal(12), 100_000, Decimal(1_200_000))}
+    if not missing:
+        totals["SMALL"] = arch.MinuteTotal(when + timedelta(minutes=offset), Decimal(10), 99_000,
+                                           Decimal(10), 99_000, Decimal(990_000))
+    snaps = {"UP": {"minuteBar": bar(when, 12, 100_000, 12)},
+             "SMALL": {"minuteBar": bar(when, price, size, vwap)}}
+    with pytest.raises(ValueError, match="does not confirm"):
+        arch.rank_inputs(DAY, ["UP", "SMALL"], {"UP": Decimal(10), "SMALL": Decimal(5)}, totals, snaps)
 
 
 def test_assistant_refused_and_owner_reads_frozen_day(boundary, tmp_path, monkeypatch):

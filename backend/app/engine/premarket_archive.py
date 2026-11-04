@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from datetime import date, datetime, time as clock, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -130,6 +131,16 @@ class Market:
             params["page_token"] = token
 
 
+@dataclass(frozen=True)
+class MinuteTotal:
+    when: datetime
+    price: Decimal
+    last_volume: int
+    last_vwap: Decimal
+    volume: int
+    dollars: Decimal
+
+
 def read_minutes(market, symbols, start, end, totals):
     """Accumulate only fully closed minutes inside this specific request window."""
     for i in range(0, len(symbols), BATCH):
@@ -138,13 +149,16 @@ def read_minutes(market, symbols, start, end, totals):
                 when = timestamp(row)
                 if not start <= when <= end or when.second or when.microsecond:
                     raise ValueError("Bar outside pre-market window")
-                old_time, _, volume, dollars = totals.get(symbol, (None, None, 0, Decimal(0)))
-                if old_time and when <= old_time:
+                previous = totals.get(symbol)
+                if previous and when <= previous.when:
                     raise ValueError("Repeated or unordered SIP minute")
                 size = row["v"]
                 if type(size) is not int or size <= 0:
                     raise ValueError("Invalid bar volume")
-                totals[symbol] = when, positive(row["c"]), volume + size, dollars + size * positive(row["vw"])
+                vwap = positive(row["vw"])
+                totals[symbol] = MinuteTotal(when, positive(row["c"]), size, vwap,
+                                             (previous.volume if previous else 0) + size,
+                                             (previous.dollars if previous else Decimal(0)) + size * vwap)
 
 
 def inputs(market, day, prior, symbols, through):
@@ -162,27 +176,44 @@ def inputs(market, day, prior, symbols, through):
     return closes, totals
 
 
+def confirm_snapshot_minutes(day, totals, snapshots):
+    # Check both directions BEFORE filtering. An 08:59 snapshot can expose
+    # volume absent from the other concurrent read, even for a snapshot-only name.
+    opening, cutoff = at(day, 4), at(day, 9)
+    confirmed = set()
+    for symbol, snap in snapshots.items():
+        minute = (snap or {}).get("minuteBar")
+        if not minute:
+            continue
+        when = timestamp(minute)
+        if when < opening:
+            continue
+        if when >= cutoff:
+            raise ValueError("Snapshot minute outside the checkpoint")
+        total = totals.get(symbol)
+        if (not total or when != total.when or minute["v"] != total.last_volume
+                or positive(minute["vw"]) != total.last_vwap or positive(minute["c"]) != total.price):
+            raise ValueError("Snapshot does not confirm the last pre-market minute")
+        confirmed.add(symbol)
+    if any(s not in confirmed and t.dollars >= MIN_DOLLARS for s, t in totals.items()):
+        raise ValueError("Snapshot does not confirm the last pre-market minute")
+
+
 def rank_inputs(day, symbols, closes, totals, snapshots=None):
     rows = []
     without_close = 0
-    for symbol, (when, price, volume, dollars) in totals.items():
-        if dollars < MIN_DOLLARS:
-            continue
-        if snapshots is not None:
-            # A stale/missing snapshot cannot establish even the price-floor decision.
-            minute = (snapshots.get(symbol) or {}).get("minuteBar")
-            if not minute or timestamp(minute) != when:
-                raise ValueError("Snapshot does not confirm the last pre-market minute")
-            price = positive(minute["c"])
-        if price < MIN_PRICE:
+    if snapshots is not None:
+        confirm_snapshot_minutes(day, totals, snapshots)
+    for symbol, total in totals.items():
+        if total.dollars < MIN_DOLLARS or total.price < MIN_PRICE:
             continue
         if symbol not in closes:
             without_close += 1
             continue
         close = closes[symbol]
-        change = (price / close - 1) * 100
-        rows.append(dict(symbol=symbol, price=float(price), prior_regular_close=float(close),
-                         volume=volume, dollar_volume=float(dollars), pct_change=float(change)))
+        change = (total.price / close - 1) * 100
+        rows.append(dict(symbol=symbol, price=float(total.price), prior_regular_close=float(close),
+                         volume=total.volume, dollar_volume=float(total.dollars), pct_change=float(change)))
     if not rows:
         raise ValueError("No eligible market data")
     gainers = sorted((r for r in rows if r["pct_change"] > 0), key=lambda r: (-r["pct_change"], r["symbol"]))

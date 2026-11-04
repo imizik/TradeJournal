@@ -98,9 +98,10 @@ effective-dated records, which the provider can correct retrospectively.
 [Point-in-time listing reference](https://massive.com/docs/rest/stocks/tickers/all-tickers)
 
 Both modes use raw SIP minutes from 04:00 through 08:59 ET inclusive. Price is
-the last completed minute close. For each listing meeting the dollar floor,
-the live job requires a snapshot minute stamped with that exact interval and
-uses its price. Missing or conflicting minute evidence withholds the whole day.
+the last completed minute close. Before filtering, the live job cross-checks
+every pre-market snapshot minute against the last historical minute by time,
+close, volume and VWAP. Every listing meeting the dollar floor needs a matching
+snapshot. A snapshot-only minute or conflicting input withholds the whole day.
 Both modes use the preceding exchange session’s raw SIP daily close, which is
 converted to current share units for splits effective that morning. A listing
 without a previous-session close is excluded and counted. Dollar volume is
