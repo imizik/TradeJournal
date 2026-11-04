@@ -544,19 +544,19 @@ def test_a_sent_trigger_is_recorded_on_the_notification_policy(engine, world):
     assert (ping.anchor, ping.symbol, ping.title) == ("symbol:NBIS", "NBIS", "New on NBIS since your thesis") and ping.delivered_at is not None
 
 
-def test_over_the_shared_cap_a_trigger_is_held_keyed_to_its_day_and_does_not_use_up_the_symbol_s_day(engine, world, monkeypatch):
+def test_over_its_category_budget_a_trigger_is_held_keyed_to_its_day_and_does_not_use_up_the_symbol_s_day(engine, world, monkeypatch):
     watch, readers, phone, clock = world
     investigate(engine, "NBIS")
-    monkeypatch.setenv("PING_DAILY_CAP", "0")
+    monkeypatch.setenv("PING_BUDGET_THESIS_WATCH", "0")
     readers.articles = [article("NBIS", "Nebius news", "https://benzinga.com/n1", at("09:55"))]
     result = watch.run_once()
     [row] = triggers(engine)
     assert phone.sent == [] and result["fired"] == [] and [s["delivery"] for s in result["skipped"]] == ["held"]
-    assert row.delivery == "held" and row.reason.startswith("Not sent: 0 pings already went out today (cap 0).")
+    assert row.delivery == "held" and row.reason == notification_policy.budget_reason("thesis_watch", 0)
     assert row.dedupe_key == "news:NBIS:https://benzinga.com/n1#skipped:2026-10-21"
     assert [p.decision for p in pings(engine)] == ["over_cap"]
-    # Not told, so the symbol's one ping a day is still there for the next headline once the cap allows it.
-    monkeypatch.delenv("PING_DAILY_CAP")
+    # Not told, so the symbol's one ping a day is still there for the next headline once the budget allows it.
+    monkeypatch.delenv("PING_BUDGET_THESIS_WATCH")
     clock.now = at("10:15")
     readers.articles = [article("NBIS", "Nebius more news", "https://benzinga.com/n2", at("10:10"))]
     assert [f["delivery"] for f in watch.run_once()["fired"]] == ["sent"] and len(phone.sent) == 1

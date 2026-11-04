@@ -76,7 +76,7 @@ export function DeskStatus({ data }: { data: DeskSession | null }) {
   );
 }
 
-/** The Briefing's numbers: open positions, what needs a decision, the nearest armed trigger and pings against the cap. */
+/** The Briefing's numbers: open positions, what needs a decision, the nearest armed trigger and phone-ping counts. */
 function Numbers({ data, rows }: { data: DeskSession; rows: DeskThread[] }) {
   const positions = new Set(rows.filter(r => r.tradeId).map(r => r.tradeId)).size;
   const needYou = needingCount(rows, nyDay());
@@ -85,7 +85,7 @@ function Numbers({ data, rows }: { data: DeskSession; rows: DeskThread[] }) {
     ["Positions", num(positions)],
     ["Needs you", num(needYou), needYou ? "text-primary" : undefined],
     ["Nearest trigger", near ? <>{near.symbol ?? near.title} · <span className="tabular-nums">{near.status.text}</span></> : "None", near ? undefined : "text-muted-foreground"],
-    ["Pings today", data.pings ? <>{num(data.pings.sent)} of {num(data.pings.cap)}{data.pings.held > 0 && <span className="text-muted-foreground"> · {num(data.pings.held)} held</span>}</> : "—"],
+    ["Pings today", data.pings ? <>{num(data.pings.sent)} sent{data.pings.held > 0 && <span className="text-muted-foreground"> · {num(data.pings.held)} held</span>}</> : "—"],
   ];
   return (
     <dl data-testid="briefing-numbers" className="grid grid-cols-2 border-t pt-2 sm:grid-cols-4">
@@ -103,7 +103,7 @@ function Numbers({ data, rows }: { data: DeskSession; rows: DeskThread[] }) {
  * The Briefing's day at a glance (docs/copilot-lab.md § The desk), shown at the top of the thread while the Briefing (or
  * no thread) is open: one strip of the regular session in New York time with a "now" marker, today's fills, pings,
  * Radar events and logged decisions as ticks by kind, the time stops still ahead as hollow ticks, SPY and QQQ beside the
- * title, a numbers row (positions, needs you, the nearest trigger, pings against the daily cap; ``rows`` are the thread
+ * title, a numbers row (positions, needs you, the nearest trigger, phone-ping counts; ``rows`` are the thread
  * list's) and one quiet line (what is next: a time stop, else the open or the close; the practice goal). Before the open
  * it says whether the prep is written; after the close it shows the whole day. ``data`` is the desk's one session read
  * (``useDeskSession``); read-only.

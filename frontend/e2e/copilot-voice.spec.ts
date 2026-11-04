@@ -94,6 +94,14 @@ async function hold(page: Page, ms = 700) {
 
 const autoSend = (page: Page) => page.getByLabel("Auto-send what I say");
 
+async function openComposer(page: Page) {
+  // These reads insert lines above the idle composer. Wait for their final
+  // state so the textarea cannot move between pointer-down and pointer-up.
+  await expect(page.getByText("Today's session is unavailable: Copilot Lab is off.")).toBeVisible();
+  await expect(page.getByText("Alert scorecard unavailable: Copilot Lab is off.")).toBeVisible();
+  await page.getByLabel("Message").click();
+}
+
 test("hold, release: the words go straight out with auto-send on (the default)", async ({ page }) => {
   const seen = await lab(page);
   await page.goto("/copilot-lab");
@@ -111,10 +119,10 @@ test("hold, release: the words go straight out with auto-send on (the default)",
 test("with auto-send off the words wait in the box for review, and the setting is remembered", async ({ page }) => {
   const seen = await lab(page);
   await page.goto("/copilot-lab");
-  await page.getByLabel("Message").click(); // the idle box opens when used
+  await openComposer(page);
   await autoSend(page).uncheck();
   await page.reload();
-  await page.getByLabel("Message").click();
+  await openComposer(page);
   await expect(autoSend(page)).not.toBeChecked();
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("Quick one:");
   const { release } = await hold(page);

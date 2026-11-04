@@ -405,11 +405,11 @@ export async function getDeskPicture(id: string, signal?: AbortSignal, timeframe
 export type DeskSessionEvent = { kind: "fill" | "ping" | "radar" | "decision"; at: number; symbol: string | null; text: string };
 
 /** ``GET /copilot/desk/session``: today's regular session (``open``/``close`` null on a closed day), what happened in it,
- * the plan time stops still ahead, pings against the daily cap, the pre-market prep and SPY/QQQ/VIX. Times are epoch seconds. */
+ * the plan time stops still ahead, phone-ping counts, the pre-market prep and SPY/QQQ/VIX. Times are epoch seconds. */
 export type DeskSession = {
   as_of: string; now: number; day: string; phase: DeskDay["phase"]; open: number | null; close: number | null;
   events: DeskSessionEvent[]; time_stops: { symbol: string; at: number; clock: string }[];
-  pings: { sent: number; held: number; cap: number } | null; prep: { at: number | null; line: string | null } | null;
+  pings: { sent: number; held: number; cap: number | null } | null; prep: { at: number | null; line: string | null } | null;
   indices: { symbol: string; last: number | null; change_pct: number | null }[]; quote_issue: string | null;
   /** What waits on the owner's answer for /proof: ``count`` in the proof's scope, ``rows`` today's then the newest waiting.
    * Null when that source is off or unavailable; absent from an older backend. */

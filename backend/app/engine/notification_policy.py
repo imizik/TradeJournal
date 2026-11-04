@@ -39,13 +39,10 @@ The policy, in the order it is applied:
   its ping could no longer go out), one of them is kept for it: the 09:00 brief comes
   after the Radar pilot's 08:50 scan and early thesis-watch pings, which would
   otherwise spend the allowance first.
-- **Daily ceiling.** At most ``PING_DAILY_CAP`` (default 12) pings a New York day
-  across every kind; ranks 3 and below (time stop, entry, hold-hour and the
-  budgeted kinds) are held once it is reached; the position companion's updates
-  count toward it only for themselves, so they never hold another kind.
-  Last-day final, invalidation
-  and give-back are never over it, and ``evening_review`` is never held at all,
-  by the window or the ceiling: it is the ping that reports what was held.
+- **No shared daily ceiling.** Each budget is independent. Position alerts
+  without a per-kind budget are governed by their senders and the quiet window.
+  ``evening_review`` is never held: it reports what was held. The former
+  ``PING_DAILY_CAP`` setting is ignored.
 
   ``expiry_final`` > ``invalidation`` > ``giveback`` > ``time_stop`` (the
   90-minute last-day and the day-before-expiry alerts ranked with it) > ``entry``
@@ -59,7 +56,7 @@ card's "held back today" line; each held sender row reads ``held`` with the
 reason). A database problem in the gate never holds a ping: the sender is told
 to send. Known limit: a ``sent`` record whose send kept failing until the sender
 expired it stays ``sent`` without ``delivered_at``; it still counts toward the
-cap and the window (fewer pings, never more), and any text merged into it is
+category budget and the window (fewer pings, never more), and any text merged into it is
 recorded ``merged`` but never reaches the phone.
 
 ``ALERT_POLICY_ENABLED`` defaults to **true**: the policy only ever reduces
@@ -98,15 +95,13 @@ PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "h
 ALIASES = {"expiry_first": "time_stop", "expiry_eve": "time_stop", "wrong_way": "hold_hour", "link": "nudge", "no_plan": "nudge",
            "companion_adopt": "nudge",
            "week_review": "prep", "day_replay": "prep"}
-NEVER_CAPPED = 3  # ranks 0-2 (last-day final, invalidation, give-back) are never over cap
 NEVER_QUIET = 2  # ranks 0-1 (last-day final, invalidation) are never held by the quiet window
-NEVER_HELD = ("evening_review",)  # neither the quiet window nor the ceiling: it reports what was held
-# Each kind's own daily budget (PING_BUDGET_<KIND>); a kind here is also held by the ceiling and, before the open, the
+NEVER_HELD = ("evening_review",)  # never held by the quiet window: it reports what was held
+# Each kind's own daily budget (PING_BUDGET_<KIND>); before the open it also shares the
 # pre-open allowance. The noun names the budget in a held ping's reason.
 BUDGETS = {"interrupt": 4, "companion_update": 12, "nudge": 2, "prep": 1, "radar_event": 4, "radar_digest": 2, "thesis_watch": 2, "research": 1}
 BUDGET_NAMES = {"interrupt": ("pattern interrupts'", "message"), "companion_update": ("the position companion's", "update"), "nudge": ("plan nudges'", "ping"), "prep": ("the prep and review pings'", "ping"), "radar_event": ("Radar's", "single ping"),
                 "radar_digest": ("Radar's", "digest"), "thesis_watch": ("thesis watch's", "ping"), "research": ("research's", "ping")}
-COMPANION = "companion_update"  # counted toward the ceiling only for itself
 PREOPEN = 9 * 60 + 30  # New York; budgeted pings decided before it also count against PING_PREOPEN_ALLOWANCE
 HELD = ("merged", "suppressed", "over_cap")
 RUN_SECONDS = 30
@@ -133,16 +128,12 @@ def _setting(name: str, default: int) -> int:
         return default
 
 
-def daily_cap() -> int:
-    return _setting("PING_DAILY_CAP", 12)
-
-
 def quiet_seconds() -> int:
     return _setting("PING_QUIET_MINUTES", 10) * 60
 
 
 def budget(kind: str) -> int | None:
-    """The canonical kind's own daily budget, or None for a kind only the ceiling holds."""
+    """The canonical kind's own daily budget, or None for a kind with no policy budget."""
     canonical = ALIASES.get(kind, kind)
     if canonical not in BUDGETS:
         return None
@@ -285,8 +276,6 @@ def _judge(db: Session, row: PhonePing, now: float) -> None:
                 row.decision = "suppressed"
                 row.reason = f"Not sent: a {_label(prev.kind)} ping went out {minutes} min earlier for the same position (quiet window {quiet_seconds() // 60} min)."
             return
-    if row.rank < NEVER_CAPPED:
-        return
     start, end = day_bounds(now)
     sent = db.exec(select(PhonePing.kind, PhonePing.decided_at).where(PhonePing.decision == "sent", PhonePing.decided_at >= start,
                                                                        PhonePing.decided_at < end)).all()
@@ -306,14 +295,6 @@ def _judge(db: Session, row: PhonePing, now: float) -> None:
                               "watch and research before 9:30 AM New York are spent"
                               + (" (one is kept for the morning brief)." if kept else "."))
                 return
-    cap = daily_cap()
-    # The companion's updates have their own budget and never crowd out another kind: they count toward the ceiling only
-    # for themselves (October 29's Radar starvation must not come back this way).
-    if row.kind != COMPANION:
-        sent = [(k, at) for k, at in sent if canonical(k) != COMPANION]
-    if len(sent) >= cap:
-        row.decision = "over_cap"
-        row.reason = f"Not sent: {len(sent)} ping{'' if len(sent) == 1 else 's'} already went out today (cap {cap})."
 
 
 def _brief_to_come(db: Session, now: float, start: datetime, end: datetime) -> bool:
@@ -598,4 +579,4 @@ def week_summary(db: Session, start_utc: datetime, end_utc: datetime) -> dict:
             "then": (f"acted_on: an entry trigger followed by an entry fill in the symbol within {ENTRY_MINUTES} min; an "
                      f"invalidation, time stop or open-trade alert followed by the position closed or trimmed within {EXIT_MINUTES} "
                      f"min; a nudge or link ping followed by a plan link within {LINK_MINUTES} min. judged counts pings the fills "
-                     "could answer. held: merged, suppressed by the quiet window, or over its budget or the daily cap.")}
+                     "could answer. held: merged, suppressed by the quiet window, or over its budget or the pre-open allowance.")}

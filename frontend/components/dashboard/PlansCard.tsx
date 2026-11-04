@@ -147,7 +147,7 @@ export default function PlansCard() {
           <PlanATrade origin="dashboard" className={`${PLAN_BUTTON} h-11 w-full sm:ml-auto sm:w-auto`} />
         </div>}
       {body && heldBackText(body.held_back_today) && <p data-testid="plans-card-held-back" className="mt-2 text-xs text-muted-foreground"
-        title="Phone pings the notification policy did not send today: over the daily cap, or too soon after another ping for the same position.">{heldBackText(body.held_back_today)}</p>}
+        title="Phone pings the notification policy did not send today: over a category budget or pre-open allowance, or too soon after another ping for the same position.">{heldBackText(body.held_back_today)}</p>}
     </div>
   </DashboardCard>;
 }

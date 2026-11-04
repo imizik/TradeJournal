@@ -662,7 +662,7 @@ def _fill_events(db: Session, day) -> dict:
 
 
 def _ping_events(db: Session, now: float) -> dict:
-    """Phone pings the notification policy sent today, and its day count against the cap (held ones count apart)."""
+    """Phone pings the notification policy sent today, and its day count (held ones count apart)."""
     from app.engine import notification_policy as policy
     from app.models import PhonePing
     start, end = policy.day_bounds(now)
@@ -670,7 +670,7 @@ def _ping_events(db: Session, now: float) -> dict:
     sent = [p for p in found if p.decision == "sent"]
     rows = [{"kind": "ping", "at": _utc_epoch(p.decided_at), "symbol": p.symbol,
              "text": f"{policy._label(p.kind).capitalize()} ping{f' · {p.symbol}' if p.symbol else ''}"} for p in sent]
-    return {"state": "ok", "rows": rows, "sent": len(sent), "held": sum(p.decision in policy.HELD for p in found), "cap": policy.daily_cap()}
+    return {"state": "ok", "rows": rows, "sent": len(sent), "held": sum(p.decision in policy.HELD for p in found), "cap": None}
 
 
 def _radar_events(day) -> dict:
