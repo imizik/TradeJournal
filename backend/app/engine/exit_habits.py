@@ -39,6 +39,13 @@ excluded, never counted as a zero.
 - ``opened_green``: the first entry fill came while that account's realized P&L
   for the day was above zero (``realized_pnl_today_before``).
 
+**Before and after** (``before_after``): for give-back, one-hour and the
+first expiry-day alert, the share of positions closed or trimmed within 15
+minutes. Before is the frozen pre-alert baseline in ``BEFORE_ALERTS``; since
+is every listed alert of that kind whose position has settled (still-open,
+rolled and unmatched ones are left out and counted). Descriptive only: no
+verdict reads it and it does not show that an alert caused a change.
+
 **Verdict** (the /proof page): ``helping``, ``not_helping`` or, by default,
 ``not_enough_data``, with the rule and sample stated; see ``verdict``.
 """
@@ -68,6 +75,14 @@ EPS = 1e-9
 Z = 2.0
 MIN_HABIT_TRADES = 20
 HABITS_TO_HELP = 2
+# The pre-alert baseline: per closed long-option trade from July 10, 2025 to October 19, 2026, the first moment each
+# alert's condition held, and whether the contracts open then were closed or trimmed within RESPONSE_MINUTES (the same
+# FIFO reading as follow_up). Frozen protocol exit-counterfactual-20261024-v1; counts copied from BEFORE_SOURCE:
+# (trades with the condition, closed within 15 min, trimmed within 15 min).
+BEFORE_ALERTS = {"giveback": (247, 49, 6), "hold_hour": (485, 39, 15), "expiry_first": (53, 7, 0)}
+BEFORE_SOURCE = "research/notes/position-alert-baseline-2026-11-03.md"
+ACTED_SOON = ("closed_15m", "trimmed_15m")
+SETTLED = ACTED_SOON + ("closed_later", "held_overnight", "expired")
 
 
 def _et(moment_utc: datetime) -> datetime:
@@ -139,6 +154,21 @@ def follow_up(alert: dict, fills: list[dict] | None, status: str | None) -> dict
     out["value_at_alert"] = round(alert["mark"] * held, 2)
     out["vs_alert"] = round(proceeds - alert["mark"] * held, 2)
     return out
+
+
+def before_after(alerts: list[dict]) -> dict:
+    """Closed or trimmed within 15 minutes: the frozen pre-alert baseline next to the sent alerts of the same kind
+    whose position has settled. ``alerts`` are ``build``'s listed rows (every eligible alert, not just those shown)."""
+    rows = []
+    for kind, (trades, closed, trimmed) in BEFORE_ALERTS.items():
+        mine = [a for a in alerts if a["kind"] == kind]
+        settled = [a for a in mine if a["response"] in SETTLED]
+        acted = sum(a["response"] in ACTED_SOON for a in settled)
+        rows.append({"kind": kind,
+                     "before": {"n": closed + trimmed, "of": trades, "pct": (closed + trimmed) / trades},
+                     "since": {"n": acted, "of": len(settled), "pct": acted / len(settled) if settled else None,
+                               "left_out": len(mine) - len(settled)}})
+    return {"rows": rows, "source": BEFORE_SOURCE}
 
 
 # ------------------------------------------------------------------ habits
@@ -318,6 +348,7 @@ def build(db: Session, go_live: date = GO_LIVE) -> dict:
         })
     out["responses"] = dict(Counter(a["response"] or "unmatched" for a in listed))
     out["alerts_total"] = len(listed)
+    out["before_after"] = before_after(listed)
     out["feedback"] = {"total": len(alerts), "responded": len(feedback), "unanswered": len(alerts) - len(feedback),
                        "counts": dict(Counter(f["rating"] for f in feedback.values()))}
     out["alerts"] = listed[:ALERTS_SHOWN]

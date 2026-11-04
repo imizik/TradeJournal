@@ -16,6 +16,9 @@ type Alert = { id: string; kind: string; contract: string; contracts: number; de
 export type ExitHabitsBody = { go_live: string; window: number; since_go_live: number; recent_trades: number; baseline_trades: number;
   habits: Habit[]; alerts: Alert[]; alerts_total: number; responses: Record<string, number>;
   feedback?: { total: number; responded: number; unanswered: number; counts: Record<string, number> };
+  /** Closed or trimmed within 15 minutes: the frozen pre-alert baseline next to settled sent alerts. Absent from an older backend. */
+  before_after?: { source: string; rows: { kind: string; before: { n: number; of: number; pct: number };
+    since: { n: number; of: number; pct: number | null; left_out: number } }[] };
   verdict: { verdict: "helping" | "not_helping" | "not_enough_data"; reason: string; rule: string; sample: number } };
 
 const KIND: Record<string, string> = { giveback: "Gave back its gain", expiry_first: "Expires today", expiry_final: "Last 30 minutes",
