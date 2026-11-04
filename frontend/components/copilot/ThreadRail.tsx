@@ -297,10 +297,11 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
   const radarNew = radar.filter(unread).length;
   // Conversations about no ticker (a Briefing turn, a week review): the desk's own rows, then the other open ones saved.
   const loose = useMemo(() => {
-    const own = rows.filter(r => !r.symbol && r.investigationId && r.group !== "pinned" && !isRadar(r)).map(r => ({
+    const dailyIds = new Set(saved.filter(t => t.main_day).map(t => t.id));
+    const own = rows.filter(r => !dailyIds.has(r.investigationId ?? "") && !r.symbol && r.investigationId && r.group !== "pinned" && !isRadar(r)).map(r => ({
       id: r.investigationId!, title: r.title, at: saved.find(t => t.id === r.investigationId)?.updated_at ?? (r.changedAt ? new Date(r.changedAt * 1000).toISOString() : null) }));
     const seenIds = new Set(own.map(t => t.id));
-    return [...own, ...saved.filter(t => !t.symbol && t.status === "open" && !seenIds.has(t.id)).map(t => ({ id: t.id, title: t.title, at: t.updated_at }))];
+    return [...own, ...saved.filter(t => !t.main_day && !t.symbol && t.status === "open" && !seenIds.has(t.id)).map(t => ({ id: t.id, title: t.title, at: t.updated_at }))];
   }, [rows, saved]);
   const ordered = useMemo(() => [...rows.filter(r => r.group === "pinned"), ...tickers.flatMap(t => t.rows), ...rows.filter(isRadar)], [rows, tickers]);
   useEffect(() => { if (data) onRows?.(ordered); }, [data, ordered, onRows]); // once read: the placeholder is not the list
@@ -351,16 +352,17 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
       </div>
       {view === "plans" ? data && <PlanList plans={data.plans} actions={actions} active={active} /> : (
         <>
+          <Link href="/copilot-lab" className="flex min-h-11 items-center rounded-md px-3 py-2 font-semibold hover:bg-secondary">Main chat</Link>
           {/* Pinned where the list scrolls on its own: the conversations under it scroll away, Main does not. */}
-          <section aria-label="Main" className="z-10 bg-background lg:sticky lg:top-0 lg:shadow-[0_-12px_0_0_hsl(var(--background)),0_6px_0_0_hsl(var(--background))]">
+          <section aria-label="Today’s briefing" className="z-10 bg-background lg:sticky lg:top-0 lg:shadow-[0_-12px_0_0_hsl(var(--background)),0_6px_0_0_hsl(var(--background))]">
             <button type="button" onClick={() => { setOpened(null); mark(radar); actions.home(); }} aria-current={main ? "page" : undefined}
-              title="The market-wide thread: the day, Radar hits to rate, alerts to answer and Review my week" className={cn(box(main), "border", !main && "bg-card")}>
+              title="The day, Radar hits to rate, alerts to answer and Review my week" className={cn(box(main), "border", !main && "bg-card")}>
               <span className="flex items-center gap-1.5">
                 <Home size={14} aria-hidden className="shrink-0 text-muted-foreground" />
-                <span className="font-semibold text-foreground">Main</span>
+                <span className="font-semibold text-foreground">Today’s briefing</span>
                 {radarNew > 0 && <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
                 <span className="ml-auto flex shrink-0 gap-2 text-xs tabular-nums text-muted-foreground">
-                  {toAnswer > 0 && <span className="text-primary" title="Alerts to answer and Radar hits to rate, in Main">{toAnswer} to answer</span>}
+                  {toAnswer > 0 && <span className="text-primary" title="Alerts to answer and Radar hits to rate, in the briefing">{toAnswer} to answer</span>}
                   {radar.length > 0 && <span title="Radar hits since your last Radar visit; rate them in Main">{radar.length} Radar</span>}
                 </span>
               </span>

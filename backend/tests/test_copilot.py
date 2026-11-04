@@ -1255,3 +1255,41 @@ def test_investigations_without_a_rating_or_metrics_still_load_and_bad_ones_are_
         for bad in ({"rating": "meh"}, {"metrics": {"total_ms": -1}}, {"metrics": {"model": "x" * 200}}, {"metrics": {"extra": 1}}):
             r = client.post("/copilot/investigations", json={"title": "Bad", "transcript": [{"role": "assistant", "content": "A", **bad}]})
             assert r.status_code == 422, bad
+
+
+def test_daily_main_resolves_once_across_devices_rolls_over_and_keeps_archive(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from app.routers import copilot as routes
+
+    class Clock(datetime):
+        day_in_new_york = 1
+
+        @classmethod
+        def now(cls, tz):
+            assert tz == routes.ET
+            return cls(2026, 11, cls.day_in_new_york, 0, 5, tzinfo=tz)
+
+    monkeypatch.setattr(routes, "datetime", Clock)
+    with TestClient(app) as client:
+        monkeypatch.setenv("COPILOT_ENABLED", "false")
+        assert client.post("/copilot/main-chat").status_code == 503
+        monkeypatch.setenv("COPILOT_ENABLED", "true")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            devices = list(pool.map(lambda _: client.post("/copilot/main-chat").json(), range(2)))
+        first = devices[0]
+        assert first["id"] == devices[1]["id"] and first["main_day"] == "2026-11-01"
+        url = f"/copilot/investigations/{first['id']}"
+        payload = {"title": "changed", "revision": 1, "transcript": [
+            {"role": "user" if i % 2 == 0 else "assistant", "content": str(i)} for i in range(180)]}
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            writes = list(pool.map(lambda _: client.put(url, json=payload).status_code, range(2)))
+        assert sorted(writes) == [200, 409]
+        assert client.get(url).json()["main_at_capacity"]
+        second = client.post("/copilot/main-chat").json()
+        assert second["id"] != first["id"] and second["main_day"] == first["main_day"]
+        Clock.day_in_new_york = 2
+        today = client.post("/copilot/main-chat").json()
+        assert today["main_day"] == "2026-11-02"
+        history = client.get("/copilot/main-chat/history").json()["chats"]
+        assert [row["id"] for row in history[:3]] == [today["id"], second["id"], first["id"]]
+        assert client.get(url).json()["transcript"] == payload["transcript"]

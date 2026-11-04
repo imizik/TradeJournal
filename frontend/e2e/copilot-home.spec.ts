@@ -56,7 +56,7 @@ async function lab(page: Page) {
   });
   await page.route("**/charts/alerts", (route) => route.fulfill({ json: { alerts: [], phone: true } }));
   await page.route("**/copilot/research-jobs?*", (route) => route.fulfill({ json: { jobs: [], queue_enabled: false, daily_budget_usd: 2, spent_today_usd: 0 } }));
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await openDeskThreads(page);
   return { chats, saves, reads: () => reads };
 }
@@ -112,7 +112,7 @@ test("the list says so when its read fails, and the Briefing and Review my week 
   await page.route("**/copilot/desk/threads", (route) => route.fulfill({ status: 503, json: { detail: "Copilot Lab is off." } }));
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await openDeskThreads(page);
   const threads = list(page);
   await expect(threads).toContainText("Threads unavailable: Copilot Lab is off.");
@@ -148,4 +148,43 @@ test("on a wide screen the app's navigation folds into the desk bar's Menu, and 
   await page.getByRole("button", { name: "Collapse navigation" }).click();
   await expect(page.getByRole("button", { name: "Open menu" }).first()).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1440);
+});
+
+test("daily Main reopens across devices, keeps drafts in their tab and opens earlier dates without sending", async ({ page, browser }) => {
+  const prior = { ...saved, main_day: "2026-10-22", title: "Main chat · 2026-10-22", symbol: null };
+  const today = { ...prior, id: "33333333-3333-4333-8333-333333333333", main_day: "2026-10-23", title: "Main chat · 2026-10-23" };
+  let sends = 0;
+  async function fixture(p: Page) {
+    await p.route("**/copilot/status", route => route.fulfill({ json: ON }));
+    await p.route("**/copilot/main-chat", route => route.fulfill({ json: today }));
+    await p.route("**/copilot/main-chat/history", route => route.fulfill({ json: { chats: [today, prior] } }));
+    for (const chat of [prior, today]) await p.route(`**/copilot/investigations/${chat.id}`, route => route.fulfill({ json: chat }));
+    await p.route("**/copilot/chat", route => { sends++; return route.abort(); });
+    await p.goto("/copilot-lab");
+    await expect(p.getByRole("heading", { name: today.title })).toBeVisible();
+    await expect(p).toHaveURL(`/copilot-lab?thread=${today.id}`);
+  }
+  await fixture(page);
+  await page.getByLabel("Message").fill("Follow up after lunch");
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, baseURL: test.info().project.use.baseURL });
+  try {
+    const mobile = await phone.newPage();
+    await fixture(mobile);
+    await expect(mobile.getByLabel("Message")).toHaveValue("");
+    await expect(mobile.getByText("Not yet: it lags CRWV.")).toBeVisible();
+    await mobile.screenshot({ path: test.info().outputPath("daily-main-phone.png") });
+  } finally { await phone.close(); }
+  await page.getByRole("link", { name: "Today’s briefing", exact: true }).click();
+  await expect(page.getByRole("button", { name: "What matters right now?" })).toBeVisible();
+  await page.getByRole("link", { name: "Main chat", exact: true }).first().click();
+  await expect(page.getByLabel("Message")).toHaveValue("Follow up after lunch");
+  await page.getByText("Previous days", { exact: true }).click();
+  await page.getByRole("button", { name: prior.title }).click();
+  await expect(page.getByRole("heading", { name: prior.title })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: today.title })).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Message")).toHaveValue("Follow up after lunch");
+  expect(sends).toBe(0);
+  await page.screenshot({ path: test.info().outputPath("daily-main-desktop.png") });
 });

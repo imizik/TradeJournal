@@ -18,11 +18,12 @@ import math
 import re
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date, datetime
 from typing import Iterator, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-from sqlalchemy import or_
+from sqlalchemy import or_, update as sql_update
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.models import CopilotInvestigation
@@ -227,8 +228,44 @@ def _session(session: Session | None) -> Iterator[Session]:
         yield own
 
 
+def _main_at_capacity(row: CopilotInvestigation) -> bool:
+    # Leave room for a full new question/answer, its cards and evidence references.
+    return bool(row.main_day and (len(json.loads(row.transcript_json)) >= 180
+                or len(row.transcript_json) >= 300_000 or len(json.loads(row.evidence_json)) >= 320))
+
+
+def main_chat(db: Session, day: date) -> dict:
+    """Resolve the current segment. The primary key converges concurrent opens on both databases."""
+    latest = db.exec(select(CopilotInvestigation).where(CopilotInvestigation.main_day == day)
+                     .order_by(CopilotInvestigation.created_at.desc()).limit(1)).first()
+    if latest and not _main_at_capacity(latest):
+        return full(latest)
+    # Derive the successor from the observed segment; a concurrent insert cannot skip a part.
+    part = int(latest.title.rsplit(" · Part ", 1)[1]) + 1 if latest and " · Part " in latest.title else 2 if latest else 1
+    key = uuid.uuid5(uuid.NAMESPACE_URL, f"tradejournal:desk:main:{day}:{part}")
+    row = CopilotInvestigation(id=key, main_day=day, transcript_json="[]", evidence_json="[]",
+                               title=f"Main chat · {day}" + (f" · Part {part}" if part > 1 else ""))
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.get(CopilotInvestigation, key)
+        if existing is None:
+            raise
+        row = existing
+    return full(row)
+
+
+def main_history(db: Session, before: datetime | None = None) -> list[dict]:
+    query = select(CopilotInvestigation).where(CopilotInvestigation.main_day.is_not(None))
+    if before:
+        query = query.where(CopilotInvestigation.created_at < before)
+    return [summary(row) for row in db.exec(query.order_by(CopilotInvestigation.created_at.desc()).limit(30))]
+
+
 def summary(row: CopilotInvestigation) -> dict:
-    return {"id": str(row.id), "source": row.source, "title": row.title, "symbol": row.symbol, "status": row.status,
+    return {"id": str(row.id), "main_day": row.main_day.isoformat() if row.main_day else None, "main_at_capacity": _main_at_capacity(row), "source": row.source, "title": row.title, "symbol": row.symbol, "status": row.status,
             "conclusion": row.conclusion, "revision": row.revision, "message_count": len(json.loads(row.transcript_json)),
             "has_findings": row.findings_json is not None,
             "created_at": row.created_at.isoformat() + "Z", "updated_at": row.updated_at.isoformat() + "Z"}
@@ -315,9 +352,19 @@ def update(investigation_id: str | uuid.UUID, fields: InvestigationFields, revis
         row = _row(db, investigation_id)
         if revision != row.revision:
             raise InvestigationError("stale", "This investigation changed in another window. Reload it before saving.")
+        if row.main_day is not None:
+            # Reserve the revision in this transaction before replacing a shared daily transcript.
+            claimed = db.execute(sql_update(CopilotInvestigation).where(
+                CopilotInvestigation.id == row.id, CopilotInvestigation.revision == revision
+            ).values(revision=revision + 1).execution_options(synchronize_session=False))
+            if claimed.rowcount != 1:
+                db.rollback()
+                raise InvestigationError("stale", "Main chat changed on another device. Reopen it to see the latest messages.")
+            db.refresh(row)
+            fields = fields.model_copy(update={"title": row.title, "status": "open", "symbol": None})
         stored = json.loads(row.transcript_json)
         _fill(row, fields, _outcomes(stored), {i: (m["rating"], m["content"]) for i, m in enumerate(stored) if m.get("rating")})
-        row.revision += 1
+        row.revision = revision + 1
         row.updated_at = datetime.utcnow()
         db.add(row)
         db.commit()
@@ -326,13 +373,23 @@ def update(investigation_id: str | uuid.UUID, fields: InvestigationFields, revis
         return full(row)
 
 
+def _feedback_row(db: Session, investigation_id: str | uuid.UUID) -> CopilotInvestigation:
+    row = _row(db, investigation_id)
+    if row.main_day:
+        # Take the same write lock as a daily save before reading/modifying the saved transcript.
+        db.execute(sql_update(CopilotInvestigation).where(CopilotInvestigation.id == row.id)
+                   .values(revision=CopilotInvestigation.revision).execution_options(synchronize_session=False))
+        db.refresh(row)
+    return row
+
+
 def set_outcome(investigation_id: str | uuid.UUID, proposal_id: str, outcome: ProposalOutcome,
                 session: Session | None = None) -> dict:
     """Record what the owner did with one saved card (Confirm or Dismiss). It records a result and changes nothing
     the owner wrote, so it needs no revision and does not bump it: an open window's next save still fits, and keeps
     this outcome (``_kept``)."""
     with _session(session) as db:
-        row = _row(db, investigation_id)
+        row = _feedback_row(db, investigation_id)
         transcript = json.loads(row.transcript_json)
         card = next((p for m in transcript for p in m.get("proposals") or () if p.get("id") == proposal_id), None)
         if card is None:
@@ -352,7 +409,7 @@ def set_rating(investigation_id: str | uuid.UUID, index: int, rating: str | None
     """Record (or clear, with None) the owner's rating of the saved answer at ``index``. Like ``set_outcome`` it needs
     no revision and does not bump it; the next save from an open window keeps it."""
     with _session(session) as db:
-        row = _row(db, investigation_id)
+        row = _feedback_row(db, investigation_id)
         transcript = json.loads(row.transcript_json)
         if not 0 <= index < len(transcript) or transcript[index]["role"] != "assistant":
             raise InvestigationError("not_found", "That answer is not saved with this investigation.")

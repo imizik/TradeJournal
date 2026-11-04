@@ -10,7 +10,7 @@ that turn ends, or after 24 hours if it is never sent.
 """
 import asyncio
 import contextlib
-from datetime import datetime
+from datetime import UTC, datetime
 import json
 import logging
 import time
@@ -278,6 +278,18 @@ def answer_scorecard(days: int = Query(7, ge=1, le=90), session: Session = Depen
 
 def _http(exc: investigations.InvestigationError) -> HTTPException:
     return HTTPException({"not_found": 404, "stale": 409, "too_long": 413}[exc.code], str(exc))
+
+
+@router.post("/main-chat")
+def open_main_chat(session: Session = Depends(get_session)):
+    _enabled()
+    return investigations.main_chat(session, datetime.now(ET).date())
+
+
+@router.get("/main-chat/history")
+def main_chat_history(before: datetime | None = None, session: Session = Depends(get_session)):
+    _enabled()
+    return {"chats": investigations.main_history(session, before.astimezone(UTC).replace(tzinfo=None) if before and before.tzinfo else before)}
 
 
 @router.get("/investigations")

@@ -19,7 +19,7 @@ export type DeskTab = "now" | "thread" | "context";
 export type DeskCommand = { kind: "open"; id: string; n: number; text?: string } | { kind: "ask"; text: string; n: number } | { kind: "fill"; text: string; n: number } | { kind: "home"; n: number };
 
 /** The conversation's open investigation, reported up so the inspector can show its context. */
-export type DeskThreadRef = { id: string; symbol: string | null; title: string; refreshKey: number };
+export type DeskThreadRef = { id: string; symbol: string | null; title: string; refreshKey: number; mainDay?: string | null };
 
 /** How the conversation and the desk talk: commands down, the open thread up. ``planDone`` is there while the open
  * thread has a plan that can be marked done (the thread menu's Mark plan done): its symbol, and ``done`` hears it was. */

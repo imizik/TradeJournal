@@ -98,7 +98,7 @@ async function lab(page: Page, server: Server, { alertsSupported = true, default
     ];
     return route.fulfill({ json: { state: "ok", symbol: "NBIS", unavailable: [], recent_days: 7, count: rows.length, rows } });
   });
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
 }
 
 /** The Context pane's Timeline tab, opened. */

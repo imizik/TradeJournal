@@ -54,7 +54,7 @@ const box = (page: Page) => page.getByRole("textbox", { name: "Message", exact: 
 
 test("attach a screenshot: thumbnail, a ready question, the id in the chat body, a text marker in the saved transcript", async ({ page }) => {
   const seen = await lab(page);
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await openDeskThreads(page);
   await expect(page.getByText("Nothing open. Plan a trade to start a ticker.")).toBeVisible();
   await page.getByTestId("copilot-image-input").setInputFiles({ name: "chart.png", mimeType: "image/png", buffer: PNG });

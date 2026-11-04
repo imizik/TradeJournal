@@ -61,7 +61,7 @@ const ANSWER: Record<string, [string, string]> = {
   [NBIS]: ["NBIS", "NBIS answer: hold above 92.30."], [CRWV]: ["CRWV", "CRWV answer: short under 99.00."], [APLD]: ["APLD", "APLD answer: enter at 31.00."],
 };
 
-async function lab(page: Page, { time = NOW, session = SESSION, threads = () => DESK as unknown, path = "/copilot-lab", showThreads = true }: { time?: Date; session?: unknown; threads?(): unknown; path?: string; showThreads?: boolean } = {}) {
+async function lab(page: Page, { time = NOW, session = SESSION, threads = () => DESK as unknown, path = "/copilot-lab?view=briefing", showThreads = true }: { time?: Date; session?: unknown; threads?(): unknown; path?: string; showThreads?: boolean } = {}) {
   const chats: unknown[] = [];
   await page.clock.install({ time });
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
@@ -268,7 +268,7 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
   test(`the Briefing opens on today's session at ${width} px`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await lab(page);
-    if (width < 760) await page.getByRole("tab", { name: "Main" }).click();
+    if (width < 760) await page.getByRole("tab", { name: "Briefing" }).click();
     const tape = page.getByTestId("session-tape");
     await expect(tape).toBeVisible();
     await expect(tape).toContainText("Market open");

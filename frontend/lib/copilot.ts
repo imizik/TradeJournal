@@ -416,6 +416,7 @@ export type Findings = {
 };
 export type InvestigationSummary = {
   id: string; source: "copilot" | "research_job" | "jo"; has_findings: boolean; title: string; symbol: string | null; status: "open" | "closed"; conclusion: string | null;
+  main_day?: string | null; main_at_capacity?: boolean;
   revision: number; message_count: number; created_at: string; updated_at: string;
 };
 export type Investigation = InvestigationSummary & {
@@ -433,6 +434,10 @@ async function investigationRequest<T>(path: string, init?: RequestInit): Promis
   }
   return response.json();
 }
+
+export const openDailyMain = (signal?: AbortSignal) => request<Investigation>("/copilot/main-chat", { method: "POST", signal });
+export const mainHistory = (before?: string) => request<{ chats: InvestigationSummary[] }>(
+  "/copilot/main-chat/history" + (before ? `?before=${encodeURIComponent(before)}` : ""));
 
 export const listInvestigations = (symbol?: string) =>
   investigationRequest<{ investigations: InvestigationSummary[] }>(`?limit=8${symbol ? `&symbol=${encodeURIComponent(symbol)}` : ""}`).then(r => r.investigations);

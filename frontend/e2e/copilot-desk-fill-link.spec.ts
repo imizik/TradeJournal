@@ -86,7 +86,7 @@ async function lab(page: Page) {
     threads = desk([...NBIS_ROWS, CRWV_ROW]);
     return route.fulfill({ json: {} });
   });
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await openDeskThreads(page);
   await expect(page.getByRole("navigation", { name: "Thread list" }).getByTestId("desk-day")).toBeVisible();
   return { linked, unlinked, chats };

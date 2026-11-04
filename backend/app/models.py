@@ -2045,6 +2045,7 @@ class CopilotInvestigation(SQLModel, table=True):
     __tablename__ = "copilot_investigation"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)  # UUID: the app role has no sequence grants.
+    main_day: Optional[date] = Field(default=None, index=True)  # New York calendar day of a Main chat segment
     source: str = Field(default="copilot", index=True)  # "copilot" | "research_job" | "jo"
     title: str
     symbol: Optional[str] = Field(default=None, index=True)

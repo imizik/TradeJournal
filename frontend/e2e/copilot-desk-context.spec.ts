@@ -225,7 +225,7 @@ test("on the Briefing the pane shows the day: QQQ with your fills and pings, the
     answers: { total: 23, rated: 9, helped: 7, didnt: 2, helped_rate: 0.778, pushback: 2, pushback_rate: 0.087, follow_ups: 5, follow_up_rate: 0.217, failed: 1 },
     by_kind: {}, latency: { ask: { turns: 19, first_text_ms: { p50: 4100, p90: 9800 }, total_ms: { p50: 6000, p90: 12000 }, max_silence_ms_p50: 3900 } },
     failed: { timeout: 1 }, cost: { total_usd: 0.38, per_turn_usd: 0.0165, top_threads: [], cache: { read_tokens: 0, input_tokens: 0, read_share: null } } } }));
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   const pane = page.getByRole("complementary", { name: "Context" });
   await expect(pane).toBeHidden();
   await page.getByRole("button", { name: "Context pane" }).click();
@@ -267,7 +267,7 @@ test("this week's proof lines say when a proof read is missing or fails", async 
   await page.route("**/analytics/exit-habits", (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
   await page.route("**/radar/proof", (route) => route.fulfill({ json: { state: "off", reason: "Radar is not recording." } }));
   await page.route("**/copilot/answer-scorecard*", (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await page.getByRole("tablist", { name: "Desk" }).getByRole("tab", { name: "Context" }).click();
   const pane = page.getByRole("complementary", { name: "Context" });
   await pane.getByRole("tablist", { name: "Context" }).getByRole("tab", { name: "This week" }).click();

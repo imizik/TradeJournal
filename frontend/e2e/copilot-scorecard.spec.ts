@@ -44,7 +44,7 @@ async function briefing(page: Page, card: unknown = CARD) {
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route("**/copilot/desk/scorecard", (route) => { reads += 1; return route.fulfill({ json: card }); });
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   return { reads: () => reads };
 }
 

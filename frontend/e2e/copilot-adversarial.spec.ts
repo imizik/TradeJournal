@@ -23,7 +23,6 @@ const answer = (text: string) => [
 ].join("");
 
 async function openResult(page: Page, sent: { role: string; content: string }[][]) {
-  await page.addInitScript((id) => window.localStorage.setItem("tradejournal.copilot-lab.current.v2", id), RESULT);
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [result] } }));
   await page.route(`**/copilot/investigations/${RESULT}`, (route) => route.fulfill({ json: { ...result, revision: 2 } }));
@@ -34,7 +33,7 @@ async function openResult(page: Page, sent: { role: string; content: string }[][
     sent.push(route.request().postDataJSON().messages);
     return route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: answer(`Answer ${sent.length}.`) });
   });
-  await page.goto("/copilot-lab");
+  await page.goto(`/copilot-lab?thread=${RESULT}`);
   await expect(page.getByText("Financing stress, not demand.")).toBeVisible();
 }
 

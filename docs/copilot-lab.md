@@ -172,18 +172,17 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     phone check), `frontend/e2e/copilot-panel.spec.ts` and
     `frontend/e2e/copilot-review.spec.ts`.
 - **Thread list**, the desk's left pane (page only, lab on;
-  `components/copilot/ThreadRail.tsx`). **Main** in its own bordered card, pinned
+  `components/copilot/ThreadRail.tsx`). **Today’s briefing** in its own bordered card, pinned
   while the list scrolls on a wide screen, then one row per ticker, with one line for the day above it: the market phase, how many
   rows need a decision, and the plan streak. The server still sends its rows
   in `DESK_GROUPS` order (Act now, Near a trigger, Waiting for you, New since
   you looked, Watching); the list regroups them by symbol in the browser.
-  - **Main**: the market-wide thread, the Briefing (today's pre-market prep
-    line when there is one). Pressing it goes back to the Briefing in place
-    (a deep link leaves for the bare desk) and sends nothing; the
+  - **Today’s briefing**: the market-wide view, the Briefing (today's pre-market prep
+    line when there is one). Pressing it opens the briefing at `?view=briefing` and sends nothing; the
     open conversation stays saved. Radar hits, alerts to answer and Review my
     week are lines inside the Briefing, not rows in the list: "N new on
     Radar ▾" lists the Radar events since the last Radar visit, each opening
-    the desk on its decision (a stock hit) or Radar (a group event). Main
+    the desk on its decision (a stock hit) or Radar (a group event). The briefing
     shows their count ("18 Radar", an amber dot while one is unseen in this
     browser) and, in amber, how many alerts and Radar hits wait for an answer
     ("3 to answer"). Open conversations about no ticker (a Briefing turn, a week
@@ -220,10 +219,10 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     with one conversation shows no children. Thesis news is remembered as seen in
     this browser (`localStorage`) once its ticker is opened.
 
-  A **breadcrumb** tops the conversation pane at every width: "Main",
-  "Main › <conversation>" for one about no ticker, or "NBIS › Neocloud group
+  A **breadcrumb** tops the conversation pane: "Today’s briefing",
+  "Threads › <conversation>" for one about no ticker, or "NBIS › Neocloud group
   bounce · Oct 29" (the date the conversation was last saved). On a phone the
-  middle tab carries the open ticker, or "Main".
+  middle tab identifies the ticker, Main chat or briefing.
 
   **All | Plans** under the day line switches the list to the **Plans**
   view and back; the choice is remembered in this browser (`localStorage`),
@@ -488,6 +487,14 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
 
 ## The desk
 
+Open Desk to resume **Main chat** for the current New York calendar date. Desktop and phone open the same
+saved conversation. Unsent words belong to their browser tab. Returning to a saved link keeps its original
+conversation, including after midnight. **Previous days** opens earlier conversations. A busy day's full
+segment stays in history when opening Main starts its next part. Opening, switching or browsing history
+uses no model turn. **Today’s briefing** opens the session tape, Radar and alert feedback, prep and review
+actions. Existing symbol, plan, chart and evening-review links still open their own workflows.
+
+
 The full page is a desk of three panes beside each other
 (`frontend/components/copilot/CopilotLab.tsx`, layout and look in
 `CopilotLab.module.css`):
@@ -653,7 +660,7 @@ threshold. Proof: `tests/test_alert_scorecard.py`,
 `frontend/e2e/copilot-scorecard.spec.ts`.
 
 **Radar hits open on a decision** (`components/copilot/RadarDecision.tsx`).
-A stock Radar hit in Main's "N new on Radar" line opens the desk on that hit: what
+A stock Radar hit in the briefing’s "N new on Radar" line opens the desk on that hit: what
 Radar saw (its kind, direction, first-seen time and summary, with Open in
 Radar) and one choice. **Watching** or **Pass** logs a `decision` day-journal
 entry for the symbol ("Watching. Radar vs SPY: …", "Passing. …") after the
@@ -921,9 +928,7 @@ unsent "Plan a trade: " link as the list's button; Review my week and What
 matters right now? send their one turn exactly as their pinned rows do; Prep
 the day and Close the day only put a question in the message box, unsent.
 The open thread is in the address (`/copilot-lab?thread=<id>`), so Back returns
-to the thread before it and a reload stays on it. The bare address reopens the
-last thread only on the New York day it was open; on a new day the desk starts
-on Main. While not typing in a field: J / K open the next or previous
+to the thread before it and a reload stays on it. The bare address opens Main chat for the current New York date. While not typing in a field: J / K open the next or previous
 conversation as the list shows it (those under Main, then each ticker's
 subthreads when shown, else its newest; folded ones are skipped), N opens Plan a trade (not while the message box holds unsent words), `[` hides or shows Threads, and `]` hides or shows Context
 (both choices are remembered in this browser; the labelled desk-bar buttons do

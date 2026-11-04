@@ -136,7 +136,7 @@ async function ask(page: Page, text: string) {
 
 test("the speaker is remembered; each answer is spoken once, after it finishes, at the chosen speed", async ({ page }) => {
   await lab(page);
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await expect(speaker(page)).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByLabel("Voice speed")).toHaveCount(0);
   await speaker(page).click();
@@ -167,7 +167,7 @@ test("the speaker is remembered; each answer is spoken once, after it finishes, 
 
 test("hands-free: pressing the mic stops speech before it listens, and the spoken question's answer is read", async ({ page }) => {
   const chats = await lab(page);
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await speaker(page).click();
   await ask(page, "Is NBIS holding?");
   await expect(speaker(page)).toHaveAttribute("aria-label", "Stop reading aloud");
@@ -190,7 +190,7 @@ test("hands-free: pressing the mic stops speech before it listens, and the spoke
 
 test("a hidden page stops speaking", async ({ page }) => {
   await lab(page);
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await speaker(page).click();
   await ask(page, "Is NBIS holding?");
   await expect(speaker(page)).toHaveAttribute("aria-label", "Stop reading aloud");
@@ -204,7 +204,7 @@ test("a hidden page stops speaking", async ({ page }) => {
 
 test("without speech synthesis there is no speaker", async ({ page }) => {
   await lab(page, { speech: false });
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await expect(page.getByTestId("copilot-mic")).toBeVisible();
   await expect(speaker(page)).toHaveCount(0);
   await expect(page.getByLabel("Voice speed")).toHaveCount(0);
@@ -213,7 +213,7 @@ test("without speech synthesis there is no speaker", async ({ page }) => {
 test("at 375 px the speaker waits behind + on the mic's row, the box takes the full width, and nothing scrolls sideways", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await lab(page);
-  await page.goto("/copilot-lab");
+  await page.goto("/copilot-lab?view=briefing");
   await expect(page.getByText("Nothing open. Plan a trade to start a ticker.")).toBeVisible();
   await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click(); // a phone shows the conversation on its own tab
   await expect(speaker(page)).toBeHidden(); // attach and read-aloud wait behind "+"
