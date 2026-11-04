@@ -95,16 +95,14 @@ async function hold(page: Page, ms = 700) {
 const autoSend = (page: Page) => page.getByLabel("Auto-send what I say");
 
 async function openComposer(page: Page) {
-  // These reads insert lines above the idle composer. Wait for their final
-  // state so the textarea cannot move between pointer-down and pointer-up.
-  await expect(page.getByText("Today's session is unavailable: Copilot Lab is off.")).toBeVisible();
-  await expect(page.getByText("Alert scorecard unavailable: Copilot Lab is off.")).toBeVisible();
+  // A blank conversation (?view=new) has no briefing reads above the box, so it cannot move under the pointer.
+  await expect(page.getByLabel("Message")).toBeEnabled();
   await page.getByLabel("Message").click();
 }
 
 test("hold, release: the words go straight out with auto-send on (the default)", async ({ page }) => {
   const seen = await lab(page);
-  await page.goto("/copilot-lab?view=briefing");
+  await page.goto("/copilot-lab?view=new");
   await page.getByLabel("Message").click(); // the idle box opens when used
   await expect(autoSend(page)).toBeChecked();
   const { release } = await hold(page);
@@ -118,7 +116,7 @@ test("hold, release: the words go straight out with auto-send on (the default)",
 
 test("with auto-send off the words wait in the box for review, and the setting is remembered", async ({ page }) => {
   const seen = await lab(page);
-  await page.goto("/copilot-lab?view=briefing");
+  await page.goto("/copilot-lab?view=new");
   await openComposer(page);
   await autoSend(page).uncheck();
   await page.reload();
@@ -138,7 +136,7 @@ test("with auto-send off the words wait in the box for review, and the setting i
 
 test("a short tap starts tap mode; the next tap stops; Cancel and sliding away send nothing", async ({ page }) => {
   const seen = await lab(page);
-  await page.goto("/copilot-lab?view=briefing");
+  await page.goto("/copilot-lab?view=new");
   const mic = page.getByTestId("copilot-mic");
   await mic.click();
   await expect(page.getByTestId("copilot-voice-status")).toContainText("tap the mic to stop");
@@ -162,7 +160,7 @@ test("a short tap starts tap mode; the next tap stops; Cancel and sliding away s
 
 test("a refused microphone says how to allow it", async ({ page }) => {
   const seen = await lab(page, { denied: true });
-  await page.goto("/copilot-lab?view=briefing");
+  await page.goto("/copilot-lab?view=new");
   await page.getByTestId("copilot-mic").click();
   await expect(page.getByTestId("copilot-voice-status")).toContainText("Microphone access is blocked");
   expect(seen.transcribes).toEqual([]);
@@ -170,7 +168,7 @@ test("a refused microphone says how to allow it", async ({ page }) => {
 
 test("without a server transcriber the browser listens, and only its tickers are cleaned up", async ({ page }) => {
   const seen = await lab(page, { configured: false, recognition: true });
-  await page.goto("/copilot-lab?view=briefing");
+  await page.goto("/copilot-lab?view=new");
   await page.getByLabel("Message").click(); // the idle box opens when used
   await autoSend(page).uncheck();
   const { release } = await hold(page);
@@ -181,7 +179,7 @@ test("without a server transcriber the browser listens, and only its tickers are
 
 test("with neither a transcriber nor browser recognition there is no mic", async ({ page }) => {
   await lab(page, { configured: false });
-  await page.goto("/copilot-lab?view=briefing");
+  await page.goto("/copilot-lab?view=new");
   await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeVisible();
   await expect(page.getByTestId("copilot-mic")).toHaveCount(0);
   await expect(autoSend(page)).toHaveCount(0);
@@ -190,7 +188,7 @@ test("with neither a transcriber nor browser recognition there is no mic", async
 test("at 375 px the mic is a 44 px thumb target beside Send, and nothing scrolls sideways", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await lab(page);
-  await page.goto("/copilot-lab?view=briefing");
+  await page.goto("/copilot-lab?view=new");
   await page.getByRole("tab", { name: "Threads", exact: true }).click();
   await expect(page.getByText("Nothing open. Plan a trade to start a ticker.")).toBeVisible();
   await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click(); // a phone shows the conversation on its own tab

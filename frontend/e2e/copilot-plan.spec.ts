@@ -36,7 +36,7 @@ const TURN = sse([
 
 type Server = { alerts: object[]; jobs: object[]; posts: { path: string; body: unknown }[]; quote: { fresh: boolean; last: number | null }; queueOff?: boolean };
 
-async function lab(page: Page, server: Server, { alertsSupported = true, url = "/copilot-lab?view=briefing" } = {}) {
+async function lab(page: Page, server: Server, { alertsSupported = true, url = "/copilot-lab?view=new" } = {}) {
   const post = (path: string, route: import("@playwright/test").Route) => server.posts.push({ path, body: route.request().postDataJSON() });
   await page.route("**/copilot/status", (route) => route.fulfill({ json: status(alertsSupported) }));
   await page.route("**/copilot/chat", (route) => route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: TURN }));

@@ -1337,5 +1337,6 @@ def test_daily_main_resolves_once_across_devices_rolls_over_and_keeps_archive(mo
         today = client.post("/copilot/main-chat").json()
         assert today["main_day"] == "2026-11-02"
         history = client.get("/copilot/main-chat/history").json()["chats"]
-        assert [row["id"] for row in history[:3]] == [today["id"], second["id"], first["id"]]
+        # Today's and the second segment are empty: only a day with exchanges is listed.
+        assert [row["id"] for row in history] == [first["id"]]
         assert client.get(url).json()["transcript"][:4] == kept["transcript"]

@@ -417,7 +417,7 @@ test("the open thread is in the address: Back returns to the one before, a reloa
   const main = { ...saved, id: ID(15), symbol: null, main_day: "2026-10-23", title: "Main chat · 2026-10-23", transcript: [] };
   await page.route("**/copilot/main-chat", route => route.fulfill({ json: main }));
   await page.goto("/copilot-lab");
-  await expect(page.getByRole("heading", { name: main.title })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Main chat · Fri, Oct 23" })).toBeVisible();
   await expect(here.getByText("Answer 2")).toBeHidden();
   await expect(page.getByPlaceholder("Message Main chat…")).toBeEnabled();
 });

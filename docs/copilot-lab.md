@@ -172,7 +172,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     phone check), `frontend/e2e/copilot-panel.spec.ts` and
     `frontend/e2e/copilot-review.spec.ts`.
 - **Thread list**, the desk's left pane (page only, lab on;
-  `components/copilot/ThreadRail.tsx`). **Today’s briefing** in its own bordered card, pinned
+  `components/copilot/ThreadRail.tsx`). **Main chat** and **Today’s briefing** as a bordered pair (the open one
+  filled in, as is the matching header button), the briefing pinned
   while the list scrolls on a wide screen, then one row per ticker, with one line for the day above it: the market phase, how many
   rows need a decision, and the plan streak. The server still sends its rows
   in `DESK_GROUPS` order (Act now, Near a trigger, Waiting for you, New since
@@ -489,10 +490,14 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
 
 Open Desk to resume **Main chat** for the current New York calendar date. Desktop and phone open the same
 saved conversation. Unsent words belong to their browser tab. Returning to a saved link keeps its original
-conversation, including after midnight. **Previous days** opens earlier conversations. A busy day's full
+conversation, including after midnight. The heading names the day ("Main chat · Wed, Nov 4"; a busy day's next
+part adds "(continued)"). **Previous days** opens earlier days that have at least one exchange; a day the Desk was
+only opened on is not listed. A busy day's full
 segment stays in history when opening Main starts its next part. Opening, switching or browsing history
 uses no model turn or automatic research job. Concurrent answers append separately, each beside its own question. A proposed trade plan opens in its own ticker thread for review and confirmation so it has a distinct place in Plans and its alerts link back to it. **Today’s briefing** opens the session tape, Radar and alert feedback, prep and review
-actions. Existing symbol, plan, chart and evening-review links still open their own workflows.
+actions. It has no message box of its own: until one of its buttons starts a thread it points to Main chat
+("Ask in Main chat →"). A blank conversation of its own is **New** (`?view=new`). In Main chat a proposed plan's
+button also gives its levels in one line (side, entry, invalidation, time stop). Existing symbol, plan, chart and evening-review links still open their own workflows.
 
 
 The full page is a desk of three panes beside each other

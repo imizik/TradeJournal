@@ -13,10 +13,12 @@ export default async function CopilotLabPage({ searchParams }: { searchParams: P
   const close = (Array.isArray(params.close) ? params.close[0] : params.close) === "1";
   const daily = !close && !link && !params.thread && !params.view;
   const briefing = close || params.view === "briefing";
+  // "New" (and ?view=new) is a blank conversation: it opens on the conversation, like Main chat.
+  const fresh = params.view === "new";
   return (
     // Full screen beside the nav rail on a wide screen (AppMain), the desk fills the height left under the banner.
     <div className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
-      <CopilotLab key={JSON.stringify([link, daily, briefing])} link={link} close={close} daily={daily} briefing={briefing} />
+      <CopilotLab key={JSON.stringify([link, daily, briefing, fresh])} link={link} close={close} daily={daily} briefing={briefing} fresh={fresh} />
     </div>
   );
 }
