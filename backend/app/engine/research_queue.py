@@ -389,7 +389,8 @@ def enqueue_reassessments(after_hours: int, session: Session | None = None) -> i
         recent = {json.loads(job.input_json)["investigation_id"] for job in jobs
                   if job.status in ACTIVE or job.created_at >= cutoff}
         stale = [str(row.id) for row in db.exec(select(CopilotInvestigation).where(
-            CopilotInvestigation.status == "open", col(CopilotInvestigation.updated_at) < cutoff))]
+            CopilotInvestigation.status == "open", col(CopilotInvestigation.main_day).is_(None),
+            col(CopilotInvestigation.updated_at) < cutoff))]
     created = 0
     for investigation_id in stale:
         if investigation_id in outputs or investigation_id in recent:

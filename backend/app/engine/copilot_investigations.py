@@ -131,6 +131,7 @@ class AnswerMetrics(_Strict):
 
 
 class SavedMessage(_Strict):
+    exchange_id: str | None = Field(None, pattern=r"^[A-Za-z0-9_-]{8,64}$")  # replay key for a daily answer
     role: Literal["user", "assistant"]
     content: str = Field(max_length=20_000)
     rating: Literal["helped", "didnt"] | None = None  # the owner's one-tap verdict on an answer; absent on older records
@@ -353,15 +354,7 @@ def update(investigation_id: str | uuid.UUID, fields: InvestigationFields, revis
         if revision != row.revision:
             raise InvestigationError("stale", "This investigation changed in another window. Reload it before saving.")
         if row.main_day is not None:
-            # Reserve the revision in this transaction before replacing a shared daily transcript.
-            claimed = db.execute(sql_update(CopilotInvestigation).where(
-                CopilotInvestigation.id == row.id, CopilotInvestigation.revision == revision
-            ).values(revision=revision + 1).execution_options(synchronize_session=False))
-            if claimed.rowcount != 1:
-                db.rollback()
-                raise InvestigationError("stale", "Main chat changed on another device. Reopen it to see the latest messages.")
-            db.refresh(row)
-            fields = fields.model_copy(update={"title": row.title, "status": "open", "symbol": None})
+            raise InvestigationError("stale", "Main chat saves new exchanges individually.")
         stored = json.loads(row.transcript_json)
         _fill(row, fields, _outcomes(stored), {i: (m["rating"], m["content"]) for i, m in enumerate(stored) if m.get("rating")})
         row.revision = revision + 1
@@ -381,6 +374,81 @@ def _feedback_row(db: Session, investigation_id: str | uuid.UUID) -> CopilotInve
                    .values(revision=CopilotInvestigation.revision).execution_options(synchronize_session=False))
         db.refresh(row)
     return row
+
+
+def append_main(db: Session, key: str, exchange: InvestigationFields) -> dict:
+    """Append to the committed transcript under the feedback/write lock; a device never replaces its peer's turns."""
+    if [m.role for m in exchange.transcript] != ["user", "assistant"] or any(e.message not in (0, 1) for e in exchange.evidence):
+        raise InvestigationError("invalid", "Expected one question and answer with their evidence.")
+    row = _feedback_row(db, key)
+    if not row.main_day:
+        raise InvestigationError("not_found", "No such Main chat.")
+    receipt = exchange.transcript[1].exchange_id
+    if not receipt:
+        raise InvestigationError("invalid", "This Main exchange needs a replay key.")
+    if any(m.get("exchange_id") == receipt for m in json.loads(row.transcript_json)):
+        return full(row)
+    if _main_at_capacity(row):
+        # A lost response may have committed to a later part, which can itself be full by the retry.
+        for other in db.exec(select(CopilotInvestigation).where(CopilotInvestigation.main_day == row.main_day,
+                             CopilotInvestigation.created_at > row.created_at,
+                             CopilotInvestigation.transcript_json.contains(receipt, autoescape=True))):
+            if any(m.get("exchange_id") == receipt for m in json.loads(other.transcript_json)):
+                return full(other)
+        successor = main_chat(db, row.main_day)
+        row = _feedback_row(db, successor["id"])
+    old = json.loads(row.transcript_json)
+    if any(m.get("exchange_id") == receipt for m in old):
+        return full(row)
+    evidence = json.loads(row.evidence_json)
+    incoming = [m.model_dump(exclude_none=True) for m in exchange.transcript]
+    # Model card IDs can repeat in different simultaneous turns. Their saved positions never move.
+    for i, card in enumerate(incoming[1].get("proposals", [])):
+        card["id"] = f"main-{len(old) + 1}-{i}"
+    evidence += [{**e.model_dump(exclude_none=True), "message": len(old) + e.message} for e in exchange.evidence]
+    try:
+        fields = InvestigationFields(title=row.title, transcript=old + incoming, evidence=evidence)
+    except ValidationError as exc:
+        raise InvestigationError("too_long", "This exchange exceeds the saved chat limits.") from exc
+    _fill(row, fields)
+    row.revision += 1
+    row.updated_at = datetime.utcnow()
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    _link_turns(db, row)
+    return full(row)
+
+
+def main_plan_thread(db: Session, key: str, proposal_id: str) -> dict:
+    """A daily plan card opens one stable, symbol-scoped plan thread. Opening it never confirms its actions."""
+    row = _row(db, key)
+    if not row.main_day:
+        raise InvestigationError("not_found", "No such Main chat.")
+    thread_id = uuid.uuid5(row.id, "plan:" + proposal_id)
+    existing = db.get(CopilotInvestigation, thread_id)
+    if existing:
+        return full(existing)
+    said = json.loads(row.transcript_json)
+    for index, message in enumerate(said):
+        card = next((c for c in message.get("proposals", []) if c["id"] == proposal_id and c["kind"] == "trade_plan"), None)
+        if not card or index == 0:
+            continue
+        # The plan's originating exchange and evidence, without duplicating another plan, answer rating or spend record.
+        answer = {"role": "assistant", "content": message["content"], "proposals": [card]}
+        refs = [{**e, "message": 1} for e in json.loads(row.evidence_json) if e["message"] == index]
+        fields = InvestigationFields(title=f"{card['symbol']} plan · {row.main_day}", symbol=card["symbol"],
+                                     transcript=[said[index - 1], answer], evidence=refs)
+        child = CopilotInvestigation(id=thread_id, title=fields.title, transcript_json="[]", evidence_json="[]")
+        _fill(child, fields)
+        db.add(child)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            child = _row(db, thread_id)
+        return full(child)
+    raise InvestigationError("not_found", "No such saved plan card.")
 
 
 def set_outcome(investigation_id: str | uuid.UUID, proposal_id: str, outcome: ProposalOutcome,

@@ -124,7 +124,7 @@ export type AnswerScorecard = {
 export const unavailable = (part: unknown): part is { state: "unavailable" } => !!part && typeof part === "object" && (part as { state?: string }).state === "unavailable";
 /** Where a question is asked from; recorded with its turn. */
 export type TurnSource = "desk" | "charts" | "radar" | "panel";
-export type LabMessage = { role: "user" | "assistant"; content: string; rating?: Rating; savedMetrics?: SavedMetrics; images?: string[]; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics; turnId?: string;
+export type LabMessage = { exchange_id?: string; role: "user" | "assistant"; content: string; rating?: Rating; savedMetrics?: SavedMetrics; images?: string[]; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics; turnId?: string;
   /** The server's id for the evidence this answer read, sent with the next message; never saved. */
   carry?: string };
 
@@ -420,7 +420,7 @@ export type InvestigationSummary = {
   revision: number; message_count: number; created_at: string; updated_at: string;
 };
 export type Investigation = InvestigationSummary & {
-  transcript: { role: "user" | "assistant"; content: string; proposals?: Proposal[]; rating?: Rating; metrics?: SavedMetrics }[]; evidence: EvidenceRef[]; findings: Findings | null;
+  transcript: { exchange_id?: string; role: "user" | "assistant"; content: string; proposals?: Proposal[]; rating?: Rating; metrics?: SavedMetrics }[]; evidence: EvidenceRef[]; findings: Findings | null;
 };
 export type InvestigationFields = Pick<Investigation, "title" | "symbol" | "status" | "conclusion" | "transcript" | "evidence">;
 
@@ -436,6 +436,10 @@ async function investigationRequest<T>(path: string, init?: RequestInit): Promis
 }
 
 export const openDailyMain = (signal?: AbortSignal) => request<Investigation>("/copilot/main-chat", { method: "POST", signal });
+export const appendMainExchange = (id: string, fields: InvestigationFields) =>
+  request<Investigation>(`/copilot/main-chat/${encodeURIComponent(id)}/exchange`, { method: "POST", body: JSON.stringify(fields) });
+export const mainPlanThread = (id: string, proposal: string) =>
+  request<Investigation>(`/copilot/main-chat/${encodeURIComponent(id)}/plans/${encodeURIComponent(proposal)}`, { method: "POST" });
 export const mainHistory = (before?: string) => request<{ chats: InvestigationSummary[] }>(
   "/copilot/main-chat/history" + (before ? `?before=${encodeURIComponent(before)}` : ""));
 
@@ -514,7 +518,7 @@ export async function uploadImage(file: Blob): Promise<SharedImage> {
  * tools it used and how old their data was. A proposal is not evidence, so propose_plan is left out of the evidence. */
 export function toSaved(messages: LabMessage[]): Pick<InvestigationFields, "transcript" | "evidence"> {
   return {
-    transcript: messages.map(m => ({ role: m.role, content: spokenText(m),
+    transcript: messages.map(m => ({ role: m.role, content: spokenText(m), ...(m.exchange_id ? { exchange_id: m.exchange_id } : {}),
       ...(m.role === "assistant" && m.rating ? { rating: m.rating } : {}),
       ...(m.role === "assistant" && savedMetrics(m) ? { metrics: savedMetrics(m) } : {}),
       // A card from the stream still carries its event type, which is not part of the proposal.

@@ -78,7 +78,7 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
   const navFolded = useFoldedNav();
   const session = useDeskSession(on);
   // A deep link (a ping, a Radar row, a chip) opens on its conversation, so a phone's composer is on the first screen.
-  const [tab, setTab] = useState<DeskTab>(link || daily ? "thread" : "now");
+  const [tab, setTab] = useState<DeskTab>(link || daily || briefing ? "thread" : "now");
   const [command, setCommand] = useState<DeskCommand | null>(null);
   const [thread, setThread] = useState<DeskThreadRef | null>(null);
   const [rows, setRows] = useState<DeskThread[]>([]);

@@ -325,6 +325,9 @@ def test_reassessments_stay_one_per_original_per_day_over_several_days(monkeypat
     original = inv.save_research_result(title="Neocloud financing", symbol="CRWV", findings={"summary": "Debt."})
     other = inv.save_research_result(title="Fresh question", symbol="NBIS", findings={"summary": "s"})
 
+    with Session(engine) as db:
+        inv.main_chat(db, clock["now"].date())  # a passive Desk visit never enrolls in paid research
+
     def age_everything():  # every investigation, outputs included, looks stale
         with Session(engine) as db:
             for row in db.exec(select(CopilotInvestigation)):
@@ -347,7 +350,7 @@ def test_reassessments_stay_one_per_original_per_day_over_several_days(monkeypat
     jobs = q.list_jobs()
     assert {j["input"]["investigation_id"] for j in jobs} == {original["id"], other["id"]}
     with Session(engine) as db:
-        assert len(list(db.exec(select(CopilotInvestigation)))) == 2 + 8
+        assert len(list(db.exec(select(CopilotInvestigation)))) == 3 + 8
 
 
 def test_a_waiting_reassessment_blocks_another():

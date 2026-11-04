@@ -1279,11 +1279,33 @@ def test_daily_main_resolves_once_across_devices_rolls_over_and_keeps_archive(mo
         first = devices[0]
         assert first["id"] == devices[1]["id"] and first["main_day"] == "2026-11-01"
         url = f"/copilot/investigations/{first['id']}"
-        payload = {"title": "changed", "revision": 1, "transcript": [
-            {"role": "user" if i % 2 == 0 else "assistant", "content": str(i)} for i in range(180)]}
+        def exchange(symbol):
+            return {"title": "ignored", "transcript": [{"role": "user", "content": symbol}, {"role": "assistant",
+                    "content": f"Plan for {symbol}", "exchange_id": f"question-{symbol}", "proposals": [{**PLAN_CARD, "symbol": symbol}]}],
+                    "evidence": [{"tool": "get_quote", "message": 1}]}
+        daily_url = f"/copilot/main-chat/{first['id']}"
         with ThreadPoolExecutor(max_workers=2) as pool:
-            writes = list(pool.map(lambda _: client.put(url, json=payload).status_code, range(2)))
-        assert sorted(writes) == [200, 409]
+            writes = list(pool.map(lambda symbol: client.post(daily_url + "/exchange", json=exchange(symbol)), ["NBIS", "AAPL"]))
+        assert all(r.status_code == 200 for r in writes)
+        kept = client.get(url).json()
+        assert {m["content"] for m in kept["transcript"][::2]} == {"NBIS", "AAPL"}
+        assert [e["message"] for e in kept["evidence"]] == [1, 3]
+        assert client.post(daily_url + "/exchange", json=exchange("NBIS")).json()["message_count"] == 4
+        plans = []
+        for m in kept["transcript"][1::2]:
+            card = m["proposals"][0]
+            open_plan = daily_url + "/plans/" + card["id"]
+            plan = client.post(open_plan).json()
+            assert plan["symbol"] == card["symbol"] and not plan["main_day"] and len(plan["transcript"]) == 2
+            assert client.post(open_plan).json()["id"] == plan["id"]
+            plans.append(plan["id"])
+        assert len(set(plans)) == 2
+        assert client.put(url, json={"revision": kept["revision"], **exchange("NBIS")}).status_code == 409
+        # Fill by text size in eight exchanges rather than seeding a different storage path.
+        long_turn = {"title": "ignored", "transcript": [{"role": role, "content": "x" * 20000} for role in ["user", "assistant"]]}
+        for index in range(8):
+            long_turn["transcript"][1]["exchange_id"] = f"long-turn-{index}"
+            assert client.post(daily_url + "/exchange", json=long_turn).status_code == 200
         assert client.get(url).json()["main_at_capacity"]
         second = client.post("/copilot/main-chat").json()
         assert second["id"] != first["id"] and second["main_day"] == first["main_day"]
@@ -1292,4 +1314,4 @@ def test_daily_main_resolves_once_across_devices_rolls_over_and_keeps_archive(mo
         assert today["main_day"] == "2026-11-02"
         history = client.get("/copilot/main-chat/history").json()["chats"]
         assert [row["id"] for row in history[:3]] == [today["id"], second["id"], first["id"]]
-        assert client.get(url).json()["transcript"] == payload["transcript"]
+        assert client.get(url).json()["transcript"][:4] == kept["transcript"]

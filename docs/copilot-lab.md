@@ -491,7 +491,7 @@ Open Desk to resume **Main chat** for the current New York calendar date. Deskto
 saved conversation. Unsent words belong to their browser tab. Returning to a saved link keeps its original
 conversation, including after midnight. **Previous days** opens earlier conversations. A busy day's full
 segment stays in history when opening Main starts its next part. Opening, switching or browsing history
-uses no model turn. **Today’s briefing** opens the session tape, Radar and alert feedback, prep and review
+uses no model turn or automatic research job. Concurrent answers append separately, each beside its own question. A proposed trade plan opens in its own ticker thread for review and confirmation so it has a distinct place in Plans and its alerts link back to it. **Today’s briefing** opens the session tape, Radar and alert feedback, prep and review
 actions. Existing symbol, plan, chart and evening-review links still open their own workflows.
 
 
