@@ -34,7 +34,11 @@ The policy, in the order it is applied:
   October 29, 2026 the old shared pool was gone by 09:50 on prep, thesis watch,
   research and nudges, and every Radar ping and the evening review were held.
   Before 09:30 New York these kinds together also have ``PING_PREOPEN_ALLOWANCE``
-  (default 2) pings, so pre-open headlines cannot spend the day.
+  (default 2) pings, so pre-open headlines cannot spend the day. While the
+  morning brief is switched on and not yet decided today (on a weekday, until
+  its ping could no longer go out), one of them is kept for it: the 09:00 brief comes
+  after the Radar pilot's 08:50 scan and early thesis-watch pings, which would
+  otherwise spend the allowance first.
 - **Daily ceiling.** At most ``PING_DAILY_CAP`` (default 12) pings a New York day
   across every kind; ranks 3 and below (time stop, entry, hold-hour and the
   budgeted kinds) are held once it is reached; the position companion's updates
@@ -295,10 +299,12 @@ def _judge(db: Session, row: PhonePing, now: float) -> None:
         if _minute_et(now) < PREOPEN:
             allowance = preopen_allowance()
             early = sum(budget(k) is not None and _minute_et(_epoch(at)) < PREOPEN for k, at in sent)
-            if early >= allowance:
+            kept = row.kind != "prep" and allowance > 0 and _brief_to_come(db, now, start, end)
+            if early >= allowance - kept:
                 row.decision = "over_cap"
                 row.reason = (f"Not sent: the {allowance} pre-open ping{'' if allowance == 1 else 's'} for nudges, prep, Radar, thesis "
-                              "watch and research before 9:30 AM New York are spent.")
+                              "watch and research before 9:30 AM New York are spent"
+                              + (" (one is kept for the morning brief)." if kept else "."))
                 return
     cap = daily_cap()
     # The companion's updates have their own budget and never crowd out another kind: they count toward the ceiling only
@@ -308,6 +314,18 @@ def _judge(db: Session, row: PhonePing, now: float) -> None:
     if len(sent) >= cap:
         row.decision = "over_cap"
         row.reason = f"Not sent: {len(sent)} ping{'' if len(sent) == 1 else 's'} already went out today (cap {cap})."
+
+
+def _brief_to_come(db: Session, now: float, start: datetime, end: datetime) -> bool:
+    """The morning brief is on, not yet decided today, and its ping could still go out: a pre-open slot is kept for it."""
+    from app.engine import premarket_prep
+    moment = datetime.fromtimestamp(now, ET)
+    if not premarket_prep.enabled() or moment.weekday() >= 5:
+        return False
+    if _minute_et(now) >= premarket_prep.prep_minute() + premarket_prep.WINDOW_MINUTES + premarket_prep.EXPIRE_SECONDS // 60:
+        return False
+    return db.exec(select(PhonePing.id).where(PhonePing.kind == "prep", PhonePing.decided_at >= start,
+                                              PhonePing.decided_at < end)).first() is None
 
 
 def budget_reason(kind: str, own: int) -> str:
