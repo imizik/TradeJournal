@@ -1,5 +1,5 @@
 {
-  "commit": "03dcbd22e3faf56d246ab05a8b2b349205f7094f",
-  "date": "2026-11-03",
-  "note": "Reconciled d418a7d8..03dcbd22 (24 code commits, #628-#649 and two follow-ups: API move, Land auto-merge, copilot turn record and scorecard, eval harness, new copilot tools, desk-look redesign, grouped nav). Fixed: feature-map AI reviews run on the API (not the plan), Copilot proof column adds macro/breadth/web tests, phone More menu wording and nav-groups spec; copilot-lab tool count 21->25 with macro/breadth listed, Main's unseen-Radar dot is amber. Not checked: deploy/README; per-PR prose in copilot-lab beyond counts; live host states."
+  "commit": "25505ef0405634af2259107a2ffc14c4f2e5353d",
+  "date": "2026-11-05",
+  "note": "Reconciled 03dcbd22..25505ef0 (24 code commits, #652-#674 and four follow-ups: copilot extended hours and review fixes, scalp shortlist, phone tabs, Why? pings, ping cap removal, Radar v2/whole-market research and checkpoints, 09:00 archive and brief scorecard, Main chat). Fixed: phone tab bar (owner Dashboard tab, Daily Review under More), desk session and Radar policy no longer mention the removed shared ping ceiling, Radar row adds v2 opening drive, outside-list scan and tests, morning brief row adds the 09:00 archive and scorecard. Not checked: deploy/README; Dots board rows; per-PR prose in copilot-lab and radar.md; live host states."
 }

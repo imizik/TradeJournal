@@ -767,8 +767,8 @@ or the live 20-session experiment's scoring.
   budgets (4 singles and 2 digests a day by default) replace it.
 - **Notification policy:** right before every send, the app's
   [phone ping policy](copilot-lab.md#phone-ping-policy) may hold it: its
-  kind's budget (`PING_BUDGET_RADAR_EVENT`, `PING_BUDGET_RADAR_DIGEST`), the
-  daily ceiling, or, for a single (anchored to the stock's open position, else
+  kind's budget (`PING_BUDGET_RADAR_EVENT`, `PING_BUDGET_RADAR_DIGEST`; there
+  is no shared daily ceiling), or, for a single (anchored to the stock's open position, else
   the stock, or to the group), the quiet window after a ping for the same
   position. A held ping is recorded `held` with the reason and never sent
   later.

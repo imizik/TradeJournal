@@ -297,7 +297,7 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   (with a 375 px phone check); route tests: `tests/test_plan_positions.py`.
 - **Today** (`/today`, `components/today/TodayView.tsx`): the owner's phone
   landing page, the first phone tab and ahead of Dashboard in the sidebar
-  (Dashboard stays in the phone's More menu). One column, top to bottom, each
+  (Dashboard is the second phone tab). One column, top to bottom, each
   section collapsed to its count when empty:
   - **Act now**: open positions within 1% of an armed invalidation (or past a
     hit one), expiring today, with the give-back alert fired, or with a time
