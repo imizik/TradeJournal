@@ -45,6 +45,7 @@ _journal_logging()
 DEFAULT_MODEL = "claude-sonnet-5-5"
 # The models the panel may pick for a turn when COPILOT_MODELS is unset; COPILOT_MODEL is always offered first.
 DEFAULT_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1")
+DEFAULT_FOLLOWUP_MODEL = "off"  # set from the offline eval (docs/copilot-lab.md § Follow-ups keep the evidence)
 MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9.\-]{0,60}$")
 # "Explain this candle: NBIS 5m at 10:40 ET" (the Charts menu's line), with "on 2026-10-23" for an earlier session.
 MOMENT = re.compile(r"(?:(?P<symbol>[A-Z][A-Z0-9.\-]{0,9}) (?P<timeframe>1m|3m|5m|15m|30m|1h|4h|1D) )?at (?P<hour>\d{1,2}):(?P<minute>\d{2}) ET"
@@ -52,8 +53,10 @@ MOMENT = re.compile(r"(?:(?P<symbol>[A-Z][A-Z0-9.\-]{0,9}) (?P<timeframe>1m|3m|5
 BACKENDS = ("anthropic",)  # what a turn may pick; `fake` is only ever the default
 # Short progress notes between tool calls come back as thinking text; reasoning itself stays hidden.
 PROGRESS_BETA = "thinking-display-updates-2026-08-18"
-# USD per million tokens: input, output, cache read, 5-minute cache write.
-PRICES = {"claude-sonnet-5-5": (2.00, 10.00, 0.20, 2.50), "claude-opus-5-5": (4.00, 20.00, 0.20, 5.00)}
+# USD per million tokens: input, output, cache read, 5-minute cache write. Haiku 5.5 is its rate for prompts of
+# 100K tokens or fewer (a copilot turn's prompt stays well under that); longer prompts bill at 5x.
+PRICES = {"claude-sonnet-5-5": (2.00, 10.00, 0.20, 2.50), "claude-opus-5-5": (4.00, 20.00, 0.20, 5.00),
+          "claude-haiku-5-5": (0.10, 0.50, 0.01, 0.125)}
 
 SYSTEM_PROMPT = """You are the research copilot inside TradeJournal, a single trader's private journal and charting app. \
 You are a sparring partner for investigating trading ideas and managing positions, not an autonomous trader.
@@ -273,10 +276,12 @@ class Settings:
     models: tuple[str, ...] = (DEFAULT_MODEL,)  # what a turn may pick; self.model is always first
     backends: tuple[str, ...] = ("fake",)  # what a turn may pick; self.backend is always first
     daily_budget_usd: float = 4.0  # COPILOT_DAILY_BUDGET_USD: API turns stop for the day past this estimate
+    followup_model: str = ""  # COPILOT_FOLLOWUP_MODEL: a follow-up on carried evidence runs on it; "" is off
 
     def public(self) -> dict:
         return {"enabled": self.enabled, "backend": self.backend, "evidence": self.evidence, "model": self.model,
                 "models": list(self.models), "backends": list(self.backends), "daily_budget_usd": self.daily_budget_usd,
+                "followup_model": self.followup_model or None,
                 "effort": self.effort, "fallbacks": self.fallbacks, "key_configured": self.key_configured,
                 "limits": {"max_rounds": self.max_rounds, "max_tool_calls": self.max_tool_calls,
                            "turn_budget_usd": self.turn_budget_usd,
@@ -306,6 +311,7 @@ def settings() -> Settings:
         evidence=evidence if evidence in ("fixture", "live", "replay") else "fixture",
         model=model,
         models=offered_models(model),
+        followup_model=followup_model(),
         effort=effort if effort in ("low", "medium", "high") else "medium",
         fallbacks=os.environ.get("COPILOT_FALLBACKS", "default") != "off",
         key_configured=key_configured,
@@ -313,6 +319,26 @@ def settings() -> Settings:
         replay_store=os.environ.get("COPILOT_REPLAY_STORE", ""),
         replay_at=os.environ.get("COPILOT_REPLAY_AT", ""),
     )
+
+
+def followup_model() -> str:
+    """COPILOT_FOLLOWUP_MODEL: the model a follow-up on carried evidence runs on; ``off`` (the default), unset or
+    anything that is not a plain model id means follow-ups stay on the turn's own model."""
+    raw = model_id(os.environ.get("COPILOT_FOLLOWUP_MODEL", DEFAULT_FOLLOWUP_MODEL).strip().lower())
+    if raw in ("", "off"):
+        return ""
+    if not MODEL_ID.match(raw):
+        log.warning("COPILOT_FOLLOWUP_MODEL is not a model id; follow-ups stay on the turn's model")
+        return ""
+    return raw
+
+
+def as_followup(cfg: Settings, picked: str | None, carry: list[dict]) -> Settings:
+    """``cfg`` for a follow-up turn: when the follow-up model is on, the earlier turn's evidence is still carried and
+    the owner did not pick a model for this turn, the turn runs on the follow-up model (it still has its tools)."""
+    if not cfg.followup_model or not carry or (picked is not None and picked != cfg.models[0]):
+        return cfg
+    return dataclasses.replace(cfg, model=cfg.followup_model)
 
 
 def offered_models(default: str) -> tuple[str, ...]:

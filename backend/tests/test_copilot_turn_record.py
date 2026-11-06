@@ -194,3 +194,52 @@ def test_the_scheduled_senders_name_their_kind(monkeypatch):
     monkeypatch.setattr(copilot_spend, "spent_today", lambda session=None: 99.0)
     answer, error = premarket_prep._turn("Morning brief", now)
     assert answer == "" and "budget" in error and _rows()[-1].error == "daily_budget" and _rows()[-1].kind == "prep"
+
+
+def test_a_follow_up_on_carried_evidence_runs_and_is_recorded_on_the_follow_up_model(monkeypatch):
+    """COPILOT_FOLLOWUP_MODEL: a turn whose carry can still be served and that picked no model runs on it; an explicit
+    pick, or a carry that cannot be served, keeps the turn's own model. The row records the model actually used."""
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    monkeypatch.delenv("COPILOT_BACKEND", raising=False)
+    monkeypatch.delenv("COPILOT_MODEL", raising=False)
+    monkeypatch.delenv("COPILOT_MODELS", raising=False)
+    monkeypatch.setenv("COPILOT_FOLLOWUP_MODEL", "claude-haiku-5-5")
+    seen: list[str] = []
+
+    def adapter_for(cfg):
+        seen.append(cfg.model)
+        adapter = copilot.FakeAdapter(0)
+        adapter.model = cfg.model  # stands in for the API adapter, whose turns record the configured model
+        return adapter
+
+    monkeypatch.setattr(copilot, "adapter_for", adapter_for)
+    first = [{"role": "user", "content": "Is the NBIS group confirming?"}]
+    with TestClient(app) as client:
+        assert client.get("/copilot/status").json()["followup_model"] == "claude-haiku-5-5"
+        frames = _frames(client.post("/copilot/chat", json={"messages": first, "symbol": "NBIS"}).text)
+        carry_id = next(f for f in frames if f["type"] == "done")["carry_id"]
+        assert carry_id and seen == ["claude-sonnet-5-5"]
+        _rows_once_written(1)
+        follow = {"messages": first + [{"role": "assistant", "content": "It is."}, {"role": "user", "content": "And CRWV?"}],
+                  "symbol": "NBIS", "carry_id": carry_id}
+        done = next(f for f in _frames(client.post("/copilot/chat", json=follow).text) if f["type"] == "done")
+        assert seen[-1] == "claude-haiku-5-5" and done["metrics"]["model"] == "claude-haiku-5-5"
+        _rows_once_written(2)
+        client.post("/copilot/chat", json={**follow, "model": "claude-sonnet-5-5"})  # the default, picked: still a follow-up
+        assert seen[-1] == "claude-haiku-5-5"
+        _rows_once_written(3)
+        client.post("/copilot/chat", json={**follow, "model": "claude-opus-5-5"})  # the owner's pick wins
+        assert seen[-1] == "claude-opus-5-5"
+        _rows_once_written(4)
+        client.post("/copilot/chat", json={**follow, "carry_id": "0" * 32})  # nothing was kept under that id
+        assert seen[-1] == "claude-sonnet-5-5"
+        _rows_once_written(5)
+        client.post("/copilot/chat", json={"messages": first, "symbol": "NBIS", "carry_id": carry_id})  # a first turn
+        assert seen[-1] == "claude-sonnet-5-5"
+        _rows_once_written(6)
+        monkeypatch.setenv("COPILOT_FOLLOWUP_MODEL", "off")
+        client.post("/copilot/chat", json=follow)
+        assert seen[-1] == "claude-sonnet-5-5"
+    rows = _rows_once_written(7)
+    assert [r.model for r in rows] == ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-haiku-5-5", "claude-opus-5-5",
+                                       "claude-sonnet-5-5", "claude-sonnet-5-5", "claude-sonnet-5-5"]

@@ -11,7 +11,7 @@ export type CopilotStatus =
       /** The models a turn may pick (the server's default first); absent on older servers. */
       models?: string[];
       /** The backends a turn may pick (the server's default first), and today's estimated API spend against its cap. */
-      backends?: Backend[]; spend_today_usd?: number | null; daily_budget_usd?: number;
+      backends?: Backend[]; spend_today_usd?: number | null; daily_budget_usd?: number; followup_model?: string | null;
       /** copilot_alerts: whether the level-alert route accepts a watch confirmed here. transcriber: whether hold-to-talk
        * can use this server's speech to text (else the browser's own, where it has one). */
       capabilities?: { copilot_alerts: boolean; transcriber?: { configured: boolean; provider: string } };
