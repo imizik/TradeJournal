@@ -424,7 +424,10 @@ export type DeskSessionEvent = { kind: "fill" | "ping" | "radar" | "decision"; a
 export type DeskSession = {
   as_of: string; now: number; day: string; phase: DeskDay["phase"]; open: number | null; close: number | null;
   events: DeskSessionEvent[]; time_stops: { symbol: string; at: number; clock: string }[];
-  pings: { sent: number; held: number; cap: number | null } | null; prep: { at: number | null; line: string | null } | null;
+  pings: { sent: number; held: number; cap: number | null } | null;
+  /** Today's morning brief: its first line, and (absent from an older backend) its saved lines, whether the turn failed
+   * and the raw facts stand in, and the path of its thread. */
+  prep: { at: number | null; line: string | null; lines?: string[]; fallback?: boolean; path?: string | null } | null;
   indices: { symbol: string; last: number | null; change_pct: number | null }[]; quote_issue: string | null;
   /** What waits on the owner's answer for /proof: ``count`` in the proof's scope, ``rows`` today's then the newest waiting.
    * Null when that source is off or unavailable; absent from an older backend. */
