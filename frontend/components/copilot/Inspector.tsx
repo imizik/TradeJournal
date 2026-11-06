@@ -392,9 +392,10 @@ function FocusContext({ symbol, onMarket }: { symbol: string; onMarket(): void }
  * instead. Read-only: nothing here arms or sends. */
 export default function Inspector({ thread, day = false, focus = null }: { thread: DeskThreadRef | null; day?: boolean; focus?: string | null }) {
   const [tab, setTab] = useState<ContextTab>("chart");
-  // The ticker the owner switched away from, back to the market; a new one shows again.
-  const [left, setLeft] = useState<string | null>(null);
-  if (day && focus && left !== focus) return <FocusContext symbol={focus} onMarket={() => setLeft(focus)} />;
+  // The ticker the owner switched away from, back to the market, in this chat; a new one, or another chat, shows again.
+  const chat = thread?.id ?? null;
+  const [left, setLeft] = useState<{ chat: string | null; symbol: string } | null>(null);
+  if (day && focus && !(left?.chat === chat && left.symbol === focus)) return <FocusContext symbol={focus} onMarket={() => setLeft({ chat, symbol: focus })} />;
   if (day) return <DayContext focus={focus} onFocus={() => setLeft(null)} />;
   if (!thread) return <Quiet>Open a thread to see its chart, timeline and your history here.</Quiet>;
   return (
