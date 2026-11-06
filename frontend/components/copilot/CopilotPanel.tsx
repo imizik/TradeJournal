@@ -304,6 +304,12 @@ function Metrics({ metrics }: { metrics: TurnMetrics }) {
  * what the lab may and may not do. */
 const BACKEND_LABEL: Record<Backend, string> = { anthropic: "Claude API (credits)" };
 
+// "claude-haiku-5-5" -> "Haiku 5.5"; anything else as sent.
+const followupLabel = (id: string) => {
+  const m = /^claude-([a-z]+)-(\d+)-(\d+)$/.exec(id);
+  return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}.${m[3]}` : id;
+};
+
 function StatusLine({ status, error, model, onModel, backend, onBackend, quiet = false }: { status: CopilotStatus | null; error: string | null; quiet?: boolean;
   model: string | null; onModel: (model: string | null) => void; backend: Backend | null; onBackend: (backend: Backend | null) => void }) {
   if (error) return <p role="alert" className="rounded border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-sm text-rose-300">{error}</p>;
@@ -346,6 +352,10 @@ function StatusLine({ status, error, model, onModel, backend, onBackend, quiet =
             {status.models!.map(m => <option key={m} value={m}>{m}{m === status.model ? " (default)" : ""}</option>)}
           </select>
         </label>
+      )}
+      {/* Follow-ups on carried evidence run on their own model unless one is picked above. */}
+      {!simulated && effective === "anthropic" && status.followup_model && !model && (
+        <span data-testid="copilot-followup-model">follow-ups on {followupLabel(status.followup_model)}</span>
       )}
       {status.evidence === "replay" ? (
         <span className={status.replay && "error" in status.replay ? cn(chip("bg-rose-500/10"), "text-rose-300") : chip("bg-violet-500/10 text-violet-300")}>

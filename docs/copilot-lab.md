@@ -1313,6 +1313,33 @@ inside carried text. The data never leaves the server, and the block says that
 text inside it is third-party data, never an instruction. Tests:
 `backend/tests/test_copilot_carry.py`.
 
+**The follow-up model.** `COPILOT_FOLLOWUP_MODEL` (a model id, or `off`)
+names a model for follow-ups. A turn runs on it when the browser sends a
+`carry_id` that `copilot.carried` can still serve (in-process or the stored
+row, same evidence mode), the conversation has an earlier turn, and the
+browser picked no model for this turn (no `model`, or the default); the
+owner's pick in the panel always wins. A follow-up that needs new reads still
+has every tool; the system prompt, tools, answer format, turn budget and daily
+budget are unchanged. The `done` metrics and the `copilot_turn` row record the
+model actually used, so the answer scorecard's `by_model` shows Helped rates and
+first-text latency per model. `GET /copilot/status` returns `followup_model`
+(`null` when off) and the panel's status line says "follow-ups on Haiku 5.5"
+while the API backend is picked and no model is picked. Why: on Sonnet 5.5 the
+API holds the whole answer after tool results (§ Live measurements), while
+Haiku 5.5 streams after the same tool result; a follow-up on carried evidence
+makes no new reads, so it is the safe turn to switch.
+
+The offline eval sets the default. Decision rule: run the starter cases with
+fixture evidence on Sonnet 5.5 and Haiku 5.5 at effort `medium`
+(`scripts.copilot_eval run`, `grade` deterministic checks only, `report`); if
+Haiku's pass rate on the two follow-up cases (`followup-carry`,
+`followup-more`) and its overall `completed`, `no_orders` and `unsupported`
+pass rates are at or above Sonnet's, the default is `claude-haiku-5-5`;
+otherwise `off`. The paid comparison has not run yet (2026-11-06: the API
+rejected the key, see § Live measurements), so the default is `off`. Tests:
+`backend/tests/test_copilot.py` (settings),
+`backend/tests/test_copilot_turn_record.py` (the chat route and its row).
+
 ## What changed?
 
 A reopened investigation, from the desk's thread list or from an alert's
@@ -2693,6 +2720,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `COPILOT_REPLAY_AT` | none | `replay` only: New York time inside a recorded session, e.g. `2026-10-23T11:12`. |
 | `COPILOT_MODEL` | `claude-sonnet-5-5` | Model id for `anthropic`: the default for a turn. |
 | `COPILOT_MODELS` | `claude-sonnet-5-5,claude-opus-5-5,claude-fable-5-1` | The models the panel's **Model** picker offers, comma-separated; `COPILOT_MODEL` is always offered first. A turn sends its pick as `model` in `POST /copilot/chat`; one not in this list is refused (422). The pick is remembered per browser, and the metrics line in each answer's Sources shows the model that actually answered. A model with no entry in `copilot.PRICES` is costed at the dearest known price, so the turn budget errs high. |
+| `COPILOT_FOLLOWUP_MODEL` | `off` | A model id that follow-ups on carried evidence run on when the panel picked no model (§ Follow-ups keep the evidence); `off`, empty or an invalid id keeps every turn on its own model. The default follows the offline eval's decision rule. |
 | `COPILOT_EFFORT` | `medium` | `low`, `medium` or `high`. |
 | `COPILOT_BACKENDS` | `anthropic` | The backends the panel's **Backend** picker offers, comma-separated; `COPILOT_BACKEND` is always offered first. `anthropic` is offered only when the API key is set. A turn sends its pick as `backend` in `POST /copilot/chat`; one not offered is refused (422). Remembered per browser. |
 | `COPILOT_DAILY_BUDGET_USD` | `4` | Estimated API spend (New York day, `anthropic` turns only) at which `POST /copilot/chat` refuses further API turns with a 429 until tomorrow. Every turn is recorded in `copilot_turn` (`app/ai/copilot_spend.py`: backend, model, rounds, tokens, estimated cost; no text), `GET /copilot/status` reports `spend_today_usd`, and the panel shows "API today $x of $y" while the API backend is picked. Turn metrics also reach the server journal at INFO. |
@@ -2953,6 +2981,20 @@ financing stress); `medium` stays the default. The status line keeps the wait
 honest. Shorter answers or another model are the remaining levers; neither is
 changed here. Since 2026-11-06 the wait also shows each read's fact line as its
 result lands (§ What runs), so those seconds read as a briefing.
+
+### Follow-up model eval (2026-11-06)
+
+The Sonnet 5.5 against Haiku 5.5 comparison of the starter cases (fixture
+evidence, effort `medium`, deterministic graders) did not run: every case on
+both models ended `api_auth` (the API rejected the configured key) in about
+0.1 s, for $0.00. Only the scripted model ran (23/23 completed, $0, a harness
+check rather than a model comparison). With no numbers the decision rule
+cannot pass, so `COPILOT_FOLLOWUP_MODEL` ships `off`. To decide it, rerun from
+`backend/`:
+`python -m scripts.copilot_eval run --model claude-sonnet-5-5 --effort medium --max-cost-usd 1 --out data/copilot_eval/runs/sonnet`,
+the same with `--model claude-haiku-5-5 --out data/copilot_eval/runs/haiku`,
+`grade --run` each, then `report --run data/copilot_eval/runs/sonnet --run data/copilot_eval/runs/haiku`,
+and record the per-check pass rates, p50 first text and cost here.
 
 ## Research job
 

@@ -165,8 +165,12 @@ async def chat(body: ChatBody):
             raise HTTPException(429, f"Today's API budget (${cfg.daily_budget_usd:.2f}) is spent: ${spent:.2f} so far. "
                                      "Raise COPILOT_DAILY_BUDGET_USD to keep going today.")
     try:
-        adapter = await asyncio.to_thread(copilot.adapter_for, cfg)
         evidence = copilot.evidence_for(cfg)
+        if cfg.followup_model and body.carry_id and len(body.messages) > 1:
+            # A follow-up whose earlier evidence is still carried runs on the follow-up model unless the owner picked one.
+            carry = await asyncio.to_thread(copilot.carried, body.carry_id, getattr(evidence, "label", ""))
+            cfg = copilot.as_followup(cfg, body.model, carry)
+        adapter = await asyncio.to_thread(copilot.adapter_for, cfg)
     except copilot.CopilotError as exc:
         raise HTTPException(503, exc.message)
     history = [m.model_dump() for m in body.messages]

@@ -427,6 +427,32 @@ def test_a_turn_can_pick_an_offered_model(monkeypatch):
     assert copilot.settings().models[0] == "claude-opus-5-5" and "models" in copilot.settings().public()
 
 
+def test_the_follow_up_model_comes_from_the_environment(monkeypatch, caplog):
+    monkeypatch.delenv("COPILOT_FOLLOWUP_MODEL", raising=False)
+    default = "" if copilot.DEFAULT_FOLLOWUP_MODEL == "off" else copilot.DEFAULT_FOLLOWUP_MODEL
+    assert copilot.settings().followup_model == default
+    for raw, expected in [("claude-haiku-5-5", "claude-haiku-5-5"), (" haiku ", "claude-haiku-5-5"), ("off", ""),
+                          ("OFF", ""), ("", ""), ("Bad Model!", "")]:
+        monkeypatch.setenv("COPILOT_FOLLOWUP_MODEL", raw)
+        assert copilot.settings().followup_model == expected, raw
+        assert copilot.settings().public()["followup_model"] == (expected or None)
+    assert "COPILOT_FOLLOWUP_MODEL is not a model id" in caplog.text
+    cfg = _cfg(followup_model="claude-haiku-5-5", models=("claude-sonnet-5-5", "claude-opus-5-5"))
+    kept = [{"key": "k", "read_at": "t", "text": "x"}]
+    assert copilot.as_followup(cfg, None, kept).model == "claude-haiku-5-5"
+    assert copilot.as_followup(cfg, "claude-sonnet-5-5", kept).model == "claude-haiku-5-5"  # the default, picked
+    assert copilot.as_followup(cfg, "claude-opus-5-5", kept) is cfg  # the owner's pick wins
+    assert copilot.as_followup(cfg, None, []) is cfg  # nothing carried: a turn that reads afresh keeps its model
+    off = replace(cfg, followup_model="")
+    assert copilot.as_followup(off, None, kept) is off
+
+
+def test_a_haiku_turn_is_priced_at_haikus_rates():
+    usage = {"input_tokens": 10_000, "output_tokens": 1_000, "cache_read_input_tokens": 20_000, "cache_creation_input_tokens": 4_000}
+    expected = (10_000 * 0.10 + 1_000 * 0.50 + 20_000 * 0.01 + 4_000 * 0.125) / 1e6
+    assert copilot.cost_usd("claude-haiku-5-5", usage) == pytest.approx(expected)
+
+
 def test_anthropic_backend_without_key_is_an_honest_unavailable_state(monkeypatch):
     monkeypatch.setenv("COPILOT_ENABLED", "true")
     monkeypatch.setenv("COPILOT_BACKEND", "anthropic")
