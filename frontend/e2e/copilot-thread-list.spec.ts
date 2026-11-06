@@ -430,3 +430,27 @@ test("the open thread is in the address: Back returns to the one before, a reloa
   await expect(here.getByText("Answer 2")).toBeHidden();
   await expect(page.getByPlaceholder("Message Main chat…")).toBeEnabled();
 });
+
+test("Context follows the ticker a Main conversation is about; going back to the market holds for that conversation only", async ({ page }) => {
+  await lab(page);
+  const chat = (n: number) => ({ ...summary(`77777777-7777-4777-8777-77777777777${n}`, "X", "open", `2026-10-23T1${n}:00:00Z`), symbol: null, title: `Market talk ${n}`,
+    transcript: [{ role: "user", content: `Question ${n}` }, { role: "assistant", content: `NBIS is leading the group, answer ${n}.` }], evidence: [], findings: null });
+  await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [chat(4), chat(3)].map(c => ({ ...c, transcript: undefined })) } }));
+  for (const n of [3, 4]) await page.route(`**/copilot/investigations/${chat(n).id}`, (route) => route.fulfill({ json: chat(n) }));
+  await page.route("**/copilot/desk/*/picture*", (route) => route.fulfill({ status: 404, json: { detail: "no bars" } }));
+  await page.reload();
+  const toggle = page.getByRole("button", { name: "Context pane" });
+  if (await toggle.getAttribute("aria-pressed") !== "true") await toggle.click();
+  const pane = page.getByRole("complementary", { name: "Context" });
+  const under = list(page).getByRole("list", { name: "Main threads" });
+
+  await under.getByRole("link", { name: /Market talk 4/ }).click();
+  await expect(page.getByText("NBIS is leading the group, answer 4.")).toBeVisible();
+  await expect(pane.getByTestId("context-focus")).toContainText("NBIS");
+  await pane.getByRole("button", { name: "Market" }).click();
+  await expect(pane.getByRole("button", { name: "Back to NBIS" })).toBeVisible();
+
+  await under.getByRole("link", { name: /Market talk 3/ }).click();
+  await expect(page.getByText("NBIS is leading the group, answer 3.")).toBeVisible();
+  await expect(pane.getByTestId("context-focus")).toContainText("NBIS"); // another conversation shows its ticker again
+});

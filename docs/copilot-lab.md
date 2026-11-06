@@ -604,7 +604,8 @@ The full page is a desk of three panes beside each other
   pane shows the day instead. When that conversation's latest turn names a ticker (its question first, then
   its answer; one of the owner's desk tickers or a market or sector fund such as SMH,
   `lib/desk.ts` `answerSymbol`), the pane charts that ticker instead (`symbol:` picture, 2m/15m/1D), marked
-  "in this chat", with **Market** back to the day; the day's view then offers **Back to SMH**. After the
+  "in this chat", with **Market** back to the day; the day's view then offers **Back to SMH**. That choice holds for that conversation only; another one
+  shows its ticker again. After the
   session's last regular bar, today's 2m chart (the thread's and the market's) keeps the after-hours minutes
   and is titled "<symbol> + AFTER HOURS" (`desk_context._today_shown`). The day has its own three tabs: **Chart**, QQQ today
   with the day's fills (any symbol, amber, first labelled FILL) and phone pings
