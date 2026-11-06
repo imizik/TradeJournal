@@ -123,3 +123,35 @@ for (const width of [1440, 375]) {
     await page.getByRole("region", { name: "Conversation" }).screenshot({ path: test.info().outputPath(`proof-answers-briefing-${width}.png`) });
   });
 }
+
+for (const width of [1440, 390]) {
+  test(`today's Main chat asks about today's alerts and Radar hits under the brief, answered in place (${width} px)`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    const MAIN = "66666666-6666-4666-8666-666666666666";
+    const main = { id: MAIN, source: "copilot", title: `Main chat · ${DAY}`, symbol: null, status: "open", conclusion: null, main_day: DAY,
+      revision: 1, message_count: 0, has_findings: false, created_at: `${DAY}T13:00:00Z`, updated_at: `${DAY}T13:00:00Z`,
+      transcript: [], evidence: [], findings: null };
+    await page.route("**/copilot/main-chat", (route) => route.fulfill({ json: main }));
+    await page.route("**/copilot/main-chat/history", (route) => route.fulfill({ json: { chats: [main] } }));
+    await page.route(`**/copilot/investigations/${MAIN}`, (route) => route.fulfill({ json: main }));
+    const { feedback, ratings } = await desk(page, "/copilot-lab");
+    const asked = page.getByRole("region", { name: "To answer today" });
+    // Today's unanswered only: the answered hold-hour alert and the older APLD alert and CRWV hit wait in the Briefing.
+    await expect(asked).toContainText("2 to answer today");
+    await expect(asked.getByTestId("alert-answer")).toHaveCount(1);
+    await expect(asked.getByTestId("alert-answer")).toContainText("Give-back · NBIS 11/21/26 100C");
+    await expect(asked.getByTestId("hit-to-rate")).toHaveCount(1);
+    await expect(asked.getByTestId("hit-to-rate")).toContainText("MU vs sector");
+    await page.getByRole("region", { name: "Conversation" }).screenshot({ path: test.info().outputPath(`main-chat-to-answer-${width}.png`) });
+
+    await asked.getByTestId("alert-answer").getByRole("button", { name: "Prompted a review" }).click();
+    await expect(asked.getByTestId("alert-answer")).toContainText("Answered: Prompted a review");
+    await expect(asked).toContainText("1 to answer today");
+    await asked.getByTestId("hit-to-rate").getByRole("button", { name: "Useful" }).click();
+    await expect(asked.getByTestId("hit-to-rate")).toContainText("Rated: Useful");
+    await expect(asked).toContainText("All answered");
+    expect(feedback).toEqual([{ url: `/trades/${NBIS_TRADE}/phone-alerts/${GIVEBACK.id}/feedback`, body: { rating: "prompted_review", reason: null, base_version: 0 } }]);
+    expect(ratings).toEqual([{ url: `/radar/events/${HIT}/feedback`, body: { rating: "useful" } }]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  });
+}

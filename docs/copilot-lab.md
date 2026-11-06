@@ -494,7 +494,10 @@ part adds "(continued)"). Today's Main chat starts with the day's **Morning brie
 (`MorningBrief.tsx`, from the desk session read's `prep`: the brief's saved lines with its verdict, headline and
 Changes if line, the time it was written, and "Copilot turn failed: raw facts" when the turn failed), with **Ask about
 it →** putting the brief in this Main chat's message box as context, unsent, so questions about it stay in the day's
-conversation; an earlier day's Main chat, or a day with no brief yet, shows none. **Previous days** opens earlier days that have at least one exchange; a day the Desk was
+conversation; an earlier day's Main chat, or a day with no brief yet, shows none. Under it, **To answer today**
+(`MainChatToAnswer`) lists today's sent position alerts and Radar hits still waiting on the answer /proof counts, at most
+three of each, answered in place through the same routes as the Briefing; the rest of today's, and older ones, wait in
+the Briefing. **Previous days** opens earlier days that have at least one exchange; a day the Desk was
 only opened on is not listed. A busy day's full
 segment stays in history when opening Main starts its next part. Opening, switching or browsing history
 uses no model turn or automatic research job. Concurrent answers append separately, each beside its own question. A proposed trade plan opens in its own ticker thread for review and confirmation so it has a distinct place in Plans and its alerts link back to it. **Today’s briefing** opens the session tape, Radar and alert feedback, prep and review

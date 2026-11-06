@@ -197,3 +197,31 @@ export function BriefingToAnswer({ toAnswer }: { toAnswer: { alerts: { count: nu
     </>
   );
 }
+
+const SHOWN = 3;
+
+/**
+ * Today's Main chat, under the morning brief: today's sent alerts and Radar hits still waiting on an answer, open and
+ * answered in place, so the answers /proof counts are asked where the owner already is. Three of each at most; the rest,
+ * and older ones, wait in the Briefing. Rows answered here stay as a line with Change until the desk reloads.
+ */
+export function MainChatToAnswer({ toAnswer }: { toAnswer: { alerts: { count: number; rows: DeskAlertToAnswer[] } | null;
+  radar: { count: number; rows: DeskHitToRate[] } | null } | undefined }) {
+  const [answered, setAnswered] = useState<Set<string>>(() => new Set());
+  const mark = (id: string) => setAnswered(prev => new Set(prev).add(id));
+  const alerts = (toAnswer?.alerts?.rows ?? []).filter(r => r.today && (!r.feedback || answered.has(r.id)));
+  const hits = (toAnswer?.radar?.rows ?? []).filter(r => r.today && (!r.rating || answered.has(r.event_id)));
+  if (!alerts.length && !hits.length) return null;
+  const left = alerts.filter(r => !answered.has(r.id)).length + hits.filter(r => !answered.has(r.event_id)).length;
+  const more = Math.max(0, alerts.length - SHOWN) + Math.max(0, hits.length - SHOWN);
+  return (
+    <section aria-label="To answer today" data-testid="main-chat-to-answer" className={cn(SECTION, "mb-6 space-y-3 px-4")}>
+      <p className="text-xs text-muted-foreground">
+        <span className="font-semibold text-foreground">{left ? `${left} to answer today` : "All answered"}</span> · Was it useful? Your answers count on Proof.
+      </p>
+      {alerts.slice(0, SHOWN).map(alert => <AlertAnswer key={alert.id} alert={alert} onAnswered={mark} />)}
+      {hits.slice(0, SHOWN).map(hit => <HitToRate key={hit.event_id} hit={hit} onRated={mark} />)}
+      {more > 0 && <a href="/copilot-lab?view=briefing" className={cn(LINK, "inline-block")}>{more} more in Today’s briefing →</a>}
+    </section>
+  );
+}
