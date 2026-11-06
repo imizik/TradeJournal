@@ -395,9 +395,12 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
       {data && missing.length > 0 && <p className="px-2.5 text-xs text-muted-foreground">Unavailable right now: {missing.join(", ")}.</p>}
       {data?.quoteIssue && <p className="px-2.5 text-xs text-muted-foreground">Prices: {data.quoteIssue}</p>}
       {data && <div className="px-2.5"><PlanATrade origin="copilot" className="inline-flex min-h-11 items-center gap-1.5 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline sm:min-h-0" /></div>}
-      <p data-testid="desk-keys" className="hidden items-center gap-1 whitespace-nowrap border-t px-2.5 pt-3 text-[11px] text-muted-foreground md:flex">
-        <kbd className={KBD}>J</kbd><kbd className={KBD}>K</kbd>move<kbd className={cn(KBD, "ml-1.5")}>{jumpKey}</kbd>jump
-        <kbd className={cn(KBD, "ml-1.5")}>N</kbd>plan<kbd className={cn(KBD, "ml-1.5")}>]</kbd>context
+      {/* Each key stays with its word; the pairs wrap onto a second line in a narrow list instead of running off its edge. */}
+      <p data-testid="desk-keys" className="hidden flex-wrap items-center gap-x-2.5 gap-y-1.5 border-t px-2.5 pt-3 text-[11px] text-muted-foreground md:flex">
+        <span className="inline-flex items-center gap-1 whitespace-nowrap"><kbd className={KBD}>J</kbd><kbd className={KBD}>K</kbd>move</span>
+        <span className="inline-flex items-center gap-1 whitespace-nowrap"><kbd className={KBD}>{jumpKey}</kbd>jump</span>
+        <span className="inline-flex items-center gap-1 whitespace-nowrap"><kbd className={KBD}>N</kbd>plan</span>
+        <span className="inline-flex items-center gap-1 whitespace-nowrap"><kbd className={KBD}>]</kbd>context</span>
       </p>
     </nav>
   );

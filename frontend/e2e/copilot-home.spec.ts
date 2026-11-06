@@ -173,7 +173,9 @@ test("daily Main reopens across devices, keeps drafts in their tab and opens ear
     await expect(mobile.getByLabel("Message")).toHaveValue("");
     await expect(mobile.getByText("Not yet: it lags CRWV.")).toBeVisible();
     await mobile.screenshot({ path: test.info().outputPath("daily-main-phone.png") });
-    await mobile.getByRole("link", { name: "Today’s briefing", exact: true }).click();
+    // A phone opens the briefing from its thread list; the bar's Daily switch is for wider screens.
+    await mobile.getByRole("tab", { name: "Threads" }).click();
+    await mobile.getByRole("region", { name: "Today’s briefing" }).getByRole("button").first().click();
     await expect(mobile.getByRole("button", { name: "What matters right now?" })).toBeVisible();
   } finally { await phone.close(); }
   await expect(page.getByRole("link", { name: "Main chat", exact: true }).first()).toHaveAttribute("aria-current", "page");
@@ -247,16 +249,15 @@ test("two devices keep their own exchange and feedback targets when both opened 
   } finally { await other.close(); }
 });
 
-test("today's Main chat opens on the morning brief, with its thread a tap away; an earlier day's does not", async ({ page }) => {
+test("today's Main chat opens on the morning brief and asks about it here; an earlier day's does not", async ({ page }) => {
   const BRIEF = "44444444-4444-4444-8444-444444444444";
   const prior = { ...saved, main_day: "2026-10-22", title: "Main chat · 2026-10-22", symbol: null };
   const today = { ...prior, id: "33333333-3333-4333-8333-333333333333", main_day: "2026-10-23", title: "Main chat · 2026-10-23" };
-  const brief = { ...saved, id: BRIEF, symbol: null, title: "Morning brief 2026-10-23", conclusion: "Semis lead pre-market." };
   let sends = 0;
   await page.route("**/copilot/status", route => route.fulfill({ json: ON }));
   await page.route("**/copilot/main-chat", route => route.fulfill({ json: today }));
   await page.route("**/copilot/main-chat/history", route => route.fulfill({ json: { chats: [today, prior] } }));
-  for (const chat of [prior, today, brief]) await page.route(`**/copilot/investigations/${chat.id}`, route => route.fulfill({ json: chat }));
+  for (const chat of [prior, today]) await page.route(`**/copilot/investigations/${chat.id}`, route => route.fulfill({ json: chat }));
   await page.route("**/copilot/chat", route => { sends++; return route.abort(); });
   await page.route("**/copilot/desk/session", route => route.fulfill({ json: {
     as_of: "2026-10-23T15:00:00Z", now: 1792767600, day: "2026-10-23", phase: "regular", open: null, close: null, events: [], time_stops: [],
@@ -275,6 +276,12 @@ test("today's Main chat opens on the morning brief, with its thread a tap away; 
   await page.screenshot({ path: test.info().outputPath("main-chat-brief-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(card).toBeInViewport();
+  // A phone's tabs already name Main chat, so the bar drops the Daily switch and keeps Desk, search and New plan on one line.
+  await expect(page.getByRole("group", { name: "Daily" })).toBeHidden();
+  const middle = async (box: Promise<{ y: number; height: number } | null>) => { const b = await box; return b ? b.y + b.height / 2 : NaN; };
+  const desk = await middle(page.getByRole("heading", { name: "Desk", level: 1 }).boundingBox());
+  for (const button of [page.getByRole("button", { name: "Jump to a thread or command" }), page.getByRole("button", { name: "New plan" })])
+    expect(Math.abs(await middle(button.boundingBox()) - desk)).toBeLessThan(12);
   await page.screenshot({ path: test.info().outputPath("main-chat-brief-phone.png") });
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.getByText("Previous days", { exact: true }).click();
@@ -283,7 +290,11 @@ test("today's Main chat opens on the morning brief, with its thread a tap away; 
   await expect(card).toHaveCount(0); // an earlier day's Main chat is that day's conversation only
   await page.goBack();
   await expect(page.getByRole("heading", { name: "Main chat · Fri, Oct 23" })).toBeVisible();
+  // Ask about it stays in today's Main chat: the brief goes in the message box as context, unsent, for the question after it.
   await card.getByRole("button", { name: "Ask about it →" }).click();
-  await expect(page).toHaveURL(`/copilot-lab?thread=${BRIEF}`);
+  await expect(page).toHaveURL(`/copilot-lab?thread=${today.id}`);
+  await expect(page.getByLabel("Message")).toHaveValue("Context: this morning's brief (09:00 ET): Focus — Semis lead pre-market. "
+    + "SPY +0.4% and SMH +1.1% before the open. NBIS 100C expires Friday. Changes if: SMH loses its gap.\n\n");
+  await expect(page.getByLabel("Message")).toBeFocused();
   expect(sends).toBe(0);
 });
