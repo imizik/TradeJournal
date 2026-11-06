@@ -70,7 +70,7 @@ const list = (page: Page) => page.getByRole("navigation", { name: "Thread list" 
 const tickers = (page: Page) => list(page).getByRole("region", { name: "Tickers" });
 const crumb = (page: Page) => page.getByTestId("desk-breadcrumb");
 
-test("Main, then one row per ticker, needs-you first; meters only on Act now and Near a trigger; the list refreshes each minute", async ({ page }) => {
+test("Main, then one row per ticker, needs-you first; one status line and no meters or state chips; the list refreshes each minute", async ({ page }) => {
   const { chats, reads } = await lab(page);
   const threads = list(page);
   await expect(threads.getByTestId("desk-day")).toHaveText("1 needs you · plan streak 4");
@@ -81,11 +81,13 @@ test("Main, then one row per ticker, needs-you first; meters only on Act now and
   const nbis = tickers(page).getByRole("button", { name: "NBIS, Held, needs you" });
   await expect(nbis).toContainText("+$180.00");
   await expect(nbis).toContainText("1.0% from invalidation 92.30");
-  await expect(nbis.getByRole("img")).toHaveAttribute("aria-label", "Underlying 20% of the way from the invalidation; entry at 80%");
-  await expect(tickers(page).getByRole("button", { name: "CRWV, Plan armed" }).getByRole("img")).toHaveCount(1); // near a trigger
+  // The plan's meter lives in its thread (the plan ladder), not in the list; the state is named, not drawn as a chip.
+  await expect(tickers(page).getByRole("img")).toHaveCount(0);
   const apld = tickers(page).getByRole("button", { name: "APLD, Plan armed" });
   await expect(apld).toContainText("Entry 31.00 · 3.3% away");
-  await expect(apld.getByRole("img")).toHaveCount(0); // a watched plan carries no meter
+  await expect(apld).not.toContainText("Plan armed");
+  // Only the row that needs the owner carries the amber dot.
+  await expect(tickers(page).locator("span.bg-primary")).toHaveCount(1);
   // A number sets in the mono face; a word never does.
   await expect(nbis.getByText("+$180.00")).toHaveClass(/tabular-nums/);
   await expect(crumb(page)).toHaveText("Today’s briefing");

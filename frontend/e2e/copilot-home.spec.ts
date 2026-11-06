@@ -246,3 +246,44 @@ test("two devices keep their own exchange and feedback targets when both opened 
     }
   } finally { await other.close(); }
 });
+
+test("today's Main chat opens on the morning brief, with its thread a tap away; an earlier day's does not", async ({ page }) => {
+  const BRIEF = "44444444-4444-4444-8444-444444444444";
+  const prior = { ...saved, main_day: "2026-10-22", title: "Main chat · 2026-10-22", symbol: null };
+  const today = { ...prior, id: "33333333-3333-4333-8333-333333333333", main_day: "2026-10-23", title: "Main chat · 2026-10-23" };
+  const brief = { ...saved, id: BRIEF, symbol: null, title: "Morning brief 2026-10-23", conclusion: "Semis lead pre-market." };
+  let sends = 0;
+  await page.route("**/copilot/status", route => route.fulfill({ json: ON }));
+  await page.route("**/copilot/main-chat", route => route.fulfill({ json: today }));
+  await page.route("**/copilot/main-chat/history", route => route.fulfill({ json: { chats: [today, prior] } }));
+  for (const chat of [prior, today, brief]) await page.route(`**/copilot/investigations/${chat.id}`, route => route.fulfill({ json: chat }));
+  await page.route("**/copilot/chat", route => { sends++; return route.abort(); });
+  await page.route("**/copilot/desk/session", route => route.fulfill({ json: {
+    as_of: "2026-10-23T15:00:00Z", now: 1792767600, day: "2026-10-23", phase: "regular", open: null, close: null, events: [], time_stops: [],
+    pings: null, indices: [], quote_issue: null, sections: {},
+    prep: { at: 1792760400, line: "Verdict: Focus — Semis lead pre-market.", fallback: false, path: `/copilot-lab?investigation=${BRIEF}`,
+      lines: ["Verdict: Focus — Semis lead pre-market.", "- **SPY** +0.4% and SMH +1.1% before the open.", "- NBIS 100C expires Friday.", "Changes if: SMH loses its gap."] },
+  } }));
+  await page.goto("/copilot-lab");
+  await expect(page.getByRole("heading", { name: "Main chat · Fri, Oct 23" })).toBeVisible();
+  const card = page.getByRole("region", { name: "Morning brief" });
+  await expect(card).toContainText("09:00 ET");
+  await expect(card).toContainText("FocusSemis lead pre-market.");
+  // The saved lines read as words: no list marker or bold, and the closing line stays apart from the bullets.
+  await expect(card.getByRole("listitem")).toHaveText(["SPY +0.4% and SMH +1.1% before the open.", "NBIS 100C expires Friday."]);
+  await expect(card).toContainText("Changes if: SMH loses its gap.");
+  await page.screenshot({ path: test.info().outputPath("main-chat-brief-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(card).toBeInViewport();
+  await page.screenshot({ path: test.info().outputPath("main-chat-brief-phone.png") });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.getByText("Previous days", { exact: true }).click();
+  await page.getByRole("button", { name: "Main chat · Thu, Oct 22" }).click();
+  await expect(page.getByRole("heading", { name: "Main chat · Thu, Oct 22" })).toBeVisible();
+  await expect(card).toHaveCount(0); // an earlier day's Main chat is that day's conversation only
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Main chat · Fri, Oct 23" })).toBeVisible();
+  await card.getByRole("button", { name: "Ask about it →" }).click();
+  await expect(page).toHaveURL(`/copilot-lab?thread=${BRIEF}`);
+  expect(sends).toBe(0);
+});

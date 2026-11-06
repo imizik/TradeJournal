@@ -19,6 +19,7 @@ import AlertScorecard from "@/components/copilot/AlertScorecard";
 import ArmChecklist from "@/components/copilot/ArmChecklist";
 import BriefingExtras from "@/components/copilot/BriefingExtras";
 import SessionTape, { DeskStatus, useDeskSession } from "@/components/copilot/SessionTape";
+import MorningBrief from "@/components/copilot/MorningBrief";
 import PreviousDays from "@/components/copilot/PreviousDays";
 import ThreadRail from "@/components/copilot/ThreadRail";
 import { ScalpShortlistNudge } from "@/components/ScalpShortlistPanel";
@@ -418,6 +419,8 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
               <h2 className="text-lg font-semibold">{mainChatLabel({ title: thread.title, main_day: thread.mainDay })}</h2><PreviousDays active={thread.id} open={actions.open} />
             </div>
           )}
+          {/* Today's Main chat starts the day with the morning brief; an earlier day's does not. */}
+          {on && thread?.mainDay && thread.mainDay === session.data?.day && <MorningBrief prep={session.data?.prep} open={actions.open} />}
           {on && !thread?.mainDay && (thread || briefing || link) && <Breadcrumb thread={thread} link={link} saved={saved} onMain={actions.home} />}
           {/* The Briefing (or no thread) opens on the day at a glance. Any other thread has one main element: the header,
               then the decision when one is asked (the ladder shrinks to a line), else the full plan ladder; the conversation follows. */}

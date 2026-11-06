@@ -195,17 +195,16 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     position, a plan (armed, near a trigger, or exited with its exit review
     waiting), a plan or alert card waiting on Confirm, a thesis-watch trigger
     today, an open conversation, or a conversation closed since Monday (New
-    York). A row shows the symbol, its state (**Plan armed**, **Exited**,
-    **Watching** or **Closed**; a held position shows none, its P&L and group say it), the position's unrealized P&L
+    York). A row shows the symbol, the position's unrealized P&L
     (an option's from its own mark) or the exit day, and the status line of
     its most urgent row (Act now's reasons, a plan's nearest level, "N to
-    confirm", the close question) on up to two lines; "Want a plan for this?" is muted, not amber. An amber dot means it needs the owner: an
+    confirm", the close question) on one line, cut with the full text on hover; "Want a plan for this?" is muted, not amber.
+    Its state (Held, Plan armed, Exited, Watching or Closed) is named to a screen reader, not drawn as a chip: the status
+    line says it, and the plan's meter is the plan ladder in its thread. An amber dot means it needs the owner: an
     Act now position, a card waiting on Confirm, a fill to link, or a close
-    or exit question not yet answered or skipped today. A plan meter shows
-    when the leading row is Act now or Near a trigger: the underlying on the
-    track from the invalidation (left) to the entry (the tick). Three headed
-    groups: **Needs you**, **Held and armed**, and **Others** (exited,
-    watching, closed), the biggest loss first within each state, then the newest; six of Others show and
+    or exit question not yet answered or skipped today; something new since the last look is a grey dot. The order is
+    **Needs you** (the only heading), then held and armed, then the others (exited,
+    watching, closed), the biggest loss first within each state, then the newest; six of the others show and
     the rest wait behind "+N more".
   - **Subthreads**: pressing a ticker opens its newest saved conversation in
     place (from the latest 50 in `GET /copilot/investigations`, open and
@@ -491,7 +490,10 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
 Open Desk to resume **Main chat** for the current New York calendar date. Desktop and phone open the same
 saved conversation. Unsent words belong to their browser tab. Returning to a saved link keeps its original
 conversation, including after midnight. The heading names the day ("Main chat · Wed, Nov 4"; a busy day's next
-part adds "(continued)"). **Previous days** opens earlier days that have at least one exchange; a day the Desk was
+part adds "(continued)"). Today's Main chat starts with the day's **Morning brief** card
+(`MorningBrief.tsx`, from the desk session read's `prep`: the brief's saved lines with its verdict, headline and
+Changes if line, the time it was written, and "Copilot turn failed: raw facts" when the turn failed), with **Ask about
+it →** opening the brief's own thread; an earlier day's Main chat, or a day with no brief yet, shows none. **Previous days** opens earlier days that have at least one exchange; a day the Desk was
 only opened on is not listed. A busy day's full
 segment stays in history when opening Main starts its next part. Opening, switching or browsing history
 uses no model turn or automatic research job. Concurrent answers append separately, each beside its own question. A proposed trade plan opens in its own ticker thread for review and confirmation so it has a distinct place in Plans and its alerts link back to it. **Today’s briefing** opens the session tape, Radar and alert feedback, prep and review

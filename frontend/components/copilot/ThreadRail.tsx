@@ -20,18 +20,12 @@ const VIEW_KEY = "desk.rail.v1";
 export const TONE: Record<DeskTone, string> = {
   attention: "text-primary", loss: "text-rose-300", gain: "text-emerald-300", info: "text-foreground", muted: "text-muted-foreground",
 };
-const BAR: Record<DeskTone, string> = {
-  attention: "bg-primary", loss: "bg-rose-400", gain: "bg-emerald-400", info: "bg-foreground", muted: "bg-muted-foreground",
-};
 const SOURCE: Record<string, string> = { positions: "positions", plans: "plans", investigations: "investigations", drafts: "waiting cards", radar: "Radar", thesis: "thesis watch" };
 /** A ticker's state, in sort order after "needs you". */
 type TickerState = "held" | "armed" | "exited" | "watching" | "closed";
-const STATE: Record<TickerState, { text: string; tone: string }> = {
-  held: { text: "Held", tone: "bg-emerald-400/10 text-emerald-300" },
-  armed: { text: "Plan armed", tone: "bg-secondary text-foreground" },
-  exited: { text: "Exited", tone: "bg-secondary text-muted-foreground" },
-  watching: { text: "Watching", tone: "bg-secondary text-muted-foreground" },
-  closed: { text: "Closed", tone: "bg-secondary text-muted-foreground" },
+/** A ticker's state, named to a screen reader; the row's status line says it on screen. */
+const STATE: Record<TickerState, { text: string }> = {
+  held: { text: "Held" }, armed: { text: "Plan armed" }, exited: { text: "Exited" }, watching: { text: "Watching" }, closed: { text: "Closed" },
 };
 const RANK: Record<TickerState, number> = { held: 0, armed: 1, exited: 2, watching: 3, closed: 4 };
 /** Which row speaks for a ticker: the most urgent. */
@@ -54,17 +48,6 @@ function writeSeen(seen: Record<string, number>) {
 
 const plain = (event: MouseEvent) => !event.metaKey && !event.ctrlKey && !event.shiftKey && event.button === 0;
 const isRadar = (row: DeskThread) => row.key.startsWith("radar:");
-
-/** Where the underlying sits on its plan: 0 is the invalidation, the tick the entry. */
-function Meter({ meter }: { meter: NonNullable<DeskThread["meter"]> }) {
-  return (
-    <div role="img" aria-label={`Underlying ${Math.round(meter.last)}% of the way from the invalidation; entry at ${Math.round(meter.entry)}%`}
-      title="The underlying's price on the plan: invalidation at the left, the tick is the entry" className="relative mt-1.5 h-1 rounded-full bg-muted">
-      <div className={cn("absolute inset-y-0 left-0 rounded-full opacity-60", BAR[meter.tone])} style={{ width: `${meter.last}%` }} />
-      <div className="absolute -top-0.5 h-2 w-px bg-foreground/70" style={{ left: `${meter.entry}%` }} />
-    </div>
-  );
-}
 
 /** One ticker: every desk row about it (a position, a plan, an exit review, a waiting card, news, an open conversation)
  * and its saved conversations, newest first. */
@@ -183,7 +166,6 @@ function TickerRow({ ticker, open, expanded, onExpand, active, actions, pick, sk
   const status = asking && skipped ? { text: "Skipped today", tone: "muted" as const } : ticker.status;
   const state = STATE[ticker.state];
   const here = open && (!active || ticker.conversations.every(t => t.id !== active) || ticker.conversations.length < 2);
-  const meter = lead?.meter && (lead.group === "act" || lead.group === "near") ? lead.meter : null;
   const many = ticker.conversations.length > 1;
   return (
     <li>
@@ -192,11 +174,9 @@ function TickerRow({ ticker, open, expanded, onExpand, active, actions, pick, sk
         aria-label={[ticker.symbol, state.text, ticker.needs ? "needs you" : null].filter(Boolean).join(", ")} title={lead?.title}
         className={cn(box(here), "min-w-0 flex-1", open && !here && "bg-secondary/50")}>
         <span className="flex min-w-0 items-center gap-1.5">
-          {ticker.needs
-            ? <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-            : unread ? <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" /> : <span aria-hidden className="w-1.5 shrink-0" />}
+          {/* Amber only for what needs the owner; something new since the last look is a quiet grey dot. */}
+          <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", ticker.needs ? "bg-primary" : unread ? "bg-muted-foreground/60" : "")} />
           <span className="shrink-0 font-semibold text-foreground">{ticker.symbol}</span>
-          {ticker.state !== "held" && <span className={cn("shrink-0 rounded px-1 text-[10px] leading-4", state.tone)}>{state.text}</span>}
           {ticker.value && (
             <span className={cn("ml-auto shrink-0 text-xs", TONE[ticker.value.tone], numeric(ticker.value.text) && "tabular-nums")}
               title={lead?.tradeId && numeric(ticker.value.text) ? "Unrealized P&L on this position (an option's own mark, not the underlying)" : undefined}>
@@ -204,8 +184,7 @@ function TickerRow({ ticker, open, expanded, onExpand, active, actions, pick, sk
             </span>
           )}
         </span>
-        {status.text && <span className={cn("line-clamp-2 pl-3 text-xs", TONE[status.tone], asking && !skipped && (lead?.close?.kind === "plan_ask" ? "text-muted-foreground" : "text-primary/75"))} title={status.text}>{status.text}</span>}
-        {meter && <div className="pl-3"><Meter meter={meter} /></div>}
+        {status.text && <span className={cn("block truncate pl-3 text-xs", TONE[status.tone], asking && !skipped && (lead?.close?.kind === "plan_ask" ? "text-muted-foreground" : "text-primary/75"))} title={status.text}>{status.text}</span>}
       </button>
       {/* A ticker with one conversation keeps the column, so the P&L figures line up. */}
       {!many ? <span aria-hidden className="w-9 shrink-0" /> : (
@@ -389,9 +368,11 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
               {!tickers.length && <p className="px-2.5 py-1 text-xs text-muted-foreground">
                 {data.sections.positions === "unavailable" ? "Positions unavailable right now." : "Nothing open. Plan a trade to start a ticker."}
               </p>}
+              {/* One list in the same order; only what needs the owner gets a heading. */}
               {([["Needs you", needing], ["Held and armed", live], ["Others", shownQuiet]] as const).map(([title, group]) => group.length > 0 && (
-                <div key={title} className="space-y-0.5">
-                  <h3 className="px-2.5 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{title}</h3>
+                <div key={title} role="group" aria-label={title}
+                  className={cn("space-y-0.5", needing.length > 0 && title === (live.length ? "Held and armed" : "Others") && "mt-2 border-t pt-2")}>
+                  {title === "Needs you" && <h3 className="px-2.5 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{title}</h3>}
                   <ul className="space-y-0.5">
                     {group.map(ticker => (
                       <TickerRow key={ticker.symbol} ticker={ticker} open={openSymbol === ticker.symbol} expanded={expanded.has(ticker.symbol)}

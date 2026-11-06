@@ -797,7 +797,9 @@ def desk_session(db: Session = Depends(get_session)):
         "open": regular.get("open"), "close": regular.get("close"),
         "events": events[-MAX_EVENTS:], "time_stops": stops.get("rows", []),
         "pings": {k: pings[k] for k in ("sent", "held", "cap")} if pings["state"] == "ok" else None,
-        "prep": {"at": _epoch(written.get("at")), "line": (written.get("lines") or [None])[0]} if written else None,
+        # The whole brief (its saved lines) and its thread, so Main chat can open the day on it.
+        "prep": {"at": _epoch(written.get("at")), "line": (written.get("lines") or [None])[0], "lines": written.get("lines") or [],
+                 "fallback": bool(written.get("fallback")), "path": written.get("path")} if written else None,
         "indices": indices.get("rows", []), "quote_issue": indices.get("issue"),
         "to_answer": {name: {"count": part["count"], "rows": part["rows"]} if part["state"] == "ok" else None
                       for name, part in (("alerts", alerts_due), ("radar", hits_due))},

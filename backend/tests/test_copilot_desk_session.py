@@ -77,7 +77,8 @@ def test_the_days_events_in_time_order_and_the_time_stops_ahead(desk, engine, tm
     assert (radar["symbol"], radar["at"]) == ("MU", at(12) + 4) and radar["text"] == "Radar · MU vs sector"
     assert body["time_stops"] == [{"symbol": "NBIS", "at": at(330), "clock": "15:30"}]
     assert body["pings"] == {"sent": 1, "held": 1, "cap": None}
-    assert body["prep"] == {"at": at(-90), "line": "NBIS 100C expires Friday."}
+    assert body["prep"] == {"at": at(-90), "line": "NBIS 100C expires Friday.", "lines": ["NBIS 100C expires Friday."],
+                            "fallback": False, "path": f"/copilot-lab?investigation={APLD}"}
     with Session(engine) as db:
         assert len(db.exec(select(PhonePing)).all()) == 2  # read-only: no ping written
 
