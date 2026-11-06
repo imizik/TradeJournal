@@ -4,10 +4,13 @@ knows about the owner before it reads a word of the question.
 One compact, bounded view assembled for the turn's symbol from services that
 already exist, so the model spends no tool rounds rediscovering the owner:
 
-- ``positions``: open positions through ``copilot_book`` (its rows, marks and
-  labels), each with its hold time, days to expiry, the give-back watch and
-  phone alerts ``position_alerts`` keeps for it, and the plan captured before
-  it (``capture_links``). The turn's symbol comes first.
+- ``positions``: open positions through ``trader_context.for_symbol`` (one call a
+  turn; ``copilot_book``'s rows and marks), each with its hold time, days to
+  expiry, the give-back watch and phone alerts, its thesis object as ``plan``
+  (plan card, Charts plan sheet, the companion's adopted draft, or ``none``) and
+  the owner's decisions since the entry. The turn's symbol comes first, with its
+  ``since_entry`` diff (each line with as_of and source; headlines as a count
+  only, since third-party words never enter the owner block).
 - ``history``: the owner's closed trades in the symbol and their total.
 - ``habits``: the four exit habits of the October 21 behavior audit, the latest
   30 trades against the baseline (``exit_habits.scorecard``), cached briefly.
@@ -52,7 +55,7 @@ SHORT = 120
 HABITS_TTL_S = 600
 
 PROVENANCE = {
-    "positions": "measured: journal fills and current marks; give-back watch and phone alerts; a captured plan is owner said",
+    "positions": "measured: journal fills and current marks; give-back watch and phone alerts; since_entry lines each name their source and as_of, and 'unavailable' means the input is missing, not zero; a plan's wording is owner said, a thesis_guess is the companion's",
     "history": "measured: the journal's closed trades in this symbol",
     "habits": "measured: the behavior audit's four exit habits, latest 30 closed long options vs. every trade before the alerts went live",
     "memories": "owner said: memories they approved (statements, theses, preferences, lessons)",
@@ -89,45 +92,69 @@ def _section(name: str, build):
 MAX_ROLL_NOTES = 5
 
 
-def _positions(db, symbol: str | None, now_et: datetime) -> dict:
-    from app.engine import capture_links, position_alerts
-    pairs, total = copilot_book.position_rows(db, limit=MAX_POSITIONS, first=symbol, now=now_et)
-    today = now_et.date()
-    rows = []
-    for trade, row in pairs[:MAX_POSITIONS]:
-        out = {k: v for k, v in row.items() if k not in ("mark_as_of",)}
-        opened = trade.opened_at
-        if opened is not None:
-            opened_et = opened.replace(tzinfo=now_et.tzinfo) if opened.tzinfo is None else opened.astimezone(now_et.tzinfo)
-            if opened_et.date() == today:
-                out["held_minutes"] = max(0, int((now_et - opened_et).total_seconds() // 60))
-        if trade.instrument_type == "option" and trade.expiration:
-            out["days_to_expiry"] = (trade.expiration - today).days
-            out["expires_today"] = trade.expiration == today
-            watch = position_alerts.for_trade(db, trade)
-            if watch.get("watch"):
-                w = watch["watch"]
-                out["peak_gain_usd"] = w.get("peak_gain")
-                out["peak_gain_pct"] = None if w.get("peak_gain_pct") is None else round(100 * w["peak_gain_pct"], 1)
-                out["giveback"] = "fired" if w.get("fired") else "armed" if w.get("armed") else "not armed"
-            sent = [a for a in watch.get("alerts", []) if a.get("delivery") in ("sent", "unknown")]
-            if sent:
-                out["phone_alerts"] = [{"kind": a["kind"], "at": copilot_book._iso(a["detected_at"])} for a in sent[-3:]]
-        plans = capture_links.for_trade(db, trade.id)
-        if plans:
-            plan = sorted(plans, key=lambda c: c.received_at)[0]
-            out["plan"] = {k: v for k, v in {
-                "setup": _trim(plan.setup_label, 60), "wording": _trim(plan.wording), "note": _trim(plan.note),
-                "captured_at": copilot_book._iso(plan.received_at)}.items() if v}
-        rows.append(out)
+GIVEBACK = {"watching": "not armed"}  # the pack's word for a watch that has not armed yet
+
+
+def _plan(thesis: dict) -> dict:
+    """The record's thesis as the pack shows it: the owner's words whole, the companion's marked as a guess."""
+    if thesis.get("source") == "none":
+        return {"source": "none"}
+    level = thesis.get("invalidation") or {}
+    stop = thesis.get("time_stop") or {}
+    entry = thesis.get("entry_trigger") or {}
+    return {k: v for k, v in {
+        "source": thesis["source"], "setup": _trim(thesis.get("label"), 60),
+        # The companion's guess was written by a model that had just read headlines: like a research job's conclusion it
+        # stays out of the owner's turn (the desk shows it); only the owner's own wording comes here.
+        "wording": _trim(thesis.get("text")) if not thesis.get("text_is_guess") else None,
+        "entry": f"{entry['price']:,.2f} ({entry.get('state')})" if entry.get("price") else None,
+        "invalidation": f"{level['price']:,.2f} ({level.get('state')})" if level.get("price") else None,
+        "time_stop": f"{_trim(stop.get('text'), 60)} ({stop.get('state')})" if stop.get("text") else None,
+        "horizon": thesis.get("horizon"), "captured_at": thesis.get("captured_at"), "timing": thesis.get("timing"),
+        "revisions": [f"{r['at'][:16]} {r['by']}: {_trim(r['text'], 80)}" for r in thesis.get("revisions", [])[-2:] if r.get("text")] or None,
+    }.items() if v}
+
+
+def _since(since: dict) -> dict:
+    """A line's ``as_of`` is shown when it differs from the diff's own (a quote's or a recording's time)."""
+    at = since.get("as_of")
+    return {"as_of": at, "lines": [
+        {k: v for k, v in {"line": line["text"], "as_of": line.get("as_of") if line.get("as_of") != at else None,
+                           "from": line.get("source")}.items() if v}
+        for line in since.get("lines", [])]}
+
+
+def _render(record: dict) -> dict:
+    """One position of ``trader_context`` as the pack shows it: no trade id, plan in the owner's words."""
+    skip = ("mark_as_of", "trade_id", "thesis", "alerts", "decisions", "since_entry", "contract", "greeks_as_of")
+    out = {k: v for k, v in record.items() if k not in skip}
+    if out.get("giveback"):
+        out["giveback"] = GIVEBACK.get(out["giveback"], out["giveback"])
+    phone = [a for a in record.get("alerts", []) if a.get("source") == "position alert"]
+    if phone:
+        out["phone_alerts"] = [{"kind": a["kind"], "at": a["at"]} for a in phone[-3:]]
+    out["plan"] = _plan(record.get("thesis") or {"source": "none"})
+    if record.get("decisions"):
+        out["decisions"] = [f"{d['at'][:16]} {_trim(d['text'], 100)}" for d in record["decisions"][-2:]]
+    if record.get("since_entry"):
+        out["since_entry"] = _since(record["since_entry"])
+    return out
+
+
+def _positions(db, symbol: str | None, now_et: datetime, reads=None) -> dict:
+    """The open positions through ``trader_context`` (one call a turn): the turn's symbol first, with its since-entry
+    diff and headlines; every position with its thesis object."""
+    from app.engine import trader_context
+    found = trader_context.for_symbol(symbol, now_et.timestamp(), session=db, limit=MAX_POSITIONS, reads=reads)
+    rows = [_render(r) for r in found["positions"]]
     from app.engine.option_rolls import unresolved_rolls
     unresolved = unresolved_rolls(db)
     rolls = [{"symbol": r.ticker, "contracts": float(r.contracts), "net_per_contract_usd": float(r.net_per_contract),
               "at": copilot_book._journal_time(r.executed_at)} for r in unresolved[-MAX_ROLL_NOTES:]]
-    return {"state": "ok", "count": total, "shown": len(rows), "positions": rows,
+    return {"state": "ok", "count": found["count"], "shown": len(rows), "positions": rows,
             **({"unresolved_rolls": rolls, "unresolved_rolls_total": len(unresolved), "unresolved_rolls_note": "The broker's email names no contracts, so these positions and "
                 "their realized P&L may be wrong until this resolves: the rolled-out contract can still show as held, or as expired worthless."} if rolls else {}),
-            "units": "Options: avg_entry, mark and peak are dollars per contract (premium x 100). Stocks: per share."}
+            "units": found["units"]}
 
 
 def _history(db, symbol: str) -> dict:
@@ -284,9 +311,37 @@ def owner_context(symbol: str | None, session=None, now: datetime | None = None,
     return shed(pack) if bounded else pack
 
 
+def _drop_sources(pack: dict) -> None:
+    for row in pack.get("positions", {}).get("positions", []):
+        for line in (row.get("since_entry") or {}).get("lines", []):
+            line.pop("from", None)
+        (row.get("plan") or {}).pop("revisions", None)
+
+
+def _trim_diffs(pack: dict) -> None:
+    """Past the first position with a diff, keep only its own mark line; the underlying, group, headline and time lines
+    read nearly the same for every contract on the symbol."""
+    rows = [r for r in pack.get("positions", {}).get("positions", []) if r.get("since_entry")]
+    for row in rows[1:]:
+        row["since_entry"]["lines"] = [line for line in row["since_entry"]["lines"] if line["line"].startswith(("mark ", "price "))]
+
+
+def _slim_rows(pack: dict) -> None:
+    """Past the first position, the plan's levels only: no decisions, alerts or revision notes."""
+    for row in pack.get("positions", {}).get("positions", [])[1:]:
+        row.pop("decisions", None)
+        row.pop("phone_alerts", None)
+        plan = row.get("plan") or {}
+        for key in ("wording", "captured_at", "timing", "revisions", "entry"):
+            plan.pop(key, None)
+
+
 def _shed_steps(pack: dict):
     yield lambda: pack.get("history", {}).pop("recent", None)
     yield lambda: pack.get("today", {}).pop("entries", None)
+    yield lambda: _drop_sources(pack)
+    yield lambda: _trim_diffs(pack)
+    yield lambda: _slim_rows(pack)
     yield lambda: pack.get("investigations", {}).pop("investigations", None)
     yield lambda: pack.get("memories", {}).pop("memories", None)
     yield lambda: pack.get("positions", {}).update(positions=pack["positions"].get("positions", [])[:3],

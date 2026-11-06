@@ -19,6 +19,8 @@ export type PlanPosition = {
   giveback: "armed" | "fired" | "watching" | null; latest_alert: { kind: string; at: number } | null;
   plan: { setup: string; thesis: string | null; timing: "pre_entry" | "late" | "unverified"; invalidation: Invalidation | null; time_stop: TimeStop | null } | null;
   link_path: string | null; plan_path: string | null;
+  /** The position's thesis object as one line (backend trader_context), and where it came from. */
+  thesis?: string | null; thesis_source?: "plan_card" | "plan_sheet" | "companion" | "none";
 };
 export type PlanPositions = { positions: PlanPosition[]; count: number; quotes_at: number | null; quote_issue: string | null;
   /** Phone pings the notification policy held today (New York), by kind label (backend notification_policy.held_back_today). */

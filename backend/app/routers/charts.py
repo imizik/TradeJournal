@@ -318,6 +318,20 @@ def journal_trade(trade_id: uuid.UUID, db: Session = Depends(get_session)):
     return {"fill": None, **chart_journal.trade_card(db, trade)}
 
 
+@router.get("/journal/positions/{symbol}/context")
+def journal_position_context(symbol: str, db: Session = Depends(get_session)):
+    """Each open position in the symbol as one record (``engine/trader_context.py``): its thesis object (plan card,
+    Charts plan, the companion's adopted draft, or none), alerts, decisions and the since-entry lines, each with its
+    as_of and source. Read by Charts' Holding context and the Copilot desk's thread header. Read-only."""
+    from app.engine import trader_context
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9.\-]{0,9}", symbol):
+        raise HTTPException(422, "That is not a symbol.")
+    symbol = symbol.upper()
+    found = trader_context.for_symbol(symbol, session=db)  # the symbol's positions first, so at most a few marks are read
+    rows = [r for r in found["positions"] if r["symbol"] == symbol]
+    return {"state": "ok", "as_of": found["as_of"], "symbol": symbol, "positions": rows, "units": found["units"]}
+
+
 @router.get("/journal/trades/{trade_id}/mark")
 def journal_mark(trade_id: uuid.UUID, db: Session = Depends(get_session)):
     """An open option trade's current premium and open P&L, asked for from its

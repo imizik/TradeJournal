@@ -400,10 +400,21 @@ def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_
 
 
 def message(alert: PositionAlert, close_label: str | None = None, minutes_left: int | None = None,
-            facts: dict | None = None) -> tuple[str, str, int]:
+            facts: dict | None = None, since: str | None = None) -> tuple[str, str, int]:
+    """``since`` is the position's "Since you entered: …" line from its thesis object (``trader_context.phone_line``)."""
     title, body, priority = _base_message(alert, close_label, minutes_left, facts)
     context = position_alert_context.phone_text(alert.context_snapshot_json)
-    return title, body + ("\n\n" + context if context else ""), priority
+    return title, body + ("\n\n" + context if context else "") + ("\n" + since if since else ""), priority
+
+
+def since_line(db: Session, alert: PositionAlert, now: float) -> str | None:
+    """The thesis and time-held line for the alert's position (database and the frozen Radar snapshot only), or None
+    when the trade that fired it is gone (a rebuild)."""
+    from app.engine import trader_context
+    trade = db.get(Trade, alert.trade_id)
+    if trade is None or trade.account_id != alert.account_id:
+        return None
+    return trader_context.phone_line(db, trade, now, alert.context_snapshot_json)
 
 
 def desk_path(db: Session, alert: PositionAlert) -> str:
@@ -654,7 +665,8 @@ class PositionAlerts:
             facts = (wrong_way_facts(db, alert) if alert.kind == "wrong_way" else self._eve_facts(db, alert, now) if alert.kind == "expiry_eve"
                      else None)
             title, body, priority = message(alert, _clock_label(_minute_of(close)) if close else None,
-                                            max(1, int((close - now) // 60)) if close else None, facts)
+                                            max(1, int((close - now) // 60)) if close else None, facts,
+                                            since_line(db, alert, _epoch(alert.detected_at)))  # as of detection: a retry sends the same words
             path, more = _links(db, alert)
             ticket = notification_policy.decide(
                 db, sender="position_alerts", source_id=str(alert.id), kind=alert.kind, title=title, body=body, now=now,

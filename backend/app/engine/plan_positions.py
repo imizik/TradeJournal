@@ -14,7 +14,11 @@ for it (``plan_nudges.candidates``), else the plan-this-position deep link the
 nudge opens. Each row also carries the book's mark and average entry (dollars a
 share, or a contract: the premium x 100, as the journal keeps them), an
 option's strike, side and expiry, and the days held, for the Copilot desk's
-thread header. Read-only; the only id out is each row's trade id.
+thread header. ``thesis`` is the row's one line from its thesis object
+(``engine/trader_context.py``), so a plan card, a Charts plan and the companion's
+adopted draft read the same; an adopted position's ``plan`` is its draft, with
+the invalidation alert its Confirm armed. Read-only; the only id out is each
+row's trade id.
 """
 
 from datetime import UTC, datetime
@@ -82,6 +86,7 @@ def _watch(db: Session, trade) -> tuple[str | None, dict | None]:
 
 def positions(db: Session, quotes=None) -> dict:
     """``quotes`` replaces the one batched quote read (the Today screen shares one read across readers)."""
+    from app.engine import day_journal, position_companion, trader_context
     now = _now()
     pairs, total = copilot_book.position_rows(db, limit=MAX_ROWS)
     planned = {}
@@ -90,7 +95,16 @@ def positions(db: Session, quotes=None) -> dict:
         if linked:
             planned[trade.id] = min(linked, key=lambda c: c.received_at)
     parts = {trade_id: _plan_parts(db, capture) for trade_id, capture in planned.items()}
-    symbols = sorted({inv.symbol for inv, _stop in parts.values() if inv is not None and inv.state == "active"})
+    # Every position's thesis object (trader_context): a position the companion adopted has its plan there, not in a capture.
+    adopted, horizons = position_companion.adopted_trades(db), day_journal.check_ins(db)[0]
+    theses = {trade.id: trader_context.thesis_for(db, trade, adopted=adopted, horizons=horizons) for trade, _row in pairs}
+    adopted_alerts = {}
+    for trade, _row in pairs:
+        row = adopted.get(str(trade.id))
+        if trade.id not in planned and row is not None and row.alert_id is not None:
+            adopted_alerts[trade.id] = db.get(LevelAlert, row.alert_id)
+    symbols = sorted({inv.symbol for inv, _stop in list(parts.values()) + [(a, None) for a in adopted_alerts.values()]
+                      if inv is not None and inv.state == "active"})
     last, fetched_at, issue = (quotes or copilot_plans._quotes)(symbols)
 
     rows = []
@@ -104,6 +118,7 @@ def positions(db: Session, quotes=None) -> dict:
             "unrealized_usd": row["unrealized_usd"], "unrealized_pct": row["unrealized_pct"],
             "giveback": giveback, "latest_alert": latest,
             "plan": None, "link_path": None, "plan_path": None,
+            "thesis": trader_context.thesis_line(theses[trade.id]), "thesis_source": theses[trade.id]["source"],
         }
         capture = planned.get(trade.id)
         if capture is not None:
@@ -116,6 +131,14 @@ def positions(db: Session, quotes=None) -> dict:
                 "timing": TIMING[capture_links.timing(capture.received_at, trade.opened_at)],
                 "invalidation": level, "time_stop": _time_stop(stop, now),
             }
+        elif theses[trade.id]["source"] == "companion":
+            # The companion's adopted plan: the same thesis object, its invalidation the alert Confirm armed (none while a draft).
+            alert = adopted_alerts.get(trade.id)
+            level = copilot_plans._level(alert, last.get(alert.symbol)) if alert is not None else None
+            if level is not None:
+                level.pop("interval", None)
+            out["plan"] = {"setup": theses[trade.id]["label"], "thesis": theses[trade.id]["text"], "timing": "late",
+                           "invalidation": level, "time_stop": None}
         else:
             page = plan_nudges.link_page(db, trade, now)
             if page and page["candidates"]:

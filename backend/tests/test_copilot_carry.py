@@ -43,11 +43,35 @@ def _carry(events) -> str | None:
     return events[-1]["carry_id"]
 
 
+def _clear_store():
+    from sqlalchemy import delete
+    from sqlmodel import Session
+    from app.database import engine
+    from app.models import CopilotCarry
+    with Session(engine) as db:
+        db.exec(delete(CopilotCarry))
+        db.commit()
+
+
 @pytest.fixture(autouse=True)
 def _empty():
     copilot._CARRY.clear()
+    _clear_store()
     yield
     copilot._CARRY.clear()
+    _clear_store()
+
+
+def _age_stored(seconds: float) -> None:
+    from datetime import datetime, timedelta
+    from sqlmodel import Session, select
+    from app.database import engine
+    from app.models import CopilotCarry
+    with Session(engine) as db:
+        for row in db.exec(select(CopilotCarry)).all():
+            row.saved_at = datetime.utcnow() - timedelta(seconds=seconds)
+            db.add(row)
+        db.commit()
 
 
 def test_a_turn_keeps_its_successful_reads_but_not_cards_or_the_owner_pack():
@@ -89,6 +113,7 @@ def test_a_new_conversation_an_unknown_id_or_an_expired_one_reads_afresh():
     assert copilot.carried(_carry(first), "live") == [] and copilot.carried(_carry(first), "replay") == []  # another mode
     at, mode, items = copilot._CARRY[_carry(first)]
     copilot._CARRY[_carry(first)] = (time.monotonic() - copilot.CARRY_TTL_S - 1, mode, items)
+    _age_stored(copilot.CARRY_TTL_S + 1)  # the durable copy expires on the same clock
     assert copilot.carried(_carry(first), "fixture") == [] and copilot.carried("0" * 32, "fixture") == []
     assert copilot.carried(None, "fixture") == []
 
@@ -125,3 +150,66 @@ def test_the_chat_body_takes_only_an_opaque_id():
     assert ChatBody(messages=[{"role": "user", "content": "q"}], carry_id="a" * 32).carry_id == "a" * 32
     with pytest.raises(pydantic.ValidationError):
         ChatBody(messages=[{"role": "user", "content": "q"}], carry_id="../etc")
+
+
+class Careful(copilot.FakeAdapter):
+    """A model that follows the prompt's follow-up rule: it reads a tool only when the earlier evidence lacks it."""
+
+    def __init__(self):
+        super().__init__(0)
+        self.first: list[dict] | None = None
+
+    async def stream_round(self, system, messages, tools, allow_tools=True):
+        if self.first is None:
+            self.first = messages[:]
+            if "get_group_comparison" in messages[-1]["content"] and "[Earlier evidence:" in messages[-1]["content"]:
+                yield "text", "Verdict: Wait — The group read from 11:12 still covers it."
+                yield "final", copilot.Round([{"type": "text", "text": "Verdict: Wait — The group read from 11:12 still covers it."}],
+                                             "end_turn", {}, None)
+                return
+        async for item in super().stream_round(system, messages, tools, allow_tools):
+            yield item
+
+
+def _turn_for(history, adapter, investigation_id, carry_id=None):
+    async def collect():
+        return [e async for e in copilot.run_turn(history, "NBIS", _cfg(), adapter, FixtureEvidence(), NOW, carry_id=carry_id,
+                                                  investigation_id=investigation_id)]
+    return asyncio.run(collect())
+
+
+def test_a_follow_up_after_a_restart_makes_no_new_tool_calls_when_the_carry_covers_it():
+    import uuid
+    investigation = uuid.uuid4()
+    question = [{"role": "user", "content": "Is the NBIS group confirming?"}]
+    first = _turn_for(question, copilot.FakeAdapter(0), investigation)
+    assert {e["name"] for e in first if e["type"] == "tool"} > {"owner_context"}  # the first turn read the market
+    copilot._CARRY.clear()  # a restart: nothing in the process
+    history = question + [{"role": "assistant", "content": "Verdict: Wait — x"}, {"role": "user", "content": "Still?"}]
+    careful = Careful()
+    second = _turn_for(history, careful, investigation, carry_id=_carry(first))
+    assert [e["name"] for e in second if e["type"] == "tool"] == ["owner_context"]  # no tool read beyond the pack
+    assert "[Earlier evidence:" in careful.first[-1]["content"]
+
+    copilot._CARRY.clear()  # a reload as well: the panel lost the carry id, the investigation still finds it
+    careful = Careful()
+    third = _turn_for(history, careful, investigation)
+    assert [e["name"] for e in third if e["type"] == "tool"] == ["owner_context"]
+    assert copilot.carried(None, "live", investigation) == []  # never across evidence modes
+
+
+def test_the_store_keeps_one_row_per_investigation_and_drops_expired_ones():
+    import uuid
+    from sqlmodel import Session, select
+    from app.database import engine
+    from app.models import CopilotCarry
+    item = {"key": "get_quotes {}", "read_at": "Fri 10:00 ET", "as_of": None, "text": "x"}
+    investigation = uuid.uuid4()
+    copilot.keep_carry([item], "fixture", investigation)
+    _age_stored(copilot.CARRY_TTL_S + 1)
+    copilot.keep_carry([item], "fixture")  # prunes the expired row
+    copilot.keep_carry([item], "fixture", investigation)
+    newest = copilot.keep_carry([item], "fixture", investigation)
+    with Session(engine) as db:
+        rows = db.exec(select(CopilotCarry)).all()
+    assert len(rows) == 2 and [r.carry_id for r in rows if r.investigation_id == investigation] == [newest]

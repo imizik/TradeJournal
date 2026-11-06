@@ -130,7 +130,7 @@ async def recorded_turn(history: list[dict], symbol: str | None, cfg, adapter, e
     finished = False
     try:
         async for event in copilot.run_turn(history, symbol, cfg, adapter, evidence, now, images=images, carry_id=carry_id, live=live,
-                                              web=web):
+                                              web=web, investigation_id=investigation_id):
             etype = event.get("type")
             if etype == "error" and error is None:
                 error = event.get("code")

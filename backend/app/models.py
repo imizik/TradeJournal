@@ -2034,6 +2034,21 @@ class MarketContextItem(SQLModel, table=True):
     source: str
 
 
+class CopilotCarry(SQLModel, table=True):
+    """The evidence one copilot turn kept for the conversation's next (``app/ai/copilot.py`` § carry): its tool results,
+    clipped, as the "Earlier evidence" block. Kept here as well as in the process so a follow-up after a restart or a
+    reload reads none of it again; found by its ``carry_id`` (the id the panel sends back) or, after a reload, by the
+    conversation's investigation. Rows older than the carry's TTL are pruned on write."""
+
+    __tablename__ = "copilot_carry"
+
+    carry_id: str = Field(primary_key=True, max_length=32)
+    investigation_id: Optional[uuid.UUID] = Field(default=None, index=True)
+    mode: str = Field(max_length=16)  # live | replay | fixture: evidence never crosses modes
+    items_json: str = Field(sa_column=Column(Text, nullable=False))
+    saved_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
 class CopilotInvestigation(SQLModel, table=True):
     """A saved Copilot Lab conversation or background research result
     (docs/copilot-lab.md; app/engine/copilot_investigations.py). Text only: the

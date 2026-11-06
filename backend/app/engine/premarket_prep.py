@@ -128,16 +128,25 @@ def _trading_day(calendar, day: date) -> bool:
 # --------------------------------------------------------------------------- the pack
 
 def _positions(db: Session, now_et: datetime) -> dict:
-    """The owner context pack's positions section, cut to what the morning needs; expiring soonest first."""
-    from app.ai import copilot_context
-    section = copilot_context._positions(db, None, now_et)
+    """Each open position's record (``trader_context``), cut to what the morning needs; expiring soonest first. The
+    thesis in its own words and the since-entry lines (each with its as_of; a missing input reads unavailable)."""
+    from app.ai.copilot_context import _trim
+    from app.engine import trader_context
+    section = trader_context.for_symbol(None, now_et.timestamp(), session=db, diff="all", headlines=False)
     keep = ("symbol", "instrument", "option", "direction", "quantity", "unrealized_usd", "unrealized_pct",
             "days_to_expiry", "expires_today", "giveback", "peak_gain_pct")
     rows = []
     for row in section["positions"]:
         out = {k: row[k] for k in keep if row.get(k) is not None}
-        if row.get("plan", {}).get("setup"):
-            out["plan"] = row["plan"]["setup"]
+        thesis = row.get("thesis") or {}
+        if thesis.get("source") not in (None, "none"):
+            out["plan"] = thesis.get("label")
+            if not thesis.get("text_is_guess") and (line := trader_context.thesis_line(thesis)):  # owner's words only
+                out["thesis"] = _trim(line, 160)
+        since = row.get("since_entry") or {}
+        if since.get("lines"):
+            out["since_entry"] = [f"{line['text']}" + (f" (as of {line['as_of']})" if line.get("as_of") else "")
+                                  for line in since["lines"] if line["key"] in ("underlying", "mark", "iv", "held")]
         rows.append(out)
     rows.sort(key=lambda r: (not r.get("expires_today"), r.get("days_to_expiry", 10_000)))
     return {"state": "ok", "count": section["count"], "shown": len(rows), "positions": rows}

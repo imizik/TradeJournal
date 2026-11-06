@@ -174,6 +174,41 @@ test("a position the copilot adopted: its row and header say Adopted while the p
   await page.screenshot({ path: test.info().outputPath("thread-head-adopted.png") });
 });
 
+test("an unplanned open position opened by its symbol shows the header and the since-entry lines", async ({ page }) => {
+  await lab(page, NBIS);
+  await page.route("**/copilot/plans/positions", (route) => route.fulfill({ json: { ...POSITIONS, count: 4, positions: [...POSITIONS.positions,
+    { trade_id: "t-aapl", symbol: "AAPL", contract: "AAPL 11/21/26 270C", instrument: "option", direction: "long", quantity: 2,
+      option: { side: "call", strike: 270, expiry: "2026-11-21" }, mark: 640, avg_entry: 590, days_held: 0, unrealized_usd: 100,
+      unrealized_pct: 8.5, giveback: "armed", latest_alert: null, plan: null, link_path: null, plan_path: "/copilot-lab?symbol=AAPL",
+      thesis: null, thesis_source: "none" }] } }));
+  const line = (key: string, state: string, text: string, source: string, at: string | null = "2026-10-23T14:59:00Z") =>
+    ({ key, state, text, as_of: at, source });
+  await page.route("**/charts/journal/positions/AAPL/context", (route) => route.fulfill({ json: { state: "ok", as_of: "2026-10-23T11:00:00-04:00",
+    symbol: "AAPL", units: "", positions: [{ trade_id: "t-aapl", symbol: "AAPL", contract: "AAPL 11/21/26 270C",
+      thesis: { source: "none", label: "No plan", text: null, text_is_guess: false, direction: "long", horizon: null, invalidation: null,
+        time_stop: null, revisions: [] },
+      alerts: [], decisions: [],
+      since_entry: { as_of: "2026-10-23T11:00:00-04:00", lines: [
+        line("underlying", "ok", "AAPL 268.40 · +0.85% since entry (266.14) · no invalidation (no plan)", "quote (≤60 s cache); entry: fill context (alpaca_sip)"),
+        line("group", "unavailable", "unavailable: Only entries from today's regular session are supported; overnight positions are unavailable", "Radar since-entry"),
+        line("mark", "ok", "mark 640.00 vs entry 590.00 a contract (+8.5%)", "journal cost; option mid"),
+        line("iv", "ok", "IV 31.2% now vs 33.0% at the fill (-1.8 pts)", "fill: Black-Scholes on its premium; now: provider (different methods)"),
+        line("held", "ok", "held 55 min · 29 days to expiry · no horizon or time stop on file", "journal; the plan"),
+      ] } }] } }));
+  await page.goto("/copilot-lab?symbol=AAPL");
+  const head = conversation(page).getByRole("group", { name: "Thread header" });
+  await expect(head).toContainText("In position");
+  await expect(head).toContainText("270C · Nov 21");
+  await expect(head.getByTestId("thread-price")).toContainText("option mark6.40+8.5%");
+  const since = conversation(page).getByRole("region", { name: "Since you entered" });
+  await expect(since).toContainText("No plan saved for this position");
+  await expect(since).toContainText("AAPL 268.40 · +0.85% since entry (266.14)");
+  await expect(since.locator("li[data-state=unavailable]")).toContainText("overnight positions are unavailable");
+  await expect(since).toContainText("IV 31.2% now vs 33.0% at the fill");
+  await expect(since).toContainText("Radar since-entry");  // every line names its source
+  await page.screenshot({ path: test.info().outputPath("thread-head-unplanned.png") });
+});
+
 test("the header and ladder fit a 375 px phone, the underlying still labelled", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await lab(page, NBIS);

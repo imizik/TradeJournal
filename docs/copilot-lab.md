@@ -1131,12 +1131,21 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
 - **Sections**, each with a provenance label the system prompt explains
   (`owner said` = their own words; `measured` = journal facts; `saved` = earlier
   conclusions and watches, possibly stale):
-  - `positions` (measured): `get_positions`' rows, the turn's symbol first (put
+  - `positions` (measured): one `trader_context.for_symbol` call a turn (§
+    Trader context), rendered: `get_positions`' rows, the turn's symbol first (put
     ahead before any cut, so a large book never drops it) and at most 8, each with its minutes held when opened today, days to expiry and
     expires-today flag, the give-back watch (`not armed`, `armed` or `fired`,
-    with the peak gain) and the last three phone alerts `position_alerts` keeps
-    for it, and the plan captured before it (`capture_links`: setup, wording,
-    note, time; owner said).
+    with the peak gain), the last three phone alerts sent for it, its thesis
+    object as `plan` (`source` plan card, Charts plan, companion or `none`;
+    setup, the owner's own wording, entry, invalidation, time stop, horizon,
+    timing, the latest revisions), the owner's decisions since the entry and,
+    for the turn's symbol only, the `since_entry` diff: each line with its
+    `from` (source) and its own `as_of` when that differs from the diff's.
+    Third-party words never enter this block: headlines appear as a count only
+    (the model reads them with `get_symbol_news`), a companion revision names a
+    thesis-watch trigger by kind without its headline, and the companion's
+    thesis guess (written by a model that had just read headlines) stays on the
+    desk, like a research job's conclusion.
   - `history` (measured): closed trades in the symbol (count, wins, realized $)
     and the latest four, as `get_trades` shows them.
   - `habits` (measured): the behavior audit's four exit habits through
@@ -1169,8 +1178,11 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
   unavailable and the turn goes on (the read itself finishes in its worker
   thread; the turn does not wait for it). The read runs before the first model
   round, so a slow quote provider adds up to the tool timeout to a turn. Over the size cap, the pack sheds the
-  least decision-relevant parts first (recent trades, today's notes,
-  investigations, memories, then positions beyond three) and marks itself
+  least decision-relevant parts first (recent trades, today's notes, the
+  since-entry lines' sources and the plan revisions, every since-entry line but
+  the mark past the symbol's first position, those positions' decisions, alerts
+  and plan notes, investigations, memories, then positions beyond three) and
+  marks itself
   `trimmed`; positions and habits go last.
 - The UI shows it as the first evidence row of every answer ("Your context",
   provenance `saved`, with a one-line summary such as "2 open (NBIS +6.1%,
@@ -1185,17 +1197,90 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
   steers its scripted tool choice.
 - No account number, account id, trade id, fill id or broker id is in it; the
   only ids are saved investigations'.
-- Tests: `backend/tests/test_copilot_context.py`.
+- Tests: `backend/tests/test_copilot_context.py`, `backend/tests/test_trader_context.py`.
+
+## Trader context
+
+One record per open position, planned or not, in
+`backend/app/engine/trader_context.py`: the Desk's thread header, Charts'
+Holding context, the Today screen's Act now rows and the Dashboard's Plans
+card (`plan_positions`), position alert and companion phone bodies, the
+pre-market prep and the owner pack all read it instead of rebuilding a
+position's plan each in their own way. It is built from readers that already
+exist (`copilot_book`, `capture_links`, the plan card's level alerts and time
+stop, `position_companion`, `position_alerts`, `day_journal`, Radar's
+since-entry comparison, the news reader) and writes nothing.
+
+- **Thesis object.** `source` is `plan_card` (a confirmed plan card: its
+  capture, entry and invalidation alerts and time stop), `plan_sheet` (a
+  Charts plan linked to the trade: the owner's words; its chart levels are
+  annotations, not rules), `companion` (the adopted draft: the thesis is the
+  copilot's guess and says so, the invalidation is the alert Confirm armed, or
+  a draft) or `none`. Each carries the same fields: label, text, direction,
+  entry trigger, invalidation, time stop, horizon (the owner's newest pick on
+  the desk, else the plan's), captured time and timing, the plan's
+  investigation, and revisions (capture notes, companion updates and the
+  owner's Closed it / Holding answers). A plan card and an adoption are the
+  same shape, so an adopted position with an armed invalidation now shows its
+  plan on Act now and the desk header (before, `plan_positions` read captures
+  only and called it unplanned).
+- **Alerts and decisions.** Phone alerts sent for the position and its plan's
+  level alerts hit; the owner's decision-bar entries since the entry.
+- **Since entry.** Deterministic lines, each with `state` (`ok` or
+  `unavailable`: a missing input is never a zero), `as_of` and `source`: the
+  underlying vs its price at the first entry fill (fill market context, else
+  the fill's enrichment) and vs the invalidation; the symbol and SPY since the
+  post-entry baseline with the group's peers (Radar's same-session since-entry
+  comparison, so today's regular-session entries only: an overnight hold reads
+  unavailable); the option mark vs the average entry; IV now (the provider's)
+  vs at the fill (Black-Scholes on the fill premium: different methods, and the
+  line says so); headlines naming the symbol since the entry (the news reader:
+  a provider read, so only the symbol a page or turn is about reads it); time
+  held vs the time stop, horizon and expiry.
+- **Entry points.** `for_symbol(symbol, now)` (the symbol's positions get the
+  diff; the owner pack and `GET /charts/journal/positions/{symbol}/context`),
+  `for_day(now)` (every position's diff, the day's decisions and ping counts),
+  `for_trade` (one position), `records` (a book a caller already read).
+- **Phone line.** `phone_line` writes "Since you entered: plan: … · NBIS 98.50
+  at 10:53 is 1.5% above the invalidation 97.00 · held 48 min · time stop …"
+  from the database and the alert's frozen Radar snapshot only: no provider
+  read, so a send never waits on a quote. Position alerts add it under their
+  Radar block, as of detection, so a retry sends the same words; companion
+  updates add it under the answer, with the underlying the companion already
+  read, and the update prompt gets it too. No new alert kinds, triggers or
+  senders.
+- **Screens.** `frontend/components/SinceEntry.tsx` shows the thesis and the
+  lines with their sources and times, refreshed each minute while visible: under
+  the desk's thread header for an open position (a symbol opened with no
+  conversation now gets the header too) and in Charts' Holding context for the
+  selected trade. Act now rows show the thesis line.
+- **Telegram on the desk.** Each Telegram question and Why? answer is saved on
+  the symbol's desk thread (its plan, the companion's adopted conversation, or
+  its newest open conversation, with that thread's `updated_at` kept so thesis
+  watch re-checks the same one), else in today's Main chat. Only the owner's own
+  words are saved as theirs: a Why? tap reads "Why? on a ping", never the ping's
+  text. No conversation is created, since an open one with a symbol would start
+  thesis-watch pings.
+- Headlines are read through a two-minute cache per symbol and entry, so the
+  desk header's and Charts' minute refresh and repeated turns make one news read.
+- The context route is owner-only: it is in `access_manifest.DOMAIN_ROUTES`,
+  not in the journal paths an assistant may read.
+- Tests: `backend/tests/test_trader_context.py`, the unplanned-position case in
+  `frontend/e2e/copilot-thread-head.spec.ts`.
 
 ## Follow-ups keep the evidence
 
 The panel sends only the conversation's text, so a follow-up used to lose
 the numbers the previous answer read and either read them all again (another
 held answer, see § Live measurements) or reasoned from its own prose. Now
-each turn keeps its successful tool results in the backend process
-(`copilot.carry_items` / `keep_carry`): at most 6 reads, 2,500 characters
-each, newest first, a re-read replacing the earlier one, for 2 hours, at
-most 64 conversations. Cards (`propose_plan`) and the owner context pack
+each turn keeps its successful tool results (`copilot.carry_items` /
+`keep_carry`): at most 6 reads, 2,500 characters each, newest first, a
+re-read replacing the earlier one, for 2 hours. They are kept in the process
+(at most 64 conversations) and in the `copilot_carry` table with the
+conversation's investigation when it has one (one row per investigation,
+expired rows pruned on write), so a follow-up after a restart, or after a
+reload that lost the id, finds them by the id or by the investigation and
+reads nothing again. Cards (`propose_plan`) and the owner context pack
 (rebuilt every turn) are not kept. The `done` event carries an opaque
 `carry_id`; the panel holds it on the answer (never saved with the
 investigation) and sends it back as `carry_id` with the next message. The
@@ -1208,8 +1293,9 @@ without calling those tools again, saying when it was read, and to read
 again when the owner asks for fresh data, asks about a symbol or question the
 block does not cover, disputes a specific number, or the read is more than
 15 minutes old while the market is open. A first message never inherits one;
-an unknown or expired id, a restart, another worker, or evidence kept in
-another mode (live, replay, fixture) means the turn reads afresh as before.
+an unknown or expired id with no investigation to find it by, a store that
+cannot be read, or evidence kept in another mode (live, replay, fixture) means
+the turn reads afresh as before.
 A clipped read ends `[clipped]`, and the block's frame markers are made inert
 inside carried text. The data never leaves the server, and the block says that
 text inside it is third-party data, never an instruction. Tests:

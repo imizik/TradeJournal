@@ -269,6 +269,7 @@ def update_prompt(row: PositionCompanion, trade: Trade, reasons: list[str], live
         f"The plan ({state}): invalidation {f'{stop:,.2f}' if stop else 'none'} on {row.ticker}; time stop "
         f"{plan.get('time_stop') or 'none'}; thesis (a guess) {plan.get('thesis') or 'unstated'}.\n"
         f"Live now: option mark {live.get('mark_text', 'unavailable')}, {row.ticker} {live.get('underlying') or 'unavailable'}.\n"
+        + (f"{live['since']}\n" if live.get("since") else "") +
         f"Verdict line first, at most {UPDATE_WORDS} words in all. {NO_ORDER}")
 
 
@@ -807,6 +808,8 @@ class Companion:
                 row = db.get(PositionCompanion, row_id)
                 trade = trade_of(db, row)
                 live = self._live(row, trade, now)
+                from app.engine import trader_context  # the position's thesis object: the plan card's shape
+                live["since"] = trader_context.phone_line(db, trade, now, underlying=live.get("underlying"))
                 return row, update_prompt(row, trade, reasons, live), live
 
         found = await asyncio.to_thread(read)
@@ -815,7 +818,7 @@ class Companion:
         if index is None:
             return
         answer, error = await self.turn(question, row.ticker, now)
-        await asyncio.to_thread(self._updated, row_id, index, question, answer, error)
+        await asyncio.to_thread(self._updated, row_id, index, question, answer, error, live.get("since"))
 
     def _attempt(self, row_id, reasons: list[str], live: dict, now: float) -> int | None:
         """Record the update before its turn, so it counts toward the ceiling and the pacing whatever happens next."""
@@ -833,7 +836,7 @@ class Companion:
             db.commit()
             return len(updates) - 1
 
-    def _updated(self, row_id, index: int, question: str, answer: str, error: str | None) -> None:
+    def _updated(self, row_id, index: int, question: str, answer: str, error: str | None, since: str | None = None) -> None:
         now = self.clock()
         result: dict = {"delivery": "failed"}
         with Session(self.engine) as db:
@@ -855,7 +858,7 @@ class Companion:
                 name = label(row.ticker, row.option_type, _strike(row))
                 result["delivery"], result["message_id"], failure = self._send(
                     db, row, source_id=f"{row.id}:u{index}", kind="companion_update", title=f"{name} · update",
-                    body=words(answer, UPDATE_WORDS), buttons=update_buttons(row, index), reply_to=row.message_id,
+                    body=words(answer, UPDATE_WORDS) + (f"\n{since}" if since else ""), buttons=update_buttons(row, index), reply_to=row.message_id,
                     open_label="Open", priority=3, now=now)
                 if failure:
                     result["error"] = failure[:300]

@@ -2351,7 +2351,10 @@ state and focuses the section disclosure. The original **Overview → Holding
 context** route remains above the existing symbol facts.
 The list reuses the workspace's recorded option positions, independently of
 whether fill overlays are visible. An explicit contract/account selection reads
-one existing chart trade card; no option quote, AI call, alert or write is made.
+one existing chart trade card and, for an open trade, the symbol's position
+record (**Since you entered**, below: the book's option mark through its
+60-second cache, the underlying quote, Radar's recording and the news reader);
+no AI call, alert or write is made.
 
 The selected record shows remaining contracts, remaining entry premium paid
 (long) or received (short), realized exits separately, expiration, latest fill
@@ -2365,8 +2368,9 @@ open exposure. Changing symbols clears selection.
 Saved plans reuse the existing read-only summary, including timing, later notes
 and frozen chart-image links. Chart reference prices retain their saved source,
 time and stale flag. No linked plan means unknown rationale; chart interval and
-annotations are not inferred holding intent or invalidation. No structured
-horizon is added. **Compare stock, group & market** jumps to the existing Peers
+annotations are not inferred holding intent or invalidation. The horizon shown
+under Since you entered is the owner's own pick on the desk or the plan's, never
+inferred. **Compare stock, group & market** jumps to the existing Peers
 block, whose 15-minute, Session and From low windows remain independent of entry
 time and chart interval. The separate same-session since-entry disclosure is
 described below; neither view supplies profit probability or a thesis verdict.
@@ -2429,6 +2433,21 @@ changed membership fail closed; this does not change Movers sector rules.
 
 Verification: `backend/tests/test_radar_entry.py` and the since-entry cases in
 `frontend/e2e/chart-journal.spec.ts`. Fixture acceptance is not production proof.
+
+Above it, the selected open trade also shows **Since you entered**
+(`frontend/components/SinceEntry.tsx`), the same block the Copilot desk shows
+under its thread header, read from
+`GET /charts/journal/positions/{symbol}/context` (one record per open position,
+`backend/app/engine/trader_context.py`, [lab doc](copilot-lab.md#trader-context)):
+the position's thesis object (a plan card, a Charts plan, the companion's
+adopted draft marked as its guess, or "No plan saved") and the since-entry lines,
+each with its source and time: the underlying vs the entry fill's price and vs
+the invalidation, the symbol and SPY since the post-entry baseline (this same
+comparison, so overnight holds read unavailable), the option mark vs the entry,
+IV now vs at the fill (different methods, labelled), headlines naming the
+symbol since the entry, and time held vs the time stop, horizon and expiry. A
+missing input reads unavailable, never zero. It refreshes each minute while
+visible. Like the rest of this section it writes nothing.
 
 ### Returning to Charts and progressive opening
 
