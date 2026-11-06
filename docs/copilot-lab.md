@@ -1634,6 +1634,15 @@ additive table `practice_goal`).
   Dashboard's Review my week button carries it as a second line:
   "Practicing: exit at my invalidation · 2 of 3 this week" (or "starts Mon,
   Oct 26"). Nothing shows while no goal is active.
+- The ping that tests the active goal ends with one sentence naming it and the
+  week's score so far (`practice_goal.ping_line`): "Practice this week: no new
+  trade while the day is green · kept 2 of 3 so far", or "Practice from Mon
+  Nov 9: …" before its first week. `no_opening_while_green` rides the
+  green-day pattern interrupt, `respond_to_giveback_15m` the give-back alert,
+  `no_trade_after_hour_red` the one-hour alert, `exit_at_invalidation` the
+  plan's invalidation ping and `plan_before_entry` the plan nudge (not the link
+  ping); `max_trades_per_day` has no ping that tests it, so none carries it. A
+  failure leaves the ping as it was; triggers, budgets and dedupe are unchanged.
 - No id is returned to the page or the copilot. Research jobs never see it.
 - Tests: `backend/tests/test_practice_goal.py`,
   `frontend/e2e/practice-goal.spec.ts`.
@@ -1894,7 +1903,9 @@ nothing exists until the owner confirms.
       the owner's question ("My entry trigger hit at 95.90 (10:41). Is the
       plan still valid? Check the chart and group now.") in the message box,
       unsent. Delivery is the level alerts' own outbox. A copilot watch with
-      no role keeps the plain level message. The open P&L is not added: no
+      no role keeps the plain level message. While the practice goal is
+      `exit_at_invalidation`, the invalidation ping ends with [its
+      line](#the-practice-goal). The open P&L is not added: no
       mark is stored for it, and reading one at send time would add a quote
       call to the alert path.
     - The **time stop** is read as a clock time (`out by 15:30`, `15:30`,
@@ -2199,7 +2210,9 @@ dollars are not an option premium, and a short receives premium rather than
 paying it. The put, green-day, late-buy, ticker-record and
 large-size rules describe the position, so each fires once per position; adding
 to a loser fires on every such add. A fill that fires several sends one
-message, one line per rule in that order, ending "Your record, not advice.":
+message, one line per rule in that order, ending "Your record, not advice."
+(when the green-day rule fired and the [practice goal](#the-practice-goal) is
+`no_opening_while_green`, the goal's line goes just above it):
 
 ```
 Pattern: NBIS 160P

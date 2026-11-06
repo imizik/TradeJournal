@@ -386,3 +386,23 @@ def test_the_monitor_runs_nudges_beside_position_alerts(engine):
     fake = Fake()
     asyncio.run(LevelAlertMonitor(engine, None, nudges=fake).run_once())
     assert fake.calls == ["run", "deliver"]
+
+
+@pytest.mark.parametrize("goal", ["plan_before_entry", "exit_at_invalidation", "raises"])
+def test_the_nudge_ends_with_the_practice_goal_it_tests(engine, world, monkeypatch, goal):
+    def ping_line(db, measure, today):
+        assert today == WED
+        if goal == "raises":
+            raise RuntimeError("boom")
+        return f"Practice this week: {measure} · kept 2 of 3 so far" if measure == goal else None
+    monkeypatch.setattr(plan_nudges.practice_goal, "ping_line", ping_line)
+    sent = []
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: sent.append((title, body, kw)))
+    clock, nudger = world
+    buy(engine, "10:00")
+    tick(clock, nudger, "10:03")
+    nudger.deliver()
+    practice = "\nPractice this week: plan_before_entry · kept 2 of 3 so far" if goal == "plan_before_entry" else ""
+    assert [body for _, body, _ in sent] == ["Opened 2 at $3.10. Tap for a 20-second plan." + practice]
+    assert nudges(engine)[0].delivery == "sent"

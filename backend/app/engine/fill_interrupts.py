@@ -68,7 +68,7 @@ from sqlalchemy import func, or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import notification_policy, phone, ping_images
+from app.engine import notification_policy, phone, ping_images, practice_goal
 from app.engine.analytics import wall_time
 from app.engine.chart_journal import OPEN_SIDES, contract_label, open_lots, stamp
 from app.engine.chart_math import ET, session_windows
@@ -282,8 +282,21 @@ def short_label(ticker: str, instrument_type: str, option_type: str | None, stri
     return f"{ticker} {float(strike):g}{'P' if option_type == 'put' else 'C'}"
 
 
-def message(label: str, lines: list[str]) -> tuple[str, str]:
-    return f"Pattern: {label}", "\n".join(lines + [FOOTER])
+def message(label: str, lines: list[str], practice: str | None = None) -> tuple[str, str]:
+    """``practice`` is the week's practice-goal sentence (``practice_goal.ping_line``), kept above the footer."""
+    return f"Pattern: {label}", "\n".join(lines + ([practice] if practice else []) + [FOOTER])
+
+
+def practice_line(db: Session, kinds: list[str], day: date) -> str | None:
+    """The practice goal's sentence when the green-day rule fired and the goal is not opening while green; None, never
+    an error, otherwise."""
+    if "opened_green" not in kinds:
+        return None
+    try:
+        return practice_goal.ping_line(db, "no_opening_while_green", day)
+    except Exception:  # noqa: BLE001 - the interrupt matters more than its extras
+        log.warning("Practice line skipped", exc_info=True)
+        return None
 
 
 # ------------------------------------------------------------------ the pass
@@ -382,7 +395,8 @@ class FillInterrupts:
         kinds = [k for k in fired(fill, prior, day, recs["ticker_record"], recs["large_size"])
                  if k not in said or k not in ONCE_PER_POSITION]
         label = short_label(trade.ticker, trade.instrument_type, trade.option_type, trade.strike)
-        title, body = message(label, [line(k, recs.get(k) or record(rows, k, key), day, premium(fill)) for k in kinds])
+        title, body = message(label, [line(k, recs.get(k) or record(rows, k, key), day, premium(fill)) for k in kinds],
+                              practice_line(db, kinds, fill["executed_at"].date()))
         return FillInterrupt(
             account_id=fill["account_id"], fill_key=fill["key"], position_key=position, trade_id=trade.id, ticker=trade.ticker,
             contract=contract_label(trade.ticker, trade.instrument_type, trade.option_type, trade.strike, trade.expiration),

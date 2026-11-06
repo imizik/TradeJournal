@@ -506,3 +506,23 @@ def test_a_large_add_in_a_losing_ticker_sends_all_six_lines_once(engine, world, 
                         "Size: $250 is 2.5× your median ($100); your 7 past entries above 2×: 0% won, −$450",
                         "Your record, not advice."]
     assert len(sent) == 2 and sent[1][1].startswith("Adding to a loser")
+
+
+@pytest.mark.parametrize("goal", ["no_opening_while_green", "plan_before_entry", "raises"])
+def test_the_green_day_interrupt_carries_the_practice_goal_above_the_footer(engine, world, sent, monkeypatch, goal):
+    def ping_line(db, measure, today):
+        assert today == date(2026, 10, 21)
+        if goal == "raises":
+            raise RuntimeError("boom")
+        return "Practice this week: no new trade while the day is green · kept 2 of 3 so far" if measure == goal else None
+    monkeypatch.setattr(fill_interrupts.practice_goal, "ping_line", ping_line)
+    clock, interrupts = world
+    exp = date(2026, 10, 30)
+    fill(engine, ny("10:00"), "SNDK", option_type="call", strike=500, price=100, expiration=exp)
+    tick(clock, interrupts, "10:01")
+    fill(engine, ny("10:05"), "SNDK", side="sell_to_close", option_type="call", strike=500, price=300, expiration=exp)
+    fill(engine, ny("10:10"), "CRWV", side="buy", qty=10, price=120)
+    tick(clock, interrupts, "10:11")
+    practice = ["Practice this week: no new trade while the day is green · kept 2 of 3 so far"] if goal == "no_opening_while_green" else []
+    assert sent[0][1].split("\n") == ["Day already green (+$200 today): 1 past trade opened green, too few to read", *practice,
+                                      "Your record, not advice."]
