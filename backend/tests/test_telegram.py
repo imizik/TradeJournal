@@ -567,3 +567,268 @@ def test_why_on_a_ping_too_old_to_read_says_so(case, monkeypatch):
 
     run(go())
     assert "no longer shows that ping's text" in bot.named("sendMessage")[0]["text"]
+
+
+# ------------------------------------------------------------------ voice notes and photos
+
+OGG = b"OggS" + b"\0" * 2000  # an Ogg clip by its first bytes; the transcriber is stubbed
+
+
+class FileBot(Bot):
+    """``Bot`` that also answers ``getFile``."""
+
+    def __call__(self, name, *, json=None, timeout=None, **_):
+        if name == "getFile":
+            self.calls.append((name, json))
+            return {"file_id": json["file_id"], "file_path": f"docs/{json['file_id']}"}
+        return super().__call__(name, json=json, timeout=timeout)
+
+
+@pytest.fixture
+def files(monkeypatch):
+    """Telegram's file host, stubbed: ``files[file_id] = bytes``; every GET is recorded in ``files["gets"]``."""
+    import contextlib
+    held = {"gets": []}
+
+    @contextlib.contextmanager
+    def stream(verb, url, **kwargs):
+        held["gets"].append(url)
+        file_id = url.rsplit("/", 1)[1]
+        yield httpx.Response(200, content=held[file_id]) if file_id in held else httpx.Response(404)
+
+    monkeypatch.setattr(httpx, "stream", stream)
+    return held
+
+
+@pytest.fixture
+def whisper(monkeypatch):
+    from app.engine import transcribe
+    heard = []
+    monkeypatch.setattr(transcribe, "status", lambda: transcribe.Status(True, "Whisper (test)", "test"))
+
+    def fake(data, extension, prompt=None):
+        heard.append((len(data), extension, prompt))
+        return "should I trim NBIS here"
+    monkeypatch.setattr(transcribe, "transcribe_bytes", fake)
+    return heard
+
+
+def voice(update_id=1, duration=6, size=2004, chat=CHAT, sender=None, kind="voice") -> dict:
+    return {"update_id": update_id, "message": {"message_id": 60 + update_id, "chat": {"id": int(chat)}, "from": {"id": int(sender or chat)},
+                                                kind: {"file_id": "v1", "duration": duration, "mime_type": "audio/ogg", "file_size": size}}}
+
+
+def photo(update_id=1, caption=None, document=None) -> dict:
+    body = {"document": document} if document else {"photo": [
+        {"file_id": "small", "width": 90, "height": 60, "file_size": 900}, {"file_id": "big", "width": 1280, "height": 853, "file_size": 9000}]}
+    return {"update_id": update_id, "message": {"message_id": 60 + update_id, "chat": {"id": int(CHAT)}, "from": {"id": int(CHAT)},
+                                                **body, **({"caption": caption} if caption else {})}}
+
+
+def test_download_reads_to_the_cap_and_never_logs_the_token(monkeypatch, files, caplog):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", TOKEN)
+    files["f1"] = b"x" * 10
+    bot = FileBot()
+    assert telegram.download("f1", 10, call=bot) == b"x" * 10
+    assert bot.named("getFile") == [{"file_id": "f1"}] and files["gets"] == [f"https://api.telegram.org/file/bot{TOKEN}/docs/f1"]
+    with pytest.raises(telegram.FileTooLarge):
+        telegram.download("f1", 9, call=bot)
+    with pytest.raises(telegram.TelegramError) as refused:
+        telegram.download("missing", 10, call=bot)
+    assert TOKEN not in str(refused.value) and TOKEN not in caplog.text
+
+
+def test_a_voice_note_is_heard_confirmed_asked_and_saved_on_the_desk(case, monkeypatch, files, whisper):
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    files["v1"] = OGG
+    bot = FileBot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+    saved = []
+    monkeypatch.setattr(telegram_replies, "save_on_desk", lambda db, said, symbol, answer, now: saved.append(said) or "x")
+
+    async def go():
+        assert await replies.handle(voice()) == "voice"
+        assert await replies.handle(voice(update_id=2)) == "busy"  # one turn at a time
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    assert whisper[0][:2] == (len(OGG), "ogg") and whisper[0][2]  # primed with the owner's tickers
+    busy, heard, answer = bot.named("sendMessage")
+    assert busy["text"] == telegram_replies.BUSY
+    assert heard["text"] == "Heard: should I trim NBIS here" and heard["reply_parameters"]["message_id"] == 61
+    assert answer["text"].startswith("Verdict:") and answer["reply_parameters"]["message_id"] == 61
+    assert saved == ["should I trim NBIS here"]
+
+
+def test_audio_files_are_taken_like_voice_notes(case, monkeypatch, files, whisper):
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    files["v1"] = OGG
+    bot = FileBot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+
+    async def go():
+        assert await replies.handle(voice(kind="audio")) == "voice"
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    assert bot.named("sendMessage")[0]["text"].startswith("Heard:")
+
+
+@pytest.mark.parametrize("duration,size", [(31, 2004), (10, 3_000_001)])
+def test_a_voice_note_too_long_or_too_large_is_refused_before_any_download(case, files, whisper, duration, size):
+    db_engine, _ = case
+    bot = FileBot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+    assert run(replies.handle(voice(duration=duration, size=size))) == "refused"
+    assert bot.named("sendMessage")[0]["text"] == telegram_replies.VOICE_TOO_LONG
+    assert not bot.named("getFile") and not files["gets"] and not whisper
+
+
+def test_a_voice_note_larger_than_telegram_said_is_cut_off_at_the_cap(case, files, whisper):
+    db_engine, _ = case
+    files["v1"] = b"OggS" + b"\0" * 3_000_000
+    bot = FileBot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+
+    async def go():
+        await replies.handle(voice())
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    assert [m["text"] for m in bot.named("sendMessage")] == [telegram_replies.VOICE_TOO_LONG] and not whisper
+
+
+def test_a_voice_note_without_a_transcriber_gets_its_note(case, monkeypatch, files):
+    from app.engine import transcribe
+    db_engine, _ = case
+    monkeypatch.setenv("CAPTURE_TRANSCRIBER", "off")
+    bot = FileBot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+    assert run(replies.handle(voice())) == "refused"
+    assert bot.named("sendMessage")[0]["text"] == transcribe.status().note and not bot.named("getFile")
+
+
+def test_a_failed_transcription_says_so_and_asks_nothing(case, monkeypatch, files):
+    from app.engine import transcribe
+    db_engine, _ = case
+    files["v1"] = OGG
+    monkeypatch.setattr(transcribe, "status", lambda: transcribe.Status(True, "Whisper (test)", "test"))
+
+    def broken(*a, **k):
+        raise transcribe.TranscriptionError("The speech-to-text engine could not read this clip.")
+    monkeypatch.setattr(transcribe, "transcribe_bytes", broken)
+    bot = FileBot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+    monkeypatch.setattr(replies, "turn", lambda *a, **k: pytest.fail("no turn without words"))
+
+    async def go():
+        await replies.handle(voice())
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    assert [m["text"] for m in bot.named("sendMessage")] == ["The speech-to-text engine could not read this clip."]
+
+
+def test_messages_from_anyone_else_are_ignored_before_any_download(case, files, whisper):
+    db_engine, _ = case
+    bot = FileBot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+    assert run(replies.handle(voice(sender=999))) is None
+    assert run(replies.handle(voice(chat=999))) is None
+    stranger = photo()
+    stranger["message"]["from"] = {"id": 999}
+    assert run(replies.handle(stranger)) is None
+    assert bot.calls == [] and not files["gets"] and not whisper
+
+
+@pytest.fixture
+def image_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("CAPTURE_STORAGE_DIR", str(tmp_path))
+    return tmp_path / "copilot-images"
+
+
+def scripted_turn(monkeypatch, seen):
+    from app.ai import copilot_spend
+
+    async def scripted(history, symbol, *args, images=None, **kwargs):
+        seen.append({"question": history[-1]["content"], "images": images})
+        yield {"type": "text", "delta": "Verdict: Matches."}
+        yield {"type": "done"}
+    monkeypatch.setattr(copilot_spend, "recorded_turn", scripted)
+
+
+def test_a_photo_with_a_caption_asks_it_with_the_image_attached_then_deletes_it(case, monkeypatch, files, image_store):
+    from tests.test_copilot_images import png
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    files["big"] = png()
+    seen, saved = [], []
+    scripted_turn(monkeypatch, seen)
+    monkeypatch.setattr(telegram_replies, "save_on_desk", lambda db, said, symbol, answer, now: saved.append(said) or "x")
+    bot = FileBot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+
+    async def go():
+        assert await replies.handle(photo(caption="Is my NBIS call still on?")) == "photo"
+        assert await replies.handle(photo(update_id=2)) == "busy"
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    assert bot.named("getFile") == [{"file_id": "big"}]  # the largest size
+    assert seen[0]["question"] == "Is my NBIS call still on?"
+    assert [b["source"]["media_type"] for b in seen[0]["images"]] == ["image/jpeg"]
+    assert saved == ["(photo) Is my NBIS call still on?"]
+    assert [m["text"] for m in bot.named("sendMessage")] == [telegram_replies.BUSY, "Verdict: Matches."]
+    assert list(image_store.glob("*.jpg")) == []  # deleted when the turn ended
+
+
+def test_a_photo_without_a_caption_asks_the_reconcile_question_and_an_image_document_counts(case, monkeypatch, files, image_store):
+    from tests.test_copilot_images import png
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    files["doc"] = png()
+    seen = []
+    scripted_turn(monkeypatch, seen)
+    bot = FileBot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+
+    async def go():
+        assert await replies.handle(photo(document={"file_id": "doc", "mime_type": "image/png", "file_size": 9000})) == "photo"
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    assert seen[0]["question"] == telegram_replies.RECONCILE_QUESTION and len(seen[0]["images"]) == 1
+    assert list(image_store.glob("*.jpg")) == []
+
+
+def test_a_failed_photo_turn_still_deletes_the_image_and_says_so(case, monkeypatch, files, image_store):
+    from tests.test_copilot_images import png
+    from app.ai import copilot_spend
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    files["big"] = png()
+
+    async def broken(*a, **k):
+        raise RuntimeError("boom")
+        yield
+    monkeypatch.setattr(copilot_spend, "recorded_turn", broken)
+    bot = FileBot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+
+    async def go():
+        await replies.handle(photo())
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    assert [m["text"] for m in bot.named("sendMessage")] == [telegram_replies.FAILED]
+    assert list(image_store.glob("*.jpg")) == []
+
+
+def test_a_document_that_is_not_an_image_is_ignored(case, files):
+    db_engine, _ = case
+    bot = FileBot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+    assert run(replies.handle(photo(document={"file_id": "pdf", "mime_type": "application/pdf"}))) is None
+    assert bot.calls == [] and not files["gets"]

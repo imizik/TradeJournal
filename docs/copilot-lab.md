@@ -1269,7 +1269,10 @@ since-entry comparison, the news reader) and writes nothing.
   watch re-checks the same one), else in today's Main chat. Only the owner's own
   words are saved as theirs: a Why? tap reads "Why? on a ping", never the ping's
   text. No conversation is created, since an open one with a symbol would start
-  thesis-watch pings.
+  thesis-watch pings. A voice note to the bot is a question too: 30 seconds and
+  3 MB at most, transcribed by this server's Whisper with the owner's tickers as
+  vocabulary (as hold-to-talk is), confirmed back as "Heard: …", then asked like
+  a typed message; the heard words are what the desk keeps.
 - Headlines are read through a two-minute cache per symbol and entry, so the
   desk header's and Charts' minute refresh and repeated turns make one news read.
 - The context route is owner-only: it is in `access_manifest.DOMAIN_ROUTES`,
@@ -2402,7 +2405,7 @@ No model call; it runs whether or not the lab is on.
 
 ## The copilot can see
 
-Two kinds of image reach the model, never more than **two per turn**:
+Images reach the model these ways, never more than **two per turn**:
 
 - **A screenshot the owner shares.** The composer's attach button (beside the
   mic; a file picker with `accept="image/*"`, so a phone offers its camera roll
@@ -2421,6 +2424,14 @@ Two kinds of image reach the model, never more than **two per turn**:
   after 24 hours (`GET /copilot/images/{id}` serves it meanwhile, for the
   share-sheet thumbnail). History and the saved transcript keep the text
   marker `[shared a screenshot]`, never the image.
+- **A photo sent to the Telegram bot.** A photo (its largest size) or an image
+  sent as a file goes through the same image store and is attached to one
+  bounded Telegram turn (`engine/telegram_replies.py`); its caption is the
+  question. With no caption the question is the reconcile question: read the
+  positions the screenshot shows (contract, quantity, mark), compare them with
+  the journal's open positions through the book tools, and list what is
+  missing, extra or a different quantity, read only. The image is deleted when
+  the turn ends; the desk keeps the question marked "(photo)", never the image.
 - **Look at my chart.** In the Charts dock's Copilot tab, **Look at my chart**
   takes the main chart's canvas as drawn (the same snapshot a saved plan
   keeps: candles, studies, fills and the owner's levels and drawings, made a

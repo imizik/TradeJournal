@@ -29,6 +29,15 @@ reply to a ping, the ping is its context: a position alert's (found from the pin
 note on what the bot does. One turn runs at a time, shared with Why?; a question while one runs is not asked, and the
 reply says so. A question is cut to ``QUESTION_MAX`` characters.
 
+A voice note (or audio file) is a typed question spoken: 30 seconds and 3 MB at most, downloaded (``telegram.download``),
+transcribed by the app's own Whisper (``engine/transcribe.py``, primed with the owner's tickers as hold-to-talk is, so
+"en bis" becomes NBIS), the words confirmed back ("Heard: …") and asked. A photo (the largest size Telegram offers, or
+an image sent as a document) goes through the copilot's image store (``ai/copilot_images.py``) and is attached to one
+turn whose question is its caption, or with none ``RECONCILE_QUESTION`` (the broker screenshot against the journal's
+open positions); the stored image is deleted when the turn ends. The same owner check runs before any download, the
+same one-turn-at-a-time rule and reply-to context apply, and a failed download, transcription or turn says what
+failed. The desk keeps the heard words, or the caption or reconcile question marked "(photo)", never the image.
+
 Each question and Why? answer is also saved on the desk (``save_on_desk``): the owner's own words, marked "From
 Telegram:" (a Why? tap is saved as "Why? on a ping", never the ping's text, which may be a headline or a research
 result), and the answer, as two messages on the symbol's thread (its plan, else the conversation the companion adopted
@@ -60,10 +69,15 @@ POLL_SECONDS = 10  # Telegram holds the request open this long when nothing is n
 RETRY_SECONDS = 30
 ANSWER_MAX = 1500
 QUESTION_MAX = 1000
-HELP = ("I send TradeJournal's phone pings. Tap a ping's buttons to answer it, or type a question for copilot. "
-        "Reply to a ping to ask about that alert.")
+HELP = ("I send TradeJournal's phone pings. Tap a ping's buttons to answer it, or type or speak a question for copilot "
+        "(or send a screenshot of your positions). Reply to a ping to ask about that alert.")
 BUSY = "Copilot is still answering the last question; ask again in a moment."
 WHY_QUESTION = "Why does this matter for me right now, and what should I check before acting?"
+RECONCILE_QUESTION = ("What positions does this screenshot show? For each one you can read, give the contract, quantity and "
+                      "mark, compare it with my open positions in the journal, and list what differs: missing, extra, or a "
+                      "different quantity. Read only; change nothing.")
+VOICE_TOO_LONG = "Keep a voice note under 30 seconds."
+FAILED = "The copilot turn failed unexpectedly."
 FEEDBACK_LABELS = {"prompted_review": "Prompted review", "already_aware": "Already aware", "too_late": "Too late",
                    "not_useful": "Not useful"}
 RADAR_LABELS = {"useful": "Useful", "already_knew": "Already knew", "too_late": "Too late", "irrelevant": "Not useful"}
@@ -158,23 +172,45 @@ class Replies:
         return verb
 
     async def handle_message(self, message: dict | None) -> str | None:
-        """A typed message from the owner: a copilot question (``ask``), or the help note for a command."""
+        """A message from the owner: a typed question (``ask``), a voice note (``voice``) or a photo (``photo``), or the
+        help note for a command; ``refused`` when a voice note cannot be taken, ``busy`` while a turn runs."""
+        from app.engine import captures, transcribe
         owner = telegram.chat_id()
         if not message or str((message.get("chat") or {}).get("id")) != owner or str((message.get("from") or {}).get("id")) != owner:
             return None
         text = str(message.get("text") or "").strip()
-        if not text:
+        voice = message.get("voice") or message.get("audio")
+        document = message.get("document") or {}
+        photo = (max(message["photo"], key=lambda p: (p.get("width") or 0) * (p.get("height") or 0)) if message.get("photo")
+                 else document if str(document.get("mime_type") or "").startswith("image/") else None)
+        if text:
+            if text.startswith("/"):
+                await asyncio.to_thread(self._reply, message, HELP)
+                return "help"
+            kind = "ask"
+        elif voice:
+            refusal = (VOICE_TOO_LONG if int(voice.get("duration") or 0) * 1000 > captures.CLIP_MS
+                       or int(voice.get("file_size") or 0) > captures.AUDIO_MAX else None)
+            if refusal is None and not (speech := transcribe.status()).configured:
+                refusal = speech.note
+            if refusal is not None:
+                await asyncio.to_thread(self._reply, message, refusal)
+                return "refused"
+            kind = "voice"
+        elif photo:
+            kind = "photo"
+        else:
             return None
-        if text.startswith("/"):
-            await asyncio.to_thread(self._reply, message, HELP)
-            return "help"
         if self._tasks:
             await asyncio.to_thread(self._reply, message, BUSY)
             return "busy"
-        task = asyncio.create_task(self._ask(text[:QUESTION_MAX], message))
+        work = (self._ask(text[:QUESTION_MAX], message) if kind == "ask"
+                else self._voice(str(voice.get("file_id") or ""), message) if kind == "voice"
+                else self._photo(str(photo.get("file_id") or ""), message))
+        task = asyncio.create_task(work)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
-        return "ask"
+        return kind
 
     # -------------------------------------------------------------- the writes
 
@@ -236,7 +272,7 @@ class Replies:
             text = await self.why_text(alert_id)
         except Exception:  # noqa: BLE001 - the owner hears that it failed, never silence
             log.exception("Telegram Why? turn failed")
-            text = "The copilot turn failed unexpectedly."
+            text = FAILED
         await asyncio.to_thread(self._reply, message, text)
 
     async def _ask_ping(self, message: dict) -> None:
@@ -248,7 +284,7 @@ class Replies:
                 answer = await self.question_text(WHY_QUESTION, message)
         except Exception:  # noqa: BLE001 - the owner hears that it failed, never silence
             log.exception("Telegram Why? turn failed")
-            answer = "The copilot turn failed unexpectedly."
+            answer = FAILED
         await asyncio.to_thread(self._reply, message, answer)
 
     async def _ask(self, text: str, message: dict) -> None:
@@ -256,7 +292,69 @@ class Replies:
             answer = await self.question_text(text, message.get("reply_to_message"))
         except Exception:  # noqa: BLE001 - the owner hears that it failed, never silence
             log.exception("Telegram question turn failed")
-            answer = "The copilot turn failed unexpectedly."
+            answer = FAILED
+        await asyncio.to_thread(self._reply, message, answer)
+
+    async def _voice(self, file_id: str, message: dict) -> None:
+        """A voice note: downloaded, transcribed with the owner's tickers as vocabulary, confirmed back, then asked."""
+        from app.engine import captures, transcribe
+        try:
+            data = await asyncio.to_thread(telegram.download, file_id, captures.AUDIO_MAX, call=self.call)
+            kind = captures.sniff_audio(data)
+            heard = await asyncio.to_thread(self._transcribe, data, captures.AUDIO_TYPES[kind])
+        except telegram.FileTooLarge:
+            answer = VOICE_TOO_LONG
+        except telegram.TelegramError as exc:
+            log.warning("Telegram voice note not downloaded: %s", exc)
+            answer = "The voice note could not be downloaded from Telegram."
+        except (captures.CaptureError, transcribe.TranscriptionError) as exc:
+            answer = str(exc)
+        except Exception:  # noqa: BLE001 - the owner hears that it failed, never silence
+            log.exception("Telegram voice note failed")
+            answer = FAILED
+        else:
+            if not heard:
+                answer = "No words were heard in that voice note."
+            else:
+                await asyncio.to_thread(self._reply, message, f"Heard: {heard}")
+                await self._ask(heard[:QUESTION_MAX], message)
+                return
+        await asyncio.to_thread(self._reply, message, answer)
+
+    def _transcribe(self, data: bytes, extension: str) -> str:
+        """The words in a clip, spoken tickers written as symbols, primed as the composer's hold-to-talk is."""
+        from app.engine import spoken_tickers, transcribe
+        with Session(self.engine) as db:
+            traded = spoken_tickers.traded(db)
+        known = spoken_tickers.known_symbols(traded)
+        heard = transcribe.transcribe_bytes(data, extension, spoken_tickers.prompt_for(known, traded)).strip()
+        return spoken_tickers.map_tickers(heard, known)[0]
+
+    async def _photo(self, file_id: str, message: dict) -> None:
+        """A photo: processed into the image store, attached to one turn (its caption, else the reconcile question),
+        and deleted when the turn ends, whatever happens."""
+        from app.ai import copilot_images
+        image_id = None
+        try:
+            data = await asyncio.to_thread(telegram.download, file_id, copilot_images.MAX_IN, call=self.call)
+            image_id = (await asyncio.to_thread(copilot_images.store, data))["id"]
+            caption = str(message.get("caption") or "").strip()
+            images = [copilot_images.block(copilot_images.load(image_id))]
+            answer = await self.question_text(caption[:QUESTION_MAX] or RECONCILE_QUESTION, message.get("reply_to_message"),
+                                              images=images)
+        except telegram.FileTooLarge:
+            answer = "The image is larger than 8 MB."
+        except telegram.TelegramError as exc:
+            log.warning("Telegram photo not downloaded: %s", exc)
+            answer = "The photo could not be downloaded from Telegram."
+        except copilot_images.ImageError as exc:
+            answer = str(exc)
+        except Exception:  # noqa: BLE001 - the owner hears that it failed, never silence
+            log.exception("Telegram photo turn failed")
+            answer = FAILED
+        finally:
+            if image_id:
+                copilot_images.delete(image_id)
         await asyncio.to_thread(self._reply, message, answer)
 
     def _alert_context(self, alert_id: str) -> tuple[str, str | None] | None:
@@ -281,8 +379,9 @@ class Replies:
             return "That alert is no longer in the journal."
         return await self.turn(*found, said="Why? on a position alert")
 
-    async def question_text(self, text: str, replied: dict | None) -> str:
-        """One bounded copilot turn on a typed question; a reply to a ping carries that ping as its context."""
+    async def question_text(self, text: str, replied: dict | None, images: list[dict] | None = None) -> str:
+        """One bounded copilot turn on a typed question; a reply to a ping carries that ping as its context. ``images``:
+        a Telegram photo's image block, attached to the turn (the desk notes "(photo)", never keeps the image)."""
         from app.ai import copilot
         if not copilot.settings().enabled:
             return "Copilot Lab is off on this server, so there is no answer here."
@@ -299,9 +398,11 @@ class Replies:
         question = f"{context}\n\nMy question about this: {text}" if context else text
         # The desk keeps only the owner's own words: a ping's text (a headline, a research result) never becomes theirs.
         said = "Why? on a ping" if text == WHY_QUESTION else text if not context else f"(replying to a ping) {text}"
+        if images:
+            return await self.turn(question, symbol, said=f"(photo) {said}", images=images)
         return await self.turn(question, symbol, said=said)
 
-    async def turn(self, question: str, symbol: str | None, said: str | None = None) -> str:
+    async def turn(self, question: str, symbol: str | None, said: str | None = None, images: list[dict] | None = None) -> str:
         """One bounded copilot turn (the configured backend, its turn and daily budgets), as plain text for the chat."""
         from app.ai import copilot, copilot_spend
         from app.engine.chart_math import ET
@@ -324,7 +425,7 @@ class Replies:
         cards: list[str] = []
         try:
             turn = copilot_spend.recorded_turn(history, symbol, cfg, adapter, evidence, now, kind=None, source="telegram",
-                                               web=True)
+                                               images=images, web=True)
             async with contextlib.aclosing(turn) as events:
                 async for event in events:
                     if event.get("type") == "text":
