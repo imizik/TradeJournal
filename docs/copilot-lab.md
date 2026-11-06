@@ -1272,7 +1272,12 @@ since-entry comparison, the news reader) and writes nothing.
   thesis-watch pings. A voice note to the bot is a question too: 30 seconds and
   3 MB at most, transcribed by this server's Whisper with the owner's tickers as
   vocabulary (as hold-to-talk is), confirmed back as "Heard: …", then asked like
-  a typed message; the heard words are what the desk keeps.
+  a typed message; the heard words are what the desk keeps. A trade plan the
+  turn proposes is saved on the answer with the same shape and id as a desk
+  card (Main chat gives it its own plan thread), then sent as a message of its
+  own: the card's lines, **Confirm** (`pl:<card client id>:confirm`) and
+  **Edit** (the thread). The bot's taps: `fb:`, `rr:`, `pc:`, `pu:`, `pl:`,
+  `why:` and `ask:` (`engine/telegram_replies.py`).
 - Headlines are read through a two-minute cache per symbol and entry, so the
   desk header's and Charts' minute refresh and repeated turns make one news read.
 - The context route is owner-only: it is in `access_manifest.DOMAIN_ROUTES`,
@@ -1925,6 +1930,11 @@ nothing exists until the owner confirms.
       retry returns the first row), the investigation id, the symbol and the
       words, re-read on the server and saved in `plan_time_stop`
       (`backend/app/engine/plan_time_stops.py`).
+  - A plan proposed in a Telegram turn is confirmed the same way from its card
+    message: Confirm there records the card's outcome and arms only the
+    invalidation alert (a fresh quote, refused when stale or already crossed;
+    a second tap, or a card confirmed on the desk, arms nothing), and the desk
+    thread shows it confirmed with that alert armed.
   - **Follow-through.** A plan's pings name the plan:
     - When its entry or invalidation alert fires, the phone says
       "NBIS hit your 95.90 entry trigger. Still valid? Tap to check." or
@@ -2649,8 +2659,10 @@ ends reads "search failed (no result)". Each query is logged at INFO
   search results add input; the daily budget is unchanged. A `pause_turn` (a
   long server-side search) is sent back to resume, within that cap; a turn
   whose last round still paused ends with a `rounds` error, not a blank answer.
-  Telegram cannot show a card, so a proposed card is named at the end of the
-  reply with a pointer to the desk.
+  On Telegram a proposed trade plan (at most two a turn) is saved on the desk
+  as the desk saves a card and sent after the answer as its own message, with
+  Confirm and Edit (see Confirm a plan); any other card is named at the end of
+  the reply with a pointer to the desk.
 - **Research now.** When a question needs more than a turn can read, the
   prompt has the model answer what the evidence supports and then propose
   `propose_plan kind=revisit` with `horizon_days 0`: a **Proposed research**
