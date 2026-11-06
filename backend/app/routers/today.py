@@ -121,6 +121,7 @@ def _act_now(db: Session, quotes: SharedQuotes, now: float, today: date, book: d
             rows.append({"trade_id": row["trade_id"], "symbol": row["symbol"], "contract": row["contract"],
                          "quantity": row["quantity"], "unrealized_usd": row["unrealized_usd"],
                          "unrealized_pct": row["unrealized_pct"], "reasons": reasons,
+                         "thesis": row.get("thesis"),  # the position's thesis object, one line (trader_context)
                          # what the Copilot desk's decision bar says beside the reasons: the plan's level and the alert's time
                          "direction": row["direction"], "invalidation": level, "time_stop": stop,
                          "latest_alert": row["latest_alert"]})

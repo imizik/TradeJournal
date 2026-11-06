@@ -6,11 +6,13 @@ import { chartLink, fetchTradeCard, type ChartPosition, type TradeCardData } fro
 import { captureTime } from "@/lib/captures";
 import HoldingEntryContext from "./HoldingEntryContext";
 import PlanSummary from "./PlanSummary";
+import SinceEntry from "@/components/SinceEntry";
 
 const money = (n: number | null | undefined) => n == null || !Number.isFinite(n) ? "Unavailable" : n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
-/** Journal facts only. The workspace already reads positions; details are read
- * only for the owner's explicit selection. Never request option marks or alerts. */
+/** Journal facts, plus the selected trade's "Since you entered" record (its thesis
+ * and since-entry lines, the one read that includes a current mark). The workspace
+ * already reads positions; details are read only for the owner's explicit selection. */
 export default function HoldingContext({ symbol, positions, onPeers }: { symbol: string; positions?: ChartPosition[]; onPeers(): void }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState("");
@@ -62,13 +64,14 @@ function HoldingDetails({ symbol, id }: { symbol: string; id: string }) {
         <div><dt className="text-muted-foreground">{trade.direction === "long" ? "Remaining premium paid" : "Remaining entry premium received"}</dt><dd>{money(position.avg_cost == null ? null : position.avg_cost * position.open)}</dd></div>
         <div><dt className="text-muted-foreground">Realized on recorded exits</dt><dd>{money(position.realized)}</dd></div>
       </dl>}
-      <p className="text-muted-foreground">Recorded cost/credit, not current value or remaining loss. Option value unavailable here.</p>
+      <p className="text-muted-foreground">Recorded cost/credit, not current value or remaining loss.{position ? " The current mark is under Since you entered." : ""}</p>
       <p>Expiration: {trade.expiration ?? "Unavailable"}<br />Holding horizon: unspecified (not inferred from chart timeframe).</p>
       <p className="text-muted-foreground">Details read {captureTime(result.readAt!)}.<br />Latest recorded fill: {lastFill ? captureTime(lastFill) : "Unavailable"}. This is execution time, not import time.</p>
       <div className="flex flex-wrap gap-3 text-foreground">
         <Link href={`/trades/${id}`} className="py-2 underline">Trade details</Link>
         <Link href={chartLink({ symbol, from: trade.opened_at, trade: id })} className="py-2 underline">Entry on chart</Link>
       </div>
+      {position && <SinceEntry symbol={symbol} tradeId={id} className="rounded border border-border p-2" />}
       {position && <HoldingEntryContext symbol={symbol} tradeId={id} />}
       <details className="rounded border border-border p-2">
         <summary className="cursor-pointer py-1 text-foreground">Saved plan & reference</summary>

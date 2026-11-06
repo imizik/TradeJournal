@@ -53,6 +53,26 @@ export const fetchFillCard = (id: string, signal?: AbortSignal) => read<TradeCar
 export const fetchTradeCard = (id: string, signal?: AbortSignal) => read<TradeCardData>(`/charts/journal/trades/${encodeURIComponent(id)}`, signal);
 export const fetchOptionMark = (id: string) => read<OptionMark>(`/charts/journal/trades/${encodeURIComponent(id)}/mark`);
 
+/** One "since entry" line (backend ``engine/trader_context.py``): ``unavailable`` means the input is missing, never zero. */
+export type SinceLine = { key: string; state: "ok" | "unavailable"; text: string; as_of: string | null; source: string;
+  headlines?: { headline: string; publisher: string | null; at: string }[] };
+/** A position's thesis object: a plan card, a Charts plan, the companion's adopted draft, or none. */
+export type Thesis = {
+  source: "plan_card" | "plan_sheet" | "companion" | "none"; label: string; text: string | null; text_is_guess: boolean;
+  direction: string | null; horizon: string | null;
+  invalidation: { price: number; condition?: string; state: string } | null;
+  time_stop: { text: string | null; due_at: string | null; state: string } | null;
+  revisions: { at: string; by: string; kind: string; text: string | null }[];
+};
+/** One open position as one record: what the Desk header, Charts' Holding context and the copilot all read. */
+export type PositionRecord = {
+  trade_id: string; symbol: string; contract: string; thesis: Thesis;
+  alerts: { kind: string; at: string | null; source: string }[]; decisions: { at: string | null; text: string | null }[];
+  since_entry?: { as_of: string; lines: SinceLine[] };
+};
+export const fetchPositionContext = (symbol: string, signal?: AbortSignal) =>
+  read<{ state: "ok"; as_of: string; symbol: string; positions: PositionRecord[] }>(`/charts/journal/positions/${encodeURIComponent(symbol)}/context`, signal);
+
 /** A mark older than this reads as stale on the card. */
 export const MARK_STALE_SECONDS = 5 * 60;
 

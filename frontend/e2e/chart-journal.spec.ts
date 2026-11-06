@@ -444,6 +444,16 @@ test("holding context selects a contract, preserves partial-exit units and refre
   });
   let marks = 0;
   await page.route("**/api/backend/charts/journal/trades/*/mark", (route) => { marks++; return route.fulfill({ status: 503 }); });
+  // The selected trade's one record (trader_context): the same "Since you entered" block the Copilot desk shows.
+  await page.route("**/api/backend/charts/journal/positions/MRVL/context", (route) => route.fulfill({ json: { state: "ok",
+    as_of: new Date(now * 1000).toISOString(), symbol: "MRVL", units: "", positions: [{ trade_id: "o1", symbol: "MRVL", contract: "MRVL 1/15/27 95C",
+      thesis: { source: "plan_sheet", label: "Breakout", text: "Holds the 92 shelf into the custom-silicon update", text_is_guess: false,
+        direction: "long", horizon: "swing", invalidation: null, time_stop: null, revisions: [] },
+      alerts: [], decisions: [{ at: null, text: "Holding: plan intact" }],
+      since_entry: { as_of: new Date(now * 1000).toISOString(), lines: [
+        { key: "underlying", state: "ok", text: "MRVL 94.10 · +2.30% since entry (91.99) · the plan names no invalidation", as_of: new Date(now * 1000).toISOString(), source: "quote (≤60 s cache); entry: fill context (alpaca_sip)" },
+        { key: "group", state: "unavailable", text: "unavailable: Only entries from today's regular session are supported; overnight positions are unavailable", as_of: null, source: "Radar since-entry" },
+      ] } }] } }));
   await page.goto("/charts?symbol=MRVL");
   const info = page.getByRole("region", { name: "Symbol info", exact: true });
   await info.getByRole("tab", { name: "Overview", exact: true }).click();
@@ -457,6 +467,11 @@ test("holding context selects a contract, preserves partial-exit units and refre
   await expect(holding).toContainText("Realized on recorded exits$110.00");
   await expect(holding).toContainText("not live broker holdings");
   await expect(holding).toContainText("Holding horizon: unspecified");
+  const since = holding.getByRole("region", { name: "Since you entered" });
+  await expect(since).toContainText("Charts plan: Holds the 92 shelf into the custom-silicon update");
+  await expect(since).toContainText("MRVL 94.10 · +2.30% since entry (91.99)");
+  await expect(since.locator("li[data-state=unavailable]")).toContainText("overnight positions are unavailable");
+  await expect(since).toContainText("Your decisions: Holding: plan intact");
   await expect(holding).toContainText("Expiration: 2027-01-15");
   await expect(holding.getByRole("link", { name: "Trade details", exact: true })).toHaveAttribute("href", "/trades/o1");
   await holding.getByText("Saved plan & reference", { exact: true }).click();

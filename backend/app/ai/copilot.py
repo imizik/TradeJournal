@@ -19,7 +19,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, AsyncIterator
 from urllib.parse import urlsplit
 
@@ -1518,8 +1518,10 @@ def proposal_event(tool_event: dict) -> dict | None:
     return None
 
 
-# Evidence a conversation's next turn may reuse, kept in this process and never sent to the browser: the panel gets an
-# opaque id and sends it back. A restart, another worker or an expired id only means the next turn reads afresh.
+# Evidence a conversation's next turn may reuse, never sent to the browser: the panel gets an opaque id and sends it
+# back. Kept in this process and in ``copilot_carry`` (with the conversation's investigation when it has one), so a
+# restart or a reload finds it by its id or by the investigation; an expired id, or a store that cannot be read, only
+# means the next turn reads afresh.
 CARRY_TTL_S = 2 * 3600
 CARRY_ITEMS = 6
 CARRY_ITEM_CHARS = 2500
@@ -1530,11 +1532,44 @@ CARRY_END = "[End of earlier evidence]"
 _CARRY: dict[str, tuple[float, str, list[dict]]] = {}
 
 
-def carried(carry_id: str | None, mode: str) -> list[dict]:
-    """The evidence an earlier turn kept under ``carry_id``; none once it expired, was never kept here, or was read in
-    another evidence mode (live evidence must never reach a replay turn, nor fixture data a live one)."""
+def carried(carry_id: str | None, mode: str, investigation_id=None) -> list[dict]:
+    """The evidence an earlier turn kept under ``carry_id`` (or, with no id this process knows, the newest kept for
+    ``investigation_id``); none once it expired, was never kept, or was read in another evidence mode (live evidence
+    must never reach a replay turn, nor fixture data a live one)."""
     hit = _CARRY.get(carry_id or "")
-    return hit[2] if hit and hit[1] == mode and time.monotonic() - hit[0] <= CARRY_TTL_S else []
+    if hit and hit[1] == mode and time.monotonic() - hit[0] <= CARRY_TTL_S:
+        return hit[2]
+    if not carry_id and not investigation_id:
+        return []
+    return _stored_carry(carry_id, mode, investigation_id)
+
+
+def _investigation_key(value) -> uuid.UUID | None:
+    try:
+        return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value)) if value else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _stored_carry(carry_id: str | None, mode: str, investigation_id) -> list[dict]:
+    from sqlmodel import Session, col, select
+    from app.database import engine
+    from app.models import CopilotCarry
+    since = datetime.utcnow() - timedelta(seconds=CARRY_TTL_S)
+    key = _investigation_key(investigation_id)
+    try:
+        with Session(engine) as db:
+            row = db.get(CopilotCarry, carry_id) if carry_id and re.fullmatch(CARRY_ID, carry_id) else None
+            if row is None and key is not None:
+                row = db.exec(select(CopilotCarry).where(CopilotCarry.investigation_id == key)
+                              .order_by(col(CopilotCarry.saved_at).desc())).first()
+            if row is None or row.mode != mode or row.saved_at < since:
+                return []
+            items = json.loads(row.items_json)
+    except Exception as exc:  # noqa: BLE001 - an unreadable store only means the turn reads afresh
+        log.warning("copilot carry unreadable: %s", type(exc).__name__)
+        return []
+    return [i for i in items if isinstance(i, dict) and {"key", "read_at", "text"} <= i.keys()][:CARRY_ITEMS]
 
 
 def carry_items(ran: list[tuple[dict, dict]], earlier: list[dict], now: datetime) -> list[dict]:
@@ -1559,7 +1594,7 @@ def _carried_text(text: str) -> str:
     return text if len(text) <= CARRY_ITEM_CHARS else text[:CARRY_ITEM_CHARS - 10] + " [clipped]"
 
 
-def keep_carry(items: list[dict], mode: str) -> str | None:
+def keep_carry(items: list[dict], mode: str, investigation_id=None) -> str | None:
     """Keep ``items`` for the conversation's next turn; the id the panel sends back, or None when there is nothing."""
     if not items:
         return None
@@ -1570,7 +1605,27 @@ def keep_carry(items: list[dict], mode: str) -> str | None:
         del _CARRY[next(iter(_CARRY))]  # the oldest first: dicts keep insertion order
     carry_id = uuid.uuid4().hex
     _CARRY[carry_id] = (clock, mode, items)
+    _store_carry(carry_id, mode, items, investigation_id)
     return carry_id
+
+
+def _store_carry(carry_id: str, mode: str, items: list[dict], investigation_id) -> None:
+    """The durable copy: bounded by the TTL (older rows pruned) and one row per investigation (its newest)."""
+    from sqlalchemy import delete, or_
+    from sqlmodel import Session
+    from app.database import engine
+    from app.models import CopilotCarry
+    now = datetime.utcnow()
+    key = _investigation_key(investigation_id)
+    try:
+        with Session(engine) as db:
+            stale = CopilotCarry.saved_at < now - timedelta(seconds=CARRY_TTL_S)
+            db.exec(delete(CopilotCarry).where(or_(stale, CopilotCarry.investigation_id == key) if key else stale))
+            db.add(CopilotCarry(carry_id=carry_id, investigation_id=key, mode=mode,
+                                items_json=json.dumps(items, default=str), saved_at=now))
+            db.commit()
+    except Exception as exc:  # noqa: BLE001 - this process still holds it
+        log.warning("copilot carry not stored: %s", type(exc).__name__)
 
 
 def carry_block(items: list[dict]) -> str:
@@ -1677,7 +1732,7 @@ def web_events(content: list[dict], now: datetime, pending: dict[str, str]) -> t
 
 async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapter, evidence,
                    now: datetime, images: list[dict] | None = None, carry_id: str | None = None,
-                   live: dict | None = None, web: bool = False) -> AsyncIterator[dict]:
+                   live: dict | None = None, web: bool = False, investigation_id=None) -> AsyncIterator[dict]:
     """Stream one turn as UI events: progress, text, tool, error, done (always last, with metrics and the ``carry_id``
     the next turn sends back). ``images`` are the owner's shared screenshots as image blocks (``copilot_images.block``),
     sent with their message; ``carry_id`` names the evidence the conversation's previous turn kept. ``live``, when
@@ -1691,7 +1746,8 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
     if replay:
         now = evidence.at
     mode = getattr(evidence, "label", "")
-    earlier = carried(carry_id, mode) if len(history) > 1 else []
+    # ``investigation_id``: the saved conversation, so a reload (no carry id) or a restart still finds its evidence.
+    earlier = await asyncio.to_thread(carried, carry_id, mode, investigation_id) if len(history) > 1 else []
     ran_all: list[tuple[dict, dict]] = []
     block, pack_event = await owner_context(evidence, symbol, cfg)
     messages[-1] = {"role": "user", "content": context_line(symbol, now, replay, simulated) + carry_block(earlier) + block
@@ -1821,4 +1877,5 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
              metrics["total_ms"], metrics["rounds"],
              ",".join(t["name"] for t in metrics["tool_calls"]), usage["input_tokens"], usage["output_tokens"],
              usage["cache_read_input_tokens"], metrics["cost_usd"])
-    yield {"type": "done", "metrics": metrics, "carry_id": keep_carry(carry_items(ran_all, earlier, now), mode)}
+    kept = await asyncio.to_thread(keep_carry, carry_items(ran_all, earlier, now), mode, investigation_id)
+    yield {"type": "done", "metrics": metrics, "carry_id": kept}

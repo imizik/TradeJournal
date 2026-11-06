@@ -29,6 +29,10 @@ reply to a ping, the ping is its context: a position alert's (found from the pin
 note on what the bot does. One turn runs at a time, shared with Why?; a question while one runs is not asked, and the
 reply says so. A question is cut to ``QUESTION_MAX`` characters.
 
+Each question and Why? answer is also saved on the desk (``save_on_desk``), the question marked "From Telegram:": as
+two messages on the symbol's thread (its plan, else the conversation the companion adopted it in, else the newest open
+conversation about it, else a new ``<symbol> · Telegram`` one), or, with no symbol, in today's Main chat.
+
 Every handled tap is answered (``answerCallbackQuery``) and the message's keyboard is edited to show the answer
 chosen. Each tap is recorded once in the rows those routes already write; there is no table of its own. Known
 limit: the offset lives in memory, so a tap handled just before a restart may be read again after it; the feedback
@@ -334,7 +338,18 @@ class Replies:
         if errors:
             answer = (answer + "\n\n" if answer else "") + " ".join(errors)
         answer = answer or "The copilot gave no answer."
-        return answer if len(answer) <= ANSWER_MAX else answer[: ANSWER_MAX - 1].rstrip() + "…"
+        answer = answer if len(answer) <= ANSWER_MAX else answer[: ANSWER_MAX - 1].rstrip() + "…"
+        await asyncio.to_thread(self._save, question, symbol, answer, now)
+        return answer
+
+    def _save(self, question: str, symbol: str | None, answer: str, now: datetime) -> None:
+        """The question and answer as messages on the desk: the symbol's thread (``thread_for``), else today's Main
+        chat. A failure only leaves the desk without them; the chat already has the answer."""
+        try:
+            with Session(self.engine) as db:
+                save_on_desk(db, question, symbol, answer, now)
+        except Exception:  # noqa: BLE001
+            log.warning("Telegram answer not saved on the desk", exc_info=True)
 
     # -------------------------------------------------------------- the chat
 
@@ -377,6 +392,45 @@ class Replies:
                                                       "reply_markup": {"inline_keyboard": edited}})
         except telegram.TelegramError as exc:
             log.info("Telegram keyboard not updated: %s", exc)
+
+
+FROM_TELEGRAM = "From Telegram: "
+
+
+def thread_for(db: Session, symbol: str) -> str:
+    """The symbol's desk thread: its plan (in a position first), else the conversation the companion adopted it in,
+    else the newest open conversation about it, else a new one, ``<symbol> · Telegram``."""
+    from sqlmodel import col, select
+    from app.engine import copilot_investigations, desk_context, position_companion
+    from app.models import CopilotInvestigation
+    found = desk_context.symbol_thread(db, symbol).id
+    if found:
+        return found
+    for row in position_companion.adopted_trades(db).values():
+        if row.ticker == symbol and row.investigation_id:
+            return str(row.investigation_id)
+    latest = db.exec(select(CopilotInvestigation).where(CopilotInvestigation.symbol == symbol, CopilotInvestigation.status == "open",
+                                                        CopilotInvestigation.source == "copilot", CopilotInvestigation.main_day.is_(None))
+                     .order_by(col(CopilotInvestigation.updated_at).desc())).first()
+    if latest is not None:
+        return str(latest.id)
+    return copilot_investigations.create(copilot_investigations.InvestigationFields(title=f"{symbol} · Telegram", symbol=symbol),
+                                         session=db)["id"]
+
+
+def save_on_desk(db: Session, question: str, symbol: str | None, answer: str, now: datetime) -> str:
+    """Append one Telegram exchange to the desk; the investigation id it went to."""
+    from app.engine import copilot_investigations as investigations, position_companion
+    messages = [{"role": "user", "content": FROM_TELEGRAM + question}, {"role": "assistant", "content": answer}]
+    if symbol:
+        target = thread_for(db, symbol)
+        position_companion.save_messages(target, messages, session=db)
+        return target
+    from app.engine.chart_math import ET
+    main = investigations.main_chat(db, now.astimezone(ET).date())
+    exchange = investigations.InvestigationFields(title=main["title"], transcript=[
+        messages[0], {**messages[1], "exchange_id": f"telegram-{uuid.uuid4().hex}"}])
+    return investigations.append_main(db, main["id"], exchange)["id"]
 
 
 def _trade_for(db: Session, alert) -> uuid.UUID | None:

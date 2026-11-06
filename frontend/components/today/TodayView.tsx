@@ -18,7 +18,7 @@ import ScalpShortlistPanel from "@/components/ScalpShortlistPanel";
 // GET /today (backend/app/routers/today.py): every section is built on its own; a failed one reads { state: "unavailable" }.
 type Unavailable = { state: "unavailable" };
 type Reason = { kind: string; text: string };
-type ActRow = { trade_id: string; symbol: string; contract: string; quantity: number; unrealized_usd: number | null; unrealized_pct: number | null; reasons: Reason[] };
+type ActRow = { trade_id: string; symbol: string; contract: string; quantity: number; unrealized_usd: number | null; unrealized_pct: number | null; reasons: Reason[]; thesis?: string | null };
 type PlanRow = { symbol: string; direction: string | null; thesis: string | null; last: number | null; trigger: "entry" | "invalidation"; price: number; distance_pct: number; position: string; path: string };
 type RadarRow = { event_id: string; symbol: string; kind: string | null; direction: string | null; summary: string | null; first_seen_at: string | null; path: string };
 type ThesisRow = { symbol: string; kind: string; text: string; fired_at: string | null; delivery: string; path: string };
@@ -87,6 +87,7 @@ function ActNow({ section, lab }: { section: Today["act_now"]; lab: boolean }) {
           </span>
         </div>
         <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs tabular-nums text-primary">{row.reasons.map(r => <span key={r.kind}>{r.text}</span>)}</div>
+        {row.thesis && <p className="mt-0.5 truncate text-xs text-muted-foreground" data-testid="today-act-thesis" title={row.thesis}>{row.thesis}</p>}
       </Row>))}
     </ul>
   </Section>;

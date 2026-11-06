@@ -202,7 +202,7 @@ def test_malformed_saved_context_still_delivers_original_alert_once(engine, worl
     world[2].deliver()
     world[2].deliver()
     assert len(attempts) == 1 and alerts(engine)[0].delivery == "sent"
-    assert attempts[0][1].endswith("\n\nSince-entry context unavailable.")
+    assert "\n\nSince-entry context unavailable.\nSince you entered: no plan saved · held " in attempts[0][1]  # the thesis line follows
     assert attempts[0][1].startswith(position_alerts._base_message(alert, "4:00 PM", 20)[1])
     assert attempts[0][2]["path"] == f"/trades/{alert.trade_id}?alert={alert.id}"
 

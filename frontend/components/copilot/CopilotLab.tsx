@@ -443,6 +443,8 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
             <><RadarDecision key={link.radar} eventId={link.radar} symbol={link.symbol} fill={fill} /><ThreadHitRating key={`rate-${link.radar}`} eventId={link.radar} /></>
           ) : !thread && link?.symbol && !link.investigation ? (
             <div className="mb-4 space-y-3">
+              {/* An open position, planned or not, still gets its header and since-entry lines. */}
+              <DeskThreadTop thread={deskSymbolThread(link.symbol)} heldOnly compact={deciding} />
               {/* No conversation, so no thread header: the symbol's horizon sits on its own line. */}
               <p className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Link href={`/charts?symbol=${encodeURIComponent(link.symbol)}`} aria-label={`Open ${link.symbol} chart`} title={`Open ${link.symbol} in Charts`}
