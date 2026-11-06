@@ -129,6 +129,31 @@ def test_a_paid_model_without_a_cap_or_key_is_refused_before_any_client(harness,
     assert not (harness / "paid").exists()
 
 
+def test_a_paid_run_closes_the_client_on_the_loop_it_ran_on(harness, monkeypatch):
+    """The first VPS run lost every record: the client was closed with a second ``asyncio.run`` after the first loop
+    had closed, which raises before the records are written. The close must happen on the running loop."""
+    import asyncio
+    closed_on = []
+
+    class Adapter:
+        def __init__(self, cfg):
+            pass
+
+        async def aclose(self):
+            closed_on.append(asyncio.get_running_loop().is_running())
+
+    async def no_cases(*args, **kwargs):
+        return [], 0.0
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(copilot_eval.copilot, "AnthropicAdapter", Adapter)
+    monkeypatch.setattr(copilot_eval, "run_all", no_cases)
+    out = harness / "paid"
+    assert copilot_eval.main(["run", "--cases", str(CASES), "--model", "claude-sonnet-5-5", "--max-cost-usd", "1", "--out", str(out)]) == 0
+    assert closed_on == [True]
+    assert (out / "records.jsonl").exists() and json.loads((out / "run.json").read_text())["count"] == 0
+
+
 def test_grading_with_the_judge_needs_a_cap(harness, capsys):
     out = harness / "run"
     copilot_eval.main(["run", "--cases", str(CASES), "--model", "fake", "--out", str(out)])

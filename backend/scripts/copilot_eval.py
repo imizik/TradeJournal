@@ -232,11 +232,16 @@ def cmd_run(args) -> int:
     adapter = copilot.FakeAdapter(0) if not paid else copilot.AnthropicAdapter(cfg_for(0.25))
     out = Path(args.out) if args.out else DATA_DIR / "runs" / f"{datetime.now():%Y%m%d-%H%M%S}-{args.model}-{args.effort}"
     started = datetime.now()
-    try:
-        records, spent = asyncio.run(run_all(cases, args, cfg_for, adapter, evidence_for, replay_at))
-    finally:
-        if hasattr(adapter, "aclose"):
-            asyncio.run(adapter.aclose())
+    async def go():
+        try:
+            return await run_all(cases, args, cfg_for, adapter, evidence_for, replay_at)
+        finally:
+            # The API client must close on the loop it ran on; closing it on a second loop raises "Event loop is
+            # closed" and the records are never written (seen on the first VPS run, 2026-11-06).
+            if hasattr(adapter, "aclose"):
+                await adapter.aclose()
+
+    records, spent = asyncio.run(go())
     write_jsonl(out / "records.jsonl", records)
     meta = {"model": args.model, "effort": args.effort, "backend": "fake" if not paid else "anthropic", "evidence": args.evidence,
             "replay_at": replay_at, "cases": str(Path(args.cases).resolve()), "started_at": started.isoformat(timespec="seconds"),
