@@ -450,6 +450,12 @@ async def lifespan(_app: FastAPI):
     market_watch = await _maybe_start_market_watch(_app)
     radar = await _maybe_start_radar(_app)
     archive = _maybe_start_premarket_archive()
+    from app.engine import first_pullback
+    pullback = None
+    if first_pullback.enabled():
+        from app.engine.chart_feed import chart_feed
+        watcher = first_pullback.FirstPullbackAlerts(engine, chart_feed, chart_calendar)
+        pullback = asyncio.create_task(watcher.watch())
     outside_scan = _maybe_start_radar_outside_scan()
     jo_morning = await _maybe_start_jo_morning(_app)
     research = await _maybe_start_research_queue(_app)
@@ -472,6 +478,9 @@ async def lifespan(_app: FastAPI):
             await asyncio.wait({research}, timeout=10)
         if market_watch is not None:
             market_watch.cancel()
+        if pullback is not None:
+            pullback.cancel()
+            await asyncio.gather(pullback, return_exceptions=True)
         if outside_scan is not None:
             outside_scan.cancel()
         if archive is not None:
