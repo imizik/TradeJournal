@@ -832,3 +832,185 @@ def test_a_document_that_is_not_an_image_is_ignored(case, files):
     replies = telegram_replies.Replies(db_engine, call=bot)
     assert run(replies.handle(photo(document={"file_id": "pdf", "mime_type": "application/pdf"}))) is None
     assert bot.calls == [] and not files["gets"]
+
+
+# ------------------------------------------------------------------ plan cards
+
+PLAN_EVENT = {"type": "proposal", "id": "toolu_01PlanNBIS", "kind": "trade_plan", "symbol": "NBIS", "direction": "long",
+              "instrument": "calls", "contract": "NBIS 100C 11/21", "thesis": "Holds the base above 95",
+              "entry_trigger": {"condition": "crosses", "price": 100.0, "interval": None},
+              "invalidation": {"condition": "closes_beyond", "price": 95.0, "interval": "5m"},
+              "time_stop": "out by 15:30", "size_note": None, "last": 98.0, "as_of": 1_762_440_000.0}
+PLAN_CARD = {k: v for k, v in PLAN_EVENT.items() if k != "type"}
+
+
+def plan_turn(monkeypatch):
+    from app.ai import copilot_spend
+
+    async def scripted(*args, **kwargs):
+        yield {"type": "text", "delta": "Verdict: Plan it. Wait for 100."}
+        yield PLAN_EVENT
+        yield {"type": "done"}
+    monkeypatch.setattr(copilot_spend, "recorded_turn", scripted)
+
+
+def ask_plan(db_engine, monkeypatch, bot, quote=(98.0, True)):
+    lab_on(monkeypatch)
+    plan_turn(monkeypatch)
+    changed = []
+    replies = telegram_replies.Replies(db_engine, call=bot, alerts_changed=lambda: changed.append(1))
+    replies.quote = lambda symbol: quote
+
+    async def go():
+        assert await replies.handle(said("Plan NBIS for me?")) == "ask"
+        await asyncio.gather(*replies._tasks)
+    run(go())
+    return replies, changed
+
+
+def card_data(bot) -> str:
+    card = next(m for m in bot.named("sendMessage") if "reply_markup" in m)
+    return card["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
+
+
+def test_a_proposed_plan_is_saved_as_the_desk_saves_it_and_sent_after_the_answer_with_confirm_and_edit(case, monkeypatch):
+    from app.engine import copilot_investigations
+    from app.models import CopilotInvestigation
+    db_engine, _ = case
+    monkeypatch.setenv("ALERT_APP_URL", "https://journal.example/")
+    bot = Bot()
+    ask_plan(db_engine, monkeypatch, bot)
+    answer, card = bot.named("sendMessage")
+    assert answer["text"].startswith("Verdict: Plan it.") and "only be confirmed on the desk" not in answer["text"]
+    lines = card["text"].splitlines()
+    assert lines[:5] == ["Proposed trade plan · NBIS · Buy calls · NBIS 100C 11/21", "Thesis: Holds the base above 95",
+                         "Entry: crosses 100", "Invalidation: 5m close beyond 95", "Time stop: out by 15:30"]
+    assert lines[5] in ("Horizon: Day trade", "Horizon: Swing") and lines[6] == telegram_replies.PLAN_FOOTER
+    assert card["reply_parameters"]["message_id"] == 61
+    (confirm,), (edit,) = card["reply_markup"]["inline_keyboard"]
+    assert confirm["text"] == "Confirm" and confirm["callback_data"].startswith("pl:") and confirm["callback_data"].endswith(":confirm")
+    assert len(confirm["callback_data"].encode()) <= telegram.CALLBACK_MAX
+    key = confirm["callback_data"].split(":")[1]
+    with Session(db_engine) as db:
+        thread_id, saved = telegram_replies.find_plan(db, key)
+        main = db.exec(select(CopilotInvestigation).where(CopilotInvestigation.main_day.is_not(None))).one()
+        thread = copilot_investigations.get(thread_id, session=db)
+        assert thread["main_day"] is None and thread["symbol"] == "NBIS"
+        # The desk's shape: the proposal without its event type (last and as_of kept), its id as Main chat numbers it, a client id.
+        assert saved == {**PLAN_CARD, "id": saved["id"], "client_id": key}
+        assert copilot_investigations.main_plan_thread(db, str(main.id), saved["id"])["id"] == thread_id
+        main_card = json.loads(main.transcript_json)[-1]["proposals"][0]
+        assert main_card["client_id"] == key and main_card["id"] == saved["id"]
+    assert edit == {"text": "Edit", "url": f"https://journal.example/copilot-lab?investigation={thread_id}"}
+
+
+def test_a_plan_on_the_symbols_thread_keeps_its_id_made_unique_in_the_conversation(case, monkeypatch):
+    from app.engine import copilot_investigations
+    db_engine, _ = case
+    with Session(db_engine) as db:
+        thread = copilot_investigations.create(copilot_investigations.InvestigationFields(
+            title="NBIS", symbol="NBIS", transcript=[{"role": "user", "content": "q"},
+                                                     {"role": "assistant", "content": "a", "proposals": [PLAN_CARD]}]), session=db)
+        monkeypatch.setattr(telegram_replies, "thread_for", lambda db_, symbol: thread["id"])
+        card = {**PLAN_CARD, "client_id": "a" * 32}
+        target = telegram_replies.save_on_desk(db, "Plan it?", "NBIS", "Verdict: Plan it.", datetime(2026, 11, 6, 15), [card])
+        assert target == thread["id"]
+        last = copilot_investigations.get(target, session=db)["transcript"][-1]
+        assert last["proposals"] == [{**card, "id": "toolu_01PlanNBIS.2"}]
+        assert telegram_replies.find_plan(db, "a" * 32) == (thread["id"], last["proposals"][0])
+
+
+def test_confirm_records_the_outcome_and_arms_the_invalidation_once(case, monkeypatch):
+    from app.models import LevelAlert
+    db_engine, _ = case
+    bot = Bot()
+    replies, changed = ask_plan(db_engine, monkeypatch, bot)
+    data = card_data(bot)
+    keyboard = [[{"text": "Confirm", "callback_data": data}]]
+    assert run(replies.handle(tap(data, keyboard=keyboard, update_id=5))) == "pl"
+    assert run(replies.handle(tap(data, keyboard=keyboard, update_id=6))) == "pl"  # a second tap arms nothing more
+    assert [a["text"] for a in bot.named("answerCallbackQuery")] == [
+        "Confirmed: invalidation 95.00 on NBIS is armed.", "Already confirmed: its invalidation alert is armed."]
+    assert bot.named("editMessageReplyMarkup")[0]["reply_markup"]["inline_keyboard"][0][0]["text"] == "✓ Confirmed"
+    with Session(db_engine) as db:
+        thread_id, card = telegram_replies.find_plan(db, data.split(":")[1])
+        alerts = db.exec(select(LevelAlert)).all()
+    assert [(a.symbol, a.price, a.condition, a.interval, a.plan_role, a.source_kind, a.source_id, a.direction, a.state) for a in alerts] == [
+        ("NBIS", 95.0, "closes_beyond", "5m", "invalidation", "copilot", thread_id, "down", "active")]
+    outcome = card["outcome"]
+    assert outcome["state"] == "confirmed" and outcome["note"].startswith(telegram_replies.FROM_TELEGRAM_NOTE)
+    assert outcome["parts"] == {"invalidation": {"state": "done", "text": "Set: NBIS 5m close beyond 95."}}
+    assert (outcome["fields"]["entry"], outcome["fields"]["invalidation"], outcome["fields"]["thesis"]) == ("100", "95", PLAN_EVENT["thesis"])
+    assert changed == [1, 1]
+
+
+def test_a_plan_confirmed_on_the_desk_or_dismissed_arms_nothing(case, monkeypatch):
+    from app.engine import copilot_investigations as inv
+    from app.models import LevelAlert
+    db_engine, _ = case
+    bot = Bot()
+    ask_plan(db_engine, monkeypatch, bot)
+    key = card_data(bot).split(":")[1]
+    with Session(db_engine) as db:
+        thread_id, card = telegram_replies.find_plan(db, key)
+        inv.set_outcome(thread_id, card["id"], inv.ProposalOutcome(state="dismissed"), session=db)
+    assert telegram_replies.confirm_plan(db_engine, key, quote=lambda s: (98.0, True)) == (
+        "Not confirmed: this plan was dismissed on the desk.", None)
+    with Session(db_engine) as db:
+        inv.set_outcome(thread_id, card["id"], inv.ProposalOutcome(state="confirmed", parts={"plan": {"state": "done", "text": "Saved."}}),
+                        session=db)
+    assert telegram_replies.confirm_plan(db_engine, key, quote=lambda s: (98.0, True)) == ("Already confirmed on the desk.", "Confirmed")
+    with Session(db_engine) as db:
+        assert db.exec(select(LevelAlert)).all() == []
+
+
+@pytest.mark.parametrize("quote, reply", [
+    ((94.0, True), "NBIS is at 94.00, already past the invalidation at 95.00, so it was not armed."),
+    ((98.0, False), "The latest NBIS quote is stale or missing, so nothing was armed. Try again."),
+    ((None, False), "The latest NBIS quote is stale or missing, so nothing was armed. Try again.")])
+def test_a_crossed_invalidation_or_a_stale_quote_arms_nothing(case, monkeypatch, quote, reply):
+    from app.models import LevelAlert
+    db_engine, _ = case
+    bot = Bot()
+    replies, changed = ask_plan(db_engine, monkeypatch, bot, quote=quote)
+    data = card_data(bot)
+    run(replies.handle(tap(data, keyboard=[[{"text": "Confirm", "callback_data": data}]], update_id=5)))
+    assert bot.named("answerCallbackQuery")[0]["text"] == reply
+    assert bot.named("editMessageReplyMarkup") == [] and changed == []
+    with Session(db_engine) as db:
+        assert db.exec(select(LevelAlert)).all() == []
+        assert "outcome" not in telegram_replies.find_plan(db, data.split(":")[1])[1]
+
+
+def test_a_failed_card_send_leaves_the_answer_sent_and_the_plan_on_the_desk(case, monkeypatch, caplog):
+    from app.models import CopilotInvestigation
+    db_engine, _ = case
+
+    class Refusing(Bot):
+        def __call__(self, name, *, json=None, timeout=None, **kw):
+            if name == "sendMessage" and "reply_markup" in (json or {}):
+                raise telegram.TelegramError("Bad Request: refused")
+            return super().__call__(name, json=json, timeout=timeout, **kw)
+    bot = Refusing()
+    ask_plan(db_engine, monkeypatch, bot)
+    (answer,) = bot.named("sendMessage")
+    assert answer["text"].startswith("Verdict: Plan it.")
+    assert "Telegram plan card not delivered" in caplog.text
+    with Session(db_engine) as db:
+        threads = db.exec(select(CopilotInvestigation).where(CopilotInvestigation.main_day.is_(None))).all()
+    (thread,) = [t for t in threads if "trade_plan" in t.transcript_json]
+    assert json.loads(thread.transcript_json)[-1]["proposals"][0]["symbol"] == "NBIS"
+
+
+def test_a_plan_tap_from_anyone_else_is_ignored(case, monkeypatch):
+    from app.models import LevelAlert
+    db_engine, _ = case
+    bot = Bot()
+    replies, _changed = ask_plan(db_engine, monkeypatch, bot)
+    data = card_data(bot)
+    assert run(replies.handle(tap(data, chat="999", update_id=5))) is None
+    assert run(replies.handle(tap(data, sender="999", update_id=6))) is None
+    assert bot.named("answerCallbackQuery") == []
+    with Session(db_engine) as db:
+        assert db.exec(select(LevelAlert)).all() == []
+    assert telegram_replies.confirm_plan(db_engine, "not-a-key", quote=lambda s: (98.0, True)) == ("That plan is no longer on the desk.", None)

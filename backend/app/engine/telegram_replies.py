@@ -16,6 +16,8 @@ A button's callback data is ``<verb>:<id>[:<answer>]``, at most 64 bytes:
 - ``pc:<companion id>:confirm|ignore``: the position companion's adopt message (``engine/position_companion.py``):
   Confirm arms the draft plan's invalidation alert as a confirmed plan card does, Ignore stops its updates;
 - ``pu:<companion id>:<update>:closed|holding``: the owner's answer to a companion update, recorded on its row;
+- ``pl:<card client id>:confirm``: a trade plan a Telegram turn proposed (``_send_plans``): Confirm records the card's
+  outcome and arms its invalidation alert as the desk's Confirm does (``confirm_plan``), and nothing else;
 - ``why:<position alert id>``: one bounded copilot turn on the alert (``position_alerts.ask_context``, the configured
   backend and its turn and daily budgets), answered in the chat with the Verdict line and body cut to 1,500
   characters; with Copilot Lab off the reply says so. One turn runs at a time, and a message's Why? is asked once.
@@ -45,6 +47,15 @@ it in, else the newest open conversation about it; its ``updated_at`` left as it
 same conversation), or, with none or no symbol, in today's Main chat. No conversation is created (an open one with a
 symbol would start thesis-watch pings).
 
+A ``trade_plan`` card the turn proposes (at most ``PLAN_CARDS``) is saved on the answer as the desk saves one (the
+proposal event without its type, its id made unique in the conversation, and a client id; on Main chat ``append_main``
+gives it its own plan thread), then sent after the answer as its own message: the card's lines, Confirm
+(``pl:<client id>:confirm``) and Edit (the thread on the desk). The callback carries the card's client id, 32 hex
+characters, because the proposal id is only unique within its conversation and the conversation's id beside it does
+not fit 64 bytes; a tap finds the card by that id in the saved conversations (``find_plan``). Other cards are named at
+the end of the answer, to confirm on the desk. A card message that fails to send is logged; the answer is already sent
+and the card is on the desk.
+
 Every handled tap is answered (``answerCallbackQuery``) and the message's keyboard is edited to show the answer
 chosen. Each tap is recorded once in the rows those routes already write; there is no table of its own. Known
 limit: the offset lives in memory, so a tap handled just before a restart may be read again after it; the feedback
@@ -53,8 +64,10 @@ and rating writes are idempotent, a repeated ``why`` or question asks once more.
 
 import asyncio
 import contextlib
+import json
 import logging
 import re
+import time
 import uuid
 from datetime import datetime
 
@@ -84,6 +97,14 @@ RADAR_LABELS = {"useful": "Useful", "already_knew": "Already knew", "too_late": 
 DONE = "done"  # a button that shows a chosen answer (``done:<id>``, so a reply still finds the alert); a tap does nothing
 WHY = object()  # _mark's marker for a Why? tap
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
+PLAN_CARDS = 2  # trade plan cards sent per turn
+PLAN_KEY = re.compile(r"^[0-9a-f]{32}$")  # a Telegram card's client id
+PLAN_FOOTER = "Nothing is placed; Confirm arms the invalidation alert."
+FROM_TELEGRAM_NOTE = "Confirmed from Telegram"
+PLAN_SIDE = {("long", "stock"): "Buy stock", ("short", "stock"): "Short stock", ("long", "calls"): "Buy calls",
+             ("short", "puts"): "Buy puts"}
+HORIZON_LABEL = {"day": "Day trade", "swing": "Swing", "long": "Long hold"}
+CONDITION = {"touches": "touches", "crosses": "crosses", "closes_beyond": "closes beyond"}
 
 
 def feedback_buttons(alert_id, ratings: tuple[str, ...] = ("prompted_review", "already_aware")) -> tuple[tuple[str, str], ...]:
@@ -105,6 +126,8 @@ class Replies:
         self.last_error: str | None = None
         self._tasks: set[asyncio.Task] = set()
         self._asked: set = set()  # messages whose Why? was asked in this process
+        self._plans: list[str] = []  # the client ids of the plan cards the running turn saved, sent after its answer
+        self.quote = None  # a test's quote reader for Confirm; None reads the copilot's fresh quote
 
     async def loop(self) -> None:
         while True:
@@ -147,6 +170,8 @@ class Replies:
             reply, chosen = await asyncio.to_thread(self._rating, *rest.partition(":")[::2])
         elif verb == "pc":
             reply, chosen = await asyncio.to_thread(self._companion, *rest.partition(":")[::2])
+        elif verb == "pl":
+            reply, chosen = await asyncio.to_thread(self._plan, *rest.partition(":")[::2])
         elif verb == "pu":
             from app.engine import position_companion
             companion_id, _, tail = rest.partition(":")
@@ -267,6 +292,14 @@ class Replies:
             return position_companion.ignore(self.engine, companion_id)
         return "That button is not one the app knows.", None
 
+    def _plan(self, client_id: str, action: str) -> tuple[str, str | None]:
+        if action != "confirm":
+            return "That button is not one the app knows.", None
+        reply, chosen = confirm_plan(self.engine, client_id, quote=self.quote)
+        if chosen and self.alerts_changed is not None:
+            self.alerts_changed()
+        return reply, chosen
+
     async def _why(self, alert_id: str, message: dict) -> None:
         try:
             text = await self.why_text(alert_id)
@@ -274,6 +307,7 @@ class Replies:
             log.exception("Telegram Why? turn failed")
             text = FAILED
         await asyncio.to_thread(self._reply, message, text)
+        await asyncio.to_thread(self._send_plans, message)
 
     async def _ask_ping(self, message: dict) -> None:
         """Why? on a ping that is not an open-trade alert: copilot on the ping's own text."""
@@ -286,6 +320,7 @@ class Replies:
             log.exception("Telegram Why? turn failed")
             answer = FAILED
         await asyncio.to_thread(self._reply, message, answer)
+        await asyncio.to_thread(self._send_plans, message)
 
     async def _ask(self, text: str, message: dict) -> None:
         try:
@@ -294,6 +329,7 @@ class Replies:
             log.exception("Telegram question turn failed")
             answer = FAILED
         await asyncio.to_thread(self._reply, message, answer)
+        await asyncio.to_thread(self._send_plans, message)
 
     async def _voice(self, file_id: str, message: dict) -> None:
         """A voice note: downloaded, transcribed with the owner's tickers as vocabulary, confirmed back, then asked."""
@@ -356,6 +392,7 @@ class Replies:
             if image_id:
                 copilot_images.delete(image_id)
         await asyncio.to_thread(self._reply, message, answer)
+        await asyncio.to_thread(self._send_plans, message)
 
     def _alert_context(self, alert_id: str) -> tuple[str, str | None] | None:
         """``ask_context`` on a position alert and its symbol, or None when the alert is not in the journal."""
@@ -423,6 +460,8 @@ class Replies:
         parts: list[str] = []
         errors: list[str] = []
         cards: list[str] = []
+        plans: list[dict] = []
+        self._plans = []
         try:
             turn = copilot_spend.recorded_turn(history, symbol, cfg, adapter, evidence, now, kind=None, source="telegram",
                                                images=images, web=True)
@@ -432,6 +471,9 @@ class Replies:
                         parts.append(event.get("delta") or "")
                     elif event.get("type") == "error":
                         errors.append(event.get("message") or "")
+                    elif event.get("type") == "proposal" and event.get("kind") == "trade_plan" and len(plans) < PLAN_CARDS:
+                        # Saved as the desk saves a card: the event without its type, with a client id of its own.
+                        plans.append({**{k: v for k, v in event.items() if k != "type"}, "client_id": uuid.uuid4().hex})
                     elif event.get("type") == "proposal":
                         cards.append(str(next((event[k] for k in ("label", "question", "thesis", "text") if event.get(k)), event.get("kind") or "a card"))[:160])
         finally:
@@ -445,17 +487,43 @@ class Replies:
             answer = (answer + "\n\n" if answer else "") + " ".join(errors)
         answer = answer or "The copilot gave no answer."
         answer = answer if len(answer) <= ANSWER_MAX else answer[: ANSWER_MAX - 1].rstrip() + "…"
-        await asyncio.to_thread(self._save, said or question, symbol, answer, now)
+        if await asyncio.to_thread(self._save, said or question, symbol, answer, now, plans) and plans:
+            self._plans = [p["client_id"] for p in plans]  # sent after the answer (``_send_plans``)
         return answer
 
-    def _save(self, said: str, symbol: str | None, answer: str, now: datetime) -> None:
-        """The owner's words and the answer as messages on the desk: the symbol's thread (``thread_for``), else today's
-        Main chat. A failure only leaves the desk without them; the chat already has the answer."""
+    def _save(self, said: str, symbol: str | None, answer: str, now: datetime, plans: list[dict] = ()) -> bool:
+        """The owner's words and the answer, with its plan cards, as messages on the desk: the symbol's thread
+        (``thread_for``), else today's Main chat. A failure only leaves the desk without them; the chat already has the
+        answer."""
         try:
             with Session(self.engine) as db:
-                save_on_desk(db, said, symbol, answer, now)
+                save_on_desk(db, said, symbol, answer, now, plans) if plans else save_on_desk(db, said, symbol, answer, now)
+            return True
         except Exception:  # noqa: BLE001
             log.warning("Telegram answer not saved on the desk", exc_info=True)
+            return False
+
+    def _send_plans(self, message: dict) -> None:
+        """Each plan card the turn saved, as its own message after the answer: the card's lines, Confirm and Edit (its
+        thread on the desk). A card that cannot be read or sent is logged; it stays on the desk to confirm there."""
+        keys, self._plans = self._plans, []
+        for key in keys:
+            try:
+                with Session(self.engine) as db:
+                    found = find_plan(db, key)
+                if found is None:
+                    log.warning("Telegram plan card %s not found on the desk", key)
+                    continue
+                thread_id, card = found
+                from app.engine.position_companion import desk_path
+                markup = telegram.keyboard(desk_path(thread_id), (("Confirm", f"pl:{key}:confirm"),), open_label="Edit")
+                self.call("sendMessage", json={
+                    "chat_id": telegram.chat_id(), "text": plan_text(card), "reply_markup": markup,
+                    "reply_parameters": {"message_id": message.get("message_id"), "allow_sending_without_reply": True},
+                    "link_preview_options": {"is_disabled": True}})
+            except Exception as exc:  # noqa: BLE001 - the answer is already sent and the card is on the desk
+                log.warning("Telegram plan card not delivered: %s", exc if isinstance(exc, telegram.TelegramError) else type(exc).__name__,
+                            exc_info=not isinstance(exc, telegram.TelegramError))
 
     # -------------------------------------------------------------- the chat
 
@@ -522,18 +590,32 @@ def thread_for(db: Session, symbol: str) -> str | None:
     return str(latest.id) if latest is not None else None
 
 
-def save_on_desk(db: Session, said: str, symbol: str | None, answer: str, now: datetime) -> str:
+def save_on_desk(db: Session, said: str, symbol: str | None, answer: str, now: datetime, plans: list[dict] = ()) -> str:
     """Append one Telegram exchange to the desk (``said``: the owner's own words, never a ping's text); the
     investigation id it went to. On the symbol's thread its ``updated_at`` is kept as it was, so thesis watch, which
-    re-checks each symbol's newest open conversation, re-checks the same one; with no thread, today's Main chat."""
+    re-checks each symbol's newest open conversation, re-checks the same one; with no thread, today's Main chat.
+    ``plans``: the answer's trade plan cards as the desk saves them (the proposal event without its type, with a client
+    id); one that does not validate is left out and logged, so it never costs the exchange its save."""
     from sqlalchemy import update as sql_update
     from app.engine import copilot_investigations as investigations, position_companion
     from app.models import CopilotInvestigation
+    cards = []
+    for card in plans:
+        try:
+            cards.append(investigations._saved_proposal(card))
+        except ValueError as exc:
+            log.warning("Telegram plan card not saved: %s", exc)
     target = thread_for(db, symbol) if symbol else None
     if target is not None:
         before = db.get(CopilotInvestigation, uuid.UUID(target)).updated_at
+        taken = {p["id"] for m in investigations.get(target, session=db)["transcript"] for p in m.get("proposals") or ()}
+        for card in cards:  # unique in the conversation, as the desk makes a repeated id unique
+            base, n = card["id"], 2
+            while card["id"] in taken:
+                card["id"], n = f"{base}.{n}", n + 1
+            taken.add(card["id"])
         position_companion.save_messages(target, [{"role": "user", "content": FROM_TELEGRAM + said},
-                                                  {"role": "assistant", "content": answer}], session=db)
+                                                  {"role": "assistant", "content": answer, "proposals": cards}], session=db)
         db.execute(sql_update(CopilotInvestigation).where(CopilotInvestigation.id == uuid.UUID(target)).values(updated_at=before))
         db.commit()
         return target
@@ -542,8 +624,111 @@ def save_on_desk(db: Session, said: str, symbol: str | None, answer: str, now: d
     about = f" ({symbol})" if symbol else ""
     exchange = investigations.InvestigationFields(title=main["title"], transcript=[
         {"role": "user", "content": FROM_TELEGRAM.rstrip(": ") + about + ": " + said},
-        {"role": "assistant", "content": answer, "exchange_id": f"telegram-{uuid.uuid4().hex}"}])
-    return investigations.append_main(db, main["id"], exchange)["id"]
+        {"role": "assistant", "content": answer, "exchange_id": f"telegram-{uuid.uuid4().hex}", **({"proposals": cards} if cards else {})}])
+    return investigations.append_main(db, main["id"], exchange)["id"]  # a plan card gets its own plan thread there
+
+
+def find_plan(db: Session, client_id: str) -> tuple[str, dict] | None:
+    """The saved trade plan card with this client id and the conversation that holds it, or None. A Main chat card is
+    found in its own plan thread (the Main chat row keeps only the pointer the desk opens it from)."""
+    from sqlmodel import col, select
+    from app.models import CopilotInvestigation
+    if not PLAN_KEY.match(client_id or ""):
+        return None
+    rows = db.exec(select(CopilotInvestigation).where(CopilotInvestigation.main_day.is_(None),
+                                                      CopilotInvestigation.transcript_json.contains(client_id, autoescape=True))
+                   .order_by(col(CopilotInvestigation.created_at).desc()))
+    for row in rows:
+        for m in json.loads(row.transcript_json):
+            for card in m.get("proposals") or ():
+                if card.get("client_id") == client_id and card.get("kind") == "trade_plan":
+                    return str(row.id), card
+    return None
+
+
+def _level(level: dict) -> str:
+    """"crosses 92.3", "5m close beyond 95.9": the card's own wording of a level."""
+    condition = (f"{level.get('interval')} close beyond" if level.get("condition") == "closes_beyond"
+                 else CONDITION.get(level.get("condition"), level.get("condition")))
+    return f"{condition} {level['price']:,.4f}".rstrip("0").rstrip(".")
+
+
+def _horizon(card: dict, now: float) -> str:
+    """The card's default horizon: a time stop due today is a day trade, else a swing (the desk's ``horizonFor``)."""
+    from app.engine import plan_time_stops
+    from app.engine.chart_math import ET
+    due = plan_time_stops.parse(card.get("time_stop") or "", now).get("due_at")
+    return "day" if due and datetime.fromtimestamp(due, ET).date() == datetime.fromtimestamp(now, ET).date() else "swing"
+
+
+def plan_text(card: dict, now: float | None = None) -> str:
+    """A plan card as one Telegram message, its lines as the desk's card shows them."""
+    side = PLAN_SIDE.get((card.get("direction"), card.get("instrument")), f"{card.get('direction')} {card.get('instrument')}")
+    lines = [f"Proposed trade plan · {card['symbol']} · {side}" + (f" · {card['contract']}" if card.get("contract") else ""),
+             f"Thesis: {card.get('thesis') or ''}".rstrip(),
+             f"Entry: {_level(card['entry_trigger'])}",
+             f"Invalidation: {_level(card['invalidation'])}"]
+    if card.get("time_stop"):
+        lines.append(f"Time stop: {card['time_stop']}")
+    lines.append(f"Horizon: {HORIZON_LABEL[_horizon(card, time.time() if now is None else now)]}")
+    lines.append(PLAN_FOOTER)
+    return "\n".join(lines)
+
+
+def _fresh_quote(symbol: str) -> tuple[float | None, bool]:
+    """The copilot's fresh quote, as the desk's Confirm reads it (``GET /copilot/quote``): ``(last, fresh)``."""
+    from app.routers.copilot import quote
+    try:
+        read = quote(symbol)
+    except HTTPException:
+        return None, False
+    return read.get("last"), bool(read.get("fresh"))
+
+
+def confirm_plan(engine, client_id: str, *, quote=None, now: float | None = None) -> tuple[str, str | None]:
+    """Confirm on a Telegram plan card: what the desk's Confirm does for its invalidation, and only that. The card's
+    outcome is recorded as confirmed (``set_outcome``) and its invalidation armed as a ``copilot`` level alert with
+    ``plan_role="invalidation"`` on the conversation, at the plan's level. Arms nothing for a card already confirmed
+    (here or on the desk) or dismissed, a stale or missing quote, or an invalidation already crossed; the level
+    alert's own check refuses a duplicate. ``(reply, chosen label)``."""
+    from app.engine import copilot_investigations as investigations
+    from app.engine.level_alert_monitor import create_alert
+    now = time.time() if now is None else now
+    with Session(engine) as db:
+        found = find_plan(db, client_id)
+        if found is None:
+            return "That plan is no longer on the desk.", None
+        thread_id, card = found
+        outcome = card.get("outcome") or {}
+        if outcome.get("state") == "confirmed":
+            if str(outcome.get("note") or "").startswith(FROM_TELEGRAM_NOTE):
+                return "Already confirmed: its invalidation alert is armed.", "Confirmed"
+            return "Already confirmed on the desk.", "Confirmed"
+        if outcome.get("state") == "dismissed":
+            return "Not confirmed: this plan was dismissed on the desk.", None
+        symbol, level = card["symbol"], card["invalidation"]
+        price = level["price"]
+        last, fresh = (quote or _fresh_quote)(symbol)
+        if not fresh or not last:
+            return f"The latest {symbol} quote is stale or missing, so nothing was armed. Try again.", None
+        if (last <= price) if card["direction"] == "long" else (last >= price):
+            return f"{symbol} is at {last:,.2f}, already past the invalidation at {price:,.2f}, so it was not armed.", None
+        wording = _level(level)
+        try:  # the plan card's invalidation alert, as its Confirm arms it (TradePlanCard: createPlanAlert)
+            create_alert(db, symbol=symbol, price=price, reference=last, condition=level["condition"], interval=level.get("interval"),
+                         session="regular", source_kind="copilot", source_id=thread_id, label=f"{symbol} invalidation: {wording}"[:60],
+                         now=now, plan_role="invalidation")
+        except ValueError as exc:
+            return f"Not armed: {exc}", None
+        fields = investigations.PlanFields(
+            thesis=(card.get("thesis") or "")[:300], contract=(card.get("contract") or "")[:80],
+            entry=f"{card['entry_trigger']['price']:g}"[:24], invalidation=f"{price:g}"[:24], time_stop=(card.get("time_stop") or "")[:80],
+            size_note=(card.get("size_note") or "")[:120], horizon=_horizon(card, now))
+        investigations.set_outcome(thread_id, card["id"], investigations.ProposalOutcome(
+            state="confirmed", note=f"{FROM_TELEGRAM_NOTE}: only the invalidation alert is armed.",
+            parts={"invalidation": investigations.PartResult(state="done", text=f"Set: {symbol} {wording}.")}, fields=fields), session=db)
+    log.info("Telegram plan confirmed for %s: invalidation %.2f armed", symbol, price)
+    return f"Confirmed: invalidation {price:,.2f} on {symbol} is armed.", "Confirmed"
 
 
 def _trade_for(db: Session, alert) -> uuid.UUID | None:

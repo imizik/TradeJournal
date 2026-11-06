@@ -397,7 +397,8 @@ def save_messages(investigation_id, messages: list[dict], *, status: str | None 
         fields = investigations.InvestigationFields(
             title=found["title"], symbol=found["symbol"], status=status or found["status"],
             conclusion=conclusion if conclusion is not None else found["conclusion"],
-            transcript=found["transcript"] + [{"role": m["role"], "content": m["content"][:20_000]} for m in messages],
+            transcript=found["transcript"] + [{"role": m["role"], "content": m["content"][:20_000],
+                                             **({"proposals": m["proposals"]} if m.get("proposals") else {})} for m in messages],
             evidence=found["evidence"])
         try:
             investigations.update(investigation_id, fields, found["revision"], session=session)
