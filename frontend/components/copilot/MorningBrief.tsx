@@ -7,22 +7,22 @@ import type { DeskSession } from "@/lib/desk";
 const hhmm = (epoch: number) => new Date(epoch * 1000).toLocaleTimeString("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" });
 /** A saved line as words: no list marker or bold. */
 const plain = (line: string) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").replace(/\*\*/g, "").trim();
-const idOf = (path: string | null | undefined) => {
-  try { return path ? new URL(path, "http://desk").searchParams.get("investigation") : null; } catch { return null; }
-};
 
 /**
  * Today's morning brief at the top of Main chat (docs/copilot-lab.md § The desk), so the day's thread starts with it
  * instead of it waiting in its own view. It reads the desk's one session read (``prep``): the brief's saved lines, at most
- * ten, with its verdict and headline when it has them, and a link to its own thread for follow-ups. A brief whose turn
- * failed says the raw facts stand in. Nothing before the brief is written; nothing here calls a model.
+ * ten, with its verdict and headline when it has them. Ask about it puts the brief in this Main chat's message box as
+ * context, unsent, so the day's questions stay in one conversation. A brief whose turn failed says the raw facts stand in.
+ * Nothing before the brief is written; nothing here calls a model.
  */
-export default function MorningBrief({ prep, open }: { prep: DeskSession["prep"] | undefined; open(id: string): void }) {
+export default function MorningBrief({ prep, fill }: { prep: DeskSession["prep"] | undefined; fill(text: string): void }) {
   const lines = prep?.lines ?? [];
   if (!prep || !lines.length) return null;
   const parts = prep.fallback ? null : answerParts(lines.join("\n"));
   const body = (parts ? parts.body.split("\n") : lines).map(plain).filter(Boolean);
-  const id = idOf(prep.path);
+  const said = [parts ? `${parts.verdict} — ${parts.headline}` : null, ...body, parts?.against ? `Against: ${parts.against}` : null,
+    parts?.changesIf ? `Changes if: ${parts.changesIf}` : null].filter(Boolean).join(" ");
+  const ask = () => fill(`Context: this morning's brief${prep.at !== null ? ` (${hhmm(prep.at)} ET)` : ""}: ${said}`.slice(0, 600) + "\n\n");
   return (
     <section aria-label="Morning brief" data-testid="morning-brief" className="mb-6 rounded-lg border bg-card px-4 py-3">
       <header className="mb-2 flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
@@ -30,7 +30,7 @@ export default function MorningBrief({ prep, open }: { prep: DeskSession["prep"]
         <h3 className="text-sm font-semibold text-foreground">Morning brief</h3>
         {prep.at !== null && <span className="tabular-nums">{hhmm(prep.at)} ET</span>}
         {prep.fallback && <span className="text-primary">Copilot turn failed: raw facts</span>}
-        {id && <button type="button" onClick={() => open(id)} className="ml-auto text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Ask about it →</button>}
+        <button type="button" onClick={ask} className="ml-auto text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Ask about it →</button>
       </header>
       {parts && (
         <p className="mb-1.5 text-sm">

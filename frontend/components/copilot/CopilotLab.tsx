@@ -362,8 +362,9 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
         {on && <ScalpShortlistNudge />}
         {on && (
           <div className={styles.barActions}>
-            {/* The two daily places as one switch; the one on screen is filled in. */}
-            <div role="group" aria-label="Daily" className="inline-flex items-center rounded-md border p-0.5">
+            {/* The two daily places as one switch; the one on screen is filled in. A phone's tabs already name Main chat, and
+                its thread list opens the briefing, so it hides the switch and keeps the bar on one line. */}
+            <div role="group" aria-label="Daily" className={cn(styles.daily, "inline-flex items-center rounded-md border p-0.5")}>
               <Link href="/copilot-lab" aria-current={onMainChat ? "page" : undefined}
                 className={cn("inline-flex min-h-10 items-center whitespace-nowrap rounded px-2 text-xs sm:min-h-7", onMainChat ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}>Main chat</Link>
               <Link href="/copilot-lab?view=briefing" aria-label="Today’s briefing" aria-current={onBriefing ? "page" : undefined}
@@ -420,7 +421,7 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
             </div>
           )}
           {/* Today's Main chat starts the day with the morning brief; an earlier day's does not. */}
-          {on && thread?.mainDay && thread.mainDay === session.data?.day && <MorningBrief prep={session.data?.prep} open={actions.open} />}
+          {on && thread?.mainDay && thread.mainDay === session.data?.day && <MorningBrief prep={session.data?.prep} fill={fill} />}
           {on && !thread?.mainDay && (thread || briefing || link) && <Breadcrumb thread={thread} link={link} saved={saved} onMain={actions.home} />}
           {/* The Briefing (or no thread) opens on the day at a glance. Any other thread has one main element: the header,
               then the decision when one is asked (the ladder shrinks to a line), else the full plan ladder; the conversation follows. */}

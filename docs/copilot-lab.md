@@ -493,7 +493,8 @@ conversation, including after midnight. The heading names the day ("Main chat ·
 part adds "(continued)"). Today's Main chat starts with the day's **Morning brief** card
 (`MorningBrief.tsx`, from the desk session read's `prep`: the brief's saved lines with its verdict, headline and
 Changes if line, the time it was written, and "Copilot turn failed: raw facts" when the turn failed), with **Ask about
-it →** opening the brief's own thread; an earlier day's Main chat, or a day with no brief yet, shows none. **Previous days** opens earlier days that have at least one exchange; a day the Desk was
+it →** putting the brief in this Main chat's message box as context, unsent, so questions about it stay in the day's
+conversation; an earlier day's Main chat, or a day with no brief yet, shows none. **Previous days** opens earlier days that have at least one exchange; a day the Desk was
 only opened on is not listed. A busy day's full
 segment stays in history when opening Main starts its next part. Opening, switching or browsing history
 uses no model turn or automatic research job. Concurrent answers append separately, each beside its own question. A proposed trade plan opens in its own ticker thread for review and confirmation so it has a distinct place in Plans and its alerts link back to it. **Today’s briefing** opens the session tape, Radar and alert feedback, prep and review
@@ -966,7 +967,8 @@ width; it opens the labelled menu (every page, sync, the plan streak), whose
 browser with the same key as Charts' expanded rail (its Collapse folds it
 back). A phone keeps its tab bar. Every icon in the Charts rail names itself
 on hover or focus (`NavHint`), the sync dot included.
-The desk bar holds Menu, the **Main chat | Today’s briefing** switch (the open one filled in), Jump to…
+The desk bar holds Menu, the **Main chat | Today’s briefing** switch (the open one filled in; a phone drops it, as its
+tabs already name Main chat and its thread list opens the briefing, so the bar stays on one line), Jump to…
 (⌘K), New plan (outlined, not the bar's loudest button) and icon-only Threads and Context toggles, named
 for a screen reader and on hover. The conversation is one centred reading column (46rem), its messages
 at most 60ch wide. A new desk opens with the active conversation; both panes stay

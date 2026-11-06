@@ -254,7 +254,8 @@
 
 @container (max-width: 759px) {
   .paneToggle,
-  .contextToggle {
+  .contextToggle,
+  .daily {
     display: none !important;
   }
 }
