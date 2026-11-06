@@ -2164,7 +2164,7 @@ When an entry fill repeats one of the owner's own costly habits from the
 [October 21 behavior audit](../backend/reports/behavior_audit_2026-10-21.md), the
 phone gets one message carrying the owner's own record for that habit: no
 advice, no model call, nothing ordered (`backend/app/engine/fill_interrupts.py`).
-Four rules judge each new entry fill:
+Six rules judge each new entry fill:
 
 - **Adding to a loser:** a second or later `buy_to_open` into a long option
   position still open, below the open lots' average cost (first in, first out).
@@ -2173,9 +2173,21 @@ Four rules judge each new entry fill:
   already above zero at the fill (the rule the exit-habit `opened_green` reads).
 - **Late short-dated buy:** a `buy_to_open` of an option with 0 to 2 trading
   days to expiry (weekdays) at or after 14:00 New York.
+- **Ticker record:** the owner has at least 5 closed trades in the fill's ticker
+  and their realized total is below zero (the audit's SNDK, −$5,410 over 48). A
+  positive or too-small record stays quiet, so familiar names do not spend the
+  budget.
+- **Large size:** a buy whose premium paid (contracts × price, option prices
+  being stored per contract; shares × price for a stock) is at least 2× the
+  median of the owner's closed long option positions entered in the last 12
+  months (each position's largest entry fill), needing at least 20 of them, else
+  it never fires (the audit: since July "the same mistakes now cost more per
+  trade because sizes are larger"). The 2×, 12 months and 20 are module
+  constants.
 
-A stock (or a short) can fire only the green-day rule. The put, green-day and
-late-buy rules describe the position, so each fires once per position; adding
+A stock can fire only the green-day, ticker and size rules; a short only the
+green-day and ticker rules. The put, green-day, late-buy, ticker-record and
+large-size rules describe the position, so each fires once per position; adding
 to a loser fires on every such add. A fill that fires several sends one
 message, one line per rule in that order, ending "Your record, not advice.":
 
@@ -2185,6 +2197,8 @@ Adding to a loser: 12 past adds, 3 ended green, −$2,140
 Put entry: puts −$6,480 over 210 trades; calls +$8,710 over 1,120
 Day already green (+$420 today): 85 past trades opened green, −$9,050
 Late short-dated buy: 64 past buys after 2 PM with 0–2 days left, 48% expired worthless, −$5,210
+Your record in NBIS: 48 trades, 35% won, −$5,410
+Size: $4,200 is 2.3× your median ($1,800); your 31 past entries above 2×: 39% won, −$6,100
 Your record, not advice.
 ```
 

@@ -2,7 +2,8 @@
 with the owner's own numbers for that habit. No advice, no model call; nothing here places, changes or suggests an order.
 
 The October 21, 2026 behavior audit (``backend/reports/behavior_audit_2026-10-21.md``) found the money leaking at
-exits and in a few repeated entry habits. Four pure rules judge each new **entry** fill, newest-first order:
+exits and in a few repeated entry habits, and that since July the same mistakes cost more per trade because sizes
+are larger. Six pure rules judge each new **entry** fill, newest-first order:
 
 - ``add_to_loser``: a second or later ``buy_to_open`` into a long option position still open, below the open lots'
   average cost (first in, first out, as ``chart_journal.open_lots`` replays it);
@@ -10,20 +11,30 @@ exits and in a few repeated entry habits. Four pure rules judge each new **entry
 - ``opened_green``: the account's realized P&L for the New York day is already above zero at the fill (trades
   closed earlier that day, as ``behavior.SequenceState`` sums them; the rule ``exit_habits.opened_green`` reads);
 - ``late_short_dated``: a ``buy_to_open`` of an option with 0 to 2 trading days to expiry (weekdays; a market
-  holiday counts as one) at or after 14:00 New York.
+  holiday counts as one) at or after 14:00 New York;
+- ``ticker_record``: the owner has at least ``MIN_SAMPLE`` closed trades in the fill's ticker and their realized
+  total is below zero (a positive or too-small record stays quiet, so familiar names do not spend the budget);
+- ``large_size``: a buy whose premium paid (contracts × price, fills storing option prices as dollars per
+  contract; shares × price for a stock) is at least ``LARGE_MULTIPLE`` times the median of the owner's closed long
+  option positions entered in the last ``LARGE_LOOKBACK_DAYS`` (each position's largest entry fill), needing
+  ``LARGE_MIN_ENTRIES`` of them, else it never fires.
 
-A stock entry can fire only ``opened_green``; a short (``sell_to_open``) only ``opened_green``. The put, green-day
-and late-buy rules describe the position, so each fires once per position (``ONCE_PER_POSITION``); adding to a
-loser fires on every such add. A fill whose email arrives after a later entry's keeps the position's recorded
-anchor. Known limit, as for position alerts: a message sent before an earlier entry fill arrived links the trade
-id of that moment, which the rebuild replaces, so its link no longer opens. Each rule's line
+A stock entry can fire only ``opened_green``, ``ticker_record`` and ``large_size``; a short (``sell_to_open``) only
+``opened_green`` and ``ticker_record``. The put, green-day, late-buy, ticker and size rules describe the position,
+so each fires once per position (``ONCE_PER_POSITION``); adding to a loser fires on every such add. A fill whose
+email arrives after a later entry's keeps the position's recorded anchor. Known limit, as for position alerts: a
+message sent before an earlier entry fill arrived links the trade id of that moment, which the rebuild replaces, so
+its link no longer opens. Each rule's line
 carries the owner's record for that habit from closed trades in every account but Webull, never counting the
 trade being judged (matched by its first entry fill's source identity, so a rebuild cannot slip it in):
 
 - ``add_to_loser``: past long option positions with such an add, how many ended green, their P&L;
 - ``put_entry``: lifetime long-put P&L and count against long-call P&L and count;
 - ``opened_green``: trades whose first entry came with the day already green, their count and P&L;
-- ``late_short_dated``: long options first bought that way, their count, expired-worthless share and P&L.
+- ``late_short_dated``: long options first bought that way, their count, expired-worthless share and P&L;
+- ``ticker_record``: closed trades in the ticker, their count, share won and P&L;
+- ``large_size``: the size against the median, and the window's past positions at or above the multiple, their
+  count, share won and P&L.
 
 A record under ``MIN_SAMPLE`` (5) says "too few to read" instead of its share. The records are built once from
 the journal and kept in memory for the New York day, rebuilt only when the closed trades change (their count or
@@ -47,6 +58,7 @@ from collections import defaultdict
 from datetime import date, datetime, time as clock_time, timedelta
 import logging
 import os
+from statistics import median
 import time
 from typing import Callable
 from urllib.parse import urlencode
@@ -71,9 +83,12 @@ STALE_SECONDS = 15 * 60  # a fill first seen later than this after it happened i
 MIN_SAMPLE = 5
 LATE_AT = clock_time(14, 0)
 SHORT_DATED_DAYS = 2
+LARGE_MULTIPLE = 2.0
+LARGE_LOOKBACK_DAYS = 365
+LARGE_MIN_ENTRIES = 20
 EPS = 1e-9
-KINDS = ("add_to_loser", "put_entry", "opened_green", "late_short_dated")
-ONCE_PER_POSITION = ("put_entry", "opened_green", "late_short_dated")
+KINDS = ("add_to_loser", "put_entry", "opened_green", "late_short_dated", "ticker_record", "large_size")
+ONCE_PER_POSITION = ("put_entry", "opened_green", "late_short_dated", "ticker_record", "large_size")
 FOOTER = "Your record, not advice."
 
 
@@ -121,8 +136,25 @@ def late_short_dated(fill: dict) -> bool:
     return at.time() >= LATE_AT and 0 <= trading_days(at.date(), expiration) <= SHORT_DATED_DAYS
 
 
-def fired(fill: dict, prior: list[dict], day_pnl_before: float | None) -> list[str]:
-    """The rules this entry fill fires, in ``KINDS`` order."""
+def premium(fill: dict) -> float:
+    """Dollars paid: contracts × price (option prices are stored per contract, multiplier included), or shares × price."""
+    return fill["contracts"] * fill["price"]
+
+
+def ticker_record(rec: dict | None) -> bool:
+    """The ticker's record (``record(rows, "ticker_record", ...)``) has enough trades and lost money."""
+    return rec is not None and rec["n"] >= MIN_SAMPLE and rec["pnl"] < 0
+
+
+def large_size(fill: dict, usual: float | None) -> bool:
+    """A buy paying at least ``LARGE_MULTIPLE`` times ``usual`` (None when the history is too short to say)."""
+    return fill["side"] in ("buy_to_open", "buy") and usual is not None and premium(fill) >= LARGE_MULTIPLE * usual - EPS
+
+
+def fired(fill: dict, prior: list[dict], day_pnl_before: float | None, ticker_rec: dict | None = None,
+          size_rec: dict | None = None) -> list[str]:
+    """The rules this entry fill fires, in ``KINDS`` order. ``ticker_rec`` and ``size_rec`` are the fill's ticker and
+    size records (``record``); without them those two rules do not fire."""
     out = []
     if adds_to_loser(fill, prior):
         out.append("add_to_loser")
@@ -132,6 +164,10 @@ def fired(fill: dict, prior: list[dict], day_pnl_before: float | None) -> list[s
         out.append("opened_green")
     if late_short_dated(fill):
         out.append("late_short_dated")
+    if ticker_record(ticker_rec):
+        out.append("ticker_record")
+    if large_size(fill, (size_rec or {}).get("median")):
+        out.append("large_size")
     return out
 
 
@@ -143,7 +179,7 @@ def day_pnl_before(closes: list[tuple[datetime, float]], at: datetime) -> float:
 # ------------------------------------------------------------------ the record (pure)
 
 def history_rows(trades: list[dict], fills_of: dict) -> list[dict]:
-    """One row per closed trade with what each record counts. ``trades`` hold id, account_id, status,
+    """One row per closed trade with what each record counts. ``trades`` hold id, account_id, ticker, status,
     instrument_type, option_type, expiration, realized_pnl, expired_worthless and closed_at (naive New York);
     ``fills_of`` maps a trade id to its fills (id, key, role, side, contracts, price, executed_at)."""
     closed = [t for t in trades if t["status"] in ("closed", "expired") and t["closed_at"] is not None]
@@ -160,7 +196,8 @@ def history_rows(trades: list[dict], fills_of: dict) -> list[dict]:
         long_option = t["instrument_type"] == "option" and all(f["side"] == "buy_to_open" for f in entries)
         option = {"instrument_type": "option", "expiration": t["expiration"]}
         rows.append({
-            "key": first.get("key") or str(first["id"]), "pnl": t["realized_pnl"] or 0.0,
+            "key": first.get("key") or str(first["id"]), "pnl": t["realized_pnl"] or 0.0, "ticker": t["ticker"],
+            "entered": first["executed_at"].date(), "premium": max(premium(f) for f in entries),
             "long_option": long_option, "option_type": t["option_type"] if long_option else None,
             "expired_worthless": bool(t["expired_worthless"]),
             "added_to_loser": long_option and any(adds_to_loser({**f, **option}, fills[:i]) for i, f in enumerate(fills)
@@ -171,9 +208,20 @@ def history_rows(trades: list[dict], fills_of: dict) -> list[dict]:
     return rows
 
 
-def record(rows: list[dict], kind: str, exclude: str | None = None) -> dict:
-    """One rule's record over ``rows``, leaving out the position whose first entry fill is ``exclude``."""
+def record(rows: list[dict], kind: str, exclude: str | None = None, *, ticker: str | None = None, day: date | None = None) -> dict:
+    """One rule's record over ``rows``, leaving out the position whose first entry fill is ``exclude``. The ticker
+    record needs ``ticker``; the size record needs the fill's ``day`` (its window ends there)."""
     rows = [r for r in rows if r["key"] != exclude]
+    if kind == "ticker_record":
+        hit = [r for r in rows if r["ticker"] == ticker]
+        return {"ticker": ticker, "n": len(hit), "pnl": round(sum(r["pnl"] for r in hit), 2), "green": sum(1 for r in hit if r["pnl"] > 0)}
+    if kind == "large_size":
+        since = day - timedelta(days=LARGE_LOOKBACK_DAYS)
+        window = [r for r in rows if r["long_option"] and since <= r["entered"] <= day]
+        usual = median(r["premium"] for r in window) if len(window) >= LARGE_MIN_ENTRIES else None
+        hit = [r for r in window if usual is not None and r["premium"] >= LARGE_MULTIPLE * usual - EPS]
+        return {"n": len(hit), "pnl": round(sum(r["pnl"] for r in hit), 2), "green": sum(1 for r in hit if r["pnl"] > 0),
+                "median": usual, "entries": len(window)}
     if kind == "put_entry":
         puts = [r for r in rows if r["long_option"] and r["option_type"] == "put"]
         calls = [r for r in rows if r["long_option"] and r["option_type"] == "call"]
@@ -196,9 +244,17 @@ def _plural(n: int, word: str) -> str:
     return f"{n:,} {word}{'' if n == 1 else 's'}"
 
 
-def line(kind: str, rec: dict, day_pnl: float | None = None) -> str:
-    """One rule's line with the owner's numbers and the sample."""
+def line(kind: str, rec: dict, day_pnl: float | None = None, paid: float | None = None) -> str:
+    """One rule's line with the owner's numbers and the sample; ``paid`` is the fill's premium, for the size line."""
     n = rec["n"]
+    if kind == "ticker_record":
+        head = f"Your record in {rec['ticker']}: {_plural(n, 'trade')}"
+        return f"{head}, too few to read" if n < MIN_SAMPLE else f"{head}, {round(100 * rec['green'] / n)}% won, {money(rec['pnl'])}"
+    if kind == "large_size":
+        paid, usual = paid or 0.0, rec["median"]
+        head = f"Size: ${paid:,.0f} is {paid / usual:.1f}× your median (${usual:,.0f})"
+        tail = f"your {n:,} past {'entry' if n == 1 else 'entries'} above {LARGE_MULTIPLE:g}×"
+        return f"{head}; {tail}, too few to read" if n < MIN_SAMPLE else f"{head}; {tail}: {round(100 * rec['green'] / n)}% won, {money(rec['pnl'])}"
     if kind == "add_to_loser":
         head = f"Adding to a loser: {_plural(n, 'past add')}"
         return f"{head}, too few to read" if n < MIN_SAMPLE else f"{head}, {rec['green']:,} ended green, {money(rec['pnl'])}"
@@ -318,9 +374,13 @@ class FillInterrupts:
         # The put, green-day and late-buy rules describe the position: once each, so scaling in does not repeat them.
         said = {k for kinds in db.exec(select(FillInterrupt.kinds).where(
             FillInterrupt.account_id == fill["account_id"], FillInterrupt.position_key == position)) for k in kinds.split(",")}
-        kinds = [k for k in fired(fill, prior, day) if k not in said or k not in ONCE_PER_POSITION]
+        key = anchor(entries)
+        recs = {"ticker_record": record(rows, "ticker_record", key, ticker=trade.ticker),
+                "large_size": record(rows, "large_size", key, day=fill["executed_at"].date())}
+        kinds = [k for k in fired(fill, prior, day, recs["ticker_record"], recs["large_size"])
+                 if k not in said or k not in ONCE_PER_POSITION]
         label = short_label(trade.ticker, trade.instrument_type, trade.option_type, trade.strike)
-        title, body = message(label, [line(k, record(rows, k, anchor(entries)), day) for k in kinds])
+        title, body = message(label, [line(k, recs.get(k) or record(rows, k, key), day, premium(fill)) for k in kinds])
         return FillInterrupt(
             account_id=fill["account_id"], fill_key=fill["key"], position_key=position, trade_id=trade.id, ticker=trade.ticker,
             contract=contract_label(trade.ticker, trade.instrument_type, trade.option_type, trade.strike, trade.expiration),
@@ -425,7 +485,8 @@ def load_history(db: Session) -> list[dict]:
     for f in links:
         fills_of[f.trade_id].append({"id": f.id, "key": f.raw_email_id or str(f.id), "role": f.role, "side": f.side,
                                      "contracts": float(f.contracts), "price": float(f.price), "executed_at": wall_time(f.executed_at)})
-    return history_rows([{"id": t.id, "account_id": t.account_id, "status": t.status, "instrument_type": t.instrument_type,
+    return history_rows([{"id": t.id, "account_id": t.account_id, "ticker": t.ticker, "status": t.status,
+                          "instrument_type": t.instrument_type,
                           "option_type": t.option_type, "expiration": t.expiration, "realized_pnl": _num(t.realized_pnl),
                           "expired_worthless": t.expired_worthless, "closed_at": wall_time(t.closed_at) if t.closed_at else None}
                          for t in trades], fills_of)
