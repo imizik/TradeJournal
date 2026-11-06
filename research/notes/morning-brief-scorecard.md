@@ -240,5 +240,3 @@ Morning-available ticker mentions: ≥3pp first hour 8/18; session 12/19. Repeat
 No saved brief on confirmed sessions: none.
 
 - Gap: Archived whole-market 09:00 SIP top-10 gainers AND top-10 losers unavailable: baseline, gapper coverage and catalyst coverage unscored.
-
-Stock/ETF ticker mentions are scored; non-equity index references are outside SIP stock-bar coverage. The existing reconstructed-SIP supplement above remains unchanged; no contemporaneous 09:00 ranking was available from the production read-only archive endpoint for this week.
