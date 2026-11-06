@@ -16,7 +16,7 @@ from app.engine import alert_feedback, ntfy, position_alerts, reconstructor
 from app.engine.chart_math import ET
 from app.engine.position_alerts import PositionAlerts
 from app.engine.tradier import TradierError, TradierQuote
-from app.models import Account, Fill, PositionAlert, PositionWatch, Trade
+from app.models import Account, Fill, PositionAlert, PositionWatch, Trade, TradeFill, TradePathMetrics
 from app.routers import position_alerts as position_alerts_router
 from app.routers.fills import _rebuild_trades
 
@@ -984,3 +984,78 @@ def test_a_monday_expiry_is_alerted_friday_and_a_half_day_moves_it_before_the_cl
     assert title == "SNDK 10/26/26 230C expires Monday, still open"
     assert body.startswith("Cost $1.50, no reliable quote. 1 contract open. Expiring this week: 1 contract, $150 premium at risk.")
     assert position_alerts.trading_days_after(Weekdays(), friday, 2) == [monday, date(2026, 10, 27)]
+
+
+# ------------------------------------------------------------ the give-back record
+
+def peaked(db, pnl, peak_pct=20.0, peak_dollars=120.0, path=True, side="buy_to_open"):
+    """One closed long NBIS call with its entry fill and, unless ``path`` is False, its option path peak."""
+    i = next(n)
+    trade = Trade(account_id=ROTH, ticker="NBIS", instrument_type="option", contracts=1, avg_entry_premium=1,
+                  total_premium_paid=100, realized_pnl=pnl, hold_duration_mins=90, opened_at=datetime(2026, 9, 1, 10),
+                  closed_at=datetime(2026, 9, 1, 11, 30), status="closed")
+    db.add(trade)
+    db.add(Fill(id=UUID(int=i), account_id=ROTH, ticker="NBIS", instrument_type="option", side=side, contracts=1, price=1,
+                executed_at=datetime(2026, 9, 1, 10), raw_email_id=f"gmail:{i}", option_type="call", strike=100, expiration=FRI))
+    db.flush()
+    db.add(TradeFill(trade_id=trade.id, fill_id=UUID(int=i), role="entry"))
+    if path:
+        db.add(TradePathMetrics(trade_id=trade.id, data_source="test", fetched_at=datetime(2026, 9, 2),
+                                option_mfe_pct=peak_pct, option_peak_unrealized_pnl=peak_dollars))
+
+
+def giveback_sent(world, monkeypatch):
+    """Deliver the fired give-back alert and return the bodies published."""
+    sent = []
+
+    def publish(title, body, priority=4, tags=(), path="", direct_click=False, more=()):
+        sent.append(body)
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(ntfy, "publish", publish)
+    world[2].deliver()
+    return sent
+
+
+def test_the_give_back_alert_carries_the_owners_record_from_a_green_peak(engine, world, monkeypatch):
+    fired(engine, world)  # first: a trade rebuild replaces the hand-made rows below
+    with Session(engine) as db:
+        for i in range(5):
+            peaked(db, 100.0 + i)                                # closed green after the peak: +$510
+        for _ in range(6):
+            peaked(db, -200.0)                                   # closed red after the peak: -$1,200
+        peaked(db, -9999.0, peak_pct=9.0)                        # under +10%: never armed
+        peaked(db, -9999.0, peak_dollars=40.0)                   # under $50: never armed
+        peaked(db, -9999.0, path=False)                          # no path data: left out, not a zero
+        peaked(db, -9999.0, side="sell_to_open")                 # not a long option
+        peaked(db, 0.0)                                          # flat: neither side
+        db.commit()
+        line = position_alerts.giveback_record(db)
+    assert line == "Your record from a green peak: closed green 5 of 11 (+$510), closed red 6 (-$1,200)."
+    assert len(line) < 150
+    sent = giveback_sent(world, monkeypatch)
+    assert alerts(engine)[0].delivery == "sent"
+    assert ("2 contracts open. Your record from a green peak: closed green 5 of 11 (+$510), closed red 6 (-$1,200). "
+            "Review your exit plan.") in sent[0]
+
+
+@pytest.mark.parametrize("greens,reds,pathless", [(4, 6, False), (6, 4, False), (5, 5, True)])
+def test_no_record_line_under_five_a_side_or_without_path_data(engine, world, monkeypatch, greens, reds, pathless):
+    fired(engine, world)
+    with Session(engine) as db:
+        for i in range(greens):
+            peaked(db, 100.0, path=not (pathless and i == 0))    # a path-less trade is dropped, leaving 4 green
+        for _ in range(reds):
+            peaked(db, -200.0)
+        db.commit()
+        assert position_alerts.giveback_record(db) is None
+    sent = giveback_sent(world, monkeypatch)
+    assert "Your record" not in sent[0] and "2 contracts open. Review your exit plan." in sent[0]
+
+
+def test_a_record_failure_never_holds_the_give_back_alert(engine, world, monkeypatch):
+    def broken(db):
+        raise RuntimeError("record query failed")
+    monkeypatch.setattr(position_alerts, "giveback_record", broken)
+    fired(engine, world)
+    sent = giveback_sent(world, monkeypatch)
+    assert alerts(engine)[0].delivery == "sent" and "2 contracts open. Review your exit plan." in sent[0]

@@ -23,6 +23,10 @@ monitor's loop (``level_alert_monitor.py``), at most every ``RUN_SECONDS``:
   a quote whose bid or ask is older than ``MAX_QUOTE_AGE``, or wider than
   ``MAX_SPREAD`` of its midpoint, is not judged. The peak is what this loop saw, not the trade's
   whole path: a position opened before the switch-on starts at its first mark.
+  The message carries the owner's record from a green peak (``giveback_record``): the closed long option trades whose
+  option path reached the same arming rule (``option_mfe_pct`` and ``option_peak_unrealized_pnl``), closed green
+  against closed red, count and dollars; trades without path data are left out, and under ``RECORD_MIN_TRADES`` on
+  either side there is no line.
 - **Last day.** An option still open on its expiration date gets one alert
   ``FIRST_MINUTES`` before the close and a last one ``FINAL_MINUTES`` before,
   from the market calendar (half days included). A first alert more than
@@ -96,7 +100,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import alert_feedback, notification_policy, ntfy, phone, ping_images, position_alert_context, telegram_replies
+from app.engine import alert_feedback, exit_habits, notification_policy, ntfy, phone, ping_images, position_alert_context, telegram_replies
 from app.engine.chart_journal import OPEN_SIDES, contract_label, open_lots
 from app.engine.chart_math import ET, session_windows
 from app.engine.occ import occ_symbol
@@ -296,6 +300,37 @@ def wrong_way_facts(db: Session, alert: PositionAlert) -> dict:
     return facts
 
 
+def giveback_record(db: Session) -> str | None:
+    """The owner's closed long option trades (``exit_habits.long_rows``, as /proof reads them) whose option path peaked
+    at the give-back arming rule (``ARM_PCT`` of cost and ``ARM_DOLLARS``), split into closed green and closed red. Trades
+    without path data, and flat ones, are left out; None when either side has fewer than ``RECORD_MIN_TRADES``."""
+    trades = db.exec(select(Trade).where(Trade.instrument_type == "option", Trade.status.in_(("closed", "expired")))).all()
+    if not trades:
+        return None
+    fills_of: dict = {}
+    for row in db.exec(select(TradeFill.trade_id, TradeFill.role, Fill.id, Fill.side, Fill.executed_at)
+                       .join(Fill, Fill.id == TradeFill.fill_id).where(TradeFill.trade_id.in_([t.id for t in trades]))).all():
+        fills_of.setdefault(row.trade_id, []).append({"id": row.id, "role": row.role, "side": row.side, "executed_at": row.executed_at})
+    peaked = [r["realized_pnl"] for r in exit_habits.long_rows(db, trades, fills_of)
+              if r["realized_pnl"] is not None and r["peak_pct"] is not None and r["peak_dollars"] is not None
+              and r["peak_pct"] >= ARM_PCT * 100 and r["peak_dollars"] >= ARM_DOLLARS]
+    green, red = [p for p in peaked if p > 0], [p for p in peaked if p < 0]
+    if min(len(green), len(red)) < RECORD_MIN_TRADES:
+        return None
+    return (f"Your record from a green peak: closed green {len(green)} of {len(green) + len(red)} ({_money(sum(green))}), "
+            f"closed red {len(red)} ({_money(sum(red))}).")
+
+
+def giveback_facts(db: Session) -> dict:
+    """What a give-back message says beyond the alert row: the owner's record. None never holds the alert back."""
+    facts = {"record": None}
+    try:
+        facts["record"] = giveback_record(db)
+    except Exception:  # noqa: BLE001 - the alert matters more than its extras
+        log.warning("Give-back facts skipped", exc_info=True)
+    return facts
+
+
 def open_positions(db: Session) -> list[dict]:
     """Every open long option with what is still held, anchored in its first entry fill."""
     trades = db.exec(select(Trade).where(Trade.status == "open", Trade.instrument_type == "option",
@@ -387,9 +422,11 @@ def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_
                 f"Open {HOLD_MINUTES} min, {now_part}{peak}. {_count(alert.contracts)} open. "
                 f"Re-decide: close, trim, or set your exit.", 4)
     if alert.kind == "giveback":
+        record = (facts or {}).get("record")
         return (f"{alert.contract}: give-back triggered",
                 f"Peak {_money(alert.peak_gain)} ({_pct(alert.peak_gain_pct)}), {now_part}. "
-                f"Gain reached the +3% give-back threshold or below. {_count(alert.contracts)} open. Review your exit plan.", 4)
+                f"Gain reached the +3% give-back threshold or below. {_count(alert.contracts)} open.{f' {record}' if record else ''} "
+                f"Review your exit plan.", 4)
     when = f" The market closes at {close_label}." if close_label else ""
     if alert.kind == "expiry_first":
         return (f"{alert.contract} expires today and is still open",
@@ -663,7 +700,7 @@ class PositionAlerts:
                 db.commit()
                 return
             facts = (wrong_way_facts(db, alert) if alert.kind == "wrong_way" else self._eve_facts(db, alert, now) if alert.kind == "expiry_eve"
-                     else None)
+                     else giveback_facts(db) if alert.kind == "giveback" else None)
             title, body, priority = message(alert, _clock_label(_minute_of(close)) if close else None,
                                             max(1, int((close - now) // 60)) if close else None, facts,
                                             since_line(db, alert, _epoch(alert.detected_at)))  # as of detection: a retry sends the same words
