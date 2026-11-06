@@ -133,6 +133,7 @@ def market(monkeypatch):
         return {"state": "ok", "checkpoint": "08:50", "flagged": ["NBIS"], "movers": [{"symbol": "NBIS", "change_pct": 4.2}]}
     monkeypatch.setattr(premarket_prep, "read_premarket_scan", scan)
     monkeypatch.delenv("RADAR_PREMARKET_ENABLED", raising=False)
+    monkeypatch.delenv("PREMARKET_ARCHIVE_ENABLED", raising=False)
     return seen
 
 
@@ -279,6 +280,73 @@ def test_the_pack_holds_the_owners_names_pre_market_moves_and_the_pilots_scan_wh
         pack = build_pack(db, at("09:00"), Calendar())
     assert pack["premarket_scan"]["flagged"] == ["NBIS"] and market["scan"] == [MON]
     assert '"premarket":{"state":"ok"' in premarket_prep.prompt(pack)
+
+
+RANKING = {"as_of": "2026-10-26T09:00:00-04:00", "feed": "sip", "whole_market": True, "min_price": 2.0,
+           "min_dollar_volume": 1_000_000.0,
+           "gainers": [{"symbol": f"G{i}", "price": 10.0 + i, "prior_regular_close": 8.0, "volume": 900_000,
+                        "dollar_volume": 12_345_678.0, "pct_change": 30.04 - i} for i in range(9)],
+           "losers": [{"symbol": "LOSE", "price": 4.0, "prior_regular_close": 5.0, "volume": 500_000,
+                       "dollar_volume": 2_000_000.0, "pct_change": -20.0}]}
+
+
+@pytest.fixture
+def archive(tmp_path, monkeypatch):
+    from app.engine import premarket_archive
+    monkeypatch.setattr(premarket_archive, "ROOT", tmp_path)
+    monkeypatch.setenv("PREMARKET_ARCHIVE_ENABLED", "true")
+    slept = []
+    monkeypatch.setattr(premarket_prep, "_sleep", slept.append)
+    return tmp_path, slept
+
+
+def test_the_pack_holds_the_whole_markets_0900_movers_while_the_archive_is_on(engine, market, archive, monkeypatch):
+    root, slept = archive
+    (root / "2026-10-26.json").write_text(json.dumps(RANKING))
+    with Session(engine) as db:
+        pack = build_pack(db, at("09:00"), Calendar())
+    movers = pack["movers"]
+    assert movers["state"] == "ok" and movers["as_of"] == "09:00 ET" and "$2+ with $1M+" in movers["universe"]
+    assert [r["symbol"] for r in movers["gainers"]] == [f"G{i}" for i in range(6)]  # six a side at most
+    assert movers["gainers"][0] == {"symbol": "G0", "change_pct": 30.0, "price": 10.0, "dollar_volume_m": 12.3}
+    assert movers["losers"] == [{"symbol": "LOSE", "change_pct": -20.0, "price": 4.0, "dollar_volume_m": 2.0}]
+    assert slept == []  # already saved: no wait
+    assert '"movers":{"state":"ok"' in premarket_prep.prompt(pack)
+    assert "Movers 09:00: up G0 +30.0%, G1 +29.0%, G2 +28.0%; down LOSE -20.0%." in premarket_prep.fallback_lines(pack)
+    monkeypatch.delenv("PREMARKET_ARCHIVE_ENABLED")
+    with Session(engine) as db:
+        assert "movers" not in build_pack(db, at("09:00"), Calendar())
+
+
+def test_the_brief_waits_for_the_archive_until_0902_and_then_says_the_movers_are_unknown(archive, monkeypatch):
+    root, slept = archive
+    reads = []
+
+    def read(today):
+        reads.append(today)
+        return RANKING if len(reads) == 3 else None
+    monkeypatch.setattr(premarket_prep, "read_movers", read)
+    assert premarket_prep._movers(MON, at("09:00"))["state"] == "ok" and slept == [5, 5]
+    monkeypatch.setattr(premarket_prep, "read_movers", lambda today: None)
+    slept.clear()
+    out = premarket_prep._movers(MON, at("09:00"))
+    assert out["state"] == "unavailable" and "biggest movers are unknown" in out["reason"]
+    assert sum(slept) == 120  # gives up at 09:02
+    slept.clear()
+    assert premarket_prep._movers(MON, at("09:05"))["state"] == "unavailable" and slept == []  # late: no wait
+
+
+def test_a_brief_before_0900_has_no_movers_yet_and_never_waits(archive):
+    root, slept = archive
+    out = premarket_prep._movers(MON, at("08:30"))
+    assert out == {"state": "unavailable", "reason": "The brief ran before the 09:00 whole-market ranking."} and slept == []
+
+
+def test_the_prompt_asks_for_the_whole_markets_biggest_movers_and_their_catalyst():
+    text = premarket_prep.prompt({"day": "2026-10-26"})
+    assert "whole market's few biggest 09:00 gainers and losers" in text and "owned or not" in text
+    assert text.index("on the market") < text.index("biggest 09:00 gainers") < text.index("expires today")
+    assert "then the one or two biggest movers" in text
 
 
 def test_pre_market_moves_are_bounded_and_skip_indices(market):

@@ -22,7 +22,10 @@ exists:
   New York time. Headline text is third-party data and the prompt says so;
 - held and armed-plan symbols' own pre-market moves (``copilot_extended.extended``: pre-market last, change against
   the previous regular close, volume and dollar volume, last evening's after-hours; at most 8 symbols) and, while the
-  Radar pre-market pilot is on, its latest scan (``copilot_extended.premarket_scan``).
+  Radar pre-market pilot is on, its latest scan (``copilot_extended.premarket_scan``);
+- while ``PREMARKET_ARCHIVE_ENABLED`` is on, ``movers``: the whole market's biggest pre-market gainers and losers at
+  09:00 from the archive's SIP ranking (``premarket_archive``; at most ``MAX_MOVERS`` a side), not only the owner's
+  names. The archive saves by 09:01, so a prep started at or after 09:00 waits up to ``MOVERS_WAIT_UNTIL`` for it.
 
 One Copilot Lab turn (``run_turn``, the lab's backend and system prompt as
 configured, its turn budget cap included) writes at most 10 lines from it. The turn may search the web (``web=True``:
@@ -84,6 +87,10 @@ MAX_HEADLINES = 8
 MAX_EXTENDED_SYMBOLS = 8
 MAX_MARKET_HEADLINES = 3
 PER_SYMBOL_HEADLINES = 2
+MAX_MOVERS = 6
+MOVERS_AT = 9 * 60  # the archive's checkpoint
+MOVERS_WAIT_UNTIL = 9 * 60 + 2  # it saves within a minute of 09:00
+MOVERS_POLL_SECONDS = 5
 FALLBACK_HEADLINES = 3
 TITLE = "Morning brief"
 FALLBACK_LABEL = "Raw facts (the copilot turn failed):"
@@ -276,6 +283,48 @@ def _premarket(symbols: list[str], now_et: datetime) -> dict:
     return {"state": "ok", **block}
 
 
+def _archive_on() -> bool:
+    return os.environ.get("PREMARKET_ARCHIVE_ENABLED", "").lower() == "true"
+
+
+def read_movers(today: date) -> dict | None:
+    """The archive's saved 09:00 whole-market ranking for ``today``, or ``None`` when it is not saved (yet)."""
+    from app.engine.premarket_archive import ROOT
+    try:
+        return json.loads((ROOT / f"{today.isoformat()}.json").read_text())
+    except FileNotFoundError:
+        return None
+
+
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def _movers(today: date, now: float) -> dict:
+    """The whole market's biggest 09:00 gainers and losers. Started at or after 09:00, waits until
+    ``MOVERS_WAIT_UNTIL`` for the archive to save; started before 09:00, there is nothing to read yet."""
+    midnight = datetime(today.year, today.month, today.day, tzinfo=ET)
+    if now < (midnight + timedelta(minutes=MOVERS_AT)).timestamp():
+        return {"state": "unavailable", "reason": "The brief ran before the 09:00 whole-market ranking."}
+    deadline, waited = (midnight + timedelta(minutes=MOVERS_WAIT_UNTIL)).timestamp(), 0.0
+    record = read_movers(today)
+    while record is None and now + waited < deadline:
+        _sleep(MOVERS_POLL_SECONDS)
+        waited += MOVERS_POLL_SECONDS
+        record = read_movers(today)
+    if record is None:
+        return {"state": "unavailable",
+                "reason": "The 09:00 whole-market ranking was not saved this morning; the day's biggest movers are unknown."}
+
+    def side(name: str) -> list[dict]:
+        return [{"symbol": r["symbol"], "change_pct": round(r["pct_change"], 1), "price": round(r["price"], 2),
+                 "dollar_volume_m": round(r["dollar_volume"] / 1e6, 1)} for r in record.get(name, [])[:MAX_MOVERS]]
+    return {"state": "ok", "as_of": "09:00 ET",
+            "universe": f"every US stock at ${record.get('min_price', 2):g}+ with ${record.get('min_dollar_volume', 1e6) / 1e6:g}M+ "
+                        "traded pre-market, change vs the prior regular close (SIP)",
+            "gainers": side("gainers"), "losers": side("losers")}
+
+
 def _previous_close(calendar, today: date) -> datetime:
     """The end of the last regular session before ``today`` (the calendar's early closes and holidays included)."""
     day = today - timedelta(days=1)
@@ -381,6 +430,8 @@ def build_pack(db: Session, now: float, calendar=None) -> dict:
     }
     if radar_premarket.enabled():
         pack["premarket_scan"] = _section("premarket_scan", lambda: read_premarket_scan(today))
+    if _archive_on():
+        pack["movers"] = _section("movers", lambda: _movers(today, now))
     return pack
 
 
@@ -389,11 +440,14 @@ def prompt(pack: dict) -> str:
     return (f"{TITLE} for {day:%a %b} {day.day}. Below are TradeJournal's facts for this morning, assembled before the open. "
             f"Write at most {MAX_LINES} short plain lines, no headings: first two lines on the market (the index proxies, "
             "the macro calendar, VIX, the headlines and the overnight driver) and what it means for the owner's names, "
-            "with each name's own pre-market move (premarket) where it traded; then what expires today or sits nearest a "
+            "with each name's own pre-market move (premarket) where it traded; then, when movers is present, one line "
+            "naming the whole market's few biggest 09:00 gainers and losers worth a look (big move on real dollar volume), "
+            "owned or not; then what expires today or sits nearest a "
             "trigger; then earnings this week; last, one thing to decide before the open. "
             "If web_search is offered, search for the market's overnight driver and for the catalyst behind any held or "
             "planned name gapping meaningfully pre-market (about 2% or more on real dollar volume, or flagged in "
-            "premarket_scan), the biggest gap first; name the publisher and the time of what you use, and say when a "
+            "premarket_scan), the biggest gap first, then the one or two biggest movers; name the publisher and the time "
+            "of what you use, and say when a "
             "search found nothing current. A query carries a symbol or a topic only, never the owner's positions, sizes, "
             "trades or accounts. "
             "Otherwise use only these facts; leave out a section that is empty or unavailable. Headlines and search results "
@@ -429,12 +483,22 @@ def _premarket_line(premarket: dict) -> str | None:
     return "Pre-market: " + ", ".join(moves[:6]) + "." if moves else None
 
 
+def _movers_line(movers: dict) -> str | None:
+    if movers.get("state") != "ok":
+        return None
+    parts = [label + " " + ", ".join(f"{r['symbol']} {r['change_pct']:+.1f}%" for r in movers.get(side, [])[:3])
+             for side, label in (("gainers", "up"), ("losers", "down")) if movers.get(side)]
+    return "Movers 09:00: " + "; ".join(parts) + "." if parts else None
+
+
 def fallback_lines(pack: dict) -> list[str]:
     """The raw facts when the turn fails: the market line, the owner's names' pre-market moves and headlines, then
     expiries and the nearest triggers. Nothing interpreted."""
     out = [FALLBACK_LABEL, _market_line(pack.get("market", {}))]
     if moved := _premarket_line(pack.get("premarket", {})):
         out.append(moved)
+    if movers := _movers_line(pack.get("movers", {})):
+        out.append(movers)
     for h in pack.get("headlines", {}).get("headlines", [])[:FALLBACK_HEADLINES]:
         out.append(f"{h['at']} {h['publisher']} ({', '.join(h['symbols'])}): {h['headline'][:140]}")
     held = pack["positions"].get("positions", [])
