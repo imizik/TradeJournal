@@ -2186,16 +2186,17 @@ Six rules judge each new entry fill:
   and their realized total is below zero (the audit's SNDK, −$5,410 over 48). A
   positive or too-small record stays quiet, so familiar names do not spend the
   budget.
-- **Large size:** a buy whose premium paid (contracts × price, option prices
-  being stored per contract; shares × price for a stock) is at least 2× the
+- **Large size:** an option bought to open whose premium paid (contracts ×
+  price, option prices being stored per contract) is at least 2× the
   median of the owner's closed long option positions entered in the last 12
   months (each position's largest entry fill), needing at least 20 of them, else
   it never fires (the audit: since July "the same mistakes now cost more per
   trade because sizes are larger"). The 2×, 12 months and 20 are module
   constants.
 
-A stock can fire only the green-day, ticker and size rules; a short only the
-green-day and ticker rules. The put, green-day, late-buy, ticker-record and
+A stock, or a short, can fire only the green-day and ticker rules: a stock's
+dollars are not an option premium, and a short receives premium rather than
+paying it. The put, green-day, late-buy, ticker-record and
 large-size rules describe the position, so each fires once per position; adding
 to a loser fires on every such add. A fill that fires several sends one
 message, one line per rule in that order, ending "Your record, not advice.":

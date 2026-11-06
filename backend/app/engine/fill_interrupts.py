@@ -14,13 +14,13 @@ are larger. Six pure rules judge each new **entry** fill, newest-first order:
   holiday counts as one) at or after 14:00 New York;
 - ``ticker_record``: the owner has at least ``MIN_SAMPLE`` closed trades in the fill's ticker and their realized
   total is below zero (a positive or too-small record stays quiet, so familiar names do not spend the budget);
-- ``large_size``: a buy whose premium paid (contracts × price, fills storing option prices as dollars per
-  contract; shares × price for a stock) is at least ``LARGE_MULTIPLE`` times the median of the owner's closed long
+- ``large_size``: a ``buy_to_open`` of an option whose premium paid (contracts × price, fills storing option prices
+  as dollars per contract) is at least ``LARGE_MULTIPLE`` times the median of the owner's closed long
   option positions entered in the last ``LARGE_LOOKBACK_DAYS`` (each position's largest entry fill), needing
   ``LARGE_MIN_ENTRIES`` of them, else it never fires.
 
-A stock entry can fire only ``opened_green``, ``ticker_record`` and ``large_size``; a short (``sell_to_open``) only
-``opened_green`` and ``ticker_record``. The put, green-day, late-buy, ticker and size rules describe the position,
+A stock entry, and a short (``sell_to_open``), can fire only ``opened_green`` and ``ticker_record``: a stock's dollars
+are not an option premium, and a short receives premium rather than paying it. The put, green-day, late-buy, ticker and size rules describe the position,
 so each fires once per position (``ONCE_PER_POSITION``); adding to a loser fires on every such add. A fill whose
 email arrives after a later entry's keeps the position's recorded anchor. Known limit, as for position alerts: a
 message sent before an earlier entry fill arrived links the trade id of that moment, which the rebuild replaces, so
@@ -137,7 +137,7 @@ def late_short_dated(fill: dict) -> bool:
 
 
 def premium(fill: dict) -> float:
-    """Dollars paid: contracts × price (option prices are stored per contract, multiplier included), or shares × price."""
+    """Dollars paid: contracts × price (option prices are stored per contract, multiplier included)."""
     return fill["contracts"] * fill["price"]
 
 
@@ -147,8 +147,10 @@ def ticker_record(rec: dict | None) -> bool:
 
 
 def large_size(fill: dict, usual: float | None) -> bool:
-    """A buy paying at least ``LARGE_MULTIPLE`` times ``usual`` (None when the history is too short to say)."""
-    return fill["side"] in ("buy_to_open", "buy") and usual is not None and premium(fill) >= LARGE_MULTIPLE * usual - EPS
+    """An option bought to open paying at least ``LARGE_MULTIPLE`` times ``usual`` (None when the history is too short
+    to say). A stock buy never fires: its dollars are not an option premium, so the median says nothing about it."""
+    return (fill["side"] == "buy_to_open" and fill.get("instrument_type") == "option" and usual is not None
+            and premium(fill) >= LARGE_MULTIPLE * usual - EPS)
 
 
 def fired(fill: dict, prior: list[dict], day_pnl_before: float | None, ticker_rec: dict | None = None,
