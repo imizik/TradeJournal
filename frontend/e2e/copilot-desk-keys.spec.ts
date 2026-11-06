@@ -211,12 +211,19 @@ test("sending a saved-thread draft clears it and switching back does not restore
 test("J and K open the next and previous thread in list order; keys typed in the message box are ignored", async ({ page }) => {
   const { chats } = await lab(page);
   const thread = conversation(page);
+  // J and K step from the thread the desk has open, which it records just after the answer shows: each step waits for
+  // the list to mark it open, or a fast next key would step from the one before.
+  const open = (symbol: string) => expect(page.getByRole("navigation", { name: "Thread list" })
+    .getByRole("button", { name: new RegExp(`^${symbol}, `) })).toHaveClass(/ring-1/);
   await page.keyboard.press("j");
   await expect(thread.getByText("NBIS answer: hold above 92.30.")).toBeVisible();
+  await open("NBIS");
   await page.keyboard.press("j");
   await expect(thread.getByText("CRWV answer: short under 99.00.")).toBeVisible(); // an armed plan; the MU Radar row leaves the page, so J skips it
+  await open("CRWV");
   await page.keyboard.press("j");
   await expect(thread.getByText("APLD answer: enter at 31.00.")).toBeVisible();
+  await open("APLD");
   await page.keyboard.press("k");
   await expect(thread.getByText("CRWV answer: short under 99.00.")).toBeVisible();
   await expect(page.getByRole("button", { name: "CRWV, Plan armed" })).toHaveClass(/ring-1/);

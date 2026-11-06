@@ -55,6 +55,25 @@ export function sizeContracts(risk: number, pick: { ask_contract: number; ask: n
   return { maxLoss, premium: maxLoss * pick.ask_contract, atInvalidation };
 }
 
+/**
+ * The plan's numbers row, worked out here from its own prices, never from the copilot's words: the drafted last, the
+ * entry's distance from it, and the invalidation's distance from the entry with the move it takes in the underlying.
+ * Prices show as given (no rounding); a level missing, not positive or on the wrong side of the entry gets no distance.
+ */
+export function planNumbers({ symbol, stock, long, last, entry, stop }: { symbol: string; stock: boolean; long: boolean;
+  last: number | undefined; entry: number; stop: number }): string[] {
+  const ok = (n: number | undefined): n is number => n !== undefined && Number.isFinite(n) && n > 0;
+  const pct = (a: number, b: number) => { const p = (a - b) / b * 100; return `${p < 0 ? "−" : "+"}${Math.abs(p).toFixed(1)}%`; };
+  const parts: string[] = [];
+  if (ok(last)) parts.push(`Last ${last} at draft`);
+  if (ok(entry)) parts.push(`Entry ${entry}${ok(last) ? `, ${pct(entry, last)} from last` : ""}`);
+  if (ok(entry) && ok(stop) && (long ? stop < entry : stop > entry)) {
+    const gap = Math.abs(entry - stop), move = gap.toFixed(gap < 0.1 ? 4 : 2); // cents, as the sizing lines show it
+    parts.push(`Stop ${stop}, ${pct(stop, entry)} from entry (${stock ? `${move} a share` : `a ${move} move in ${symbol}`})`);
+  }
+  return parts;
+}
+
 /** The computed size leads the owner's size note, which keeps its 120 characters: the owner's words are cut, not the size. */
 export function sizedNote(sized: string, note: string): string {
   const both = [sized, note.trim()].filter(Boolean).join("; ");
@@ -173,6 +192,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   const horizon = pickedHorizon ?? horizonFor(timed?.due_at);
   const ready = !problem && !!account && (!alertsSupported || !!investigationId) && !reading;
 
+  const numbers = planNumbers({ symbol: plan.symbol, stock: plan.instrument === "stock", long, last: plan.last, entry: entryLevel.price, stop: stopLevel.price });
   const sizing = sizeIt();
   const sizeText = sizing?.note && !sizeEdited ? sizedNote(sizing.note, size) : size.trim();
   const wording = [`Entry: ${levelText(entryLevel)}.`, `Invalidation: ${levelText(stopLevel)}.`,
@@ -302,6 +322,11 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
       <p className="font-medium text-foreground">
         Proposed trade plan · {plan.symbol} · {SIDE_LABEL[side]}{contract ? ` · ${contract}` : ""}
       </p>
+      {numbers.length > 0 && (
+        <p aria-label="Plan numbers" className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs tabular-nums text-muted-foreground">
+          {numbers.map(n => <span key={n}>{n}</span>)}
+        </p>
+      )}
       {picks.length > 0 && (
         <label className="block space-y-1">
           <span className="text-xs text-muted-foreground">Contract</span>
@@ -318,7 +343,6 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
           </span>
         </label>
       )}
-      {plan.last !== undefined && <p className="text-xs text-muted-foreground">{plan.symbol} was {plan.last} when this was drafted.</p>}
       {drafting && <LastExitLine symbol={plan.symbol} lesson={lastExit} />}
       {drafting && plan.instrument !== "stock" && <SetupRecordLines symbol={plan.symbol} side={plan.instrument === "calls" ? "call" : "put"}
         setup={setupRecord} />}
