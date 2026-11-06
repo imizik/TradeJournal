@@ -16,8 +16,10 @@ A button's callback data is ``<verb>:<id>[:<answer>]``, at most 64 bytes:
 - ``pc:<companion id>:confirm|ignore``: the position companion's adopt message (``engine/position_companion.py``):
   Confirm arms the draft plan's invalidation alert as a confirmed plan card does, Ignore stops its updates;
 - ``pu:<companion id>:<update>:closed|holding``: the owner's answer to a companion update, recorded on its row;
-- ``pl:<card client id>:confirm``: a trade plan a Telegram turn proposed (``_send_plans``): Confirm records the card's
-  outcome and arms its invalidation alert as the desk's Confirm does (``confirm_plan``), and nothing else;
+- ``pl:<card client id>:confirm``: a trade plan a Telegram turn proposed (``_send_plans``): Confirm runs the desk's
+  Confirm parts in its order (``confirm_plan``): the pre-trade plan capture on the default (or only) account, then the
+  entry and invalidation alerts and a readable time stop, each with its own result on the card's outcome; a later tap
+  retries only the parts not done. Nothing is placed or sized;
 - ``why:<position alert id>``: one bounded copilot turn on the alert (``position_alerts.ask_context``, the configured
   backend and its turn and daily budgets), answered in the chat with the Verdict line and body cut to 1,500
   characters; with Copilot Lab off the reply says so. One turn runs at a time, and a message's Why? is asked once.
@@ -99,10 +101,13 @@ WHY = object()  # _mark's marker for a Why? tap
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 PLAN_CARDS = 2  # trade plan cards sent per turn
 PLAN_KEY = re.compile(r"^[0-9a-f]{32}$")  # a Telegram card's client id
-PLAN_FOOTER = "Nothing is placed; Confirm arms the invalidation alert."
+PLAN_FOOTER = "Nothing is placed; Confirm saves the plan and arms its alerts."
 FROM_TELEGRAM_NOTE = "Confirmed from Telegram"
 PLAN_SIDE = {("long", "stock"): "Buy stock", ("short", "stock"): "Short stock", ("long", "calls"): "Buy calls",
              ("short", "puts"): "Buy puts"}
+PLAN_CAPTURE_SIDE = {("long", "stock"): "buy_stock", ("short", "stock"): "short_stock", ("long", "calls"): "buy_calls",
+                     ("short", "puts"): "buy_puts"}  # the desk's capture side (TradePlanCard: SIDE)
+PART_NAME = {"plan": "Plan", "entry": "Entry", "invalidation": "Invalidation", "timeStop": "Time stop"}
 HORIZON_LABEL = {"day": "Day trade", "swing": "Swing", "long": "Long hold"}
 CONDITION = {"touches": "touches", "crosses": "crosses", "closes_beyond": "closes beyond"}
 
@@ -295,10 +300,7 @@ class Replies:
     def _plan(self, client_id: str, action: str) -> tuple[str, str | None]:
         if action != "confirm":
             return "That button is not one the app knows.", None
-        reply, chosen = confirm_plan(self.engine, client_id, quote=self.quote)
-        if chosen and self.alerts_changed is not None:
-            self.alerts_changed()
-        return reply, chosen
+        return confirm_plan(self.engine, client_id, quote=self.quote, armed=self.alerts_changed)
 
     async def _why(self, alert_id: str, message: dict) -> None:
         try:
@@ -685,13 +687,37 @@ def _fresh_quote(symbol: str) -> tuple[float | None, bool]:
     return read.get("last"), bool(read.get("fresh"))
 
 
-def confirm_plan(engine, client_id: str, *, quote=None, now: float | None = None) -> tuple[str, str | None]:
-    """Confirm on a Telegram plan card: what the desk's Confirm does for its invalidation, and only that. The card's
-    outcome is recorded as confirmed (``set_outcome``) and its invalidation armed as a ``copilot`` level alert with
-    ``plan_role="invalidation"`` on the conversation, at the plan's level. Arms nothing for a card already confirmed
-    (here or on the desk) or dismissed, a stale or missing quote, or an invalidation already crossed; the level
-    alert's own check refuses a duplicate. ``(reply, chosen label)``."""
-    from app.engine import copilot_investigations as investigations
+def _calendar():
+    """The market calendar the time-stop route reads a time stop with."""
+    from app.engine.chart_calendar import chart_calendar
+    return chart_calendar
+
+
+def _plan_account(db: Session) -> str | None:
+    """The plan's journal account as the desk picks it: the capture default, else the only account."""
+    from sqlmodel import select
+    from app.engine import captures
+    from app.models import Account
+    default = captures.profile(db).default_account_id
+    if default is not None:
+        return str(default)
+    accounts = db.exec(select(Account.id)).all()
+    return str(accounts[0]) if len(accounts) == 1 else None
+
+
+def confirm_plan(engine, client_id: str, *, quote=None, now: float | None = None, armed=None) -> tuple[str, str | None]:
+    """Confirm on a Telegram plan card: the desk's Confirm (``TradePlanCard``), part by part, through the engine
+    functions its routes call. The pre-trade plan first (``captures.build``/``save`` as ``POST /charts/captures`` with
+    the card's client id, then the horizon entry the desk saves with it); only once it is saved, the entry and
+    invalidation alerts (a fresh quote each, ``create_alert`` as ``POST /charts/alerts``; an invalidation the price has
+    already crossed is refused) and, when the server reads it as a time, the time stop (``plan_time_stops.create`` with
+    the client id). Each part has its own result, recorded on the card's outcome as the desk records it, with a note
+    saying it came from Telegram; a later tap runs only the parts not done (the client id keeps the plan and time stop
+    single). Saves nothing without an account to put the plan on, or for a card dismissed or confirmed on the desk.
+    ``armed`` is called when an alert was armed. ``(reply, chosen label)``: the label only once every part is done, so
+    the button stays for a retry."""
+    from app.engine import captures, copilot_investigations as investigations, day_journal, plan_time_stops
+    from app.engine.chart_math import ET
     from app.engine.level_alert_monitor import create_alert
     now = time.time() if now is None else now
     with Session(engine) as db:
@@ -700,35 +726,90 @@ def confirm_plan(engine, client_id: str, *, quote=None, now: float | None = None
             return "That plan is no longer on the desk.", None
         thread_id, card = found
         outcome = card.get("outcome") or {}
-        if outcome.get("state") == "confirmed":
-            if str(outcome.get("note") or "").startswith(FROM_TELEGRAM_NOTE):
-                return "Already confirmed: its invalidation alert is armed.", "Confirmed"
-            return "Already confirmed on the desk.", "Confirmed"
         if outcome.get("state") == "dismissed":
             return "Not confirmed: this plan was dismissed on the desk.", None
-        symbol, level = card["symbol"], card["invalidation"]
-        price = level["price"]
-        last, fresh = (quote or _fresh_quote)(symbol)
-        if not fresh or not last:
-            return f"The latest {symbol} quote is stale or missing, so nothing was armed. Try again.", None
-        if (last <= price) if card["direction"] == "long" else (last >= price):
-            return f"{symbol} is at {last:,.2f}, already past the invalidation at {price:,.2f}, so it was not armed.", None
-        wording = _level(level)
-        try:  # the plan card's invalidation alert, as its Confirm arms it (TradePlanCard: createPlanAlert)
-            create_alert(db, symbol=symbol, price=price, reference=last, condition=level["condition"], interval=level.get("interval"),
-                         session="regular", source_kind="copilot", source_id=thread_id, label=f"{symbol} invalidation: {wording}"[:60],
-                         now=now, plan_role="invalidation")
-        except ValueError as exc:
-            return f"Not armed: {exc}", None
+        if outcome.get("state") == "confirmed" and not str(outcome.get("note") or "").startswith(FROM_TELEGRAM_NOTE):
+            return "Already confirmed on the desk.", "Confirmed"
+        results = {part: dict(r) for part, r in (outcome.get("parts") or {}).items()}
+        symbol, long = card["symbol"], card["direction"] == "long"
+        stop_text = (card.get("time_stop") or "").strip()
+        timed = plan_time_stops.parse(stop_text, now, _calendar()) if stop_text else {"due_at": None}
+        wanted = ["plan", "entry", "invalidation", *(["timeStop"] if timed.get("due_at") or "timeStop" in results else [])]
+        todo = [part for part in wanted if results.get(part, {}).get("state") != "done"]
+        if not todo:
+            return "Already confirmed: the plan is saved and its alerts are armed.", "Confirmed"
+        account = _plan_account(db) if "plan" in todo else None
+        if "plan" in todo and account is None:
+            return "Set a default account for plans on the desk first; nothing was saved.", None
+        horizon = _horizon(card, now)
+        size = (card.get("size_note") or "").strip()
+        lines, alerts = [], 0
+
+        def result(part: str, done: bool, text: str, line: str = "") -> None:
+            results[part] = {"state": "done" if done else "failed", "text": text[:500]}
+            lines.append(line if done else f"{PART_NAME[part]} failed: {text}")
+
+        if "plan" in todo:
+            side = PLAN_CAPTURE_SIDE.get((card["direction"], card["instrument"]), "")
+            wording = " ".join(filter(None, [f"Entry: {_level(card['entry_trigger'])}.", f"Invalidation: {_level(card['invalidation'])}.",
+                                             stop_text and f"Time stop: {stop_text}.", size and f"Size: {size}."]))[:400]
+            note = " ".join(filter(None, [f"Thesis: {(card.get('thesis') or '').strip()}",
+                                          card.get("contract") and f"Contract: {card['contract']}.", "From a Copilot Lab plan card."]))[:500]
+            try:  # the desk's savePlanCapture body, then its saveHorizon
+                captures.save(db, captures.build(db, {
+                    "client_id": client_id, "underlying": symbol, "account_id": account, "side": side, "wording": wording, "note": note,
+                    "client_captured_at": now * 1000, "mode": "discretionary", "setup_label": "Copilot plan", "image": False,
+                    "origin": {"kind": "copilot", "ref": thread_id, "text": None},
+                    "context": {"state": "unavailable", "reason": "Saved from a Copilot Lab plan card.", "investigation_id": thread_id}}))
+                day_journal.append(db, day=datetime.fromtimestamp(now, ET).date(), operation_id=f"horizon-{client_id}-{horizon}",
+                                   kind="horizon", text=HORIZON_LABEL[horizon], symbol=symbol)
+                result("plan", True, "Saved as your pre-trade plan. It is suggested for the trade when the fill arrives.", "Plan saved")
+            except (captures.CaptureError, day_journal.EntryError) as exc:
+                db.rollback()
+                result("plan", False, str(exc))
+        if results["plan"]["state"] == "done":  # the alerts and time stop only once the plan is saved, as the desk runs them
+            for part in ("entry", "invalidation"):
+                if part not in todo:
+                    continue
+                level = card["entry_trigger"] if part == "entry" else card["invalidation"]
+                price, wording = level["price"], _level(level)
+                last, fresh = (quote or _fresh_quote)(symbol)  # read fresh for each alert, as the desk does
+                if not fresh or not last:
+                    result(part, False, f"The latest {symbol} quote is stale or missing, so it was not set.")
+                elif last == price:
+                    result(part, False, f"{symbol} is at {price:g} now, so the alert has no side to wait on.")
+                elif part == "invalidation" and (last < price if long else last > price):
+                    result(part, False, f"{symbol} is at {last:g}, already past the invalidation at {price:g}, so it was not set.")
+                else:
+                    try:
+                        create_alert(db, symbol=symbol, price=price, reference=last, condition=level["condition"], interval=level.get("interval"),
+                                     session="regular", source_kind="copilot", source_id=thread_id, label=f"{symbol} {part}: {wording}"[:60],
+                                     now=now, plan_role=part)
+                    except ValueError as exc:
+                        result(part, False, str(exc))
+                    else:
+                        alerts += 1
+                        result(part, True, f"Set: {symbol} {wording}.", f"{PART_NAME[part]}{' alert' if part == 'entry' else ''} armed at {price:,.2f}")
+            if "timeStop" in todo:
+                try:
+                    plan_time_stops.create(db, client_id=client_id, investigation_id=thread_id, symbol=symbol, text=stop_text, now=now,
+                                           calendar=_calendar())
+                    when = timed.get("when") or stop_text
+                    result("timeStop", True, f"Set for {when}.", f"Time stop set: {when}")
+                except ValueError as exc:
+                    result("timeStop", False, str(exc))
         fields = investigations.PlanFields(
             thesis=(card.get("thesis") or "")[:300], contract=(card.get("contract") or "")[:80],
-            entry=f"{card['entry_trigger']['price']:g}"[:24], invalidation=f"{price:g}"[:24], time_stop=(card.get("time_stop") or "")[:80],
-            size_note=(card.get("size_note") or "")[:120], horizon=_horizon(card, now))
+            entry=f"{card['entry_trigger']['price']:g}"[:24], invalidation=f"{card['invalidation']['price']:g}"[:24],
+            time_stop=stop_text[:80], size_note=size[:120], horizon=horizon)
         investigations.set_outcome(thread_id, card["id"], investigations.ProposalOutcome(
-            state="confirmed", note=f"{FROM_TELEGRAM_NOTE}: only the invalidation alert is armed.",
-            parts={"invalidation": investigations.PartResult(state="done", text=f"Set: {symbol} {wording}.")}, fields=fields), session=db)
-    log.info("Telegram plan confirmed for %s: invalidation %.2f armed", symbol, price)
-    return f"Confirmed: invalidation {price:,.2f} on {symbol} is armed.", "Confirmed"
+            state="confirmed", note=f"{FROM_TELEGRAM_NOTE}.",
+            parts={part: investigations.PartResult(**r) for part, r in results.items()}, fields=fields), session=db)
+    if alerts and armed is not None:
+        armed()
+    log.info("Telegram plan confirm for %s: %s", symbol, {part: r["state"] for part, r in results.items()})
+    finished = all(results.get(part, {}).get("state") == "done" for part in wanted)
+    return "\n".join(lines), "Confirmed" if finished else None
 
 
 def _trade_for(db: Session, alert) -> uuid.UUID | None:

@@ -1275,7 +1275,9 @@ since-entry comparison, the news reader) and writes nothing.
   a typed message; the heard words are what the desk keeps. A trade plan the
   turn proposes is saved on the answer with the same shape and id as a desk
   card (Main chat gives it its own plan thread), then sent as a message of its
-  own: the card's lines, **Confirm** (`pl:<card client id>:confirm`) and
+  own: the card's lines, **Confirm** (`pl:<card client id>:confirm`, which
+  runs the same parts as the desk's Confirm: the pre-trade plan, then the
+  entry and invalidation alerts and the time stop; see Confirm a plan) and
   **Edit** (the thread). The bot's taps: `fb:`, `rr:`, `pc:`, `pu:`, `pl:`,
   `why:` and `ask:` (`engine/telegram_replies.py`).
 - Headlines are read through a two-minute cache per symbol and entry, so the
@@ -1931,10 +1933,18 @@ nothing exists until the owner confirms.
       words, re-read on the server and saved in `plan_time_stop`
       (`backend/app/engine/plan_time_stops.py`).
   - A plan proposed in a Telegram turn is confirmed the same way from its card
-    message: Confirm there records the card's outcome and arms only the
-    invalidation alert (a fresh quote, refused when stale or already crossed;
-    a second tap, or a card confirmed on the desk, arms nothing), and the desk
-    thread shows it confirmed with that alert armed.
+    message: Confirm there runs the same parts in the same order through the
+    engine functions these routes call (`confirm_plan` in
+    `engine/telegram_replies.py`): the pre-trade plan with the card's client
+    id on the capture default account (or the only one; with neither it says
+    "Set a default account for plans on the desk first" and saves nothing),
+    then the entry and invalidation alerts and a time stop it can read. The
+    reply lists each part on its own line ("Plan saved", "Entry alert armed
+    at 100.00", "Invalidation failed: …"); the card's outcome records each
+    part's result with a note starting "Confirmed from Telegram", so the desk
+    card shows the same state as a desk-confirmed one. A second tap retries
+    only the failed parts, and once every part is done says it is already
+    confirmed; a card confirmed on the desk or dismissed saves nothing.
   - **Follow-through.** A plan's pings name the plan:
     - When its entry or invalidation alert fires, the phone says
       "NBIS hit your 95.90 entry trigger. Still valid? Tap to check." or
