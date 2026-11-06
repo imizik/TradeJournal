@@ -319,7 +319,8 @@ test("the Model picker sends the chosen model with each turn and remembers it in
   const picker = page.getByLabel("Model");
   await expect(picker).toHaveValue("claude-sonnet-5-5");
   await picker.selectOption("claude-opus-5-5");
-  await expect(page.getByText("Claude API · claude-opus-5-5")).toBeVisible();
+  await expect(picker).toHaveValue("claude-opus-5-5");
+  await expect(page.getByText("Claude API · claude-opus-5-5")).toHaveCount(0); // the desk names the model once, in its picker
   await page.getByLabel("Message").fill("Is MRVL leading its group?");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText(ANSWER)).toBeVisible();
@@ -333,12 +334,17 @@ test("the Model picker sends the chosen model with each turn and remembers it in
   expect(lab.chats[1].model).toBeUndefined();
 });
 
-test("the API day budget shows beside the model", async ({ page }) => {
+test("the desk shows the API day budget beside the model once half of it is spent", async ({ page }) => {
   const lab: Lab = { saved: new Map(), chats: [] };
   await stubLab(page, lab);
+  let spent = 0.84;
   await page.route("**/copilot/status", (route) => route.fulfill({ json: { ...ON, backend: "anthropic", key_configured: true,
-    backends: ["anthropic"], spend_today_usd: 0.84, daily_budget_usd: 2 } }));
+    backends: ["anthropic"], spend_today_usd: spent, daily_budget_usd: 2 } }));
   await page.goto("/copilot-lab?symbol=MRVL");
-  await expect(page.getByText("API today $0.84 of $2.00")).toBeVisible();
+  await expect(page.getByText("Read-only TradeJournal data")).toHaveCount(0); // the usual data needs no label
+  await expect(page.getByText(/^API today/)).toHaveCount(0);
+  spent = 1.2;
+  await page.reload();
+  await expect(page.getByText("API today $1.20 of $2.00")).toBeVisible();
   await expect(page.getByLabel("Backend")).toHaveCount(0); // one backend: no picker
 });

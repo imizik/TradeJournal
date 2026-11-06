@@ -25,7 +25,9 @@ export type DeskThreadRef = { id: string; symbol: string | null; title: string; 
  * thread has a plan that can be marked done (the thread menu's Mark plan done): its symbol, and ``done`` hears it was. */
 export type DeskHooks = { command: DeskCommand | null; onThread(thread: DeskThreadRef | null): void; planDone?: { symbol: string; done(): void } | null;
   /** Something at the top of the thread still asks for an answer: a conversation opens there, not on its latest turn. */
-  holdTop?: boolean };
+  holdTop?: boolean;
+  /** The latest question and its finished answer, so the Context pane can follow the ticker they are about. */
+  onAnswer?(text: string | null): void };
 
 /** The thread list's groups, in order: what needs a decision first, what is only being watched last. */
 export type DeskGroup = "pinned" | "act" | "near" | "draft" | "new" | "watch";
@@ -382,6 +384,19 @@ export const DESK_MARKET = "market";
 /** A thread named by its symbol alone (a position or plan with no saved conversation, a Radar hit): the Context pane's
  * routes read it as ``symbol:`` and the symbol, with its plan's lines and its open trade when it has them. */
 export const deskSymbolThread = (symbol: string): DeskThreadRef => ({ id: `symbol:${symbol}`, symbol, title: symbol, refreshKey: 0 });
+
+/** Market and sector funds an answer about the day often names, besides the owner's own tickers. */
+const MARKET_FUNDS = ["SPY", "QQQ", "IWM", "DIA", "SMH", "SOXX", "XLK", "XLF", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLB", "XLC", "XLRE",
+  "KRE", "XBI", "IGV", "ARKK", "TLT", "GLD", "SLV", "USO"];
+
+/** The ticker a conversation about no symbol is about: the first one ``text`` names (the question before the answer)
+ * among ``known`` (the owner's tickers) and the market funds, or null. A word in capitals that is no ticker never counts. */
+export function answerSymbol(text: string | null, known: Iterable<string>): string | null {
+  if (!text) return null;
+  const tickers = new Set([...known, ...MARKET_FUNDS]);
+  for (const [word] of text.matchAll(/\b[A-Z]{1,5}\b/g)) if (tickers.has(word)) return word;
+  return null;
+}
 
 /** The thread chart's timeframes: today's minutes, recent sessions' 15-minute bars, a few months of daily bars. */
 export const DESK_TIMEFRAMES = ["2m", "15m", "1D"] as const;

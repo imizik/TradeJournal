@@ -172,10 +172,10 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     phone check), `frontend/e2e/copilot-panel.spec.ts` and
     `frontend/e2e/copilot-review.spec.ts`.
 - **Thread list**, the desk's left pane (page only, lab on;
-  `components/copilot/ThreadRail.tsx`). **Main chat** and **Today’s briefing** as a bordered pair (the open one
-  filled in, as is the matching header button), the briefing pinned
-  while the list scrolls on a wide screen, then one row per ticker, with one line for the day above it: the market phase, how many
-  rows need a decision, and the plan streak. The server still sends its rows
+  `components/copilot/ThreadRail.tsx`). **Today’s briefing** (filled in while open), pinned
+  while the list scrolls on a wide screen, then one row per ticker, with one line for the day above it: how many
+  rows need a decision, and the plan streak while one is running. Main chat is not listed here: the desk bar's
+  **Main chat | Today’s briefing** switch opens it. The server still sends its rows
   in `DESK_GROUPS` order (Act now, Near a trigger, Waiting for you, New since
   you looked, Watching); the list regroups them by symbol in the browser.
   - **Today’s briefing**: the market-wide view, the Briefing (today's pre-market prep
@@ -185,8 +185,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     Radar ▾" lists the Radar events since the last Radar visit, each opening
     the desk on its decision (a stock hit) or Radar (a group event). The briefing
     shows their count ("18 Radar", an amber dot while one is unseen in this
-    browser) and, in amber, how many alerts and Radar hits wait for an answer
-    ("3 to answer"). Open conversations about no ticker (a Briefing turn, a week
+    browser) and, in amber, how many of today's alerts and Radar hits still wait
+    for an answer ("3 to answer"); older ones wait in the Briefing, uncounted here. Open conversations about no ticker (a Briefing turn, a week
     review) are listed under it, title and date: today's, the open one and the
     latest automatic week review, the rest under **Earlier · N**. **What matters right
     now?** (one turn, the fixed `lib/copilot.ts` `WHAT_MATTERS_PROMPT`) sits
@@ -195,17 +195,17 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     position, a plan (armed, near a trigger, or exited with its exit review
     waiting), a plan or alert card waiting on Confirm, a thesis-watch trigger
     today, an open conversation, or a conversation closed since Monday (New
-    York). A row shows the symbol, its state (**Held**, **Plan armed**,
-    **Exited**, **Watching** or **Closed**), the position's unrealized P&L
+    York). A row shows the symbol, its state (**Plan armed**, **Exited**,
+    **Watching** or **Closed**; a held position shows none, its P&L and group say it), the position's unrealized P&L
     (an option's from its own mark) or the exit day, and the status line of
     its most urgent row (Act now's reasons, a plan's nearest level, "N to
-    confirm", the close question). An amber dot means it needs the owner: an
+    confirm", the close question) on up to two lines; "Want a plan for this?" is muted, not amber. An amber dot means it needs the owner: an
     Act now position, a card waiting on Confirm, a fill to link, or a close
     or exit question not yet answered or skipped today. A plan meter shows
     when the leading row is Act now or Near a trigger: the underlying on the
     track from the invalidation (left) to the entry (the tick). Three headed
     groups: **Needs you**, **Held and armed**, and **Others** (exited,
-    watching, closed), newest first within each state; six of Others show and
+    watching, closed), the biggest loss first within each state, then the newest; six of Others show and
     the rest wait behind "+N more".
   - **Subthreads**: pressing a ticker opens its newest saved conversation in
     place (from the latest 50 in `GET /copilot/investigations`, open and
@@ -509,8 +509,9 @@ The full page is a desk of three panes beside each other
   conversation beside it, through the panel's `desk` hand-off.
 - **Conversation**: the page variant of `CopilotPanel.tsx` in `desk` mode. Its
   message box stays in reach while the conversation scrolls. One quiet line
-  says what answers and on what data (the simulated model, simulated or replay
-  data, the API budget, a missing key), with **New** and a **…** menu (the
+  names the model (in its picker when the server offers several) and only what is unusual: the simulated model,
+  simulated or replay data, the day's API spend once past half the budget, a missing key (read-only live data,
+  the usual case, needs no label). It ends with **New** and a **…** menu (the
   thread's one-line conclusion or lesson, Save, Close thread / Reopen, and
   Mark plan done on a plan's thread; see Plans end below) at its end. There is no Recent row (the thread list does that) and no Symbol box:
   the message box carries a scope chip, "About NBIS ×", where × asks across
@@ -600,7 +601,12 @@ The full page is a desk of three panes beside each other
     quote.
 
   While the Briefing (or a thread about no symbol, or no thread) is open the
-  pane shows the day instead, with its own three tabs: **Chart**, QQQ today
+  pane shows the day instead. When that conversation's latest turn names a ticker (its question first, then
+  its answer; one of the owner's desk tickers or a market or sector fund such as SMH,
+  `lib/desk.ts` `answerSymbol`), the pane charts that ticker instead (`symbol:` picture, 2m/15m/1D), marked
+  "in this chat", with **Market** back to the day; the day's view then offers **Back to SMH**. After the
+  session's last regular bar, today's 2m chart (the thread's and the market's) keeps the after-hours minutes
+  and is titled "<symbol> + AFTER HOURS" (`desk_context._today_shown`). The day has its own three tabs: **Chart**, QQQ today
   with the day's fills (any symbol, amber, first labelled FILL) and phone pings
   sent (violet, PING) as dots on the bar of their minute, from the picture
   route's reserved id (`GET /copilot/desk/market/picture`,
@@ -957,8 +963,10 @@ width; it opens the labelled menu (every page, sync, the plan streak), whose
 browser with the same key as Charts' expanded rail (its Collapse folds it
 back). A phone keeps its tab bar. Every icon in the Charts rail names itself
 on hover or focus (`NavHint`), the sync dot included.
-The desk bar holds Menu, Jump to… (⌘K), New plan and labelled Threads and
-Context toggles. A new desk opens with the active conversation; both panes stay
+The desk bar holds Menu, the **Main chat | Today’s briefing** switch (the open one filled in), Jump to…
+(⌘K), New plan (outlined, not the bar's loudest button) and icon-only Threads and Context toggles, named
+for a screen reader and on hover. The conversation is one centred reading column (46rem), its messages
+at most 60ch wide. A new desk opens with the active conversation; both panes stay
 closed until requested, preserving access to saved conversations, outstanding
 work and the chart without putting them in the first view. Threads carries one
 outstanding-work count when no phase action is present; the phase action itself
@@ -1066,7 +1074,7 @@ Briefing's day).
   read aloud they become "Thesis holds, Timing early, …" and "Against that,
   …". The scripted group reads carry both. Every finished answer's headline,
   bullets and Against line carry a small reply button, **Push back on
-  this**: it puts `Push back on "<that line>": ` in the message box, unsent,
+  this** (with a mouse it shows while its line is hovered or it has focus; a touch screen always shows it): it puts `Push back on "<that line>": ` in the message box, unsent,
   for the owner to finish (the disagreement rule then re-checks the evidence
   they dispute). Under a finished answer the desk's chips include **More**,
   one turn asking for the full reasoning behind it (the length rule gives the
