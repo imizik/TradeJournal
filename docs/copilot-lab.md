@@ -2143,19 +2143,28 @@ unchanged, and switching Jo's morning task off is the owner's step.
   and change vs the previous regular close, volume, dollar volume, last
   evening's after-hours; see [Extended hours](#extended-hours)); and, while
   `RADAR_PREMARKET_ENABLED` is on, `premarket_scan`: the pilot's latest scan
-  (`copilot_extended.premarket_scan`). A section that fails reads
-  `unavailable`; the rest stand.
+  (`copilot_extended.premarket_scan`); and, while `PREMARKET_ARCHIVE_ENABLED`
+  is on, `movers`: the whole market's six biggest 09:00 gainers and losers
+  from the [pre-market archive](../research/notes/morning-brief-scorecard.md)'s
+  SIP ranking ($2+, $1M+ traded, change vs the prior regular close), owned or
+  not. The archive saves by 09:01, so a prep started at or after 09:00 waits
+  up to 09:02 for it; one started before 09:00 says the ranking is not ready.
+  Added 2026-11-05 after the [input audit](../research/notes/morning-brief-input-audit.md)
+  found no saved brief named any of its day's top 09:00 movers. A section that
+  fails reads `unavailable`; the rest stand.
 - **Turn:** one `run_turn` on the configured backend and evidence, system
   prompt unchanged, its turn budget cap included. The message starts "Morning
   brief for …" and asks for at most 10 lines: two on the market and what it
-  means for the owner's names (with their own pre-market moves), then what
+  means for the owner's names (with their own pre-market moves), one on the
+  whole market's biggest movers worth a look (when `movers` is present), then what
   expires or sits near a trigger, earnings this week, and one thing to decide
   before the open. Since 2026-11-03 the turn may [search the web](#web-search)
   (`web=True`; the API backend with live evidence only, three searches, the
   cap raised by `WEB_TURN_EXTRA_USD`, about $0.03 a morning in searches): for
   the market's overnight driver and the catalyst behind any held or planned
   name gapping meaningfully (about 2% on real dollar volume, or flagged in the
-  pilot's scan), naming the publisher and time of what it uses. Queries carry a
+  pilot's scan), then the one or two biggest whole-market movers, naming the
+  publisher and time of what it uses. Queries carry a
   symbol or topic only, never positions, sizes, trades or accounts (the system
   prompt's rule, repeated in the message). Otherwise it uses the pack's facts
   only. Headlines and search results are marked as third-party data, never
@@ -2168,7 +2177,7 @@ unchanged, and switching Jo's morning task off is the owner's step.
   `/copilot-lab?investigation=<id>`. If the turn fails (an error event,
   including the budget stop, or no text), the ping and the saved record carry
   the raw facts instead under "Raw facts (the copilot turn failed):": the market
-  line, the owner's names' pre-market moves, up to 3 headlines, then expiries, the nearest triggers, today's time
+  line, the owner's names' pre-market moves, the top three 09:00 movers each way, up to 3 headlines, then expiries, the nearest triggers, today's time
   stops and earnings this week.
 - **Delivery:** the same at-most-once outbox as plan nudges: a send that may
   have reached ntfy is `unknown` and never resent; a prep that never finished
