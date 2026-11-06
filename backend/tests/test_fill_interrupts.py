@@ -252,10 +252,11 @@ def test_large_size_is_twice_the_median_of_twenty_entries_in_twelve_months():
     stock = [past(f"s{i}", premium=99_000.0, long_option=False) for i in range(5)]
     rec = fill_interrupts.record(usual + big + old + stock, "large_size", day=day)
     assert rec == {"n": 5, "pnl": -1300, "green": 1, "median": 1000.0, "entries": 20}
-    buy = {"side": "buy_to_open", "contracts": 4, "price": 500.0}  # $2,000 paid, exactly twice the median
+    buy = {"side": "buy_to_open", "instrument_type": "option", "contracts": 4, "price": 500.0}  # $2,000 paid, exactly twice the median
     assert fill_interrupts.premium(buy) == 2000 and fill_interrupts.large_size(buy, rec["median"])
     assert not fill_interrupts.large_size({**buy, "price": 499.0}, rec["median"])
-    assert fill_interrupts.large_size({"side": "buy", "contracts": 100, "price": 20.0}, rec["median"])  # shares × price
+    assert not fill_interrupts.large_size({"side": "buy", "instrument_type": "stock", "contracts": 100, "price": 20.0}, rec["median"])  # a stock is not a premium
+    assert not fill_interrupts.large_size({**buy, "instrument_type": "stock"}, rec["median"])
     assert not fill_interrupts.large_size({**buy, "side": "sell_to_open"}, rec["median"])  # premium received, not paid
     assert fill_interrupts.line("large_size", rec, paid=2300.0) == (
         "Size: $2,300 is 2.3× your median ($1,000); your 5 past entries above 2×: 20% won, −$1,300")
