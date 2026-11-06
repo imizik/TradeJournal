@@ -223,3 +223,20 @@ Each cell counts hits over tickers with both endpoints. Repeated mentions count 
 | 2026-10-30 / 1 | reconstructed-sip | 13/19 | 15/20 | 0/20 |
 | 2026-11-02 / 1 | reconstructed-sip | 10/18 | 16/20 | 0/20 |
 | 2026-11-03 / 1 | reconstructed-sip | 12/20 | 17/20 | 0/20 |
+
+## Week of 2026-11-02 (through 2026-11-06)
+
+5 saved versions; 4 available before 09:30. Late versions are descriptive only.
+Morning-available ticker mentions: ≥3pp first hour 8/18; session 12/19. Repeated mentions across days count separately.
+
+| Day / version | Saved ET | Morning eligible | Named | ≥3pp first hour | ≥3pp session | Baseline hour / session | Gappers mentioned / catalyst assessment |
+|---|---|---|---:|---|---|---|---|
+| 2026-11-02 / 1 | 09:54:29 | late | 5 | 0/5 | 5/5 | unavailable | unavailable |
+| 2026-11-03 / 1 | 09:03:23 | yes | 4 | 3/4 | 4/4 | unavailable | unavailable |
+| 2026-11-04 / 1 | 08:56:00 | yes | 4 | 1/4 | 1/4 | unavailable | unavailable |
+| 2026-11-05 / 1 | 09:05:14 | yes | 4 | 3/4 | 3/4 | unavailable | unavailable |
+| 2026-11-06 / 1 | 09:00:00 | yes | 7 | 1/6 | 4/7 | unavailable | unavailable |
+
+No saved brief on confirmed sessions: none.
+
+- Gap: Archived whole-market 09:00 SIP top-10 gainers AND top-10 losers unavailable: baseline, gapper coverage and catalyst coverage unscored.
