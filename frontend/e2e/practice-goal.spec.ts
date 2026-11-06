@@ -120,3 +120,30 @@ test("without Remember this too, Confirm saves only the practice", async ({ page
   expect(posts.practice[0]).toMatchObject({ text: PROPOSAL.text, measure: "exit_at_invalidation", target: 1 });
   expect(posts.memories).toHaveLength(0);
 });
+
+// At risk now (docs/copilot-lab.md § Exposure): the Briefing's session line carries the open long options' premium beside
+// the practice goal, and draws nothing when the read fails.
+const EXPOSURE = { state: "ok", at_risk_usd: 6400, positions: 3, usual_day_usd: 2100, sample_days: 60, as_of: "2026-10-24T11:12:00-04:00",
+  line: "At risk now: $6,400 in 3 options · usual day $2,100" };
+
+test("the session line shows what is at risk now, and fits a phone", async ({ page }) => {
+  await labOn(page);
+  await page.route("**/copilot/exposure", (route) => route.fulfill({ json: EXPOSURE }));
+  await page.goto("/copilot-lab?view=briefing");
+  await expect(page.getByTestId("exposure-line")).toHaveText("At risk now: $6,400 in 3 options · usual day $2,100");
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/copilot-lab?view=briefing");
+  await expect(page.getByTestId("exposure-line")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await page.screenshot({ path: test.info().outputPath("exposure-phone.png") });
+});
+
+test("a failed exposure read draws no line", async ({ page }) => {
+  await labOn(page);
+  await page.route("**/copilot/exposure", (route) => route.fulfill({ status: 500, json: { detail: "down" } }));
+  const read = page.waitForResponse("**/copilot/exposure");
+  await page.goto("/copilot-lab?view=briefing");
+  await read;
+  await expect(page.getByTestId("session-tape")).toBeVisible();
+  await expect(page.getByTestId("exposure-line")).toHaveCount(0);
+});

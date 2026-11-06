@@ -1650,6 +1650,22 @@ additive table `practice_goal`).
 - Tests: `backend/tests/test_practice_goal.py`,
   `frontend/e2e/practice-goal.spec.ts`.
 
+### Exposure
+
+One deterministic line beside the practice goal in the Briefing's session line,
+and in the 09:00 brief: "At risk now: $6,400 in 3 options · usual day $2,100"
+(`backend/app/engine/exposure.py`, `GET /copilot/exposure`, owner-only, refused
+while the lab is off; no model call). The owner sometimes panics at large
+exposure, and before this nothing showed it outside the Dashboard's collapsed
+Journal & performance section. *At risk now* is the premium still paid for the
+open long option positions, every account but Webull: the cost of the contracts
+still open, first in, first out. Stocks (long holds) and shorts are left out.
+*Usual day* is the median, over the last 60 New York days before today with at
+least one long-option entry, of that day's total `buy_to_open` premium; under
+10 such days it is left off. A failed read, or no open long option, draws no
+line. Tests: `backend/tests/test_exposure.py`,
+`frontend/e2e/practice-goal.spec.ts`.
+
 ## Your history at this level
 
 The setup playbook: when the copilot drafts a trade plan, the card shows what
@@ -2281,7 +2297,10 @@ unchanged, and switching Jo's morning task off is the owner's step.
   held and armed-plan symbols (catalyst stories first, two per symbol), each with
   publisher and New York time, from two batched Alpaca/Benzinga reads; then open
   positions with days to expiry, expires-today, give-back watch
-  state and open P&L (the owner context pack's positions section); armed plans
+  state and open P&L (the owner context pack's positions section); `at_risk`:
+  the [exposure](#exposure) summary and its sentence, which the raw-facts
+  fallback appends to its positions line, so the brief states it whether or not
+  the turn succeeds; armed plans
   with their distance to the entry and the invalidation (the Plans board's
   `copilot_plans.board`, one batched quote); earnings from today through Sunday
   for held symbols and symbols with an active thesis memory (one batched

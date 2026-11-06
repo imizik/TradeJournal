@@ -43,6 +43,16 @@ def current(investigation: str | None = Query(None, pattern=UUID), db: Session =
     return out
 
 
+@router.get("/exposure")
+def exposure(db: Session = Depends(get_session)):
+    """At risk now (``engine/exposure.py``, docs/copilot-lab.md § Exposure): the open long options' premium still paid and
+    the usual day's premium bought, with the rendered ``line`` (null when unavailable or nothing is open). Read-only."""
+    _enabled()
+    from app.engine import exposure as exposure_engine
+    out = exposure_engine.now(db, datetime.now(ET))
+    return {**out, "line": exposure_engine.line(out)}
+
+
 @router.post("/practice", status_code=201)
 def confirm(body: PracticeBody, db: Session = Depends(get_session)):
     """The confirmed card becomes the one active goal; a goal already active ends."""

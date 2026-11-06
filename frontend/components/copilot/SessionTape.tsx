@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
+import { getExposure } from "@/lib/copilot";
 import { getDeskSession, needingCount, nyDay, type DeskSession, type DeskSessionEvent, type DeskThread } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
@@ -47,6 +48,21 @@ export function useDeskSession(on: boolean): { data: DeskSession | null; error: 
     return () => { controller.abort(); clearInterval(timer); document.removeEventListener("visibilitychange", shown); };
   }, [on]);
   return { data, error };
+}
+
+/** "At risk now: $6,400 in 3 options · usual day $2,100", re-read with each session read (its ``as_of``); null when the
+ * read fails or no long option is open. */
+function useExposureLine(asOf: string | undefined): string | null {
+  const [line, setLine] = useState<string | null>(null);
+  useEffect(() => {
+    if (!asOf) return;
+    const controller = new AbortController();
+    getExposure(controller.signal).then(now => setLine(now.line)).catch(() => {
+      if (!controller.signal.aborted) setLine(null); /* the line is extra */
+    });
+    return () => controller.abort();
+  }, [asOf]);
+  return line;
 }
 
 /** The desk bar's live line: Live, Pre-market or Closed 16:00 by the session read, then SPY / QQQ / VIX's change (wide
@@ -104,7 +120,7 @@ function Numbers({ data, rows }: { data: DeskSession; rows: DeskThread[] }) {
  * no thread) is open: one strip of the regular session in New York time with a "now" marker, today's fills, pings,
  * Radar events and logged decisions as ticks by kind, the time stops still ahead as hollow ticks, SPY and QQQ beside the
  * title, a numbers row (positions, needs you, the nearest trigger, phone-ping counts; ``rows`` are the thread
- * list's) and one quiet line (what is next: a time stop, else the open or the close; the practice goal). Before the open
+ * list's) and one quiet line (what is next: a time stop, else the open or the close; at risk now; the practice goal). Before the open
  * it says whether the prep is written; after the close it shows the whole day. ``data`` is the desk's one session read
  * (``useDeskSession``); read-only.
  */
@@ -112,6 +128,7 @@ export default function SessionTape({ data, error, rows, tally }: {
   data: DeskSession | null; error: string | null; rows: DeskThread[]; tally: { done: number; total: number };
 }) {
   const practice = usePracticeLine(true);
+  const exposure = useExposureLine(data?.as_of);
 
   if (!data) return error ? <p className="mb-4 text-xs text-muted-foreground">Today&apos;s session is unavailable: {error}</p> : null;
   const { open, close, now } = data;
@@ -136,6 +153,7 @@ export default function SessionTape({ data, error, rows, tally }: {
   if (next) facts.push(<>Next: <span className="text-foreground/80">{next}</span></>);
   // After the close: how much of Close the day is answered (the desk's tally: close questions, alerts, Radar hits, fills).
   if (tally.total) facts.unshift(<span data-testid="briefing-reviewed">{num(tally.done)} of {num(tally.total)} done</span>);
+  if (exposure) facts.push(<span data-testid="exposure-line">{exposure}</span>);
   if (practice) facts.push(practice);
 
   return (

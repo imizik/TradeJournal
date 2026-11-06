@@ -9,6 +9,8 @@ exists:
 
 - open positions with days to expiry, expires-today, give-back watch state and
   open P&L (the owner context pack's positions section);
+- ``at_risk``: the open long options' premium still paid against the usual day (``exposure.now``, its sentence in
+  ``line``), which the fallback carries too;
 - armed copilot plans with their distance to the entry and the invalidation
   (``copilot_plans.board``, one batched quote read);
 - earnings this week for held symbols and symbols with an active thesis memory
@@ -150,6 +152,13 @@ def _positions(db: Session, now_et: datetime) -> dict:
         rows.append(out)
     rows.sort(key=lambda r: (not r.get("expires_today"), r.get("days_to_expiry", 10_000)))
     return {"state": "ok", "count": section["count"], "shown": len(rows), "positions": rows}
+
+
+def _at_risk(db: Session, now_et: datetime) -> dict:
+    """``exposure.now`` with its rendered ``line``, so the model's facts and the fallback state the same sentence."""
+    from app.engine import exposure
+    summary = exposure.now(db, now_et)
+    return {**summary, "line": exposure.line(summary)}
 
 
 def _level(level: dict | None) -> dict | None:
@@ -432,6 +441,7 @@ def build_pack(db: Session, now: float, calendar=None) -> dict:
         "headlines": _section("headlines", lambda: _headlines(held + planned, _previous_close(calendar, today), now_et)),
         "premarket": _section("premarket", lambda: _premarket(held + planned, now_et)),
         "positions": positions,
+        "at_risk": _at_risk(db, now_et),
         "plans": plans,
         "earnings": _section("earnings", lambda: _earnings(held + thesis, today)),
         "time_stops": _section("time_stops", lambda: _time_stops(db, today)),
@@ -519,6 +529,8 @@ def fallback_lines(pack: dict) -> list[str]:
         out.append(f"{pack['positions']['count']} open, none expiring within 2 days.")
     else:
         out.append("Positions unavailable.")
+    if at_risk := (pack.get("at_risk") or {}).get("line"):  # on the positions line, so it never costs another
+        out[-1] = f"{out[-1].rstrip('.')} · {at_risk}"
     triggers = []
     for plan in pack["plans"].get("plans", []):
         for role in ("entry", "invalidation"):
