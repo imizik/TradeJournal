@@ -839,6 +839,11 @@ export type PracticeGoal = { text: string; measure: PracticeMeasure; label: stri
 export type PracticeNow = { goal: PracticeGoal | null; this_week: PracticeScore | null; proposed?: Proposal | null };
 export const getPractice = (signal?: AbortSignal, investigation?: string) =>
   request<PracticeNow>(`/copilot/practice${investigation ? `?investigation=${encodeURIComponent(investigation)}` : ""}`, { signal });
+/** At risk now (``backend/app/engine/exposure.py``): the open long options' premium still paid, first in first out, and the
+ * usual day's premium bought (null under 10 entry days). ``line`` is the rendered sentence, null when unavailable or none is open. */
+export type Exposure = { state: "ok" | "unavailable"; at_risk_usd: number | null; positions: number | null; usual_day_usd: number | null;
+  sample_days: number | null; as_of: string; line: string | null };
+export const getExposure = (signal?: AbortSignal) => request<Exposure>("/copilot/exposure", { signal });
 /** The automatic week review's saved investigations (``backend/app/engine/week_review_auto.py``) are titled this way. */
 export const AUTO_WEEK_REVIEW_TITLE = "Week review ";
 /** Confirming a practice card makes it the one active goal; the previous one ends. */
