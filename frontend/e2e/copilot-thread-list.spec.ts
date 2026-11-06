@@ -410,7 +410,10 @@ test("the open thread is in the address: Back returns to the one before, a reloa
   await page.goBack();
   await expect(here.getByText("Answer 2")).toBeVisible();
   await expect(page).toHaveURL(`/copilot-lab?thread=${ID(2)}`);
+  // Back to the bare briefing address reloads the page; Forward only once that reload is done, or it can win the race.
+  const reloaded = page.waitForEvent("load");
   await page.goBack();
+  await reloaded;
   await expect(page).toHaveURL("/copilot-lab?view=briefing");
   await expect(here.getByText("Answer 2")).toBeHidden();
   await page.goForward();
