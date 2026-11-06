@@ -220,6 +220,74 @@ def test_records_lines_and_the_too_few_rule():
     assert fill_interrupts.short_label("NBIS", "option", "call", 160.0) == "NBIS 160C" and fill_interrupts.short_label("CRWV", "stock", None, None) == "CRWV"
 
 
+def past(key, ticker="SNDK", pnl=-100.0, premium=1000.0, entered=date(2026, 9, 1), long_option=True):
+    return {"key": key, "pnl": pnl, "ticker": ticker, "entered": entered, "premium": premium, "long_option": long_option,
+            "option_type": "call" if long_option else None, "expired_worthless": False, "added_to_loser": False,
+            "opened_green": False, "late_short_dated": False}
+
+
+def test_ticker_record_fires_only_on_a_losing_record_of_five_or_more():
+    losing = [past(f"s{i}", pnl=pnl) for i, pnl in enumerate((-500, -400, 100, 200, -1))]  # -$601 over 5
+    rec = fill_interrupts.record(losing + [past("mu", "MU", 9000)], "ticker_record", ticker="SNDK")
+    assert rec == {"ticker": "SNDK", "n": 5, "pnl": -601, "green": 2}
+    assert fill_interrupts.ticker_record(rec)
+    assert fill_interrupts.line("ticker_record", rec) == "Your record in SNDK: 5 trades, 40% won, −$601"
+    assert not fill_interrupts.ticker_record(fill_interrupts.record(losing[:4], "ticker_record", ticker="SNDK"))  # four is too few
+    # The judged position is never in its own record: leaving it out drops the count under five.
+    assert not fill_interrupts.ticker_record(fill_interrupts.record(losing, "ticker_record", "s0", ticker="SNDK"))
+    flat = losing[:4] + [past("s4", pnl=600)]
+    assert fill_interrupts.record(flat, "ticker_record", ticker="SNDK")["pnl"] == 0
+    assert not fill_interrupts.ticker_record(fill_interrupts.record(flat, "ticker_record", ticker="SNDK"))  # zero is not below zero
+    assert not fill_interrupts.ticker_record(fill_interrupts.record([past(f"m{i}", "MU", 500) for i in range(9)], "ticker_record", ticker="MU"))
+    assert not fill_interrupts.ticker_record(None)
+    assert fill_interrupts.line("ticker_record", fill_interrupts.record(losing[:2], "ticker_record", ticker="SNDK")) == (
+        "Your record in SNDK: 2 trades, too few to read")
+
+
+def test_large_size_is_twice_the_median_of_twenty_entries_in_twelve_months():
+    day = date(2026, 10, 21)
+    usual = [past(f"u{i}", premium=1000.0, pnl=50.0) for i in range(15)]
+    big = [past(f"b{i}", premium=2500.0, pnl=-400.0 if i else 300.0) for i in range(5)]
+    old = [past(f"o{i}", premium=50.0, entered=date(2025, 10, 20)) for i in range(30)]  # a year and a day: outside the window
+    stock = [past(f"s{i}", premium=99_000.0, long_option=False) for i in range(5)]
+    rec = fill_interrupts.record(usual + big + old + stock, "large_size", day=day)
+    assert rec == {"n": 5, "pnl": -1300, "green": 1, "median": 1000.0, "entries": 20}
+    buy = {"side": "buy_to_open", "contracts": 4, "price": 500.0}  # $2,000 paid, exactly twice the median
+    assert fill_interrupts.premium(buy) == 2000 and fill_interrupts.large_size(buy, rec["median"])
+    assert not fill_interrupts.large_size({**buy, "price": 499.0}, rec["median"])
+    assert fill_interrupts.large_size({"side": "buy", "contracts": 100, "price": 20.0}, rec["median"])  # shares × price
+    assert not fill_interrupts.large_size({**buy, "side": "sell_to_open"}, rec["median"])  # premium received, not paid
+    assert fill_interrupts.line("large_size", rec, paid=2300.0) == (
+        "Size: $2,300 is 2.3× your median ($1,000); your 5 past entries above 2×: 20% won, −$1,300")
+    # Nineteen entries in the window is too few: no median, never fires, whatever the size.
+    short = fill_interrupts.record(usual + big[:4] + old, "large_size", day=day)
+    assert short["median"] is None and short["entries"] == 19 and not fill_interrupts.large_size({**buy, "contracts": 1000}, short["median"])
+    # The judged position is left out of its own baseline.
+    assert fill_interrupts.record(usual + big, "large_size", "u0", day=day)["median"] is None
+    few = fill_interrupts.record(usual[:9] + big[:1] + [past(f"x{i}", premium=900.0) for i in range(10)], "large_size", day=day)
+    assert fill_interrupts.line("large_size", few, paid=2000.0) == (
+        "Size: $2,000 is 2.1× your median ($950); your 1 past entry above 2×, too few to read")
+
+
+def test_six_rules_fire_in_order_in_one_message():
+    rows = [past(f"s{i}", premium=1000.0) for i in range(20)]
+    ticker_rec = fill_interrupts.record(rows, "ticker_record", ticker="SNDK")
+    size_rec = fill_interrupts.record(rows, "large_size", day=WED)
+    entry = {**option_fill(price=2500), "contracts": 1}
+    kinds = fill_interrupts.fired(entry, [lot("buy_to_open", 3100, "14:05", qty=2)], 200.0, ticker_rec, size_rec)
+    assert kinds == list(fill_interrupts.KINDS) == ["add_to_loser", "put_entry", "opened_green", "late_short_dated", "ticker_record",
+                                                    "large_size"]
+    assert fill_interrupts.fired(entry, [], None) == ["put_entry", "late_short_dated"]  # without the records neither new rule fires
+    assert set(fill_interrupts.ONCE_PER_POSITION) == set(kinds) - {"add_to_loser"}
+    lines = [fill_interrupts.line(k, {"ticker_record": ticker_rec, "large_size": size_rec}.get(k) or fill_interrupts.record(rows, k),
+                                  200.0, fill_interrupts.premium(entry)) for k in kinds]
+    _, body = fill_interrupts.message("SNDK 160P", lines)
+    assert body.split("\n")[-3:] == ["Your record in SNDK: 20 trades, 0% won, −$2,000",
+                                     "Size: $2,500 is 2.5× your median ($1,000); your 0 past entries above 2×, too few to read",
+                                     "Your record, not advice."]
+    assert len(body.split("\n")) == 7
+
+
 # ------------------------------------------------------------------ the pass
 
 def test_the_seeded_day_one_message_per_fill(engine, world, sent):
@@ -412,3 +480,28 @@ def test_nothing_places_or_suggests_an_order():
     source = inspect.getsource(fill_interrupts)
     for word in ("place_order", "submit_order", "orders", "tradier.post"):
         assert word not in source
+
+
+def test_a_large_add_in_a_losing_ticker_sends_all_six_lines_once(engine, world, sent):
+    clock, interrupts = world
+    exp = date(2026, 10, 30)
+    for i in range(20):  # twenty closed NBIS calls in September, $100 each: five won $40, fifteen lost $20
+        fill(engine, ny("10:00", date(2026, 9, 1 + i)), option_type="call", strike=150 + i, price=100, expiration=exp, rebuild=False)
+        fill(engine, ny("10:30", date(2026, 9, 1 + i)), side="sell_to_close", option_type="call", strike=150 + i,
+             price=140 if i < 5 else 80, expiration=exp, rebuild=False)
+    fill(engine, ny("09:40"), qty=2, price=310, rebuild=False)  # the position's first entry, before the process started
+    fill(engine, ny("10:00"), "SNDK", option_type="call", strike=500, price=100, expiration=exp, rebuild=False)
+    fill(engine, ny("10:05"), "SNDK", side="sell_to_close", option_type="call", strike=500, price=300, expiration=exp)  # +$200 today
+    fill(engine, ny("14:20"), qty=1, price=250)  # below cost, a put, green day, late, a losing ticker, 2.5× the $100 median
+    tick(clock, interrupts, "14:21")
+    fill(engine, ny("14:40"), qty=1, price=240)  # a second large add, past the quiet window: only adding to a loser repeats
+    tick(clock, interrupts, "14:41")
+    first, second = rows(engine)
+    assert first.kinds == ",".join(fill_interrupts.KINDS) and second.kinds == "add_to_loser"
+    body = sent[0][1].split("\n")
+    assert len(body) == 7 and body[0].startswith("Adding to a loser") and body[1].startswith("Put entry")
+    assert body[2].startswith("Day already green (+$200 today)") and body[3].startswith("Late short-dated buy")
+    assert body[4:] == ["Your record in NBIS: 20 trades, 25% won, −$100",
+                        "Size: $250 is 2.5× your median ($100); your 7 past entries above 2×: 0% won, −$450",
+                        "Your record, not advice."]
+    assert len(sent) == 2 and sent[1][1].startswith("Adding to a loser")
