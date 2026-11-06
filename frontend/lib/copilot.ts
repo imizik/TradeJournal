@@ -19,7 +19,9 @@ export type CopilotStatus =
 
 export type ToolEvent = {
   type: "tool"; id: string; name: string; status: "running" | "ok" | "error"; input?: Record<string, unknown>;
-  summary?: string; ms?: number; provenance?: { source: string; kind: "recorded" | "fetched" | "cached" | "simulated" | "replay" | "saved" | "proposal"; as_of: string | number | null; state?: string | null };
+  /** ``summary``: the evidence row's line. ``fact``: the server's one plain fact from a completed result, shown while the
+   * answer has no text yet (backend/app/ai/copilot_tool_summary.py); null when the result has nothing to summarise. */
+  summary?: string; fact?: string | null; ms?: number; provenance?: { source: string; kind: "recorded" | "fetched" | "cached" | "simulated" | "replay" | "saved" | "proposal"; as_of: string | number | null; state?: string | null };
   /** web_search only: the pages the search returned, shown as links under Sources. */
   links?: { title: string; url: string; page_age?: string }[];
   /** get_level_history only: the counts the plan card shows under its invalidation (never ids). */
