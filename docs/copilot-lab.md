@@ -476,8 +476,17 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   status line shows the model's progress notes (`progress` events, from
   `thinking: {type: "adaptive", display: "updates"}` with the
   `thinking-display-updates-2026-08-18` beta) or what the turn is doing
-  ("Reading evidence…", "Weighing the evidence…"). It disappears when the
-  answer starts.
+  ("Reading evidence…", "Weighing the evidence…"). Under it, each completed
+  read adds one small fact line as it lands, in arrival order ("NBIS +0.84%
+  vs SPY +0.09%, 4 of 6 peers up (15m, 11:12)", "3 headlines since 08:10,
+  latest 10:40", "Web: 3 results"). The server builds it from the result
+  itself, never the model (`backend/app/ai/copilot_tool_summary.py`, the
+  completed `tool` event's `fact`): numbers at the result's own precision,
+  times New York, at most 90 characters, headlines counted and never quoted,
+  and none for a read with nothing to summarise or a shape it cannot read
+  (plans, the book and the owner context get none). Both disappear when the
+  answer's first text arrives; the Sources line still lists every read.
+  Telegram, the eval, the companion and the research job ignore the field.
 - Prompts and answers are never logged; they are stored only as a saved
   investigation. One metrics line per turn is
   logged: model, first feedback (first progress note, tool call or answer
@@ -2863,7 +2872,8 @@ second) and the client cannot stream it. Effort `low` saved 1 s and $0.008 but
 skipped the news check, which held the day's key context (a CRWV downgrade and
 financing stress); `medium` stays the default. The status line keeps the wait
 honest. Shorter answers or another model are the remaining levers; neither is
-changed here.
+changed here. Since 2026-11-06 the wait also shows each read's fact line as its
+result lands (§ What runs), so those seconds read as a briefing.
 
 ## Research job
 

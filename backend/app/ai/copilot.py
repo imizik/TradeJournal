@@ -24,7 +24,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, AsyncIterator
 from urllib.parse import urlsplit
 
-from app.ai import copilot_tools
+from app.ai import copilot_tool_summary, copilot_tools
 
 log = logging.getLogger(__name__)
 
@@ -1468,7 +1468,8 @@ async def _run_tool(evidence, block: dict, cfg: Settings, turn: dict | None = No
             result["content"], looked = await _review_images(evidence, args["trade_id"], result["content"], cfg, turn)
             if looked:
                 event["looked_at"] = looked
-        event.update(status="ok", provenance=prov, summary=_summary(name, data))
+        # ``fact``: the one deterministic line the panel shows while the model has not spoken yet (None: nothing to say).
+        event.update(status="ok", provenance=prov, summary=_summary(name, data), fact=copilot_tool_summary.summarize(name, data))
     except copilot_tools.ToolInputError as exc:
         result = {"type": "tool_result", "tool_use_id": block["id"], "is_error": True, "content": f"Invalid input: {exc}"}
         event.update(status="error", summary=f"refused: {exc}")
@@ -1712,7 +1713,8 @@ def web_row(search_id: str | None, query: str | None, found: Any, now: datetime)
                   **({"page_age": str(r["page_age"])[:40]} if r.get("page_age") else {})} for r in pages[:WEB_LINKS]]
         links = list({link["url"]: link for link in links}.values())
         hosts = [h for h in dict.fromkeys(_host(link["url"]) for link in links) if h]
-        event.update(status="ok", links=links, summary=f"{len(pages)} results" + (f": {', '.join(hosts[:4])}" if hosts else ""))
+        event.update(status="ok", links=links, summary=f"{len(pages)} results" + (f": {', '.join(hosts[:4])}" if hosts else ""),
+                     fact=copilot_tool_summary.summarize("web_search", {"results": len(pages)}))
     else:
         code = found.get("error_code", "no result") if isinstance(found, dict) else "no result"
         event.update(status="error", summary=f"search failed ({code})")

@@ -1376,7 +1376,13 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           <div key={i} className={desk ? "max-w-[60ch]" : "max-w-[95%]"}>
             {message.content && !(busy && i === messages.length - 1 && verdictPending(message.content)) ? <Answer text={message.content}
               onPushBack={busy && i === messages.length - 1 ? undefined : line => fill(pushBackText(line))} /> : !message.error && !message.metrics && (
-              <p className="text-sm italic text-muted-foreground" aria-label="Progress">{message.progress || waiting(message.tools ?? [])}</p>
+              <>
+                <p className="text-sm italic text-muted-foreground" aria-label="Progress">{message.progress || waiting(message.tools ?? [])}</p>
+                {/* Until the answer's first text: each read's fact as it lands, built by the server from the result itself. */}
+                {!message.content && (message.tools ?? []).filter(t => t.status === "ok" && t.fact).map(t => (
+                  <p key={t.id} data-testid="copilot-progress-fact" className="mt-0.5 break-words text-xs text-muted-foreground">{t.fact}</p>
+                ))}
+              </>
             )}
             {message.error && <p role="alert" className="mt-1 text-sm text-rose-300">{message.error.message}</p>}
             {(message.tools ?? []).filter(t => t.lessons).slice(-1).map(t => <ExitLessons key={t.id} lessons={t.lessons!} />)}
