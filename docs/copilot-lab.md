@@ -1137,12 +1137,15 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
     expires-today flag, the give-back watch (`not armed`, `armed` or `fired`,
     with the peak gain), the last three phone alerts sent for it, its thesis
     object as `plan` (`source` plan card, Charts plan, companion or `none`;
-    setup, wording in the owner's words or the companion's `thesis_guess`,
-    entry, invalidation, time stop, horizon, timing, the latest revisions), the
-    owner's decisions since the entry and, for the turn's symbol only, the
-    `since_entry` diff: each line with its `as_of` and `from` (source).
-    Headlines appear there as a count only: third-party words never enter
-    this block; the model reads them with `get_symbol_news`.
+    setup, the owner's own wording, entry, invalidation, time stop, horizon,
+    timing, the latest revisions), the owner's decisions since the entry and,
+    for the turn's symbol only, the `since_entry` diff: each line with its
+    `from` (source) and its own `as_of` when that differs from the diff's.
+    Third-party words never enter this block: headlines appear as a count only
+    (the model reads them with `get_symbol_news`), a companion revision names a
+    thesis-watch trigger by kind without its headline, and the companion's
+    thesis guess (written by a model that had just read headlines) stays on the
+    desk, like a research job's conclusion.
   - `history` (measured): closed trades in the symbol (count, wins, realized $)
     and the latest four, as `get_trades` shows them.
   - `habits` (measured): the behavior audit's four exit habits through
@@ -1176,8 +1179,10 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
   thread; the turn does not wait for it). The read runs before the first model
   round, so a slow quote provider adds up to the tool timeout to a turn. Over the size cap, the pack sheds the
   least decision-relevant parts first (recent trades, today's notes, the
-  since-entry lines' sources and the plan revisions, investigations, memories,
-  then positions beyond three) and marks itself
+  since-entry lines' sources and the plan revisions, every since-entry line but
+  the mark past the symbol's first position, those positions' decisions, alerts
+  and plan notes, investigations, memories, then positions beyond three) and
+  marks itself
   `trimmed`; positions and habits go last.
 - The UI shows it as the first evidence row of every answer ("Your context",
   provenance `saved`, with a one-line summary such as "2 open (NBIS +6.1%,
@@ -1249,6 +1254,17 @@ since-entry comparison, the news reader) and writes nothing.
   the desk's thread header for an open position (a symbol opened with no
   conversation now gets the header too) and in Charts' Holding context for the
   selected trade. Act now rows show the thesis line.
+- **Telegram on the desk.** Each Telegram question and Why? answer is saved on
+  the symbol's desk thread (its plan, the companion's adopted conversation, or
+  its newest open conversation, with that thread's `updated_at` kept so thesis
+  watch re-checks the same one), else in today's Main chat. Only the owner's own
+  words are saved as theirs: a Why? tap reads "Why? on a ping", never the ping's
+  text. No conversation is created, since an open one with a symbol would start
+  thesis-watch pings.
+- Headlines are read through a two-minute cache per symbol and entry, so the
+  desk header's and Charts' minute refresh and repeated turns make one news read.
+- The context route is owner-only: it is in `access_manifest.DOMAIN_ROUTES`,
+  not in the journal paths an assistant may read.
 - Tests: `backend/tests/test_trader_context.py`, the unplanned-position case in
   `frontend/e2e/copilot-thread-head.spec.ts`.
 

@@ -33,6 +33,9 @@ from datetime import UTC, datetime
 import json
 import logging
 import math
+import re
+import threading
+import time as _time
 from typing import Callable
 
 from sqlmodel import Session, select
@@ -119,9 +122,25 @@ def _read_group(db: Session, trade, now: float) -> dict:
     return compare_resolved_entry(store, result, now, window, live)
 
 
+NEWS_TTL_S = 120  # the desk header and Charts refresh each minute, and every turn about a held symbol reads it
+_news: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+_news_lock = threading.Lock()
+
+
 def _read_news(symbol: str, since: datetime, now: datetime) -> list[dict]:
+    """Headlines naming the symbol since the entry, one provider read per symbol and entry every ``NEWS_TTL_S``."""
     from app.engine import news
-    return news.fetch_news(symbols=[symbol], start=since, end=now, limit=20, fast=True, strict=True)
+    key, clock = (symbol, since.isoformat(timespec="minutes")), _time.monotonic()
+    with _news_lock:
+        hit = _news.get(key)
+        if hit and clock - hit[0] < NEWS_TTL_S:
+            return hit[1]
+    found = news.fetch_news(symbols=[symbol], start=since, end=now, limit=20, fast=True, strict=True)
+    with _news_lock:
+        for stale in [k for k, (at, _) in _news.items() if clock - at >= NEWS_TTL_S]:
+            del _news[stale]
+        _news[key] = (clock, found)
+    return found
 
 
 @dataclass
@@ -244,7 +263,8 @@ def _companion_thesis(db: Session, row) -> dict:
     for update in position_companion.updates_of(row):
         at = update.get("at")
         at = datetime.fromtimestamp(at, UTC).isoformat(timespec="seconds") if isinstance(at, (int, float)) else None
-        revisions.append({"at": at, "by": "companion", "kind": "update", "text": _trim("; ".join(update.get("reasons") or []), 160)})
+        reasons = [_own_words(r) for r in update.get("reasons") or []]
+        revisions.append({"at": at, "by": "companion", "kind": "update", "text": _trim("; ".join(reasons), 160)})
         if update.get("answer") in position_companion.ANSWERS:
             revisions.append({"at": at, "by": "owner", "kind": "decision", "text": position_companion.ANSWERS[update["answer"]]})
     return {
@@ -261,6 +281,15 @@ def _companion_thesis(db: Session, row) -> dict:
         "investigation_id": str(row.investigation_id) if row.investigation_id else None,
         "revisions": [r for r in revisions if r.get("at")],
     }
+
+
+THIRD_PARTY = re.compile(r"^thesis watch fired \((\w+):.*$", re.S)
+
+
+def _own_words(reason: str) -> str:
+    """A companion update's reason without the third-party text some carry (a thesis-watch headline): the record
+    reaches the copilot's owner block, where only the app's and the owner's words belong."""
+    return THIRD_PARTY.sub(r"thesis watch fired (\1)", str(reason))
 
 
 def _no_thesis() -> dict:

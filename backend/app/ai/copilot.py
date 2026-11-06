@@ -16,6 +16,7 @@ import logging
 import math
 import os
 import re
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -1530,13 +1531,15 @@ CARRY_ID = r"^[0-9a-f]{32}$"
 NOT_CARRIED = frozenset({"propose_plan", "owner_context"})  # a card is not evidence; the pack is rebuilt every turn
 CARRY_END = "[End of earlier evidence]"
 _CARRY: dict[str, tuple[float, str, list[dict]]] = {}
+_CARRY_LOCK = threading.Lock()  # turns keep and read their carry on worker threads
 
 
 def carried(carry_id: str | None, mode: str, investigation_id=None) -> list[dict]:
     """The evidence an earlier turn kept under ``carry_id`` (or, with no id this process knows, the newest kept for
     ``investigation_id``); none once it expired, was never kept, or was read in another evidence mode (live evidence
     must never reach a replay turn, nor fixture data a live one)."""
-    hit = _CARRY.get(carry_id or "")
+    with _CARRY_LOCK:
+        hit = _CARRY.get(carry_id or "")
     if hit and hit[1] == mode and time.monotonic() - hit[0] <= CARRY_TTL_S:
         return hit[2]
     if not carry_id and not investigation_id:
@@ -1599,12 +1602,13 @@ def keep_carry(items: list[dict], mode: str, investigation_id=None) -> str | Non
     if not items:
         return None
     clock = time.monotonic()
-    for key in [k for k, (at, _, _) in _CARRY.items() if clock - at > CARRY_TTL_S]:
-        del _CARRY[key]
-    while len(_CARRY) >= CARRY_SLOTS:
-        del _CARRY[next(iter(_CARRY))]  # the oldest first: dicts keep insertion order
     carry_id = uuid.uuid4().hex
-    _CARRY[carry_id] = (clock, mode, items)
+    with _CARRY_LOCK:
+        for key in [k for k, (at, _, _) in _CARRY.items() if clock - at > CARRY_TTL_S]:
+            del _CARRY[key]
+        while len(_CARRY) >= CARRY_SLOTS:
+            del _CARRY[next(iter(_CARRY))]  # the oldest first: dicts keep insertion order
+        _CARRY[carry_id] = (clock, mode, items)
     _store_carry(carry_id, mode, items, investigation_id)
     return carry_id
 

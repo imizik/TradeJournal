@@ -29,9 +29,12 @@ reply to a ping, the ping is its context: a position alert's (found from the pin
 note on what the bot does. One turn runs at a time, shared with Why?; a question while one runs is not asked, and the
 reply says so. A question is cut to ``QUESTION_MAX`` characters.
 
-Each question and Why? answer is also saved on the desk (``save_on_desk``), the question marked "From Telegram:": as
-two messages on the symbol's thread (its plan, else the conversation the companion adopted it in, else the newest open
-conversation about it, else a new ``<symbol> · Telegram`` one), or, with no symbol, in today's Main chat.
+Each question and Why? answer is also saved on the desk (``save_on_desk``): the owner's own words, marked "From
+Telegram:" (a Why? tap is saved as "Why? on a ping", never the ping's text, which may be a headline or a research
+result), and the answer, as two messages on the symbol's thread (its plan, else the conversation the companion adopted
+it in, else the newest open conversation about it; its ``updated_at`` left as it was, so thesis watch re-checks the
+same conversation), or, with none or no symbol, in today's Main chat. No conversation is created (an open one with a
+symbol would start thesis-watch pings).
 
 Every handled tap is answered (``answerCallbackQuery``) and the message's keyboard is edited to show the answer
 chosen. Each tap is recorded once in the rows those routes already write; there is no table of its own. Known
@@ -276,7 +279,7 @@ class Replies:
         found = await asyncio.to_thread(self._alert_context, alert_id)
         if found is None:
             return "That alert is no longer in the journal."
-        return await self.turn(*found)
+        return await self.turn(*found, said="Why? on a position alert")
 
     async def question_text(self, text: str, replied: dict | None) -> str:
         """One bounded copilot turn on a typed question; a reply to a ping carries that ping as its context."""
@@ -294,9 +297,11 @@ class Replies:
             else:
                 context = str(replied.get("text") or replied.get("caption") or "").strip()[:QUESTION_MAX] or None
         question = f"{context}\n\nMy question about this: {text}" if context else text
-        return await self.turn(question, symbol)
+        # The desk keeps only the owner's own words: a ping's text (a headline, a research result) never becomes theirs.
+        said = "Why? on a ping" if text == WHY_QUESTION else text if not context else f"(replying to a ping) {text}"
+        return await self.turn(question, symbol, said=said)
 
-    async def turn(self, question: str, symbol: str | None) -> str:
+    async def turn(self, question: str, symbol: str | None, said: str | None = None) -> str:
         """One bounded copilot turn (the configured backend, its turn and daily budgets), as plain text for the chat."""
         from app.ai import copilot, copilot_spend
         from app.engine.chart_math import ET
@@ -339,15 +344,15 @@ class Replies:
             answer = (answer + "\n\n" if answer else "") + " ".join(errors)
         answer = answer or "The copilot gave no answer."
         answer = answer if len(answer) <= ANSWER_MAX else answer[: ANSWER_MAX - 1].rstrip() + "…"
-        await asyncio.to_thread(self._save, question, symbol, answer, now)
+        await asyncio.to_thread(self._save, said or question, symbol, answer, now)
         return answer
 
-    def _save(self, question: str, symbol: str | None, answer: str, now: datetime) -> None:
-        """The question and answer as messages on the desk: the symbol's thread (``thread_for``), else today's Main
-        chat. A failure only leaves the desk without them; the chat already has the answer."""
+    def _save(self, said: str, symbol: str | None, answer: str, now: datetime) -> None:
+        """The owner's words and the answer as messages on the desk: the symbol's thread (``thread_for``), else today's
+        Main chat. A failure only leaves the desk without them; the chat already has the answer."""
         try:
             with Session(self.engine) as db:
-                save_on_desk(db, question, symbol, answer, now)
+                save_on_desk(db, said, symbol, answer, now)
         except Exception:  # noqa: BLE001
             log.warning("Telegram answer not saved on the desk", exc_info=True)
 
@@ -397,11 +402,12 @@ class Replies:
 FROM_TELEGRAM = "From Telegram: "
 
 
-def thread_for(db: Session, symbol: str) -> str:
+def thread_for(db: Session, symbol: str) -> str | None:
     """The symbol's desk thread: its plan (in a position first), else the conversation the companion adopted it in,
-    else the newest open conversation about it, else a new one, ``<symbol> · Telegram``."""
+    else the newest open conversation about it; None when it has none. Never a new conversation: an open one with a
+    symbol is what thesis watch watches, so making one would start pings."""
     from sqlmodel import col, select
-    from app.engine import copilot_investigations, desk_context, position_companion
+    from app.engine import desk_context, position_companion
     from app.models import CopilotInvestigation
     found = desk_context.symbol_thread(db, symbol).id
     if found:
@@ -412,24 +418,30 @@ def thread_for(db: Session, symbol: str) -> str:
     latest = db.exec(select(CopilotInvestigation).where(CopilotInvestigation.symbol == symbol, CopilotInvestigation.status == "open",
                                                         CopilotInvestigation.source == "copilot", CopilotInvestigation.main_day.is_(None))
                      .order_by(col(CopilotInvestigation.updated_at).desc())).first()
-    if latest is not None:
-        return str(latest.id)
-    return copilot_investigations.create(copilot_investigations.InvestigationFields(title=f"{symbol} · Telegram", symbol=symbol),
-                                         session=db)["id"]
+    return str(latest.id) if latest is not None else None
 
 
-def save_on_desk(db: Session, question: str, symbol: str | None, answer: str, now: datetime) -> str:
-    """Append one Telegram exchange to the desk; the investigation id it went to."""
+def save_on_desk(db: Session, said: str, symbol: str | None, answer: str, now: datetime) -> str:
+    """Append one Telegram exchange to the desk (``said``: the owner's own words, never a ping's text); the
+    investigation id it went to. On the symbol's thread its ``updated_at`` is kept as it was, so thesis watch, which
+    re-checks each symbol's newest open conversation, re-checks the same one; with no thread, today's Main chat."""
+    from sqlalchemy import update as sql_update
     from app.engine import copilot_investigations as investigations, position_companion
-    messages = [{"role": "user", "content": FROM_TELEGRAM + question}, {"role": "assistant", "content": answer}]
-    if symbol:
-        target = thread_for(db, symbol)
-        position_companion.save_messages(target, messages, session=db)
+    from app.models import CopilotInvestigation
+    target = thread_for(db, symbol) if symbol else None
+    if target is not None:
+        before = db.get(CopilotInvestigation, uuid.UUID(target)).updated_at
+        position_companion.save_messages(target, [{"role": "user", "content": FROM_TELEGRAM + said},
+                                                  {"role": "assistant", "content": answer}], session=db)
+        db.execute(sql_update(CopilotInvestigation).where(CopilotInvestigation.id == uuid.UUID(target)).values(updated_at=before))
+        db.commit()
         return target
     from app.engine.chart_math import ET
     main = investigations.main_chat(db, now.astimezone(ET).date())
+    about = f" ({symbol})" if symbol else ""
     exchange = investigations.InvestigationFields(title=main["title"], transcript=[
-        messages[0], {**messages[1], "exchange_id": f"telegram-{uuid.uuid4().hex}"}])
+        {"role": "user", "content": FROM_TELEGRAM.rstrip(": ") + about + ": " + said},
+        {"role": "assistant", "content": answer, "exchange_id": f"telegram-{uuid.uuid4().hex}"}])
     return investigations.append_main(db, main["id"], exchange)["id"]
 
 

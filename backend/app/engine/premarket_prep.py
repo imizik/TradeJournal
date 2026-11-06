@@ -141,7 +141,7 @@ def _positions(db: Session, now_et: datetime) -> dict:
         thesis = row.get("thesis") or {}
         if thesis.get("source") not in (None, "none"):
             out["plan"] = thesis.get("label")
-            if (line := trader_context.thesis_line(thesis)):
+            if not thesis.get("text_is_guess") and (line := trader_context.thesis_line(thesis)):  # owner's words only
                 out["thesis"] = _trim(line, 160)
         since = row.get("since_entry") or {}
         if since.get("lines"):

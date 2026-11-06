@@ -429,7 +429,7 @@ def test_a_reply_to_a_ping_carries_that_ping_as_context(case, monkeypatch):
     lab_on(monkeypatch)
     asked = []
 
-    async def turn(question, symbol):
+    async def turn(question, symbol, said=None):
         asked.append((question, symbol))
         return "ok"
 
@@ -521,7 +521,7 @@ def test_why_on_any_ping_asks_copilot_about_that_pings_text(case, monkeypatch):
     replies = telegram_replies.Replies(db_engine, call=bot)
     asked = []
 
-    async def turn(question, symbol):
+    async def turn(question, symbol, said=None):
         asked.append((question, symbol))
         return "Verdict: Watch. The group is moving with it."
     monkeypatch.setattr(replies, "turn", turn)

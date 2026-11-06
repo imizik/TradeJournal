@@ -72,6 +72,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /charts/journal/fills/{fill_id}',
     'GET /charts/journal/trades/{trade_id}',
     'GET /charts/journal/trades/{trade_id}/mark',
+    'GET /charts/journal/positions/{symbol}/context',  # owner-only: not a JOURNAL_PATHS grant (carries the owner's theses)
     'GET /charts/options/{symbol:path}/ladder',
     'GET /charts/settings',
     'GET /charts/stream',

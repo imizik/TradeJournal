@@ -327,7 +327,7 @@ def journal_position_context(symbol: str, db: Session = Depends(get_session)):
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9.\-]{0,9}", symbol):
         raise HTTPException(422, "That is not a symbol.")
     symbol = symbol.upper()
-    found = trader_context.for_symbol(symbol, session=db, limit=40)
+    found = trader_context.for_symbol(symbol, session=db)  # the symbol's positions first, so at most a few marks are read
     rows = [r for r in found["positions"] if r["symbol"] == symbol]
     return {"state": "ok", "as_of": found["as_of"], "symbol": symbol, "positions": rows, "units": found["units"]}
 

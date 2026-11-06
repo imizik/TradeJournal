@@ -98,25 +98,29 @@ GIVEBACK = {"watching": "not armed"}  # the pack's word for a watch that has not
 def _plan(thesis: dict) -> dict:
     """The record's thesis as the pack shows it: the owner's words whole, the companion's marked as a guess."""
     if thesis.get("source") == "none":
-        return {"source": "none", "note": "no plan saved for this position"}
+        return {"source": "none"}
     level = thesis.get("invalidation") or {}
     stop = thesis.get("time_stop") or {}
     entry = thesis.get("entry_trigger") or {}
     return {k: v for k, v in {
         "source": thesis["source"], "setup": _trim(thesis.get("label"), 60),
+        # The companion's guess was written by a model that had just read headlines: like a research job's conclusion it
+        # stays out of the owner's turn (the desk shows it); only the owner's own wording comes here.
         "wording": _trim(thesis.get("text")) if not thesis.get("text_is_guess") else None,
-        "thesis_guess": _trim(thesis.get("text")) if thesis.get("text_is_guess") else None,
         "entry": f"{entry['price']:,.2f} ({entry.get('state')})" if entry.get("price") else None,
         "invalidation": f"{level['price']:,.2f} ({level.get('state')})" if level.get("price") else None,
-        "time_stop": f"{stop.get('text')} ({stop.get('state')})" if stop.get("text") else None,
+        "time_stop": f"{_trim(stop.get('text'), 60)} ({stop.get('state')})" if stop.get("text") else None,
         "horizon": thesis.get("horizon"), "captured_at": thesis.get("captured_at"), "timing": thesis.get("timing"),
-        "revisions": [f"{r['at'][:16]} {r['by']}: {r['text']}" for r in thesis.get("revisions", [])[-3:] if r.get("text")] or None,
+        "revisions": [f"{r['at'][:16]} {r['by']}: {_trim(r['text'], 80)}" for r in thesis.get("revisions", [])[-2:] if r.get("text")] or None,
     }.items() if v}
 
 
 def _since(since: dict) -> dict:
-    return {"as_of": since.get("as_of"), "lines": [
-        {k: v for k, v in {"line": line["text"], "as_of": line.get("as_of"), "from": line.get("source")}.items() if v}
+    """A line's ``as_of`` is shown when it differs from the diff's own (a quote's or a recording's time)."""
+    at = since.get("as_of")
+    return {"as_of": at, "lines": [
+        {k: v for k, v in {"line": line["text"], "as_of": line.get("as_of") if line.get("as_of") != at else None,
+                           "from": line.get("source")}.items() if v}
         for line in since.get("lines", [])]}
 
 
@@ -131,7 +135,7 @@ def _render(record: dict) -> dict:
         out["phone_alerts"] = [{"kind": a["kind"], "at": a["at"]} for a in phone[-3:]]
     out["plan"] = _plan(record.get("thesis") or {"source": "none"})
     if record.get("decisions"):
-        out["decisions"] = [f"{d['at'][:16]} {d['text']}" for d in record["decisions"]]
+        out["decisions"] = [f"{d['at'][:16]} {_trim(d['text'], 100)}" for d in record["decisions"][-2:]]
     if record.get("since_entry"):
         out["since_entry"] = _since(record["since_entry"])
     return out
@@ -314,10 +318,30 @@ def _drop_sources(pack: dict) -> None:
         (row.get("plan") or {}).pop("revisions", None)
 
 
+def _trim_diffs(pack: dict) -> None:
+    """Past the first position with a diff, keep only its own mark line; the underlying, group, headline and time lines
+    read nearly the same for every contract on the symbol."""
+    rows = [r for r in pack.get("positions", {}).get("positions", []) if r.get("since_entry")]
+    for row in rows[1:]:
+        row["since_entry"]["lines"] = [line for line in row["since_entry"]["lines"] if line["line"].startswith(("mark ", "price "))]
+
+
+def _slim_rows(pack: dict) -> None:
+    """Past the first position, the plan's levels only: no decisions, alerts or revision notes."""
+    for row in pack.get("positions", {}).get("positions", [])[1:]:
+        row.pop("decisions", None)
+        row.pop("phone_alerts", None)
+        plan = row.get("plan") or {}
+        for key in ("wording", "captured_at", "timing", "revisions", "entry"):
+            plan.pop(key, None)
+
+
 def _shed_steps(pack: dict):
     yield lambda: pack.get("history", {}).pop("recent", None)
     yield lambda: pack.get("today", {}).pop("entries", None)
     yield lambda: _drop_sources(pack)
+    yield lambda: _trim_diffs(pack)
+    yield lambda: _slim_rows(pack)
     yield lambda: pack.get("investigations", {}).pop("investigations", None)
     yield lambda: pack.get("memories", {}).pop("memories", None)
     yield lambda: pack.get("positions", {}).update(positions=pack["positions"].get("positions", [])[:3],
