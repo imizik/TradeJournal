@@ -77,12 +77,13 @@ const NOTE = /^_\(([\s\S]*)\)_$/; // a label the server adds ("Simulated model �
 /** The message box's words for disputing one line of an answer: the line quoted, the owner's reason still to write. */
 const pushBackText = (line: string) => `Push back on "${line.replace(/\*\*/g, "").trim().slice(0, 300)}": `;
 
-/** A small reply button after a line of an answer: puts that line in the message box to dispute, unsent. */
+/** A small reply button after a line of an answer: puts that line in the message box to dispute, unsent. With a mouse it
+ * shows while its line is hovered (or the button has focus); a touch screen always shows it. */
 function PushBack({ line, onPushBack }: { line: string; onPushBack?: (line: string) => void }) {
   if (!onPushBack) return null;
   return (
     <button type="button" aria-label="Push back on this" title="Push back on this" onClick={() => onPushBack(line)}
-      className="ml-1 inline-flex size-6 items-center justify-center rounded align-middle text-muted-foreground/60 hover:bg-muted hover:text-foreground focus-visible:text-foreground sm:size-5">
+      className="ml-1 inline-flex size-6 items-center justify-center rounded align-middle text-muted-foreground/60 hover:bg-muted hover:text-foreground focus-visible:text-foreground focus-visible:opacity-100 sm:size-5 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:[*:hover>&]:opacity-100">
       <Reply className="size-3.5" aria-hidden />
     </button>
   );
@@ -298,7 +299,8 @@ function Metrics({ metrics }: { metrics: TurnMetrics }) {
   );
 }
 
-/** The lab's backing and evidence as two chips, or (``quiet``, the desk) one small line. The page's own description says
+/** The lab's backing and evidence as two chips, or (``quiet``, the desk) one small line: the model, and only what is
+ * unusual (simulated data or model, a replay, spend past half the budget, no key). The page's own description says
  * what the lab may and may not do. */
 const BACKEND_LABEL: Record<Backend, string> = { anthropic: "Claude API (credits)" };
 
@@ -317,9 +319,10 @@ function StatusLine({ status, error, model, onModel, backend, onBackend, quiet =
     <p data-testid="copilot-status" className={quiet
       ? "flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground [&>*+*]:before:mr-1.5 [&>*+*]:before:content-['·']"
       : "flex flex-wrap items-center gap-2 text-xs text-muted-foreground"}>
-      <span className={chip(simulated ? "bg-amber-500/10 text-amber-300" : "bg-emerald-500/10 text-emerald-300")}>
+      {/* The desk's line names the model once: in its picker when there is one. */}
+      {!(quiet && !simulated && (status.models?.length ?? 0) > 1) && <span className={chip(simulated ? "bg-amber-500/10 text-amber-300" : "bg-emerald-500/10 text-emerald-300")}>
         {simulated ? "Simulated model — no API calls" : `Claude API · ${model ?? status.model}`}
-      </span>
+      </span>}
       {!simulated && (status.backends?.length ?? 0) > 1 && (
         <label className="inline-flex items-center gap-1">
           <span className="sr-only">Backend</span>
@@ -329,7 +332,8 @@ function StatusLine({ status, error, model, onModel, backend, onBackend, quiet =
           </select>
         </label>
       )}
-      {!simulated && effective === "anthropic" && status.spend_today_usd != null && status.daily_budget_usd != null && (
+      {/* The desk shows the day's spend once it passes half the budget. */}
+      {!simulated && effective === "anthropic" && status.spend_today_usd != null && status.daily_budget_usd != null && (!quiet || status.spend_today_usd >= status.daily_budget_usd / 2) && (
         <span className={status.spend_today_usd >= status.daily_budget_usd ? cn(chip("bg-rose-500/10"), "text-rose-300") : chip("bg-muted")}>
           API today ${status.spend_today_usd.toFixed(2)} of ${status.daily_budget_usd.toFixed(2)}
         </span>
@@ -348,7 +352,7 @@ function StatusLine({ status, error, model, onModel, backend, onBackend, quiet =
           {!status.replay ? "Replay" : "error" in status.replay ? `Replay unavailable: ${status.replay.error}`
             : `Replay · clock frozen at ${new Date(status.replay.at).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET · recorded Radar data`}
         </span>
-      ) : (
+      ) : quiet && status.evidence !== "fixture" ? null : (
         <span className={chip(status.evidence === "fixture" ? "bg-amber-500/10 text-amber-300" : "bg-secondary text-foreground")}>
           {status.evidence === "fixture" ? "Simulated market data" : "Read-only TradeJournal data"}
         </span>
@@ -1141,6 +1145,11 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   } });
 
   const last = messages.at(-1);
+  // The desk's Context pane follows the latest finished turn: its question, then its answer.
+  const lastAnswer = messages.findLastIndex(m => m.role === "assistant" && !!m.content);
+  const turnText = lastAnswer > 0 ? `${messages[lastAnswer - 1]?.role === "user" ? messages[lastAnswer - 1].content : ""}\n${messages[lastAnswer].content}` : null;
+  const onAnswer = desk?.onAnswer;
+  useEffect(() => { if (!busy) onAnswer?.(turnText); }, [busy, turnText, onAnswer]);
   const speak = useSpeakAnswer({ ready: status !== null, turn: answered, message: last?.role === "assistant" ? last : null, busy, listening: voice.listening, disabled: status?.enabled !== true });
 
   const enabled = status?.enabled === true;
@@ -1152,6 +1161,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       {saveState.state === "saving" ? "Saving…" : saveState.state === "saved" ? "Saved" : saveState.message}
     </span>
   );
+  const research = current && <ResearchDeeper key={`research-${current.id}`} investigationId={current.id} symbol={symbol} topic={topic}
+    onFinished={refreshRecent} onOpenResult={id => void resume(id)} onDiscuss={id => void discuss(id)} />;
   const messageBox = (
     <textarea ref={box} value={draft} onChange={e => { edits.current++; typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={small ? 1 : 3} wrap={small ? "off" : undefined} disabled={!enabled || openingMain || current?.main_at_capacity}
       onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft); } }}
@@ -1331,8 +1342,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           )}
         </div>
       )}
-      {current && <ResearchDeeper key={`research-${current.id}`} investigationId={current.id} symbol={symbol} topic={topic}
-        onFinished={refreshRecent} onOpenResult={id => void resume(id)} onDiscuss={id => void discuss(id)} />}
+      {/* The desk keeps Research deeper after the conversation, beside the next step, not above the question. */}
+      {!desk && research}
 
       {current && !desk && <LinkedActivity key={`linked-${current.id}`} investigationId={current.id} refreshKey={linkedKey} />}
 
@@ -1352,7 +1363,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           </p>
         )}
         {messages.map((message, i) => message.role === "user" ? (
-          <div key={i} data-turn={i === messages.map(m => m.role).lastIndexOf("user") ? "latest" : undefined} className={cn("ml-auto scroll-mt-10 w-fit whitespace-pre-wrap rounded-xl rounded-br-sm bg-secondary px-3 py-2 text-sm text-foreground", desk ? "max-w-[75ch]" : "max-w-[85%]")}>
+          <div key={i} data-turn={i === messages.map(m => m.role).lastIndexOf("user") ? "latest" : undefined} className={cn("ml-auto scroll-mt-10 w-fit whitespace-pre-wrap rounded-xl rounded-br-sm bg-secondary px-3 py-2 text-sm text-foreground", desk ? "max-w-[60ch]" : "max-w-[85%]")}>
             {message.images?.length ? (
               <span className="mb-1.5 flex flex-wrap justify-end gap-1.5">
                 {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL */}
@@ -1362,7 +1373,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             {message.content}
           </div>
         ) : (
-          <div key={i} className={desk ? "max-w-[75ch]" : "max-w-[95%]"}>
+          <div key={i} className={desk ? "max-w-[60ch]" : "max-w-[95%]"}>
             {message.content && !(busy && i === messages.length - 1 && verdictPending(message.content)) ? <Answer text={message.content}
               onPushBack={busy && i === messages.length - 1 ? undefined : line => fill(pushBackText(line))} /> : !message.error && !message.metrics && (
               <p className="text-sm italic text-muted-foreground" aria-label="Progress">{message.progress || waiting(message.tools ?? [])}</p>
@@ -1422,6 +1433,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           {attaching?.state === "error" && <span role="alert" className="text-xs text-rose-300">{attaching.message}</span>}
         </div>
       )}
+      {desk && research}
       {look && (
         <button type="button" onClick={() => void lookAtChart()} data-testid="copilot-look"
           disabled={!enabled || busy || attaching?.state === "busy" || (!!pageSymbol && symbol !== pageSymbol)}

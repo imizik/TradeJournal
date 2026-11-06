@@ -25,7 +25,7 @@ import { ScalpShortlistNudge } from "@/components/ScalpShortlistPanel";
 import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { BRIEFING_TITLE, WHAT_MATTERS_PROMPT, copilotLabHref, mainChatLabel, type InvestigationSummary } from "@/lib/copilot";
-import { afterClose, deskSymbolThread, needingCount, nyDay, saveHorizon, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
+import { afterClose, answerSymbol, deskSymbolThread, needingCount, nyDay, saveHorizon, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import styles from "./CopilotLab.module.css";
 
@@ -125,7 +125,8 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
   const [planSymbol, setPlanSymbol] = useState<string | null>(null);
   // A decision or an alert still asking today: a conversation opens on it, at the top of the thread.
   const asking = deciding || !!session.data?.to_answer?.alerts?.rows.some(a => a.today && !a.feedback && a.symbol === thread?.symbol);
-  const hooks = useMemo<DeskHooks>(() => ({ command, onThread: setThread, holdTop: asking,
+  const [turnText, setTurnText] = useState<string | null>(null);
+  const hooks = useMemo<DeskHooks>(() => ({ command, onThread: setThread, holdTop: asking, onAnswer: setTurnText,
     planDone: planSymbol ? { symbol: planSymbol, done: () => setRefresh(n => n + 1) } : null }), [command, planSymbol, asking]);
 
   // The open thread is in the address, so Back and a reload come back to it: opening another adds a step, and the thread
@@ -341,6 +342,9 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
   // A deep link naming a symbol shows its Context by the symbol until a conversation is saved, then by that conversation.
   const linkSymbol = link?.symbol;
   const context = useMemo(() => thread ?? (linkSymbol ? deskSymbolThread(linkSymbol) : null), [thread, linkSymbol]);
+  // A conversation about no ticker (Main chat) charts the ticker its latest turn is about, when it names one.
+  const known = useMemo(() => rows.flatMap(r => r.symbol ? [r.symbol] : []), [rows]);
+  const focus = day && !onBriefing ? answerSymbol(turnText, known) : null;
 
   return (
     <div ref={desk} className={styles.desk} data-on={on} data-tab={tab} data-context={contextShown ? "shown" : "hidden"} data-threads={threadsShown ? "shown" : "hidden"}>
@@ -357,15 +361,17 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
         {on && <ScalpShortlistNudge />}
         {on && (
           <div className={styles.barActions}>
-            {/* The two daily places; the one on screen is marked, like the pane toggles beside them. */}
-            <Link href="/copilot-lab" aria-current={onMainChat ? "page" : undefined}
-              className={cn("inline-flex min-h-11 items-center rounded-md border px-2 text-xs sm:min-h-8", onMainChat ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground")}>Main chat</Link>
-            <Link href="/copilot-lab?view=briefing" aria-current={onBriefing ? "page" : undefined}
-              className={cn("inline-flex min-h-11 items-center rounded-md border px-2 text-xs sm:min-h-8", onBriefing ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground")}>Today’s briefing</Link>
+            {/* The two daily places as one switch; the one on screen is filled in. */}
+            <div role="group" aria-label="Daily" className="inline-flex items-center rounded-md border p-0.5">
+              <Link href="/copilot-lab" aria-current={onMainChat ? "page" : undefined}
+                className={cn("inline-flex min-h-10 items-center whitespace-nowrap rounded px-2 text-xs sm:min-h-7", onMainChat ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}>Main chat</Link>
+              <Link href="/copilot-lab?view=briefing" aria-label="Today’s briefing" aria-current={onBriefing ? "page" : undefined}
+                className={cn("inline-flex min-h-10 items-center whitespace-nowrap rounded px-2 text-xs sm:min-h-7", onBriefing ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}><span className="sm:hidden">Briefing</span><span className="hidden sm:inline">Today’s briefing</span></Link>
+            </div>
             <button type="button" onClick={toggleThreads} aria-pressed={threadsShown}
               aria-label={`Threads${!phaseAction && needYouCount > 0 ? `, ${needYouCount} need you` : ""}`} title="Show or hide the thread list ( [ )"
               className={cn(styles.paneToggle, "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground", threadsShown && "bg-secondary")}>
-              <PanelLeft size={15} aria-hidden /><span>Threads</span>
+              <PanelLeft size={15} aria-hidden />
               {!phaseAction && needYouCount > 0 && <span className="tabular-nums text-primary">{needYouCount}</span>}
             </button>
             <button type="button" onClick={() => setPalette(true)} aria-label="Jump to a thread or command" aria-haspopup="dialog"
@@ -374,14 +380,14 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
               <Search size={14} aria-hidden /><span className="hidden sm:inline">Jump to…</span><kbd className={cn(KBD, "hidden md:inline")}>{jumpKey}</kbd>
             </button>
             <button type="button" onClick={planTrade} title="A new plan; you name the symbol. Nothing is sent. ( N )"
-              className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-semibold text-background hover:bg-foreground/90 sm:min-h-8">
+              className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">
               <Plus size={14} aria-hidden /><span className="sr-only sm:not-sr-only">New plan</span>
             </button>
             {phaseAction && <button type="button" onClick={runPhase} title={phaseAction.hint}
               className="inline-flex min-h-11 items-center rounded-md border px-2.5 text-xs font-medium text-foreground hover:bg-secondary md:min-h-8">{phaseAction.label}</button>}
             <button type="button" onClick={toggleContext} aria-pressed={contextShown} aria-label="Context pane" title="Show or hide market context ( ] )"
               className={cn(styles.contextToggle, "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground", contextShown && "bg-secondary")}>
-              <PanelRight size={15} aria-hidden /><span>Context</span>
+              <PanelRight size={15} aria-hidden />
             </button>
           </div>
         )}
@@ -398,13 +404,15 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
       <div className={styles.panes}>
         {on && (
           <aside aria-label="Threads" className={styles.rail}>
-            <ThreadRail actions={actions} active={thread?.id ?? null} activeSymbol={thread ? thread.symbol : link?.symbol ?? null} main={onBriefing} mainChat={onMainChat}
+            <ThreadRail actions={actions} active={thread?.id ?? null} activeSymbol={thread ? thread.symbol : link?.symbol ?? null} main={onBriefing}
               pick={pick} onRows={setRows} onWalk={setWalk} onSaved={setSaved} refresh={refresh}
-              toAnswer={(session.data?.to_answer?.alerts?.count ?? 0) + (session.data?.to_answer?.radar?.count ?? 0)}
+              toAnswer={(session.data?.to_answer?.alerts?.rows.filter(a => a.today && !a.feedback).length ?? 0) + (session.data?.to_answer?.radar?.rows.filter(h => h.today && !h.rating).length ?? 0)}
               phase={fills.waiting.length > 0 && <FillsToLink count={fills.waiting.length} onStart={fills.start} />} />
           </aside>
         )}
         <section aria-label="Conversation" className={styles.thread}>
+          {/* One reading column, centred however wide the pane is: lines stay short enough to read at a glance. */}
+          <div className="mx-auto w-full max-w-[46rem]">
           {on && thread?.mainDay && (
             <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
               <h2 className="text-lg font-semibold">{mainChatLabel({ title: thread.title, main_day: thread.mainDay })}</h2><PreviousDays active={thread.id} open={actions.open} />
@@ -447,8 +455,9 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
                 <ThreadAlertAnswers symbol={thread.symbol ?? null} rows={alertRows} /></>} />
           ) : null)}
           <CopilotPanel variant="page" link={link} desk={hooks} daily={daily} briefing={briefing && !link && !close} />
+          </div>
         </section>
-        {on && <aside aria-label="Context" className={styles.inspector}><Inspector thread={context} day={day} /></aside>}
+        {on && <aside aria-label="Context" className={styles.inspector}><Inspector thread={context} day={day} focus={focus} /></aside>}
       </div>
       {on && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} onConversation={actions.open} />}
     </div>

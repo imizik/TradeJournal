@@ -147,6 +147,20 @@ def test_the_picture_says_why_it_is_unavailable(lab, engine, monkeypatch):  # no
     assert lab.get(f"/copilot/desk/{NBIS}/picture").json() == {"detail": "No NBIS minute bars for today yet."}
 
 
+def test_after_the_close_the_picture_keeps_the_after_hours_minutes_and_says_so(lab, engine, monkeypatch):  # noqa: F811
+    planned(engine)
+    session = bars()
+    last = session[-1]["time"]
+    late = [{"time": last + 60 * (i + 1), "open": 96.0, "high": 96.1, "low": 95.9, "close": 96.0 + i / 10, "extended": True} for i in range(3)]
+    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: session + late)
+    seen = drawn(monkeypatch)
+    assert lab.get(f"/copilot/desk/{NBIS}/picture").status_code == 200
+    [chart] = seen
+    assert chart.title == "NBIS + AFTER HOURS" and chart.note == "NOW 96.20"
+    assert chart.bars[0].get("extended") is None and [b["time"] for b in chart.bars[-3:]] == [b["time"] for b in late]
+    assert len(chart.bars) == 120 + 3  # the pre-market before the open stays off
+
+
 def test_the_market_picture_is_qqq_today_with_the_days_fills_and_pings(lab, engine, monkeypatch):  # noqa: F811
     with Session(engine) as db:  # fills keep New York wall time, pings UTC
         db.add(Fill(account_id=ROTH, ticker="NBIS", instrument_type="stock", side="buy", contracts=5, price=93.0,

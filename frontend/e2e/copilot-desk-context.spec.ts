@@ -82,7 +82,7 @@ test("the conversation opens first and Context is available on demand", async ({
   await expect(page.getByRole("region", { name: "Conversation" }).getByText("It held the open; the group leads.")).toBeVisible();
   await expect(pane).toBeHidden();
   const toggle = page.getByRole("button", { name: "Context pane" });
-  await expect(toggle).toContainText("Context");
+  await expect(toggle).toHaveAttribute("title", /market context/); // an icon, named for a screen reader
   await toggle.click();
   await expect(pane).toBeVisible();
 });

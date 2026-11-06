@@ -165,10 +165,16 @@ test("Main stays pinned as the list scrolls, with only today's conversations und
   const loose = (n: number, day: string) => ({ ...summary(`66666666-6666-4666-8666-66666666666${n}`, "X", "open", `2026-10-${day}T16:00:00Z`), symbol: null, title: `About the market ${n}` });
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [loose(1, "23"), loose(2, "22"), loose(3, "21"), loose(4, "20")] } }));
   await page.route("**/copilot/desk/session", (route) => route.fulfill({ json: { as_of: "2026-10-23T15:00:00Z", now: epoch("2026-10-23T15:00:00Z"), day: "2026-10-23", phase: "regular",
-    open: null, close: null, events: [], time_stops: [], pings: null, prep: null, indices: [], quote_issue: null, sections: {}, to_answer: { alerts: { count: 2, rows: [] }, radar: { count: 1, rows: [] } } } }));
+    open: null, close: null, events: [], time_stops: [], pings: null, prep: null, indices: [], quote_issue: null, sections: {}, to_answer: {
+      // Only today's still waiting count here: the older one and the answered one wait in the briefing, not on the list.
+      alerts: { count: 3, rows: [{ id: "a1", trade_id: "t1", symbol: "NBIS", contract: "NBIS", kind: "giveback", at: 0, today: true, feedback: null },
+        { id: "a2", trade_id: "t1", symbol: "NBIS", contract: "NBIS", kind: "giveback", at: 0, today: true, feedback: { rating: "already_aware", reason: null, version: 1, created_at: 0, updated_at: 0 } },
+        { id: "a3", trade_id: "t1", symbol: "NBIS", contract: "NBIS", kind: "giveback", at: 0, today: false, feedback: null }] },
+      radar: { count: 40, rows: [{ event_id: "e1", symbol: "MU", kind: "vs sector", at: 0, today: true, rating: null },
+        { event_id: "e2", symbol: "MU", kind: "vs sector", at: 0, today: false, rating: null }] } } } }));
   await page.reload();
   const main = list(page).getByRole("region", { name: "Today’s briefing" });
-  await expect(main).toContainText("3 to answer");
+  await expect(main).toContainText("2 to answer");
   const under = list(page).getByRole("list", { name: "Main threads" });
   await expect(under.getByRole("link")).toHaveText([/About the market 1/]);
   await under.getByRole("button", { name: /^Earlier/ }).click();

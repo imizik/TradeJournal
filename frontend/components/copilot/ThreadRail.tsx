@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronRight, Home, MessagesSquare } from "lucide-react";
+import { ChevronDown, ChevronRight, Home } from "lucide-react";
 import { KBD, useJumpKey } from "@/components/copilot/CommandPalette";
 import PlanATrade from "@/components/copilot/PlanATrade";
 import PlanList from "@/components/copilot/PlanList";
@@ -73,7 +73,8 @@ export type Ticker = {
   value: DeskThread["value"]; status: DeskThread["status"]; conversations: InvestigationSummary[]; changedAt: number;
 };
 
-/** The thread list's tickers in order: needs-you first, then held, armed plans, exited, watching, closed this week. */
+/** The thread list's tickers in order: needs-you first, then held, armed plans, exited, watching, closed this week; within
+ * each, the biggest loss first, then the newest change. */
 export function tickersOf(rows: DeskThread[], plans: DeskPlan[], saved: InvestigationSummary[], needs: (row: DeskThread) => boolean): Ticker[] {
   const by = new Map<string, DeskThread[]>();
   for (const row of rows) {
@@ -98,7 +99,14 @@ export function tickersOf(rows: DeskThread[], plans: DeskPlan[], saved: Investig
       value: position?.value ?? exit?.value ?? null,
       status: lead?.status ?? { text: conversations[0]?.conclusion ?? conversations[0]?.title ?? "", tone: "muted" as const },
     };
-  }).sort((a, b) => Number(b.needs) - Number(a.needs) || RANK[a.state] - RANK[b.state] || b.changedAt - a.changedAt);
+  }).sort((a, b) => Number(b.needs) - Number(a.needs) || RANK[a.state] - RANK[b.state] || pnl(a) - pnl(b) || b.changedAt - a.changedAt);
+}
+
+/** A ticker's loss as a negative number, so the biggest loss sorts first; a gain or no figure is 0 and keeps its place. */
+function pnl(ticker: Ticker) {
+  const text = ticker.value?.text;
+  if (!text || !numeric(text) || !/^[−-]/.test(text)) return 0;
+  return -Number(text.replace(/[^\d.]/g, ""));
 }
 
 function closedThisWeek(talk: InvestigationSummary) {
@@ -188,7 +196,7 @@ function TickerRow({ ticker, open, expanded, onExpand, active, actions, pick, sk
             ? <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
             : unread ? <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" /> : <span aria-hidden className="w-1.5 shrink-0" />}
           <span className="shrink-0 font-semibold text-foreground">{ticker.symbol}</span>
-          <span className={cn("shrink-0 rounded px-1 text-[10px] leading-4", state.tone)}>{state.text}</span>
+          {ticker.state !== "held" && <span className={cn("shrink-0 rounded px-1 text-[10px] leading-4", state.tone)}>{state.text}</span>}
           {ticker.value && (
             <span className={cn("ml-auto shrink-0 text-xs", TONE[ticker.value.tone], numeric(ticker.value.text) && "tabular-nums")}
               title={lead?.tradeId && numeric(ticker.value.text) ? "Unrealized P&L on this position (an option's own mark, not the underlying)" : undefined}>
@@ -196,7 +204,7 @@ function TickerRow({ ticker, open, expanded, onExpand, active, actions, pick, sk
             </span>
           )}
         </span>
-        {status.text && <span className={cn("block truncate pl-3 text-xs", TONE[status.tone], asking && !skipped && "text-primary/75")} title={status.text}>{status.text}</span>}
+        {status.text && <span className={cn("line-clamp-2 pl-3 text-xs", TONE[status.tone], asking && !skipped && (lead?.close?.kind === "plan_ask" ? "text-muted-foreground" : "text-primary/75"))} title={status.text}>{status.text}</span>}
         {meter && <div className="pl-3"><Meter meter={meter} /></div>}
       </button>
       {/* A ticker with one conversation keeps the column, so the P&L figures line up. */}
@@ -218,7 +226,7 @@ function DayLine({ data, needYou }: { data: DeskThreads; needYou: number }) {
   return (
     <p data-testid="desk-day" className="px-2.5 text-xs text-muted-foreground">
       {needYou ? <span className="text-primary"><span className="tabular-nums">{needYou}</span> need{needYou === 1 ? "s" : ""} you</span> : "Nothing needs you"}
-      {streak && <> · plan streak <span className="tabular-nums">{streak.current}</span></>}
+      {!!streak?.current && <> · plan streak <span className="tabular-nums">{streak.current}</span></>}
     </p>
   );
 }
@@ -231,13 +239,13 @@ function DayLine({ data, needYou }: { data: DeskThreads; needYou: number }) {
  * you" dot; tickers sort under Needs you, Held and armed, and Others. Pressing a ticker opens its newest conversation (or
  * follows its row's link when it has none) and shows its subthreads; with more than one, its count and arrow show or hide
  * them without changing the open conversation, and any number can stay open. Radar hits, alerts to answer and Review my
- * week live inside Main; ``toAnswer`` is how many are waiting.
+ * week live inside Main; ``toAnswer`` is how many of today's are waiting (older ones wait in the briefing).
  * ``onRows`` gets the desk rows in the order shown, for the palette; ``onWalk`` the conversations J / K walk, as the list
  * shows them (under Main, then each ticker: its subthreads when shown, else its newest); ``onSaved`` the saved conversations, for
  * the breadcrumb. All | Plans switches to the Plans view (``PlanList``) from the same read, remembered in this browser.
  */
-export default function ThreadRail({ actions, active = null, activeSymbol = null, main = false, mainChat = false, onRows, onWalk, onSaved, phase = null, refresh = 0, toAnswer = 0, pick }: {
-  actions: HomeActions; active?: string | null; activeSymbol?: string | null; main?: boolean; mainChat?: boolean; onRows?(rows: DeskThread[]): void; onWalk?(ids: string[]): void;
+export default function ThreadRail({ actions, active = null, activeSymbol = null, main = false, onRows, onWalk, onSaved, phase = null, refresh = 0, toAnswer = 0, pick }: {
+  actions: HomeActions; active?: string | null; activeSymbol?: string | null; main?: boolean; onRows?(rows: DeskThread[]): void; onWalk?(ids: string[]): void;
   onSaved?(saved: InvestigationSummary[]): void; phase?: ReactNode; refresh?: number; toAnswer?: number; pick(row: DeskThread): void;
 }) {
   const [data, setData] = useState<DeskThreads | null>(null);
@@ -352,21 +360,16 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
       </div>
       {view === "plans" ? data && <PlanList plans={data.plans} actions={actions} active={active} /> : (
         <>
-          {/* Main chat and the briefing read as one pair; only the open one is filled in. */}
-          <Link href="/copilot-lab" aria-current={mainChat ? "page" : undefined} className={cn(box(mainChat), "flex items-center gap-1.5 border")}>
-            <MessagesSquare size={14} aria-hidden className="shrink-0 text-muted-foreground" />
-            <span className="font-semibold text-foreground">Main chat</span>
-          </Link>
           {/* Pinned where the list scrolls on its own: the conversations under it scroll away, Main does not. */}
           <section aria-label="Today’s briefing" className="z-10 bg-background lg:sticky lg:top-0 lg:shadow-[0_-12px_0_0_hsl(var(--background)),0_6px_0_0_hsl(var(--background))]">
             <button type="button" onClick={() => { setOpened(null); mark(radar); actions.home(); }} aria-current={main ? "page" : undefined}
               title="The day, Radar hits to rate, alerts to answer and Review my week" className={cn(box(main), "border")}>
               <span className="flex items-center gap-1.5">
                 <Home size={14} aria-hidden className="shrink-0 text-muted-foreground" />
-                <span className="font-semibold text-foreground">Today’s briefing</span>
+                <span className="min-w-0 truncate font-semibold text-foreground">Today’s briefing</span>
                 {radarNew > 0 && <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
                 <span className="ml-auto flex shrink-0 gap-2 text-xs tabular-nums text-muted-foreground">
-                  {toAnswer > 0 && <span className="text-primary" title="Alerts to answer and Radar hits to rate, in the briefing">{toAnswer} to answer</span>}
+                  {toAnswer > 0 && <span className="text-primary" title="Today's alerts to answer and Radar hits to rate, in the briefing; older ones wait there too">{toAnswer} to answer</span>}
                   {radar.length > 0 && <span title="Radar hits since your last Radar visit; rate them in Main">{radar.length} Radar</span>}
                 </span>
               </span>

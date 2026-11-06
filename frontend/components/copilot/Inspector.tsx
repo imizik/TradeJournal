@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { REVIEW_WEEK, usePlanStreak, type PlanStreakEntry } from "@/components/PlanStreak";
 import { VERDICT, useJson, type RadarProof } from "@/components/ProofView";
 import { EXIT_HABIT_VERDICT, type ExitHabitsBody } from "@/components/dashboard/ExitHabits";
 import {
-  DESK_MARKET, DESK_TIMEFRAMES, getDeskHistory, getDeskPicture, getDeskSession, getDeskTimeline,
+  DESK_MARKET, DESK_TIMEFRAMES, deskSymbolThread, getDeskHistory, getDeskPicture, getDeskSession, getDeskTimeline,
   type ContextTab, type DeskHistory, type DeskTimeframe, type DeskSession, type DeskSessionEvent, type DeskThreadRef, type DeskTimeline, type DeskTimelineRow,
 } from "@/lib/desk";
 import { cn } from "@/lib/utils";
@@ -335,7 +335,7 @@ function WeekRecord() {
 
 /** The Context pane while the Briefing (or a thread with no symbol) is open: the market today with the day's fills and
  * pings, the day's timeline across everything, and this week's record. The chart reads again each minute while shown. */
-function DayContext() {
+function DayContext({ focus = null, onFocus }: { focus?: string | null; onFocus?(): void }) {
   const [tab, setTab] = useState<DayTab>("chart");
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -346,8 +346,11 @@ function DayContext() {
     <div className="space-y-3">
       <div className="flex items-baseline gap-2 text-sm">
         <span className="font-semibold text-foreground">QQQ</span>
-        <span className="text-xs text-muted-foreground">market today</span>
-        <Link href="/charts?symbol=QQQ" className="ml-auto text-xs text-muted-foreground hover:text-primary">Open in Charts →</Link>
+        <span className="whitespace-nowrap text-xs text-muted-foreground">market today</span>
+        <span className="ml-auto flex items-baseline gap-3 whitespace-nowrap">
+          {focus && onFocus && <button type="button" onClick={onFocus} className="text-xs text-muted-foreground hover:text-primary">Back to {focus}</button>}
+          <Link href="/charts?symbol=QQQ" className="text-xs text-muted-foreground hover:text-primary">Open in Charts →</Link>
+        </span>
       </div>
       <TabBar<DayTab> tabs={DAY_TABS} tab={tab} onTab={setTab} />
       <div role="tabpanel" aria-label={DAY_TABS.find(item => item.id === tab)!.label}>
@@ -365,12 +368,34 @@ function DayContext() {
   );
 }
 
+/** A conversation about no ticker that names one in its latest turn: that ticker's chart today (after hours included
+ * once the session closes), with the market one click away. */
+function FocusContext({ symbol, onMarket }: { symbol: string; onMarket(): void }) {
+  const thread = useMemo(() => deskSymbolThread(symbol), [symbol]);
+  return (
+    <div className="space-y-3" data-testid="context-focus">
+      <div className="flex items-baseline gap-2 text-sm">
+        <span className="font-semibold text-foreground">{symbol}</span>
+        <span className="whitespace-nowrap text-xs text-muted-foreground" title="The ticker this conversation's latest turn is about">in this chat</span>
+        <span className="ml-auto flex items-baseline gap-3 whitespace-nowrap">
+          <button type="button" onClick={onMarket} className="text-xs text-muted-foreground hover:text-primary">Market</button>
+          <Link href={`/charts?symbol=${encodeURIComponent(symbol)}`} className="text-xs text-muted-foreground hover:text-primary">Open in Charts →</Link>
+        </span>
+      </div>
+      <ThreadChart key={symbol} thread={thread} />
+    </div>
+  );
+}
+
 /** The desk's Context pane for the open thread: today's chart first, then its timeline and the owner's history at its
  * invalidation, each read only when its tab opens; ``day`` (the Briefing, or a thread with no symbol) shows the day
  * instead. Read-only: nothing here arms or sends. */
-export default function Inspector({ thread, day = false }: { thread: DeskThreadRef | null; day?: boolean }) {
+export default function Inspector({ thread, day = false, focus = null }: { thread: DeskThreadRef | null; day?: boolean; focus?: string | null }) {
   const [tab, setTab] = useState<ContextTab>("chart");
-  if (day) return <DayContext />;
+  // The ticker the owner switched away from, back to the market; a new one shows again.
+  const [left, setLeft] = useState<string | null>(null);
+  if (day && focus && left !== focus) return <FocusContext symbol={focus} onMarket={() => setLeft(focus)} />;
+  if (day) return <DayContext focus={focus} onFocus={() => setLeft(null)} />;
   if (!thread) return <Quiet>Open a thread to see its chart, timeline and your history here.</Quiet>;
   return (
     <div className="space-y-3">

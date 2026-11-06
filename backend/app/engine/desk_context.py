@@ -234,11 +234,20 @@ def _budgeted(symbol: str, draw, budget: float, what: str = WHAT["2m"]) -> bytes
 
 
 def _today_shown(read, symbol: str, now: float) -> list[dict]:
-    """Today's minutes up to ``now``: the regular session once it has bars, before that the pre-market."""
+    """Today's minutes up to ``now``: the regular session once it has bars, before that the pre-market; after the
+    close, the after-hours minutes past the session's last bar follow it."""
     today = datetime.fromtimestamp(now, ET).date()
     found_bars = [b for b in read(symbol) if b["time"] <= now][-DAY_BARS:]
     found_bars = [b for b in found_bars if datetime.fromtimestamp(b["time"], ET).date() == today]
-    return [b for b in found_bars if not b.get("extended")] or found_bars
+    regular = [b for b in found_bars if not b.get("extended")]
+    if not regular:
+        return found_bars
+    return regular + [b for b in found_bars if b.get("extended") and b["time"] > regular[-1]["time"]]
+
+
+def _day_title(symbol: str, shown: list[dict]) -> str:
+    """The symbol, saying so when the regular session's bars are followed by after-hours ones."""
+    return f"{symbol} + AFTER HOURS" if shown and not shown[0].get("extended") and shown[-1].get("extended") else symbol
 
 
 def fifteen_bars(symbol: str) -> list[dict]:
@@ -323,7 +332,7 @@ def picture(db: Session, inv: CopilotInvestigation | SymbolThread, now: float, b
         if not shown:
             return None
         note = f"NOW {_price(shown[-1]['close'])}"
-        title = symbol if timeframe == "2m" else f"{symbol} {timeframe}"
+        title = _day_title(symbol, shown) if timeframe == "2m" else f"{symbol} {timeframe}"
         if timeframe == "1D":
             return chart_render.render(Chart(title=title, note=note, bars=tuple(shown)))
         marks, times = _fill_marks(fills, shown[0]["time"])
@@ -344,7 +353,7 @@ def market_picture(events: list[dict], now: float, bars=None, budget: float = BU
         if not shown:
             return None
         marks = _event_marks([e for e in events if e["kind"] in ("fill", "ping")], shown)
-        return chart_render.render(Chart(title=MARKET, note=f"NOW {_price(shown[-1]['close'])}", bars=tuple(shown), marks=tuple(marks)))
+        return chart_render.render(Chart(title=_day_title(MARKET, shown), note=f"NOW {_price(shown[-1]['close'])}", bars=tuple(shown), marks=tuple(marks)))
 
     return _budgeted(MARKET, draw, budget)
 
