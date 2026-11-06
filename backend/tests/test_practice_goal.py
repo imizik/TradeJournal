@@ -296,3 +296,19 @@ def test_the_lab_line_reads_the_current_week(db):  # noqa: F811
     later = practice_goal.current(db, date(2026, 10, 27))
     assert later["goal"]["week_start"] == "2026-10-26" and later["this_week"]["text"] == "0 of 0"
     assert json.dumps(later).count("-") < 20  # dates only; no ids
+
+
+def test_the_ping_line_names_the_goal_and_its_score_on_the_ping_that_tests_it(db):  # noqa: F811
+    assert practice_goal.ping_line(db, "no_trade_after_hour_red", date(2026, 10, 23)) is None  # no active goal
+    _seed_week(db)
+    practice_goal.save(db, text="Out before the hour.", measure="no_trade_after_hour_red", target=None, investigation_id=None,
+                       today=date(2026, 10, 20))
+    line = practice_goal.ping_line(db, "no_trade_after_hour_red", date(2026, 10, 23))
+    assert line == "Practice this week: no trade held an hour into a red close · kept 1 of 4 so far" and len(line) < 120
+    assert practice_goal.ping_line(db, "respond_to_giveback_15m", date(2026, 10, 23)) is None  # another measure
+    practice_goal.save(db, text="Act on give-backs.", measure="respond_to_giveback_15m", target=None, investigation_id=None,
+                       today=date(2026, 10, 24))  # Saturday: starts Monday the 26th
+    assert practice_goal.ping_line(db, "respond_to_giveback_15m", date(2026, 10, 24)) == \
+        "Practice from Mon Oct 26: act on give-back alerts within 15 min"
+    assert practice_goal.ping_line(db, "respond_to_giveback_15m", date(2026, 10, 27)) == \
+        "Practice this week: act on give-back alerts within 15 min"  # nothing to count yet

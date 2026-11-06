@@ -1059,3 +1059,39 @@ def test_a_record_failure_never_holds_the_give_back_alert(engine, world, monkeyp
     fired(engine, world)
     sent = giveback_sent(world, monkeypatch)
     assert alerts(engine)[0].delivery == "sent" and "2 contracts open. Review your exit plan." in sent[0]
+
+
+def practice_stub(monkeypatch, goal):
+    """``practice_goal.ping_line`` answering for ``goal`` only, or raising when ``goal`` is "raises"."""
+    def ping_line(db, measure, today):
+        assert today == WED
+        if goal == "raises":
+            raise RuntimeError("boom")
+        return f"Practice this week: {measure} · kept 2 of 3 so far" if measure == goal else None
+    monkeypatch.setattr(position_alerts.practice_goal, "ping_line", ping_line)
+
+
+@pytest.mark.parametrize("goal", ["respond_to_giveback_15m", "no_trade_after_hour_red", "raises"])
+def test_the_give_back_alert_ends_with_the_practice_goal_it_tests(engine, world, monkeypatch, goal):
+    practice_stub(monkeypatch, goal)
+    fired(engine, world)
+    sent = giveback_sent(world, monkeypatch)
+    assert alerts(engine)[0].delivery == "sent"
+    if goal == "respond_to_giveback_15m":
+        assert sent[0].endswith("\nPractice this week: respond_to_giveback_15m · kept 2 of 3 so far")
+    else:
+        assert "Practice" not in sent[0] and "2 contracts open. Review your exit plan." in sent[0]
+
+
+@pytest.mark.parametrize("goal", ["no_trade_after_hour_red", "respond_to_giveback_15m", "raises"])
+def test_the_one_hour_alert_ends_with_the_practice_goal_it_tests(engine, world, hold_on, monkeypatch, goal):
+    practice_stub(monkeypatch, goal)
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
+    quotes.set(4.00)
+    run_at(clock, watcher, WED, "11:00")
+    sent = giveback_sent(world, monkeypatch)
+    assert alerts(engine)[0].delivery == "sent" and "Re-decide: close, trim, or set your exit." in sent[0]
+    assert sent[0].endswith("\nPractice this week: no_trade_after_hour_red · kept 2 of 3 so far") == (goal == "no_trade_after_hour_red")
+    assert ("Practice" in sent[0]) == (goal == "no_trade_after_hour_red")

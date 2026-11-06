@@ -33,7 +33,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import fill_interrupts, level_alerts, notification_policy, phone, ping_images
+from app.engine import fill_interrupts, level_alerts, notification_policy, phone, ping_images, practice_goal
 from app.engine.chart_feed import ChartFeedError
 from app.engine.chart_math import ET, chart_bars, normalize_bars, session_windows
 from app.models import LevelAlert, LevelAlertEvent
@@ -436,6 +436,8 @@ class LevelAlertMonitor:
                 # with the question ready (never sent on its own). The notification policy may hold it (the daily cap,
                 # or a ping for the same position moments earlier); an invalidation is never over the cap.
                 title, body, path = level_alerts.plan_message(alert.symbol, alert.plan_role, investigation, fired)
+                practice = practice_line(db, alert.plan_role, fired["event_at"])
+                body += f"\n{practice}" if practice else ""
                 anchor, trade_id = notification_policy.symbol_anchor(db, alert.symbol)
                 ticket = notification_policy.decide(db, sender="level_alerts", source_id=str(event.id), kind=alert.plan_role, title=title,
                                                     body=body, now=now, anchor=anchor, symbol=alert.symbol, trade_id=trade_id)
@@ -560,3 +562,15 @@ def rearm_alert(db: Session, alert: LevelAlert, *, price: float, reference: floa
     db.refresh(alert)
     return alert
 
+
+
+def practice_line(db: Session, role: str | None, event_at: float) -> str | None:
+    """The practice goal's sentence on a plan's invalidation ping while the goal is exiting at the invalidation
+    (``practice_goal.ping_line``, as of the break's day); None, never an error, otherwise."""
+    if role != "invalidation":
+        return None
+    try:
+        return practice_goal.ping_line(db, "exit_at_invalidation", datetime.fromtimestamp(event_at, ET).date())
+    except Exception:  # noqa: BLE001 - the ping matters more than its extras
+        log.warning("Practice line skipped", exc_info=True)
+        return None

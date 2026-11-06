@@ -724,3 +724,29 @@ def test_the_week_review_counts_pings_by_kind_and_acted_on_share(engine):
     assert "pings" in review["provenance"] and "acted_on" in pings["then"]
     with Session(engine) as db:
         assert copilot_review.week_review(date(2026, 9, 2).isoformat(), session=db)["state"] == "none"
+
+
+@pytest.mark.parametrize("goal", ["exit_at_invalidation", "plan_before_entry", "raises"])
+def test_the_invalidation_ping_ends_with_the_practice_goal_it_tests(engine, phone, monkeypatch, goal):
+    from app.engine import level_alert_monitor
+
+    def ping_line(db, measure, today):
+        assert today == WED
+        if goal == "raises":
+            raise RuntimeError("boom")
+        return f"Practice this week: {measure} · kept 2 of 3 so far" if measure == goal else None
+    monkeypatch.setattr(level_alert_monitor.practice_goal, "ping_line", ping_line)
+    with Session(engine) as db:
+        stop = create_alert(db, symbol="SNDK", price=92.3, reference=94.0, condition="crosses", interval=None, session="regular",
+                            source_kind="copilot", source_id=INV, label="SNDK invalidation", now=at("10:00"), plan_role="invalidation").id
+        entry = create_alert(db, symbol="NBIS", price=95.9, reference=94.0, condition="crosses", interval=None, session="regular",
+                             source_kind="copilot", source_id=INV, label="NBIS entry", now=at("10:00"), plan_role="entry").id
+    monitor = LevelAlertMonitor(engine, None, clock=lambda: at("10:42"))
+    monitor.reload()
+    monitor.record([monitor._event(monitor._watched[stop], 92.27, at("10:41"), "stream", None),
+                    monitor._event(monitor._watched[entry], 95.93, at("10:41"), "stream", None)])
+    monitor.deliver()
+    bodies = {title: body for title, body, _ in phone}
+    practice = "\nPractice this week: exit_at_invalidation · kept 2 of 3 so far" if goal == "exit_at_invalidation" else ""
+    assert bodies["SNDK invalidation broke"] == "SNDK broke your 92.30 invalidation. Your plan says out." + practice
+    assert "Practice" not in bodies["NBIS entry trigger hit"]

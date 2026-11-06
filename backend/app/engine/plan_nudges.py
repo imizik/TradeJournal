@@ -47,7 +47,7 @@ from sqlalchemy import func, or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import capture_links, notification_policy, phone, ping_images, position_companion
+from app.engine import capture_links, notification_policy, phone, ping_images, position_companion, practice_goal
 from app.engine.captures import epoch
 from app.engine.chart_journal import contract_label, stamp
 from app.engine.chart_math import ET, session_windows
@@ -101,6 +101,16 @@ def message(nudge: PlanNudge, title_label: str) -> tuple[str, str, str]:
                "Help me set an invalidation and a time stop.")[:CONTEXT_MAX]
     path = "/copilot-lab?" + urlencode({"symbol": nudge.ticker, "context": context}, quote_via=quote)
     return f"{title_label}: no plan yet", f"{verb.capitalize()} {_size(nudge)}. Tap for a 20-second plan.", path
+
+
+def practice_line(db: Session, nudge: PlanNudge) -> str | None:
+    """The practice goal's sentence when the goal is planning before the entry (``practice_goal.ping_line``, as of the
+    detection day); None, never an error, otherwise."""
+    try:
+        return practice_goal.ping_line(db, "plan_before_entry", datetime.fromtimestamp(_epoch(nudge.detected_at), ET).date())
+    except Exception:  # noqa: BLE001 - the nudge matters more than its extras
+        log.warning("Practice line skipped", exc_info=True)
+        return None
 
 
 def plan_name(capture: TradeCapture) -> str:
@@ -264,6 +274,8 @@ class PlanNudges:
                 title, body, path = link_message(label, plans, trade.id)
             else:
                 title, body, path = message(nudge, label)
+                practice = practice_line(db, nudge)
+                body += f"\n{practice}" if practice else ""
             ticket_kind = "link" if nudge.kind == "link" else "nudge"
             ticket = notification_policy.decide(
                 db, sender="plan_nudges", source_id=str(nudge.id), kind=ticket_kind, title=title, body=body,

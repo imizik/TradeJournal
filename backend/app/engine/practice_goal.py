@@ -197,3 +197,16 @@ def current(db: Session, today: date) -> dict:
     monday = _monday(today)
     return {"goal": public(goal),
             "this_week": score(db, goal.measure, goal.target, monday) if monday >= goal.week_start else None}
+
+
+def ping_line(db: Session, measure: str, today: date) -> str | None:
+    """The sentence a ping that tests ``measure`` ends with while the active goal practices it: the goal and the week's
+    score so far, or the day it starts. None for any other measure or with no active goal."""
+    goal = active(db)
+    if goal is None or goal.measure != measure:
+        return None
+    name = label(goal.measure, goal.target)
+    if _monday(today) < goal.week_start:
+        return f"Practice from {goal.week_start:%a %b} {goal.week_start.day}: {name}"
+    week = score(db, goal.measure, goal.target, _monday(today))
+    return f"Practice this week: {name}" + (f" · kept {week['hit']} of {week['of']} so far" if week["of"] else "")

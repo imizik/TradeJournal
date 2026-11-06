@@ -100,7 +100,8 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import alert_feedback, exit_habits, notification_policy, ntfy, phone, ping_images, position_alert_context, telegram_replies
+from app.engine import (alert_feedback, exit_habits, notification_policy, ntfy, phone, ping_images, position_alert_context, practice_goal,
+                        telegram_replies)
 from app.engine.chart_journal import OPEN_SIDES, contract_label, open_lots
 from app.engine.chart_math import ET, session_windows
 from app.engine.occ import occ_symbol
@@ -331,6 +332,21 @@ def giveback_facts(db: Session) -> dict:
     return facts
 
 
+PRACTICE = {"giveback": "respond_to_giveback_15m", "hold_hour": "no_trade_after_hour_red"}
+
+
+def practice_line(db: Session, alert: PositionAlert) -> str | None:
+    """The practice goal's sentence when this alert tests the active goal (``practice_goal.ping_line``, as of the
+    detection day); None, never an error, otherwise."""
+    if alert.kind not in PRACTICE:
+        return None
+    try:
+        return practice_goal.ping_line(db, PRACTICE[alert.kind], datetime.fromtimestamp(_epoch(alert.detected_at), ET).date())
+    except Exception:  # noqa: BLE001 - the alert matters more than its extras
+        log.warning("Practice line skipped", exc_info=True)
+        return None
+
+
 def open_positions(db: Session) -> list[dict]:
     """Every open long option with what is still held, anchored in its first entry fill."""
     trades = db.exec(select(Trade).where(Trade.status == "open", Trade.instrument_type == "option",
@@ -437,11 +453,13 @@ def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_
 
 
 def message(alert: PositionAlert, close_label: str | None = None, minutes_left: int | None = None,
-            facts: dict | None = None, since: str | None = None) -> tuple[str, str, int]:
-    """``since`` is the position's "Since you entered: …" line from its thesis object (``trader_context.phone_line``)."""
+            facts: dict | None = None, since: str | None = None, practice: str | None = None) -> tuple[str, str, int]:
+    """``since`` is the position's "Since you entered: …" line from its thesis object (``trader_context.phone_line``);
+    ``practice`` the week's practice-goal sentence (``practice_line``), last."""
     title, body, priority = _base_message(alert, close_label, minutes_left, facts)
     context = position_alert_context.phone_text(alert.context_snapshot_json)
-    return title, body + ("\n\n" + context if context else "") + ("\n" + since if since else ""), priority
+    return (title, body + ("\n\n" + context if context else "") + ("\n" + since if since else "")
+            + ("\n" + practice if practice else ""), priority)
 
 
 def since_line(db: Session, alert: PositionAlert, now: float) -> str | None:
@@ -703,7 +721,8 @@ class PositionAlerts:
                      else giveback_facts(db) if alert.kind == "giveback" else None)
             title, body, priority = message(alert, _clock_label(_minute_of(close)) if close else None,
                                             max(1, int((close - now) // 60)) if close else None, facts,
-                                            since_line(db, alert, _epoch(alert.detected_at)))  # as of detection: a retry sends the same words
+                                            since_line(db, alert, _epoch(alert.detected_at)),  # as of detection: a retry sends the same words
+                                            practice_line(db, alert))
             path, more = _links(db, alert)
             ticket = notification_policy.decide(
                 db, sender="position_alerts", source_id=str(alert.id), kind=alert.kind, title=title, body=body, now=now,
