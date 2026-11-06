@@ -10,7 +10,7 @@ import {
   type ContextTab, type DeskHistory, type DeskTimeframe, type DeskSession, type DeskSessionEvent, type DeskThreadRef, type DeskTimeline, type DeskTimelineRow,
 } from "@/lib/desk";
 import { cn } from "@/lib/utils";
-import { unavailable, type AnswerScorecard } from "@/lib/copilot";
+import { unavailable, type AnswerScorecard, type BriefScorecard } from "@/lib/copilot";
 
 const NY = "America/New_York";
 const nyDay = (seconds: number) => new Date(seconds * 1000).toLocaleDateString("en-US", { timeZone: NY });
@@ -289,8 +289,39 @@ function WeekCopilot() {
   );
 }
 
+/** The morning brief, as ``GET /copilot/brief-scorecard`` scores it: symbols named over the week's briefs and how many
+ * moved 3+ points vs SPY by the close, then one small row per brief day (newest first). A read that fails says so. */
+function WeekBrief() {
+  const card = useJson<BriefScorecard>("/copilot/brief-scorecard?days=7");
+  const body = card.body;
+  if (body && body.state === "ok" && body.briefs === 0) return <Quiet>No morning brief in the last 7 days.</Quiet>;
+  let line: ReactNode = card.error || body?.state === "unavailable" ? "could not load" : "reading…";
+  if (body && body.state === "ok") {
+    line = <>named <span className="tabular-nums">{body.named}</span> symbol{body.named === 1 ? "" : "s"} over <span className="tabular-nums">{body.briefs}</span> brief{body.briefs === 1 ? "" : "s"}
+      {" · "}<span className="tabular-nums">{body.moved}</span> moved 3+ pts vs SPY by the close
+      {body.unknown > 0 && <> · <span className="tabular-nums">{body.unknown}</span> without bars</>}</>;
+  }
+  const day = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).replace(",", "");
+  const rows = body?.state === "ok" ? body.rows.slice(0, 5) : [];
+  return (
+    <section aria-label="Morning brief this week" data-testid="week-brief" className="space-y-1 border-b pb-3 text-sm">
+      <p data-testid="week-brief-line" className="min-w-0 break-words"><span className="text-muted-foreground">Morning brief: </span><span className="font-medium text-foreground">{line}</span></p>
+      {rows.length > 0 && (
+        <ul aria-label="Morning briefs by day" className="space-y-0.5 text-xs text-muted-foreground">
+          {rows.map(row => (
+            <li key={row.day} data-testid="week-brief-row">
+              {day(row.day)}: {row.state === "unavailable" ? "could not score"
+                : <>{row.named} named, {row.moved} moved{row.unknown > 0 && `, ${row.unknown} without bars`}{row.state === "in_progress" && " (in progress)"}</>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function WeekTab() {
-  return <div className="space-y-3"><WeekCopilot /><WeekProof /><WeekRecord /></div>;
+  return <div className="space-y-3"><WeekCopilot /><WeekBrief /><WeekProof /><WeekRecord /></div>;
 }
 
 function WeekRecord() {

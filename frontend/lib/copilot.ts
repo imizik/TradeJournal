@@ -123,6 +123,11 @@ export type AnswerScorecard = {
   cost: { total_usd: number; per_turn_usd: number | null; top_threads: { investigation_id: string; title: string; usd: number; turns: number }[];
     cache: { read_tokens: number; input_tokens: number; read_share: number | null } } | { state: "unavailable" };
 };
+/** ``GET /copilot/brief-scorecard`` (docs/copilot-lab.md § The brief scorecard): symbols the morning brief named and how
+ * many moved 3+ points vs SPY by the close; counts only, newest brief first. */
+export type BriefScorecardRow = { day: string; named: number; moved: number; unknown: number; state: "ok" | "in_progress" | "no_bars" } | { day: string; state: "unavailable" };
+export type BriefScorecard = { state: "ok"; days: number; briefs: number; named: number; moved: number; unknown: number; rows: BriefScorecardRow[]; as_of: string }
+  | { state: "unavailable"; days: number; as_of: string };
 export const unavailable = (part: unknown): part is { state: "unavailable" } => !!part && typeof part === "object" && (part as { state?: string }).state === "unavailable";
 /** Where a question is asked from; recorded with its turn. */
 export type TurnSource = "desk" | "charts" | "radar" | "panel";

@@ -5,6 +5,11 @@ Retrospective research of every saved morning-brief version from October 19,
 session dates. No brief was saved for October 28. Three versions arrived after
 09:30; their returns are descriptive, excluded from morning-available totals.
 
+The copilot's own 09:00 brief (not Jo's briefing scored here) gets an automatic
+line on the Desk's This week tab with the same excess and hit definitions, but a
+weaker symbol match: uppercase tokens against known symbols, not this manual
+audit ([the brief scorecard](../../docs/copilot-lab.md#the-brief-scorecard)).
+
 The original November 3 scorecard had no archived 09:00 ranking. Its weekly
 tables remain the record of that first run. The dated supplement below uses
 historical SIP minutes and a date-effective listing universe. Catalyst coverage

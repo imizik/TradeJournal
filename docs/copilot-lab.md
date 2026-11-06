@@ -2880,6 +2880,46 @@ a model or a budget; it is the number to read before changing one. Tests:
 `backend/tests/test_copilot_answer_scorecard.py`,
 `frontend/e2e/copilot-desk-context.spec.ts`.
 
+### The brief scorecard
+
+`GET /copilot/brief-scorecard?days=7` (owner-only, refused while the lab is
+off; `days` 1–30; `backend/app/engine/brief_scorecard.py`) scores the copilot's
+own 09:00 morning brief, not Jo's briefing, with the definitions of
+`research/notes/morning-brief-scorecard.md`:
+
+- A **brief** is one `PremarketPrep` row with its saved investigation; its text
+  is the answer lines (the question, which carries the whole pack, is left out).
+- **Named**: the distinct known symbols that appear in that text as whole
+  uppercase tokens. Known = the journal's traded tickers, Radar's universe
+  (`spoken_tickers.known_symbols`) and the backdrop ETFs (SPY, QQQ, SMH), less a
+  short stoplist of all-caps words that are not tickers here (AI, CPI, FOMC, ET,
+  MA, VWAP, …). This is a token match, not the research note's manual audit: a
+  company named only in words is missed, and an incidental mention counts.
+- `excess_pp = 100 × [(close / open − 1) − (SPY close / SPY open − 1)]` over the
+  brief's regular session: the 09:30 minute's open and the last regular minute's
+  close (clock hours, so an early close is not seen). A **moved** symbol has
+  `abs(excess_pp) ≥ 3`. SPY counts as named with zero excess.
+- Bars come from storage only, as the day replay reads them
+  (`ping_images.stored_bars`, and for today the chart feed's minutes); never a
+  provider fetch for this card. A symbol without the 09:30 minute, or a day
+  without SPY, is **unknown**: counted in named, never in moved, and shown so
+  coverage loss stays visible. Today's brief is `in_progress` on the latest
+  minute; a brief with every symbol unknown is `no_bars`.
+
+The response holds `days`, `briefs`, `named`, `moved`, `unknown`, `as_of` and
+one row per brief (`day`, `named`, `moved`, `unknown`, `state`). Nothing is
+stored and no model is called; a finished day whose symbols all had bars is
+cached in the process by (day, brief id). A failing brief marks its row
+`unavailable`; an unreadable store marks the card. No symbol or brief text
+leaves the server.
+
+The desk shows it under the Copilot line in the **This week** tab: "Morning
+brief: named 23 symbols over 4 briefs · 7 moved 3+ pts vs SPY by the close",
+then up to five rows, newest first ("Thu Nov 5: 6 named, 2 moved"), or "No
+morning brief in the last 7 days.". It measures attention to movers, not
+direction, trade suitability or profit. Tests:
+`backend/tests/test_brief_scorecard.py`, `frontend/e2e/copilot-desk-context.spec.ts`.
+
 ## Live measurements (2026-10-24)
 
 Sonnet 5.5 on the Messages API, effort `medium` unless noted, replay of Fri

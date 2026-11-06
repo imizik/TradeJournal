@@ -276,6 +276,15 @@ def answer_scorecard(days: int = Query(7, ge=1, le=90), session: Session = Depen
     return copilot_scorecard.answer_scorecard(session, datetime.utcnow(), days)
 
 
+@router.get("/brief-scorecard")
+def brief_scorecard(days: int = Query(7, ge=1, le=30), session: Session = Depends(get_session)):
+    """How many symbols the morning brief named over the last ``days`` and how many moved 3+ points vs SPY by the close
+    (docs/copilot-lab.md § The brief scorecard). Stored bars only; counts only; owner-only, refused while the lab is off."""
+    _enabled()
+    from app.engine import brief_scorecard as scorecard
+    return scorecard.brief_scorecard(session, datetime.now(ET), days)
+
+
 def _http(exc: investigations.InvestigationError) -> HTTPException:
     return HTTPException({"not_found": 404, "stale": 409, "too_long": 413, "invalid": 422}[exc.code], str(exc))
 

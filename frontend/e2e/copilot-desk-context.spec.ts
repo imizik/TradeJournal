@@ -225,6 +225,13 @@ test("on the Briefing the pane shows the day: QQQ with your fills and pings, the
     answers: { total: 23, rated: 9, helped: 7, didnt: 2, helped_rate: 0.778, pushback: 2, pushback_rate: 0.087, follow_ups: 5, follow_up_rate: 0.217, failed: 1 },
     by_kind: {}, latency: { ask: { turns: 19, first_text_ms: { p50: 4100, p90: 9800 }, total_ms: { p50: 6000, p90: 12000 }, max_silence_ms_p50: 3900 } },
     failed: { timeout: 1 }, cost: { total_usd: 0.38, per_turn_usd: 0.0165, top_threads: [], cache: { read_tokens: 0, input_tokens: 0, read_share: null } } } }));
+  await page.route("**/copilot/brief-scorecard*", (route) => route.fulfill({ json: {
+    state: "ok", days: 7, briefs: 4, named: 23, moved: 7, unknown: 2, as_of: "2026-11-06T15:00:00-05:00", rows: [
+      { day: "2026-11-06", named: 5, moved: 1, unknown: 0, state: "in_progress" },
+      { day: "2026-11-05", named: 6, moved: 2, unknown: 0, state: "ok" },
+      { day: "2026-11-04", named: 7, moved: 3, unknown: 2, state: "ok" },
+      { day: "2026-11-03", named: 5, moved: 1, unknown: 0, state: "ok" },
+    ] } }));
   await page.goto("/copilot-lab?view=briefing");
   const pane = page.getByRole("complementary", { name: "Context" });
   await expect(pane).toBeHidden();
@@ -245,6 +252,9 @@ test("on the Briefing the pane shows the day: QQQ with your fills and pings, the
   const proof = pane.getByRole("region", { name: "Proof this week" });
   await expect(pane.getByTestId("week-copilot-line")).toHaveText("Copilot: Helped 7 of 9 rated · 23 answers · first text 4.1 s median · $0.38");
   await expect(pane.getByTestId("week-copilot-detail")).toHaveText("Pushed back on 2 · 5 follow-ups · 1 failed");
+  await expect(pane.getByTestId("week-brief-line")).toHaveText("Morning brief: named 23 symbols over 4 briefs · 7 moved 3+ pts vs SPY by the close · 2 without bars");
+  await expect(pane.getByTestId("week-brief-row")).toHaveText(["Fri Nov 6: 5 named, 1 moved (in progress)", "Thu Nov 5: 6 named, 2 moved",
+    "Wed Nov 4: 7 named, 3 moved, 2 without bars", "Tue Nov 3: 5 named, 1 moved"]);
   await expect(proof.getByTestId("week-proof-alerts")).toHaveText("Alerts: No consistent decrease · based on 9 of 14 alerts answered");
   await expect(proof.getByTestId("week-proof-radar")).toHaveText("Radar: Not enough data · 6 hits rated");
   await expect(proof.getByRole("link", { name: "Open Proof →" })).toHaveAttribute("href", "/proof");
@@ -267,14 +277,34 @@ test("this week's proof lines say when a proof read is missing or fails", async 
   await page.route("**/analytics/exit-habits", (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
   await page.route("**/radar/proof", (route) => route.fulfill({ json: { state: "off", reason: "Radar is not recording." } }));
   await page.route("**/copilot/answer-scorecard*", (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
+  await page.route("**/copilot/brief-scorecard*", (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
   await page.goto("/copilot-lab?view=briefing");
   await page.getByRole("tablist", { name: "Desk" }).getByRole("tab", { name: "Context" }).click();
   const pane = page.getByRole("complementary", { name: "Context" });
   await pane.getByRole("tablist", { name: "Context" }).getByRole("tab", { name: "This week" }).click();
   const proof = pane.getByRole("region", { name: "Proof this week" });
   await expect(pane.getByTestId("week-copilot-line")).toHaveText("Copilot: could not load");
+  await expect(pane.getByTestId("week-brief-line")).toHaveText("Morning brief: could not load");
   await expect(proof.getByTestId("week-proof-alerts")).toHaveText("Alerts: could not load");
   await expect(proof.getByTestId("week-proof-radar")).toHaveText("Radar: Not enough data · Radar is not recording.");
   await expect(pane).toContainText("No entries are tracked yet."); // the week's record still shows below
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+});
+
+test("this week says so quietly when no morning brief was written", async ({ page }) => {
+  await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
+  await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
+  await page.route("**/copilot/chat", (route) => route.abort());
+  await page.route("**/charts/captures/streak", (route) => route.fulfill({ json: { show: false } }));
+  await page.route("**/analytics/exit-habits", (route) => route.fulfill({ json: EXIT_HABITS }));
+  await page.route("**/radar/proof", (route) => route.fulfill({ json: RADAR_PROOF }));
+  await page.route("**/copilot/answer-scorecard*", (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
+  await page.route("**/copilot/brief-scorecard*", (route) => route.fulfill({ json: {
+    state: "ok", days: 7, briefs: 0, named: 0, moved: 0, unknown: 0, rows: [], as_of: "2026-11-06T15:00:00-05:00" } }));
+  await page.goto("/copilot-lab?view=briefing");
+  await page.getByRole("button", { name: "Context pane" }).click();
+  const pane = page.getByRole("complementary", { name: "Context" });
+  await pane.getByRole("tablist", { name: "Context" }).getByRole("tab", { name: "This week" }).click();
+  await expect(pane).toContainText("No morning brief in the last 7 days.");
+  await expect(pane.getByTestId("week-brief")).toHaveCount(0);
 });
