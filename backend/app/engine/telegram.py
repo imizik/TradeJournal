@@ -11,6 +11,9 @@ the first row, and an "Open" button to ``ALERT_APP_URL + path`` (then any ``link
 Telegram's message id. A failure raises ``TelegramError``, a ``ntfy.NtfyError`` so every sender's at-most-once
 handling is unchanged: a refusal with a status, or no connection, certainly sent nothing (``surely_unsent``); any
 other failure (a read timeout) may have reached the phone. No retries here: the senders own them.
+
+``download`` fetches one file the owner sent the bot (a voice note, a photo): ``getFile`` for its path, then the bytes
+from Telegram's file host, capped (``FileTooLarge`` above the cap). The bytes are untrusted data held in memory only.
 """
 
 import html
@@ -138,3 +141,31 @@ def call(method: str, *, json: dict | None = None, data: dict | None = None, fil
     if image and 400 <= response.status_code < 500 and response.status_code != 429:
         raise ImageRefused(f"Telegram refused the picture ({status}: {reason}).")
     raise TelegramError(f"Telegram refused {method} ({status}{': ' + reason if reason else ''}).")
+
+
+class FileTooLarge(TelegramError):
+    """A file the owner sent is larger than the caller's cap; nothing more of it was read."""
+
+
+def download(file_id: str, max_bytes: int, *, call=call) -> bytes:
+    """One file the owner sent the bot, at most ``max_bytes`` (read to the cap + 1, then refused with ``FileTooLarge``);
+    ``TelegramError`` when Telegram refuses or cannot be reached (never the token in the message)."""
+    info = call("getFile", json={"file_id": file_id}) or {}
+    path = str(info.get("file_path") or "") if isinstance(info, dict) else ""
+    if not path:
+        raise TelegramError("Telegram gave no file to download.")
+    if int(info.get("file_size") or 0) > max_bytes:
+        raise FileTooLarge("The file is too large.")
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    data = bytearray()
+    try:
+        with httpx.stream("GET", f"{API_URL}/file/bot{token}/{path}", timeout=TIMEOUT_SECONDS) as response:
+            if response.status_code != 200:
+                raise TelegramError(f"Telegram refused the file download ({response.status_code}).")
+            for chunk in response.iter_bytes():
+                data += chunk
+                if len(data) > max_bytes:
+                    raise FileTooLarge("The file is too large.")
+    except httpx.HTTPError as exc:
+        raise TelegramError(f"Telegram could not be reached ({type(exc).__name__}).") from exc
+    return bytes(data)

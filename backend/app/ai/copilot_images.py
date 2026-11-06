@@ -1,8 +1,8 @@
 """Images the copilot can see (docs/copilot-lab.md § The copilot can see).
 
-Two kinds reach the model: a screenshot the owner shares from the panel or the
-phone's share sheet, and the chart image saved with a pre-trade plan, which the
-trade review attaches. Either is decoded to pixels and re-encoded here, so no
+Two kinds reach the model: a screenshot the owner shares from the panel, the
+phone's share sheet or a photo sent to the Telegram bot, and the chart image
+saved with a pre-trade plan, which the trade review attaches. Either is decoded to pixels and re-encoded here, so no
 metadata (EXIF, GPS, colour profiles, comments) survives and the model never
 sees more than a 1568-pixel longest side, the size it reads at full detail.
 
