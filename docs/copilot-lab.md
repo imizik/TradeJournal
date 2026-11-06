@@ -1736,6 +1736,12 @@ nothing exists until the owner confirms.
     Swing, Long hold; see [the desk](#the-desk)) defaults from that reading: a
     time stop due today makes it a day trade, anything else a swing. The
     pre-trade plan part saves it as a `horizon` day-journal entry.
+  - **Plan numbers.** Under the title, one row worked out in the browser from
+    the card's own prices (`planNumbers`), never from the copilot's words: the
+    drafted last, the entry's distance from it, and the invalidation's distance
+    from the entry with the move it takes (a share, or in the underlying for an
+    option plan). It follows an edit; a stop on the wrong side of the entry
+    gets no distance. A plan carries no target, so there is no reward:risk.
   - **Size it for me.** A `Risk $` field beside the size (numeric keypad,
     remembered per browser in `localStorage` key `copilot.risk`, blank until
     typed; no server setting) turns a dollar risk into a size as it is typed,

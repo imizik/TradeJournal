@@ -135,6 +135,9 @@ test("the plan card is edited, then Confirm saves the pre-trade plan and arms bo
   await expect(card.getByLabel("Thesis")).toHaveValue(PLAN.thesis);
   await expect(card.getByLabel("Entry (5m close beyond)")).toHaveValue("95.9");
   await expect(card.getByLabel("Invalidation (crosses)")).toHaveValue("92.3");
+  // The numbers row is worked out from the card's own prices, and follows an edit.
+  const numbers = card.getByLabel("Plan numbers");
+  await expect(numbers).toHaveText("Last 94.35 at draftEntry 95.9, +1.6% from lastStop 92.3, −3.8% from entry (a 3.60 move in NBIS)");
   expect(server.posts).toEqual([]); // nothing until Confirm
 
   // The owner's own history at the drafted invalidation, from the turn's evidence: counts and a link, never a rule.
@@ -156,6 +159,7 @@ test("the plan card is edited, then Confirm saves the pre-trade plan and arms bo
   await card.getByLabel("Invalidation (crosses)").fill("96");
   await expect(history).toHaveText("Your history at this level: you changed the levels; re-ask the copilot to refresh it.");
   await expect(card.getByRole("alert")).toHaveText("A long plan's invalidation must be below its entry.");
+  await expect(numbers).toHaveText("Last 94.35 at draftEntry 95.9, +1.6% from last"); // no distance to a stop on the wrong side
   await expect(card.getByRole("button", { name: "Confirm" })).toBeDisabled();
   await card.getByLabel("Invalidation (crosses)").fill("92.1");
   await card.getByLabel("Thesis").fill("Neoclouds turn and NBIS reclaims the prior-day low.");
@@ -290,6 +294,8 @@ test("the plan card fits a 375 px phone with large tap targets, and Dismiss remo
     expect(size.x + size.width).toBeLessThanOrEqual(375);
   }
   await page.screenshot({ path: test.info().outputPath("trade-plan-375.png"), fullPage: false });
+  await expect(card.getByLabel("Plan numbers")).toBeVisible();
+  await card.screenshot({ path: test.info().outputPath("trade-plan-card-375.png") }); // the numbers row under the title
   await card.getByRole("button", { name: "Dismiss" }).click();
   await expect(page.getByRole("region", { name: "Proposed trade plan" })).toHaveCount(0);
   expect(server.posts).toEqual([]);
@@ -476,6 +482,7 @@ test("size it for me on a stock plan: shares from the invalidation distance, cos
   await page.route("**/copilot/chat", (route) => route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" },
     body: turnWith({ ...PLAN, instrument: "stock", contract: null }, null) }));
   const card = await askForPlan(page);
+  await expect(card.getByLabel("Plan numbers")).toContainText("Stop 92.3, −3.8% from entry (3.60 a share)");
   // A long note written before sizing is cut to keep 120 characters, and the card says so before Confirm.
   await card.getByLabel("Size", { exact: true }).fill("x".repeat(100));
   await card.getByLabel("Risk $").fill("150");
