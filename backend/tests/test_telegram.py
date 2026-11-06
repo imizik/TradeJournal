@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime
 import json
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -920,28 +921,113 @@ def test_a_plan_on_the_symbols_thread_keeps_its_id_made_unique_in_the_conversati
         assert telegram_replies.find_plan(db, "a" * 32) == (thread["id"], last["proposals"][0])
 
 
-def test_confirm_records_the_outcome_and_arms_the_invalidation_once(case, monkeypatch):
-    from app.models import LevelAlert
+FRIDAY_10 = datetime(2026, 11, 6, 10, tzinfo=ZoneInfo("America/New_York")).timestamp()
+
+
+def saved_plan(db_engine, key):
+    """The card's capture, level alerts, time stops, horizon entries and outcome as stored."""
+    from app.models import DayJournalEntry, LevelAlert, PlanTimeStop, TradeCapture
+    with Session(db_engine) as db:
+        thread_id, card = telegram_replies.find_plan(db, key)
+        return (thread_id, db.exec(select(TradeCapture)).all(), db.exec(select(LevelAlert)).all(), db.exec(select(PlanTimeStop)).all(),
+                db.exec(select(DayJournalEntry).where(DayJournalEntry.kind == "horizon")).all(), card.get("outcome"))
+
+
+def confirm(db_engine, key, last=98.0, fresh=True, armed=None):
+    return telegram_replies.confirm_plan(db_engine, key, quote=lambda s: (last, fresh), now=FRIDAY_10, armed=armed)
+
+
+def test_confirm_saves_the_plan_then_arms_both_alerts_and_the_time_stop_as_the_desk_does(case, monkeypatch):
+    from tests.test_exit_habits import ROTH
+    db_engine, _ = case
+    bot = Bot()
+    ask_plan(db_engine, monkeypatch, bot)
+    monkeypatch.setattr(telegram_replies, "_calendar", lambda: None)
+    key = card_data(bot).split(":")[1]
+    armed = []
+    assert confirm(db_engine, key, armed=lambda: armed.append(1)) == (
+        "Plan saved\nEntry alert armed at 100.00\nInvalidation armed at 95.00\nTime stop set: today 15:30 ET", "Confirmed")
+    assert confirm(db_engine, key) == ("Already confirmed: the plan is saved and its alerts are armed.", "Confirmed")
+    thread_id, (capture,), alerts, (stop,), (horizon,), outcome = saved_plan(db_engine, key)
+    # The desk's savePlanCapture: discretionary, "Copilot plan", the side from direction and instrument, the card's client id.
+    assert (capture.client_id, capture.account_id, capture.underlying, capture.side, capture.mode, capture.setup_label) == (
+        key, ROTH, "NBIS", "buy_calls", "discretionary", "Copilot plan")
+    assert capture.wording == "Entry: crosses 100. Invalidation: 5m close beyond 95. Time stop: out by 15:30."
+    assert capture.note == "Thesis: Holds the base above 95 Contract: NBIS 100C 11/21. From a Copilot Lab plan card."
+    assert (capture.origin_kind, capture.origin_ref, json.loads(capture.context_json)["investigation_id"]) == ("copilot", thread_id, thread_id)
+    assert sorted((a.plan_role, a.price, a.condition, a.interval, a.source_kind, a.source_id, a.label, a.state) for a in alerts) == [
+        ("entry", 100.0, "crosses", None, "copilot", thread_id, "NBIS entry: crosses 100", "active"),
+        ("invalidation", 95.0, "closes_beyond", "5m", "copilot", thread_id, "NBIS invalidation: 5m close beyond 95", "active")]
+    assert (stop.client_id, stop.investigation_id, stop.symbol, stop.text) == (key, thread_id, "NBIS", "out by 15:30")
+    assert (horizon.operation_id, horizon.symbol, horizon.text) == (f"horizon-{key}-day", "NBIS", "Day trade")
+    assert outcome["state"] == "confirmed" and outcome["note"].startswith(telegram_replies.FROM_TELEGRAM_NOTE)
+    assert outcome["parts"] == {
+        "plan": {"state": "done", "text": "Saved as your pre-trade plan. It is suggested for the trade when the fill arrives."},
+        "entry": {"state": "done", "text": "Set: NBIS crosses 100."},
+        "invalidation": {"state": "done", "text": "Set: NBIS 5m close beyond 95."},
+        "timeStop": {"state": "done", "text": "Set for today 15:30 ET."}}
+    assert outcome["fields"] == {"thesis": PLAN_EVENT["thesis"], "contract": "NBIS 100C 11/21", "entry": "100", "invalidation": "95",
+                                 "time_stop": "out by 15:30", "size_note": "", "horizon": "day"}
+    assert armed == [1]
+
+
+def test_a_tap_lists_each_part_and_marks_the_card_confirmed(case, monkeypatch):
     db_engine, _ = case
     bot = Bot()
     replies, changed = ask_plan(db_engine, monkeypatch, bot)
+    monkeypatch.setattr(telegram_replies, "_calendar", lambda: None)
     data = card_data(bot)
     keyboard = [[{"text": "Confirm", "callback_data": data}]]
     assert run(replies.handle(tap(data, keyboard=keyboard, update_id=5))) == "pl"
-    assert run(replies.handle(tap(data, keyboard=keyboard, update_id=6))) == "pl"  # a second tap arms nothing more
-    assert [a["text"] for a in bot.named("answerCallbackQuery")] == [
-        "Confirmed: invalidation 95.00 on NBIS is armed.", "Already confirmed: its invalidation alert is armed."]
+    assert run(replies.handle(tap(data, keyboard=keyboard, update_id=6))) == "pl"  # a second tap saves and arms nothing more
+    first, second = [a["text"] for a in bot.named("answerCallbackQuery")]
+    assert first.splitlines()[:3] == ["Plan saved", "Entry alert armed at 100.00", "Invalidation armed at 95.00"]
+    assert first.splitlines()[3].startswith("Time stop set: ")
+    assert second == "Already confirmed: the plan is saved and its alerts are armed."
     assert bot.named("editMessageReplyMarkup")[0]["reply_markup"]["inline_keyboard"][0][0]["text"] == "✓ Confirmed"
+    _, captures_, alerts, stops, _, _ = saved_plan(db_engine, data.split(":")[1])
+    assert (len(captures_), len(alerts), len(stops)) == (1, 2, 1)
+    assert changed == [1]
+
+
+def test_a_crossed_invalidation_is_refused_the_rest_completes_and_a_second_tap_retries_only_it(case, monkeypatch):
+    db_engine, _ = case
+    bot = Bot()
+    ask_plan(db_engine, monkeypatch, bot)
+    monkeypatch.setattr(telegram_replies, "_calendar", lambda: None)
+    key = card_data(bot).split(":")[1]
+    assert confirm(db_engine, key, last=94.0) == (
+        "Plan saved\nEntry alert armed at 100.00\n"
+        "Invalidation failed: NBIS is at 94, already past the invalidation at 95, so it was not set.\nTime stop set: today 15:30 ET", None)
+    _, captures_, alerts, stops, _, outcome = saved_plan(db_engine, key)
+    assert (len(captures_), [a.plan_role for a in alerts], len(stops)) == (1, ["entry"], 1)
+    assert {part: r["state"] for part, r in outcome["parts"].items()} == {
+        "plan": "done", "entry": "done", "invalidation": "failed", "timeStop": "done"}
+    assert confirm(db_engine, key, last=98.0) == ("Invalidation armed at 95.00", "Confirmed")
+    _, captures_, alerts, stops, horizons, outcome = saved_plan(db_engine, key)
+    assert (len(captures_), sorted(a.plan_role for a in alerts), len(stops), len(horizons)) == (1, ["entry", "invalidation"], 1, 1)
+    assert all(r["state"] == "done" for r in outcome["parts"].values())
+
+
+def test_with_no_account_for_plans_confirm_saves_nothing_and_says_so(case, monkeypatch):
+    import uuid as uuid_
+    from app.engine import captures
+    from app.models import Account
+    db_engine, _ = case
+    bot = Bot()
+    ask_plan(db_engine, monkeypatch, bot)
+    monkeypatch.setattr(telegram_replies, "_calendar", lambda: None)
+    key = card_data(bot).split(":")[1]
+    second = uuid_.uuid4()
     with Session(db_engine) as db:
-        thread_id, card = telegram_replies.find_plan(db, data.split(":")[1])
-        alerts = db.exec(select(LevelAlert)).all()
-    assert [(a.symbol, a.price, a.condition, a.interval, a.plan_role, a.source_kind, a.source_id, a.direction, a.state) for a in alerts] == [
-        ("NBIS", 95.0, "closes_beyond", "5m", "invalidation", "copilot", thread_id, "down", "active")]
-    outcome = card["outcome"]
-    assert outcome["state"] == "confirmed" and outcome["note"].startswith(telegram_replies.FROM_TELEGRAM_NOTE)
-    assert outcome["parts"] == {"invalidation": {"state": "done", "text": "Set: NBIS 5m close beyond 95."}}
-    assert (outcome["fields"]["entry"], outcome["fields"]["invalidation"], outcome["fields"]["thesis"]) == ("100", "95", PLAN_EVENT["thesis"])
-    assert changed == [1, 1]
+        db.add(Account(id=second, name="Second", type="individual", last4="1111", broker="robinhood"))
+        db.commit()
+    assert confirm(db_engine, key) == ("Set a default account for plans on the desk first; nothing was saved.", None)
+    assert saved_plan(db_engine, key)[1:] == ([], [], [], [], None)
+    with Session(db_engine) as db:
+        captures.set_default_account(db, second)
+    assert confirm(db_engine, key)[1] == "Confirmed"
+    assert saved_plan(db_engine, key)[1][0].account_id == second
 
 
 def test_a_plan_confirmed_on_the_desk_or_dismissed_arms_nothing(case, monkeypatch):
@@ -964,22 +1050,21 @@ def test_a_plan_confirmed_on_the_desk_or_dismissed_arms_nothing(case, monkeypatc
         assert db.exec(select(LevelAlert)).all() == []
 
 
-@pytest.mark.parametrize("quote, reply", [
-    ((94.0, True), "NBIS is at 94.00, already past the invalidation at 95.00, so it was not armed."),
-    ((98.0, False), "The latest NBIS quote is stale or missing, so nothing was armed. Try again."),
-    ((None, False), "The latest NBIS quote is stale or missing, so nothing was armed. Try again.")])
-def test_a_crossed_invalidation_or_a_stale_quote_arms_nothing(case, monkeypatch, quote, reply):
-    from app.models import LevelAlert
+@pytest.mark.parametrize("quote", [(98.0, False), (None, False)])
+def test_a_stale_quote_arms_no_alert_but_the_plan_and_time_stop_are_saved(case, monkeypatch, quote):
     db_engine, _ = case
     bot = Bot()
     replies, changed = ask_plan(db_engine, monkeypatch, bot, quote=quote)
+    monkeypatch.setattr(telegram_replies, "_calendar", lambda: None)
     data = card_data(bot)
     run(replies.handle(tap(data, keyboard=[[{"text": "Confirm", "callback_data": data}]], update_id=5)))
-    assert bot.named("answerCallbackQuery")[0]["text"] == reply
-    assert bot.named("editMessageReplyMarkup") == [] and changed == []
-    with Session(db_engine) as db:
-        assert db.exec(select(LevelAlert)).all() == []
-        assert "outcome" not in telegram_replies.find_plan(db, data.split(":")[1])[1]
+    lines = bot.named("answerCallbackQuery")[0]["text"].splitlines()
+    assert lines[:3] == ["Plan saved", "Entry failed: The latest NBIS quote is stale or missing, so it was not set.",
+                         "Invalidation failed: The latest NBIS quote is stale or missing, so it was not set."]
+    assert bot.named("editMessageReplyMarkup") == [] and changed == []  # Confirm stays for the retry
+    _, captures_, alerts, _, _, outcome = saved_plan(db_engine, data.split(":")[1])
+    assert (len(captures_), alerts) == (1, [])
+    assert (outcome["parts"]["entry"]["state"], outcome["parts"]["invalidation"]["state"]) == ("failed", "failed")
 
 
 def test_a_failed_card_send_leaves_the_answer_sent_and_the_plan_on_the_desk(case, monkeypatch, caplog):
