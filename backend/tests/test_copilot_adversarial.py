@@ -106,7 +106,8 @@ def _say(text):
 
 
 def _results(messages):
-    return [b for m in messages if m["role"] == "user" and isinstance(m["content"], list) for b in m["content"]]
+    return [b for m in messages if m["role"] == "user" and isinstance(m["content"], list) for b in m["content"]
+            if b["type"] == "tool_result"]  # the answer-shape reminder rides behind them as a text block
 
 
 # =========================================================================== 1. disagreement

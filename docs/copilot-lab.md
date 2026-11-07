@@ -1054,8 +1054,18 @@ Briefing's day).
   body, one-sentence Against and Changes if lines, under 120 words in all,
   leaving out whatever does not change the verdict; no preamble, tool tour or
   closing summary, and a plan's fields stay on its card rather than in the
-  text. (The first, softer "about 120 words" rule produced about 300-word
-  answers in the 2026-10-29 live check.) A trade review, a
+  text. The rule comes with word budgets that add up under it (headline 15,
+  each bullet 22, Against 20, Changes if 15: `copilot_answer.MAX_WORDS` and
+  the `*_WORDS` constants) and is repeated where the answer is written: the
+  `copilot_answer.ANSWER_SHAPE` reminder ends the owner's prepared message and
+  follows every tool-result batch as a text block, because the same rule in
+  the middle of the 3,700-word system prompt was not followed (the first,
+  softer "about 120 words" rule produced about 300-word answers in the
+  2026-10-29 live check; the hard rule still gave 150–295 words, four or five
+  multi-sentence bullets and a closing note on 20 of 22 cases in the
+  2026-11-06 eval, § Follow-up model eval). `copilot_context.user_text` strips
+  the reminder, so the scripted model and the spend record read only the
+  owner's words. A trade review, a
   week review or an explicit "more", "why" or "go deeper" gets the room it
   needs. Length is the wait: after a tool result, Sonnet 5.5 sends the whole
   answer at once at about 100 tokens a second (§ Live measurements).
@@ -1342,8 +1352,8 @@ fixture evidence on Sonnet 5.5 and Haiku 5.5 at effort `medium`
 Haiku's pass rate on the two follow-up cases (`followup-carry`,
 `followup-more`) and its overall `completed`, `no_orders` and `unsupported`
 pass rates are at or above Sonnet's, the default is `claude-haiku-5-5`;
-otherwise `off`. The paid comparison has not run yet (2026-11-06: the API
-rejected the key, see § Live measurements), so the default is `off`. Tests:
+otherwise `off`. The paid comparison ran on 2026-11-06 (§ Follow-up model eval):
+Haiku failed the rule, so the default is `off`. Tests:
 `backend/tests/test_copilot.py` (settings),
 `backend/tests/test_copilot_turn_record.py` (the chat route and its row).
 
@@ -2857,8 +2867,9 @@ python -m scripts.copilot_eval export --out data/copilot_eval/owner-cases.jsonl 
   replay (`--evidence replay --replay-store … --replay-at …`) only against a
   local database, as the lab's replay mode. Every tool read, including the owner
   context, is recorded with its result. Answers are cached by case, model,
-  effort, evidence, the system prompt and the tool schemas, so a prompt change
-  never reuses a stale answer and a re-run costs nothing. Records go under
+  effort, evidence, the system prompt, the answer-shape reminder and the tool
+  schemas, so a prompt change never reuses a stale answer and a re-run costs
+  nothing. Records go under
   `backend/data/copilot_eval/` (gitignored).
 - **Grade.** The deterministic checks (`backend/app/ai/copilot_graders.py`, over
   the Python reading of the answer format in `backend/app/ai/copilot_answer.py`,
@@ -3059,6 +3070,14 @@ the prompt's length rule is not being followed by either model. And
 `no_reread` was not applicable in both runs because the follow-ups' parent
 answer came from the cache, which carries nothing; a run meant to measure the
 carry needs `--no-cache` on the parent.
+
+Sonnet's prose ran 150–295 words (median about 215) over four or five bullets
+of two to four sentences each, plus a separate simulated-data line, a
+multi-sentence Against and a closing note. The 2026-11-07 answer: per-line
+word budgets in the prompt and the `ANSWER_SHAPE` reminder after every tool
+result (§ How the copilot reasons). Not yet re-measured: the next paid Sonnet
+run on the starter cases (the same commands; the cache key includes the
+reminder, so no `--no-cache` is needed) says whether `length` moved from 9%.
 
 To rerun, from `backend/` with a working `ANTHROPIC_API_KEY` (on the VPS, as
 the service user with its environment file):

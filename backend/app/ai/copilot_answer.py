@@ -21,6 +21,25 @@ COMPARE_LINE = re.compile(r"^\**compare\**\s*:\**\s*(.+?)\s+\|\s+(.+?)\**$", re.
 COMPARE_ROW = re.compile(r"^(?:[-*]\s+)?\**(needs|risks|breaks if|costs)\**\s*:\**\s*(.+?)\s+\|\s+(.+?)\**$", re.I)
 NOTE_LINE = re.compile(r"^_\(.*\)_$")  # the scripted model's own labels, which may come first
 
+# The length rule, in one place: SYSTEM_PROMPT states it, ANSWER_SHAPE repeats it where the answer is written, and the
+# eval's ``length`` check measures it over ``AnswerParts.prose()`` (the Read line aside).
+MAX_WORDS = 120
+HEADLINE_WORDS, BULLET_WORDS, AGAINST_WORDS, CHANGES_WORDS = 15, 22, 20, 15  # 15 + 3 × 22 + 20 + 15 = 116 < 120
+
+# Sent as the last text of the owner's message and after every tool-result batch, so the model reads it right before it
+# writes. The same rule in the middle of the 3,700-word system prompt was not followed: on 2026-11-06 Sonnet 5.5 wrote
+# 150–295 words (four or five multi-sentence bullets, a closing note) on 20 of 22 eval cases. The scripted model never
+# reads it as the owner's words (``copilot_context.user_text`` strips it).
+ANSWER_SHAPE = (
+    f"[Answer shape: under {MAX_WORDS} words in all, a hard limit unless the owner asked for more (\"more\", \"why\", "
+    f"\"go deeper\") or for a trade or week review. Verdict headline at most {HEADLINE_WORDS} words. The Read line. Body: "
+    f"at most 3 bullets, each one sentence of at most {BULLET_WORDS} words with its number and as-of; no bold label, no "
+    f"second sentence. Against at most {AGAINST_WORDS} words. "
+    f"Changes if at most {CHANGES_WORDS} words. Nothing else: no separate simulated-data line (two words in the headline "
+    "instead), no closing note, no \"nothing is saved\" line, no card fields repeated. Plain prose without a Verdict line "
+    "keeps the same limit. Cut what does not change the verdict.]"
+)
+
 
 @dataclass(frozen=True)
 class Compare:

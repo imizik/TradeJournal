@@ -25,6 +25,7 @@ from typing import Any, AsyncIterator
 from urllib.parse import urlsplit
 
 from app.ai import copilot_tool_summary, copilot_tools
+from app.ai.copilot_answer import ANSWER_SHAPE
 
 log = logging.getLogger(__name__)
 
@@ -214,11 +215,15 @@ proposes. Say so if asked.
 - Keep answers short. This is a hard limit, not a target: they are read in a glance between decisions, and after a tool \
 result the owner sees nothing until the whole answer is written. The body is at most three bullets, each one sentence \
 with its number and as-of: the facts that decide the verdict, not every fact you read. Against and Changes if are one \
-sentence each, and the whole answer stays under 120 words. Leave out what does not change the verdict, even when it is \
-in the owner context or a tool result; they can ask for more. A simulated-data note is a few words, not a paragraph. No \
-preamble, no restating their question, no tour of the tools you read, no closing summary. A plan's thesis, trigger, invalidation and time stop are on its card; do not repeat \
+sentence each, and the whole answer stays under 120 words. The word budgets that add up to it: the headline at most \
+15 words, each bullet at most 22, Against at most 20, Changes if at most 15; a bullet never gets a bold label or a \
+second sentence, and a fourth bullet is cut, not added. Leave out what does not change the verdict, even when it is \
+in the owner context or a tool result; they can ask for more. A simulated-data note is two words in the headline, not \
+a line of its own. No preamble, no restating their question, no tour of the tools you read, no closing note or summary, \
+no "nothing is saved" line (the card has Confirm). A plan's thesis, trigger, invalidation and time stop are on its card; do not repeat \
 them in the text. Take the room the task needs only when they ask for more ("more", "why", "go deeper") or for a trade \
-review or a week review, and still lead with what matters for the decision.
+review or a week review, and still lead with what matters for the decision. The same shape is repeated after each tool \
+result; follow it there.
 
 Answer format. Use a first line of "Verdict: <word> — <headline>" for market reads, trade ideas, position reviews, plans and \
 other trading decisions, for example "Verdict: Hold — The thesis \
@@ -1783,7 +1788,7 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
     ran_all: list[tuple[dict, dict]] = []
     block, pack_event = await owner_context(evidence, symbol, cfg)
     messages[-1] = {"role": "user", "content": context_line(symbol, now, replay, simulated) + carry_block(earlier) + block
-                    + history[-1]["content"]}
+                    + history[-1]["content"] + "\n\n" + ANSWER_SHAPE}
     if images:
         messages[-1]["images"] = list(images)
     usage = _zero_usage()
@@ -1887,7 +1892,8 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                     yield event
                     if (proposal := proposal_event(event)) is not None:
                         yield proposal
-                messages.append({"role": "user", "content": results})
+                # The shape reminder rides behind the results: the answer is written right after it.
+                messages.append({"role": "user", "content": [*results, {"type": "text", "text": ANSWER_SHAPE}]})
             else:  # every round went to a paused search or a tool call: no round was left for the answer
                 yield {"type": "error", "code": "rounds", "message": "The turn ran out of rounds before it finished an answer."}
     except CopilotError as exc:
