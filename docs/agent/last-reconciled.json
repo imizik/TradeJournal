@@ -1,5 +1,5 @@
 {
-  "commit": "25505ef0405634af2259107a2ffc14c4f2e5353d",
-  "date": "2026-11-05",
-  "note": "Reconciled 03dcbd22..25505ef0 (24 code commits, #652-#674 and four follow-ups: copilot extended hours and review fixes, scalp shortlist, phone tabs, Why? pings, ping cap removal, Radar v2/whole-market research and checkpoints, 09:00 archive and brief scorecard, Main chat). Fixed: phone tab bar (owner Dashboard tab, Daily Review under More), desk session and Radar policy no longer mention the removed shared ping ceiling, Radar row adds v2 opening drive, outside-list scan and tests, morning brief row adds the 09:00 archive and scorecard. Not checked: deploy/README; Dots board rows; per-PR prose in copilot-lab and radar.md; live host states."
+  "commit": "5239575b2c9f143956917706368f60c909168c8e",
+  "date": "2026-11-07",
+  "note": "Reconciled 25505ef0..5239575b (23 code commits, #675-#699: SPY/QQQ first-pullback alert, morning brief whole-market movers and scorecard, Desk focus and Main chat, trader context G.3, pattern-interrupt record/size, Telegram voice/photo and plan cards, follow-up carry model, exposure). Fixed: feature-map gains a first-pullback row; notification policy row adds companion_update budget/priority and first_pullback's fail-closed new_only claim; Telegram row's pl: Confirm and phone.send sender list; interrupt row's large size is option buys only; lab doc's policy senders add first-pullback. Not checked: deploy/README; Dots board (no Dots commits in range); per-PR prose in copilot-lab; live host states."
 }
