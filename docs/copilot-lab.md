@@ -2110,6 +2110,9 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   pattern interrupts, Radar alerts, thesis watch, research results, the position companion) calls
   `notification_policy.decide` right before it hands a message to ntfy, and keeps
   its own at-most-once delivery, caps and expiry. `ntfy.py` stays a transport.
+  The SPY/QQQ first-pullback alert (`first_pullback.py`) calls it too, with
+  `new_only`: one claim per ETF a day, held rather than sent when the policy
+  cannot be read, so a ping can be lost but never repeated.
   Radar alerts and thesis watch are anchored per symbol (the symbol's open
   position when there is one; a Radar group event to its group); a ping they
   hold is recorded `held` and counts toward neither sender's own caps.
