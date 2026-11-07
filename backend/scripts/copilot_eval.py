@@ -32,7 +32,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from app.ai import copilot, copilot_graders, copilot_tools
+from app.ai import copilot, copilot_answer, copilot_graders, copilot_tools
 from app.ai.copilot_fixture import FixtureEvidence
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -122,7 +122,7 @@ class RecordingEvidence:
 def cache_key(case: dict, model: str, effort: str, backend: str, evidence: str, replay_at: str | None) -> str:
     """The same case on the same prompt, tools, model and evidence gives the same answer; anything else re-runs."""
     payload = {"case": case, "model": model, "effort": effort, "backend": backend, "evidence": evidence, "replay_at": replay_at,
-               "system_prompt": copilot.SYSTEM_PROMPT, "tools": copilot_tools.TOOLS}
+               "system_prompt": copilot.SYSTEM_PROMPT, "answer_shape": copilot_answer.ANSWER_SHAPE, "tools": copilot_tools.TOOLS}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
 

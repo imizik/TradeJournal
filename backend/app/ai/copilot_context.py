@@ -39,6 +39,7 @@ from contextlib import nullcontext
 from datetime import UTC, datetime
 
 from app.ai import copilot_book
+from app.ai.copilot_answer import ANSWER_SHAPE
 
 log = logging.getLogger(__name__)
 
@@ -400,7 +401,9 @@ def block(pack: dict) -> str:
 
 
 def user_text(content: str) -> str:
-    """The owner's own words in a prepared user message: after the context line and the owner block, if present."""
+    """The owner's own words in a prepared user message: after the context line and the owner block, and before the
+    answer-shape reminder, when present."""
+    content = content.removesuffix("\n\n" + ANSWER_SHAPE)
     if BLOCK_END in content:
         content = content.split(BLOCK_END + "\n\n", 1)[-1]
     if content.startswith("[Copilot Lab context:") and "]\n\n" in content:

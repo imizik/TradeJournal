@@ -11,9 +11,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from app.ai.copilot_answer import UNSUPPORTED_LINE, AnswerParts, Figure, answer_parts, figures_in, word_count
+from app.ai.copilot_answer import MAX_WORDS, UNSUPPORTED_LINE, AnswerParts, Figure, answer_parts, figures_in, word_count
 
-MAX_WORDS = 120  # SYSTEM_PROMPT: "the whole answer stays under 120 words"
 IGNORED_SMALL_INTEGERS = {0, 1, 2, 3}  # counts and ordinals ("3 bullets", "2 of them") are not market figures
 MAX_GROUP = 12  # a derived figure must come from a small group of values (one object, one short list of rows)
 

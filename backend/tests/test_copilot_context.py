@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.ai import copilot, copilot_book, copilot_context, copilot_tools, research_job
+from app.ai import copilot, copilot_answer, copilot_book, copilot_context, copilot_tools, research_job
 from app.ai.copilot_fixture import FixtureEvidence
 from app.ai.copilot_replay import ReplayEvidence
 from app.engine import capture_links, copilot_investigations, day_journal, exit_habits, jo_briefing, position_alerts, quotes
@@ -354,7 +354,7 @@ def test_the_pack_follows_the_context_line_and_is_the_turns_first_evidence_row()
     assert rest.startswith("[Owner context, assembled by TradeJournal for this turn; not the owner's message.")
     pack = json.loads(rest.split("\n")[1])
     assert pack["simulated"] is True and pack["symbol"] == "NBIS" and pack["positions"]["positions"][0]["symbol"] == "NBIS"
-    assert rest.endswith(copilot_context.BLOCK_END + "\n\nIs my NBIS thesis still intact? But CRWV leads.")
+    assert rest.endswith(copilot_context.BLOCK_END + "\n\nIs my NBIS thesis still intact? But CRWV leads.\n\n" + copilot_answer.ANSWER_SHAPE)
     assert adapter.seen[0][0]["content"] == "a"  # earlier turns carry no pack
     assert copilot_context.user_text(content) == "Is my NBIS thesis still intact? But CRWV leads."
     # The scripted model read the owner's words, not the pack: a pushback re-check, although the pack holds a "plan".
