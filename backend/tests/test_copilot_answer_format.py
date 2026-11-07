@@ -129,3 +129,39 @@ def test_a_scripted_compare_names_both_sides_and_keeps_the_row_order():
     assert all(line.count(" | ") == 1 for line in lines[3:8])
     plain = copilot.FakeAdapter._compare("Which is better, enter now or wait for 95.9?")
     assert "Compare: enter now | wait for 95.9\n" in plain and "Costs:" not in plain and "Contract n/a" in plain
+
+
+# --------------------------------------------------------------------------- the length rule where the answer is written
+
+def test_the_word_budgets_add_up_under_the_limit_and_both_rule_statements_quote_them():
+    from app.ai import copilot_answer, copilot_graders
+    budgets = (copilot_answer.HEADLINE_WORDS, copilot_answer.BULLET_WORDS, copilot_answer.AGAINST_WORDS, copilot_answer.CHANGES_WORDS)
+    assert budgets[0] + 3 * budgets[1] + budgets[2] + budgets[3] < copilot_answer.MAX_WORDS == 120
+    assert copilot_graders.MAX_WORDS is copilot_answer.MAX_WORDS  # the eval's length check measures the rule the prompt states
+    prompt = " ".join(copilot.SYSTEM_PROMPT.split())
+    assert (f"the headline at most {budgets[0]} words, each bullet at most {budgets[1]}, Against at most {budgets[2]}, "
+            f"Changes if at most {budgets[3]}") in prompt
+    assert "The same shape is repeated after each tool result" in prompt
+    shape = copilot_answer.ANSWER_SHAPE
+    assert shape.startswith("[Answer shape: under 120 words in all") and shape.endswith("]")
+    for n in budgets:
+        assert f"at most {n} words" in shape
+    assert copilot_answer.word_count(shape) <= copilot_answer.MAX_WORDS  # the reminder costs less than the answer it bounds
+    assert '"more", "why", "go deeper"' in shape and "trade or week review" in shape  # the long_ok exceptions stay
+
+
+def test_the_answer_shape_reminder_ends_the_owner_message_and_follows_every_tool_result():
+    from app.ai import copilot_answer, copilot_context
+    from tests.test_copilot_adversarial import Scripted, _say, _use
+    adapter = Scripted([_use("get_quotes", {"symbols": ["NBIS"]})], [_use("get_peer_moves", {"symbol": "NBIS"}, 1)],
+                       [_say("Verdict: Hold — Fine.")])
+    events = _turn([{"role": "user", "content": "Is NBIS holding?"}], adapter)
+    assert _text(events) == "Verdict: Hold — Fine." and len(adapter.seen) == 3
+    first = adapter.seen[0]["messages"][-1]["content"]
+    assert first.endswith("Is NBIS holding?\n\n" + copilot_answer.ANSWER_SHAPE)
+    assert copilot_context.user_text(first) == "Is NBIS holding?"  # the scripted model reads only the owner's words
+    for round_no in (1, 2):
+        blocks = adapter.seen[round_no]["messages"][-1]["content"]
+        assert blocks[-1] == {"type": "text", "text": copilot_answer.ANSWER_SHAPE}
+        assert blocks and all(b["type"] == "tool_result" for b in blocks[:-1])  # the API wants the results first
+    assert adapter.seen[2]["messages"][-1]["content"][0]["tool_use_id"] == "s_get_peer_moves_1"

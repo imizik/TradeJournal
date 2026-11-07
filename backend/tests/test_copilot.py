@@ -123,7 +123,8 @@ def test_fixture_evidence_is_marked_simulated_to_the_model():
     _turn([{"role": "user", "content": "Is the NBIS group confirming?"}], Capture(0))
     assert "SIMULATED" in seen["system"] and "not real market data" in seen["system"]
     assert "SIMULATED market data — not real prices" in seen["messages"][0]["content"]
-    results = [b for m in seen["messages"] if m["role"] == "user" and isinstance(m["content"], list) for b in m["content"]]
+    results = [b for m in seen["messages"] if m["role"] == "user" and isinstance(m["content"], list) for b in m["content"]
+               if b["type"] == "tool_result"]  # the answer-shape reminder rides behind them as a text block
     assert results and all(b["content"].startswith('{"simulated":true,"note":"SIMULATED') for b in results)
     assert all(json.loads(b["content"])["simulated"] is True for b in results)
 
