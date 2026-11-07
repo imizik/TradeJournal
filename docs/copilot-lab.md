@@ -3025,17 +3025,46 @@ result lands (§ What runs), so those seconds read as a briefing.
 
 ### Follow-up model eval (2026-11-06)
 
-The Sonnet 5.5 against Haiku 5.5 comparison of the starter cases (fixture
-evidence, effort `medium`, deterministic graders) did not run: every case on
-both models ended `api_auth` (the API rejected the configured key) in about
-0.1 s, for $0.00. Only the scripted model ran (23/23 completed, $0, a harness
-check rather than a model comparison). With no numbers the decision rule
-cannot pass, so `COPILOT_FOLLOWUP_MODEL` ships `off`. To decide it, rerun from
-`backend/`:
+Sonnet 5.5 against Haiku 5.5 on the 23 starter cases, fixture evidence,
+effort `medium`, deterministic graders, run on the VPS with the app's own key
+(the main checkout's key is rejected with 401). Haiku's real spend was $0.09
+for 23 cases; Sonnet's $1.42. The first attempt lost its run records to the
+client-close bug fixed in #698, so the cases ran again from the per-case cache.
+
+| Check (n) | Sonnet | Haiku | Haiku minus Sonnet, 95% |
+|---|---|---|---|
+| completed (23) | 100% | 100% | 0 |
+| format_verdict (23) | 96% | 96% | 0 [−13, +13] |
+| format_against (14–15) | 80% | 21% | −57 pts [−86, −21] |
+| format_read (4–5) | 100% | 75% | −25 pts [−75, 0] |
+| traceable_figures (21–22) | 86% | 64% | −24 pts [−48, 0] |
+| length (22) | 9% | 14% | 0 on shared cases |
+| no_orders, tools_any, verdict_in, unsupported | 100% | 100% | 0 |
+| first text p50 / p90 | 6.3 s / 9.8 s | 6.9 s / 11.6 s | |
+| total p50 / p90 | 6.3 s / 9.8 s | 8.9 s / 13.7 s | |
+| output tokens, typical case | 450–1,100 | 900–3,000 | |
+
+On the two follow-up cases Haiku failed `traceable_figures` on both (a
+percentage not in any read) where Sonnet failed it on one, and was slower:
+first text 6.3 s against 3.2 s on `followup-carry`, 9.9 s against 4.7 s on
+`followup-more`. Haiku writes two to three times the words, so the hold before
+the first text is longer, not shorter, and the "Against" line is dropped far
+more often. The decision rule (Haiku at or above Sonnet on the follow-up cases
+and on `completed`, `no_orders` and `unsupported`) fails, so
+`COPILOT_FOLLOWUP_MODEL` stays `off` (`DEFAULT_FOLLOWUP_MODEL`).
+
+Two things the run also showed. Both models fail `length` on almost every case
+(120 words unless the case allows long): the 7–9 s wait is answer length, and
+the prompt's length rule is not being followed by either model. And
+`no_reread` was not applicable in both runs because the follow-ups' parent
+answer came from the cache, which carries nothing; a run meant to measure the
+carry needs `--no-cache` on the parent.
+
+To rerun, from `backend/` with a working `ANTHROPIC_API_KEY` (on the VPS, as
+the service user with its environment file):
 `python -m scripts.copilot_eval run --model claude-sonnet-5-5 --effort medium --max-cost-usd 1 --out data/copilot_eval/runs/sonnet`,
 the same with `--model claude-haiku-5-5 --out data/copilot_eval/runs/haiku`,
-`grade --run` each, then `report --run data/copilot_eval/runs/sonnet --run data/copilot_eval/runs/haiku`,
-and record the per-check pass rates, p50 first text and cost here.
+`grade --run` each, then `report --run data/copilot_eval/runs/sonnet --run data/copilot_eval/runs/haiku`.
 
 ## Research job
 
