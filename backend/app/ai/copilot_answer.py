@@ -127,11 +127,14 @@ def word_count(text: str) -> int:
 
 # --------------------------------------------------------------------------- numbers in prose
 
-# A number the owner would read as a figure: 94.35, 1,528, -2.95, 4.5%, $610. Skipped: clock times (10:40), ISO dates
-# and M/D expiries (2026-10-23, 10/30), hex and other id-like runs, and a number glued to letters (5m, 1D, Q3, 12.5x).
+# A number the owner would read as a figure: 94.35, 1,528, -2.95, 4.5%, $610. Skipped: clock times (10:40), ISO, M/D and
+# month-name dates (2026-10-23, 10/30, Nov 21), hex and other id-like runs, and a number glued to letters (5m, 1D, Q3, 12.5x).
 # A sign counts only when no digit precedes it, so "5-10" is two figures and "-2.95" one.
 _NUMBER = re.compile(r"(?<![\w/:.])(?:(?<!\d)[-+])?\$?(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?%?(?![\w/:]|\.\d)")
-_TIME_OR_DATE = re.compile(r"\d{1,2}:\d{2}|\d{4}-\d{2}-\d{2}|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|[0-9a-f]{8}(?:-[0-9a-f]{4}){1,3}(?:-[0-9a-f]{12})?", re.I)
+# Capitalised month names only (the scoped flag turns off re.I there), so "market 21" and "may 5" stay figures.
+_MONTH = r"(?-i:(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b\.?)"
+_TIME_OR_DATE = re.compile(r"\d{1,2}:\d{2}|\d{4}-\d{2}-\d{2}|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b" + _MONTH + r"\s+\d{1,2}\b|\b\d{1,2}\s+" + _MONTH + r"(?!\.?\s+\d)"
+                           + r"|[0-9a-f]{8}(?:-[0-9a-f]{4}){1,3}(?:-[0-9a-f]{12})?", re.I)
 
 
 @dataclass(frozen=True)

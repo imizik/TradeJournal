@@ -1063,7 +1063,10 @@ Briefing's day).
   softer "about 120 words" rule produced about 300-word answers in the
   2026-10-29 live check; the hard rule still gave 150–295 words, four or five
   multi-sentence bullets and a closing note on 20 of 22 cases in the
-  2026-11-06 eval, § Follow-up model eval). `copilot_context.user_text` strips
+  2026-11-06 eval, § Follow-up model eval; with the reminder the median fell
+  to 128 words and 38% of cases came in under the limit, the rest 121–153
+  words on two- or three-sentence bullets, § Answer-length re-measure).
+  `copilot_context.user_text` strips
   the reminder, so the scripted model and the spend record read only the
   owner's words. A trade review, a
   week review or an explicit "more", "why" or "go deeper" gets the room it
@@ -2881,8 +2884,8 @@ python -m scripts.copilot_eval export --out data/copilot_eval/owner-cases.jsonl 
   `long_ok`), `traceable_figures` (every figure in the prose appears in a tool
   result, the owner context or the owner's own words at the precision written,
   as a percent of a fraction, or as the gap between two values of one result,
-  also as a percentage; clock times, dates, expiries, ids and counts up to 3 are
-  skipped), `no_reread`, `unsupported`, `no_orders`, `verdict_in`, `tools_any`,
+  also as a percentage; clock times, dates in ISO, M/D or month-name form,
+  expiries, ids and counts up to 3 are skipped), `no_reread`, `unsupported`, `no_orders`, `verdict_in`, `tools_any`,
   `tools_none`. The optional judge scores six rubric items 1–5 with Opus 5.5
   through the structured-answer runner (`backend/scripts/copilot_eval_rubric.md`,
   its hash recorded); it needs the API runner from the API migration and its own
@@ -3078,9 +3081,45 @@ Sonnet's prose ran 150–295 words (median about 215) over four or five bullets
 of two to four sentences each, plus a separate simulated-data line, a
 multi-sentence Against and a closing note. The 2026-11-07 answer: per-line
 word budgets in the prompt and the `ANSWER_SHAPE` reminder after every tool
-result (§ How the copilot reasons). Not yet re-measured: the next paid Sonnet
-run on the starter cases (the same commands; the cache key includes the
-reminder, so no `--no-cache` is needed) says whether `length` moved from 9%.
+result (§ How the copilot reasons), re-measured the same day (§ Answer-length
+re-measure).
+
+### Answer-length re-measure (2026-11-07)
+
+The same Sonnet 5.5 run (23 starter cases, fixture evidence, effort `medium`,
+on the VPS, $1.39) on release `24f39d9955`, which carries #701, against the
+2026-11-06 run as the baseline. Both runs are graded with the figure extractor
+after this change: a month-name date ("Nov 21") is masked like an ISO or M/D
+date, where the deployed grader read its "21" as a figure and failed three
+answers on it.
+
+| Check (n) | Before (11-06) | After (11-07) | After minus before, 95% |
+|---|---|---|---|
+| length (20–22) | 9% | 38% | +25 pts [+5, +45] |
+| format_against (14–15) | 80% | 100% | +21 pts [0, +43] |
+| format_verdict (23) | 96% | 91% | −4 pts [−17, +9] |
+| traceable_figures (21–22) | 91% | 90% | −5 pts [−25, +10] |
+| no_reread (1) | n/a, parent cached | 100% | |
+| completed, no_orders, tools_any, verdict_in, unsupported | 100% | 100% | 0 |
+| prose words, median | 217 | 128 | |
+| output tokens p50 / p90 | 677 / 1,062 | 518 / 602 | |
+| first text p50 / p90 | 6.3 s / 9.8 s | 4.9 s / 6.7 s | |
+| total p50 / p90 | 6.3 s / 9.8 s | 5.0 s / 8.4 s | |
+
+The shape is now followed: three bullets, one Against, one Changes if, the
+simulated-data words in the headline, no closing note and no "nothing is
+saved" line. The limit is not: 18 of 23 answers are still over 120 words, but
+16 of them by a little (121–153 words; the two long ones are the `long_ok`
+follow-up at 336 words and the week review). The whole overrun is the bullets,
+which run two or three sentences of 25–35 words against the one-sentence,
+22-word budget. The two `format_verdict` misses are wording slips ("Verdict:
+Wait." with a full stop where the format wants a dash; "Verdict: Watch", not in
+the fixed set). The two `traceable_figures` misses: the long follow-up quotes
+peer moves carried from its parent's reads, which the grader cannot see (it
+checks the follow-up's own reads), and the trade review subtracts two values
+from different reads (94.35 − 92.50 = 1.85). Not decided: whether a second
+pass sets the bullet budget so the typical answer lands under 120, or ~128
+words is left as the answer length.
 
 To rerun, from `backend/` with a working `ANTHROPIC_API_KEY` (on the VPS, as
 the service user with its environment file):

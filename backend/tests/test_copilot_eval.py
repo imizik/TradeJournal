@@ -93,6 +93,9 @@ def test_the_figure_grader_traces_values_percents_and_differences_and_catches_an
     from_question = _record("Verdict: Pass — Too far.\n\n- Your 95.9 trigger is 1.6% above the last 94.35.",
                             question="Enter at 95.9?", tools=[{"name": "get_quotes", "args": {"symbols": ["NBIS"]}, "result": {"prices": {"NBIS": 94.35}}}])
     assert _state(copilot_graders.grade(from_question, {"expects": {}}), "traceable_figures") == "pass"
+    expiry = _record("Verdict: Hold — Fine.\n\n- Your Nov 21 $100 calls are down 25%, with earnings on 12 Nov.",
+                     tools=[{"name": "get_positions", "args": {}, "result": {"strike": 100, "down_pct": 25}}])
+    assert _state(copilot_graders.grade(expiry, {"expects": {}}), "traceable_figures") == "pass"  # a month-name date is not a figure
 
 
 def test_the_other_graders_each_fail_and_pass():
