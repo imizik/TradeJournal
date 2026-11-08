@@ -5,9 +5,9 @@
  */
 
 import type { PlanPosition } from "@/components/dashboard/PlansCard";
-import type { AlertFeedback } from "@/lib/alertFeedback";
+import type { AlertFeedback, AlertFeedbackRating } from "@/lib/alertFeedback";
 import { api, apiUrl } from "@/lib/api";
-import { UUID_RE, type ExitLesson, type InvestigationSummary, type PlanBoardLevel, type PlanBoardRow, type PlansBoard } from "@/lib/copilot";
+import { UUID_RE, type ExitLesson, type InvestigationSummary, type PlanBoardLevel, type PlanBoardRow, type PlansBoard, type Rating } from "@/lib/copilot";
 import type { RadarRating } from "@/lib/radar";
 
 /** The phone's three tabs; on a wide screen every pane shows at once. */
@@ -445,6 +445,27 @@ export async function getDeskSession(signal?: AbortSignal): Promise<DeskSession>
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
   return body as DeskSession;
+}
+
+// --------------------------------------------------------------------------- Main chat's Rate yesterday card
+
+/** One thing still waiting on the owner's rating, with the ids its rating route takes and the answers it accepts:
+ * a position alert (``PUT /trades/{trade_id}/phone-alerts/{id}/feedback``), an alerted Radar event
+ * (``POST /radar/events/{event_id}/feedback``) or a copilot answer (``PUT /copilot/investigations/{id}/messages/{index}/rating``).
+ * ``at`` is epoch seconds. */
+export type ToRateItem = { key: string; label: string; detail: string | null; at: number } & (
+  | { type: "alert"; id: string; trade_id: string; answers: AlertFeedbackRating[] }
+  | { type: "radar"; event_id: string; answers: RadarRating[] }
+  | { type: "answer"; investigation_id: string; index: number; answers: Rating[] });
+/** ``GET /copilot/desk/to-rate``: what waits since the previous trading session (``since``), newest first, capped;
+ * ``count`` is all of it. */
+export type ToRate = { day: string; since: string; count: number; items: ToRateItem[]; sections: Record<string, "ok" | "unavailable" | "off"> };
+
+export async function getToRate(signal?: AbortSignal): Promise<ToRate> {
+  const response = await fetch(apiUrl("/copilot/desk/to-rate"), { cache: "no-store", signal });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  return body as ToRate;
 }
 
 // --------------------------------------------------------------------------- the alert scorecard

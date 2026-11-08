@@ -49,12 +49,13 @@ An option position's value is its own unrealized P&L (the option's mark), never 
 levels and meter are on the underlying, and the status line says so by naming it.
 
 ``GET /copilot/desk/scorecard`` is the alert scorecard (``app/engine/alert_scorecard.py``), with the Radar scorecard
-(``app/engine/radar_scorecard.py``) under ``radar``.
+(``app/engine/radar_scorecard.py``) under ``radar``. ``GET /copilot/desk/to-rate`` is Main chat's Rate yesterday card:
+everything since the previous trading session still waiting on the owner's rating.
 ``GET /copilot/desk/session`` (at the end) is the Briefing's session timeline: today's regular session and what
 happened in it, from the same kind of existing readers, and the alerts and Radar hits still waiting on an answer.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import json
 import logging
 import uuid
@@ -855,3 +856,104 @@ def desk_scorecard(db: Session = Depends(get_session)):
             log.warning("radar scorecard unreadable: %s", exc)
             hits = {"state": "unavailable", "reason": "The Radar file could not be read right now."}
     return {**alerts, "radar": hits}
+
+
+# --------------------------------------------------------------------------- Main chat's Rate yesterday card
+
+TO_RATE_ROWS = 30  # the card's list, newest first; ``count`` is every item waiting
+AUTOMATIC_KINDS = ("prep", "week_review")  # the morning brief and the week review, written unasked: not asked about here
+ANSWER_RATINGS = ("helped", "didnt")
+QUESTION_CHARS = 60
+
+
+def _rate_since(now: float) -> tuple:
+    """The previous trading session's New York date (the market calendar's, else the clock's weekdays) and its midnight
+    as naive UTC: the card covers that session and everything after it."""
+    from app.engine import chart_levels
+    day = datetime.fromtimestamp(now, ET).date()
+    known = {d: _hours(d) for d in (day - timedelta(days=n) for n in range(1, 15))}
+    first = chart_levels.previous_session(day, known) or day - timedelta(days=1)
+    return first, datetime(first.year, first.month, first.day, tzinfo=ET).astimezone(UTC).replace(tzinfo=None)
+
+
+def _first_words(text: str | None) -> str:
+    line = " ".join((text or "").split())
+    return line if len(line) <= QUESTION_CHARS else line[:QUESTION_CHARS].rsplit(" ", 1)[0] + "…"
+
+
+def _alerts_to_rate(db: Session, start: datetime) -> dict:
+    """Position alerts since ``start`` in /proof's scope (sent, or maybe sent) with no feedback, each with the trade its
+    feedback is saved against; one whose position left the journal is left out, as in the Briefing."""
+    from app.engine import alert_feedback
+    from app.engine.alert_scorecard import KIND
+    from app.models import PositionAlert
+    alerts = db.exec(select(PositionAlert).where(col(PositionAlert.delivery).in_(alert_feedback.ELIGIBLE_DELIVERIES),
+                                                 PositionAlert.detected_at >= start)).all()
+    answered = alert_feedback.for_alerts(db, [a.id for a in alerts])
+    waiting = [a for a in alerts if a.id not in answered]
+    trades = _alert_trades(db, waiting)
+    return {"state": "ok", "rows": [
+        {"key": f"alert:{a.id}", "type": "alert", "id": str(a.id), "trade_id": trades[(a.account_id, a.source_key)],
+         "label": a.contract, "detail": KIND.get(a.kind, "Position alert"), "at": _utc_epoch(a.detected_at),
+         "answers": list(alert_feedback.RATINGS)}
+        for a in waiting if (a.account_id, a.source_key) in trades]}
+
+
+def _hits_to_rate_since(db: Session, first, day) -> dict:
+    """Radar events of the sessions from ``first`` to ``day`` that a phone ping reached (``radar_proof.alerted_events``,
+    /proof's read) and the owner has not rated (``latest_ratings``). The dip rule is scored on its own and stays out, as
+    on /proof."""
+    from app.engine import radar_proof
+    from app.engine.radar_store import RATINGS
+    from app.routers import radar
+    store, _reason = radar._store(read_only=True)
+    if store is None:
+        return {"state": "off", "rows": []}
+    sessions = [(first + timedelta(days=n)).isoformat() for n in range((day - first).days + 1)]
+    events = [e for session in sessions for e in store.events(session) if not radar_dip.is_dip(e)]
+    rated = store.latest_ratings()
+    alerted = radar_proof.alerted_events(db, [e["event_id"] for e in events if e["event_id"] not in rated])
+    return {"state": "ok", "rows": [
+        {"key": f"radar:{e['event_id']}", "type": "radar", "event_id": e["event_id"],
+         "label": (e.get("symbols") or [None])[0] if e.get("kind") != "group_move" else e.get("group") or "Group",
+         "detail": e.get("summary") or RADAR_KIND.get(e.get("kind"), "Radar"), "at": _epoch(e.get("first_seen_at")),
+         "answers": list(RATINGS)}
+        for e in events if e["event_id"] in alerted]}
+
+
+def _answers_to_rate(db: Session, start: datetime) -> dict:
+    """The copilot's answers since ``start`` with no Helped / Didn't, read as the answer scorecard reads them (the owner's
+    saved conversations; simulated turns left out). The automatic morning brief and week review are not asked about. The
+    row's time names the day, so a Main chat segment's detail is just "Main chat"."""
+    from app.engine import copilot_scorecard
+    from app.models import CopilotTurn
+    turns = {str(t.id): t for t in db.exec(select(CopilotTurn).where(col(CopilotTurn.started_at) >= start)).all() if t.backend != "fake"}
+    return {"state": "ok", "rows": [
+        {"key": f"answer:{a['investigation_id']}:{a['index']}", "type": "answer", "investigation_id": a["investigation_id"],
+         "index": a["index"], "label": _first_words(a["question"]) or a["title"],
+         "detail": ("Main chat" if a["title"].startswith("Main chat · ") else a["title"]) if a["question"] else None,
+         "at": _utc_epoch(a["at"]), "answers": list(ANSWER_RATINGS)}
+        for a in copilot_scorecard._answers(db, start, turns) if a["rating"] not in ANSWER_RATINGS and a["kind"] not in AUTOMATIC_KINDS]}
+
+
+@router.get("/desk/to-rate")
+def desk_to_rate(db: Session = Depends(get_session)):
+    """Main chat's Rate yesterday card (docs/copilot-lab.md § The desk): what still waits on the owner's rating from the
+    previous trading session (``since``) through now, newest first, at most ``TO_RATE_ROWS`` (``count`` is all of them).
+    Each item names its ``type`` and the ids its rating route takes: a position alert (``id``, ``trade_id``:
+    ``PUT /trades/{trade_id}/phone-alerts/{id}/feedback``), an alerted Radar event (``event_id``:
+    ``POST /radar/events/{event_id}/feedback``) or a copilot answer (``investigation_id``, ``index``:
+    ``PUT /copilot/investigations/{id}/messages/{index}/rating``), with ``label``, ``detail``, ``at`` (epoch seconds) and
+    the ``answers`` that route accepts. Each source fails on its own (``sections``). Read-only, owner-only, refused while
+    the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    now = today._now()
+    day = datetime.fromtimestamp(now, ET).date()
+    first, start = _rate_since(now)
+    alerts = today._section(db, "alerts to rate", lambda: _alerts_to_rate(db, start))
+    answers = today._section(db, "answers to rate", lambda: _answers_to_rate(db, start))
+    hits = today._section(db, "radar to rate", lambda: _hits_to_rate_since(db, first, day))
+    items = sorted((row for part in (alerts, hits, answers) for row in part.get("rows", [])), key=lambda r: r["at"] or 0, reverse=True)
+    return {"day": day.isoformat(), "since": first.isoformat(), "count": len(items), "items": items[:TO_RATE_ROWS],
+            "sections": {"alerts": alerts["state"], "radar": hits["state"], "answers": answers["state"]}}

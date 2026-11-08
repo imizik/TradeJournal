@@ -499,14 +499,20 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
 Open Desk to resume **Main chat** for the current New York calendar date. Desktop and phone open the same
 saved conversation. Unsent words belong to their browser tab. Returning to a saved link keeps its original
 conversation, including after midnight. The heading names the day ("Main chat · Wed, Nov 4"; a busy day's next
-part adds "(continued)"). Today's Main chat starts with the day's **Morning brief** card
+part adds "(continued)"). Today's Main chat starts with **Rate yesterday** (`RateYesterday.tsx`, from
+`GET /copilot/desk/to-rate`): everything since the previous trading session (the market calendar's) still waiting on a
+rating, newest first, at most 30 with a count of the older ones: position alerts sent (or maybe sent) with no feedback,
+Radar events a phone ping reached and not rated (the dip rule's stay out, as on /proof), and the copilot's answers with
+no Helped / Didn't (the automatic morning brief and week review are not asked about). Each row is a label (contract,
+symbol or group, or the question's first words), its time and one-tap answers saved through the item's existing route:
+`PUT /trades/{trade_id}/phone-alerts/{id}/feedback`, `POST /radar/events/{event_id}/feedback` or
+`PUT /copilot/investigations/{id}/messages/{index}/rating`, so they count on /proof and the answer scorecard as any other
+answer does. A saved row leaves the card and the card hides once nothing is left; it is read once when Main chat opens.
+Under it, the day's **Morning brief** card
 (`MorningBrief.tsx`, from the desk session read's `prep`: the brief's saved lines with its verdict, headline and
 Changes if line, the time it was written, and "Copilot turn failed: raw facts" when the turn failed), with **Ask about
 it →** putting the brief in this Main chat's message box as context, unsent, so questions about it stay in the day's
-conversation; an earlier day's Main chat, or a day with no brief yet, shows none. Under it, **To answer today**
-(`MainChatToAnswer`) lists today's sent position alerts and Radar hits still waiting on the answer /proof counts, at most
-three of each, answered in place through the same routes as the Briefing; the rest of today's, and older ones, wait in
-the Briefing. **Previous days** opens earlier days that have at least one exchange; a day the Desk was
+conversation; an earlier day's Main chat shows neither card, and a day with no brief yet shows no brief. **Previous days** opens earlier days that have at least one exchange; a day the Desk was
 only opened on is not listed. A busy day's full
 segment stays in history when opening Main starts its next part. Opening, switching or browsing history
 uses no model turn or automatic research job. Concurrent answers append separately, each beside its own question. A proposed trade plan opens in its own ticker thread for review and confirmation so it has a distinct place in Plans and its alerts link back to it. **Today’s briefing** opens the session tape, Radar and alert feedback, prep and review
@@ -2163,7 +2169,8 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   it sends one ping, "Close the day: To review: 2 threads · 3 alerts unanswered
   · 5 Radar hits unrated · 1 fill to link · 12 pings held today (Radar 11,
   evening 1)", that opens `/copilot-lab?close=1` on Close the day (kind
-  `evening_review`, never held by the policy). Nothing waiting, the lab off, or a desk source (positions, plans,
+  `evening_review`, never held by the policy). Whatever is still unrated the
+  next morning, answers included, waits in Main chat's Rate yesterday card. Nothing waiting, the lab off, or a desk source (positions, plans,
   alerts, Radar) that cannot be read is recorded `skipped` with why and sends nothing. One `evening_review` row a day (unique day, additive
   migration `d2e7a4c9b1f6`): `skipped`, `held`, `sent`, `unknown` (may have
   reached the phone, never resent) or `expired`. A day not counted by two hours
