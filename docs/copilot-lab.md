@@ -1055,8 +1055,9 @@ Briefing's day).
   leaving out whatever does not change the verdict; no preamble, tool tour or
   closing summary, and a plan's fields stay on its card rather than in the
   text. The rule comes with word budgets that add up under it (headline 15,
-  each bullet 22, Against 20, Changes if 15: `copilot_answer.MAX_WORDS` and
-  the `*_WORDS` constants) and is repeated where the answer is written: the
+  each bullet 16 as one sentence, Against 20, Changes if 15, a compare cell 6:
+  `copilot_answer.MAX_WORDS` and the `*_WORDS` constants) and is repeated
+  where the answer is written: the
   `copilot_answer.ANSWER_SHAPE` reminder ends the owner's prepared message and
   follows every tool-result batch as a text block, because the same rule in
   the middle of the 3,700-word system prompt was not followed (the first,
@@ -1065,7 +1066,8 @@ Briefing's day).
   multi-sentence bullets and a closing note on 20 of 22 cases in the
   2026-11-06 eval, § Follow-up model eval; with the reminder the median fell
   to 128 words and 38% of cases came in under the limit, the rest 121–153
-  words on two- or three-sentence bullets, § Answer-length re-measure).
+  words on two- or three-sentence bullets, so the bullet budget went from 22
+  to 16 words on 2026-11-08, § Answer-length re-measure).
   `copilot_context.user_text` strips
   the reminder, so the scripted model and the spend record read only the
   owner's words. A trade review, a
@@ -3117,9 +3119,12 @@ Wait." with a full stop where the format wants a dash; "Verdict: Watch", not in
 the fixed set). The two `traceable_figures` misses: the long follow-up quotes
 peer moves carried from its parent's reads, which the grader cannot see (it
 checks the follow-up's own reads), and the trade review subtracts two values
-from different reads (94.35 − 92.50 = 1.85). Not decided: whether a second
-pass sets the bullet budget so the typical answer lands under 120, or ~128
-words is left as the answer length.
+from different reads (94.35 − 92.50 = 1.85). The second pass (2026-11-08):
+the bullet budget is 16 words as one sentence (a second sentence is cut or
+becomes the next bullet) and a compare cell 6 words, so the budgets add up to
+98 and the overshoot measured here lands under 120. Not yet re-measured: the
+same Sonnet run on the release that carries it says whether `length` moved
+from 38%.
 
 To rerun, from `backend/` with a working `ANTHROPIC_API_KEY` (on the VPS, as
 the service user with its environment file):
