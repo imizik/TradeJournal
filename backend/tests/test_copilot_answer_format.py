@@ -115,6 +115,8 @@ def test_the_prompt_asks_for_a_compare_block_when_two_choices_are_weighed():
     assert 'the body is a compare block instead of the bullets, under the same length limit: a line "Compare: <A> | <B>"' in prompt
     assert '"Needs: <what A needs> | <what B needs>", "Risks: … | …", "Breaks if: … | …", and, when a contract is involved, "Costs: … | …"' in prompt
     assert "from get_option_candidates, never estimated" in prompt
+    assert ("The block is the whole body: no bullets beside it and no fifth row; what fits no cell goes in Against or Changes if, "
+            "or is cut.") in prompt
     assert "the Verdict headline says which side the evidence favours, or that it is a coin flip" in prompt
     assert "never a contract recommended as advice" in prompt
 
@@ -148,7 +150,7 @@ def test_the_word_budgets_add_up_under_the_limit_and_both_rule_statements_quote_
     assert shape.startswith("[Answer shape: under 120 words in all") and shape.endswith("]")
     for n in budgets:
         assert f"at most {n} words" in shape
-    assert f"cells at most {copilot_answer.COMPARE_CELL_WORDS} words" in shape
+    assert f"A compare block replaces the bullets: none beside it, four rows at most, cells at most {copilot_answer.COMPARE_CELL_WORDS} words" in shape
     assert copilot_answer.word_count(shape) <= copilot_answer.MAX_WORDS  # the reminder costs less than the answer it bounds
     assert '"more", "why", "go deeper"' in shape and "trade or week review" in shape  # the long_ok exceptions stay
 

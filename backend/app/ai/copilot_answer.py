@@ -38,13 +38,13 @@ COMPARE_CELL_WORDS = 6  # a compare block replaces the bullets: 15 + 10 × 6 + 2
 # 150–295 words (four or five multi-sentence bullets, a closing note) on 20 of 22 eval cases. The scripted model never
 # reads it as the owner's words (``copilot_context.user_text`` strips it).
 ANSWER_SHAPE = (
-    f"[Answer shape: under {MAX_WORDS} words in all, a hard limit unless the owner asked for more (\"more\", \"why\", "
-    f"\"go deeper\") or for a trade or week review. Verdict headline at most {HEADLINE_WORDS} words. The Read line. Body: "
-    f"at most 3 bullets, each one sentence of at most {BULLET_WORDS} words with its figures and as-of, no bold label; a "
-    f"second sentence is cut or becomes the next bullet. A compare block replaces the bullets, cells at most "
-    f"{COMPARE_CELL_WORDS} words. Against at most {AGAINST_WORDS} words. Changes if at most {CHANGES_WORDS} words. Nothing "
-    "else: no separate simulated-data line (two headline words instead), no closing note, no \"nothing is saved\" line, no "
-    "card fields repeated. Prose without a Verdict line keeps the limit.]"
+    f"[Answer shape: under {MAX_WORDS} words in all, a hard limit unless the owner asks for more (\"more\", \"why\", "
+    f"\"go deeper\") or a trade or week review. Verdict headline at most {HEADLINE_WORDS} words. The Read line. Body: "
+    f"at most 3 bullets, each one sentence of at most {BULLET_WORDS} words with figures and as-of, no bold label; a "
+    f"second sentence is cut or becomes the next bullet. A compare block replaces the bullets: none beside it, four rows at "
+    f"most, cells at most {COMPARE_CELL_WORDS} words. Against at most {AGAINST_WORDS} words. Changes if at most "
+    f"{CHANGES_WORDS} words. Nothing else: no simulated-data line (two headline words), closing note, \"nothing is "
+    "saved\" line or repeated card fields. Prose without a Verdict line keeps the limit.]"
 )
 
 

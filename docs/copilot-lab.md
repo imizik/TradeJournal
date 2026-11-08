@@ -1160,7 +1160,8 @@ Briefing's day).
   `Compare: <A> | <B>`, then the rows `Needs: … | …`, `Risks: … | …`,
   `Breaks if: … | …` and, when a contract is involved, `Costs: … | …`
   (premium, break-even move or time value from `get_option_candidates`),
-  then Against and Changes if as usual. The headline says which side the
+  then Against and Changes if as usual; the block is the whole body, no
+  bullets beside it and no fifth row. The headline says which side the
   evidence favours, or that it is a coin flip; it never recommends a
   contract. `answerParts` returns `compare` only when the Compare line and at
   least two rows parse (otherwise the lines stay in the body); the desk shows
@@ -2935,7 +2936,9 @@ python -m scripts.copilot_eval export --out data/copilot_eval/owner-cases.jsonl 
 - **Grade.** The deterministic checks (`backend/app/ai/copilot_graders.py`, over
   the Python reading of the answer format in `backend/app/ai/copilot_answer.py`,
   kept in step with `answerParts` in `frontend/lib/copilot.ts`): `completed`,
-  `format_verdict`, `format_read`, `format_against`, `length` (120 words unless
+  `format_verdict`, `format_read`, `format_against`, `format_compare` (compare
+  cases only: a Compare block with nothing beside it, at most four rows,
+  every cell within 6 words), `length` (120 words unless
   `long_ok`), `traceable_figures` (every figure in the prose appears in a tool
   result, the owner context or the owner's own words at the precision written,
   as a percent of a fraction, or as the gap between two values of one result,
@@ -3250,6 +3253,13 @@ compare rows plus two bullets cost more than the budget allows. The
 parent's reads, which the grader cannot see), the trade review's own
 subtraction, and one computed percentage. Good enough to leave: the next change
 here is the compare form, not another pass on the bullets.
+
+The compare form (2026-11-08, after the re-measure): the prompt and the
+answer-shape reminder now say the block is the whole body, no bullets beside
+it and no fifth row, and the eval grades compare cases with `format_compare`
+(a Compare block with nothing beside it, at most four rows, cells within 6
+words), so the next run names the compare fault instead of folding it into
+`length`. Not yet measured: one compare case, so a run shows it, not a rate.
 
 To rerun, from `backend/` with a working `ANTHROPIC_API_KEY` (on the VPS, as
 the service user with its environment file):

@@ -243,7 +243,8 @@ two choices (A vs B, A or B, which of two: "10/30 vs 11/6 calls?", "enter now or
 body is a compare block instead of the bullets, under the same length limit: a line "Compare: <A> | <B>" naming each side \
 in a few words, then exactly these rows, one short phrase per cell: "Needs: <what A needs> | <what B needs>", "Risks: … | \
 …", "Breaks if: … | …", and, when a contract is involved, "Costs: … | …" (premium, break-even move or time value, from \
-get_option_candidates, never estimated). On a compare the Verdict headline says which side the evidence favours, or that \
+get_option_candidates, never estimated). The block is the whole body: no bullets beside it and no fifth row; what fits no \
+cell goes in Against or Changes if, or is cut. On a compare the Verdict headline says which side the evidence favours, or that \
 it is a coin flip; that is a read of the evidence, never a contract recommended as advice. When the owner's idea rests on something no tool result or owner \
 context shows (a rumour, a flow they assume, a level nobody measured), say so in a body line "Unsupported: <the claim> \
 — <what would support it>" instead of reasoning from it. On those same trade, thesis and position answers, the body \

@@ -61,7 +61,7 @@ def test_grade_emits_every_check_and_scripted_answers_pass_format_and_orders(har
     copilot_eval.main(["run", "--cases", str(CASES), "--model", "fake", "--out", str(out)])
     assert copilot_eval.main(["grade", "--run", str(out), "--cases", str(CASES)]) == 0
     grades = copilot_eval.read_jsonl(out / "grades.jsonl")
-    names = {"completed", "format_verdict", "format_read", "format_against", "length", "traceable_figures", "verdict_in", "no_reread",
+    names = {"completed", "format_verdict", "format_read", "format_against", "format_compare", "length", "traceable_figures", "verdict_in", "no_reread",
              "unsupported", "no_orders", "tools_any", "tools_none"}
     for g in grades:
         assert {c["name"] for c in g["checks"]} == names, g["id"]
@@ -112,6 +112,15 @@ def test_the_other_graders_each_fail_and_pass():
     assert _state(copilot_graders.grade(again, {"expects": {}}), "no_orders") == "pass"
     assert _state(copilot_graders.grade(again, {"expects": {"read": True}}), "format_read") == "fail"
     assert _state(copilot_graders.grade(again, {"expects": {"against": True}}), "format_against") == "pass"
+    compare = _record("Verdict: Unclear — A coin flip.\n\nCompare: 10/30 calls | 11/6 calls\nNeeds: a move this week | two weeks of room\n"
+                      "Risks: theta | a lower delta\nCosts: 1.40 now | 1.95 now\n\nAgainst: nothing in the evidence.")
+    assert _state(copilot_graders.grade(compare, {"expects": {"compare": True}}), "format_compare") == "pass"
+    assert _state(copilot_graders.grade(compare, {"expects": {}}), "format_compare") == "n/a"
+    assert _state(copilot_graders.grade(again, {"expects": {"compare": True}}), "format_compare") == "fail"  # bullets, no block
+    beside = _record("Verdict: Unclear — A coin flip.\n\n- The group leads.\n\nCompare: A | B\nNeeds: x | y\nRisks: x | y\nBreaks if: x | y\n"
+                     "Costs: x | y\nNeeds: a cell that runs far past the six word budget | y")
+    check = next(c for c in copilot_graders.grade(beside, {"expects": {"compare": True}}) if c.name == "format_compare")
+    assert check.state == "fail" and check.detail == "1 body line beside the block; 5 rows; 1 cell over 6 words"
     assert _state(copilot_graders.grade(again, {"expects": {"verdict_in": ["Wait"]}}), "verdict_in") == "fail"
     assert _state(copilot_graders.grade(again, {"expects": {"tools_any": ["get_moment"]}}), "tools_any") == "fail"
     assert _state(copilot_graders.grade(again, {"expects": {"tools_none": ["get_group_comparison"]}}), "tools_none") == "fail"
