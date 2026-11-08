@@ -137,15 +137,18 @@ def test_the_word_budgets_add_up_under_the_limit_and_both_rule_statements_quote_
     from app.ai import copilot_answer, copilot_graders
     budgets = (copilot_answer.HEADLINE_WORDS, copilot_answer.BULLET_WORDS, copilot_answer.AGAINST_WORDS, copilot_answer.CHANGES_WORDS)
     assert budgets[0] + 3 * budgets[1] + budgets[2] + budgets[3] < copilot_answer.MAX_WORDS == 120
+    assert budgets[0] + 10 * copilot_answer.COMPARE_CELL_WORDS + budgets[2] + budgets[3] < copilot_answer.MAX_WORDS  # five compare rows
     assert copilot_graders.MAX_WORDS is copilot_answer.MAX_WORDS  # the eval's length check measures the rule the prompt states
     prompt = " ".join(copilot.SYSTEM_PROMPT.split())
     assert (f"the headline at most {budgets[0]} words, each bullet at most {budgets[1]}, Against at most {budgets[2]}, "
             f"Changes if at most {budgets[3]}") in prompt
+    assert f"a compare cell at most {copilot_answer.COMPARE_CELL_WORDS}" in prompt
     assert "The same shape is repeated after each tool result" in prompt
     shape = copilot_answer.ANSWER_SHAPE
     assert shape.startswith("[Answer shape: under 120 words in all") and shape.endswith("]")
     for n in budgets:
         assert f"at most {n} words" in shape
+    assert f"cells at most {copilot_answer.COMPARE_CELL_WORDS} words" in shape
     assert copilot_answer.word_count(shape) <= copilot_answer.MAX_WORDS  # the reminder costs less than the answer it bounds
     assert '"more", "why", "go deeper"' in shape and "trade or week review" in shape  # the long_ok exceptions stay
 
