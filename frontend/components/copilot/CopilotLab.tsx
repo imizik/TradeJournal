@@ -12,7 +12,8 @@ import DecisionBar from "@/components/copilot/DecisionBar";
 import FillLinkBar, { FillsToLink, useFillLinks } from "@/components/copilot/FillLinkBar";
 import RadarDecision from "@/components/copilot/RadarDecision";
 import Inspector from "@/components/copilot/Inspector";
-import { AlertAnswer, HitToRate, MainChatToAnswer, ThreadAlertAnswers, ThreadHitRating } from "@/components/copilot/ProofAnswers";
+import { AlertAnswer, HitToRate, ThreadAlertAnswers, ThreadHitRating } from "@/components/copilot/ProofAnswers";
+import RateYesterday from "@/components/copilot/RateYesterday";
 import { planContext } from "@/components/copilot/PlanATrade";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import AlertScorecard from "@/components/copilot/AlertScorecard";
@@ -420,8 +421,8 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
               <h2 className="text-lg font-semibold">{mainChatLabel({ title: thread.title, main_day: thread.mainDay })}</h2><PreviousDays active={thread.id} open={actions.open} />
             </div>
           )}
-          {/* Today's Main chat starts the day with the morning brief; an earlier day's does not. */}
-          {on && thread?.mainDay && thread.mainDay === session.data?.day && <><MorningBrief prep={session.data?.prep} fill={fill} /><MainChatToAnswer toAnswer={session.data?.to_answer} /></>}
+          {/* Today's Main chat starts the day with what still waits on a rating, then the morning brief; an earlier day's does not. */}
+          {on && thread?.mainDay && thread.mainDay === session.data?.day && <><RateYesterday /><MorningBrief prep={session.data?.prep} fill={fill} /></>}
           {on && !thread?.mainDay && (thread || briefing || link) && <Breadcrumb thread={thread} link={link} saved={saved} onMain={actions.home} />}
           {/* The Briefing (or no thread) opens on the day at a glance. Any other thread has one main element: the header,
               then the decision when one is asked (the ladder shrinks to a line), else the full plan ladder; the conversation follows. */}

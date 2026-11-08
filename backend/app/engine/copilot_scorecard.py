@@ -77,7 +77,9 @@ def _kind_from_title(title: str | None) -> str | None:
 
 
 def _answers(db: Session, since: datetime, turns: dict[str, CopilotTurn]) -> list[dict]:
-    """Every saved answer in the window: its rating, kind, source, model, tools, what the owner did next, and its turn."""
+    """Every saved answer in the window: its rating, kind, source, model, tools, what the owner did next, and its turn;
+    with its transcript ``index``, the ``question`` before it and when it was asked (``at``, naive UTC) for the desk's
+    Rate yesterday card."""
     rows = db.exec(select(CopilotInvestigation.id, CopilotInvestigation.title, CopilotInvestigation.created_at, CopilotInvestigation.transcript_json)
                    .where(CopilotInvestigation.source == "copilot", col(CopilotInvestigation.updated_at) >= since)
                    .order_by(col(CopilotInvestigation.updated_at).desc()).limit(MAX_INVESTIGATIONS)).all()
@@ -96,9 +98,11 @@ def _answers(db: Session, since: datetime, turns: dict[str, CopilotTurn]) -> lis
                 continue  # an older answer, or one whose turn is outside the window
             following = transcript[i + 1] if i + 1 < len(transcript) and transcript[i + 1].get("role") == "user" else None
             next_text = (following or {}).get("content") or ""
+            asked = transcript[i - 1] if i and transcript[i - 1].get("role") == "user" else None
             tools = _tools(turn) if turn is not None else (metrics.get("tools") or [])
             answers.append({
-                "investigation_id": str(inv_id), "title": title, "rating": message.get("rating"),
+                "investigation_id": str(inv_id), "title": title, "rating": message.get("rating"), "index": i,
+                "question": (asked or {}).get("content"), "at": turn.started_at if turn is not None else created_at,
                 "kind": (turn.kind if turn is not None and turn.kind else None) or _kind_from_title(title) or "ask",
                 "source": (turn.source if turn is not None else None) or "desk",
                 "model": (turn.model if turn is not None else None) or metrics.get("model"),
