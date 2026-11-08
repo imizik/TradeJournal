@@ -81,8 +81,9 @@ never suppresses an alert; retries reuse the saved observations, not newer data.
 
 Positions are anchored in their first entry fill's source identity (account
 plus ``raw_email_id``), as saved-advice links are, so a trade rebuild does not
-re-send anything. With Telegram set up (``engine/phone.py``) the alert goes there instead, and its two
-answers and Why? are reply buttons that save or ask in place (``engine/telegram_replies.py``).
+re-send anything. With Telegram set up (``engine/phone.py``) the alert goes there instead, and all four
+answers (Prompted review, Already aware, Too late, Not useful) and Why? are reply buttons that save or ask in place
+(``engine/telegram_replies.py``).
 Delivery is at-most-once: a send that may have reached ntfy
 is recorded ``unknown`` and never resent, and an alert not sent within
 ``EXPIRE_SECONDS`` is dropped, since a late give-back alert is wrong advice.
@@ -799,7 +800,7 @@ class PositionAlerts:
             try:
                 _, image_state = phone.send(title, body + ticket.append, kind=alert.kind, image=image, priority=priority, tags=("warning",),
                                             path=path, direct_click=True, more=more,
-                                            buttons=telegram_replies.feedback_buttons(alert.id, tuple(r for _, r in ANSWER_ACTIONS)))
+                                            buttons=telegram_replies.feedback_buttons(alert.id))  # all four answers; ntfy keeps ANSWER_ACTIONS
             except phone.SendError as exc:
                 if not _surely_unsent(exc):
                     alert.delivery, alert.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."

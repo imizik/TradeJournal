@@ -238,7 +238,9 @@ def test_on_telegram_a_single_carries_rating_buttons_and_a_digest_only_why(tmp_p
     _runner(store, 37, alerts).run_once()
     [row] = rows(engine)
     [single] = sent
-    assert single["buttons"] == (("Useful", f"rr:{row.id}:useful"), ("Not useful", f"rr:{row.id}:irrelevant"), ("Why?", "ask:radar_event"))
+    assert single["buttons"] == (("Useful", f"rr:{row.id}:useful"), ("Already knew", f"rr:{row.id}:already_knew"),
+                                 ("Too late", f"rr:{row.id}:too_late"), ("Not useful", f"rr:{row.id}:irrelevant"),
+                                 ("Why?", "ask:radar_event"))
     assert single["links"] == () and single["path"] == f"/radar?event={EVENT}" and row.delivery == "sent"
     with Session(engine) as db:
         digest = RadarAlert(event_id="digest-x", session_date=row.session_date, rule_version=row.rule_version, kind=radar_alerts.DIGEST,

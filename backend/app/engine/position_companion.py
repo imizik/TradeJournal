@@ -389,8 +389,9 @@ async def run_turn(question: str, symbol: str, now: float) -> tuple[str, str | N
 
 
 def save_messages(investigation_id, messages: list[dict], *, status: str | None = None, conclusion: str | None = None,
-                  session: Session | None = None) -> None:
-    """Append ``messages`` to the adopted investigation (retried once if the owner saved it meanwhile)."""
+                  session: Session | None = None) -> dict:
+    """Append ``messages`` (with their cards and metrics) to the adopted investigation, retried once if the owner saved
+    it meanwhile; the saved investigation."""
     from app.engine import copilot_investigations as investigations
     for attempt in range(2):
         found = investigations.get(investigation_id, session=session)
@@ -398,11 +399,10 @@ def save_messages(investigation_id, messages: list[dict], *, status: str | None 
             title=found["title"], symbol=found["symbol"], status=status or found["status"],
             conclusion=conclusion if conclusion is not None else found["conclusion"],
             transcript=found["transcript"] + [{"role": m["role"], "content": m["content"][:20_000],
-                                             **({"proposals": m["proposals"]} if m.get("proposals") else {})} for m in messages],
+                                             **{k: m[k] for k in ("proposals", "metrics") if m.get(k)}} for m in messages],
             evidence=found["evidence"])
         try:
-            investigations.update(investigation_id, fields, found["revision"], session=session)
-            return
+            return investigations.update(investigation_id, fields, found["revision"], session=session)
         except investigations.InvestigationError as exc:
             if exc.code != "stale" or attempt:
                 raise

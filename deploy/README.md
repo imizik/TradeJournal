@@ -574,12 +574,15 @@ The API's own trading pings (position alerts, Radar, the morning prep, the
 evening review, plan nudges, time stops, level and plan alerts, thesis watch,
 the week review, Watch your day, research results) can go to a Telegram bot
 instead of ntfy, with reply buttons whose answers are saved in the app
-(position alerts: Prompted review, Already aware and Why?; Radar singles:
-Useful and Not useful; `backend/app/engine/telegram.py`, `phone.py`,
-`telegram_replies.py`). A message typed to the bot is a question for copilot,
-answered in the chat (one copilot turn at a time, within Copilot Lab's daily
-budget; with the Lab off the bot says so); typed as a reply to a ping, that ping
-is its context. The
+(position alerts: Prompted review, Already aware, Too late, Not useful and
+Why?; Radar singles: Useful, Already knew, Too late, Not useful and Why?; more
+than three buttons sit two to a row, Why? on the last; `backend/app/engine/telegram.py`,
+`phone.py`, `telegram_replies.py`). ntfy keeps its two answer links. A message
+typed to the bot is a question for copilot, answered in the chat (one copilot
+turn at a time, within Copilot Lab's daily budget; with the Lab off the bot says
+so) with Helped and Didn't under the answer, which rate it on the desk as the
+desk's own buttons do (a second tap on the chosen one clears it); typed as a
+reply to a ping, that ping is its context. The
 health, deploy and watchdog alerts in this section stay on ntfy. Telegram is
 used only when both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set; nothing
 changes until then. The API only calls out to `api.telegram.org`: it reads the

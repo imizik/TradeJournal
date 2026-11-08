@@ -7,7 +7,7 @@ chat. The bot only ever calls out to ``api.telegram.org``: replies are read by l
 
 ``publish`` sends ``sendMessage`` (or ``sendPhoto`` with the PNG when ``image`` is given, the text as its caption)
 with the title bold, the text HTML-escaped, and an inline keyboard: the reply ``buttons`` (label, callback data) on
-the first row, and an "Open" button to ``ALERT_APP_URL + path`` (then any ``links``) on the last. It returns
+the first rows (``keyboard``), and an "Open" button to ``ALERT_APP_URL + path`` (then any ``links``) on the last. It returns
 Telegram's message id. A failure raises ``TelegramError``, a ``ntfy.NtfyError`` so every sender's at-most-once
 handling is unchanged: a refusal with a status, or no connection, certainly sent nothing (``surely_unsent``); any
 other failure (a read timeout) may have reached the phone. No retries here: the senders own them.
@@ -79,14 +79,22 @@ def caption_fits(title: str, message: str) -> bool:
 
 def keyboard(path: str = "", buttons: tuple[tuple[str, str], ...] = (), links: tuple[tuple[str, str], ...] = (),
              open_label: str = "Open") -> dict | None:
-    """The inline keyboard: reply buttons first, then Open (``open_label``, and ``links``) when ``ALERT_APP_URL`` is set."""
+    """The inline keyboard: reply buttons first, then Open (``open_label``, and ``links``) when ``ALERT_APP_URL`` is set.
+    Up to three reply buttons share one row; more go two to a row, an odd last one (an alert's Why?) joining the row
+    before it, so four answers and Why? read as two rows on a phone."""
     rows = []
     reply = []
     for label, data in buttons:
         if len(data.encode()) > CALLBACK_MAX:
             raise ValueError(f"Callback data longer than {CALLBACK_MAX} bytes: {data!r}")
         reply.append({"text": label, "callback_data": data})
-    if reply:
+    if len(reply) > 3:
+        pairs = [reply[i:i + 2] for i in range(0, len(reply), 2)]
+        if len(pairs[-1]) == 1:
+            last = pairs.pop()
+            pairs[-1] = pairs[-1] + last
+        rows.extend(pairs)
+    elif reply:
         rows.append(reply)
     if app_url := os.environ.get("ALERT_APP_URL", "").strip():
         rows.append([{"text": label, "url": app_url.rstrip("/") + link} for label, link in ((open_label, path), *links)])

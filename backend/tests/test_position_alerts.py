@@ -325,7 +325,9 @@ def test_on_telegram_the_answers_and_why_are_reply_buttons_not_links(engine, wor
     watcher.deliver()
     [(title, kw)] = sent
     assert title == "SNDK 10/23/26 230C: give-back triggered" and kw["path"] == f"/trades/{alert.trade_id}?alert={alert.id}"
+    # All four answers on Telegram (ntfy keeps two links, below), and Why?
     assert kw["buttons"] == (("Prompted review", f"fb:{alert.id}:prompted_review"), ("Already aware", f"fb:{alert.id}:already_aware"),
+                             ("Too late", f"fb:{alert.id}:too_late"), ("Not useful", f"fb:{alert.id}:not_useful"),
                              ("Why?", f"why:{alert.id}")) and kw["links"] == ()
     assert alerts(engine)[0].delivery == "sent"
 
