@@ -267,7 +267,7 @@ export function speechText(message: Pick<LabMessage, "content" | "proposals" | "
     if (/^_?\(Simulated model[\s\S]*\)_?$/.test(block.trim())) continue;
     for (const raw of block.split("\n")) {
       // The answer format's labels: "Verdict: Hold — The thesis…" reads "Hold. The thesis…", "Changes if: …" as a clause.
-      const said = raw.replace(/^\s*\**verdict\**\s*:\s*\**([a-z]+)\**\s*(?:—|–|--|-|:)\s*/i, "$1. ").replace(/^\s*\**changes if\**\s*:\**\s*/i, "Changes if ")
+      const said = raw.replace(/^\s*\**verdict\**\s*:\s*\**([a-z]+)\**\s*(?:—|–|--|-|:|\.)\s*/i, "$1. ").replace(/^\s*\**changes if\**\s*:\**\s*/i, "Changes if ")
         // "Read: Thesis holds · Timing early · Contract n/a" reads as a list; "Against: …" as the case against.
         .replace(/^\s*\**read\**\s*:\**\s*(?=thesis\b)/i, "").replace(/\s+·\s+/g, ", ").replace(/^\s*\**against\**\s*:\**\s*/i, "Against that, ")
         // A compare block: "Compare: 10/30 | 11/6" reads "Compare A, 10/30, and B, 11/6"; "Needs: x | y" as "Needs: A, x; B, y".
@@ -344,7 +344,9 @@ export type AnswerParts = { verdict: Verdict; headline: string; read: { label: s
 /** A compare block in place of the bullets: ``Compare: 10/30 | 11/6`` then ``Needs: … | …`` rows. */
 export type Compare = { a: string; b: string; rows: { label: string; a: string; b: string }[] };
 
-const VERDICT_LINE = /^\**verdict\**\s*:\s*\**([a-z]+)\**\s*(?:—|–|--|-|:)\s*(.+)$/i;
+// A dash after the verdict word in the format; a colon or a full stop ("Verdict: Wait. Not yet.") reads the same, so a
+// model slip keeps its verdict tag. Kept in step with VERDICT_LINE in backend/app/ai/copilot_answer.py.
+const VERDICT_LINE = /^\**verdict\**\s*:\s*\**([a-z]+)\**\s*(?:—|–|--|-|:|\.)\s*(.+)$/i;
 const CHANGES_LINE = /^(?:[-*]\s+)?\**changes if\**\s*:\**\s*(.+?)\**$/i;
 const AGAINST_LINE = /^(?:[-*]\s+)?\**against\**\s*:\**\s*(.+?)\**$/i;
 const READ_LINE = /^\**read\**\s*:\**\s*(.+?)\**$/i;

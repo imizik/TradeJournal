@@ -18,13 +18,14 @@ def test_a_scripted_answer_parses_into_its_parts():
 
 
 @pytest.mark.parametrize("line", ["Verdict: Hold — The thesis holds.", "**Verdict**: Hold - The thesis holds.", "Verdict: hold: The thesis holds.",
-                                  "verdict: **Hold** – **The thesis holds.**"])
-def test_the_verdict_line_tolerates_bold_and_every_dash(line):
+                                  "verdict: **Hold** – **The thesis holds.**", "Verdict: Hold. The thesis holds."])
+def test_the_verdict_line_tolerates_bold_every_dash_and_a_full_stop(line):
     parts = answer_parts(line + "\n\nBody.")
     assert parts is not None and parts.verdict == "Hold" and parts.headline == "The thesis holds." and parts.body == "Body."
 
 
-@pytest.mark.parametrize("text", ["Hold — no verdict label.", "Verdict: Maybe — an unknown word.", "", "Just prose.\nVerdict: Hold — late."])
+@pytest.mark.parametrize("text", ["Hold — no verdict label.", "Verdict: Maybe — an unknown word.", "Verdict: Watch — not in the set.", "Verdict: Hold.", "",
+                                  "Just prose.\nVerdict: Hold — late."])
 def test_text_without_the_structure_is_none(text):
     assert answer_parts(text) is None
 

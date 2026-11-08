@@ -11,7 +11,10 @@ from dataclasses import dataclass
 
 VERDICTS = ("Hold", "Wait", "Pass", "Focus", "Draft", "Pattern", "Broken", "Unclear")
 
-VERDICT_LINE = re.compile(r"^\**verdict\**\s*:\s*\**([a-z]+)\**\s*(?:—|–|--|-|:)\s*(.+)$", re.I)
+# The separator after the verdict word is a dash in the format; a colon or a full stop ("Verdict: Wait. Not yet.") is read
+# the same way, since the model writes one now and then (two of 23 answers on 2026-11-07) and the owner should still see the
+# verdict tag. Kept in step with VERDICT_LINE in frontend/lib/copilot.ts.
+VERDICT_LINE = re.compile(r"^\**verdict\**\s*:\s*\**([a-z]+)\**\s*(?:—|–|--|-|:|\.)\s*(.+)$", re.I)
 CHANGES_LINE = re.compile(r"^(?:[-*]\s+)?\**changes if\**\s*:\**\s*(.+?)\**$", re.I)
 AGAINST_LINE = re.compile(r"^(?:[-*]\s+)?\**against\**\s*:\**\s*(.+?)\**$", re.I)
 UNSUPPORTED_LINE = re.compile(r"^(?:[-*]\s+)?\**unsupported\**\s*:", re.I)
