@@ -11,7 +11,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from app.ai.copilot_answer import MAX_WORDS, UNSUPPORTED_LINE, AnswerParts, Figure, answer_parts, figures_in, word_count
+from app.ai.copilot_answer import (COMPARE_CELL_WORDS, MAX_WORDS, NOTE_LINE, UNSUPPORTED_LINE, AnswerParts, Figure, answer_parts,
+                                   figures_in, word_count)
 
 IGNORED_SMALL_INTEGERS = {0, 1, 2, 3}  # counts and ordinals ("3 bullets", "2 of them") are not market figures
 MAX_GROUP = 12  # a derived figure must come from a small group of values (one object, one short list of rows)
@@ -138,6 +139,26 @@ def traceable_figures(parts: AnswerParts, record: dict, case: dict) -> Check:
     return Check("traceable_figures", True, f"{len(figures_in(parts.prose()))} figures checked")
 
 
+def compare_shape(parts: AnswerParts) -> Check:
+    """The compare form the prompt asks for on an A-or-B question: a Compare line with two to four rows and nothing else in
+    the body (two bullets beside the block and a fifth row put the 2026-11-08 compare case at 149 words), every side name
+    and cell within the cell budget. An Unsupported: line may stand beside the block."""
+    if parts.compare is None:
+        return Check("format_compare", False, "no Compare block with at least two rows")
+    faults = []
+    beside = [line for line in parts.body.split("\n")
+              if line.strip() and not NOTE_LINE.match(line.strip()) and not UNSUPPORTED_LINE.match(line.strip())]
+    if beside:
+        faults.append(f"{len(beside)} body line{'s' if len(beside) != 1 else ''} beside the block")
+    if len(parts.compare.rows) > 4:
+        faults.append(f"{len(parts.compare.rows)} rows")
+    cells = [parts.compare.a, parts.compare.b, *(cell for row in parts.compare.rows for cell in row[1:])]
+    long = sum(word_count(cell) > COMPARE_CELL_WORDS for cell in cells)
+    if long:
+        faults.append(f"{long} cell{'s' if long != 1 else ''} over {COMPARE_CELL_WORDS} words")
+    return Check("format_compare", not faults, "; ".join(faults) or f"Compare block, {len(parts.compare.rows)} rows")
+
+
 def grade(record: dict, case: dict) -> list[Check]:
     """All checks for one record. A turn that ended in an error fails ``completed`` and gets no format checks."""
     expects = case.get("expects") or {}
@@ -158,6 +179,7 @@ def grade(record: dict, case: dict) -> list[Check]:
                       else Check("format_read", None))
         checks.append(Check("format_against", bool(parts.against), "closing Against line") if expects.get("against")
                       else Check("format_against", None))
+        checks.append(compare_shape(parts) if expects.get("compare") else Check("format_compare", None))
         words = word_count(parts.prose())
         checks.append(Check("length", True if expects.get("long_ok") else words <= MAX_WORDS, f"{words} words"))
         checks.append(traceable_figures(parts, record, case))
