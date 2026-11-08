@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { answerParts } from "../lib/copilot";
+import { answerParts, verdictPending } from "../lib/copilot";
 
 // Comparing two choices on the desk (docs/copilot-lab.md § How the copilot reasons): an answer's "Compare: A | B" line
 // and its rows render side by side with the scenario names as headers, and stack as two labelled cards at 375 px with
@@ -53,6 +53,13 @@ test("the parser takes a compare block only with its Compare line and two rows",
   const one = answerParts("Verdict: Wait — Not yet.\n\nCompare: now | later\nNeeds: x | y\n\nThe group leads.")!;
   expect(one.compare).toBeNull();
   expect(one.body).toBe("Compare: now | later\nNeeds: x | y\n\nThe group leads."); // left in the body, as before
+});
+
+test("a full stop after the verdict word reads like the dash, and an unknown word still does not parse", () => {
+  const slip = answerParts("Verdict: Wait. Not yet.\n\nBody.")!;
+  expect([slip.verdict, slip.headline, slip.body]).toEqual(["Wait", "Not yet.", "Body."]);
+  expect(answerParts("Verdict: Watch — not in the set.\n\nBody.")).toBeNull();
+  expect(verdictPending("Verdict: Wait.")).toBe(true); // while streaming, the headline is still to come
 });
 
 test("at 1440 px two choices sit side by side under their names, rows labelled on the left", async ({ page }) => {

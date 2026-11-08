@@ -1089,7 +1089,9 @@ Briefing's day).
   `answerParts`, `VERDICTS`): the verdict as a small tag, the headline in
   bold, the body, then a plain "Changes if …" line. An answer without it (one
   saved before the format, a backend that ignores it, an unknown word, an
-  error) renders as plain text. The scripted `fake` backend writes every
+  error) renders as plain text. A full stop or colon after the verdict word
+  (`Verdict: Wait. Not yet.`) reads like the dash in both parsers, since the
+  model writes one now and then (two of 23 answers on 2026-11-07). The scripted `fake` backend writes every
   answer this way (`copilot.scripted`), with its simulated-model note (and
   any image note) under the Verdict line. Read aloud, the line becomes
   "Hold. The thesis has not broken."
@@ -3115,8 +3117,8 @@ saved" line. The limit is not: 18 of 23 answers are still over 120 words, but
 follow-up at 336 words and the week review). The whole overrun is the bullets,
 which run two or three sentences of 25–35 words against the one-sentence,
 22-word budget. The two `format_verdict` misses are wording slips ("Verdict:
-Wait." with a full stop where the format wants a dash; "Verdict: Watch", not in
-the fixed set). The two `traceable_figures` misses: the long follow-up quotes
+Wait." with a full stop where the format wants a dash, which both parsers
+accept since 2026-11-08; "Verdict: Watch", not in the fixed set). The two `traceable_figures` misses: the long follow-up quotes
 peer moves carried from its parent's reads, which the grader cannot see (it
 checks the follow-up's own reads), and the trade review subtracts two values
 from different reads (94.35 − 92.50 = 1.85). The second pass (2026-11-08):
