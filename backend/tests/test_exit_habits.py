@@ -51,6 +51,14 @@ def test_closed_within_fifteen_minutes_and_the_result_against_the_mark():
     assert (out["realized_after"], out["value_at_alert"], out["vs_alert"]) == (560.0, 600.0, -40.0)
 
 
+def test_a_zero_bid_prices_a_worthless_contract_and_no_quote_at_all_leaves_a_note():
+    expired = BUY  # held to expiry: no exit fill, the trade expired
+    out = follow_up({**alert(mark=None), "bid": 0.0}, expired, "expired")
+    assert (out["response"], out["realized_after"], out["value_at_alert"], out["vs_alert"]) == ("expired", 0.0, 0.0, 0.0)
+    out = follow_up(alert(mark=None), expired, "expired")
+    assert out["value_at_alert"] is None and out["note"] == "The alert had no quote, so there is no price to compare with."
+
+
 def test_a_partial_trim_within_fifteen_minutes():
     fills = BUY + [f("sell_to_close", 1, 320.0, "2026-10-21T10:35"), f("sell_to_close", 1, 250.0, "2026-10-21T14:00")]
     out = follow_up(alert(), fills, "closed")
@@ -100,7 +108,7 @@ def test_a_sale_in_the_alerts_own_minute_counts_as_after_when_the_open_count_say
 def test_a_missing_mark_leaves_the_result_null():
     out = follow_up(alert(mark=None), BUY + [f("sell_to_close", 2, 280.0, "2026-10-21T10:40")], "closed")
     assert out["response"] == "closed_15m" and out["realized_after"] == 560.0
-    assert out["vs_alert"] is None and "no midpoint" in out["note"]
+    assert out["vs_alert"] is None and "no quote" in out["note"]
 
 
 def test_unmatched_fills_are_never_guessed():

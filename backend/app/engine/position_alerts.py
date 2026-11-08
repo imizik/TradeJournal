@@ -32,7 +32,12 @@ monitor's loop (``level_alert_monitor.py``), at most every ``RUN_SECONDS``:
   from the market calendar (half days included). A first alert more than
   ``FIRST_GRACE_MINUTES`` late is skipped, and none is sent after the close;
   the last one states the minutes actually left. A contract too thin to price
-  shows its bid rather than "no quote".
+  shows its bid rather than "no quote"; a zero bid is kept however old
+  Tradier's bid time is (nobody is bidding, so it is worth $0 to sell, which the
+  scorecard measures) and said as "no bids". Both last-day messages and the
+  day-before one add what the contract is worth at expiry if the underlying
+  stays where it is, from its last price and the strike (``at_expiry``; index
+  options are left out, their proxy's price being on another scale).
 - **Day before expiry.** At ``EVE_MINUTE`` (15:30 New York, or
   ``FINAL_MINUTES`` before an earlier close) on the trading day before a long
   option's expiration (the market calendar: a Friday expiry's eve is Thursday,
@@ -89,6 +94,7 @@ alert ranks with the 90-minute last-day alert.
 
 from datetime import UTC, date, datetime, timedelta
 import logging
+import re
 import os
 import time
 from typing import Callable
@@ -180,11 +186,17 @@ def _fresh(stamp_ms: int | None, now: float) -> bool:
 
 def judged_quote(quote, now: float) -> dict | None:
     """A Tradier option quote per contract: ``mark`` is the midpoint, or None when the quote is
-    unfit to judge (wide, crossed, no bid); ``bid`` stays when it is fresh. None when nothing fresh."""
-    if quote is None or quote.bid is None or not _fresh(quote.bid_date, now):
+    unfit to judge (wide, crossed, no bid); ``bid`` stays when it is fresh. None when nothing fresh. A zero bid is kept
+    whatever its age: nobody is bidding, so the contract is worth $0 to sell, which a last-day alert and the scorecard
+    need to say (until 2026-11-08 a stale zero bid read as "no quote", and every worthless expiry went unmeasured)."""
+    if quote is None or quote.bid is None:
+        return None
+    if quote.bid <= 0:
+        return {"mark": None, "bid": 0.0, "quoted_at": quote.bid_date / 1000 if quote.bid_date else None}
+    if not _fresh(quote.bid_date, now):
         return None
     out = {"mark": None, "bid": round(quote.bid * 100, 2), "quoted_at": quote.bid_date / 1000}
-    if quote.ask is None or quote.bid <= 0 or quote.ask < quote.bid or not _fresh(quote.ask_date, now):
+    if quote.ask is None or quote.ask < quote.bid or not _fresh(quote.ask_date, now):
         return out
     mid = (quote.bid + quote.ask) / 2
     if (quote.ask - quote.bid) / mid <= MAX_SPREAD:
@@ -395,15 +407,61 @@ def _count(contracts: float) -> str:
     return f"{n} contract{'' if contracts == 1 else 's'}"
 
 
+def _bid_text(alert: PositionAlert) -> str:
+    """The option's price when there is no midpoint to judge; a zero bid is said as what it is."""
+    if alert.bid is None:
+        return "no live quote right now"
+    if alert.bid <= 0:
+        return "no bids: worth $0 to sell now"
+    return f"bid {_premium(alert.bid)}, too thin to price at a midpoint"
+
+
+def _thin(alert: PositionAlert) -> str:
+    if alert.bid is not None and alert.bid <= 0:
+        return "no bids: worth $0 to sell now"
+    return "no reliable quote" + (f", bid {_premium(alert.bid)}" if alert.bid is not None else "")
+
+
+STRIKE = re.compile(r"\s(\d+(?:\.\d+)?)([CP])$")
+
+
+def at_expiry(alert: PositionAlert, last: float | None, when: str = "at expiry") -> str:
+    """What the contract is worth ``when`` if the underlying stays at ``last``: its intrinsic value from the strike, for
+    the last-day and day-before alerts, where a worthless contract's bid is often stale or absent. Empty without a last
+    price or a readable strike (an index option's proxy is on another scale, so its sender passes no price)."""
+    found = STRIKE.search(alert.contract or "")
+    if last is None or not found:
+        return ""
+    strike, call = float(found.group(1)), found.group(2) == "C"
+    symbol = (alert.contract or "").split(" ")[0]
+    gap = last - strike
+    intrinsic = max(0.0, gap if call else -gap) * 100 * float(alert.contracts or 0)
+    where = (f"{symbol} {last:,.2f} is {abs(gap):,.2f} {'above' if gap > 0 else 'below'} the {strike:g} strike" if gap
+             else f"{symbol} {last:,.2f} is at the {strike:g} strike")
+    worth = f"worth about ${intrinsic:,.0f} {when}" if intrinsic >= 1 else f"worth $0 {when}"
+    return f" {where}: {worth} if it stays here."
+
+
+def read_underlying(symbols: list[str]) -> dict[str, float]:
+    """The underlyings' last prices from the chart feed's quote read, for a last-day message; {} when it cannot be read,
+    so the alert goes without the line rather than not at all."""
+    try:
+        from app.engine.chart_feed import chart_feed
+        rows, _, _ = chart_feed.quote_rows(symbols)
+    except Exception as exc:  # noqa: BLE001 - a feed outage never holds an alert
+        log.info("Open-trade alerts: no underlying quote: %s", exc)
+        return {}
+    return {r["symbol"]: r["last"] for r in rows if isinstance(r.get("last"), (int, float)) and r["last"] > 0}
+
+
 def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_left: int | None = None,
                   facts: dict | None = None) -> tuple[str, str, int]:
     """Title, body and ntfy priority for one alert."""
     if alert.mark is not None:
         now_part = f"now {_money(alert.gain)} ({_pct(alert.gain_pct)}) at a {_premium(alert.mark)} mid, bid {_premium(alert.bid)}"
-    elif alert.bid is not None:
-        now_part = f"bid {_premium(alert.bid)}, too thin to price at a midpoint"
     else:
-        now_part = "no live quote right now"
+        now_part = _bid_text(alert)
+    facts = facts or {}
     if alert.kind == "wrong_way":
         facts = facts or {}
         side = "put" if (alert.contract or "").endswith("P") else "call"
@@ -414,7 +472,7 @@ def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_
                  f"your entry, against your {side}" if move is not None
                  else f"{symbol} moved against your {side} in the {WRONG_WAY_MINUTES} min after your entry")
         if alert.mark is None:
-            now_part = "no reliable quote" + (f", bid {_premium(alert.bid)}" if alert.bid is not None else "")
+            now_part = _thin(alert)
         record = f" {facts['record']}" if facts.get("record") else ""
         return (f"{alert.contract}: wrong way at {WRONG_WAY_MINUTES} min",
                 f"{moved}. Option {now_part}. {_count(alert.contracts)} open.{record} "
@@ -425,14 +483,15 @@ def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_
         if alert.mark is not None:
             vs = f"Mark {_premium(alert.mark)} vs cost {_premium(alert.avg_cost)}: {_money(alert.gain)} ({_pct(alert.gain_pct)})"
         else:
-            vs = f"Cost {_premium(alert.avg_cost)}, " + ("no reliable quote" + (f", bid {_premium(alert.bid)}" if alert.bid is not None else ""))
+            vs = f"Cost {_premium(alert.avg_cost)}, {_thin(alert)}"
         week = facts.get("week")
         risk = (f" Expiring this week: {_count(week['contracts'])}, ${week['premium']:,.0f} premium at risk." if week and week["contracts"]
                 else "")
-        return (f"{alert.contract} expires {when}, still open", f"{vs}. {_count(alert.contracts)} open.{risk}", 4)
+        return (f"{alert.contract} expires {when}, still open",
+                f"{vs}.{at_expiry(alert, facts.get('underlying'), f'at expiry {when}')} {_count(alert.contracts)} open.{risk}", 4)
     if alert.kind == "hold_hour":
         if alert.mark is None:
-            now_part = "no reliable quote" + (f", bid {_premium(alert.bid)}" if alert.bid is not None else "")
+            now_part = _thin(alert)
         peak = "" if alert.peak_gain is None else f", best seen by the alert watch {_money(alert.peak_gain)} ({_pct(alert.peak_gain_pct)})"
         return (f"{alert.contract}: open an hour, re-decide",
                 f"Open {HOLD_MINUTES} min, {now_part}{peak}. {_count(alert.contracts)} open. "
@@ -446,10 +505,10 @@ def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_
     when = f" The market closes at {close_label}." if close_label else ""
     if alert.kind == "expiry_first":
         return (f"{alert.contract} expires today and is still open",
-                f"{_count(alert.contracts)} open, {now_part}.{when}", 4)
+                f"{_count(alert.contracts)} open, {now_part}.{at_expiry(alert, facts.get('underlying'))}{when}", 4)
     left = f"{minutes_left} minute{'' if minutes_left == 1 else 's'}" if minutes_left is not None else "Under 30 minutes"
     return (f"{alert.contract}: {left} left, expires today",
-            f"Still open: {_count(alert.contracts)}, {now_part}.{when}", 5)
+            f"Still open: {_count(alert.contracts)}, {now_part}.{at_expiry(alert, facts.get('underlying'))}{when}", 5)
 
 
 def message(alert: PositionAlert, close_label: str | None = None, minutes_left: int | None = None,
@@ -546,11 +605,12 @@ def _surely_unsent(exc: ntfy.NtfyError) -> bool:
 
 
 class PositionAlerts:
-    def __init__(self, engine, calendar=None, *, clock: Callable[[], float] = time.time, quotes=get_quotes_once):
+    def __init__(self, engine, calendar=None, *, clock: Callable[[], float] = time.time, quotes=get_quotes_once, underlying=None):
         self.engine = engine
         self.calendar = calendar
         self.clock = clock
         self.quotes = quotes
+        self.underlying = underlying or read_underlying  # the underlyings' last prices, for what a contract is worth at expiry
         self._last_run = 0.0
 
     def run(self) -> None:
@@ -652,7 +712,7 @@ class PositionAlerts:
             avg_cost=round(cost, 2), mark=mark["mark"] if mark else None, bid=mark["bid"] if mark else None,
             gain=gain, gain_pct=gain_pct, peak_gain=None if peak is None else round((peak - cost) * held, 2),
             peak_gain_pct=None if peak is None else (peak - cost) / cost,
-            quoted_at=_utc(mark["quoted_at"]) if mark else None, detected_at=_utc(now))
+            quoted_at=_utc(mark["quoted_at"]) if mark and mark.get("quoted_at") is not None else None, detected_at=_utc(now))
 
     def _record(self, alert: PositionAlert, *, regular=None) -> None:
         """Write one firing; a firing already written (this pass's retry, another process) is skipped."""
@@ -719,6 +779,8 @@ class PositionAlerts:
                 return
             facts = (wrong_way_facts(db, alert) if alert.kind == "wrong_way" else self._eve_facts(db, alert, now) if alert.kind == "expiry_eve"
                      else giveback_facts(db) if alert.kind == "giveback" else None)
+            if alert.kind in ("expiry_eve", "expiry_first", "expiry_final"):
+                facts = {**(facts or {}), "underlying": self._underlying_last(alert)}
             title, body, priority = message(alert, _clock_label(_minute_of(close)) if close else None,
                                             max(1, int((close - now) // 60)) if close else None, facts,
                                             since_line(db, alert, _epoch(alert.detected_at)),  # as of detection: a retry sends the same words
@@ -752,6 +814,18 @@ class PositionAlerts:
             notification_policy.delivered(db, ticket, now)
             ping_images.record(db, ticket, image_state)
             db.commit()
+
+    def _underlying_last(self, alert: PositionAlert) -> float | None:
+        """The underlying's last price for a last-day message; None when it cannot be read, or for an index option, whose
+        strike is not on its proxy's price scale."""
+        ticker = (alert.contract or "").split(" ")[0]
+        if not ticker or ticker in INDEX_UNDERLYING:
+            return None
+        try:
+            return self.underlying([ticker]).get(ticker)
+        except Exception as exc:  # noqa: BLE001 - the message goes without the line rather than not at all
+            log.info("Open-trade alerts: no underlying quote for %s: %s", ticker, exc)
+            return None
 
     def _eve_facts(self, db: Session, alert: PositionAlert, now: float) -> dict:
         """What a day-before-expiry message says beyond the alert row: the expiry's day and this week's premium at risk."""

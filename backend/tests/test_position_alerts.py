@@ -106,7 +106,7 @@ def engine():
 def world(engine):
     clock = Clock(at(WED, "10:00"))
     quotes = Quotes(clock)
-    watcher = PositionAlerts(engine, Calendar(), clock=clock, quotes=quotes)
+    watcher = PositionAlerts(engine, Calendar(), clock=clock, quotes=quotes, underlying=lambda symbols: {})
     return clock, quotes, watcher
 
 
@@ -549,6 +549,65 @@ def test_an_expiry_alert_is_never_sent_after_the_close_and_states_the_minutes_le
     clock.now = at(WED, "16:01")
     watcher.deliver()
     assert len(sent) == 1 and alerts(engine)[0].delivery == "expired"
+
+
+def bodies_to(monkeypatch, record):
+    def publish(title, body, priority=4, tags=(), path="", direct_click=False, more=()):
+        record.append((title, body))
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(ntfy, "publish", publish)
+
+
+def test_a_zero_bid_however_old_is_kept_and_the_last_day_alert_says_what_the_contract_is_worth(engine, world, monkeypatch):
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 2, 150, "2026-10-21T10:00", expiration=WED)
+    quotes.set(0.0, 0.05)
+    quotes.age = 3 * 3600  # nobody has bid since the morning, so Tradier's bid time is hours old
+    watcher.underlying = lambda symbols: {"SNDK": 200.0}
+    clock.now = at(WED, "15:50")
+    watcher.run()
+    [alert] = alerts(engine)
+    assert (alert.kind, alert.bid, alert.mark, alert.quoted_at is not None) == ("expiry_final", 0.0, None, True)
+    sent = []
+    bodies_to(monkeypatch, sent)
+    clock.now = at(WED, "15:51")
+    watcher.deliver()
+    [(title, body)] = sent
+    assert title == "SNDK 10/21/26 230C: 9 minutes left, expires today"
+    assert body.startswith("Still open: 2 contracts, no bids: worth $0 to sell now. "
+                           "SNDK 200.00 is 30.00 below the 230 strike: worth $0 at expiry if it stays here. The market closes at")
+
+
+def test_an_in_the_money_last_day_alert_says_what_it_is_worth_at_expiry_and_an_unread_underlying_adds_nothing(engine, world, monkeypatch):
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 150, "2026-10-21T10:00", expiration=WED)
+    quotes.set(2.90, 3.10)
+    watcher.underlying = lambda symbols: {"SNDK": 233.0}
+    clock.now = at(WED, "15:50")
+    watcher.run()
+    sent = []
+    bodies_to(monkeypatch, sent)
+    clock.now = at(WED, "15:51")
+    watcher.deliver()
+    [(_, body)] = sent
+    assert "at a $3.00 mid, bid $2.90. SNDK 233.00 is 3.00 above the 230 strike: worth about $300 at expiry if it stays here." in body
+    # Without an underlying price (a feed outage, or an index option) the message is as before.
+    assert position_alerts.at_expiry(alerts(engine)[0], None) == ""
+    position_alerts.PositionAlerts(engine, Calendar(), clock=clock, quotes=quotes, underlying=lambda symbols: 1 / 0)
+    assert watcher.__class__(engine, Calendar(), clock=clock, quotes=quotes, underlying=lambda symbols: 1 / 0)._underlying_last(alerts(engine)[0]) is None
+
+
+def test_a_stale_bid_is_not_judged_unless_it_is_zero():
+    now = 1_000_000.0
+    hour_ago = int((now - 3600) * 1000)
+    stale = TradierQuote(symbol="X", bid=0.35, ask=0.45, bid_date=hour_ago, ask_date=hour_ago)
+    assert position_alerts.judged_quote(stale, now) is None
+    zero = TradierQuote(symbol="X", bid=0.0, ask=0.05, bid_date=hour_ago, ask_date=int((now - 5) * 1000))
+    assert position_alerts.judged_quote(zero, now) == {"mark": None, "bid": 0.0, "quoted_at": now - 3600}
+    assert position_alerts.judged_quote(TradierQuote(symbol="X", bid=0.0, ask=None, bid_date=None, ask_date=None), now) == {
+        "mark": None, "bid": 0.0, "quoted_at": None}
 
 
 def test_the_anchor_breaks_same_minute_ties_on_the_source_id_not_the_fill_uuid():
