@@ -14,12 +14,14 @@ or been deleted and nothing is open it drops off, and still shows in its
 investigation (``LinkedActivity``). Read-only; the only id out is the
 investigation's. Last prices come from one batched quote read.
 
-A position the companion adopted (``engine/position_companion.py``) has no plan
-capture: once Confirm arms its invalidation, its plan is read from the adopted
-row instead: the position (open or closed) from the trade at its anchor, the
-direction from the option (a call is long), the thesis from the draft, and an
-``entry`` level already hit at the underlying's price when it was adopted, so
-the plan ladder has both ends.
+A position the companion adopted (``engine/position_companion.py``) is read
+from the adopted row once Confirm arms its invalidation: the position (open or
+closed) from the trade at its anchor, the direction from the option (a call is
+long), the thesis from the draft, and an ``entry`` level already hit at the
+underlying's price when it was adopted, so the plan ladder has both ends. Its
+Confirm also saves a ``Copilot plan`` capture and, when the draft's time stop
+reads as a time, a time stop under the row's id; the time stop shows here, the
+capture is the trade page's and plan-proof's.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -46,7 +48,7 @@ def _thesis(note: str | None) -> str | None:
     if not text.startswith("Thesis: "):
         return None
     text = text[len("Thesis: "):]
-    for tail in (" Contract: ", " From a Copilot Lab plan card."):
+    for tail in (" Contract: ", " From a Copilot Lab plan card.", " From the position companion, after the fill."):
         if (cut := text.rfind(tail)) >= 0:
             text = text[:cut]
     return text.strip()[:THESIS_CHARS] or None
@@ -139,7 +141,7 @@ def _plans(db: Session) -> tuple[list[dict], dict]:
     captures = [p["capture"] for p in plans if p["capture"] is not None]
     links = capture_links.link_rows(db, captures)
     from app.engine import position_companion
-    adopted = position_companion.for_investigations(db, [p["investigation_id"] for p in plans if p["capture"] is None])
+    adopted = position_companion.for_investigations(db, [p["investigation_id"] for p in plans])  # an adopted plan reads from its row
     for plan in plans:
         plan["position"] = _position(plan["capture"], links, {})
         if (row := adopted.get(plan["investigation_id"])) is not None:
@@ -148,6 +150,12 @@ def _plans(db: Session) -> tuple[list[dict], dict]:
             if trade is not None:
                 plan["position"] = "in_position" if trade.status == "open" else "closed"
     return plans, links
+
+
+def _stop_row(stop: PlanTimeStop | None) -> dict | None:
+    if stop is None:
+        return None
+    return {"text": stop.text, "due_at": int(_epoch(stop.due_at)), "state": "pending" if stop.delivery == "scheduled" else stop.delivery}
 
 
 def _adopted_entry(row) -> dict | None:
@@ -190,7 +198,7 @@ def board(db: Session, quotes=None) -> dict:
                 "investigation_id": plan["investigation_id"], "symbol": plan["symbol"], "direction": draft.get("direction"),
                 "instrument": adopted.contract.removeprefix(adopted.ticker).strip(),
                 "thesis": draft.get("thesis") or titles.get(plan["investigation_id"]), "last": price,
-                "entry": _adopted_entry(adopted), "invalidation": _level(plan["invalidation"], price), "time_stop": None,
+                "entry": _adopted_entry(adopted), "invalidation": _level(plan["invalidation"], price), "time_stop": _stop_row(stop),
                 "position": plan["position"], "confirmed_at": int(_epoch(plan["newest"])),
             })
             continue
@@ -204,8 +212,7 @@ def board(db: Session, quotes=None) -> dict:
             "investigation_id": plan["investigation_id"], "symbol": plan["symbol"], "direction": direction,
             "instrument": _instrument(capture), "thesis": _thesis(capture.note if capture else None) or titles.get(plan["investigation_id"]),
             "last": price, "entry": _level(plan["entry"], price), "invalidation": _level(plan["invalidation"], price),
-            "time_stop": {"text": stop.text, "due_at": int(_epoch(stop.due_at)),
-                          "state": "pending" if stop.delivery == "scheduled" else stop.delivery} if stop else None,
+            "time_stop": _stop_row(stop),
             "position": plan["position"], "confirmed_at": int(_epoch(plan["newest"])),
         })
     rows.sort(key=_nearest)

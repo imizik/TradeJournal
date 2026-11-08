@@ -460,8 +460,15 @@ def update_buttons(row: PositionCompanion, index: int) -> tuple[tuple[str, str],
     return tuple((text, f"pu:{row.id}:{index}:{answer}") for answer, text in ANSWERS.items())
 
 
-def confirm(engine, companion_id: str, *, quote: Callable[[str], float | None] | None = None, now: float | None = None) -> tuple[str, str | None]:
-    """Confirm: arm the draft's invalidation as a confirmed plan card's invalidation alert. ``(reply, chosen label)``."""
+PLAN_NOTE_TAIL = "From the position companion, after the fill."  # copilot_plans._thesis strips it from the capture's note
+
+
+def confirm(engine, companion_id: str, *, quote: Callable[[str], float | None] | None = None, now: float | None = None,
+            calendar=None) -> tuple[str, str | None]:
+    """Confirm: arm the draft's invalidation as a confirmed plan card's invalidation alert, then save the draft as the
+    position's pre-trade plan and its time stop (``_save_plan``), the parts the plan card's Confirm saves. ``(reply,
+    chosen label)``. A tap on a position already armed saves again whatever a first tap could not; the alert is never
+    made twice."""
     from app.engine.level_alert_monitor import create_alert
     now = time.time() if now is None else now
     key = _uuid(companion_id)
@@ -470,7 +477,8 @@ def confirm(engine, companion_id: str, *, quote: Callable[[str], float | None] |
         if row is None:
             return "That position is no longer in the journal.", None
         if row.state == "armed":
-            return "Already confirmed: its invalidation alert is armed.", "Confirmed"
+            saved = _saved(_save_plan(db, row, plan_of(row), now, calendar))
+            return f"Already confirmed: its invalidation alert is armed{saved}.", "Confirmed"
         if row.state != "draft":
             return f"Not confirmed: this position is {row.state}.", None
         plan = plan_of(row)
@@ -501,9 +509,81 @@ def confirm(engine, companion_id: str, *, quote: Callable[[str], float | None] |
             _remove_alert(db, alert.id)
             db.commit()
             return "Not confirmed: this position closed or was ignored meanwhile.", None
-    log.info("Companion plan confirmed for %s: invalidation %.2f armed", contract, price)
-    return f"Confirmed: invalidation {price:,.2f} on {ticker} is armed.", "Confirmed"
+        saved = _saved(_save_plan(db, row, plan, now, calendar, trade=trade))
+    log.info("Companion plan confirmed for %s: invalidation %.2f armed%s", contract, price, saved)
+    return f"Confirmed: invalidation {price:,.2f} on {ticker} is armed{saved}.", "Confirmed"
 
+
+def _saved(parts: list[str]) -> str:
+    return "".join(f"; {part}" for part in parts)
+
+
+def _save_plan(db: Session, row: PositionCompanion, plan: dict, now: float, calendar=None, trade: Trade | None = None) -> list[str]:
+    """The confirmed draft as the position's pre-trade plan, the parts the plan card's Confirm saves
+    (``telegram_replies.confirm_plan``): a ``Copilot plan`` capture (the body ``POST /charts/captures`` takes) linked to
+    the trade, so the trade page, the trader context and plan-proof read it (timing retrospective: it came after the
+    fill, so plan-proof shows it as late, not counted), and its time stop (``plan_time_stops.create``) when the text
+    reads as a time. The companion row's id is the client id, so a second tap finds the first capture and stop instead
+    of making more. One line per part for the reply; nothing here raises."""
+    from app.engine import captures, copilot_plans, plan_time_stops
+    client_id, parts = row.id.hex, []
+    trade = trade if trade is not None else trade_of(db, row)
+    investigation = str(row.investigation_id) if row.investigation_id else str(row.id)
+    capture = captures.by_client_id(db, client_id)
+    if capture is None:
+        price, source = plan.get("invalidation"), plan.get("invalidation_source")
+        wording = " ".join(filter(None, [
+            price and f"Invalidation: {plan.get('condition') or 'crosses'} {price:,.2f}{f' ({source})' if source else ''}.",
+            plan.get("time_stop") and f"Time stop: {plan['time_stop']}.", plan.get("horizon") and f"Horizon: {plan['horizon']} trade."]))
+        note = " ".join([f"Thesis: {(plan.get('thesis') or 'unstated').strip()}", f"Contract: {row.contract}.", PLAN_NOTE_TAIL])
+        try:
+            capture, _ = captures.save(db, captures.build(db, {
+                "client_id": client_id, "underlying": row.ticker, "account_id": str(row.account_id),
+                "side": "buy_calls" if row.option_type == "call" else "buy_puts",
+                "strike": float(trade.strike) if trade is not None and trade.strike is not None else None,
+                "expiration": row.expiration.isoformat() if row.expiration else None,
+                "wording": wording[:captures.WORDING_MAX], "note": note[:captures.NOTE_MAX], "client_captured_at": now * 1000,
+                "mode": "discretionary", "setup_label": copilot_plans.PLAN_LABEL, "image": False,
+                "origin": {"kind": "copilot", "ref": investigation, "text": None},
+                "context": {"state": "unavailable", "reason": "Saved by the position companion's Confirm, after the fill.",
+                            "investigation_id": investigation}}))
+        except captures.CaptureError as exc:
+            db.rollback()
+            parts.append(f"plan not saved ({str(exc).rstrip('.')})")
+    if capture is not None:
+        parts.append("plan saved")
+        if trade is not None:
+            try:
+                capture_links.link(db, capture, trade.id)
+            except capture_links.CaptureError as exc:
+                if "already linked" not in str(exc):  # a second tap: the first link stands
+                    parts[-1] = f"plan saved, not linked to the trade ({str(exc).rstrip('.')})"
+    text = _stop_text(plan, row, now)
+    if text:
+        parsed = plan_time_stops.parse(text, now, calendar)
+        if parsed["due_at"] is None:
+            parts.append(f"time stop kept as a note ({parsed['reason'].rstrip('.')})")
+        elif plan.get("horizon") == "day" and datetime.fromtimestamp(parsed["due_at"], ET).date() != datetime.fromtimestamp(now, ET).date():
+            parts.append(f"time stop {(plan.get('time_stop') or '').split(' (')[0]} has passed")  # a day trade's stop is today's
+        else:
+            try:
+                plan_time_stops.create(db, client_id=client_id, investigation_id=investigation, symbol=row.ticker, text=text, now=now,
+                                       calendar=calendar)
+                parts.append(f"time stop {parsed['when']}")
+            except ValueError as exc:
+                parts.append(f"time stop not set ({str(exc).rstrip('.')})")
+    return parts
+
+
+def _stop_text(plan: dict, row: PositionCompanion, now: float) -> str:
+    """The time stop as ``plan_time_stops.parse`` reads it: a day trade's clock time as drafted; a swing's "the close before
+    expiry" as the trading days until that session, which the parser counts on the market calendar."""
+    text = (plan.get("time_stop") or "").strip()
+    if plan.get("horizon") != "swing" or not row.expiration:
+        return text
+    today = datetime.fromtimestamp(now, ET).date()
+    days = sum(1 for i in range(1, (row.expiration - today).days) if (today + timedelta(days=i)).weekday() < 5)
+    return f"{days} trading day{'s' if days != 1 else ''} ({text})" if days >= 1 else text
 
 def ignore(engine, companion_id: str, *, now: float | None = None) -> tuple[str, str | None]:
     key = _uuid(companion_id)

@@ -12,9 +12,11 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.engine import copilot_investigations, copilot_plans, notification_policy, position_companion, reconstructor, telegram
 from app.engine.chart_math import ET
+from app.engine.plan_time_stops import PlanTimeStops
 from app.engine.position_companion import Companion
 from app.engine.telegram_replies import Replies
-from app.models import Account, CopilotInvestigation, Fill, LevelAlert, PhonePing, PositionCompanion, ThesisWatchTrigger, TradeCapture
+from app.models import (Account, CaptureLink, CopilotInvestigation, Fill, LevelAlert, PhonePing, PlanTimeStop, PositionCompanion,
+                        ThesisWatchTrigger, TradeCapture)
 from app.routers.fills import _rebuild_trades
 
 ROTH, WEBULL = UUID(int=1), UUID(int=2)
@@ -326,6 +328,72 @@ def test_confirm_arms_the_invalidation_as_a_plan_card_does(world, engine, phone,
     tap(engine, f"pc:{row.id}:confirm")
     with Session(engine) as db:
         assert len(db.exec(select(LevelAlert)).all()) == 1
+        [capture] = db.exec(select(TradeCapture)).all()  # the draft is the position's plan now, linked to its trade
+        assert capture.client_id == row.id.hex and capture.setup_label == "Copilot plan"
+        assert db.exec(select(CaptureLink)).one().capture_id == capture.id
+
+
+def test_confirm_saves_the_draft_as_the_positions_plan_and_its_time_stop(world, engine, phone):
+    fill(engine, "10:00")
+    world.tick("10:03")
+    [row] = companions(engine)
+    reply, chosen = position_companion.confirm(engine, str(row.id), quote=lambda symbol: 165.0, now=at("10:05"), calendar=Calendar())
+    assert (reply, chosen) == ("Confirmed: invalidation 158.20 on NBIS is armed; plan saved; time stop today 11:00 ET.", "Confirmed")
+    draft = position_companion.plan_of(row)
+    with Session(engine) as db:
+        [capture] = db.exec(select(TradeCapture)).all()
+        assert (capture.client_id, capture.underlying, capture.side, float(capture.strike), capture.expiration, capture.setup_label,
+                capture.mode) == (row.id.hex, "NBIS", "buy_calls", 160.0, FRI, "Copilot plan", "discretionary")
+        assert capture.note == f"Thesis: {draft['thesis']} Contract: NBIS 10/23/26 160C. From the position companion, after the fill."
+        assert capture.wording.startswith("Invalidation: crosses 158.20 (") and capture.wording.endswith("Time stop: 11:00 today. Horizon: day trade.")
+        [link] = db.exec(select(CaptureLink)).all()
+        assert link.capture_id == capture.id and link.unlinked_at is None
+        [stop] = db.exec(select(PlanTimeStop)).all()
+        assert (stop.client_id, stop.symbol, stop.investigation_id, stop.delivery) == (row.id.hex, "NBIS", str(row.investigation_id), "scheduled")
+        assert stop.due_at.replace(tzinfo=UTC).astimezone(ET).strftime("%m/%d %H:%M") == "10/21 11:00"
+        board = copilot_plans.board(db, quotes=lambda symbols: ({"NBIS": 165.0}, None, None))
+    [plan] = board["plans"]
+    assert plan["entry"]["state"] == "hit" and plan["invalidation"]["state"] == "armed" and plan["position"] == "in_position"
+    assert plan["time_stop"]["state"] == "pending" and plan["thesis"] == draft["thesis"]
+    # At its time the stop is about this position, although the position opened before the plan was saved.
+    PlanTimeStops(engine, Calendar(), clock=lambda: at("11:00")).run()
+    with Session(engine) as db:
+        [stop] = db.exec(select(PlanTimeStop)).all()
+        assert (stop.delivery, stop.trade_id) == ("pending", row.trade_id)
+    # A second tap finds the first plan and stop instead of making more.
+    reply, chosen = position_companion.confirm(engine, str(row.id), quote=lambda symbol: 165.0, now=at("10:06"), calendar=Calendar())
+    assert (reply, chosen) == ("Already confirmed: its invalidation alert is armed; plan saved; time stop today 11:00 ET.", "Confirmed")
+    with Session(engine) as db:
+        assert [len(db.exec(select(model)).all()) for model in (LevelAlert, TradeCapture, CaptureLink, PlanTimeStop)] == [1, 1, 1, 1]
+
+
+def test_a_swing_drafts_time_stop_is_the_session_before_expiry(world, engine, phone):
+    fill(engine, "10:00")
+    world.tick("10:03")
+    [row] = companions(engine)
+    with Session(engine) as db:
+        stored = db.get(PositionCompanion, row.id)
+        plan = json.loads(stored.plan_json)
+        plan.update(horizon="swing", time_stop="the close before expiry (10/23)")
+        stored.plan_json = json.dumps(plan)
+        db.add(stored)
+        db.commit()
+    reply, chosen = position_companion.confirm(engine, str(row.id), quote=lambda symbol: 165.0, now=at("10:05"), calendar=Calendar())
+    assert chosen == "Confirmed" and reply.endswith("; plan saved; time stop Thu Oct 22, 15:30 ET.")
+    with Session(engine) as db:
+        [stop] = db.exec(select(PlanTimeStop)).all()
+        assert stop.text == "1 trading day (the close before expiry (10/23))"
+        assert stop.due_at.replace(tzinfo=UTC).astimezone(ET).strftime("%a %m/%d %H:%M") == "Thu 10/22 15:30"
+
+
+def test_a_day_stop_already_passed_is_said_and_not_scheduled(world, engine, phone):
+    fill(engine, "10:00")
+    world.tick("10:03")
+    [row] = companions(engine)
+    reply, chosen = position_companion.confirm(engine, str(row.id), quote=lambda symbol: 165.0, now=at("11:30"), calendar=Calendar())
+    assert (reply, chosen) == ("Confirmed: invalidation 158.20 on NBIS is armed; plan saved; time stop 11:00 today has passed.", "Confirmed")
+    with Session(engine) as db:
+        assert db.exec(select(PlanTimeStop)).all() == [] and len(db.exec(select(TradeCapture)).all()) == 1
 
 
 def test_confirm_refuses_an_invalidation_already_crossed(world, engine, phone):
