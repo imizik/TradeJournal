@@ -64,6 +64,11 @@
   input[type="checkbox"], input[type="radio"] {
     accent-color: hsl(var(--primary));
   }
+  /* A keyboard focus ring takes the app's ring colour too; a control that styles its own focus (outline-none, an
+     outline or ring utility) keeps it, since utilities come after this layer. */
+  :focus-visible {
+    outline-color: hsl(var(--ring));
+  }
   /* Every number set in tabular-nums is in Plex Mono, as on the desk. A table or box that carries the class for its
      digit alignment keeps the text face; its number cells opt in on their own. */
   .tabular-nums:not(table):not(div) {
