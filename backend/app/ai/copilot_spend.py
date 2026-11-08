@@ -59,7 +59,7 @@ def record(metrics: dict, symbol: str | None = None, session=None, *, turn_id: u
                       first_text_ms=metrics.get("first_text_ms"), max_silence_ms=metrics.get("max_silence_ms"),
                       cache_creation_input_tokens=int(usage.get("cache_creation_input_tokens") or 0),
                       error=(error or None) and str(error)[:80], effort=effort or metrics.get("effort"),
-                      evidence=evidence or metrics.get("evidence"))
+                      evidence=evidence or metrics.get("evidence"), timings=timings_json(metrics))
     try:
         with (Session(engine) if session is None else nullcontext(session)) as db:
             db.add(row)
@@ -74,6 +74,29 @@ def record_refused(*, kind: str, source: str, backend: str, code: str, symbol: s
     """A turn that never ran (the daily budget was spent): a zero-cost row with the refusal as its error."""
     return record({"backend": backend, "rounds": 0, "usage": {}, "cost_usd": 0.0, "total_ms": 0}, symbol, session,
                   kind=kind, source=source, error=code)
+
+
+CALL_KEYS = ("name", "status", "ms", "queue_ms", "feed_wait_ms", "feed_ms")  # copilot.call_metrics' row
+MAX_ROUNDS = 12
+
+
+def timings_json(metrics: dict) -> str | None:
+    """Where the turn's wait went, as the row keeps it: the owner context read and each tool call with its time and split
+    (``copilot.call_metrics``), each round's model time and, for a round that read tools, their wall clock
+    (``metrics["rounds_ms"]``), and what the turn prefetched. None when the turn recorded none of it."""
+    calls = [c for c in metrics.get("tool_calls") or [] if isinstance(c, dict)]
+    rounds = [r for r in metrics.get("rounds_ms") or [] if isinstance(r, dict)]
+    if not calls and not rounds:
+        return None
+
+    def row(call: dict) -> dict:
+        return {k: (str(v)[:64] if k in ("name", "status") else v) for k, v in call.items() if k in CALL_KEYS and v is not None}
+
+    pack = next((row(c) for c in calls if c.get("name") == "owner_context"), None)
+    out = {"owner_context": pack, "rounds": [{k: r[k] for k in ("model_ms", "tools_ms") if r.get(k) is not None} for r in rounds][:MAX_ROUNDS],
+           "tools": [row(c) for c in calls if c.get("name") != "owner_context"][:MAX_TOOL_NAMES],
+           "prefetch": [str(n)[:64] for n in metrics.get("prefetch") or []][:4]}
+    return json.dumps(out, separators=(",", ":"))
 
 
 def _names(metrics: dict) -> list[str]:

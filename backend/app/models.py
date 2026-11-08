@@ -909,6 +909,9 @@ class CopilotTurn(SQLModel, table=True):
     error: Optional[str] = None  # the turn's error code, "stopped" when the owner stopped it, a refusal code when none ran
     effort: Optional[str] = None
     evidence: Optional[str] = None  # live | fixture | replay
+    # Where the owner's wait went (docs/copilot-lab.md § What every turn records): JSON with the owner context read, each
+    # round's model and tool time, and each tool call's time and split. Null on rows written before it.
+    timings: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
 class PhonePing(SQLModel, table=True):

@@ -57,6 +57,25 @@ def test_a_desk_turn_writes_one_row_with_its_kind_tools_and_timings_and_the_done
     assert names and "owner_context" not in names and "get_group_comparison" in names
     assert row.first_text_ms is not None and row.max_silence_ms is not None and row.cache_creation_input_tokens == 0
     assert row.effort == "medium" and row.evidence == "fixture" and row.error is None and row.billing == "none"
+    timings = json.loads(row.timings)
+    assert timings["owner_context"]["name"] == "owner_context" and set(timings["owner_context"]) == set(copilot_spend.CALL_KEYS)
+    assert [c["name"] for c in timings["tools"]] == names and all(c["ms"] is not None for c in timings["tools"])
+    assert len(timings["rounds"]) == row.rounds and "tools_ms" in timings["rounds"][0] and "tools_ms" not in timings["rounds"][-1]
+    assert timings["prefetch"] == []
+
+
+def test_timings_keep_the_split_bounded_and_none_when_nothing_ran():
+    assert copilot_spend.timings_json({"backend": "fake", "usage": {}}) is None
+    metrics = {"tool_calls": [{"name": "owner_context", "status": "ok", "ms": 900, "queue_ms": 1, "feed_wait_ms": 0, "feed_ms": 0},
+                              {"name": "web_search", "status": "ok", "ms": None, "query": "nbis news"},
+                              *({"name": "get_quotes", "status": "ok", "ms": 40, "queue_ms": 0, "feed_wait_ms": 300, "feed_ms": 30,
+                                 "extra": "x"} for _ in range(60))],
+               "rounds_ms": [{"model_ms": 2500, "tools_ms": 700}, {"model_ms": 6000}], "prefetch": ["get_quotes"]}
+    out = json.loads(copilot_spend.timings_json(metrics))
+    assert out["owner_context"] == {"name": "owner_context", "status": "ok", "ms": 900, "queue_ms": 1, "feed_wait_ms": 0, "feed_ms": 0}
+    assert out["tools"][0] == {"name": "web_search", "status": "ok"}  # no query text, no null time
+    assert len(out["tools"]) == copilot_spend.MAX_TOOL_NAMES and "extra" not in out["tools"][1]
+    assert out["rounds"] == metrics["rounds_ms"] and out["prefetch"] == ["get_quotes"]
 
 
 @pytest.mark.parametrize("question,expected", [

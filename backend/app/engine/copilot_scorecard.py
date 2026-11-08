@@ -132,6 +132,49 @@ def _ratings(answers: list[dict], key: Callable[[dict], str]) -> dict[str, dict]
             for name, g in sorted(groups.items())}
 
 
+def _timings(turn: CopilotTurn) -> dict | None:
+    """The turn's recorded split (``copilot_spend.timings_json``); None for an older row or a malformed value."""
+    try:
+        value = json.loads(turn.timings) if turn.timings else None
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _spread(values: list) -> dict:
+    found = [v for v in values if isinstance(v, (int, float))]
+    return {"p50": _percentile(found, 0.5), "p90": _percentile(found, 0.9)}
+
+
+def timings(turns: list[CopilotTurn]) -> dict:
+    """Where the owner's wait went, over turns that did not fail and recorded it. By kind: the owner context read, the
+    model's time in a round that asked for tools, those tools' wall clock (they run side by side), and the model's time
+    in the answer round (on Sonnet the answer after a tool result arrives whole, so this is most of its first text). By
+    tool, every call: its time and the median of its split (``queue_ms`` waiting for a worker thread, ``feed_wait_ms``
+    queued in the chart feed (the same read in flight, a provider slot), ``feed_ms`` in the chart feed's provider reads)."""
+    timed = [(t, p) for t in turns if not t.error and (p := _timings(t)) is not None]
+    by_kind: dict[str, dict] = {}
+    for kind in sorted({t.kind or "unknown" for t, _ in timed}):
+        mine = [p for t, p in timed if (t.kind or "unknown") == kind]
+        rounds = [[r for r in p.get("rounds") or [] if isinstance(r, dict)] for p in mine]
+        by_kind[kind] = {
+            "turns": len(mine),
+            "owner_context_ms": _spread([(p.get("owner_context") or {}).get("ms") for p in mine]),
+            "tool_round_model_ms": _spread([r.get("model_ms") for rs in rounds for r in rs if "tools_ms" in r]),
+            "tool_round_tools_ms": _spread([r.get("tools_ms") for rs in rounds for r in rs]),
+            "answer_round_model_ms": _spread([rs[-1].get("model_ms") for rs in rounds if rs and "tools_ms" not in rs[-1]]),
+        }
+    calls: dict[str, list[dict]] = defaultdict(list)
+    for _, p in timed:
+        for call in p.get("tools") or []:
+            if isinstance(call, dict) and call.get("name"):
+                calls[str(call["name"])].append(call)
+    by_tool = {name: {"calls": len(rows), "errors": sum(r.get("status") == "error" for r in rows), "ms": _spread([r.get("ms") for r in rows]),
+                      **{f"{k}_p50": _spread([r.get(k) for r in rows])["p50"] for k in ("queue_ms", "feed_wait_ms", "feed_ms")}}
+               for name, rows in sorted(calls.items())}
+    return {"turns": len(timed), "by_kind": by_kind, "by_tool": by_tool}
+
+
 def answer_scorecard(db: Session, now: datetime, days: int = 7) -> dict:
     """The card for the last ``days`` New York days ending now (``now`` is naive UTC, as the rows are stored)."""
     since = now - timedelta(days=days)
@@ -187,6 +230,7 @@ def answer_scorecard(db: Session, now: datetime, days: int = 7) -> dict:
         return by_kind
 
     _section(out, db, "latency", latency)
+    _section(out, db, "timings", lambda: timings(turns_list))
     _section(out, db, "failed", lambda: dict(sorted(Counter(t.error for t in turns_list if t.error).items())))
 
     def spend():

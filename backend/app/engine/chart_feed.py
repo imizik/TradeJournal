@@ -35,6 +35,9 @@ class CachedRead:
     expires_at: float
 
 
+PROVIDER_SLOTS = 4
+
+
 class ChartFeed:
     def __init__(self, splits: ChartSplits | None = None):
         from app.engine.chart_daily import ChartDaily  # imported here: chart_daily needs this module's errors
@@ -48,6 +51,10 @@ class ChartFeed:
         self._calls: deque[float] = deque()
         self._retry_at = 0.0
         self._failed: dict[tuple, float] = {}  # per-request backoff after a timeout or provider error
+        self._flights: dict[tuple, threading.Event] = {}  # requests being read now, set when each one is done
+        # At most PROVIDER_SLOTS of the shared connection pool's eight at once (it held one when a lock spanned each call),
+        # leaving room for the alert monitors' Tradier quote reads, Alpaca history and FRED.
+        self._slots = threading.BoundedSemaphore(PROVIDER_SLOTS)
 
     def read(self, path: str, params: dict, ttl: int, keep: bool = True) -> tuple[dict, float, str | None]:
         """One budgeted Tradier GET. ``keep=False`` skips the response cache (and its stale fallback):
@@ -55,61 +62,92 @@ class ChartFeed:
         if not tradier.tradier_configured():
             raise ChartFeedError("Connect your Tradier account to load charts. Set TRADIER_API_KEY on the private backend.", "not_configured")
         key = (tradier.TRADIER_BASE_URL, path, tuple(sorted(params.items())))
-        # The lock also coalesces concurrent requests from several tabs/panels.
-        with measured_lock(self._lock, "tradier_queue"):
-            now = time.time()
-            saved = self._cache.get(key) if keep else None
-            if saved:
-                self._cache.move_to_end(key)
-                if now < saved.expires_at:
-                    return saved.data, saved.fetched_at, None
-            while self._calls and self._calls[0] <= now - 60:
-                self._calls.popleft()
+        # The lock guards the cache, the budget and the backoffs, never a provider call: different requests (a copilot
+        # turn's reads, the alert monitors, the Charts tab) go out side by side. A request already in flight is joined,
+        # not sent twice, so several tabs, panels or reads asking for the same thing still make one call.
+        while True:
+            with measured_lock(self._lock, "tradier_queue"):
+                now = time.time()
+                saved = self._cache.get(key) if keep else None
+                if saved:
+                    self._cache.move_to_end(key)
+                    if now < saved.expires_at:
+                        return saved.data, saved.fetched_at, None
+                flight = self._flights.get(key)
+                if flight is None:
+                    while self._calls and self._calls[0] <= now - 60:
+                        self._calls.popleft()
+                    try:
+                        if now < self._retry_at or len(self._calls) >= 60:
+                            raise ChartFeedError("Chart requests are cooling down to stay within the data allowance.", "rate_limited")
+                        if now < self._failed.get(key, 0):
+                            raise ChartFeedError("The chart data connection is unavailable. Retrying shortly.")
+                    except ChartFeedError as exc:
+                        return self._failure(key, saved, now, exc)
+                    self._calls.append(now)
+                    self._flights[key] = flight = threading.Event()
+                    break
+            # Wait for the caller already reading this request, then read its result (or its failure) as it left it.
+            with measured("tradier_queue"):
+                flight.wait()
+        try:
             try:
-                if now < self._retry_at or len(self._calls) >= 60:
-                    raise ChartFeedError("Chart requests are cooling down to stay within the data allowance.", "rate_limited")
-                if now < self._failed.get(key, 0):
-                    raise ChartFeedError("The chart data connection is unavailable. Retrying shortly.")
-                self._calls.append(now)
-                with measured("tradier_provider"):
-                    response = market_http.get(
-                        f"{tradier.TRADIER_BASE_URL}{path}", params=params,
-                        headers={"Authorization": f"Bearer {tradier.TRADIER_API_KEY}", "Accept": "application/json"},
-                        timeout=10,
-                    )
+                with measured("tradier_queue"):
+                    self._slots.acquire()
+                now = time.time()  # deadlines (cache, backoff, cooldown) count from the call, not from the wait for a slot
+                try:
+                    with measured("tradier_provider"):
+                        response = market_http.get(
+                            f"{tradier.TRADIER_BASE_URL}{path}", params=params,
+                            headers={"Authorization": f"Bearer {tradier.TRADIER_API_KEY}", "Accept": "application/json"},
+                            timeout=10,
+                        )
+                finally:
+                    self._slots.release()
                 if response.status_code == 429:
-                    self._retry_at = now + 60
+                    with self._lock:  # a later deadline from a read that started after this one stands
+                        self._retry_at = max(self._retry_at, now + 60)
                     raise ChartFeedError("Tradier's data allowance is temporarily exhausted. Retrying in one minute.", "rate_limited")
                 if response.status_code in (401, 403):
-                    self._retry_at = now + 60
+                    with self._lock:  # a later deadline from a read that started after this one stands
+                        self._retry_at = max(self._retry_at, now + 60)
                     raise ChartFeedError("Tradier refused market data. Check the token and account data access.", "access_denied")
                 if response.status_code >= 400:
                     raise ChartFeedError("Tradier could not load these charts. Please retry shortly.")
                 payload = response.json()
                 if not isinstance(payload, dict) or payload.get("fault") or payload.get("errors"):
                     raise ChartFeedError("Tradier returned an unexpected market-data response.")
+            except (httpx.HTTPError, ValueError, ChartFeedError) as exc:
+                with self._lock:
+                    return self._failure(key, saved, now, exc)
+            with self._lock:
                 self._failed.pop(key, None)
                 fresh = CachedRead(payload, time.time(), now + ttl)
-                if not keep:
-                    return fresh.data, fresh.fetched_at, None
-                self._cache[key] = fresh
-                self._cache.move_to_end(key)
-                while len(self._cache) > 96:
-                    self._cache.popitem(last=False)
+                if keep:
+                    self._cache[key] = fresh
+                    self._cache.move_to_end(key)
+                    while len(self._cache) > 96:
+                        self._cache.popitem(last=False)
                 return fresh.data, fresh.fetched_at, None
-            except (httpx.HTTPError, ValueError, ChartFeedError) as exc:
-                error = exc if isinstance(exc, ChartFeedError) else ChartFeedError("The chart data connection is unavailable. Retrying shortly.")
-                # Failure cache prevents repeated misses during an outage; old
-                # data is explicitly marked, never silently represented as live.
-                # A timeout or provider error backs off only this request, so one slow
-                # symbol (Tradier intermittently times out on SPY's minutes) cannot
-                # freeze every chart; refusals and 429s above stay account-wide.
-                if error.code != "rate_limited" and now >= self._failed.get(key, 0):
-                    self._failed = {k: t for k, t in self._failed.items() if t > now}
-                    self._failed[key] = now + 15
-                if saved:
-                    return saved.data, saved.fetched_at, str(error)
-                raise error from None
+        finally:
+            with self._lock:
+                self._flights.pop(key, None)
+            flight.set()
+
+    def _failure(self, key: tuple, saved: CachedRead | None, now: float, exc: Exception) -> tuple[dict, float, str | None]:
+        """A read that failed, under the lock: the previous data marked with the issue, else the error."""
+        error = exc if isinstance(exc, ChartFeedError) else ChartFeedError("The chart data connection is unavailable. Retrying shortly.")
+        # Failure cache prevents repeated misses during an outage; old
+        # data is explicitly marked, never silently represented as live.
+        # A timeout or provider error backs off only this request, so one slow
+        # symbol (Tradier intermittently times out on SPY's minutes) cannot
+        # freeze every chart; refusals and 429s above stay account-wide.
+        if error.code != "rate_limited" and now >= self._failed.get(key, 0):
+            self._failed = {k: t for k, t in self._failed.items() if t > now}
+            self._failed[key] = now + 15
+        if saved:
+            return saved.data, saved.fetched_at, str(error)
+        raise error from None
 
     def workspace(self, symbol: str, intervals: list[str], watchlist: list[str], session: str, calendar=None, quotes: bool = True,
                   stored_session: Callable[[str, date], list[dict] | None] | None = None,

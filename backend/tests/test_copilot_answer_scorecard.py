@@ -88,6 +88,41 @@ def test_counts_ratings_pushback_follow_ups_latency_and_cost_from_turns_and_save
     assert sum(d["usd"] for d in card["spend_by_day"]) == pytest.approx(0.114) and all(d["billing"] in ("api", "none") for d in card["spend_by_day"])
 
 
+def _timed(db, kind, owner_ms, rounds, tools, **kw) -> uuid.UUID:
+    row_id = turn(db, kind=kind, **kw)
+    row = db.get(CopilotTurn, row_id)
+    row.timings = json.dumps({"owner_context": {"name": "owner_context", "status": "ok", "ms": owner_ms}, "rounds": rounds,
+                              "tools": tools, "prefetch": []})
+    db.add(row)
+    db.commit()
+    return row_id
+
+
+def test_timings_split_the_wait_by_kind_and_by_tool():
+    quote = {"name": "get_quotes", "status": "ok", "ms": 300, "queue_ms": 0, "feed_wait_ms": 200, "feed_ms": 90}
+    chart = {"name": "get_chart_context", "status": "ok", "ms": 2400, "queue_ms": 5, "feed_wait_ms": 0, "feed_ms": 1800}
+    with Session(engine) as db:
+        _timed(db, "ask", 1200, [{"model_ms": 3000, "tools_ms": 2400}, {"model_ms": 7000}], [quote, chart])
+        _timed(db, "ask", 800, [{"model_ms": 5000}], [])  # answered without tools
+        _timed(db, "plan", 1500, [{"model_ms": 2000, "tools_ms": 400}, {"model_ms": 2500, "tools_ms": 900}, {"model_ms": 6000}],
+               [quote, {**quote, "status": "error", "ms": 10000}])
+        _timed(db, "ask", 9999, [{"model_ms": 9999}], [chart], error="timeout")  # a failed turn is left out
+        turn(db)  # an older row without timings is left out too
+        db.add(CopilotTurn(backend="anthropic", billing="api", kind="ask", started_at=NOW - timedelta(hours=1), timings="not json"))
+        db.commit()
+        card = copilot_scorecard.answer_scorecard(db, NOW, 7)
+    t = card["timings"]
+    assert t["turns"] == 3 and set(t["by_kind"]) == {"ask", "plan"}
+    ask = t["by_kind"]["ask"]
+    assert ask["turns"] == 2 and ask["owner_context_ms"] == {"p50": 800, "p90": 1200}
+    assert ask["tool_round_model_ms"] == {"p50": 3000, "p90": 3000} and ask["tool_round_tools_ms"] == {"p50": 2400, "p90": 2400}
+    assert ask["answer_round_model_ms"] == {"p50": 5000, "p90": 7000}
+    assert t["by_kind"]["plan"]["tool_round_tools_ms"] == {"p50": 400, "p90": 900}
+    q = t["by_tool"]["get_quotes"]
+    assert (q["calls"], q["errors"], q["ms"]["p90"], q["feed_wait_ms_p50"], q["feed_ms_p50"]) == (3, 1, 10000, 200, 90)
+    assert t["by_tool"]["get_chart_context"]["calls"] == 1  # the failed turn's call is not counted
+
+
 def test_a_late_evening_turn_lands_on_its_new_york_day_and_the_window_moves():
     with Session(engine) as db:
         turn(db, started=datetime(2026, 10, 30, 3, 30), cost=0.01)  # 23:30 New York on Oct 29
