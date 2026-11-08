@@ -1296,8 +1296,15 @@ since-entry comparison, the news reader) and writes nothing.
   own: the card's lines, **Confirm** (`pl:<card client id>:confirm`, which
   runs the same parts as the desk's Confirm: the pre-trade plan, then the
   entry and invalidation alerts and the time stop; see Confirm a plan) and
-  **Edit** (the thread). The bot's taps: `fb:`, `rr:`, `pc:`, `pu:`, `pl:`,
-  `why:` and `ask:` (`engine/telegram_replies.py`).
+  **Edit** (the thread). Each answer saved on the desk is sent with **Helped**
+  and **Didn't** under it (`hd:<conversation id as 32 hex>:<message index>:h|d|n`):
+  a tap sets that answer's rating through `copilot_investigations.set_rating`,
+  as the desk's buttons do, so the answer scorecard counts it; the other button
+  switches, and the checked one carries `n` and clears. The saved answer keeps
+  its turn's `turn_id` in `metrics`, so the scorecard meets it (source
+  `telegram`) even on a thread older than its window. The bot's taps: `fb:`,
+  `rr:`, `hd:`, `pc:`, `pu:`, `pl:`, `why:` and `ask:`
+  (`engine/telegram_replies.py`).
 - Headlines are read through a two-minute cache per symbol and entry, so the
   desk header's and Charts' minute refresh and repeated turns make one news read.
 - The context route is owner-only: it is in `access_manifest.DOMAIN_ROUTES`,
@@ -1420,7 +1427,9 @@ that rating once through the existing
 alert leaves Close the day's questions. It shows "Saved: …" with Edit feedback
 to change it (or add a reason). An alert already answered keeps its answer: the
 tap is shown as not saved over it, and a stale save gets the usual reload
-prompt. No new route, token or public ingress. The push no longer carries its
+prompt. No new route, token or public ingress. On Telegram the alert carries
+all four answers instead, Prompted review, Already aware, Too late and Not
+useful, as reply buttons that save in place, and Why?. The push no longer carries its
 own Ask copilot or Open trade action: the page's Ask copilot inside the selected
 alert takes the ping's old context instead, what the alert saw, e.g.
 `Review this position: <id>. Give-back alert at 11:02 AM: was +$124, now +$20.`
@@ -2767,7 +2776,8 @@ code, so real use shows which answers helped and how slow they were. A rating
 is saved at once by `PUT /copilot/investigations/{id}/messages/{index}/rating`
 (no revision, like a card outcome; queued until the conversation's first save
 lands), and a later save from a window that had not seen it keeps it. Older
-records have neither field and read as before.
+records have neither field and read as before. Answers the Telegram bot sends
+carry the same two buttons and set the same rating (see Telegram on the desk).
 
 The same record holds background research results. `source` is `copilot` (the
 lab page, through the HTTP routes) or `research_job` (saved in-process by
@@ -2940,7 +2950,7 @@ now says what the turn was for and how it went:
   model ran. The morning brief is refused past the cap like a desk turn; the
   week review runs regardless.
 - `investigation_id`: the saved conversation. The `done` event carries the
-  row's `turn_id`; the browser keeps it in the answer's saved `metrics`, and
+  row's `turn_id`; the browser (and the Telegram bot) keeps it in the answer's saved `metrics`, and
   saving the investigation links the rows (`copilot_spend.link`), so a
   conversation's cost and the Helped / Didn't on each answer meet. The first
   answer of a new thread links at its first save.

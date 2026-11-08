@@ -8,11 +8,17 @@ Telegram cannot be reached the task sleeps and tries again; nothing else waits o
 
 A button's callback data is ``<verb>:<id>[:<answer>]``, at most 64 bytes:
 
-- ``fb:<position alert id>:<rating>``: the owner's feedback on an open-trade alert, saved through the trade page's
-  own route (``PUT /trades/{trade_id}/phone-alerts/{alert_id}/feedback``, base version 0), so a repeated tap saves
-  nothing new and a different answer after the first is refused as the page refuses it;
-- ``rr:<Radar alert id>:<rating>``: a Radar event's rating through the Radar page's own route
-  (``POST /radar/events/{event_id}/feedback``, what ``&rate=`` posts), skipped when it is already the latest rating;
+- ``fb:<position alert id>:<rating>``: the owner's feedback on an open-trade alert (Prompted review, Already aware,
+  Too late, Not useful), saved through the trade page's own route
+  (``PUT /trades/{trade_id}/phone-alerts/{alert_id}/feedback``, base version 0), so a repeated tap saves nothing new
+  and a different answer after the first is refused as the page refuses it;
+- ``rr:<Radar alert id>:<rating>``: a Radar event's rating (Useful, Already knew, Too late, Not useful) through the
+  Radar page's own route (``POST /radar/events/{event_id}/feedback``, what ``&rate=`` posts), skipped when it is
+  already the latest rating;
+- ``hd:<investigation id as 32 hex>:<message index>:h|d|n``: Helped / Didn't under a copilot answer the bot sent, set
+  on the answer saved on the desk as the desk's buttons set it (``copilot_investigations.set_rating``, what
+  ``PUT /copilot/investigations/{id}/messages/{index}/rating`` does): ``h`` helped, ``d`` didn't, ``n`` clears it (the
+  checked button carries ``n``, so a second tap on it clears, as on the desk); the other button changes it;
 - ``pc:<companion id>:confirm|ignore``: the position companion's adopt message (``engine/position_companion.py``):
   Confirm arms the draft plan's invalidation alert as a confirmed plan card does, Ignore stops its updates;
 - ``pu:<companion id>:<update>:closed|holding``: the owner's answer to a companion update, recorded on its row;
@@ -47,7 +53,9 @@ Telegram:" (a Why? tap is saved as "Why? on a ping", never the ping's text, whic
 result), and the answer, as two messages on the symbol's thread (its plan, else the conversation the companion adopted
 it in, else the newest open conversation about it; its ``updated_at`` left as it was, so thesis watch re-checks the
 same conversation), or, with none or no symbol, in today's Main chat. No conversation is created (an open one with a
-symbol would start thesis-watch pings).
+symbol would start thesis-watch pings). The saved answer keeps its turn's ``turn_id`` in its metrics, as the desk's
+do, so the answer scorecard counts it (source ``telegram``) and its rating; an answer that was saved is sent with
+Helped and Didn't (``hd:``) under it.
 
 A ``trade_plan`` card the turn proposes (at most ``PLAN_CARDS``) is saved on the answer as the desk saves one (the
 proposal event without its type, its id made unique in the conversation, and a client id; on Main chat ``append_main``
@@ -96,6 +104,8 @@ FAILED = "The copilot turn failed unexpectedly."
 FEEDBACK_LABELS = {"prompted_review": "Prompted review", "already_aware": "Already aware", "too_late": "Too late",
                    "not_useful": "Not useful"}
 RADAR_LABELS = {"useful": "Useful", "already_knew": "Already knew", "too_late": "Too late", "irrelevant": "Not useful"}
+RATE_LABELS = {"helped": "Helped", "didnt": "Didn't"}  # the desk's ratings of a copilot answer
+RATE_CODES = {"h": "helped", "d": "didnt", "n": None}  # ``hd:`` answer codes; ``n`` clears
 DONE = "done"  # a button that shows a chosen answer (``done:<id>``, so a reply still finds the alert); a tap does nothing
 WHY = object()  # _mark's marker for a Why? tap
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
@@ -112,14 +122,23 @@ HORIZON_LABEL = {"day": "Day trade", "swing": "Swing", "long": "Long hold"}
 CONDITION = {"touches": "touches", "crosses": "crosses", "closes_beyond": "closes beyond"}
 
 
-def feedback_buttons(alert_id, ratings: tuple[str, ...] = ("prompted_review", "already_aware")) -> tuple[tuple[str, str], ...]:
-    """Reply buttons for an open-trade alert: its feedback answers and Why?"""
+def feedback_buttons(alert_id, ratings: tuple[str, ...] = tuple(FEEDBACK_LABELS)) -> tuple[tuple[str, str], ...]:
+    """Reply buttons for an open-trade alert: its feedback answers (all four by default) and Why?"""
     return tuple((FEEDBACK_LABELS[r], f"fb:{alert_id}:{r}") for r in ratings) + (("Why?", f"why:{alert_id}"),)
 
 
-def rating_buttons(radar_alert_id, ratings: tuple[str, ...] = ("useful", "irrelevant")) -> tuple[tuple[str, str], ...]:
-    """Reply buttons for a Radar ping, keyed by its ``RadarAlert`` row (an event id can be longer than 64 bytes)."""
+def rating_buttons(radar_alert_id, ratings: tuple[str, ...] = tuple(RADAR_LABELS)) -> tuple[tuple[str, str], ...]:
+    """Reply buttons for a Radar ping (all four ratings by default), keyed by its ``RadarAlert`` row (an event id can be
+    longer than 64 bytes)."""
     return tuple((RADAR_LABELS[r], f"rr:{radar_alert_id}:{r}") for r in ratings)
+
+
+def rate_buttons(investigation_id, index: int, rating: str | None = None) -> tuple[tuple[str, str], ...]:
+    """Helped and Didn't under a copilot answer saved on the desk at ``index``: the saved one checked, carrying ``n`` so a
+    second tap clears it, as the desk's buttons toggle."""
+    key = uuid.UUID(str(investigation_id)).hex
+    return tuple((f"✓ {label}" if value == rating else label, f"hd:{key}:{index}:{'n' if value == rating else value[0]}")
+                 for value, label in RATE_LABELS.items())
 
 
 class Replies:
@@ -132,6 +151,7 @@ class Replies:
         self._tasks: set[asyncio.Task] = set()
         self._asked: set = set()  # messages whose Why? was asked in this process
         self._plans: list[str] = []  # the client ids of the plan cards the running turn saved, sent after its answer
+        self._saved: tuple[str, int] | None = None  # where the running turn's answer was saved, for its Helped / Didn't
         self.quote = None  # a test's quote reader for Confirm; None reads the copilot's fresh quote
 
     async def loop(self) -> None:
@@ -177,6 +197,8 @@ class Replies:
             reply, chosen = await asyncio.to_thread(self._companion, *rest.partition(":")[::2])
         elif verb == "pl":
             reply, chosen = await asyncio.to_thread(self._plan, *rest.partition(":")[::2])
+        elif verb == "hd":
+            reply, chosen = await asyncio.to_thread(self._rate, rest)
         elif verb == "pu":
             from app.engine import position_companion
             companion_id, _, tail = rest.partition(":")
@@ -302,13 +324,28 @@ class Replies:
             return "That button is not one the app knows.", None
         return confirm_plan(self.engine, client_id, quote=self.quote, armed=self.alerts_changed)
 
+    def _rate(self, rest: str) -> tuple[str, tuple | None]:
+        """Helped / Didn't on an answer saved on the desk, set as the desk sets it; the chosen value is the new row."""
+        from app.engine import copilot_investigations as investigations
+        key, _, tail = rest.partition(":")
+        index, _, code = tail.partition(":")
+        if not PLAN_KEY.match(key) or not index.isdigit() or code not in RATE_CODES:
+            return "That button is not one the app knows.", None
+        rating = RATE_CODES[code]
+        try:
+            with Session(self.engine) as db:
+                investigations.set_rating(uuid.UUID(key), int(index), rating, session=db)
+        except investigations.InvestigationError as exc:
+            return str(exc), None
+        return (f"Saved: {RATE_LABELS[rating]}." if rating else "Rating cleared."), rate_buttons(key, int(index), rating)
+
     async def _why(self, alert_id: str, message: dict) -> None:
         try:
             text = await self.why_text(alert_id)
         except Exception:  # noqa: BLE001 - the owner hears that it failed, never silence
             log.exception("Telegram Why? turn failed")
             text = FAILED
-        await asyncio.to_thread(self._reply, message, text)
+        await asyncio.to_thread(self._reply, message, text, self._rate_row())
         await asyncio.to_thread(self._send_plans, message)
 
     async def _ask_ping(self, message: dict) -> None:
@@ -321,7 +358,7 @@ class Replies:
         except Exception:  # noqa: BLE001 - the owner hears that it failed, never silence
             log.exception("Telegram Why? turn failed")
             answer = FAILED
-        await asyncio.to_thread(self._reply, message, answer)
+        await asyncio.to_thread(self._reply, message, answer, self._rate_row())
         await asyncio.to_thread(self._send_plans, message)
 
     async def _ask(self, text: str, message: dict) -> None:
@@ -330,7 +367,7 @@ class Replies:
         except Exception:  # noqa: BLE001 - the owner hears that it failed, never silence
             log.exception("Telegram question turn failed")
             answer = FAILED
-        await asyncio.to_thread(self._reply, message, answer)
+        await asyncio.to_thread(self._reply, message, answer, self._rate_row())
         await asyncio.to_thread(self._send_plans, message)
 
     async def _voice(self, file_id: str, message: dict) -> None:
@@ -393,7 +430,7 @@ class Replies:
         finally:
             if image_id:
                 copilot_images.delete(image_id)
-        await asyncio.to_thread(self._reply, message, answer)
+        await asyncio.to_thread(self._reply, message, answer, self._rate_row())
         await asyncio.to_thread(self._send_plans, message)
 
     def _alert_context(self, alert_id: str) -> tuple[str, str | None] | None:
@@ -463,7 +500,8 @@ class Replies:
         errors: list[str] = []
         cards: list[str] = []
         plans: list[dict] = []
-        self._plans = []
+        turn_id: str | None = None
+        self._plans, self._saved = [], None
         try:
             turn = copilot_spend.recorded_turn(history, symbol, cfg, adapter, evidence, now, kind=None, source="telegram",
                                                images=images, web=True)
@@ -473,6 +511,8 @@ class Replies:
                         parts.append(event.get("delta") or "")
                     elif event.get("type") == "error":
                         errors.append(event.get("message") or "")
+                    elif event.get("type") == "done":
+                        turn_id = event.get("turn_id")
                     elif event.get("type") == "proposal" and event.get("kind") == "trade_plan" and len(plans) < PLAN_CARDS:
                         # Saved as the desk saves a card: the event without its type, with a client id of its own.
                         plans.append({**{k: v for k, v in event.items() if k != "type"}, "client_id": uuid.uuid4().hex})
@@ -489,21 +529,27 @@ class Replies:
             answer = (answer + "\n\n" if answer else "") + " ".join(errors)
         answer = answer or "The copilot gave no answer."
         answer = answer if len(answer) <= ANSWER_MAX else answer[: ANSWER_MAX - 1].rstrip() + "…"
-        if await asyncio.to_thread(self._save, said or question, symbol, answer, now, plans) and plans:
+        self._saved = await asyncio.to_thread(self._save, said or question, symbol, answer, now, plans, turn_id)
+        if self._saved and plans:
             self._plans = [p["client_id"] for p in plans]  # sent after the answer (``_send_plans``)
         return answer
 
-    def _save(self, said: str, symbol: str | None, answer: str, now: datetime, plans: list[dict] = ()) -> bool:
+    def _save(self, said: str, symbol: str | None, answer: str, now: datetime, plans: list[dict] = (),
+              turn_id: str | None = None) -> tuple[str, int] | None:
         """The owner's words and the answer, with its plan cards, as messages on the desk: the symbol's thread
-        (``thread_for``), else today's Main chat. A failure only leaves the desk without them; the chat already has the
-        answer."""
+        (``thread_for``), else today's Main chat; where the answer went (conversation id, message index). A failure only
+        leaves the desk without them (and the answer without Helped / Didn't); the chat already has the answer."""
         try:
             with Session(self.engine) as db:
-                save_on_desk(db, said, symbol, answer, now, plans) if plans else save_on_desk(db, said, symbol, answer, now)
-            return True
+                return save_on_desk(db, said, symbol, answer, now, plans, turn_id=turn_id)
         except Exception:  # noqa: BLE001
             log.warning("Telegram answer not saved on the desk", exc_info=True)
-            return False
+            return None
+
+    def _rate_row(self) -> tuple[tuple[str, str], ...]:
+        """Helped and Didn't for the answer the last turn saved (taken once), or none when it was not saved."""
+        saved, self._saved = self._saved, None
+        return rate_buttons(*saved) if saved else ()
 
     def _send_plans(self, message: dict) -> None:
         """Each plan card the turn saved, as its own message after the answer: the card's lines, Confirm and Edit (its
@@ -529,12 +575,15 @@ class Replies:
 
     # -------------------------------------------------------------- the chat
 
-    def _reply(self, message: dict, text: str) -> None:
+    def _reply(self, message: dict, text: str, buttons: tuple[tuple[str, str], ...] = ()) -> None:
+        """A reply to ``message``; ``buttons``: one row of reply buttons under it (an answer's Helped / Didn't)."""
+        payload = {"chat_id": telegram.chat_id(), "text": text, "reply_parameters": {"message_id": message.get("message_id"),
+                                                                                     "allow_sending_without_reply": True},
+                   "link_preview_options": {"is_disabled": True}}
+        if buttons:
+            payload["reply_markup"] = {"inline_keyboard": [[{"text": label, "callback_data": data} for label, data in buttons]]}
         try:
-            self.call("sendMessage", json={
-                "chat_id": telegram.chat_id(), "text": text, "reply_parameters": {"message_id": message.get("message_id"),
-                                                                                  "allow_sending_without_reply": True},
-                "link_preview_options": {"is_disabled": True}})
+            self.call("sendMessage", json=payload)
         except telegram.TelegramError as exc:
             log.warning("Telegram answer not delivered: %s", exc)
 
@@ -547,20 +596,38 @@ class Replies:
         except telegram.TelegramError as exc:  # an old tap can no longer be answered; what was saved stays saved
             log.info("Telegram tap not answered: %s", exc)
 
-    def _mark(self, message: dict, data: str, chosen: str) -> None:
-        """Edit the message's keyboard: an answer replaces its row with "✓ <the saved answer>"; Why? is marked asked."""
+    def _mark(self, message: dict, data: str, chosen) -> None:
+        """Edit the message's keyboard: a ping's answers, on however many rows they sit, give way to "✓ <the saved
+        answer>" on the first of those rows, its Why? kept beside it; Why? is marked asked; Helped / Didn't (``chosen``:
+        their new buttons) show the saved rating and stay tappable."""
         rows = ((message.get("reply_markup") or {}).get("inline_keyboard")) or []
         done = f"{DONE}:{data.split(':')[1]}" if data.count(":") >= 1 else DONE  # keeps the alert for a typed reply
         edited = []
-        for row in rows:
-            tapped = next((b for b in row if b.get("callback_data") == data), None)
-            if tapped is None:
-                edited.append(row)
-            elif chosen == WHY:
-                edited.append([{"text": "✓ Why? (answer below)", "callback_data": done} if b is tapped else b for b in row])
-            else:  # the answers give way to the saved one; Why? stays
-                kept = [b for b in row if str(b.get("callback_data", "")).startswith(("why:", "ask:", DONE)) and b is not tapped]
-                edited.append([{"text": f"✓ {chosen}", "callback_data": done}, *kept])
+        if chosen is WHY or isinstance(chosen, tuple):
+            for row in rows:
+                tapped = next((b for b in row if b.get("callback_data") == data), None)
+                if tapped is None:
+                    edited.append(row)
+                elif chosen is WHY:
+                    edited.append([{"text": "✓ Why? (answer below)", "callback_data": done} if b is tapped else b for b in row])
+                else:
+                    edited.append([{"text": label, "callback_data": value} for label, value in chosen])
+        else:
+            group = data.rsplit(":", 1)[0] + ":"  # this ping's answers: the tapped one's verb and id
+
+            def answer(b):
+                return str(b.get("callback_data", "")).startswith(group)
+            kept, first = [], None
+            for row in rows:
+                if not any(answer(b) for b in row):
+                    edited.append(row)
+                    continue
+                if first is None:
+                    first = len(edited)
+                    edited.append([])
+                kept += [b for b in row if not answer(b) and str(b.get("callback_data", "")).startswith(("why:", "ask:", DONE))]
+            if first is not None:
+                edited[first] = [{"text": f"✓ {chosen}", "callback_data": done}, *kept]
         if edited == rows:
             return
         try:
@@ -592,15 +659,19 @@ def thread_for(db: Session, symbol: str) -> str | None:
     return str(latest.id) if latest is not None else None
 
 
-def save_on_desk(db: Session, said: str, symbol: str | None, answer: str, now: datetime, plans: list[dict] = ()) -> str:
+def save_on_desk(db: Session, said: str, symbol: str | None, answer: str, now: datetime, plans: list[dict] = (), *,
+                 turn_id: str | None = None) -> tuple[str, int]:
     """Append one Telegram exchange to the desk (``said``: the owner's own words, never a ping's text); the
-    investigation id it went to. On the symbol's thread its ``updated_at`` is kept as it was, so thesis watch, which
-    re-checks each symbol's newest open conversation, re-checks the same one; with no thread, today's Main chat.
+    investigation id it went to and the answer's index there (what Helped / Didn't rate). ``turn_id``: the turn's
+    ``copilot_turn`` row, kept in the answer's metrics as the desk keeps it, so the scorecard meets the two. On the
+    symbol's thread its ``updated_at`` is kept as it was, so thesis watch, which re-checks each symbol's newest open
+    conversation, re-checks the same one; with no thread, today's Main chat.
     ``plans``: the answer's trade plan cards as the desk saves them (the proposal event without its type, with a client
     id); one that does not validate is left out and logged, so it never costs the exchange its save."""
     from sqlalchemy import update as sql_update
     from app.engine import copilot_investigations as investigations, position_companion
     from app.models import CopilotInvestigation
+    metrics = {"metrics": {"turn_id": turn_id}} if turn_id else {}
     cards = []
     for card in plans:
         try:
@@ -616,18 +687,20 @@ def save_on_desk(db: Session, said: str, symbol: str | None, answer: str, now: d
             while card["id"] in taken:
                 card["id"], n = f"{base}.{n}", n + 1
             taken.add(card["id"])
-        position_companion.save_messages(target, [{"role": "user", "content": FROM_TELEGRAM + said},
-                                                  {"role": "assistant", "content": answer, "proposals": cards}], session=db)
+        saved = position_companion.save_messages(target, [{"role": "user", "content": FROM_TELEGRAM + said},
+                                                          {"role": "assistant", "content": answer, "proposals": cards, **metrics}], session=db)
         db.execute(sql_update(CopilotInvestigation).where(CopilotInvestigation.id == uuid.UUID(target)).values(updated_at=before))
         db.commit()
-        return target
+        return target, len(saved["transcript"]) - 1
     from app.engine.chart_math import ET
     main = investigations.main_chat(db, now.astimezone(ET).date())
     about = f" ({symbol})" if symbol else ""
     exchange = investigations.InvestigationFields(title=main["title"], transcript=[
         {"role": "user", "content": FROM_TELEGRAM.rstrip(": ") + about + ": " + said},
-        {"role": "assistant", "content": answer, "exchange_id": f"telegram-{uuid.uuid4().hex}", **({"proposals": cards} if cards else {})}])
-    return investigations.append_main(db, main["id"], exchange)["id"]  # a plan card gets its own plan thread there
+        {"role": "assistant", "content": answer, "exchange_id": (receipt := f"telegram-{uuid.uuid4().hex}"), **metrics,
+         **({"proposals": cards} if cards else {})}])
+    saved = investigations.append_main(db, main["id"], exchange)  # a plan card gets its own plan thread there
+    return saved["id"], next(i for i, m in enumerate(saved["transcript"]) if m.get("exchange_id") == receipt)
 
 
 def find_plan(db: Session, client_id: str) -> tuple[str, dict] | None:

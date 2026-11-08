@@ -145,10 +145,11 @@ def test_telegram_questions_and_answers_land_on_the_symbols_desk_thread(db, monk
     monkeypatch.setattr(position_companion, "trade_of", lambda db_, r: db_.get(Trade, r.trade_id))
     monkeypatch.setattr(desk_context, "symbol_thread", lambda db_, symbol: desk_context.SymbolThread("", symbol))
     at = NOW.astimezone(ET)
-    target = telegram_replies.save_on_desk(db, "Why does this matter?", "NBIS", "Verdict: Hold — x", at)
+    target, index = telegram_replies.save_on_desk(db, "Why does this matter?", "NBIS", "Verdict: Hold — x", at)
     assert target == inv["id"]  # the conversation the companion adopted it in
     saved = copilot_investigations.get(target, session=db)["transcript"]
     assert [m["content"] for m in saved[-2:]] == ["From Telegram: Why does this matter?", "Verdict: Hold — x"]
+    assert index == len(saved) - 1  # the answer, which Helped / Didn't rate
 
     before = db.get(CopilotInvestigation, uuid.UUID(inv["id"])).updated_at
     telegram_replies.save_on_desk(db, "And now?", "NBIS", "Verdict: Hold — y", at)
@@ -156,13 +157,14 @@ def test_telegram_questions_and_answers_land_on_the_symbols_desk_thread(db, monk
     assert db.get(CopilotInvestigation, uuid.UUID(inv["id"])).updated_at == before  # thesis watch re-checks the same one
 
     opened = db.exec(select(CopilotInvestigation).where(CopilotInvestigation.main_day.is_(None))).all()
-    fresh = telegram_replies.save_on_desk(db, "And AMD?", "AMD", "Verdict: Wait — y", at)
+    fresh, index = telegram_replies.save_on_desk(db, "And AMD?", "AMD", "Verdict: Wait — y", at)
     row = db.get(CopilotInvestigation, uuid.UUID(fresh))
+    assert json.loads(row.transcript_json)[index]["content"] == "Verdict: Wait — y"
     assert row.main_day == at.date() and "From Telegram (AMD): And AMD?" in row.transcript_json  # no thread: Main chat
     assert db.exec(select(CopilotInvestigation).where(CopilotInvestigation.main_day.is_(None))).all() == opened  # none made
 
-    main = telegram_replies.save_on_desk(db, "What matters today?", None, "Verdict: Watch — q", at)
-    assert main == fresh and "From Telegram: What matters today?" in db.get(CopilotInvestigation, uuid.UUID(main)).transcript_json
+    main, index = telegram_replies.save_on_desk(db, "What matters today?", None, "Verdict: Watch — q", at)
+    assert main == fresh and index == 3 and "From Telegram: What matters today?" in db.get(CopilotInvestigation, uuid.UUID(main)).transcript_json
 
 
 def test_a_why_tap_saves_the_owners_words_never_the_pings_text(monkeypatch):
