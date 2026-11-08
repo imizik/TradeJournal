@@ -1430,7 +1430,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       {/* On the desk the box stays in reach while the conversation scrolls; a phone keeps it above the tab bar. */}
       <div ref={composer} onFocus={e => { if ((e.target as HTMLElement) === box.current) setComposing(true); }}
         onBlur={e => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) setComposing(false); }}
-        className={cn("space-y-1", panel && "sticky bottom-0 bg-[#121924] py-1",
+        className={cn("space-y-1", panel && "sticky bottom-0 bg-card py-1",
         desk && "sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 bg-background py-2 md:bottom-0")}>
       {voice.banner}
       {(attached.length > 0 || attaching) && (
