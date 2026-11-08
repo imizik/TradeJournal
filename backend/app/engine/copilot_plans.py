@@ -9,7 +9,8 @@ within ``PLAN_WINDOW`` before the newest one. The capture is the time stop's
 for the symbol in that window.
 
 A plan is on the board while an alert is armed, its time stop is pending or
-the fill linked to its capture is an open position. Once its alerts have fired
+the fill linked to its capture is an open position, unless the companion
+adopted the position and the owner ignored it. Once its alerts have fired
 or been deleted and nothing is open it drops off, and still shows in its
 investigation (``LinkedActivity``). Read-only; the only id out is the
 investigation's. Last prices come from one batched quote read.
@@ -144,7 +145,10 @@ def _plans(db: Session) -> tuple[list[dict], dict]:
     adopted = position_companion.for_investigations(db, [p["investigation_id"] for p in plans])  # an adopted plan reads from its row
     for plan in plans:
         plan["position"] = _position(plan["capture"], links, {})
-        if (row := adopted.get(plan["investigation_id"])) is not None:
+        row = adopted.get(plan["investigation_id"])
+        # The adopted row speaks for its own plan (no capture, or the one its Confirm saved), never for a plan card
+        # confirmed later in the same thread.
+        if row is not None and (plan["capture"] is None or plan["capture"].client_id == row.id.hex):
             trade = position_companion.trade_of(db, row)
             plan["adopted"], plan["trade"] = row, trade
             if trade is not None:
@@ -173,6 +177,8 @@ def board(db: Session, quotes=None) -> dict:
     plans, links = _plans(db)
     live = []
     for plan in plans:
+        if (row := plan.get("adopted")) is not None and row.state == "ignored":
+            continue  # the owner stopped the companion for it: its saved plan stays on the trade, not on the board
         armed = any(a is not None and a.state == "active" for a in (plan["entry"], plan["invalidation"]))
         pending = plan["stop"] is not None and plan["stop"].delivery == "scheduled"
         if armed or pending or plan["position"] == "in_position":

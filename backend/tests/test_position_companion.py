@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.engine import copilot_investigations, copilot_plans, notification_policy, position_companion, reconstructor, telegram
+from app.engine import copilot_investigations, copilot_plans, notification_policy, position_companion, reconstructor, telegram, trader_context
 from app.engine.chart_math import ET
 from app.engine.plan_time_stops import PlanTimeStops
 from app.engine.position_companion import Companion
@@ -360,11 +360,32 @@ def test_confirm_saves_the_draft_as_the_positions_plan_and_its_time_stop(world, 
     with Session(engine) as db:
         [stop] = db.exec(select(PlanTimeStop)).all()
         assert (stop.delivery, stop.trade_id) == ("pending", row.trade_id)
-    # A second tap finds the first plan and stop instead of making more.
-    reply, chosen = position_companion.confirm(engine, str(row.id), quote=lambda symbol: 165.0, now=at("10:06"), calendar=Calendar())
+    # The trader context keeps the companion's record for its own plan: the entry, that the thesis was a guess, the stop's time.
+    with Session(engine) as db:
+        thesis = trader_context.thesis_for(db, position_companion.trade_of(db, row))
+    assert (thesis["source"], thesis["text_is_guess"], thesis["entry_trigger"]["price"], thesis["plan_horizon"]) == ("companion", True, 165.0, "day")
+    assert thesis["time_stop"]["state"] == "pending" and thesis["time_stop"]["due_at"] and thesis["timing"] == "retrospective"
+    # A second tap, even after the stop's time, finds the first plan and stop instead of making more and names the stop as saved.
+    reply, chosen = position_companion.confirm(engine, str(row.id), quote=lambda symbol: 165.0, now=at("11:30"), calendar=Calendar())
     assert (reply, chosen) == ("Already confirmed: its invalidation alert is armed; plan saved; time stop today 11:00 ET.", "Confirmed")
     with Session(engine) as db:
         assert [len(db.exec(select(model)).all()) for model in (LevelAlert, TradeCapture, CaptureLink, PlanTimeStop)] == [1, 1, 1, 1]
+
+
+def test_ignore_after_confirm_skips_the_time_stop_and_drops_the_plan_from_the_board(world, engine, phone):
+    fill(engine, "10:00")
+    world.tick("10:03")
+    [row] = companions(engine)
+    position_companion.confirm(engine, str(row.id), quote=lambda symbol: 165.0, now=at("10:05"), calendar=Calendar())
+    assert position_companion.ignore(engine, str(row.id), now=at("10:20")) == ("Ignored: no more updates for this position.", "Ignored")
+    with Session(engine) as db:
+        [stop] = db.exec(select(PlanTimeStop)).all()
+        assert stop.delivery == "skipped" and stop.last_error.startswith("Ignored:")
+        assert db.exec(select(LevelAlert)).all() == [] and db.exec(select(CaptureLink)).one().unlinked_at is None  # the plan stays on record
+        assert copilot_plans.board(db, quotes=lambda symbols: ({"NBIS": 165.0}, None, None))["plans"] == []
+    PlanTimeStops(engine, Calendar(), clock=lambda: at("11:00")).run()
+    with Session(engine) as db:
+        assert db.exec(select(PlanTimeStop)).one().delivery == "skipped"  # nothing pings after "no more updates"
 
 
 def test_a_swing_drafts_time_stop_is_the_session_before_expiry(world, engine, phone):

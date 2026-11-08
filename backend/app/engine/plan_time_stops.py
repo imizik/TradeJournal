@@ -69,6 +69,11 @@ def _at(day: date, minute: int) -> float:
     return datetime(day.year, day.month, day.day, minute // 60, minute % 60, tzinfo=ET).timestamp()
 
 
+def when(row: PlanTimeStop, now: float) -> str:
+    """A saved stop's time as ``parse`` words it: ``today 11:00 ET`` or ``Thu Oct 22, 15:30 ET``."""
+    return _clock_text(_epoch(row.due_at), now)
+
+
 def _clock_text(due: float, now: float) -> str:
     moment, today = datetime.fromtimestamp(due, ET), datetime.fromtimestamp(now, ET).date()
     hhmm = moment.strftime("%H:%M")

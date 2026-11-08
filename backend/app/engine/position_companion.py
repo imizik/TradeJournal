@@ -477,7 +477,7 @@ def confirm(engine, companion_id: str, *, quote: Callable[[str], float | None] |
         if row is None:
             return "That position is no longer in the journal.", None
         if row.state == "armed":
-            saved = _saved(_save_plan(db, row, plan_of(row), now, calendar))
+            saved = _save_plan_safely(db, row, plan_of(row), now, calendar)
             return f"Already confirmed: its invalidation alert is armed{saved}.", "Confirmed"
         if row.state != "draft":
             return f"Not confirmed: this position is {row.state}.", None
@@ -509,13 +509,20 @@ def confirm(engine, companion_id: str, *, quote: Callable[[str], float | None] |
             _remove_alert(db, alert.id)
             db.commit()
             return "Not confirmed: this position closed or was ignored meanwhile.", None
-        saved = _saved(_save_plan(db, row, plan, now, calendar, trade=trade))
+        saved = _save_plan_safely(db, row, plan, now, calendar, trade=trade)
     log.info("Companion plan confirmed for %s: invalidation %.2f armed%s", contract, price, saved)
     return f"Confirmed: invalidation {price:,.2f} on {ticker} is armed{saved}.", "Confirmed"
 
 
-def _saved(parts: list[str]) -> str:
-    return "".join(f"; {part}" for part in parts)
+def _save_plan_safely(db: Session, row: PositionCompanion, plan: dict, now: float, calendar=None, trade: Trade | None = None) -> str:
+    """``_save_plan``'s parts as the reply's tail; an error it did not expect is logged and said, since the alert is armed
+    by then and a second tap saves again."""
+    try:
+        return "".join(f"; {part}" for part in _save_plan(db, row, plan, now, calendar, trade=trade))
+    except Exception:  # noqa: BLE001
+        log.exception("Companion plan for %s not saved", row.contract)
+        db.rollback()
+        return "; plan not saved, tap Confirm again"
 
 
 def _save_plan(db: Session, row: PositionCompanion, plan: dict, now: float, calendar=None, trade: Trade | None = None) -> list[str]:
@@ -524,8 +531,10 @@ def _save_plan(db: Session, row: PositionCompanion, plan: dict, now: float, cale
     the trade, so the trade page, the trader context and plan-proof read it (timing retrospective: it came after the
     fill, so plan-proof shows it as late, not counted), and its time stop (``plan_time_stops.create``) when the text
     reads as a time. The companion row's id is the client id, so a second tap finds the first capture and stop instead
-    of making more. One line per part for the reply; nothing here raises."""
+    of making more. One line per part for the reply; the errors it expects are said, anything else reaches
+    ``_save_plan_safely``."""
     from app.engine import captures, copilot_plans, plan_time_stops
+    from app.models import PlanTimeStop
     client_id, parts = row.id.hex, []
     trade = trade if trade is not None else trade_of(db, row)
     investigation = str(row.investigation_id) if row.investigation_id else str(row.id)
@@ -557,9 +566,12 @@ def _save_plan(db: Session, row: PositionCompanion, plan: dict, now: float, cale
                 capture_links.link(db, capture, trade.id)
             except capture_links.CaptureError as exc:
                 if "already linked" not in str(exc):  # a second tap: the first link stands
-                    parts[-1] = f"plan saved, not linked to the trade ({str(exc).rstrip('.')})"
+                    parts[-1] = f"plan saved, not linked ({str(exc).split('.')[0]})"
+    held = db.exec(select(PlanTimeStop).where(PlanTimeStop.client_id == client_id)).first()
     text = _stop_text(plan, row, now)
-    if text:
+    if held is not None:  # a second tap: the stop stands, whatever its time reads as now
+        parts.append(f"time stop {plan_time_stops.when(held, now)}")
+    elif text:
         parsed = plan_time_stops.parse(text, now, calendar)
         if parsed["due_at"] is None:
             parts.append(f"time stop kept as a note ({parsed['reason'].rstrip('.')})")
@@ -602,6 +614,7 @@ def ignore(engine, companion_id: str, *, now: float | None = None) -> tuple[str,
             return "This position changed meanwhile; nothing was ignored.", None
         db.refresh(row)
         _disarm(db, row)  # an Ignore after Confirm takes its invalidation alert with it
+        _cancel_stop(db, row)  # and its time stop, while it is still scheduled
         db.commit()
         _close_thread(db, row, "Ignored: the companion sent nothing more for this position.")
     return "Ignored: no more updates for this position.", "Ignored"
@@ -1062,6 +1075,16 @@ def _disarm(db: Session, row: PositionCompanion) -> None:
     alert = db.get(LevelAlert, row.alert_id) if row.alert_id else None
     if alert is not None and alert.state == "active":
         _remove_alert(db, alert.id)
+
+
+def _cancel_stop(db: Session, row: PositionCompanion) -> None:
+    """An Ignore after Confirm skips the plan's time stop while it is still scheduled (one that fired is history), so the
+    Plans board drops the position and no ping comes after "no more updates"."""
+    from app.models import PlanTimeStop
+    stop = db.exec(select(PlanTimeStop).where(PlanTimeStop.client_id == row.id.hex, PlanTimeStop.delivery == "scheduled")).first()
+    if stop is not None:
+        stop.delivery, stop.last_error = "skipped", "Ignored: the owner stopped the companion for this position."
+        db.add(stop)
 
 
 def _remove_alert(db: Session, alert_id: uuid.UUID) -> None:

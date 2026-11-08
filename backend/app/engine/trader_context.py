@@ -247,9 +247,10 @@ def _capture_thesis(db: Session, trade, capture) -> dict:
 
 def _companion_thesis(db: Session, row) -> dict:
     from app.engine import position_companion
-    from app.models import LevelAlert
+    from app.models import LevelAlert, PlanTimeStop
     plan = position_companion.plan_of(row)
     alert = db.get(LevelAlert, row.alert_id) if row.alert_id else None
+    stop = db.exec(select(PlanTimeStop).where(PlanTimeStop.client_id == row.id.hex)).first()  # Confirm's time stop, if saved
     price = plan.get("invalidation")
     if alert is not None:
         invalidation = _level(alert)
@@ -274,7 +275,8 @@ def _companion_thesis(db: Session, row) -> dict:
         "direction": plan.get("direction"),
         "entry_trigger": {"price": float(entry), "condition": "touches", "state": "hit", "hit_at": _ny_iso(row.opened_at)} if entry else None,
         "invalidation": invalidation,
-        "time_stop": {"text": _trim(plan.get("time_stop"), 120), "due_at": None, "state": "draft" if row.state != "armed" else "noted"}
+        "time_stop": _time_stop(stop) if stop is not None else
+        {"text": _trim(plan.get("time_stop"), 120), "due_at": None, "state": "draft" if row.state != "armed" else "noted"}
         if plan.get("time_stop") else None,
         "plan_horizon": plan.get("horizon"),
         "captured_at": _utc_iso(row.detected_at), "timing": "retrospective",
@@ -303,12 +305,16 @@ def thesis_for(db: Session, trade, *, adopted: dict | None = None, horizons: dic
     (``day_journal.check_ins``) are read once by a caller building several."""
     from app.engine import capture_links, day_journal, position_companion
     linked = capture_links.for_trade(db, trade.id)
-    if linked:
+    adopted = position_companion.adopted_trades(db) if adopted is None else adopted
+    row = adopted.get(str(trade.id))
+    # The companion's record speaks for the plan its own Confirm saved (the capture under the row's id): it keeps the
+    # entry, the horizon, the updates and that the thesis was a guess. A plan the owner saved themselves wins over it.
+    if row is not None and all(c.client_id == row.id.hex for c in linked):
+        out = _companion_thesis(db, row)
+    elif linked:
         out = _capture_thesis(db, trade, min(linked, key=lambda c: c.received_at))
     else:
-        adopted = position_companion.adopted_trades(db) if adopted is None else adopted
-        row = adopted.get(str(trade.id))
-        out = _companion_thesis(db, row) if row is not None else _no_thesis()
+        out = _no_thesis()
     if out["direction"] is None and trade.instrument_type == "option":
         out["direction"] = "long" if (trade.option_type or "") == "call" else "short"
     horizons = day_journal.check_ins(db)[0] if horizons is None else horizons
