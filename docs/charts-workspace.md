@@ -949,7 +949,8 @@ snapshot; live updates come from the shared stream.
 All five panels share these reads. A request already in flight is joined, not
 sent twice, so concurrent misses for the same read still make one call; different
 reads (another symbol, the copilot's tool reads, the alert monitors) go to the
-provider side by side, and the feed's lock covers only its cache, budget and
+provider side by side, at most four at once (half the HTTP pool shared with the
+position-quote client), and the feed's lock covers only its cache, budget and
 backoffs, never a provider call. A bounded
 96-entry cache and a 60-request/minute chart budget leave headroom under
 Tradier's 120/min token allowance. A visible five-chart workspace on one stable

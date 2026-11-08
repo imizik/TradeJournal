@@ -35,6 +35,9 @@ class CachedRead:
     expires_at: float
 
 
+PROVIDER_SLOTS = 4
+
+
 class ChartFeed:
     def __init__(self, splits: ChartSplits | None = None):
         from app.engine.chart_daily import ChartDaily  # imported here: chart_daily needs this module's errors
@@ -49,6 +52,9 @@ class ChartFeed:
         self._retry_at = 0.0
         self._failed: dict[tuple, float] = {}  # per-request backoff after a timeout or provider error
         self._flights: dict[tuple, threading.Event] = {}  # requests being read now, set when each one is done
+        # At most PROVIDER_SLOTS of the shared connection pool's eight at once, so the alert monitors' Tradier quote reads
+        # and the chart history's Alpaca reads always find a connection.
+        self._slots = threading.BoundedSemaphore(PROVIDER_SLOTS)
 
     def read(self, path: str, params: dict, ttl: int, keep: bool = True) -> tuple[dict, float, str | None]:
         """One budgeted Tradier GET. ``keep=False`` skips the response cache (and its stale fallback):
@@ -86,19 +92,24 @@ class ChartFeed:
                 flight.wait()
         try:
             try:
-                with measured("tradier_provider"):
-                    response = market_http.get(
-                        f"{tradier.TRADIER_BASE_URL}{path}", params=params,
-                        headers={"Authorization": f"Bearer {tradier.TRADIER_API_KEY}", "Accept": "application/json"},
-                        timeout=10,
-                    )
+                with measured("tradier_queue"):
+                    self._slots.acquire()
+                try:
+                    with measured("tradier_provider"):
+                        response = market_http.get(
+                            f"{tradier.TRADIER_BASE_URL}{path}", params=params,
+                            headers={"Authorization": f"Bearer {tradier.TRADIER_API_KEY}", "Accept": "application/json"},
+                            timeout=10,
+                        )
+                finally:
+                    self._slots.release()
                 if response.status_code == 429:
-                    with self._lock:
-                        self._retry_at = now + 60
+                    with self._lock:  # a later deadline from a read that started after this one stands
+                        self._retry_at = max(self._retry_at, now + 60)
                     raise ChartFeedError("Tradier's data allowance is temporarily exhausted. Retrying in one minute.", "rate_limited")
                 if response.status_code in (401, 403):
-                    with self._lock:
-                        self._retry_at = now + 60
+                    with self._lock:  # a later deadline from a read that started after this one stands
+                        self._retry_at = max(self._retry_at, now + 60)
                     raise ChartFeedError("Tradier refused market data. Check the token and account data access.", "access_denied")
                 if response.status_code >= 400:
                     raise ChartFeedError("Tradier could not load these charts. Please retry shortly.")

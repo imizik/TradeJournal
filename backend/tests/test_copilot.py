@@ -1019,6 +1019,7 @@ def test_what_changed_runs_through_the_owner_chat_route(monkeypatch):
     monkeypatch.setenv("COPILOT_EVIDENCE", "live")
     monkeypatch.delenv("COPILOT_BACKEND", raising=False)
     monkeypatch.setattr(copilot, "adapter_for", lambda cfg: copilot.FakeAdapter(0))
+    monkeypatch.setattr(copilot, "prefetch", lambda *a: [])  # live evidence: no background quote read off the network
     prompt = f"What changed? Use get_investigation_changes for investigation {saved['id']}, then compare it with fresh evidence."
     with TestClient(app) as client:
         frames = _frames(client.post("/copilot/chat", json={"messages": [{"role": "user", "content": prompt}], "symbol": "NBIS"}).text)

@@ -476,7 +476,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   feed no longer queues them: its lock covers only its cache, budget and
   backoffs, a request already in flight is joined rather than sent twice, and
   different Tradier reads (this round's, the alert monitors', the Charts
-  tab's) go out together (`backend/app/engine/chart_feed.py`). Before, one
+  tab's) go out together, at most four at once so the alert monitors' quote
+  reads keep room in the shared connection pool (`backend/app/engine/chart_feed.py`). Before, one
   lock was held across every Tradier call, so three 300 ms reads in one round
   took 936 ms; now 310 ms (§ Where the wait goes).
 - Before the first round, the owner context and the carried evidence are read
@@ -488,8 +489,13 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   chart feed's own short cache (quotes and today's minutes 15 s, the daily
   tail 60 s), so the model's call for them is served from it with the feed's
   as-of, and a call after it expires reads again: nothing new is cached and
-  nothing is kept across turns. The turn never waits for a prefetch, drops its
-  result, and leaves a failure for the model's own call to report. Fixture
+  nothing is kept across turns. The as-of the model sees is the prefetch's,
+  at most the cache's 15 s before its own call. The turn never waits for a
+  prefetch and drops its result. A prefetch that fails puts that read in the
+  feed's usual 15 s backoff, as any failed chart read does, so a model call
+  inside it reports the source unavailable (or the older data, marked) rather
+  than trying again; a model call made while the prefetch is still reading
+  waits for it instead of sending a second request. Fixture
   and replay evidence are never prefetched. What the model is told and asked
   is unchanged.
 - The browser sends text-only history: at most 24 messages, 4,000 characters

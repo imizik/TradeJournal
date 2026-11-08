@@ -338,6 +338,21 @@ def test_different_requests_are_read_side_by_side(provider, monkeypatch):
     assert len(calls) == 2
 
 
+def test_at_most_four_provider_calls_go_out_at_once(provider, monkeypatch):
+    """The connection pool (eight) is shared with the alert monitors' quote reads: the feed never takes more than half."""
+    feed, _, _, _ = provider
+    inside, release, calls = _held(monkeypatch)
+    symbols = [f"S{i}" for i in range(feed_module.PROVIDER_SLOTS + 1)]
+    with ThreadPoolExecutor(len(symbols)) as pool:
+        reads = [pool.submit(feed.read, "/v1/markets/quotes", {"symbols": s}, 15) for s in symbols]
+        for _ in range(feed_module.PROVIDER_SLOTS):
+            assert inside.acquire(timeout=2)
+        assert not inside.acquire(timeout=0.2) and len(calls) == feed_module.PROVIDER_SLOTS  # the fifth waits for a slot
+        release.set()
+        assert [r.result(timeout=2)[0]["quotes"]["quote"]["symbol"] for r in reads] == symbols
+    assert len(calls) == len(symbols)
+
+
 def test_a_request_already_in_flight_is_joined_not_sent_twice(provider, monkeypatch):
     from app.engine.chart_timing import collected
     feed, _, _, _ = provider
