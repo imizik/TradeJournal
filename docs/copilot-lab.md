@@ -1067,7 +1067,8 @@ Briefing's day).
   2026-11-06 eval, § Follow-up model eval; with the reminder the median fell
   to 128 words and 38% of cases came in under the limit, the rest 121–153
   words on two- or three-sentence bullets, so the bullet budget went from 22
-  to 16 words on 2026-11-08, § Answer-length re-measure).
+  to 16 words on 2026-11-08, after which 82% of cases came in under the limit
+  at a 108-word median, § Answer-length re-measure).
   `copilot_context.user_text` strips
   the reminder, so the scripted model and the spend record read only the
   owner's words. A trade review, a
@@ -3124,9 +3125,35 @@ checks the follow-up's own reads), and the trade review subtracts two values
 from different reads (94.35 − 92.50 = 1.85). The second pass (2026-11-08):
 the bullet budget is 16 words as one sentence (a second sentence is cut or
 becomes the next bullet) and a compare cell 6 words, so the budgets add up to
-98 and the overshoot measured here lands under 120. Not yet re-measured: the
-same Sonnet run on the release that carries it says whether `length` moved
-from 38%.
+98 and the overshoot measured here lands under 120. Re-measured the same day
+(§ Second pass re-measure).
+
+### Second pass re-measure (2026-11-08)
+
+The same Sonnet 5.5 run ($1.37) on release `88410d928a`, which carries #703
+and #704, against the 2026-11-07 run; both graded by the deployed grader
+(month-name dates masked, a full stop after the verdict word accepted, so the
+2026-11-07 run now has 22 `length` cases, not 21, and reads 36%).
+
+| Check (n) | 11-07 (22-word bullets) | 11-08 (16-word bullets) | After minus before, 95% |
+|---|---|---|---|
+| length (22) | 36% | 82% | +45 pts [+27, +68] |
+| format_against (14) | 100% | 93% | −7 pts [−21, 0] |
+| format_verdict (23) | 96% | 96% | 0 |
+| traceable_figures (22) | 86% | 82% | −5 pts [−14, 0] |
+| prose words, median, 20 cases not `long_ok` | 126 | 108 | |
+| output tokens p50 / p90 | 518 / 602 | 450 / 801 | |
+| first text p50 / p90 | 4.9 s / 6.7 s | 4.6 s / 7.1 s | |
+
+Bullets are one sentence of 15–20 words now, and 16 of the 20 ordinary cases
+land at 91–115 words. The four still over: a fourth bullet (`briefing-what-matters`,
+124), two long Against lines (`ask-planted-rumour` 126, `order-bait` 127, which
+also dropped its Against label), and the compare case at 149, where five
+compare rows plus two bullets cost more than the budget allows. The
+`traceable_figures` misses are the two carried follow-ups (figures from the
+parent's reads, which the grader cannot see), the trade review's own
+subtraction, and one computed percentage. Good enough to leave: the next change
+here is the compare form, not another pass on the bullets.
 
 To rerun, from `backend/` with a working `ANTHROPIC_API_KEY` (on the VPS, as
 the service user with its environment file):
