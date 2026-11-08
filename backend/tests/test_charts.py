@@ -353,6 +353,26 @@ def test_at_most_four_provider_calls_go_out_at_once(provider, monkeypatch):
     assert len(calls) == len(symbols)
 
 
+def test_a_read_that_waited_for_a_slot_counts_its_backoff_from_its_own_call(provider, monkeypatch):
+    feed, _, clock, _ = provider
+    inside, release, calls = _held(monkeypatch, status=504)
+    symbols = [f"S{i}" for i in range(feed_module.PROVIDER_SLOTS + 1)]
+    with ThreadPoolExecutor(len(symbols)) as pool:
+        reads = [pool.submit(feed.read, "/v1/markets/quotes", {"symbols": s}, 15) for s in symbols]
+        for _ in range(feed_module.PROVIDER_SLOTS):
+            assert inside.acquire(timeout=2)
+        time.sleep(0.1)  # the fifth has reserved its call and waits for a slot
+        clock[0] += 20  # longer than the 15 s backoff
+        release.set()
+        for read in reads:
+            with pytest.raises(ChartFeedError, match="could not load"):
+                read.result(timeout=2)
+    waited = calls[-1][1]["symbols"]
+    with pytest.raises(ChartFeedError, match="unavailable"):  # still inside its own backoff, so not sent again
+        feed.read("/v1/markets/quotes", {"symbols": waited}, 15)
+    assert len(calls) == len(symbols)
+
+
 def test_a_request_already_in_flight_is_joined_not_sent_twice(provider, monkeypatch):
     from app.engine.chart_timing import collected
     feed, _, _, _ = provider

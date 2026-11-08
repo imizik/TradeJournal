@@ -2400,8 +2400,8 @@ FastAPI dependency setup, response serialization and transport. Nested metrics
 include `history_queue`, `history_provider`, `history_cache`,
 `history_resample`, `history_indicators`, `tradier_queue` and
 `tradier_provider`. Queue metrics cover lock acquisition and, for `tradier_queue`,
-waiting for the same Tradier read already in flight; provider budgets are
-unchanged. Metrics overlap where
+waiting for the same Tradier read already in flight or for one of the feed's
+four provider slots; provider budgets are unchanged. Metrics overlap where
 nested, and request durations across concurrent panels must not be added as
 wall-clock elapsed time. Browser gaps between continuation requests include
 existing retry delays and rate-limit cooldowns.

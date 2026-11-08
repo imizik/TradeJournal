@@ -2973,7 +2973,8 @@ now says what the turn was for and how it went:
   `owner_context` and each entry of `tools` (the owner-context read and
   every tool call, as `metrics["tool_calls"]` keeps them) carry `ms` and its
   split: `queue_ms` waiting for a free worker thread, `feed_wait_ms` queued
-  behind the same chart-feed read in flight (or the chart history's lock),
+  in the chart feed (behind the same read in flight, or for one of its four
+  provider slots) or for the chart history's lock,
   `feed_ms` in the chart feed's provider reads (Tradier, Alpaca SIP history);
   the rest of `ms` is other providers (news, the quote engine, FRED), the
   database and the work itself. `rounds` holds each round's `model_ms` (request

@@ -147,7 +147,7 @@ def timings(turns: list[CopilotTurn]) -> dict:
     model's time in a round that asked for tools, those tools' wall clock (they run side by side), and the model's time
     in the answer round (on Sonnet the answer after a tool result arrives whole, so this is most of its first text). By
     tool, every call: its time and the median of its split (``queue_ms`` waiting for a worker thread, ``feed_wait_ms``
-    queued behind the same chart-feed read, ``feed_ms`` in the chart feed's provider reads)."""
+    queued in the chart feed (the same read in flight, a provider slot), ``feed_ms`` in the chart feed's provider reads)."""
     timed = [(t, p) for t in turns if not t.error and (p := _timings(t)) is not None]
     by_kind: dict[str, dict] = {}
     for kind in sorted({t.kind or "unknown" for t, _ in timed}):

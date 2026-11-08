@@ -52,8 +52,8 @@ class ChartFeed:
         self._retry_at = 0.0
         self._failed: dict[tuple, float] = {}  # per-request backoff after a timeout or provider error
         self._flights: dict[tuple, threading.Event] = {}  # requests being read now, set when each one is done
-        # At most PROVIDER_SLOTS of the shared connection pool's eight at once, so the alert monitors' Tradier quote reads
-        # and the chart history's Alpaca reads always find a connection.
+        # At most PROVIDER_SLOTS of the shared connection pool's eight at once (it held one when a lock spanned each call),
+        # leaving room for the alert monitors' Tradier quote reads, Alpaca history and FRED.
         self._slots = threading.BoundedSemaphore(PROVIDER_SLOTS)
 
     def read(self, path: str, params: dict, ttl: int, keep: bool = True) -> tuple[dict, float, str | None]:
@@ -94,6 +94,7 @@ class ChartFeed:
             try:
                 with measured("tradier_queue"):
                     self._slots.acquire()
+                now = time.time()  # deadlines (cache, backoff, cooldown) count from the call, not from the wait for a slot
                 try:
                     with measured("tradier_provider"):
                         response = market_http.get(

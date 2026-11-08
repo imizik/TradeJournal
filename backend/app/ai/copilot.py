@@ -1472,8 +1472,8 @@ TIMING_KEYS = ("queue_ms", "feed_wait_ms", "feed_ms")
 
 async def _timed(timeout: float, func, *args) -> tuple[Any, dict]:
     """``func(*args)`` in a worker thread within ``timeout``: its result, and where its time went. ``queue_ms``: waiting
-    for a free worker thread; ``feed_wait_ms``: queued behind another read of the same chart-feed request (or the chart
-    history's lock); ``feed_ms``: in the chart feed's provider reads (Tradier, Alpaca SIP history). The rest of a call's
+    for a free worker thread; ``feed_wait_ms``: queued behind the same chart-feed request in flight, for one of the
+    feed's four provider slots, or for the chart history's lock; ``feed_ms``: in the chart feed's provider reads (Tradier, Alpaca SIP history). The rest of a call's
     ``ms`` is other providers (news, the quote engine, FRED), the database and the work itself."""
     from app.engine.chart_timing import collected
     submitted = time.monotonic()
