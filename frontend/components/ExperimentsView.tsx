@@ -18,7 +18,7 @@ type Entry = {
   chart?: { title: string; bars: Bar[] }; examples?: ReactNode;
   href: string; action: string; cost?: string;
 };
-const linkClass = "inline-flex min-h-11 items-center text-sm text-sky-300 hover:underline";
+const linkClass = "inline-flex min-h-11 items-center text-sm text-primary hover:underline";
 const names: Record<Path, [string, string, string, string]> = {
   alerts: ["Position alerts", "Did a reminder prompt a useful review?", "/proof", "Open alert feedback"],
   radar: ["Radar", "Did it find something worth investigating?", "/radar", "Rate Radar events"],
