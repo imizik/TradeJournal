@@ -43,7 +43,7 @@ export default function AskCopilot({ symbol, context, className, drawer = false,
         <>
           <div aria-hidden="true" data-testid="copilot-drawer-backdrop" onClick={() => setOpen(false)} className="fixed inset-0 z-[79] hidden bg-black/40 sm:block" />
           <div ref={dialog} role="dialog" aria-modal="true" aria-label={`Copilot for ${symbol}`} tabIndex={-1}
-            className="fixed inset-0 z-[80] overflow-y-auto overscroll-contain bg-[#121924] outline-none sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[28rem] sm:border-l sm:border-slate-700 sm:shadow-2xl">
+            className="fixed inset-0 z-[80] overflow-y-auto overscroll-contain bg-card outline-none sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[28rem] sm:border-l sm:border-border sm:shadow-2xl">
             {/* Keyed by what it opened on: another event's symbol or summary starts its own conversation. */}
             <CopilotPanel key={`${symbol}|${prefill}`} variant="panel" link={link} onClose={() => setOpen(false)} />
           </div>
