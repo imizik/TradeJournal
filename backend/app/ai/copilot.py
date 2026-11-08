@@ -1467,6 +1467,34 @@ def long_holds_card(evidence, data: dict) -> dict | None:
     return {"rows": rows, "simulated": bool(data.get("simulated"))} if rows else None
 
 
+TIMING_KEYS = ("queue_ms", "feed_wait_ms", "feed_ms")
+
+
+async def _timed(timeout: float, func, *args) -> tuple[Any, dict]:
+    """``func(*args)`` in a worker thread within ``timeout``: its result, and where its time went. ``queue_ms``: waiting
+    for a free worker thread; ``feed_wait_ms``: queued behind another read of the same chart-feed request (or the chart
+    history's lock); ``feed_ms``: in the chart feed's provider reads (Tradier, Alpaca SIP history). The rest of a call's
+    ``ms`` is other providers (news, the quote engine, FRED), the database and the work itself."""
+    from app.engine.chart_timing import collected
+    submitted = time.monotonic()
+
+    def run():
+        started = time.monotonic()
+        with collected() as parts:
+            result = func(*args)
+        return result, {"queue_ms": round((started - submitted) * 1000),
+                        "feed_wait_ms": round(parts.get("tradier_queue", 0) + parts.get("history_queue", 0)),
+                        "feed_ms": round(parts.get("tradier_provider", 0) + parts.get("history_provider", 0))}
+
+    return await asyncio.wait_for(asyncio.to_thread(run), timeout)
+
+
+def call_metrics(event: dict) -> dict:
+    """A tool event as the turn's ``metrics["tool_calls"]`` keeps it: name, status, ``ms`` and, for a read that ran, the
+    split of its time (``TIMING_KEYS``)."""
+    return {k: event.get(k) for k in ("name", "status", "ms")} | dict(event.get("timing") or {})
+
+
 async def _run_tool(evidence, block: dict, cfg: Settings, turn: dict | None = None) -> tuple[dict, dict]:
     """One tool call. ``turn`` is the turn's own state: a second practice proposal in one answer is refused."""
     started = time.monotonic()
@@ -1480,7 +1508,7 @@ async def _run_tool(evidence, block: dict, cfg: Settings, turn: dict | None = No
                 raise copilot_tools.ToolInputError("one practice proposal per answer")
             turn["practice"] = claimed = True  # set before the first await, so calls gathered in one round see it
         event["input"] = args
-        data = await asyncio.wait_for(asyncio.to_thread(copilot_tools.call, evidence, name, args), cfg.tool_timeout_s)
+        data, event["timing"] = await _timed(cfg.tool_timeout_s, copilot_tools.call, evidence, name, args)
         prov = copilot_tools.provenance(name, data, evidence.label)
         if name == "propose_plan":
             event["proposal"] = {"id": block["id"], **data["proposal"]}
@@ -1696,7 +1724,7 @@ async def owner_context(evidence, symbol: str | None, cfg: Settings) -> tuple[st
     try:
         if read is None:
             raise LookupError("evidence has no owner context")
-        pack = await asyncio.wait_for(asyncio.to_thread(read, symbol), cfg.tool_timeout_s)
+        pack, event["timing"] = await _timed(cfg.tool_timeout_s, read, symbol)
         label = getattr(evidence, "label", "")
         if label == "fixture":
             pack = {**SIMULATED_MARKER, **pack}
@@ -1708,6 +1736,46 @@ async def owner_context(evidence, symbol: str | None, cfg: Settings) -> tuple[st
         event.update(status="error", summary="unavailable")
     event["ms"] = round((time.monotonic() - started) * 1000)
     return copilot_context.block(pack), event
+
+
+# A price in the owner's words: "$142", "142.50", or a whole number of two to five digits that is not part of a time, a
+# date, a percent or a word ("0DTE", "Q3"). A false positive costs one chart read.
+LEVEL_IN_QUESTION = re.compile(r"(?<![\w:/.$-])(?:\$\d{1,5}(?:\.\d{1,2})?|\d{1,5}\.\d{1,2}|\d{2,5})(?![\w:/%-]|\.\d)")
+PREFETCH_TIMEFRAME = "5m"
+_warming: set[asyncio.Task] = set()  # strong references: the loop keeps only weak ones to a running task
+
+
+def prefetch(evidence, symbol: str | None, question, cfg: Settings) -> list[tuple[str, asyncio.Task]]:
+    """Reads the first tool round nearly always makes, started while the owner context is read: the selected symbol's
+    quote and, when the owner's words name a price, its chart context. Live evidence only. Each goes through the chart
+    feed's own short cache (quotes and today's minutes 15 s, the daily tail 60 s), so the model's own call for it in the
+    first round is served from that cache with the feed's as-of, and a call after it expires reads again: nothing new is
+    cached and nothing is kept across turns. Never awaited by the turn and its results are dropped; a failure is the
+    model's own call's to report. Returns ``(tool name, task)`` for each read started."""
+    if not symbol or getattr(evidence, "label", "") != "live":
+        return []
+    from app.ai.copilot_context import user_text
+    reads = [("get_quotes", {"symbols": [symbol]})]
+    if isinstance(question, str) and LEVEL_IN_QUESTION.search(user_text(question)):
+        reads.append(("get_chart_context", {"symbol": symbol, "timeframe": PREFETCH_TIMEFRAME}))
+    started = []
+    for name, raw in reads:
+        try:
+            args = copilot_tools.validate(name, raw)  # the read the tool call would make, routed the same way
+        except copilot_tools.ToolInputError:
+            continue
+        task = asyncio.create_task(_warm(name, args, evidence, cfg.tool_timeout_s))
+        _warming.add(task)
+        task.add_done_callback(_warming.discard)
+        started.append((name, task))
+    return started
+
+
+async def _warm(name: str, args: dict, evidence, timeout: float) -> None:
+    try:
+        await asyncio.wait_for(asyncio.to_thread(copilot_tools.call, evidence, name, args), timeout)
+    except Exception as exc:  # noqa: BLE001 - a warm-up that fails leaves the tool call to read and report
+        log.info("copilot prefetch %s unavailable: %s", name, type(exc).__name__)
 
 
 # A live API turn may search the web: Anthropic's server-side search, about WEB_SEARCHES a turn, a cent each on top of
@@ -1783,10 +1851,15 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
     if replay:
         now = evidence.at
     mode = getattr(evidence, "label", "")
-    # ``investigation_id``: the saved conversation, so a reload (no carry id) or a restart still finds its evidence.
-    earlier = await asyncio.to_thread(carried, carry_id, mode, investigation_id) if len(history) > 1 else []
+    warming = prefetch(evidence, symbol, history[-1]["content"], cfg)
+
+    async def earlier_evidence() -> list[dict]:
+        # ``investigation_id``: the saved conversation, so a reload (no carry id) or a restart still finds its evidence.
+        return await asyncio.to_thread(carried, carry_id, mode, investigation_id) if len(history) > 1 else []
+
+    # Two independent reads before the first round, side by side (the prefetch runs beside them, unawaited).
+    earlier, (block, pack_event) = await asyncio.gather(earlier_evidence(), owner_context(evidence, symbol, cfg))
     ran_all: list[tuple[dict, dict]] = []
-    block, pack_event = await owner_context(evidence, symbol, cfg)
     messages[-1] = {"role": "user", "content": context_line(symbol, now, replay, simulated) + carry_block(earlier) + block
                     + history[-1]["content"] + "\n\n" + ANSWER_SHAPE}
     if images:
@@ -1796,7 +1869,9 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
     metrics: dict[str, Any] = live if live is not None else {}
     metrics.update({"backend": cfg.backend, "evidence": cfg.evidence, "effort": cfg.effort, "model": getattr(adapter, "model", None) or cfg.model,
                     "first_feedback_ms": None, "first_progress_ms": None, "first_text_ms": None,
-                    "max_silence_ms": 0, "rounds": 0, "tool_calls": [], "usage": dict(usage), "cost_usd": 0.0})
+                    "max_silence_ms": 0, "rounds": 0, "tool_calls": [], "usage": dict(usage), "cost_usd": 0.0,
+                    # Where the wait went: each round's model time and, for a round that read tools, their wall clock.
+                    "rounds_ms": [], "prefetch": [name for name, _ in warming]})
     calls = searched = 0
     web = web and cfg.backend == "anthropic" and mode == "live"
     cap = cfg.turn_budget_usd + (WEB_TURN_EXTRA_USD if web else 0.0)
@@ -1818,7 +1893,8 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
             if k and metrics[k] is None:
                 metrics[k] = now_ms
 
-    metrics["tool_calls"].append({k: pack_event.get(k) for k in ("name", "status", "ms")})
+    metrics["tool_calls"].append(call_metrics(pack_event))
+    pack_event.pop("timing", None)  # the split is the record's; the UI's row stays as it was
     seen()
     yield pack_event
     try:
@@ -1828,6 +1904,7 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                 allow = round_no < cfg.max_rounds - 1 and calls < cfg.max_tool_calls
                 web_offered = web_offered or (web and allow and searched < WEB_SEARCHES)
                 tools = copilot_tools.TOOLS + (web_tool(WEB_SEARCHES - searched) if web_offered else [])
+                round_started = time.monotonic()
                 async for kind, value in adapter.stream_round(SYSTEM_PROMPT, messages, tools, allow):
                     if kind == "text":
                         seen("first_text_ms")
@@ -1838,6 +1915,8 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                     elif kind == "final":
                         final = value
                 metrics["rounds"] += 1
+                timing = {"model_ms": round((time.monotonic() - round_started) * 1000)}
+                metrics["rounds_ms"].append(timing)
                 if final is None:
                     raise CopilotError("model_output", "The model stream ended without a message.")
                 for key in usage:
@@ -1883,12 +1962,17 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                     seen()
                 for block in runnable:
                     yield {"type": "tool", "id": block.get("id"), "name": block.get("name"), "status": "running"}
+                # The round's reads run side by side (each in its own worker thread, with its own timeout and error
+                # block); gather keeps their results in the order the model asked for them.
+                tools_started = time.monotonic()
                 ran = await asyncio.gather(*(_run_tool(evidence, b, cfg, turn) for b in runnable))
+                timing["tools_ms"] = round((time.monotonic() - tools_started) * 1000)
                 ran_all += ran
                 results = [r for r, _ in ran] + [{"type": "tool_result", "tool_use_id": b["id"], "is_error": True,
                                                   "content": "Tool-call budget for this turn is used up."} for b in refused]
                 for _, event in ran:
-                    metrics["tool_calls"].append({k: event.get(k) for k in ("name", "status", "ms")})
+                    metrics["tool_calls"].append(call_metrics(event))
+                    event.pop("timing", None)
                     yield event
                     if (proposal := proposal_event(event)) is not None:
                         yield proposal

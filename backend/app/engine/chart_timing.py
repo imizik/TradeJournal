@@ -29,6 +29,17 @@ def measured_lock(lock, name: str):
 
 
 @contextmanager
+def collected():
+    """The timings of the reads inside the block, in this context only (a copilot tool call in its worker thread)."""
+    metrics: dict[str, float] = {}
+    token = _current.set(metrics)
+    try:
+        yield metrics
+    finally:
+        _current.reset(token)
+
+
+@contextmanager
 def request_timing(enabled: bool, response):
     metrics = {} if enabled else None
     token = _current.set(metrics)

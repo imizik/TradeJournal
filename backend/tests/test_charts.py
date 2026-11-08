@@ -1,6 +1,9 @@
 """Chart data integrity, request sharing, and private journal marker boundaries."""
 
+from concurrent.futures import ThreadPoolExecutor
 import json
+import threading
+import time
 from datetime import date, datetime, time as wall_time, timedelta, timezone
 from uuid import UUID
 
@@ -305,6 +308,70 @@ def test_provider_timeout_backs_off_only_that_request(provider):
     clock[0] += 6
     feed.read(path, {"symbols": "SPY"}, 15)  # retried attempts cannot extend the backoff
     assert len(calls) == 3
+
+
+def _held(monkeypatch, status=200):
+    """A provider that holds each request until released: ``(inside, release, calls)``."""
+    inside, release, calls = threading.Semaphore(0), threading.Event(), []
+
+    def get(url, params, headers, timeout):
+        calls.append((url, params))
+        inside.release()
+        assert release.wait(5)
+        return httpx.Response(status, json={"quotes": {"quote": {"symbol": params.get("symbols"), "last": 1}}},
+                              request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(feed_module.market_http, "get", get)
+    return inside, release, calls
+
+
+def test_different_requests_are_read_side_by_side(provider, monkeypatch):
+    """A copilot round's reads, the alert monitors and the Charts tab ask for different things at once: none of them
+    waits for another's provider call (one lock across every call used to queue them one behind the other)."""
+    feed, _, _, _ = provider
+    inside, release, calls = _held(monkeypatch)
+    with ThreadPoolExecutor(2) as pool:
+        reads = [pool.submit(feed.read, "/v1/markets/quotes", {"symbols": s}, 15) for s in ("SPY", "NBIS")]
+        assert inside.acquire(timeout=2) and inside.acquire(timeout=2)  # both requests are with the provider together
+        release.set()
+        assert [r.result(timeout=2)[0]["quotes"]["quote"]["symbol"] for r in reads] == ["SPY", "NBIS"]
+    assert len(calls) == 2
+
+
+def test_a_request_already_in_flight_is_joined_not_sent_twice(provider, monkeypatch):
+    from app.engine.chart_timing import collected
+    feed, _, _, _ = provider
+    inside, release, calls = _held(monkeypatch)
+
+    def second():
+        with collected() as parts:
+            return feed.read("/v1/markets/quotes", {"symbols": "SPY"}, 15), parts
+
+    with ThreadPoolExecutor(2) as pool:
+        first = pool.submit(feed.read, "/v1/markets/quotes", {"symbols": "SPY"}, 15)
+        assert inside.acquire(timeout=2)
+        joined = pool.submit(second)
+        time.sleep(0.2)
+        release.set()
+        (data, stamp, issue), parts = joined.result(timeout=2)
+        assert (data, stamp, issue) == first.result(timeout=2)
+    assert len(calls) == 1 and parts["tradier_queue"] >= 100  # it waited for the read in flight, then took its result
+
+
+def test_a_joined_request_that_fails_reports_the_failure_without_sending_again(provider, monkeypatch):
+    feed, _, clock, _ = provider
+    inside, release, calls = _held(monkeypatch, status=504)
+    with ThreadPoolExecutor(2) as pool:
+        first = pool.submit(feed.read, "/v1/markets/quotes", {"symbols": "SPY"}, 15)
+        assert inside.acquire(timeout=2)
+        joined = pool.submit(feed.read, "/v1/markets/quotes", {"symbols": "SPY"}, 15)
+        time.sleep(0.2)
+        release.set()
+        with pytest.raises(ChartFeedError, match="could not load"):
+            first.result(timeout=2)
+        with pytest.raises(ChartFeedError, match="unavailable"):  # the request's backoff, as a read after it would see
+            joined.result(timeout=2)
+    assert len(calls) == 1 and not feed._flights
 
 
 def test_chart_budget_bounds_rapid_symbol_changes_and_recovers(provider):

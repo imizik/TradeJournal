@@ -469,6 +469,29 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
 - Limits per turn: 4 model rounds, 8 tool calls, a 10 s timeout per tool,
   120 s per turn, and 6,000 characters per tool result. Tool inputs are
   validated (ticker pattern, at most 8 symbols, no extra keys).
+- A round's tool calls run side by side, each in its own worker thread with
+  its own timeout and error handling, and their results go back in the order
+  the model asked for them, followed by the answer-shape reminder; a failed or
+  timed-out read keeps its place as an error block. Since 2026-11-08 the chart
+  feed no longer queues them: its lock covers only its cache, budget and
+  backoffs, a request already in flight is joined rather than sent twice, and
+  different Tradier reads (this round's, the alert monitors', the Charts
+  tab's) go out together (`backend/app/engine/chart_feed.py`). Before, one
+  lock was held across every Tradier call, so three 300 ms reads in one round
+  took 936 ms; now 310 ms (§ Where the wait goes).
+- Before the first round, the owner context and the carried evidence are read
+  side by side, and a live turn with a selected symbol starts that symbol's
+  quote read beside them (`copilot.prefetch`); when the owner's words name a
+  price (`$142`, `142.50`, a whole number of two to five digits that is not a
+  time, date or percent) it starts the symbol's 5-minute chart context too.
+  These are the reads the first tool round nearly always makes. They fill the
+  chart feed's own short cache (quotes and today's minutes 15 s, the daily
+  tail 60 s), so the model's call for them is served from it with the feed's
+  as-of, and a call after it expires reads again: nothing new is cached and
+  nothing is kept across turns. The turn never waits for a prefetch, drops its
+  result, and leaves a failure for the model's own call to report. Fixture
+  and replay evidence are never prefetched. What the model is told and asked
+  is unchanged.
 - The browser sends text-only history: at most 24 messages, 4,000 characters
   each, 40,000 in total. Tool results are never accepted from the browser.
   Evidence is re-read when the model needs it.
@@ -1204,7 +1227,8 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
   whole read fails or exceeds the tool timeout, the block says the context was
   unavailable and the turn goes on (the read itself finishes in its worker
   thread; the turn does not wait for it). The read runs before the first model
-  round, so a slow quote provider adds up to the tool timeout to a turn. Over the size cap, the pack sheds the
+  round (beside the carried-evidence read and the symbol's prefetch), so a slow
+  quote provider adds up to the tool timeout to a turn. Over the size cap, the pack sheds the
   least decision-relevant parts first (recent trades, today's notes, the
   since-entry lines' sources and the plan revisions, every since-entry line but
   the mark past the symbol's first position, those positions' decisions, alerts
@@ -2939,6 +2963,19 @@ now says what the turn was for and how it went:
   `daily_budget` on a zero-cost row when the budget was already spent and no
   model ran. The morning brief is refused past the cap like a desk turn; the
   week review runs regardless.
+- `timings` (JSON, `copilot_spend.timings_json`): where the owner's wait went.
+  `owner_context` and each entry of `tools` (the owner-context read and
+  every tool call, as `metrics["tool_calls"]` keeps them) carry `ms` and its
+  split: `queue_ms` waiting for a free worker thread, `feed_wait_ms` queued
+  behind the same chart-feed read in flight (or the chart history's lock),
+  `feed_ms` in the chart feed's provider reads (Tradier, Alpaca SIP history);
+  the rest of `ms` is other providers (news, the quote engine, FRED), the
+  database and the work itself. `rounds` holds each round's `model_ms` (request
+  to final message) and, for a round that read tools, `tools_ms` (their wall
+  clock, side by side); `prefetch` names what the turn started early. A web
+  search is listed without a time (it runs at Anthropic). Migration
+  `backend/alembic/versions/e2f4a6c8b0d1_copilot_turn_timings.py` (additive,
+  nullable); the eval's records carry the same `metrics`.
 - `investigation_id`: the saved conversation. The `done` event carries the
   row's `turn_id`; the browser keeps it in the answer's saved `metrics`, and
   saving the investigation links the rows (`copilot_spend.link`), so a
@@ -2966,6 +3003,12 @@ days together (`backend/app/engine/copilot_scorecard.py`) and returns counts:
 - **latency** by kind over turns that did not fail: first text and total p50
   and p90, and the median longest silence.
 - **failed** by error code (`stopped`, `daily_budget`, `timeout`, …).
+- **timings**, over turns that did not fail and recorded them: by kind, the
+  owner context read, the model's time in a round that asked for tools, those
+  tools' wall clock, and the model's time in the answer round (on Sonnet the
+  answer after a tool result arrives whole, so this is most of its first
+  text), each as p50 and p90; by tool, every call's count, errors, `ms` p50
+  and p90 and the median `queue_ms`, `feed_wait_ms` and `feed_ms`.
 - **spend_by_day** by New York day, kind and billing; **cost**: total, per turn,
   the five dearest threads, and the share of input the cache served.
 
@@ -3023,6 +3066,32 @@ then up to five rows, newest first ("Thu Nov 5: 6 named, 2 moved"), or "No
 morning brief in the last 7 days.". It measures attention to movers, not
 direction, trade suitability or profit. Tests:
 `backend/tests/test_brief_scorecard.py`, `frontend/e2e/copilot-desk-context.spec.ts`.
+
+### Where the wait goes (2026-11-08)
+
+The production answer scorecard over 14 days read a median 15 s to first
+text on the owner's own questions: about 8 s when the turn read no tools,
+15 s with two or three reads, 20 s with four or more. The eval's fixture
+cases reach first text in 4.6 s on the same model, so the live cost is in the
+reads against live data and in the extra rounds, not the answer's length
+(already cut, § Second pass re-measure). A round's reads were already
+gathered side by side, but every Tradier read in the process went through
+one chart-feed lock held across the provider call, so they queued behind
+each other and behind the alert monitors and the Charts tab. Measured with
+three distinct reads of 300 ms each issued together: 936 ms through the old
+feed, 310 ms through the new one (a scripted copilot round with a 600 ms and
+a 300 ms read: the round's tools take about 600 ms, not 900). The prefetch
+and the side-by-side owner-context read take the symbol's quote, and its
+chart when a price is named, off the first tool round. Nothing in the prompt,
+the tools or the answers changed; the free eval completes 23 of 23 with the
+same check rates as before.
+
+None of this is proven live: the fixture and the eval never touch a
+provider. The next production reading of the answer scorecard is the real
+test: `latency.ask.first_text_ms` against the 15 s median, and the new
+`timings` section, which says how much of what remains is the owner context,
+the model's rounds, the reads, and within the reads Tradier, queueing or a
+busy worker pool.
 
 ## Live measurements (2026-10-24)
 

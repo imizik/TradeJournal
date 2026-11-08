@@ -946,7 +946,11 @@ ten-day daily tail (60-second TTL) joined to the whole daily series that
 `chart_daily.py` reads once per symbol per New York date, and a single batch of
 watchlist quotes (15-second TTL). That quote batch is the initial and recovery
 snapshot; live updates come from the shared stream.
-All five panels share these reads. A lock coalesces concurrent misses; a bounded
+All five panels share these reads. A request already in flight is joined, not
+sent twice, so concurrent misses for the same read still make one call; different
+reads (another symbol, the copilot's tool reads, the alert monitors) go to the
+provider side by side, and the feed's lock covers only its cache, budget and
+backoffs, never a provider call. A bounded
 96-entry cache and a 60-request/minute chart budget leave headroom under
 Tradier's 120/min token allowance. A visible five-chart workspace on one stable
 symbol normally uses about nine upstream requests per minute after its
@@ -2394,8 +2398,9 @@ Add `timing=true` to `/charts/workspace` or `/charts/history` to receive opt-in
 FastAPI dependency setup, response serialization and transport. Nested metrics
 include `history_queue`, `history_provider`, `history_cache`,
 `history_resample`, `history_indicators`, `tradier_queue` and
-`tradier_provider`. Queue metrics cover lock acquisition only; the existing
-lock lifetimes and provider budgets are unchanged. Metrics overlap where
+`tradier_provider`. Queue metrics cover lock acquisition and, for `tradier_queue`,
+waiting for the same Tradier read already in flight; provider budgets are
+unchanged. Metrics overlap where
 nested, and request durations across concurrent panels must not be added as
 wall-clock elapsed time. Browser gaps between continuation requests include
 existing retry delays and rate-limit cooldowns.
