@@ -2229,9 +2229,22 @@ long theses, reviewed weekly. Nothing here places, changes or suggests an order,
 - **Confirm** arms the draft's invalidation as a confirmed plan card's invalidation alert (a `copilot` level alert
   with `plan_role: invalidation` on the investigation), state `armed`: the desk's plan ladder and the Plans board
   read it, with the entry at the underlying's price when it was adopted. An invalidation already crossed, or a stale
-  quote, arms nothing and says so; so does a Confirm that lands after the position closed or was ignored. **Ignore**
-  stops every later message for the position (state `ignored`), removes an invalidation it had armed, and closes the
-  thread.
+  quote, arms nothing and says so; so does a Confirm that lands after the position closed or was ignored. Once armed,
+  the draft is also saved as the position's pre-trade plan, the parts the plan card's Confirm saves
+  (`position_companion._save_plan`, since 2026-11-08): a `Copilot plan` capture (thesis in its note; invalidation,
+  time stop and horizon in its wording; the contract's strike and expiry) linked to the trade, so the trade page, the
+  trader context and plan-proof read it (timing retrospective: it came after the fill, so plan-proof shows it as
+  late, not counted), and the time stop as a `plan_time_stops` row: a day trade's clock time as drafted, a swing's
+  "close before expiry" as the trading days until that session. The time-stop sender pings about the position the
+  capture is linked to, although it opened before the plan. A stop whose time has passed, or text that reads as no
+  time, is said in the reply and stays a note; the ping itself needs `PLAN_TIME_STOPS_ENABLED`. The companion row's
+  id is the plan's client id, so a second tap saves again only what a first could not and never arms twice. The
+  reply names each part: "Confirmed: invalidation 158.20 on NBIS is armed; plan saved; time stop today 11:00 ET.".
+  The trader context keeps the companion's record for this plan (the entry, the horizon, its updates, that the thesis
+  was a guess) and reads the time stop from the saved row; a plan the owner saved themselves wins over it. **Ignore**
+  stops every later message for the position (state `ignored`), removes an invalidation it had armed, skips the time
+  stop Confirm saved while it is still scheduled, and closes the thread; the saved plan stays on the trade as a record
+  and the position leaves the Plans board.
 - **Watch.** Every minute in the regular session, each adopted position still open, not ignored, and among the
   newest `COMPANION_MAX_POSITIONS` (default 6; older ones are adopt-only, closed quietly) gets an update when, since
   its last one: a phone ping went out for it (give-back, one-hour, wrong way, expiry, time stop, invalidation), thesis

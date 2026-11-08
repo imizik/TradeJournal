@@ -289,7 +289,7 @@ class Replies:
     def _companion(self, companion_id: str, action: str) -> tuple[str, str | None]:
         from app.engine import position_companion
         if action == "confirm":
-            reply, chosen = position_companion.confirm(self.engine, companion_id)
+            reply, chosen = position_companion.confirm(self.engine, companion_id, calendar=_calendar())
             if chosen and self.alerts_changed is not None:
                 self.alerts_changed()
             return reply, chosen

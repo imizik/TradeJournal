@@ -11,7 +11,9 @@ holidays or early closes (the preview shows the date). Text it cannot read
 stays a note in the plan and schedules nothing.
 
 At ``due_at`` the row is judged once: if the owner holds an open position in
-the symbol whose first entry came after the plan, one ntfy notification goes
+the symbol whose first entry came after the plan, or the open position the
+plan's capture is linked to (a plan saved for a position already held, as the
+position companion's Confirm saves one), one ntfy notification goes
 out (``NBIS time stop: you planned to be out by 15:30.``) and its tap opens the
 trade; otherwise it is recorded ``skipped`` and nothing is sent. Nothing here
 places, changes or suggests an order.
@@ -65,6 +67,11 @@ def _regular(calendar, day: date):
 
 def _at(day: date, minute: int) -> float:
     return datetime(day.year, day.month, day.day, minute // 60, minute % 60, tzinfo=ET).timestamp()
+
+
+def when(row: PlanTimeStop, now: float) -> str:
+    """A saved stop's time as ``parse`` words it: ``today 11:00 ET`` or ``Thu Oct 22, 15:30 ET``."""
+    return _clock_text(_epoch(row.due_at), now)
 
 
 def _clock_text(due: float, now: float) -> str:
@@ -173,6 +180,19 @@ def rows(db: Session, investigation_id: str) -> list[dict]:
     } for r in found]
 
 
+def _linked_position(db: Session, row: PlanTimeStop) -> uuid.UUID | None:
+    """The open trade linked to the capture that shares this time stop's client id, if any."""
+    from app.engine import capture_links
+    from app.models import TradeCapture
+    capture = db.exec(select(TradeCapture).where(TradeCapture.client_id == row.client_id)).first()
+    if capture is None:
+        return None
+    link = capture_links.link_rows(db, [capture]).get(capture.id, {}).get("link") or {}
+    if link.get("status") != "open" or not link.get("trade_id"):
+        return None
+    return uuid.UUID(link["trade_id"])
+
+
 class PlanTimeStops:
     def __init__(self, engine, calendar=None, *, clock: Callable[[], float] = time.time):
         self.engine = engine
@@ -197,8 +217,12 @@ class PlanTimeStops:
                 log.info("Plan time stop %s for %s", row.delivery, row.symbol)
 
     def _position(self, db: Session, row: PlanTimeStop) -> uuid.UUID | None:
-        """The newest open trade in the symbol whose first entry came after the plan (whole-minute fill times count
-        the plan's own minute)."""
+        """The open trade the plan's capture is linked to (a plan saved for a position already held, as the position
+        companion's Confirm saves one), else the newest open trade in the symbol whose first entry came after the plan
+        (whole-minute fill times count the plan's own minute)."""
+        linked = _linked_position(db, row)
+        if linked is not None:
+            return linked
         trades = db.exec(select(Trade).join(Account, Account.id == Trade.account_id)
                          .where(Trade.status == "open", Trade.ticker == row.symbol,
                                 or_(Account.broker.is_(None), Account.broker != "webull"))).all()
