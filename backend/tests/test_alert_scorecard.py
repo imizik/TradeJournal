@@ -87,6 +87,15 @@ def test_held_past_the_alert_and_sold_higher_counts_as_better(db):
     assert card["summary"]["holding"] == {"alerts": 1, "closed": 1, "better": 1, "worse": 0, "even": 0, "open": 0, "not_measured": 0, "vs_alert_usd": 440.0}
 
 
+def test_a_worthless_contract_with_a_zero_bid_is_measured_at_zero(db):
+    trade, key = position(db, "QQQ", [(1, 150, ny(23, 10))], status="expired", closed_at=ny(23, 16))
+    alert(db, trade, key, utc(23, 19, 30), contracts=1, bid=0, kind="expiry_final")  # a stale zero bid, kept as $0 since 2026-11-08
+    [row] = alert_scorecard.scorecard(db, NOW)["rows"]
+    outcome = row["outcome"]
+    assert (outcome["state"], outcome["how"], outcome["basis"], outcome["sell_at_alert_usd"], outcome["actual_usd"], outcome["vs_alert_usd"]) == (
+        "closed", "expired", "bid", 0.0, 0, 0.0)
+
+
 def test_held_into_a_worthless_expiry_loses_what_the_bid_would_have_fetched(db):
     trade, key = position(db, "APLD", [(3, 200, ny(20, 10))], status="expired", closed_at=ny(24, 16))
     alert(db, trade, key, utc(23, 14), contracts=3, bid=35)

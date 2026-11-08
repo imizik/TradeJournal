@@ -148,11 +148,12 @@ def follow_up(alert: dict, fills: list[dict] | None, status: str | None) -> dict
         out["note"] = "Still open, so there is no result yet."
         return out
     out["realized_after"] = round(proceeds, 2)
-    if alert.get("mark") is None:
-        out["note"] = "The alert had no midpoint mark, so there is no price to compare with."
+    price = alert.get("mark") if alert.get("mark") is not None else alert.get("bid")  # a zero bid prices a worthless contract at $0
+    if price is None:
+        out["note"] = "The alert had no quote, so there is no price to compare with."
         return out
-    out["value_at_alert"] = round(alert["mark"] * held, 2)
-    out["vs_alert"] = round(proceeds - alert["mark"] * held, 2)
+    out["value_at_alert"] = round(price * held, 2)
+    out["vs_alert"] = round(proceeds - price * held, 2)
     return out
 
 
@@ -336,7 +337,7 @@ def build(db: Session, go_live: date = GO_LIVE) -> dict:
     for a in alerts:
         trade_id = trade_of_source.get((a.account_id, a.source_key))
         trade = by_id.get(trade_id)
-        result = follow_up({"detected_at": a.detected_at, "contracts": float(a.contracts), "mark": _num(a.mark)},
+        result = follow_up({"detected_at": a.detected_at, "contracts": float(a.contracts), "mark": _num(a.mark), "bid": _num(a.bid)},
                            fills_of.get(trade_id), trade.status if trade else None)
         listed.append({
             "id": str(a.id), "kind": a.kind, "contract": a.contract, "contracts": float(a.contracts),
