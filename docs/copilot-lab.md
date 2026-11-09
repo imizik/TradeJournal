@@ -2743,12 +2743,17 @@ evidence, and so does the [morning brief](#pre-market-prep) since 2026-11-03
 week review, the position companion) never do, and neither do replay (the web is hindsight) or the
 fixture. `copilot.run_turn(..., web=True)` adds Anthropic's server-side
 `web_search` tool (`web_search_20260209`) once a round may call tools, with
-`max_uses` counting down from `copilot.WEB_SEARCHES` (3) across the turn's
-rounds. Once offered it stays in every later round, the last included: a
-search's result (and its code-execution filtering) can arrive a round later,
-and the API refuses a history whose server tool is gone (checked live on
-2026-11-02). A spent budget therefore still offers one use a round; the
-turn's rounds and spend cap bound the rest. A result is matched to its query
+`max_uses` set to `copilot.WEB_SEARCHES` (3). Once offered it stays in every
+later round, the last included, and byte for byte the same: a search's result
+(and its code-execution filtering) can arrive a round later, and the API binds
+each thinking block to the tools it was written under, so a later round whose
+server tool is gone (checked live on 2026-11-02) or changed is refused with a
+400. Until 2026-11-09 `max_uses` counted down across rounds, and every turn
+that searched and then read another tool failed that way. `max_uses` is per
+request, so the prompt's three-a-turn rule, the turn's rounds and its spend cap
+bound the total. A refused request's reason from the API is logged and shown
+after "The Anthropic API refused the request (400):", and a failed search's
+error code is logged (`copilot web search failed (code)`). A result is matched to its query
 by search id whichever round it arrives in; one still missing when the turn
 ends reads "search failed (no result)". Each query is logged at INFO
 (`copilot web search: …`), so Telegram turns' searches are visible too.

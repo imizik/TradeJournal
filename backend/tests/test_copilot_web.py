@@ -50,7 +50,7 @@ def turn(adapter, evidence=None, cfg=None, web=True):
     return asyncio.run(collect())
 
 
-def test_a_live_api_turn_offers_three_searches_and_counts_down():
+def test_a_live_api_turn_offers_three_searches():
     adapter = Rounds((search(0) + search(1, "midterm polls"), "end_turn"), ([{"type": "text", "text": "Answer."}], "end_turn"))
     events = turn(adapter)
     assert adapter.offered[0] == [{"type": copilot.WEB_SEARCH_TOOL, "name": "web_search", "max_uses": 3}]
@@ -65,15 +65,16 @@ def test_a_live_api_turn_offers_three_searches_and_counts_down():
     assert done["cost_usd"] == pytest.approx(0.02) and [t["name"] for t in done["tool_calls"]].count("web_search") == 2
 
 
-def test_the_search_budget_spans_the_turns_rounds_and_the_tool_stays_offered():
-    # Once offered, the tool stays in every later round, even the last (the API refuses a history whose server tool
-    # is gone, checked live on 2026-11-02); a spent budget offers one use a round.
+def test_the_tool_stays_offered_unchanged_in_every_round():
+    # Once offered, the tool stays in every later round, even the last, byte for byte: the API refuses a history whose
+    # server tool is gone (checked live on 2026-11-02) or changed (a max_uses count-down 400'd on 2026-11-09, because
+    # each thinking block is bound to the tools it was written under).
     adapter = Rounds((search(0) + [{"type": "tool_use", "id": "t0", "name": "get_quotes", "input": {"symbols": ["SPY"]}}], "tool_use"),
                      (search(1) + search(2) + [{"type": "tool_use", "id": "t1", "name": "get_quotes", "input": {"symbols": ["QQQ"]}}], "tool_use"),
                      ([{"type": "tool_use", "id": "t2", "name": "get_quotes", "input": {"symbols": ["IWM"]}}], "tool_use"),
                      ([{"type": "text", "text": "Answer."}], "end_turn"))
     turn(adapter)
-    assert [o[0]["max_uses"] if o else 0 for o in adapter.offered] == [3, 2, 1, 1]
+    assert adapter.offered == [copilot.web_tool()] * 4 and copilot.web_tool()[0]["max_uses"] == 3
 
 
 def test_a_result_that_arrives_a_round_later_keeps_its_query():
@@ -137,8 +138,7 @@ def test_no_search_unless_the_owner_asked_on_the_api_with_live_evidence(why):
 
 def test_the_api_request_sends_a_server_tool_as_is():
     adapter = copilot.AnthropicAdapter(_cfg(backend="anthropic", key_configured=True), client=object())
-    kwargs = adapter.request("s", [], copilot_tools.TOOLS[:1] + copilot.web_tool(3), True)
-    assert copilot.web_tool(0)[0]["max_uses"] == 1
+    kwargs = adapter.request("s", [], copilot_tools.TOOLS[:1] + copilot.web_tool(), True)
     assert kwargs["tools"][0]["eager_input_streaming"] is True
     assert kwargs["tools"][1] == {"type": copilot.WEB_SEARCH_TOOL, "name": "web_search", "max_uses": 3}
 

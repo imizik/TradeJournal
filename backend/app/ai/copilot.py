@@ -515,10 +515,12 @@ class AnthropicAdapter:
         except anthropic.RateLimitError:
             raise CopilotError("api_rate_limit", "The Anthropic API rate limit was reached. Try again shortly.")
         except anthropic.BadRequestError as exc:
-            text = str(getattr(exc, "message", "")).lower()
-            if "credit" in text or "billing" in text:
+            reason = str(getattr(exc, "message", ""))
+            if "credit" in reason.lower() or "billing" in reason.lower():
                 raise CopilotError("api_billing", "API credits are not available on this account yet.")
-            raise CopilotError("api_request", "The Anthropic API refused the request (400).")
+            # The API's own reason, in the journal and on screen: without it a 400 cannot be told apart.
+            log.warning("copilot request refused (400): %s", reason[:500])
+            raise CopilotError("api_request", f"The Anthropic API refused the request (400): {reason[:200]}")
         except anthropic.APIStatusError as exc:
             raise CopilotError("api_unavailable", f"The Anthropic API is unavailable ({exc.status_code}).")
         except anthropic.APIConnectionError:
@@ -1789,11 +1791,13 @@ WEB_SEARCH_USD = 0.01  # per search, as api_runner prices it
 WEB_TURN_EXTRA_USD = 0.15  # a turn that may search reads pages of results: its cap is the turn budget plus this
 
 
-def web_tool(left: int) -> list[dict]:
-    """The search tool for one request. Once offered in a turn it stays in every later round: a search's result (and
-    its code-execution filtering) can arrive in the next round, and the API refuses a history whose server tool is gone.
-    So a spent budget still offers one use a round; the turn's rounds and spend cap bound the rest."""
-    return [{"type": WEB_SEARCH_TOOL, "name": "web_search", "max_uses": max(1, left)}]
+def web_tool() -> list[dict]:
+    """The search tool, the same in every request of a turn. Once offered it stays in every later round, unchanged: a
+    search's result (and its code-execution filtering) can arrive in the next round, and the API binds each thinking
+    block to the tools it was written under, so a later round that drops the tool or changes its ``max_uses`` is
+    refused with a 400. ``max_uses`` is per request; the prompt's three-a-turn rule, the turn's rounds and its spend cap
+    bound the rest."""
+    return [{"type": WEB_SEARCH_TOOL, "name": "web_search", "max_uses": WEB_SEARCHES}]
 
 
 def _host(url: str) -> str:
@@ -1817,6 +1821,7 @@ def web_row(search_id: str | None, query: str | None, found: Any, now: datetime)
                      fact=copilot_tool_summary.summarize("web_search", {"results": len(pages)}))
     else:
         code = found.get("error_code", "no result") if isinstance(found, dict) else "no result"
+        log.warning("copilot web search failed (%s): %s", code, (query or "")[:200])
         event.update(status="error", summary=f"search failed ({code})")
     event["provenance"] = copilot_tools.provenance("web_search", {"as_of": now.isoformat(timespec="minutes")}, "live")
     return event
@@ -1904,7 +1909,7 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                 final: Round | None = None
                 allow = round_no < cfg.max_rounds - 1 and calls < cfg.max_tool_calls
                 web_offered = web_offered or (web and allow and searched < WEB_SEARCHES)
-                tools = copilot_tools.TOOLS + (web_tool(WEB_SEARCHES - searched) if web_offered else [])
+                tools = copilot_tools.TOOLS + (web_tool() if web_offered else [])
                 round_started = time.monotonic()
                 async for kind, value in adapter.stream_round(SYSTEM_PROMPT, messages, tools, allow):
                     if kind == "text":
