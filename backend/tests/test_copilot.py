@@ -367,6 +367,20 @@ def test_anthropic_errors_are_mapped_without_secrets(monkeypatch):
         assert [e["code"] for e in errors] == [code] and "sk-secret" not in errors[0]["message"]
 
 
+def test_a_refused_request_shows_and_logs_the_apis_reason(caplog):
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    reason = "messages.3.content.0: Invalid `signature` in `thinking` block."
+
+    class Failing:
+        def stream(self, **kwargs):
+            raise anthropic.BadRequestError(reason, response=httpx.Response(400, request=request), body=None)
+    cfg = _cfg(backend="anthropic", key_configured=True)
+    adapter = copilot.AnthropicAdapter(cfg, client=SimpleNamespace(beta=SimpleNamespace(messages=Failing())))
+    [error] = [e for e in _turn([{"role": "user", "content": "x"}], adapter, cfg=cfg) if e["type"] == "error"]
+    assert error["code"] == "api_request" and reason in error["message"]
+    assert reason in caplog.text
+
+
 # --------------------------------------------------------------------------- routes
 
 def _frames(body: str):
