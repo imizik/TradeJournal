@@ -180,3 +180,16 @@ def test_decisions_follow_the_spec():
 def test_the_session_bootstrap_of_a_constant_is_that_constant():
     assert ro._interval({"d1": [1.0, 1.0], "d2": [1.0]}) == [1.0, 1.0]
     assert ro._interval({"d1": [1.0]}) is None
+
+
+def test_reversal_events_are_scored_and_counted_under_their_own_version(tmp_path, capsys):
+    from tests.test_radar_runner import record_reversal
+    _, store = record_reversal(tmp_path, 95)
+    today = "2030-01-16"
+    [scored] = [r for r in ro.score_store(store, None, set(), today) if r["rule_version"] == "radar-reversal-v0"]
+    assert scored["rule_version"] == "radar-reversal-v0" and scored["evidence_verified"] is True
+    assert set(scored["horizons"]) == {"30m", "60m", "close"} and scored["excluded"] == {}
+    ro.main([str(store.path), "--out", str(tmp_path / "o.jsonl"), "--census-only", "--today", today])
+    sessions = json.loads(capsys.readouterr().out)["sessions"]
+    assert sorted(s["rule_version"] for s in sessions) == ["radar-reversal-v0", "radar-rules-v0"]
+    assert next(s for s in sessions if s["rule_version"] == "radar-reversal-v0")["events"] == 1

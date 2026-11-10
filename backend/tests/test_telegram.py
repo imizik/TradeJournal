@@ -1236,12 +1236,14 @@ def test_plan_it_on_a_radar_setup_ping_is_routed_once_and_marks_only_its_button(
     label, data = telegram_replies.plan_button(setup_id)
     assert (label, data) == ("Plan it", f"rp:{setup_id}") and len(data.encode()) <= telegram.CALLBACK_MAX
     monkeypatch.setattr(radar_setup_plan, "_live_price", lambda symbol: 61.4)
+    monkeypatch.setattr(telegram_replies, "_calendar", lambda: None)  # the 60-minute check reads clock hours; no calendar fetch
     keyboard = rows(telegram_replies.rating_buttons(uuid.uuid4()) + (telegram_replies.plan_button(setup_id), ("Why?", "ask:radar")))
     bot, changed = Bot(), []
     replies = telegram_replies.Replies(db_engine, call=bot, alerts_changed=lambda: changed.append(1))
     assert run(replies.handle(tap(data, keyboard=keyboard, update_id=5))) == "rp"
     assert run(replies.handle(tap(data, keyboard=keyboard, update_id=6))) == "rp"
-    assert [a["text"] for a in bot.named("answerCallbackQuery")] == ["Planned NBIS: out below 59.85. Alert armed.", "Already planned."]
+    assert [a["text"] for a in bot.named("answerCallbackQuery")] == ["Planned NBIS: out below 59.85. Alert armed. 60-minute check armed.",
+                                                                  "Already planned."]
     edited = bot.named("editMessageReplyMarkup")[0]["reply_markup"]["inline_keyboard"]
     assert edited[:2] == keyboard[:2]  # the ratings stay
     assert edited[2] == [{"text": "✓ Planned", "callback_data": f"done:{setup_id}"}, {"text": "Why?", "callback_data": "ask:radar"}]

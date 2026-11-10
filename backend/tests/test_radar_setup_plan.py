@@ -5,16 +5,27 @@ import json
 import uuid
 from zoneinfo import ZoneInfo
 
+import pytest
 from sqlmodel import Session, select
 
-from app.engine import level_alerts, radar_proof, radar_setup_plan
-from app.models import CopilotInvestigation, LevelAlert, RadarSetup, TradeCapture
+from app.engine import captures as captures_engine, level_alerts, radar_proof, radar_setup_plan, telegram_replies
+from app.models import CopilotInvestigation, LevelAlert, PlanTimeStop, RadarSetup, TradeCapture
 from tests.test_exit_habits import ROTH, engine  # noqa: F401
 
 NOW = datetime(2026, 11, 10, 10, 5, tzinfo=ZoneInfo("America/New_York")).timestamp()
 EVENT = "rd0-2026-11-10-dip-nbis-up-1"
 CONTRACT = {"symbol": "NBIS261120C00062000", "option_type": "call", "strike": 62.0, "expiration": "2026-11-20",
             "bid": 1.1, "ask": 1.2, "mid": 1.15}
+
+
+@pytest.fixture(autouse=True)
+def clock_hours(monkeypatch):
+    monkeypatch.setattr(telegram_replies, "_calendar", lambda: None)  # the time stop reads clock hours; no calendar fetch
+
+
+def time_stops(db_engine) -> list[PlanTimeStop]:
+    with Session(db_engine) as db:
+        return db.exec(select(PlanTimeStop)).all()
 
 
 def card(db_engine, direction="up", invalidation=59.85, contract=CONTRACT, kind="dip_turn", event=EVENT) -> str:
@@ -39,8 +50,11 @@ def stored(db_engine, setup_id):
 
 def test_plan_it_saves_the_plan_with_the_radar_origin_and_arms_the_invalidation(engine):  # noqa: F811
     setup_id = card(engine)
-    assert tap(engine, setup_id) == ("Planned NBIS: out below 59.85. Alert armed.", "Planned")
+    assert tap(engine, setup_id) == ("Planned NBIS: out below 59.85. Alert armed. 60-minute check armed.", "Planned")
     row, (capture,), (alert,), (thread,) = stored(engine, setup_id)
+    [stop] = time_stops(engine)
+    assert (stop.client_id, stop.investigation_id, stop.symbol, stop.text) == (uuid.UUID(setup_id).hex, str(thread.id), "NBIS", "60m")
+    assert stop.due_at == datetime(2026, 11, 10, 16, 5)  # 11:05 ET in naive UTC: 60 minutes from the tap
     assert thread.title == "Radar setup: NBIS dip turning up" and thread.symbol == "NBIS" and thread.status == "open"
     assert (row.plan_state, row.investigation_id, row.plan_note) == ("planned", str(thread.id), None)
     assert row.planned_at is not None
@@ -59,7 +73,7 @@ def test_plan_it_saves_the_plan_with_the_radar_origin_and_arms_the_invalidation(
 
 def test_a_put_idea_without_a_contract_is_a_long_put_plan_out_above(engine):  # noqa: F811
     setup_id = card(engine, direction="down", invalidation=63.0, contract=None, kind="gap_reversal")
-    assert tap(engine, setup_id, last=61.0) == ("Planned NBIS: out above 63.00. Alert armed.", "Planned")
+    assert tap(engine, setup_id, last=61.0) == ("Planned NBIS: out above 63.00. Alert armed. 60-minute check armed.", "Planned")
     row, (capture,), (alert,), (thread,) = stored(engine, setup_id)
     assert thread.title == "Radar setup: NBIS gap up turning down"
     assert (capture.side, capture.strike, capture.expiration) == ("buy_puts", None, None)
@@ -71,7 +85,7 @@ def test_a_double_tap_saves_one_plan(engine):  # noqa: F811
     assert tap(engine, setup_id)[1] == "Planned"
     assert tap(engine, setup_id) == ("Already planned.", "Planned")
     _, captures, alerts, threads = stored(engine, setup_id)
-    assert (len(captures), len(alerts), len(threads)) == (1, 1, 1)
+    assert (len(captures), len(alerts), len(threads), len(time_stops(engine))) == (1, 1, 1, 1)
 
 
 def test_a_stock_through_the_level_is_refused_in_both_directions(engine):  # noqa: F811
@@ -101,7 +115,8 @@ def test_an_alert_the_caps_refuse_keeps_the_saved_plan(engine, monkeypatch):  # 
     monkeypatch.setattr(level_alerts, "MAX_ACTIVE", 0)
     setup_id = card(engine)
     reply, chosen = tap(engine, setup_id)
-    assert reply == "Planned NBIS: out below 59.85. Alert not armed: 0 alerts are already active. Remove one first."
+    assert reply == ("Planned NBIS: out below 59.85. Alert not armed: 0 alerts are already active. Remove one first. "
+                     "60-minute check armed.")
     assert chosen == "Planned"
     row, (capture,), alerts, (thread,) = stored(engine, setup_id)
     assert (row.plan_state, row.investigation_id, alerts) == ("planned", str(thread.id), [])
@@ -113,3 +128,36 @@ def test_an_unknown_setup_writes_nothing(engine):  # noqa: F811
     assert tap(engine, "not-an-id") == ("That setup is no longer available.", None)
     with Session(engine) as db:
         assert db.exec(select(TradeCapture)).all() == [] and db.exec(select(CopilotInvestigation)).all() == []
+
+
+def test_a_time_stop_refused_after_the_close_keeps_the_plan_without_saying_armed(engine):  # noqa: F811
+    setup_id = card(engine)
+    late = datetime(2026, 11, 10, 16, 5, tzinfo=ZoneInfo("America/New_York")).timestamp()  # after the close: 60m has no session
+    reply, chosen = radar_setup_plan.plan(engine, setup_id, now=late, quote=lambda symbol: 61.4)
+    assert (reply, chosen) == ("Planned NBIS: out below 59.85. Alert armed.", "Planned")
+    row, (capture,), (alert,), _ = stored(engine, setup_id)
+    assert row.plan_state == "planned" and time_stops(engine) == []
+
+
+def test_a_failing_time_stop_never_fails_the_plan(engine, monkeypatch):  # noqa: F811
+    from app.engine import plan_time_stops
+    monkeypatch.setattr(plan_time_stops, "create", lambda *a, **k: 1 / 0)
+    setup_id = card(engine)
+    assert tap(engine, setup_id) == ("Planned NBIS: out below 59.85. Alert armed.", "Planned")
+    assert stored(engine, setup_id)[0].plan_state == "planned"
+
+
+def test_a_failure_after_the_claim_releases_it_for_a_later_tap(engine, monkeypatch):  # noqa: F811
+    setup_id = card(engine)
+    real = captures_engine.save
+
+    def broken(*a, **k):
+        raise RuntimeError("disk full")
+    monkeypatch.setattr(captures_engine, "save", broken)
+    assert tap(engine, setup_id) == ("The plan could not be saved, so nothing is planned. Tap again in a moment.", None)
+    row, captures, alerts, _ = stored(engine, setup_id)
+    assert (row.plan_state, row.planned_at, captures, alerts) == ("none", None, [], [])
+    monkeypatch.setattr(captures_engine, "save", real)
+    assert tap(engine, setup_id)[1] == "Planned"
+    row, (capture,), (alert,), _ = stored(engine, setup_id)
+    assert row.plan_state == "planned" and capture.origin_ref == EVENT

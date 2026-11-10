@@ -610,7 +610,7 @@ class Replies:
 
     def _mark(self, message: dict, data: str, chosen) -> None:
         """Edit the message's keyboard: a ping's answers, on however many rows they sit, give way to "✓ <the saved
-        answer>" on the first of those rows, its Why? kept beside it; Why? is marked asked; Helped / Didn't (``chosen``:
+        answer>" on the first of those rows, its Why? (and a Radar setup's Plan it) kept beside it; Why? is marked asked; Helped / Didn't (``chosen``:
         their new buttons) show the saved rating and stay tappable."""
         rows = ((message.get("reply_markup") or {}).get("inline_keyboard")) or []
         done = f"{DONE}:{data.split(':')[1]}" if data.count(":") >= 1 else DONE  # keeps the alert for a typed reply
@@ -637,7 +637,7 @@ class Replies:
                 if first is None:
                     first = len(edited)
                     edited.append([])
-                kept += [b for b in row if not answer(b) and str(b.get("callback_data", "")).startswith(("why:", "ask:", DONE))]
+                kept += [b for b in row if not answer(b) and str(b.get("callback_data", "")).startswith(("why:", "ask:", "rp:", DONE))]
             if first is not None:
                 edited[first] = [{"text": f"✓ {chosen}", "callback_data": done}, *kept]
         if edited == rows:

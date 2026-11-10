@@ -4,6 +4,13 @@ from datetime import date, datetime, timedelta
 from app.engine.chart_math import ET
 from app.engine.radar_comparison import epoch
 from app.engine.radar_dip import is_dip
+from app.engine.radar_reversal import is_reversal
+
+
+def rule_side(event: dict) -> str | None:
+    """The separate rule an event belongs to (``"dip"`` or ``"reversal"``, its receipt side), or None for the trial
+    rules."""
+    return "dip" if is_dip(event) else "reversal" if is_reversal(event) else None
 
 
 def side_receipt(receipt: dict | None, side: str | None) -> dict | None:
@@ -16,7 +23,8 @@ def side_receipt(receipt: dict | None, side: str | None) -> dict | None:
 
 
 def census(store, today: str, side: str | None = None) -> list[dict]:
-    """One row per session for the trial rules, or with ``side="dip"`` for the dip rule (only sessions it ran on)."""
+    """One row per session for the trial rules, or with ``side="dip"`` or ``side="reversal"`` for that separate rule
+    (only sessions it ran on)."""
     receipts, configs = store.detection_evidence()
     receipts = {pass_id: side_receipt(r, side) for pass_id, r in receipts.items()}
     sessions = sorted(s for s in store.sessions() if s < today)
@@ -32,7 +40,7 @@ def census(store, today: str, side: str | None = None) -> list[dict]:
     result = []
     for session in sorted(days):
         passes = store.passes(session)
-        events = [e for e in store.events(session) if is_dip(e) == (side == 'dip')]
+        events = [e for e in store.events(session) if rule_side(e) == side]
         own = [receipts.get(p['id']) for p in passes]
         if side is not None and not any(own):
             continue

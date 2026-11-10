@@ -14,7 +14,10 @@ events (PR 5), so a new event gets its news the same minute. With
 ``RADAR_ALERTS_ENABLED`` the new events also go to the phone through
 ``radar_alerts`` (off by default). With ``RADAR_DIP_RULES`` set, the separate ``radar_dip`` rule runs on
 the same pass under its own version and receipt (off by default; its events ping only in ``alert`` mode, and
-only with ``RADAR_ALERTS_ENABLED`` too). None of these failures affects the recorded pass. Outside the regular session an optional
+only with ``RADAR_ALERTS_ENABLED`` too); ``RADAR_REVERSAL_RULES`` does the same for the ``radar_reversal`` rule. With
+``RADAR_SETUP_CARDS=true`` each new dip or reversal event also gets its setup card (``radar_setup``, at most
+``MAX_CARDS`` a pass, in either mode) and, after the pings, the cards' paper book takes one step
+(``radar_setup_paper``). None of these failures affects the recorded pass. Outside the regular session an optional
 ``radar_premarket`` scanner (off unless ``RADAR_PREMARKET_ENABLED``) records its
 own pre-open lists in a separate file.
 """
@@ -27,7 +30,8 @@ import os
 import time
 from typing import Callable
 
-from app.engine import radar_alerts, radar_dip, radar_news, radar_premarket, radar_rules, tradier
+from app.engine import (radar_alerts, radar_dip, radar_news, radar_premarket, radar_reversal, radar_rules, radar_setup,
+                        radar_setup_paper, tradier)
 from app.engine.chart_math import ET, REGULAR_CLOSE, REGULAR_OPEN, session_windows
 from app.engine.radar_store import RadarEvent, RadarEventRevision, RadarPass, RadarQuote, RadarStore, load_universe
 
@@ -36,6 +40,7 @@ log = logging.getLogger(__name__)
 PASS_SECONDS = 60
 BATCH_SIZE = 50
 MAX_REQUESTS = 6
+MAX_CARDS = 3  # setup cards built a pass: each is up to two option reads out of the shared 30-a-minute budget
 
 
 def enabled() -> bool:
@@ -56,7 +61,9 @@ class RadarRunner:
                  clock: Callable[[], float] = time.time, news: radar_news.NewsReader = radar_news.fetch,
                  premarket: radar_premarket.PremarketScanner | None = None, alerts: radar_alerts.RadarAlerts | None = None,
                  rules: radar_rules.Rules = radar_rules.V0, dip: radar_dip.DipThresholds | None = None,
-                 dip_alerts: bool = False, daily: Callable[[list[str], str], dict] = radar_dip.fetch_daily):
+                 dip_alerts: bool = False, daily: Callable[[list[str], str], dict] = radar_dip.fetch_daily,
+                 reversal: radar_reversal.ReversalThresholds | None = None, reversal_alerts: bool = False,
+                 setups=None, options=None):
         self.store = store
         self.calendar = calendar
         self.universe = universe or load_universe()
@@ -70,6 +77,11 @@ class RadarRunner:
         self.dip = dip  # the dip-buy rule's version; None keeps it off
         self.dip_alerts = dip_alerts  # its new events also go to ``alerts``
         self.daily = daily
+        self.reversal = reversal  # the gap-reversal rule's version; None keeps it off
+        self.reversal_alerts = reversal_alerts  # its new events also go to ``alerts``
+        self.setups = setups  # the journal database engine for setup cards; None keeps cards (and their paper book) off
+        self.options = options  # the option chain reader for the cards; None is the shared ``options_chain``
+        self.paper = (radar_setup_paper.SetupPaper(setups, store, clock=clock) if setups is not None else None)
         self._daily: tuple[str, dict] | None = None  # (session, radar_dip.daily_context) once read
         self._pruned_for: date | None = None
 
@@ -134,6 +146,18 @@ class RadarRunner:
                     dip_status = "failed"
                     log.exception("Radar dip detection failed")
             side = {"dip": {"rules": asdict(self.dip), "status": dip_status, "event_ids": [e["event_id"] for e in dip_events]}}
+        reversal_events: list[RadarEvent] = []
+        if self.reversal is not None:
+            reversal_status = "skipped"
+            if inside and record["status"] in radar_rules.USABLE:
+                try:
+                    reversal_events = self.detect_reversal(record["session_date"], pass_id)
+                    reversal_status = "ok"
+                except Exception:  # the reversal rule is extra too; the pass and the other rules' events stand
+                    reversal_status = "failed"
+                    log.exception("Radar reversal detection failed")
+            side = {**(side or {}), "reversal": {"rules": asdict(self.reversal), "status": reversal_status,
+                                                 "event_ids": [e["event_id"] for e in reversal_events]}}
         try:
             self.store.append_detection(pass_id, universe=self.universe, rules=asdict(self.rules),
                                         hours=self._session_hours, status=detection_status,
@@ -143,15 +167,24 @@ class RadarRunner:
         except Exception:
             # Keep collection/alerts running, but the scorer cannot certify this pass.
             log.exception("Radar detection receipt failed")
+        if self.setups is not None and (dip_events or reversal_events):
+            self.build_cards(dip_events + reversal_events)  # after the receipt: its option reads never delay it
         if inside and self.alerts is not None:
             try:
                 if new_events:
                     self.alerts.record(new_events)
                 if self.dip_alerts and dip_events:
                     self.alerts.record(dip_events)
+                if self.reversal_alerts and reversal_events:
+                    self.alerts.record(reversal_events)
                 self.alerts.deliver()
             except Exception:  # a phone ping is extra; the recorded pass and its events stand either way
                 log.exception("Radar alerts failed")
+        if inside and self.paper is not None and record["status"] in radar_rules.USABLE:
+            try:  # step never raises; the guard keeps even a bad close time from touching the pass
+                self.paper.step(record["session_date"], self._close_at(record["session_date"]))
+            except Exception:
+                log.exception("Radar setup paper step failed")
         if inside:
             try:
                 radar_news.enrich(self.store, record["session_date"], datetime.fromtimestamp(self.clock(), UTC), self.news)
@@ -183,6 +216,50 @@ class RadarRunner:
                 self.store.append_revision(revision)
                 written_revisions.append(revision)
         return written_events, written_revisions
+
+    def detect_reversal(self, session_date: str, pass_id: int) -> list[RadarEvent]:
+        """Append the reversal rule's new events for one recorded pass; returns the rows written (``detect_dip``'s
+        pattern)."""
+        passes = radar_rules.session_passes(self.store.passes(session_date), session_date)
+        end = next((i for i, p in enumerate(passes) if p["id"] == pass_id), None)
+        if end is None:
+            return []
+        needed = radar_reversal.needed_pass_ids(passes, end, self.reversal)
+        if not needed:
+            return []  # outside the window, or the opening or five-minute pass is missing: nothing to read
+        saved = [e for e in self.store.events(session_date) if e["rule_version"] == self.reversal.version]
+        written = []
+        for event in radar_reversal.detect(self.universe, passes, end, self.store.pass_quotes(needed), saved, self.reversal):
+            if self.store.event(event["event_id"]) is None:
+                self.store.append_event(event)
+                written.append(event)
+        return written
+
+    def build_cards(self, events: list[RadarEvent]) -> None:
+        """A setup card for each new setup-kind event, at most ``MAX_CARDS`` a pass; one past the cap, or whose levels do
+        not hold, has none. A failure leaves that event without a card and never touches the pass or its events."""
+        from sqlmodel import Session
+        built = 0
+        for event in events:
+            if not radar_setup.is_setup(event):
+                continue
+            if built >= MAX_CARDS:
+                log.info("Radar setup card cap %d reached; %s has no card", MAX_CARDS, event["event_id"])
+                continue
+            built += 1
+            try:
+                with Session(self.setups) as db:
+                    radar_setup.build(db, event, now=datetime.fromtimestamp(self.clock(), UTC), options=self.options)
+            except Exception:
+                log.exception("Radar setup card failed for %s", event["event_id"])
+
+    def _close_at(self, session_date: str) -> float | None:
+        """The regular close of ``session_date`` as epoch seconds from the calendar read this pass, or None."""
+        h = getattr(self, "_session_hours", None)
+        if not h or h.get("status") != "open":
+            return None
+        d = date.fromisoformat(session_date)
+        return datetime(d.year, d.month, d.day, h["close"] // 60, h["close"] % 60, tzinfo=ET).timestamp()
 
     def _session_daily(self, session_date: str) -> dict:
         """The dip rule's daily context for the session, read once (``radar_dip.fetch_daily``)."""
@@ -261,8 +338,14 @@ def runner_from_env() -> RadarRunner | None:
     from app.engine.chart_calendar import chart_calendar
     universe = load_universe()
     dip = radar_dip.mode_from_env()
+    reversal = radar_reversal.mode_from_env()
+    setups = None
+    if radar_setup.enabled():
+        from app.database import engine as setups
     runner = RadarRunner(RadarStore(store), chart_calendar, universe=universe, rules=radar_rules.from_env(),
-                         dip=None if dip == "off" else radar_dip.V0, dip_alerts=dip == "alert")
+                         dip=None if dip == "off" else radar_dip.V0, dip_alerts=dip == "alert",
+                         reversal=None if reversal == "off" else radar_reversal.V0, reversal_alerts=reversal == "alert",
+                         setups=setups)
     if radar_alerts.enabled():
         from app.database import engine
         runner.alerts = radar_alerts.RadarAlerts(engine, store=runner.store)

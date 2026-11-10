@@ -73,7 +73,7 @@ CREATE TRIGGER IF NOT EXISTS revision_no_delete BEFORE DELETE ON event_revision 
 """
 
 PassStatus = Literal["ok", "partial", "failed", "skipped"]
-EventKind = Literal["relative_to_spy", "relative_to_sector", "group_move", "dip_turn"]
+EventKind = Literal["relative_to_spy", "relative_to_sector", "group_move", "dip_turn", "gap_reversal"]
 EventDirection = Literal["up", "down"]
 
 
@@ -240,7 +240,7 @@ class RadarStore:
         A crash before this receipt leaves the pass unverified. Config bytes are saved
         once by content digest, so a reused version label cannot rewrite history.
         ``side`` adds a separate rule's own result under its name (``{"dip": {"rules",
-        "status", "event_ids"}}``), with its config saved the same way; without it the
+        "status", "event_ids"}}``, and ``"reversal"`` the same way), with its config saved the same way; without it the
         receipt is exactly the trial rules' own.
         """
         if origin not in ("live", "replay") or status not in ("ok", "failed", "skipped"):

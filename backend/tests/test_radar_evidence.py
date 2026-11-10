@@ -140,3 +140,19 @@ def test_additive_upgrade_preserves_legacy_rows_without_certifying_them(tmp_path
     assert (upgraded.passes(), upgraded.quotes()) == before
     assert upgraded.detection_evidence() == ({}, {})
     assert not census(upgraded, "2026-10-28")[0]["verified"]
+
+
+def test_the_reversal_rule_has_its_own_census_and_stays_out_of_the_trials(tmp_path):
+    from app.engine.radar_evidence import rule_side
+    from tests.test_radar_runner import record_reversal
+    _, store = record_reversal(tmp_path, 95)
+    _, plain = record_reversal(tmp_path / "off", 95, reversal=False)
+    today = "2030-01-16"
+    [trial_row], [off_row] = census(store, today), census(plain, today)
+    assert trial_row == off_row and trial_row["rule_version"] == "radar-rules-v0"  # the reversal event is not the trial's
+    [row] = census(store, today, side="reversal")
+    assert row["rule_version"] == "radar-reversal-v0" and row["events"] == 1
+    assert census(store, today, side="dip") == [] and census(plain, today, side="reversal") == []
+    [event] = [e for e in store.events("2030-01-15") if e["rule_version"] == "radar-reversal-v0"]
+    assert rule_side(event) == "reversal" and rule_side({"rule_version": "radar-dip-v0"}) == "dip"
+    assert rule_side({"rule_version": "radar-rules-v0"}) is None

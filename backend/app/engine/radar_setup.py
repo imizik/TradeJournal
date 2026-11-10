@@ -31,6 +31,9 @@ MIN_PAPER_TRADES = 5
 # The owner's first hour, by the trade's opening time (naive New York wall time). The stored entry time buckets do
 # not fit: "open" is only 09:30-10:00 and "mid" runs to 15:00.
 FIRST_HOUR = (dtime(9, 30), dtime(10, 30))
+# Each option read's HTTP timeout: the card is built on the recorder's minute pass, so two slow reads (instead of the
+# chain reader's 20-second default) can never hold the pass for long; a timeout just means no contract on the card.
+READ_TIMEOUT_SECONDS = 5
 MINUS = "−"
 
 
@@ -83,11 +86,11 @@ def pick_contract(symbol: str, direction: str, today: date, *, options=None) -> 
     try:
         if options is None:
             from app.engine.options_chain import options_chain as options
-        expiration = scanner_rules.pick_expiration(options.expirations(symbol), today)
+        expiration = scanner_rules.pick_expiration(options.expirations(symbol, timeout=READ_TIMEOUT_SECONDS), today)
         if expiration is None:
             log.info("Radar setup %s: no expiration today or 3-7 days out", symbol)
             return None
-        chosen = scanner_rules.choose_contract(options.chain(symbol, expiration).contracts,
+        chosen = scanner_rules.choose_contract(options.chain(symbol, expiration, timeout=READ_TIMEOUT_SECONDS).contracts,
                                                "long" if direction == "up" else "short")
         if chosen is None:
             log.info("Radar setup %s: no contract met the delta and liquidity limits", symbol)

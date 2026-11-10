@@ -48,13 +48,13 @@ class FakeOptions:
     def __init__(self, contracts=(), expirations=(date(2026, 11, 12), date(2026, 11, 14)), fail=None):
         self.contracts, self.expirations_list, self.fail, self.calls = tuple(contracts), list(expirations), fail, []
 
-    def expirations(self, symbol, wait=False):
+    def expirations(self, symbol, wait=False, timeout=None):
         self.calls.append(("expirations", symbol, wait))
         if self.fail:
             raise self.fail
         return self.expirations_list
 
-    def chain(self, symbol, expiration, wait=False):
+    def chain(self, symbol, expiration, wait=False, timeout=None):
         self.calls.append(("chain", symbol, expiration, wait))
         return OptionChain(underlying=symbol, expiration=expiration, provider="fake", fetched_at=NOW, contracts=self.contracts)
 

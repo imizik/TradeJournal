@@ -7,8 +7,11 @@ fresh quote for the stock on the idea's side of the setup's invalidation, it cla
 discretionary ``Copilot plan`` on the default, or only, account, long calls for ``up`` and long puts for ``down``, the
 candidate contract when the card has one, origin ``radar_event`` with the event id, so ``radar_proof`` counts the
 event as planned) and arms its invalidation alert (``plan_role="invalidation"``, ``source_kind="copilot"`` on the
-thread, so the plan ladder, the Plans board and the invalidation ping read it). There is no entry alert: the setup's
-entry is now. A stock already at or through the invalidation is refused once, with the reason kept on the card; a
+thread, so the plan ladder, the Plans board and the invalidation ping read it), then, best effort, a 60-minute time stop
+(``plan_time_stops.create``, text ``60m``: it counts from the tap, never runs past the close, and pings only if a
+position in the symbol was entered after the plan); a time stop refused or failed never fails the plan. There is no
+entry alert: the setup's entry is now. A failure after the claim and before the plan is saved releases the claim, so a
+later tap can plan it. A stock already at or through the invalidation is refused once, with the reason kept on the card; a
 missing or stale quote leaves the card untouched for a later tap. Advice only: nothing places, sizes or suggests an
 order.
 """
@@ -53,10 +56,10 @@ def setup_words(row: RadarSetup) -> str:
 
 def plan(engine, setup_id: str, *, now: float | None = None, quote: Callable[[str], float | None] | None = None) -> tuple[str, str | None]:
     """The Plan it tap: ``(reply, chosen label)``, the label None when a later tap may still plan it."""
-    from app.engine import captures, copilot_investigations as investigations, copilot_plans
+    from app.engine import captures, copilot_investigations as investigations, copilot_plans, plan_time_stops
     from app.engine.chart_journal import contract_label
     from app.engine.level_alert_monitor import create_alert
-    from app.engine.telegram_replies import _plan_account
+    from app.engine.telegram_replies import _calendar, _plan_account
     now = time.time() if now is None else now
     key = _uuid(setup_id)
     with Session(engine) as db:
@@ -107,16 +110,25 @@ def plan(engine, setup_id: str, *, now: float | None = None, quote: Callable[[st
         except captures.CaptureError as exc:
             return f"Not planned: {exc}", None
 
-        claimed = db.exec(update(RadarSetup).where(RadarSetup.id == row.id, RadarSetup.plan_state == "none")
+        setup_key, client_id = row.id, row.id.hex
+        claimed = db.exec(update(RadarSetup).where(RadarSetup.id == setup_key, RadarSetup.plan_state == "none")
                           .values(plan_state="planned", planned_at=datetime.fromtimestamp(now, UTC).replace(tzinfo=None)))
         db.commit()
         if claimed.rowcount != 1:
             return "Already planned.", PLANNED
-        thread_id = investigations.create(investigations.InvestigationFields(
-            title=f"Radar setup: {symbol} {words}", symbol=symbol), session=db)["id"]
-        captures.save(db, captures.build(db, body(thread_id)))
-        db.exec(update(RadarSetup).where(RadarSetup.id == row.id).values(investigation_id=thread_id))
-        db.commit()
+        try:
+            thread_id = investigations.create(investigations.InvestigationFields(
+                title=f"Radar setup: {symbol} {words}", symbol=symbol), session=db)["id"]
+            captures.save(db, captures.build(db, body(thread_id)))
+            db.exec(update(RadarSetup).where(RadarSetup.id == setup_key).values(investigation_id=thread_id))
+            db.commit()
+        except Exception:
+            log.exception("Radar setup %s: the plan failed after the claim; the claim is released", event_id)
+            db.rollback()
+            db.exec(update(RadarSetup).where(RadarSetup.id == setup_key, RadarSetup.plan_state == "planned")
+                    .values(plan_state="none", planned_at=None))
+            db.commit()
+            return "The plan could not be saved, so nothing is planned. Tap again in a moment.", None
         try:
             create_alert(db, symbol=symbol, price=level, reference=last, condition="crosses", interval=None, session="regular",
                          source_kind="copilot", source_id=thread_id, label=f"{symbol} invalidation: crosses {level:,.2f}",
@@ -125,5 +137,12 @@ def plan(engine, setup_id: str, *, now: float | None = None, quote: Callable[[st
         except ValueError as exc:
             db.rollback()
             armed = f"Alert not armed: {exc}"
+        try:
+            plan_time_stops.create(db, client_id=client_id, investigation_id=thread_id, symbol=symbol, text="60m", now=now,
+                                   calendar=_calendar())
+            armed += " 60-minute check armed."
+        except Exception as exc:  # refused (after the close) or failed: the plan stands without it
+            db.rollback()
+            log.info("Radar setup %s: no 60-minute check (%s)", event_id, exc)
     log.info("Radar setup %s planned for %s: %s", event_id, symbol, armed)
     return f"Planned {symbol}: out {side} {level:,.2f}. {armed}", PLANNED
