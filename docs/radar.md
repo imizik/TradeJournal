@@ -100,10 +100,13 @@ file (older files gain them when opened).
 - `POST /radar/events/{event_id}/feedback` takes `useful`, `already_knew`,
   `too_late` or `irrelevant`; the latest rating wins on read.
 
-The screen shows one coverage line, then "New since your last visit" and the
+The screen opens with the developments: "New since your last visit" and the
 earlier events as cards that expand into the original evidence, the later
 readings, an Open chart link and the four rating buttons. No detection runs
-here; with no events it shows the empty state with coverage. Events whose
+here; with no events it shows the empty state. One coverage line (recording
+state, passes, missing symbols, universe) follows the events, with the Session
+picker beside the Developments heading; when Radar is off, has no data or is
+stale, that line leads the page instead. Events whose
 `rule_version` is `radar-rules-v0` carry a small "v0 · provisional rules" tag,
 and dip-rule events (`radar-dip-v0`) a "dip · discovery rule" tag.
 

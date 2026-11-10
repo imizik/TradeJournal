@@ -300,31 +300,38 @@ export default function RadarFeedView() {
       onToggle={() => setOpen(open === e.event_id ? null : e.event_id)} onRated={rated(e.event_id)} />
   );
 
+  // Off, no-data or stale recordings lead the page; a healthy recording is one quiet line after the developments.
+  const warn = feed.state !== "recording";
+  const picker = feed.session && (feed.state !== "off" || feed.outside_list !== undefined) ? (
+    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <label htmlFor="radar-session">Session</label>
+      <select id="radar-session" value={feed.session} onChange={(e) => { setOpen(null); setSession(e.target.value);
+        const url = new URL(window.location.href); url.searchParams.set("session", e.target.value);
+        window.history.replaceState(window.history.state, "", url); }}
+        className="h-9 rounded-md border bg-background px-2 text-xs text-foreground">
+        {Array.from(new Set([feed.session, ...(feed.sessions ?? [])])).sort().reverse().map((d) => <option key={d} value={d}>{d}</option>)}
+      </select>
+    </div>
+  ) : null;
+  const status = (
+    <div className={cn("rounded-lg border bg-card px-3.5", warn ? "py-2.5" : "py-2")} role="status" data-testid="radar-coverage">
+      <p className={cn(warn ? "text-sm" : "text-xs", STATE_TONE[feed.state])}>{coverageLine(feed)}{feed.coverage && ` · Universe ${feed.coverage.universe_version}`}</p>
+      {feed.coverage && feed.coverage.symbols_missing.length > 0 && (
+        <p className="mt-1 text-xs text-muted-foreground">Not in the latest pass: {feed.coverage.symbols_missing.slice(0, 12).join(", ")}{feed.coverage.symbols_missing.length > 12 ? "…" : ""}</p>
+      )}
+      {feed.state === "off" && picker && <div className="mt-1.5">{picker}</div>}
+    </div>
+  );
+
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border bg-card px-3.5 py-2.5" role="status" data-testid="radar-coverage">
-        <p className={cn("text-sm", STATE_TONE[feed.state])}>{coverageLine(feed)}</p>
-        {feed.session && (feed.state !== "off" || feed.outside_list !== undefined) && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <label htmlFor="radar-session">Session</label>
-            <select id="radar-session" value={feed.session} onChange={(e) => { setOpen(null); setSession(e.target.value);
-              const url = new URL(window.location.href); url.searchParams.set("session", e.target.value);
-              window.history.replaceState(window.history.state, "", url); }}
-              className="h-9 rounded-md border bg-background px-2 text-xs text-foreground">
-              {Array.from(new Set([feed.session, ...(feed.sessions ?? [])])).sort().reverse().map((d) => <option key={d} value={d}>{d}</option>)}
-            </select>
-            {feed.coverage && <span>Universe {feed.coverage.universe_version}</span>}
-          </div>
-        )}
-        {feed.coverage && feed.coverage.symbols_missing.length > 0 && (
-          <p className="mt-1 text-xs text-muted-foreground">Not in the latest pass: {feed.coverage.symbols_missing.slice(0, 12).join(", ")}{feed.coverage.symbols_missing.length > 12 ? "…" : ""}</p>
-        )}
-      </div>
+      {warn && status}
       {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
       {notice && <p role="alert" className="text-xs text-red-400">{notice}</p>}
 
       {feed.state !== "off" && <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-[13.5px] font-semibold tracking-tight">Developments</h2>
+        {picker}
         <label className="flex min-h-11 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
           <input type="checkbox" checked={unseenOnly} onChange={(e) => setUnseenOnly(e.target.checked)} />
           Not on Movers
@@ -339,7 +346,7 @@ export default function RadarFeedView() {
 
       {feed.state !== "off" && feed.events.length === 0 && (
         <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-          {feed.state === "no_data" ? "Nothing has been recorded for this session yet." : "Radar has not produced any developments yet for this session. The recording above shows what it has covered."}
+          {feed.state === "no_data" ? "Nothing has been recorded for this session yet." : "Radar has not produced any developments yet for this session. The recording status below shows what it has covered."}
         </p>
       )}
       {newEvents.length > 0 && (
@@ -354,6 +361,7 @@ export default function RadarFeedView() {
           <ul className="space-y-2">{earlier.map(card)}</ul>
         </section>
       )}
+      {!warn && status}
       {feed.outside_list && <OutsideList checkpoints={feed.outside_list} />}
       {feed.state !== "off" && <RadarMovers session={session ?? feed.session ?? undefined} />}
     </div>
