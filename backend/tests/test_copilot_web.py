@@ -187,6 +187,22 @@ def test_a_turn_that_may_search_gets_the_extra_headroom(web, stops):
     assert bool([e for e in events if e["type"] == "error" and e["code"] == "budget"]) is stops
 
 
+def test_a_fable_turn_gets_the_same_room_in_tokens_as_an_opus_turn():
+    """The cap scales with the model's price over Opus's; Sonnet and Opus keep the turn budget as set."""
+    caps = {m: copilot.turn_cap(_cfg(model=m), web=False) for m in ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2", "claude-fable-5-1")}
+    assert caps == pytest.approx({"claude-sonnet-5-5": 0.25, "claude-opus-5-5": 0.25, "claude-fable-5-2": 0.50, "claude-fable-5-1": 0.625})
+    assert copilot.turn_cap(_cfg(model="claude-fable-5-2"), web=True) == pytest.approx(0.80)
+
+    class Fable(Priced):
+        model = "claude-fable-5-2"
+    cfg = _cfg(backend="anthropic", evidence="live", model="claude-fable-5-2")
+    rounds = lambda tokens: (([QUOTE], "tool_use", usage(tokens)), ([{"type": "text", "text": "Answer."}], "end_turn", usage(0)))  # noqa: E731
+    # 10,000 output tokens at Fable 5.2's price is $0.40: over the $0.25 an Opus turn gets, under Fable's $0.50.
+    assert not [e for e in turn(Fable(*rounds(10_000)), cfg=cfg, web=False) if e["type"] == "error"]
+    stopped = [e["message"] for e in turn(Fable(*rounds(13_000)), cfg=cfg, web=False) if e["type"] == "error"]
+    assert stopped == ["Stopped: this turn reached its $0.50 API spend cap."]
+
+
 def test_a_paused_search_over_the_cap_stops_with_the_reason():
     adapter = Priced((search(0), "pause_turn", usage(41_000)))
     events = turn(adapter)
