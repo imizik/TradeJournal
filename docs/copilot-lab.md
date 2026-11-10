@@ -214,7 +214,11 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     end, which show or hide them without changing the open conversation; any
     number of tickers can stay open. Beneath it, indented, title and date, its
     three newest open conversations and the open one, the plan's tagged
-    **Plan** and the exit review's **Exit review**, then the other open ones
+    **Plan** and the exit review's **Exit review** (a thread planned from a
+    Radar hit or setup card is tagged **From Radar** instead of Plan: the list's
+    `origin: "radar"` from `GET /copilot/investigations`, read from the plan
+    capture's `radar_event` origin or the setup's own thread, else a title
+    starting "Radar setup:"), then the other open ones
     under **Earlier · N** and the closed ones under **Closed · N**. A ticker
     with one conversation shows no children. Thesis news is remembered as seen in
     this browser (`localStorage`) once its ticker is opened.
@@ -669,7 +673,10 @@ The full page is a desk of three panes beside each other
   answered" (`GET /analytics/exit-habits`, its feedback counts, or its trade
   sample when there are none) and "Radar: <label> · 6 hits rated"
   (`GET /radar/proof`, or its reason when there is no verdict), each saying
-  "could not load" when its read fails, and Open Proof →; then the plan
+  "could not load" when its read fails; under them the Radar setup cards, one
+  line per kind and direction from the same read's `setups` ("Dip turning up:
+  6 cards · 2 planned · paper 3 of 4 green, +$210", all cards so far, or "No
+  setup cards yet."), and Open Proof →; then the plan
   streak's record (`GET /charts/captures/streak`): a tile per
   entry this week in time order (+ planned before entry, − no plan or a plan
   saved late, · a suggested plan waiting to be linked), each titled like
@@ -732,6 +739,23 @@ the message box, unsent. A hit from an earlier day offers only Plan it: a
 decision counts on the hit's own New York day. Once logged it is one line, with
 Plan it still offered after Watching. Advice only. Proof:
 `frontend/e2e/copilot-radar-decision.spec.ts`.
+
+A hit that has a [setup card](radar.md#setup-cards-off-by-default) shows the
+card under the summary, worded as the phone ping words it
+(`GET /copilot/desk/radar-setup?event=<id>`): the setup in words, "In near 61.20 · out below 59.85 (−2.2%)", how
+far the latest recorded Radar price is from the level (today's session only),
+the candidate contract or "No liquid contract found.", the owner's record line,
+the paper record for the setup once there are enough, and this card's own paper
+result. Its **Plan it** does what the ping's button does
+(`POST /copilot/desk/radar-setup/{id}/plan`, the same claim and refusals: an earlier
+session, a price through the level, a stale quote), stays on the card and
+shows the reply, and wakes the alert monitor as the ping's tap does; once
+planned the card says so and links **Open its thread →** instead of offering
+Plan it again, and a refused card shows why. A plan made today also logs
+"Planning. …" as above (if that entry fails to save, **Log planning** retries
+it). A card from an earlier session is shown, but its Plan it opens a plan
+conversation as for any older hit, since its level no longer applies. Ask
+about it asks about the setup.
 
 **Radar scorecard** (under the alert scorecard, from the same
 `GET /copilot/desk/scorecard` read, its `radar` part;

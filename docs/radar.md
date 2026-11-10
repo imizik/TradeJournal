@@ -83,8 +83,10 @@ data. Rules and samples are shown on the page. See `backend/app/engine/radar_pro
 Beside alerted events, the read-out counts events that **led to a plan** (a
 pre-trade plan names the event as its origin) and **to a trade** (that plan is
 linked to a trade), shown on `/proof` and not part of the verdict. It also
-carries `setups`, the [setup cards'](#setup-cards-off-by-default) scorecard
-(backend only for now; `/proof` does not show it yet). The event
+carries `setups`, the [setup cards'](#setup-cards-off-by-default) scorecard,
+shown on `/proof`
+as its own "Radar setup cards" card under the Radar proof (chip "Record only":
+there is no verdict rule for setups) and on the desk's This week tab. The event
 detail (`GET /radar/events/{id}`, field `plans`) carries the same as
 **Planned** and **Traded** marks. See [Origin](copilot-lab.md#origin).
 
@@ -648,7 +650,20 @@ Nothing places, sizes or suggests an order.
 
 **The scorecard.** `GET /radar/proof` carries `setups`: per kind and
 direction, cards, cards with a contract, planned, paper trades closed, green,
-their total P&L, and unresolved.
+their total P&L, and unresolved; `/proof` and the desk's This week tab show
+one line per kind and direction ("Dip turning up: 6 cards · 2 planned · paper
+3 of 4 green, +$210").
+
+**On the desk.** `GET /copilot/desk/radar-setup?event=<id>` returns `setup`
+(null for an event without a card; `desk_radar_setups.view`): the card's id, words, entry and
+invalidation, the ping's levels and candidate lines, the owner's record and
+paper record lines, this card's paper result, its plan state, note and thread,
+and, for today's session, the symbol's latest recorded Radar quote with its
+distance from the level (no provider call). The desk's Radar card shows it
+([Copilot Lab](copilot-lab.md#the-desk)), and its Plan it posts
+`POST /copilot/desk/radar-setup/{id}/plan` (owner-only), which runs the ping's
+`radar_setup_plan.plan` unchanged and returns its reply, `planned`, `refused`
+and the card as it now stands.
 
 **Pings.** A card ping is policy kind `radar_setup`, with its own budget
 (`PING_BUDGET_RADAR_SETUP`, default 4 a day) ranked just above `radar_event`,
@@ -686,7 +701,7 @@ pings go back to the plain form, saved cards stay.
 - ntfy has no Plan it button; its tap opens the event page.
 
 Tests: `backend/tests/test_radar_setup.py`, `test_radar_setup_paper.py`,
-`test_radar_setup_plan.py`, and the wiring in `test_radar_runner.py` and
+`test_radar_setup_plan.py` (also the desk's read, route and copilot rows), and the wiring in `test_radar_runner.py` and
 `test_radar_alerts.py`.
 
 ## Movers now
@@ -725,7 +740,15 @@ rows Movers now computes and drops: SPY, QQQ, IWM, RSP and a stock's sector
 ETF with the same day, since-open, gap and 15-minute arithmetic. Both take a
 moment to cut at, so a replay never sees an event, revision, headline or pass
 from after its frozen time; live reads pass no cut. Neither calls a provider or
-writes to the store.
+writes to the store. `get_radar_today` also carries `setups`, the session's
+[setup cards](#setup-cards-off-by-default) newest first (at most 8; symbol,
+event, setup in words, entry, invalidation, the candidate contract, the
+owner's record line, plan state, first seen and, once closed, the paper
+result), kept to the tool's group or ticker when one is asked for; when the
+result must shrink, the longer of events and setup cards gives way first; a replay never sees a card made, planned or
+closed after its frozen time (`desk_radar_setups.copilot_rows`). The research
+job and the shadow trader read the same tool without the owner's record line
+and plan state (`research_job.without_owner_book`): they never see his book.
 
 ## Charts group movement
 

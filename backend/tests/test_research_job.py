@@ -76,6 +76,16 @@ def saved(monkeypatch):
 
 # --------------------------------------------------------------------------- the request and the tool allowlist
 
+def test_radar_today_reaches_the_job_without_the_owners_record_or_plan_on_a_setup_card():
+    rec = _recorder()
+    result = asyncio.run(rec.execute({"id": "t1", "name": "get_radar_today", "input": {}}))
+    data = json.loads(result["content"])
+    [setup] = data["setups"]
+    assert setup["symbol"] == "NBIS" and setup["contract"] and setup["invalidation"] == 92.40
+    assert "record" not in setup and "plan" not in setup  # the owner's book never reaches the web-enabled job
+    assert json.loads(research_job.without_owner_book("not json"))["state"] == "error"
+
+
 def test_only_web_and_lab_tools_with_caps_and_structured_output(saved):
     client = client_for(submit())
     _run(client)
