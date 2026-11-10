@@ -186,3 +186,45 @@ def test_endpoint_off_and_on(tmp_path, monkeypatch, boundary):  # noqa: F811
     assert body["state"] == "ok" and body["events"] == 5
     assert boundary.public.get("/radar/proof").status_code == 401
 
+
+
+def _uncached(store, universe, sessions):  # the per-request ranking before the cache: every pass, every time
+    return {s: radar_proof.movers_timeline(universe, store.passes(s), store.pass_quotes(p["id"] for p in store.passes(s)))
+            for s in sessions}
+
+
+def test_the_ranking_cache_gives_the_uncached_result_as_the_store_changes(tmp_path, db, monkeypatch):
+    path = tmp_path / "radar.sqlite"
+    writer = RadarStore(path)
+    _seed(writer)
+    radar_proof._RANKED.clear()
+
+    def both():
+        cached = radar_proof.build(RadarStore(path, read_only=True), db, UNIVERSE)
+        with monkeypatch.context() as m:
+            m.setattr(radar_proof, "session_timelines", _uncached)
+            assert radar_proof.build(RadarStore(path, read_only=True), db, UNIVERSE) == cached
+        return cached
+
+    first = both()
+    assert both() == first  # warm: nothing re-ranked, the same answer
+    calls = []
+    real = radar_proof.build_movers
+    monkeypatch.setattr(radar_proof, "build_movers", lambda *a, **k: calls.append(1) or real(*a, **k))
+    radar_proof.build(RadarStore(path, read_only=True), db, UNIVERSE)
+    assert calls == []  # every pass was ranked once already
+    # A later pass lists CCC: its event moves from "not in Movers" to "Radar first", and only that pass is ranked.
+    writer.append_pass(_pass("10:02"), [_q("SPY", 100.0, "10:02"), _q("CCC", 105.0, "10:02")])
+    calls.clear()
+    radar_proof.build(RadarStore(path, read_only=True), db, UNIVERSE)
+    assert len(calls) == 1  # just the new pass
+    later = both()
+    assert later["movers"] == {"radar_first": 2, "not_in_movers": 0, "movers_first": 1, "unavailable": 1}
+    # A rating saved now shows at once (only rankings are kept).
+    writer.append_feedback("e3", "useful", "2026-10-22T16:00:00Z")
+    assert both()["ratings"]["useful"] == 2
+    # Pruned quotes: the session reads unavailable, as uncached.
+    writer.prune_quotes(keep_sessions=0)
+    pruned = both()
+    assert pruned["movers"]["unavailable"] == 4
+    assert radar_proof._RANKED[(str(path), path.stat().st_ino)][1] == {}  # the pruned session's rankings are dropped
