@@ -15,6 +15,10 @@ type Part = "plan" | "entry" | "invalidation" | "timeStop";
 type Result = { state: "idle" | "working" | "done" | "failed"; text: string };
 const PART_LABEL: Record<Part, string> = { plan: "Pre-trade plan", entry: "Entry alert", invalidation: "Invalidation alert", timeStop: "Time stop" };
 const IDLE: Result = { state: "idle", text: "" };
+/** The journal account of the last plan confirmed in this browser: the next card starts on it. */
+const ACCOUNT_KEY = "copilot.plan-account";
+const lastAccount = () => { try { return window.localStorage.getItem(ACCOUNT_KEY) ?? ""; } catch { return ""; } };
+const rememberAccount = (id: string) => { try { window.localStorage.setItem(ACCOUNT_KEY, id); } catch { /* this visit only */ } };
 const field = "w-full rounded border bg-background px-2 py-2 text-base text-foreground disabled:opacity-60 sm:text-sm";
 /** The invalidation study's approval-only wording candidates: why a level's history is evidence beside the card, never a rule. */
 export const EVIDENCE_NOT_RULE_URL =
@@ -129,6 +133,10 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   const [setup, setSetup] = useState<CaptureSetup | null>(null);
   const [setupError, setSetupError] = useState(false);
   const [picked, setAccount] = useState("");
+  const [remembered] = useState(lastAccount);  // the card is client-only, so it reads storage on mount
+  // Risk $ and Size wait behind "Size it": open when a risk is typed or remembered or a confirmed card kept a size, or
+  // once the owner taps it. The copilot's drafted size note alone keeps it folded, shown on the folded line.
+  const [sizeOpen, setSizeOpen] = useState(() => !!(risk || saved?.fields?.size_note));
   const [results, setResults] = useState<Record<Part, Result>>(() => restored(saved));
   // The server's reading of the time stop, for the words it was asked about; a failed read leaves it a note.
   const [preview, setPreview] = useState<{ text: string; read: TimeStopPreview | null } | null>(null);
@@ -170,7 +178,9 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
 
   const side = SIDE[`${plan.direction} ${plan.instrument}`];
   const accounts = setup?.accounts ?? [];
-  const account = picked || setup?.default_account_id || (accounts.length === 1 ? accounts[0].id : "");
+  // The owner's pick, else the account of the last plan confirmed in this browser, else the journal's default, else the only one.
+  const known = (id: string | null | undefined) => (id && accounts.some(a => a.id === id) ? id : "");
+  const account = known(picked) || known(remembered) || known(setup?.default_account_id) || (accounts.length === 1 ? accounts[0].id : "");
   const entryLevel: PlanLevel = { ...plan.entry_trigger, price: Number(entry) };
   const stopLevel: PlanLevel = { ...plan.invalidation, price: Number(stop) };
   const long = plan.direction === "long";
@@ -258,6 +268,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
           origin: !origin || (origin.kind === "copilot" && !origin.ref) ? { kind: "copilot", ref: investigationId, text: origin?.text ?? null } : origin });
         // How often the desk checks in on it after the close, from today on (one save per card and horizon).
         await saveHorizon(plan.symbol, horizon, `horizon-${clientId.current}-${horizon}`);
+        rememberAccount(account);
         text = "Saved as your pre-trade plan. It is suggested for the trade when the fill arrives.";
       } else if (part === "timeStop") {
         await saveTimeStop(clientId.current, investigationId!, plan.symbol, stopText);
@@ -308,7 +319,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
     const elsewhere = investigationId ? await confirmedElsewhere(investigationId, plan.id) : null;
     if (elsewhere) {
       const f = elsewhere.fields;
-      if (f) { setThesis(f.thesis); setContract(f.contract); setEntry(f.entry); setStop(f.invalidation); setTimeStop(f.time_stop); setSize(f.size_note); setHorizon(f.horizon || null); }
+      if (f) { setThesis(f.thesis); setContract(f.contract); setEntry(f.entry); setStop(f.invalidation); setTimeStop(f.time_stop); setSize(f.size_note); setHorizon(f.horizon || null); if (f.size_note) setSizeOpen(true); }
       setResults(restored(elsewhere));
       onOutcome(elsewhere);
       return;
@@ -403,34 +414,41 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
             : "No daily question; Review my week looks at it."}
         </span>
       </label>
-      <div className="grid grid-cols-[6rem_1fr] items-end gap-2">
-        <label className="block space-y-1">
-          <span className="text-xs text-muted-foreground">Risk $</span>
-          <input value={risk} onChange={e => { const v = e.target.value.replace(/[^\d.]/g, "").slice(0, 9); setRisk(v); rememberRisk(v); }}
-            inputMode="decimal" placeholder="e.g. 150" disabled={locked} className={cn(field, "min-h-11")} />
-        </label>
-        <label className="block space-y-1">
-          <span className="text-xs text-muted-foreground">Size</span>
-          <input value={size} onChange={e => { setSize(e.target.value.slice(0, SIZE_MAX)); if (sizing?.note) setSizeEdited(true); }}
-            placeholder="e.g. one starter, no adds" disabled={locked} className={cn(field, "min-h-11")} />
-        </label>
-      </div>
-      {sizing && (
-        <div aria-label="Size it for me" className="space-y-0.5 text-xs text-muted-foreground">
-          {sizing.lines.map(line => <p key={line}>{line}</p>)}
-          {drafting && premiumLine(setupRecord, sizing.premium) && <p>{premiumLine(setupRecord, sizing.premium)}</p>}
-          {sizing.note && !locked && <p>{sizeEdited ? "Your size note is kept as you wrote it." : `Confirm puts this size in front of the size note${sizeText.endsWith("…") ? `, which is cut to fit ${SIZE_MAX} characters` : ""}.`}</p>}
-        </div>
-      )}
-      {setup && !setup.default_account_id && accounts.length > 1 && (
+      {accounts.length > 1 && (
         <label className="block space-y-1">
           <span className="text-xs text-muted-foreground">Journal account</span>
-          <select value={picked} onChange={e => setAccount(e.target.value)} disabled={locked} className={cn(field, "min-h-11")}>
-            <option value="">Choose…</option>
+          <select value={account} onChange={e => setAccount(e.target.value)} disabled={locked} className={cn(field, "min-h-11")}>
+            {!account && <option value="">Choose…</option>}
             {accounts.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
           </select>
         </label>
       )}
+      <button type="button" aria-expanded={sizeOpen} aria-controls={`size-${plan.id}`} onClick={() => setSizeOpen(open => !open)}
+        className="flex min-h-11 items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+        <span aria-hidden>{sizeOpen ? "▾" : "▸"}</span>Size it
+        {!sizeOpen && <span className="truncate text-left">· {size.trim() || "risk $ and size, optional"}</span>}
+      </button>
+      {sizeOpen && <div id={`size-${plan.id}`} className="space-y-2">
+        <div className="grid grid-cols-[6rem_1fr] items-end gap-2">
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">Risk $</span>
+            <input value={risk} onChange={e => { const v = e.target.value.replace(/[^\d.]/g, "").slice(0, 9); setRisk(v); rememberRisk(v); }}
+              inputMode="decimal" placeholder="e.g. 150" disabled={locked} className={cn(field, "min-h-11")} />
+          </label>
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">Size</span>
+            <input value={size} onChange={e => { setSize(e.target.value.slice(0, SIZE_MAX)); if (sizing?.note) setSizeEdited(true); }}
+              placeholder="e.g. one starter, no adds" disabled={locked} className={cn(field, "min-h-11")} />
+          </label>
+        </div>
+        {sizing && (
+          <div aria-label="Size it for me" className="space-y-0.5 text-xs text-muted-foreground">
+            {sizing.lines.map(line => <p key={line}>{line}</p>)}
+            {drafting && premiumLine(setupRecord, sizing.premium) && <p>{premiumLine(setupRecord, sizing.premium)}</p>}
+            {sizing.note && !locked && <p>{sizeEdited ? "Your size note is kept as you wrote it." : `Confirm puts this size in front of the size note${sizeText.endsWith("…") ? `, which is cut to fit ${SIZE_MAX} characters` : ""}.`}</p>}
+          </div>
+        )}
+      </div>}
       {!alertsSupported && <p className="text-xs text-muted-foreground">Awaiting alert support: Confirm saves the plan; its entry and invalidation alerts cannot be set here yet.</p>}
       {problem && !locked && <p role="alert" className="text-xs text-amber-300">{problem}</p>}
       {started && (
