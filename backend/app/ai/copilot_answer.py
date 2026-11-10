@@ -47,6 +47,37 @@ ANSWER_SHAPE = (
     "saved\" line or repeated card fields. Prose without a Verdict line keeps the limit.]"
 )
 
+# The other jobs' own shapes (docs/copilot-lab.md § How the copilot reasons, Jobs), sent where ANSWER_SHAPE is on a desk
+# turn. Until 2026-11-10 every job got the desk's, so the morning brief was told "at most 10 plain lines, no headings"
+# and then, right after, "Verdict line, Read line, three bullets". Each starts "[Answer shape:" like the desk's.
+TELEGRAM_SHAPE = (
+    f"[Answer shape: a phone chat, plain text. Under {MAX_WORDS} words unless the owner asks for more. Verdict line "
+    f"first (headline at most {HEADLINE_WORDS} words) on a trading decision. Then at most 3 short plain lines, one "
+    "sentence each with its figure and as-of; then Against, and Changes if when one thing would change it. No Read line, "
+    "no Compare rows or table, no headings, bold or bullets markup, no closing note.]"
+)
+PREP_SHAPE = (
+    "[Answer shape: the morning brief: only the short plain lines the message lists, in its order and within its line "
+    "count. No Verdict, Read, Against or Changes if line, no headings, bullets or bold, nothing before or after.]"
+)
+COMPANION_SHAPE = (
+    "[Answer shape: exactly the lines this message asks for, in its order and within its word limit, the Verdict line "
+    "first. No Read line, extra bullets, compare block or closing note.]"
+)
+WEEK_SHAPE = (
+    "[Answer shape: the Verdict line, then the review in short one-fact lines with their counts, in the order the "
+    "instructions give; take the room the review needs and no more. No closing note or repeated card fields.]"
+)
+SHAPES = (ANSWER_SHAPE, TELEGRAM_SHAPE, PREP_SHAPE, COMPANION_SHAPE, WEEK_SHAPE)
+
+
+def without_shape(content: str) -> str:
+    """A prepared message without the job's shape reminder at its end (``copilot_context.user_text`` strips only the
+    desk's)."""
+    for shape in SHAPES:
+        content = content.removesuffix("\n\n" + shape)
+    return content
+
 
 @dataclass(frozen=True)
 class Compare:

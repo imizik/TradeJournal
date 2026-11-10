@@ -4,6 +4,7 @@ Owner-only, read-only, no network (bars and the history engine are stubbed)."""
 
 from datetime import date, datetime, timedelta
 import json
+import threading
 import time
 from types import SimpleNamespace
 from uuid import UUID
@@ -301,16 +302,26 @@ def test_the_15m_read_joins_the_completed_sessions_before_today(monkeypatch):
 
 def test_a_slow_read_is_cut_off_at_the_budget(engine):  # noqa: F811
     investigation(engine)
+    release = threading.Event()
+    finished = []
 
     def slow(symbol):
-        time.sleep(0.5)
+        # Blocks until the test lets it go: the proof is ordering (the call raised while this was still
+        # running), not elapsed time, so a loaded runner cannot flip it.
+        release.wait(timeout=30)
+        finished.append(symbol)
         return bars()
-    with Session(engine) as db:
-        inv = db.get(CopilotInvestigation, UUID(NBIS))
-        started = time.monotonic()
-        with pytest.raises(desk_context.Unavailable, match="took too long"):
-            desk_context.picture(db, inv, NOW, bars=slow, budget=0.05)
-        assert time.monotonic() - started < 0.4
+    try:
+        with Session(engine) as db:
+            inv = db.get(CopilotInvestigation, UUID(NBIS))
+            with pytest.raises(desk_context.Unavailable, match="took too long"):
+                desk_context.picture(db, inv, NOW, bars=slow, budget=0.05)
+        assert not release.is_set() and finished == []  # cut off while the reader was still blocked
+    finally:
+        release.set()  # let the worker finish so it frees its slot for the next test
+        deadline = time.monotonic() + 5
+        while not finished and time.monotonic() < deadline:
+            time.sleep(0.01)
 
 
 # ------------------------------------------------------------------ timeline

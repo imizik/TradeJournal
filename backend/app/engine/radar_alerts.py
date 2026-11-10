@@ -36,7 +36,11 @@ chose to be told the minute it turns, and the first-hour window would be over by
 stock a session across setup kinds and versions: a later one waits for the digest. When the event has a setup card
 (``RadarSetup``, ``RADAR_SETUP_CARDS=true``) the ping is the card (``radar_setup.card_text``), it skips the
 ``RADAR_ALERTS_LEAD_UNSEEN`` Movers demotion (its value is the trigger, not novelty), and on Telegram it also carries
-Plan it (``telegram_replies.plan_button``) on its own row after the ratings. Rows live in the journal database (``RadarAlert``; the Radar file
+Plan it (``telegram_replies.plan_button``) on its own row after the ratings. A card ping is policy kind ``radar_setup``,
+with its own daily budget (``PING_BUDGET_RADAR_SETUP``, default 4) ranked just above ``radar_event``, so strong movers
+and setups never spend each other's budget; a setup event without a card stays ``radar_event``. ``RADAR_SETUP_SIDES``
+is ``both`` (default) or ``up``: with ``up`` a down-side setup event (a put idea) keeps its card and paper record but
+is never a single ping; it waits for the digest with the reason. Rows live in the journal database (``RadarAlert``; the Radar file
 stays append-only and alert-free). Delivery is the position alerts' at-most-once outbox: a send that may
 have reached ntfy is ``unknown`` and never resent, and one not sent within ``EXPIRE_SECONDS`` is dropped
 as late. ``sent`` proves ntfy accepted it, not that the phone showed it.
@@ -83,6 +87,11 @@ SINGLE = (RadarAlert.kind != DIGEST) & or_(RadarAlert.delivery.in_(("pending", "
 
 def enabled() -> bool:
     return os.environ.get("RADAR_ALERTS_ENABLED", "").lower() == "true"
+
+
+def setup_sides() -> str:
+    """``RADAR_SETUP_SIDES``: ``up`` pings only call-side setups; anything else is ``both``."""
+    return "up" if os.environ.get("RADAR_SETUP_SIDES", "").strip().lower() == "up" else "both"
 
 
 def lead_unseen() -> bool:
@@ -272,7 +281,8 @@ class RadarAlerts:
                     alert.delivery, alert.body = DIGEST, ALSO_ON_MOVERS + subject(event)
                 elif not radar_setup.is_setup(event) and not strong(event):
                     alert.delivery, alert.body = DIGEST, digest_line(event)
-                elif reason := self._hour_reason(db, alert, now) or self._setup_reason(db, alert):
+                elif reason := (self._side_reason(alert, event) or self._hour_reason(db, alert, now)
+                                or self._setup_reason(db, alert)):
                     alert.delivery, alert.body, alert.last_error = DIGEST, digest_line(event), reason
                 db.add(alert)
                 try:
@@ -293,6 +303,13 @@ class RadarAlerts:
                          .order_by(RadarAlert.detected_at.desc())).first()
         if recent is not None:
             return f"{alert.subject} was already alerted at {_clock(_epoch(recent))}; one an hour, so this one waits for the digest."
+        return None
+
+    @staticmethod
+    def _side_reason(alert: RadarAlert, event: dict) -> str | None:
+        """With ``RADAR_SETUP_SIDES=up``, a down-side setup is never a single: it waits for the digest."""
+        if alert.kind in radar_setup.SETUP_KINDS and event.get("direction") == "down" and setup_sides() == "up":
+            return f"{alert.subject} is a down-side setup and RADAR_SETUP_SIDES is up, so this one waits for the digest."
         return None
 
     @staticmethod
@@ -407,7 +424,7 @@ class RadarAlerts:
             elif alert.kind == "group_move":
                 kind, anchor, symbol, trade_id = "radar_event", f"group:{alert.subject}", None, None
             else:
-                kind, symbol = "radar_event", alert.subject
+                kind, symbol = "radar_setup" if setup_id is not None else "radar_event", alert.subject
                 anchor, trade_id = notification_policy.symbol_anchor(db, symbol)
             ticket = notification_policy.decide(db, sender="radar_alerts", source_id=str(alert.id), kind=kind, title=alert.title,
                                                 body=alert.body, now=now, anchor=anchor, symbol=symbol, trade_id=trade_id)

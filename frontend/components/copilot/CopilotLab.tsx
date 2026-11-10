@@ -492,13 +492,14 @@ export default function CopilotLab({ link = null, close = false, daily = false }
           ) : !thread && link?.symbol && !link.investigation ? (
             <div className="mb-4 space-y-3">
               {/* An open position, planned or not, still gets its header and since-entry lines. */}
-              <DeskThreadTop thread={deskSymbolThread(link.symbol)} heldOnly compact={deciding} />
-              {/* No conversation, so no thread header: the symbol's horizon sits on its own line. */}
-              <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Link href={`/charts?symbol=${encodeURIComponent(link.symbol)}`} aria-label={`Open ${link.symbol} chart`} title={`Open ${link.symbol} in Charts`}
-                  className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-2 hover:text-primary hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">{link.symbol}<ChartCandlestick size={13} aria-hidden className="text-muted-foreground" /></Link>
-                {linkRow?.horizon && <HorizonPick horizon={linkRow.horizon} onChange={horizon => changeHorizon(link.symbol, horizon)} />}
-              </p>
+              {/* Held: the header row carries the symbol and its horizon. Not held: they sit on their own line. */}
+              <DeskThreadTop thread={deskSymbolThread(link.symbol)} heldOnly compact={deciding} horizon={linkRow?.horizon ?? null}
+                onHorizon={horizon => changeHorizon(link.symbol, horizon)} fallback={
+                <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Link href={`/charts?symbol=${encodeURIComponent(link.symbol)}`} aria-label={`Open ${link.symbol} chart`} title={`Open ${link.symbol} in Charts`}
+                    className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-2 hover:text-primary hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">{link.symbol}<ChartCandlestick size={13} aria-hidden className="text-muted-foreground" /></Link>
+                  {linkRow?.horizon && <HorizonPick horizon={linkRow.horizon} onChange={horizon => changeHorizon(link.symbol, horizon)} />}
+                </p>} />
               {fills.bar(link.symbol)}
               <DecisionBar key={link.symbol} symbol={link.symbol} {...barFor(link.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
               <ThreadAlertAnswers symbol={link.symbol} rows={alertRows} />

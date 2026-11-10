@@ -148,12 +148,13 @@ export function ThreadHead({ thread, data, draft = false, horizon = null, onHori
  * folded to one line so the conversation stays in view; Full plan unfolds it, and that is remembered.
  * Reads ``GET /copilot/plans`` and ``GET /copilot/plans/positions`` when the thread opens or its activity changes, then
  * each minute while the page is visible. Nothing for a conversation across everything with no plan. An open position,
- * planned or not, also shows its "Since you entered" lines from its one record (``SinceEntry``). ``heldOnly``: show
- * nothing unless the symbol has an open position (a symbol opened with no conversation).
+ * planned or not, also shows its "Since you entered" lines from its one record (``SinceEntry``), folded to one line once
+ * the thread has a conversation so the latest answer stays near the top. ``heldOnly``: a symbol opened with no
+ * conversation shows the header only while it has an open position, and ``fallback`` otherwise.
  */
-export default function DeskThreadTop({ thread, draft = false, hero = null, compact = false, horizon = null, onHorizon, stage = null, adopted = false, heldOnly = false }: {
+export default function DeskThreadTop({ thread, draft = false, hero = null, compact = false, horizon = null, onHorizon, stage = null, adopted = false, heldOnly = false, fallback = null }: {
   thread: DeskThreadRef | null; draft?: boolean; hero?: ReactNode; compact?: boolean; horizon?: DeskHorizon | null;
-  onHorizon?(horizon: DeskHorizon): Promise<void>; stage?: string | null; adopted?: boolean; heldOnly?: boolean;
+  onHorizon?(horizon: DeskHorizon): Promise<void>; stage?: string | null; adopted?: boolean; heldOnly?: boolean; fallback?: ReactNode;
 }) {
   const [read, setRead] = useState<{ id: string; data: DeskThreadPlan } | null>(null);
   const [full, setFull] = useState(false);
@@ -182,12 +183,12 @@ export default function DeskThreadTop({ thread, draft = false, hero = null, comp
   if (!thread) return null;
   const data = read?.id === thread.id ? read.data : null;
   if (!thread.symbol && !data?.plan) return null;
-  if (heldOnly && !data?.position) return null;
+  if (heldOnly && !data?.position) return <>{fallback}</>;
   const held = data?.position && thread.symbol ? data.position : null;
   return (
     <div className="mb-4 space-y-4 border-b pb-4">
       <ThreadHead thread={thread} data={data} draft={draft} horizon={horizon} onHorizon={onHorizon} stage={stage} adopted={adopted} />
-      {held && thread.symbol && !compact && <SinceEntry symbol={thread.symbol} tradeId={held.trade_id} />}
+      {held && thread.symbol && !compact && <SinceEntry symbol={thread.symbol} tradeId={held.trade_id} collapsible={!thread.id.startsWith("symbol:")} />}
       {hero}
       {data?.plan && <PlanLadder plan={data.plan} position={data.position} dimmed={draft} compact={compact || !full} onToggle={compact ? undefined : toggleLadder} />}
     </div>

@@ -141,7 +141,7 @@ async def recorded_turn(history: list[dict], symbol: str | None, cfg, adapter, e
     """``copilot.run_turn`` with its row: the same events, the ``done`` event carrying ``turn_id``, and one
     ``copilot_turn`` row whatever happens. A turn the consumer stops before ``done`` is recorded with what it spent and
     ``error="stopped"``. ``kind`` None means: work it out from the turn (``kind_of``)."""
-    from app.ai import copilot
+    from app.ai import copilot, copilot_prompt
     from app.ai.copilot_context import user_text
     turn_id = uuid.uuid4()
     live: dict = {}
@@ -153,7 +153,8 @@ async def recorded_turn(history: list[dict], symbol: str | None, cfg, adapter, e
     finished = False
     try:
         async for event in copilot.run_turn(history, symbol, cfg, adapter, evidence, now, images=images, carry_id=carry_id, live=live,
-                                              web=web, investigation_id=investigation_id):
+                                              web=web, investigation_id=investigation_id,
+                                              job=copilot_prompt.job_for(kind, source)):
             etype = event.get("type")
             if etype == "error" and error is None:
                 error = event.get("code")

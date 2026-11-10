@@ -131,15 +131,15 @@ def sell(engine, when, qty=2, ticker="SNDK", strike=230):
 
 def test_the_priority_order_and_what_the_cap_never_drops():
     assert [policy.rank(k) for k in ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "interrupt", "companion_update",
-                                     "nudge", "prep", "evening_review", "radar_event", "radar_digest", "thesis_watch",
-                                     "research")] == list(range(15))
+                                     "nudge", "prep", "evening_review", "radar_setup", "radar_event", "radar_digest",
+                                     "thesis_watch", "research")] == list(range(16))
     assert policy.rank("expiry_first") == policy.rank("expiry_eve") == policy.rank("time_stop") and policy.rank("link") == policy.rank("nudge")
     assert policy.rank("companion_adopt") == policy.rank("nudge")
     assert policy.rank("week_review") == policy.rank("day_replay") == policy.rank("prep")
-    assert policy.rank("radar_something") == 15  # an unknown kind goes last
+    assert policy.rank("radar_something") == 16  # an unknown kind goes last
     assert policy.enabled() and policy.quiet_seconds() == 600 and policy.preopen_allowance() == 2
-    assert {k: policy.budget(k) for k in policy.BUDGETS} == {"interrupt": 4, "companion_update": 12, "nudge": 2, "prep": 1, "radar_event": 4,
-                                                             "radar_digest": 2, "thesis_watch": 2, "research": 1}
+    assert {k: policy.budget(k) for k in policy.BUDGETS} == {"interrupt": 4, "companion_update": 12, "nudge": 2, "prep": 1, "radar_setup": 4,
+                                                             "radar_event": 4, "radar_digest": 2, "thesis_watch": 2, "research": 1}
     assert policy.budget("companion_adopt") == 2
     assert (policy.budget("link"), policy.budget("week_review"), policy.budget("hold_hour"), policy.budget("evening_review")) == (2, 1, None, None)
 
@@ -772,3 +772,28 @@ def test_the_invalidation_ping_ends_with_the_practice_goal_it_tests(engine, phon
     practice = "\nPractice this week: exit_at_invalidation · kept 2 of 3 so far" if goal == "exit_at_invalidation" else ""
     assert bodies["SNDK invalidation broke"] == "SNDK broke your 92.30 invalidation. Your plan says out." + practice
     assert "Practice" not in bodies["NBIS entry trigger hit"]
+
+
+def test_setup_card_pings_and_radar_singles_never_spend_each_other_s_budget(engine, monkeypatch):
+    monkeypatch.setenv("PING_BUDGET_RADAR_SETUP", "1")
+    monkeypatch.setenv("PING_BUDGET_RADAR_EVENT", "1")
+    with Session(engine) as db:
+        first_setup = decide(db, "radar_setup", "s1", anchor="symbol:AAA", now=at("10:01"))
+        first_single = decide(db, "radar_event", "e1", anchor="symbol:BBB", now=at("10:02"))
+        second_setup = decide(db, "radar_setup", "s2", anchor="symbol:CCC", now=at("10:03"))
+        second_single = decide(db, "radar_event", "e2", anchor="symbol:DDD", now=at("10:04"))
+        assert (first_setup.action, first_single.action, second_setup.action, second_single.action) == ("send", "send", "hold", "hold")
+        assert second_setup.reason == "Not sent: Radar's 1 setup ping for today is spent."
+        assert second_single.reason == "Not sent: Radar's 1 single ping for today is spent."
+        assert policy.held_text(db, at("16:30")) == "2 pings held today (Radar 1, Radar setup 1)"
+        assert policy.held_back_today(db, at("16:30"))["by_kind"] == {"Radar setup": 1, "Radar": 1}
+    assert policy.TRACKED["radar_setup"] == "entry"
+    # A setup ping outranks a plain Radar single in the quiet window: a single moments earlier never holds it, the reverse does.
+    with Session(engine) as db:
+        decide(db, "radar_event", "e3", anchor="symbol:EEE", now=at("11:00"))
+        assert decide(db, "radar_setup", "s3", anchor="symbol:EEE", now=at("11:01")).action == "hold"  # budget 1 already spent
+    monkeypatch.setenv("PING_BUDGET_RADAR_SETUP", "4")
+    with Session(engine) as db:
+        decide(db, "radar_event", "e4", anchor="symbol:FFF", now=at("11:10"))
+        assert decide(db, "radar_setup", "s4", anchor="symbol:FFF", now=at("11:11")).action == "send"
+        assert decide(db, "radar_event", "e5", anchor="symbol:FFF", now=at("11:12")).held  # merged into the undelivered setup ping

@@ -377,3 +377,52 @@ def test_routes_preview_save_once_and_list_an_investigations_time_stops(lab):
 def test_routes_refuse_while_the_lab_is_off(lab, monkeypatch):
     monkeypatch.setattr(time_stop_routes.copilot, "settings", lambda: SimpleNamespace(enabled=False))
     assert lab.get("/copilot/time-stops", params={"investigation": INV}).status_code == 503
+
+
+# ------------------------------------------------------------------ Plan it's hour counts from the entry fill
+
+def test_a_from_entry_stop_counts_its_hour_from_the_first_entry_after_the_plan(engine, phone):
+    stop(engine, plan_time_stops.FROM_ENTRY, planned="10:00")
+    assert plan_time_stops.when(stops(engine)[0], at("10:00")) == "today 11:00 ET"  # tap + 60 until an entry
+    buy(engine, "09:50")  # held before the plan: not the entry the hour counts from
+    sell(engine, "09:55")
+    buy(engine, "10:20")
+    clock = Clock(at("11:00"))
+    runner = PlanTimeStops(engine, Calendar(), clock=clock)
+    runner.run()
+    runner.deliver()
+    [row] = stops(engine)
+    assert phone == [] and row.delivery == "scheduled" and plan_time_stops.when(row, at("11:00")) == "today 11:20 ET"
+    clock.now = at("11:20")
+    runner.run()
+    runner.deliver()
+    [(title, body, _)] = phone
+    assert body == "NBIS time stop: you planned to be out by 11:20."
+    assert stops(engine)[0].delivery == "sent"
+
+
+def test_a_from_entry_stop_without_an_entry_is_skipped_at_the_tap_s_hour(engine, phone):
+    stop(engine, plan_time_stops.FROM_ENTRY, planned="10:00")
+    runner = PlanTimeStops(engine, Calendar(), clock=Clock(at("11:00")))
+    runner.run()
+    runner.deliver()
+    assert phone == [] and stops(engine)[0].delivery == "skipped"
+
+
+def test_a_from_entry_stop_never_runs_past_the_close(engine, phone):
+    stop(engine, plan_time_stops.FROM_ENTRY, planned="15:10")
+    buy(engine, "15:30")
+    runner = PlanTimeStops(engine, Calendar(), clock=Clock(at("15:31")))
+    runner.run()
+    [row] = stops(engine)
+    assert row.delivery == "scheduled" and plan_time_stops.when(row, at("15:31")) == "today 16:00 ET"
+
+
+def test_an_ordinary_length_still_counts_from_the_confirm(engine, phone):
+    stop(engine, "60m", planned="10:00")
+    buy(engine, "10:20")
+    runner = PlanTimeStops(engine, Calendar(), clock=Clock(at("11:00")))
+    runner.run()
+    runner.deliver()
+    [(_, body, _)] = phone
+    assert body == "NBIS time stop: you planned to be out by 11:00."

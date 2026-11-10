@@ -220,15 +220,19 @@ test("at 375 px the speaker waits behind + on the mic's row, the box takes the f
   await expect(speaker(page)).toBeHidden(); // attach and read-aloud wait behind "+"
   await page.getByRole("button", { name: "More: attach, read aloud" }).click();
   await speaker(page).click();
-  const target = (await speaker(page).boundingBox())!;
-  const mic = (await page.getByTestId("copilot-mic").boundingBox())!;
+  // Measure the three boxes in one synchronous read, once the layout has stopped moving: separate boundingBox() calls
+  // can straddle a reflow or a scroll and compare positions from different moments.
+  const [targetEl, micEl, fieldEl] = await Promise.all([speaker(page), page.getByTestId("copilot-mic"), box(page)].map(l => l.elementHandle()));
+  const snap = () => page.evaluate(els => els.map(e => { const r = e!.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; }), [targetEl, micEl, fieldEl]);
+  let last = JSON.stringify(await snap());
+  await expect.poll(async () => { const now = JSON.stringify(await snap()); const same = now === last; last = now; return same; }, { intervals: [100, 100, 100, 200, 200, 500] }).toBe(true);
+  const [target, mic, field] = await snap();
   expect(target.width).toBeGreaterThanOrEqual(44);
   expect(target.height).toBeGreaterThanOrEqual(44);
   expect(target.x + target.width).toBeLessThanOrEqual(375);
   expect(Math.abs(target.y + target.height / 2 - (mic.y + mic.height / 2))).toBeLessThan(4);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   // The text field gets the full width; the buttons sit on their own row under it.
-  const field = (await box(page).boundingBox())!;
   expect(field.width).toBeGreaterThanOrEqual(300);
   expect(target.y).toBeGreaterThanOrEqual(field.y + field.height);
   if (process.env.SPEAK_SHOT) await page.screenshot({ path: process.env.SPEAK_SHOT });

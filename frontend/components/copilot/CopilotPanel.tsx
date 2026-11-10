@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type R
 import {
   AUTO_WEEK_REVIEW_TITLE, answerParts, asOfText, verdictPending, copilotStatus, pickedModel, rememberModel, pickedBackend, rememberBackend, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, saveOutcome, saveRating, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt, IMAGE_PREFILL, MAX_IMAGES, imageUrl, spokenText, uploadImage,
   type Backend, type Compare, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ProposalOutcome, type Rating, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates, type DrawnPlan,
-  appendMainExchange, mainPlanThread, openDailyMain, tradePlanLine, BRIEFING_TITLE, type TurnSource,
+  appendMainExchange, mainPlanThread, openDailyMain, tradePlanLine, BRIEFING_TITLE, historyAnswer, type TurnSource,
 } from "@/lib/copilot";
 import Link from "next/link";
 import { chartDraftThread, draftKey, readDraft, rememberChartDraft, storeDraft, type CopilotDraft } from "@/lib/copilotDraft";
@@ -39,7 +39,6 @@ const shortTime = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZ
 // The picker may finish after its chart dock is closed. A remounted editor can join the same upload.
 const uploads = new Map<string, Promise<void>>();
 const MAX_CHARS = 4000, MAX_MESSAGES = 23, MAX_TOTAL = 38_000;
-const clip = (text: string) => text.length <= MAX_CHARS ? text : `${text.slice(0, MAX_CHARS - 12)} [clipped]`;
 const UNAVAILABLE = new Set(["off", "unavailable", "failed", "error", "ungrouped", "not_configured"]);
 const TOOL_LABEL: Record<string, string> = {
   get_group_comparison: "Group comparison", get_peer_moves: "Peer moves", get_symbol_news: "News",
@@ -955,7 +954,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       running.current = false;
     }
     lookOnSend.current = false;
-    // Text-only, alternating history within the server's limits (24 messages, 4,000 characters each,
+    // Text-only (each answer's cards as one line each, with what the owner did), alternating history within the server's limits (24 messages, 4,000 characters each,
     // 40,000 in all): the newest whole pairs are kept, long answers clipped, a failed empty answer left out.
     // Paired from the end, so a transcript that opens with an unanswered question (a research result) stays aligned.
     const pairs: { role: "user" | "assistant"; content: string }[][] = [];
@@ -964,7 +963,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       if (question.role === "user" && answer.role === "assistant") {
         if (answer.content.trim())
           pairs.push([{ role: "user", content: spokenText(question).slice(0, MAX_CHARS) },
-            { role: "assistant", content: clip(answer.content) }]);
+            { role: "assistant", content: historyAnswer(answer.content, answer.proposals, MAX_CHARS) }]); // + one line per card
         i -= 2;
       } else i -= 1;
     }

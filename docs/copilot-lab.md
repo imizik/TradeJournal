@@ -445,10 +445,9 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     emitted with their offset (for example `-04:00` in summer, `-05:00` in
     winter), never as UTC. Days held count from that moment. Option marks
     are read in one batched quote call before the per-contract cache reads.
-  - `get_memories(limit ≤ 10, symbol?)` lists the owner's approved (active,
-    not redacted) Jo memories, read through `jo_briefing.memories`; with a
-    symbol, that symbol's first and then the general ones. It never writes
-    Codex's store.
+  - There is no memories tool since 2026-11-10: the owner context block
+    carries the approved memories (§ Jobs). `get_positions`, `get_trades` and
+    `get_owner_context` stay for what reaches beyond the block.
   - No account number, account id, broker id, trade id or fill id is ever
     returned. An account appears only by its name, with digit runs removed.
     Webull is left out (dormant).
@@ -1072,17 +1071,21 @@ day).
 
 ## How the copilot reasons (system prompt)
 
-`copilot.SYSTEM_PROMPT` (`backend/app/ai/copilot.py`) frames every turn:
+Every model turn has a job, and its instructions are assembled for that job
+in `backend/app/ai/copilot_prompt.py` (§ Jobs below). The desk's,
+`copilot.SYSTEM_PROMPT`, frames a question asked on the desk, Charts, Radar
+or the panel:
 
 - **Who it works with**, as working hypotheses to test against what the owner
   does, never a diagnosis: debate-driven; semiconductors, AI infrastructure,
   recoveries, relative strength and catalysts; a longer thesis often expressed
-  through a short-dated option. The [behavior audit](../backend/reports/behavior_audit_2026-10-21.md)'s
-  findings (exits, not entries; 15-60 minute holds best; hour-to-close worst;
-  the 53 green-then-red losers; trading on while green) are stated with their
-  sample and labelled associations, not rules, with the exit counterfactual's
-  rejection of the three mechanical exits. The prompt says to raise one when
-  the position in front of it resembles it, never to recite them.
+  through a short-dated option. One sentence says exits, more than entries,
+  decided their results and points at the owner context block's live
+  exit-habit counts (the [behavior audit](../backend/reports/behavior_audit_2026-10-21.md)'s
+  habits, scored on recent trades): associations, not rules, since the exit
+  counterfactual rejected the mechanical exits; raise one only when the
+  position in front of it resembles it, never recite them. The audit's fixed
+  figures left the prompt on 2026-11-10: the block carries the live counts.
 - **Four separate questions** for any trade idea: thesis, setup now,
   instrument fit (expiry, strike and premium against the horizon, from real
   contracts through `get_option_candidates`, with the provider's implied
@@ -1125,8 +1128,8 @@ day).
   answer at once at about 100 tokens a second (§ Live measurements).
 - **The answer format.** Market reads, trade ideas, position reviews, plans
   and other trading decisions start with
-  `Verdict: <word> — <headline>`, for example
-  `Verdict: Hold — The thesis has not broken.`, with the word from a fixed
+  `Verdict: <word> — <headline>`, the headline one plain sentence in the
+  model's own words for the case, with the word from a fixed
   set: Hold, Wait, Pass, Focus, Draft, Pattern, Broken (the plan's
   invalidation or the thesis broke: what the plan says, never an order) and
   Unclear. For app capability or navigation questions, definitions and other
@@ -1145,8 +1148,9 @@ day).
   any image note) under the Verdict line. Read aloud, the line becomes
   "Hold. The thesis has not broken."
 - **The case against.** On an answer about a trade idea, a thesis or a
-  position decision, the line after the Verdict is
-  `Read: Thesis holds · Timing early · Contract n/a` (one or two words per
+  position decision, the line after the Verdict is the Read line: `Read:`
+  then Thesis, Timing and Contract, each with one or two plain words of the
+  model's own, separated by middle dots (`n/a` for Contract when none is in
   question), and the body ends with `Against: <the strongest case against
   the verdict, with its number or source>` before any Changes if line;
   "nothing in the evidence" only when that is true. A claim no tool or owner
@@ -1170,8 +1174,8 @@ day).
   conversation with no conclusion yet says "Open question". The scheduled turns' phone pings and
   saved conclusions drop the "Verdict: " label (`premarket_prep.unlabelled`,
   `week_review_auto._plain`); their saved answers keep it.
-- **Comparing two choices.** When the owner weighs two options ("10/30 vs
-  11/6 calls?", "enter now or wait for 95.9?", "add or replace?"), the body is
+- **Comparing two choices.** When the owner weighs two options (two
+  expiries, entering now or at a level, adding or replacing), the body is
   a compare block instead of the bullets, under the same length limit:
   `Compare: <A> | <B>`, then the rows `Needs: … | …`, `Risks: … | …`,
   `Breaks if: … | …` and, when a contract is involved, `Costs: … | …`
@@ -1195,6 +1199,64 @@ on the answer format and the scripted answers, `tests/test_copilot_book.py`
 on account identifiers, `tests/test_copilot_adversarial.py` on "you cannot
 create alerts or research jobs yourself", `tests/test_copilot.py` on the
 four-question frame and the memory rule).
+
+### Jobs
+
+Until 2026-11-10 every turn the app runs got the desk's prompt (3,792
+words), all 26 tools (about 22,700 characters) and the desk's shape
+reminder, so the morning brief was told "at most 10 plain lines, no
+headings" and then the Verdict / Read / bullets / Against shape, and the
+companion "at most 80 words" beside the same five-part shape.
+`copilot.run_turn(..., job=)` now takes the turn's job, which
+`copilot_spend.recorded_turn` works out from what its callers already pass
+(`copilot_prompt.job_for`: source `telegram`, else kind `prep`, `companion`
+or `week_review`, else `desk`). Each job gets the shared core (who the owner
+is, the four questions, the evidence, time, untrusted-text, account,
+SIMULATED and no-order rules), a line framing its own job, only the working
+rules it uses, its own answer format and its own shape reminder
+(`copilot_answer.*_SHAPE`, sent where `ANSWER_SHAPE` is on a desk turn), and
+only its own tools; a tool call outside them is refused like an invalid one,
+and no job's prompt names a tool it is not offered (`tests/test_copilot_jobs.py`).
+Telegram keeps the week-review rule, so a typed "review my week" there is
+answered as on the desk, in the chat format.
+
+| Job | Who runs it | Answer format | Tools | Prompt + tools |
+| --- | --- | --- | --- | --- |
+| `desk` | desk, Charts, Radar, panel | as above, unchanged | all 25 | 3,715 words + 22,200 chars, about 11,700 tokens |
+| `telegram` | typed, spoken or photo question, Why? | Verdict line, at most three short plain lines, Against, Changes if; no Read line, no Compare rows, no markdown; under 120 words | all 25 | 3,207 words, about 11,000 tokens |
+| `prep` | morning brief (`premarket_prep`) | the lines its message lists, plain, no Verdict/Read/Against, no headings | 11 market reads | 1,173 words + 6,800 chars, about 3,700 tokens |
+| `companion` | position companion (`position_companion`) | exactly the shape its message gives (the adopt draft's six lines, an update's 80 words, the exit note) | 12: the trade review, chart, group, news, quotes, level history, option candidates, trades | 1,342 words + 9,200 chars, about 4,600 tokens |
+| `week_review` | automatic week review (`week_review_auto`) | Verdict line, then the review in short one-fact lines | 5: week and trade review, trades, proof, `propose_plan` | 1,278 words + 7,700 chars, about 4,100 tokens |
+
+Token figures are estimates (characters ÷ 4 for prose, ÷ 3.5 for tool JSON);
+the scorecard's input and cache figures are the measured ones. The brief
+reads no owner context block (`copilot_prompt.OWNER_BLOCK`): its own facts
+pack already carries the positions and plans, which it used to get twice.
+The desk's "Review my week" still runs as a desk turn with the desk's format.
+
+The book reads that only repeated the owner context block went on the same
+day: `get_memories` is gone (the block carries the symbol's and the general
+memories; another symbol's come with `get_owner_context`), and the others say
+in their description when they reach beyond it: `get_owner_context` for a
+different symbol, `get_trades` for more of a symbol's closed trades than the
+block lists, `get_positions` only when the block shows fewer positions than
+its count or every one is needed (a broker screenshot). The example answer
+lines ("Verdict: Hold — The thesis has not broken.", a sample Read line, the
+sample compare questions) became descriptions of the form, since earlier
+example answers were copied word for word.
+
+**Caching.** Each job's tools and system prompt are fixed strings in a fixed
+order, with nothing volatile in them (the clock, the symbol, the owner block
+and the earlier evidence all ride in the owner's message). The request puts
+an explicit cache point on the system prompt, which covers the tools ahead of
+it, so a job's prefix is written once and read by its later turns within the
+cache's five minutes; the top-level automatic cache point still moves with
+the conversation tail for reuse between a turn's rounds. Before, only the
+automatic point was set, at the end of each new question, so the fixed
+prefix was written again on every new question. A web-search turn's prefix
+includes the search tool and is cached apart from a turn without it. Cache
+read and write tokens are recorded as before, so the scorecard's cache share
+shows the change on the next live week.
 
 ## Owner context
 
@@ -1329,11 +1391,20 @@ since-entry comparison, the news reader) and writes nothing.
   updates add it under the answer, with the underlying the companion already
   read, and the update prompt gets it too. No new alert kinds, triggers or
   senders.
-- **Screens.** `frontend/components/SinceEntry.tsx` shows the thesis and the
-  lines with their sources and times, refreshed each minute while visible: under
-  the desk's thread header for an open position (a symbol opened with no
-  conversation now gets the header too) and in Charts' Holding context for the
-  selected trade. Act now rows show the thesis line.
+- **Screens.** `frontend/components/SinceEntry.tsx`, refreshed each minute while
+  visible, leads with at most three plain lines worked out from the lines'
+  values: P&L and the mark (an option's per share, as the header shows it); the
+  plan's distance to its invalidation and its time stop, or "No plan saved"
+  once; and what changed (the underlying since entry, SPY and the group's
+  peers, the headline count). The thesis, every line as the record wrote it
+  with its source and time, the headlines and every `unavailable` line wait
+  behind **Sources and gaps**, in muted grey, never amber. Times are New York
+  time (the headline line's UTC clock is rewritten). It sits under the desk's
+  thread header for an open position and in Charts' Holding context for the
+  selected trade. On a thread with a conversation it starts folded to one
+  summary line that opens on tap, so the latest answer stays near the top; a
+  symbol opened with no conversation shows it open, and its header row carries
+  the symbol and horizon (no second ticker line while it is held). Act now rows show the thesis line.
 - **Telegram on the desk.** Each Telegram question and Why? answer is saved on
   the symbol's desk thread (its plan, the companion's adopted conversation, or
   its newest open conversation, with that thread's `updated_at` kept so thesis
@@ -1384,6 +1455,16 @@ investigation) and sends it back as `carry_id` with the next message. The
 next turn gets the reads as an "Earlier evidence" block, each with the time
 it was read and its data's as-of, ahead of the owner context block, and
 keeps them on when it reads nothing new.
+
+Each answer in the history the panel sends also ends with one line per card
+it proposed and what the owner did with it (`lib/copilot.ts` `cardLine` /
+`historyAnswer`), for example `[card trade_plan NBIS long calls entry 95.9
+stop 92.3: confirmed]`, `[card watch CRWV touches 88: dismissed]` or
+`: waiting`, so the model knows a plan, watch, memory or practice card it
+drafted two messages ago was confirmed or dismissed. A confirmed plan's
+levels are the ones confirmed. The lines are never shown, and the answer's
+text is clipped to leave room for them within the 4,000-character message
+limit. The outcome records no time, so the lines carry none.
 
 The system prompt tells the model to answer a follow-up from that block
 without calling those tools again, saying when it was read, and to read
@@ -1944,8 +2025,8 @@ nothing exists until the owner confirms.
   `POST /jo/memories` as an `owner_statement` (the owner edited and
   confirmed the words), `status: active`, `owner_confirmed: true`,
   `source_reference: copilot:<investigation id>`. It needs no investigation
-  and no alert support. The memory joins the owner context pack and
-  `get_memories` from the next turn. `jo_briefing_common` is untouched: the
+  and no alert support. The memory joins the owner context pack from the
+  next turn. `jo_briefing_common` is untouched: the
   memory store's schema, kinds and sources are the same as Jo's.
 - **Trade plan:** one whole plan for a trade the owner wants to take, the
   card the "plan before you enter" loop ends in. When the owner says they
@@ -1982,7 +2063,10 @@ nothing exists until the owner confirms.
     from the entry with the move it takes (a share, or in the underlying for an
     option plan). It follows an edit; a stop on the wrong side of the entry
     gets no distance. A plan carries no target, so there is no reward:risk.
-  - **Size it for me.** A `Risk $` field beside the size (numeric keypad,
+  - **Size it for me.** `Risk $` and the size note wait behind a **Size it**
+    disclosure, open from the start when a risk is typed or remembered or a
+    confirmed card kept a size, and otherwise on tap; folded, its line shows
+    the drafted size note, which Confirm still saves. A `Risk $` field beside the size (numeric keypad,
     remembered per browser in `localStorage` key `copilot.risk`, blank until
     typed; no server setting) turns a dollar risk into a size as it is typed,
     on the card itself with nothing saved: a stock plan gets whole shares =
@@ -2009,8 +2093,12 @@ nothing exists until the owner confirms.
       `discretionary`, side from direction and instrument (`buy_stock`,
       `short_stock`, `buy_calls`, `buy_puts`), `setup_label` "Copilot plan",
       `wording` built from the levels, time stop and size, and `note` holding
-      the thesis and contract hint, on the capture default account (or the
-      only one; the card asks when neither exists). A discretionary capture may
+      the thesis and contract hint, on the card's journal account: the
+      account of the last plan confirmed in this browser (`localStorage` key
+      `copilot.plan-account`), else the capture default account, else the
+      only one, so Confirm needs no pick; with more than one account the
+      picker stays visible to change it, and the card asks only when none of
+      those applies. A discretionary capture may
       carry its own setup name and wording for this (`captures.build`). One
       client id per card, so a retried save never makes a second plan. Capture
       linking then suggests it for the trade when the fill arrives, and the
@@ -2193,8 +2281,10 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   by `PING_BUDGET_<KIND>`: `interrupt` 4 ([pattern interrupts](#pattern-interrupts)),
   `companion_update` 12 (the [position companion](#position-companion)'s updates and close notes),
   `nudge` 2 (link pings and the companion's adopt pings share it), `prep` 1 (shared
-  with the automatic week review and Watch your day), `radar_event` 4 (Radar's
-  single pings), `radar_digest` 2, `thesis_watch` 2, `research` 1. Before 09:30
+  with the automatic week review and Watch your day), `radar_setup` 4 (Radar
+  single pings that carry a [setup card](radar.md#setup-cards-off-by-default),
+  ranked just above `radar_event`), `radar_event` 4 (Radar's other single
+  pings), `radar_digest` 2, `thesis_watch` 2, `research` 1. Before 09:30
   New York these kinds together also have `PING_PREOPEN_ALLOWANCE` (default 2)
   pings, so pre-open headlines cannot spend the day. While the
   [morning brief](#pre-market-prep) is on and not yet decided today, one of them
@@ -2243,7 +2333,7 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   cannot read or write its table tells the sender to send.
 - **Acted on:** a pass on the level alert monitor's loop writes, from the fills
   and the plan links as they arrive and never by guessing, what followed each
-  delivered ping: an entry trigger or a Radar single ping naming a stock
+  delivered ping: an entry trigger or a Radar single or setup ping naming a stock
   (since November 10, 2026), an entry fill in the symbol within 30 minutes; an invalidation, time stop or open-trade alert, the position closed
   or trimmed within 15 minutes; a nudge or link ping, a plan linked within 30
   minutes. The trade page shows it per ping (`then: closed in 6 min`) and

@@ -275,6 +275,17 @@ test("without alert support Confirm saves only the plan; with no default account
   await expect(card.getByRole("status")).toHaveText("Plan confirmed.");
   expect(posts(server, "captures").map((b) => b.account_id)).toEqual(["00000000-0000-0000-0000-000000000002"]);
   expect(posts(server, "alerts")).toEqual([]);
+
+  // The next card starts on the account of the last confirmed plan, so Confirm needs no pick; the picker still changes it.
+  await page.reload();
+  const next = await askForPlan(page);
+  await expect(next.getByLabel("Journal account")).toHaveValue("00000000-0000-0000-0000-000000000002");
+  await expect(next.getByRole("alert")).toHaveCount(0);
+  await expect(next.getByRole("button", { name: "Confirm" })).toBeEnabled();
+  // Risk $ and Size wait behind Size it until one has a value.
+  await expect(next.getByLabel("Risk $")).toHaveCount(0);
+  await next.getByRole("button", { name: "Size it" }).click();
+  await expect(next.getByLabel("Risk $")).toBeVisible();
 });
 
 test("the plan card fits a 375 px phone with large tap targets, and Dismiss removes it", async ({ page }) => {
@@ -437,6 +448,7 @@ test("size it for me: a risk becomes a contract count at the chosen contract's a
   const card = await askForPlan(page);
   const sizing = card.getByLabel("Size it for me");
   await expect(sizing).toHaveCount(0); // blank until the owner types a risk
+  await card.getByRole("button", { name: "Size it" }).click(); // Risk $ and Size wait behind Size it
   await expect(card.getByLabel("Risk $")).toHaveAttribute("inputmode", "decimal");
   await card.getByLabel("Risk $").fill("700");
   // The drafted contract has no premium from the chain: the card says how to pick one, never a guess.
@@ -484,6 +496,7 @@ test("size it for me on a stock plan: shares from the invalidation distance, cos
   const card = await askForPlan(page);
   await expect(card.getByLabel("Plan numbers")).toContainText("Stop 92.3, −3.8% from entry (3.60 a share)");
   // A long note written before sizing is cut to keep 120 characters, and the card says so before Confirm.
+  await card.getByRole("button", { name: "Size it" }).click(); // Risk $ and Size wait behind Size it
   await card.getByLabel("Size", { exact: true }).fill("x".repeat(100));
   await card.getByLabel("Risk $").fill("150");
   await expect(card.getByLabel("Size it for me")).toContainText("Confirm puts this size in front of the size note, which is cut to fit 120 characters.");
@@ -566,6 +579,7 @@ test("a draft option plan shows the owner's record for its setup, and its premiu
     "NBIS is 3.1% below its 20-day average. Your opening calls bought below it: 20 trades, 55% won, +$860.",
   ]);
   await card.getByLabel("Contract").selectOption("Nov 13 '26 95C");
+  await card.getByRole("button", { name: "Size it" }).click(); // Risk $ and Size wait behind Size it
   await card.getByLabel("Risk $").fill("1400");
   // The size line sits with the sizing lines, where the risk is typed.
   await expect(card.getByLabel("Size it for me")).toContainText(
@@ -624,6 +638,7 @@ test("a Main plan keeps option sizing inputs and an in-flight follow-up survives
   await page.getByRole("button", { name: /Review NBIS plan in its own thread/ }).click();
   const card = page.getByRole("region", { name: "Proposed trade plan" });
   await card.getByLabel("Contract").selectOption("Nov 13 '26 95C");
+  await card.getByRole("button", { name: "Size it" }).click(); // Risk $ and Size wait behind Size it
   await card.getByLabel("Risk $").fill("700");
   await expect(card.getByLabel("Size it for me")).toContainText("$692 of premium");
   expect(server.posts).toEqual([]);

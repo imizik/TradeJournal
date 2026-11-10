@@ -29,7 +29,8 @@ The policy, in the order it is applied:
   (fill-time pattern interrupts), ``companion_update`` 12 (the position companion's
   updates and close notes), ``nudge`` 2 (link pings and the companion's adopt pings
   share it), ``prep`` 1 (shared with ``week_review`` and ``day_replay``),
-  ``radar_event`` 4 (Radar's single pings), ``radar_digest`` 2, ``thesis_watch``
+  ``radar_setup`` 4 (Radar single pings that carry a setup card), ``radar_event`` 4 (Radar's other single
+  pings), ``radar_digest`` 2, ``thesis_watch``
   2 and ``research`` 1. One kind spending its budget never takes another's: on
   October 29, 2026 the old shared pool was gone by 09:50 on prep, thesis watch,
   research and nudges, and every Radar ping and the evening review were held.
@@ -47,7 +48,7 @@ The policy, in the order it is applied:
   ``expiry_final`` > ``invalidation`` > ``giveback`` > ``time_stop`` (the
   90-minute last-day and the day-before-expiry alerts ranked with it) > ``entry``
   > ``hold_hour`` > ``interrupt`` > ``companion_update`` > ``nudge`` / ``link`` / ``companion_adopt`` > ``prep`` (and ``week_review``,
-  ``day_replay``) > ``evening_review`` > ``radar_event`` > ``radar_digest`` >
+  ``day_replay``) > ``evening_review`` > ``radar_setup`` > ``radar_event`` > ``radar_digest`` >
   ``thesis_watch`` > ``research``.
 
 Every decision is one ``PhonePing`` row (``sent``, ``merged``, ``suppressed``,
@@ -67,7 +68,7 @@ through (still recorded, so the follow-up below keeps working).
 **Acted on.** ``FollowUps`` runs on the level alert monitor's loop and writes,
 from the fills and the plan links as they arrive and never by guessing, what
 followed each delivered ping (``then``): an entry trigger or a Radar single
-ping (``radar_event``), did an entry fill in the symbol follow within
+ping (``radar_setup`` or ``radar_event``), did an entry fill in the symbol follow within
 ``ENTRY_MINUTES`` (a Radar group ping has no symbol and is recorded
 ``unmatched``, which no count reads); an invalidation, time stop or
 open-trade alert, was the position closed (or trimmed) within
@@ -93,7 +94,7 @@ from app.models import CaptureLink, Fill, PhonePing, Trade, TradeFill
 log = logging.getLogger(__name__)
 
 PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "interrupt", "companion_update", "nudge", "prep", "evening_review",
-            "radar_event", "radar_digest", "thesis_watch", "research")
+            "radar_setup", "radar_event", "radar_digest", "thesis_watch", "research")
 ALIASES = {"expiry_first": "time_stop", "expiry_eve": "time_stop", "wrong_way": "hold_hour", "link": "nudge", "no_plan": "nudge",
            "companion_adopt": "nudge",
            "week_review": "prep", "day_replay": "prep"}
@@ -101,8 +102,9 @@ NEVER_QUIET = 2  # ranks 0-1 (last-day final, invalidation) are never held by th
 NEVER_HELD = ("evening_review",)  # never held by the quiet window: it reports what was held
 # Each kind's own daily budget (PING_BUDGET_<KIND>); before the open it also shares the
 # pre-open allowance. The noun names the budget in a held ping's reason.
-BUDGETS = {"interrupt": 4, "companion_update": 12, "nudge": 2, "prep": 1, "radar_event": 4, "radar_digest": 2, "thesis_watch": 2, "research": 1}
-BUDGET_NAMES = {"interrupt": ("pattern interrupts'", "message"), "companion_update": ("the position companion's", "update"), "nudge": ("plan nudges'", "ping"), "prep": ("the prep and review pings'", "ping"), "radar_event": ("Radar's", "single ping"),
+BUDGETS = {"interrupt": 4, "companion_update": 12, "nudge": 2, "prep": 1, "radar_setup": 4, "radar_event": 4, "radar_digest": 2, "thesis_watch": 2, "research": 1}
+BUDGET_NAMES = {"interrupt": ("pattern interrupts'", "message"), "companion_update": ("the position companion's", "update"), "nudge": ("plan nudges'", "ping"), "prep": ("the prep and review pings'", "ping"),
+                "radar_setup": ("Radar's", "setup ping"), "radar_event": ("Radar's", "single ping"),
                 "radar_digest": ("Radar's", "digest"), "thesis_watch": ("thesis watch's", "ping"), "research": ("research's", "ping")}
 PREOPEN = 9 * 60 + 30  # New York; budgeted pings decided before it also count against PING_PREOPEN_ALLOWANCE
 HELD = ("merged", "suppressed", "over_cap")
@@ -116,7 +118,7 @@ EPS = 1e-9
 # What answers each kind: an entry fill in the symbol, an exit of the position, or a plan link.
 TRACKED = {"entry": "entry", "invalidation": "exit", "time_stop": "exit", "giveback": "exit", "hold_hour": "exit", "wrong_way": "exit",
            "expiry_first": "exit", "expiry_final": "exit", "expiry_eve": "exit", "nudge": "link", "link": "link", "no_plan": "link",
-           "radar_event": "entry"}
+           "radar_setup": "entry", "radar_event": "entry"}
 WINDOW = {"entry": ENTRY_MINUTES, "exit": EXIT_MINUTES, "link": LINK_MINUTES}
 
 
@@ -339,7 +341,7 @@ def _label(kind: str) -> str:
             "time_stop": "time stop", "entry": "entry trigger", "interrupt": "pattern", "invalidation": "invalidation", "nudge": "plan nudge",
             "no_plan": "plan nudge", "link": "plan link", "prep": "pre-market prep", "week_review": "week review", "day_replay": "Watch your day",
             "evening_review": "evening review", "expiry_eve": "day-before-expiry", "radar_digest": "Radar digest",
-            "radar_event": "Radar", "thesis_watch": "thesis watch", "research": "research", "companion_adopt": "adopted position",
+            "radar_setup": "Radar setup", "radar_event": "Radar", "thesis_watch": "thesis watch", "research": "research", "companion_adopt": "adopted position",
             "companion_update": "companion update"}.get(kind, kind)
 
 
@@ -548,7 +550,7 @@ def held_back_today(db: Session, now: float) -> dict:
     return {"count": len(rows), "by_kind": dict(Counter(_label(k) for k in rows))}
 
 
-SHORT = {"radar_event": "Radar", "radar_digest": "Radar", "evening_review": "evening", "prep": "prep", "nudge": "nudges",
+SHORT = {"radar_setup": "Radar setup", "radar_event": "Radar", "radar_digest": "Radar", "evening_review": "evening", "prep": "prep", "nudge": "nudges",
          "companion_update": "companion",
          "thesis_watch": "thesis watch", "research": "research"}
 
@@ -584,7 +586,7 @@ def week_summary(db: Session, start_utc: datetime, end_utc: datetime) -> dict:
     return {"state": "ok", "sent": sum(t["sent"] for t in by_kind.values()), "held": sum(t["held"] for t in by_kind.values()),
             "judged": judged, "acted_on": acted, "acted_on_pct": round(100 * acted / judged, 1) if judged else None,
             "by_kind": {k: dict(t) for k, t in sorted(by_kind.items(), key=lambda kv: rank(kv[0]))},
-            "then": (f"acted_on: an entry trigger or a Radar single ping followed by an entry fill in the symbol within {ENTRY_MINUTES} min; an "
+            "then": (f"acted_on: an entry trigger or a Radar single ping (setup cards included) followed by an entry fill in the symbol within {ENTRY_MINUTES} min; an "
                      f"invalidation, time stop or open-trade alert followed by the position closed or trimmed within {EXIT_MINUTES} "
                      f"min; a nudge or link ping followed by a plan link within {LINK_MINUTES} min. judged counts pings the fills "
                      "could answer. held: merged, suppressed by the quiet window, or over its budget or the pre-open allowance.")}

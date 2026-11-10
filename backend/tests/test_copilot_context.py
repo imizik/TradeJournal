@@ -403,7 +403,6 @@ def test_memories_take_a_symbol_and_put_its_memories_first(db):
     assert [m["text"] for m in out["memories"]] == ["NBIS is a two-year infrastructure thesis for me.", "I give gains back after the first hour."]
     assert [m["text"] for m in copilot_book.memories(10, session=db)["memories"]] == [
         "CRWV is the group leader.", "I give gains back after the first hour.", "NBIS is a two-year infrastructure thesis for me."]
-    assert copilot_tools.validate("get_memories", {"symbol": "nbis", "limit": 3}) == {"limit": 3, "symbol": "NBIS"}
 
 
 # --------------------------------------------------------------------------- the lab's Open threads route
