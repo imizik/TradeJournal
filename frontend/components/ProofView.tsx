@@ -52,15 +52,25 @@ export function useJson<T>(path: string) {
   return { body, error, checkedAt };
 }
 
-function VerdictBlock({ verdict, reason, sample, rule, testId, label }: { verdict: Verdict; reason: string; sample: string; rule: string; testId: string; label?: string }) {
+// The answer first: chip and verdict sentence large and bright. The sample, rule and caveat (all kept, none hidden)
+// follow together in small muted text.
+function VerdictHead({ tone, label, reason }: { tone: string; label: string; reason: string }) {
+  return <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+    <span className={`inline-flex h-7 items-center rounded-md px-2.5 text-[13px] font-semibold ${tone}`}>{label}</span>
+    <span className="text-base font-semibold leading-snug text-foreground">{reason}</span>
+  </div>;
+}
+
+function VerdictBlock({ verdict, reason, sample, rule, testId, label, caveat, caveatTestId }: { verdict: Verdict; reason: string; sample: string; rule: string;
+  testId: string; label?: string; caveat?: string; caveatTestId?: string }) {
   const v = VERDICT[verdict];
-  return <div className="space-y-1.5" data-testid={testId}>
-    <div className="flex flex-wrap items-center gap-2">
-      <span className={`inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium ${v.tone}`}>{label ?? v.label}</span>
-      <span className="text-sm">{reason}</span>
+  return <div className="space-y-2" data-testid={testId}>
+    <VerdictHead tone={v.tone} label={label ?? v.label} reason={reason} />
+    <div className="space-y-1 text-xs text-muted-foreground">
+      <p>Sample: {sample}</p>
+      <p>Rule: {rule}</p>
+      {caveat && <p data-testid={caveatTestId}>{caveat}</p>}
     </div>
-    <p className="text-xs text-muted-foreground">Sample: {sample}</p>
-    <p className="text-xs text-muted-foreground">Rule: {rule}</p>
   </div>;
 }
 
@@ -102,8 +112,7 @@ function AlertsProof() {
   return <DashboardCard title="Exit habits and alert follow-up" action={<Link href="/analytics" className={dashboardLink}>Analytics →</Link>}>
     {body ? <div className="space-y-4">
       <VerdictBlock testId="proof-alerts-verdict" label={EXIT_HABIT_VERDICT[body.verdict.verdict].label} verdict={body.verdict.verdict} reason={body.verdict.reason} rule={body.verdict.rule}
-        sample={`${body.verdict.sample} of the last ${body.window} trades since ${body.go_live} vs ${body.baseline_trades} before`} />
-      <p className="text-xs text-muted-foreground">{EXIT_HABIT_CAVEAT}</p>
+        sample={`${body.verdict.sample} of the last ${body.window} trades since ${body.go_live} vs ${body.baseline_trades} before`} caveat={EXIT_HABIT_CAVEAT} />
       {body.feedback && <div className="space-y-2" data-testid="proof-alert-feedback">
         <Counts title="Your alert feedback" rows={[...Object.entries(ALERT_FEEDBACK_LABELS), ["unanswered", "Unanswered"]]}
           counts={{ ...body.feedback.counts, unanswered: body.feedback.unanswered }} />
@@ -123,9 +132,8 @@ function RadarProofCard() {
   const { body, error } = useJson<RadarProof>("/radar/proof");
   return <DashboardCard title="Does Radar find what you'd miss, early enough?" action={<Link href="/radar" className={dashboardLink}>Open Radar →</Link>}>
     {!body ? <Status error={error} what="Radar proof" />
-      : !body.verdict ? <div className="space-y-1.5" data-testid="proof-radar-verdict">
-        <span className={`inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium ${VERDICT.not_enough_data.tone}`}>{VERDICT.not_enough_data.label}</span>
-        <p className="text-sm text-muted-foreground">{body.reason ?? "Radar is off."}</p>
+      : !body.verdict ? <div data-testid="proof-radar-verdict">
+        <VerdictHead tone={VERDICT.not_enough_data.tone} label={VERDICT.not_enough_data.label} reason={body.reason ?? "Radar is off."} />
       </div>
       : <div className="space-y-4">
         <VerdictBlock testId="proof-radar-verdict" verdict={body.verdict.verdict} reason={body.verdict.reason} rule={body.verdict.rule}
@@ -151,8 +159,7 @@ function PlanningProofCard() {
     {body ? <div className="space-y-3">
       <p className="text-xs text-muted-foreground">A secondary read, not a third proof.</p>
       <VerdictBlock testId="proof-planning-verdict" verdict={body.verdict.verdict} reason={body.verdict.reason} rule={body.verdict.rule}
-        sample={`${body.verdict.planned} planned vs ${body.verdict.unplanned} unplanned closed long options since ${body.go_live}; ${late} with a late plan, not counted`} />
-      <p className="text-xs text-muted-foreground" data-testid="proof-planning-caveat">{body.caveat}</p>
+        sample={`${body.verdict.planned} planned vs ${body.verdict.unplanned} unplanned closed long options since ${body.go_live}; ${late} with a late plan, not counted`} caveat={body.caveat} caveatTestId="proof-planning-caveat" />
       <ul className="space-y-2">{body.groups.map((g) => <li key={g.key} className="space-y-0.5" data-testid={`plan-group-${g.key}`}>
         <p className="text-sm">{g.label}</p>
         <p className="flex flex-wrap gap-x-3 text-xs tabular-nums text-muted-foreground">
