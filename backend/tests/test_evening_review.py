@@ -20,7 +20,7 @@ from tests.test_day_replay import Clock, Phone
 from tests.test_today import buy, clock, marks  # noqa: F401  (fixtures)
 
 WED, THU = date(2026, 10, 21), date(2026, 10, 22)
-WAITING = {"review": 2, "alerts": 3, "radar": 0, "fills": 1}
+WAITING = {"review": 2, "fills": 1}
 
 
 def at(hhmm: str, day: date = WED) -> float:
@@ -69,9 +69,9 @@ def test_at_1630_one_ping_says_what_waits_and_opens_close_the_day_once(engine, m
     reviews._last_run = 0
     reviews.run()
     (row,) = rows(engine)
-    assert (row.day, row.delivery, row.review, row.alerts, row.radar, row.fills) == (WED, "sent", 2, 3, 0, 1)
+    assert (row.day, row.delivery, row.review, row.alerts, row.radar, row.fills) == (WED, "sent", 2, 0, 0, 1)
     (sent,) = phone.sent
-    assert sent["title"] == "Close the day" and sent["body"] == "To review: 2 threads · 3 alerts unanswered · 1 fill to link"
+    assert sent["title"] == "Close the day" and sent["body"] == "To review: 2 threads · 1 fill to link"
     assert sent["path"] == "/copilot-lab?close=1" and sent["direct_click"] is True and sent["image"] is None
     with Session(engine) as db:
         record = db.exec(select(PhonePing).where(PhonePing.sender == "evening_review")).one()
@@ -90,7 +90,7 @@ def test_at_1630_one_ping_says_what_waits_and_opens_close_the_day_once(engine, m
 def test_nothing_waiting_is_recorded_skipped_and_sends_nothing(engine, monkeypatch):  # noqa: F811
     monkeypatch.setenv("EVENING_REVIEW_PING_ENABLED", "true")
     phone = Phone(monkeypatch)
-    job(engine, Clock(at("16:30")), counts={"review": 0, "alerts": 0, "radar": 0, "fills": 0}).run()
+    job(engine, Clock(at("16:30")), counts={"review": 0, "fills": 0}).run()
     (row,) = rows(engine)
     assert (row.delivery, row.body, row.last_error) == ("skipped", None, "Nothing was waiting for review, so nothing was sent.")
     assert phone.sent == []
@@ -136,11 +136,11 @@ def test_the_daily_cap_never_holds_it_and_it_reports_what_was_held(engine, monke
     job(engine, Clock(at("16:30"))).run()
     (row,) = rows(engine)
     assert row.delivery == "sent" and phone.sent[0]["body"] == (
-        "To review: 2 threads · 3 alerts unanswered · 1 fill to link · 12 pings held today (Radar 11, thesis watch 1)")
+        "To review: 2 threads · 1 fill to link · 12 pings held today (Radar 11, thesis watch 1)")
     with Session(engine) as db:
         assert db.exec(select(PhonePing.decision).where(PhonePing.sender == "evening_review")).one() == "sent"
     # Held pings alone are worth the evening ping.
-    assert message({"review": 0, "alerts": 0, "radar": 0, "fills": 0}, "1 ping held today (research 1)") == (
+    assert message({"review": 0, "fills": 0}, "1 ping held today (research 1)") == (
         "To review: 1 ping held today (research 1)")
 
 
@@ -169,8 +169,8 @@ def test_the_time_is_configurable_but_never_before_the_close(monkeypatch):
     for bad in ("15:30", "25:00", "evening", "17"):
         monkeypatch.setenv("EVENING_REVIEW_PING_AT", bad)
         assert at_minute() == 16 * 60 + 30
-    assert message({"review": 1, "alerts": 0, "radar": 2, "fills": 2}) == "To review: 1 thread · 2 Radar hits unrated · 2 fills to link"
-    assert message({"review": 0, "alerts": 0, "radar": 0, "fills": 0}) is None
+    assert message({"review": 1, "fills": 2}) == "To review: 1 thread · 2 fills to link"
+    assert message({"review": 0, "fills": 0}) is None
 
 
 def test_the_counts_are_the_desks_own(desk, engine, clock, monkeypatch):  # noqa: F811
@@ -186,7 +186,7 @@ def test_the_counts_are_the_desks_own(desk, engine, clock, monkeypatch):  # noqa
     body = desk.get("/copilot/desk/threads").json()
     asking = {r["symbol"] for r in body["threads"] if r["close"] and not r["close"]["reviewed"]}
     linking = {r["fill_to_link"] for r in body["threads"] if r["fill_to_link"]}
-    assert counts == {"review": len(asking), "alerts": 0, "radar": 0, "fills": len(linking)}
+    assert counts == {"review": len(asking), "fills": len(linking)}
     assert (counts["review"], counts["fills"]) == (2, 1)
     monkeypatch.setenv("EVENING_REVIEW_PING_ENABLED", "true")
     phone = Phone(monkeypatch)
@@ -212,14 +212,19 @@ def test_a_desk_source_that_cannot_be_read_is_a_skip_with_why_not_nothing_waitin
     assert phone.sent == []
 
 
-def test_alerts_count_as_close_the_day_walks_them_today_only(desk, engine, clock):  # noqa: F811
+def test_ratings_never_count_and_a_ticker_not_followed_is_left_out(desk, engine, clock):  # noqa: F811
+    """Unanswered alerts are not waiting (ratings are optional); a ticker set to Not following asks nothing."""
+    from app.engine import day_journal
     from tests.test_copilot_desk_session import sent
     buy(engine, 500)
+    buy(engine, 700, "CRWV")  # no plan: asks "Want a plan for this?"
     with Session(engine) as db:
-        sent(db, "gmail:500", "giveback", 31)  # today, no feedback: counted
-        sent(db, "gmail:500", "hold_hour", 60, answer="already_aware")  # today, answered
-        sent(db, "gmail:500", "expiry_final", -1200)  # yesterday, still unanswered: the Briefing's list, not the ping
+        sent(db, "gmail:500", "giveback", 31)  # today, no feedback: not counted
         db.commit()
     clock["t"] = WED_CLOSE
     with Session(engine) as db:
-        assert copilot_desk.waiting(db, WED_CLOSE)["alerts"] == 1
+        before = copilot_desk.waiting(db, WED_CLOSE)
+        assert set(before) == {"review", "fills"}
+        day_journal.append(db, day=WED, operation_id="follow-crwv", kind="follow", text="Not following", symbol="CRWV")
+        after = copilot_desk.waiting(db, WED_CLOSE)
+    assert after["review"] == before["review"] - 1

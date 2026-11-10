@@ -161,14 +161,14 @@ test("a ticker's arrow shows or hides its subthreads without changing the conver
   await expect(page.getByTestId("now")).toBeVisible();
 });
 
-test("Main stays pinned as the list scrolls, with only today's conversations under it and how many answers wait", async ({ page }) => {
+test("Main stays pinned as the list scrolls, with only today's conversations under it and no ratings counted", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 700 });
   await lab(page);
   const loose = (n: number, day: string) => ({ ...summary(`66666666-6666-4666-8666-66666666666${n}`, "X", "open", `2026-10-${day}T16:00:00Z`), symbol: null, title: `About the market ${n}` });
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [loose(1, "23"), loose(2, "22"), loose(3, "21"), loose(4, "20")] } }));
   await page.route("**/copilot/desk/session", (route) => route.fulfill({ json: { as_of: "2026-10-23T15:00:00Z", now: epoch("2026-10-23T15:00:00Z"), day: "2026-10-23", phase: "regular",
     open: null, close: null, events: [], time_stops: [], pings: null, prep: null, indices: [], quote_issue: null, sections: {}, to_answer: {
-      // Only today's still waiting count here: the older one and the answered one wait in the briefing, not on the list.
+      // Ratings are optional: nothing on the list counts them.
       alerts: { count: 3, rows: [{ id: "a1", trade_id: "t1", symbol: "NBIS", contract: "NBIS", kind: "giveback", at: 0, today: true, feedback: null },
         { id: "a2", trade_id: "t1", symbol: "NBIS", contract: "NBIS", kind: "giveback", at: 0, today: true, feedback: { rating: "already_aware", reason: null, version: 1, created_at: 0, updated_at: 0 } },
         { id: "a3", trade_id: "t1", symbol: "NBIS", contract: "NBIS", kind: "giveback", at: 0, today: false, feedback: null }] },
@@ -176,7 +176,7 @@ test("Main stays pinned as the list scrolls, with only today's conversations und
         { event_id: "e2", symbol: "MU", kind: "vs sector", at: 0, today: false, rating: null }] } } } }));
   await page.reload();
   const main = list(page).getByRole("region", { name: "Now" });
-  await expect(main).toContainText("2 to answer");
+  await expect(main).not.toContainText("to answer");
   const under = list(page).getByRole("list", { name: "Main threads" });
   await expect(under.getByRole("link")).toHaveText([/About the market 1/]);
   await under.getByRole("button", { name: /^Earlier/ }).click();
@@ -480,3 +480,48 @@ test("a thread planned from Radar is tagged From Radar, from the server's origin
   await expect(children.getByRole("link")).toHaveText([/^From RadarPlan a trade: Radar: NBIS turned up/, /^From RadarRadar setup: NBIS dip turning up/, /^NBIS plan/]);
   await children.screenshot({ path: test.info().outputPath("thread-list-from-radar.png") });
 });
+
+for (const width of [1440, 375]) {
+  test(`a ticker not followed leaves Now and the list for one "not followed" line, and Show again brings it back (${width} px)`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
+    const SLS = "66666666-6666-4666-8666-666666666666";
+    const sls = row({ key: `trade:${SLS}`, group: "act", symbol: "SLS", title: "SLS 12/19/26 3C", instrument: "12/19/26 3C",
+      value: { text: "−$40.00", tone: "loss" }, status: { text: "Expires Friday", tone: "attention" }, trade_id: SLS, hidden: true });
+    const entries: Record<string, unknown>[] = [];
+    let hidden = true;
+    await lab(page, { ...DESK, threads: [...DESK.threads, sls] });
+    await page.unroute("**/copilot/desk/threads");
+    await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: { ...DESK, threads: [...DESK.threads, { ...sls, hidden }] } }));
+    await page.route("**/day-journal/*/entries", (route) => {
+      const body = route.request().postDataJSON();
+      entries.push(body);
+      hidden = body.text === "Not following";
+      return route.fulfill({ json: { id: "e1", day: "2026-10-23", created_at: "2026-10-23T15:00:00Z", actor: "owner", not_traded: false, ...body } });
+    });
+    await page.reload();
+
+    // The list: SLS is not in its groups and needs nothing; one line holds it.
+    await openDeskThreads(page);
+    await expect(tickers(page).getByRole("button", { name: /^SLS, Held/ })).toHaveCount(0);
+    const fold = list(page).getByTestId("rail-not-followed");
+    await expect(fold).toContainText("1 not followed");
+    await expect(page.getByTestId("desk-day")).toContainText("1 needs you"); // NBIS only
+
+    // Now: SLS is not among the positions; it waits behind "1 not followed".
+    if (width === 375) await page.getByRole("tab", { name: "Now" }).click();
+    const positions = page.getByTestId("now-positions");
+    await expect(positions).toContainText("Open positions · 1");
+    await expect(positions.getByRole("button", { name: /^SLS/ })).toHaveCount(0);
+    await expect(page.getByTestId("now-waiting")).not.toContainText("SLS");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await positions.getByRole("button", { name: /1 not followed/ }).click();
+    await positions.getByRole("button", { name: "Show again" }).click();
+    await expect(positions).toContainText("Open positions · 2");
+    expect(entries.map(e => [e.kind, e.symbol, e.text])).toEqual([["follow", "SLS", "Following"]]);
+
+    // Hide it again from its row: one tap, saved for every device.
+    await positions.getByRole("button", { name: "Hide SLS: not following" }).click();
+    await expect(positions).toContainText("Open positions · 1");
+    expect(entries.map(e => e.text)).toEqual(["Following", "Not following"]);
+  });
+}

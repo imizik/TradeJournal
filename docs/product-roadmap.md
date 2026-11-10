@@ -59,7 +59,12 @@ Alerts describe observed habit rates as Lower habit rates / No consistent
 decrease / Not enough data, without claiming that alerts caused a change; Radar
 retains its helping / not helping / not enough data labels. Alert feedback
 (Prompted a review / Already aware / Too late / Not useful, optional reason) is
-saved against the exact alert with a timestamp. Proof shows response coverage
+saved against the exact alert with a timestamp. Since 2026-11-10 both answers
+are optional: offered only where the item shows (the alert on its position's
+thread, the hit on its Radar card, the Telegram buttons) and never counted as
+waiting on the desk or in the evening ping, after 0 of 37 alerts were answered
+in 30 days; Now's "How the pings did" shows what followed each ping instead
+([the desk](copilot-lab.md#the-desk)). Proof shows response coverage
 and unanswered counts across all recorded sent or delivery-unconfirmed position
 alerts, separately from fill-derived actions and financial results. These reads
 come from `GET /analytics/exit-habits` and `GET /radar/proof`

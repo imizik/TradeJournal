@@ -226,3 +226,19 @@ def test_a_horizon_and_a_plan_answer_are_check_ins_and_the_newest_horizon_wins(j
     assert post("d1", "plan_done", "NBIS", "Marked done").status_code == 200
     with Session(engine) as session:
         assert set(day_journal.done(session)) == {"NBIS"}
+
+
+def test_not_following_is_its_own_entry_and_leaves_the_horizon_alone(journal):
+    client, engine = journal
+    post = lambda op, symbol, text: client.post(f"/day-journal/{DAY}/entries",  # noqa: E731
+                                                json={"operation_id": op, "kind": "follow", "symbol": symbol, "text": text})
+    assert client.post(f"/day-journal/{DAY}/entries", json={"operation_id": "h1", "kind": "horizon", "symbol": "SLS",
+                                                            "text": "Long hold"}).status_code == 200
+    assert post("f1", "SLS", "Not following").status_code == 200
+    assert post("f2", "APLD", "Not following").status_code == 200
+    assert post("f3", "APLD", "Following").status_code == 200  # Show again: the newest wins
+    assert post("f4", "SLS", "maybe").status_code == 422  # only the desk's two words
+    assert post("f5", None, "Not following").status_code == 422  # always about a ticker
+    with Session(engine) as session:
+        assert day_journal.not_following(session) == {"SLS"}
+        assert day_journal.check_ins(session)[0] == {"SLS": "long"}  # a long hold stays a long hold

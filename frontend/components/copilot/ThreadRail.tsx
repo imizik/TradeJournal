@@ -231,15 +231,20 @@ function DayLine({ data, needYou }: { data: DeskThreads; needYou: number }) {
  * saved conversations, refreshed each minute while the page is visible. A ticker row shows its state, P&L and a "needs
  * you" dot; tickers sort under Needs you, Held and armed, and Others. Pressing a ticker opens its newest conversation (or
  * follows its row's link when it has none) and shows its subthreads; with more than one, its count and arrow show or hide
- * them without changing the open conversation, and any number can stay open. Radar hits, alerts to answer and Review my
- * week live inside Main; ``toAnswer`` is how many of today's are waiting (older ones wait in the briefing).
+ * them without changing the open conversation, and any number can stay open. Radar hits and Review my week live inside
+ * Main. A ticker the owner does not follow (``hidden``) leaves the groups for "N not followed" at the bottom, each with
+ * Show again (``onFollow``).
  * ``onRows`` gets the desk rows in the order shown, for the palette; ``onWalk`` the conversations J / K walk, as the list
  * shows them (under Main, then each ticker: its subthreads when shown, else its newest); ``onSaved`` the saved conversations, for
  * the breadcrumb. All | Plans switches to the Plans view (``PlanList``) from the same read, remembered in this browser.
  */
-export default function ThreadRail({ actions, active = null, activeSymbol = null, main = false, onRows, onWalk, onSaved, phase = null, refresh = 0, toAnswer = 0, pick }: {
+export default function ThreadRail({ actions, active = null, activeSymbol = null, main = false, onRows, onWalk, onSaved, phase = null, refresh = 0, follow = {}, onFollow, onFollowRead, pick }: {
   actions: HomeActions; active?: string | null; activeSymbol?: string | null; main?: boolean; onRows?(rows: DeskThread[]): void; onWalk?(ids: string[]): void;
-  onSaved?(saved: InvestigationSummary[]): void; phase?: ReactNode; refresh?: number; toAnswer?: number; pick(row: DeskThread): void;
+  onSaved?(saved: InvestigationSummary[]): void; phase?: ReactNode; refresh?: number; pick(row: DeskThread): void;
+  /** Follow changes made on this page, ahead of the next read (symbol → following). */
+  follow?: Readonly<Record<string, boolean>>; onFollow?(symbol: string, following: boolean): Promise<void>;
+  /** A read that agrees with a follow change made here: the change is no longer needed ahead of the read. */
+  onFollowRead?(symbol: string): void;
 }) {
   const [data, setData] = useState<DeskThreads | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -289,10 +294,24 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
     return next;
   }), []);
 
-  const rows = useMemo(() => data?.threads ?? [], [data]);
+  const rows = useMemo(() => (data?.threads ?? []).map(r => r.symbol && r.symbol in follow ? { ...r, hidden: !follow[r.symbol] } : r), [data, follow]);
   const day = data ? nyDay(new Date(data.asOf)) : null;
   const needs = useCallback((row: DeskThread) => needsYou(row, day), [day]);
-  const tickers = useMemo(() => tickersOf(rows, data?.plans ?? [], saved, needs), [rows, data, saved, needs]);
+  // A ticker not followed: out of the groups, behind "N not followed" (its conversations go with it).
+  const hiddenSymbols = useMemo(() => new Set(rows.flatMap(r => r.hidden && r.symbol ? [r.symbol] : [])), [rows]);
+  const tickers = useMemo(() => tickersOf(rows.filter(r => !r.hidden), data?.plans ?? [], saved.filter(t => !t.symbol || !hiddenSymbols.has(t.symbol)), needs),
+    [rows, data, saved, needs, hiddenSymbols]);
+  const hiddenTickers = useMemo(() => tickersOf(rows.filter(r => r.hidden), data?.plans ?? [], saved.filter(t => !!t.symbol && hiddenSymbols.has(t.symbol)), () => false),
+    [rows, data, saved, hiddenSymbols]);
+  const [hiddenShown, setHiddenShown] = useState(false);
+  const [followFailed, setFollowFailed] = useState<string | null>(null);
+  // Once the server's read says what this page set, the server's word stands again (another device may change it later).
+  useEffect(() => {
+    for (const [symbol, following] of Object.entries(follow)) {
+      const own = data?.threads.filter(r => r.symbol === symbol) ?? [];
+      if (own.length && own.some(r => r.hidden) === !following) onFollowRead?.(symbol);
+    }
+  }, [data, follow, onFollowRead]);
   const briefing = rows.find(r => r.key === "briefing");
   const radar = rows.filter(isRadar);
   const radarNew = radar.filter(unread).length;
@@ -304,7 +323,8 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
     const seenIds = new Set(own.map(t => t.id));
     return [...own, ...saved.filter(t => !t.main_day && !t.symbol && t.status === "open" && !seenIds.has(t.id)).map(t => ({ id: t.id, title: t.title, at: t.updated_at }))];
   }, [rows, saved]);
-  const ordered = useMemo(() => [...rows.filter(r => r.group === "pinned"), ...tickers.flatMap(t => t.rows), ...rows.filter(isRadar)], [rows, tickers]);
+  const ordered = useMemo(() => [...rows.filter(r => r.group === "pinned"), ...tickers.flatMap(t => t.rows), ...hiddenTickers.flatMap(t => t.rows),
+    ...rows.filter(isRadar)], [rows, tickers, hiddenTickers]);
   useEffect(() => { if (data) onRows?.(ordered); }, [data, ordered, onRows]); // once read: the placeholder is not the list
   const jumpKey = useJumpKey();
   const livePlans = data?.plans.filter(p => p.stage === "armed" || p.stage === "in_position").length ?? 0;
@@ -362,7 +382,6 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
                 <span className="min-w-0 truncate font-semibold text-foreground">Now</span>
                 {radarNew > 0 && <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
                 <span className="ml-auto flex shrink-0 gap-2 text-xs tabular-nums text-muted-foreground">
-                  {toAnswer > 0 && <span className="text-primary" title="Today's alerts to answer and Radar hits to rate, on Now; older ones wait there too">{toAnswer} to answer</span>}
                   {radar.length > 0 && <span title="Radar hits since your last Radar visit, on Now">{radar.length} Radar</span>}
                 </span>
               </span>
@@ -379,7 +398,7 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
           )}
           {data && (
             <section aria-label="Tickers" className="space-y-0.5">
-              {!tickers.length && <p className="px-2.5 py-1 text-xs text-muted-foreground">
+              {!tickers.length && !hiddenTickers.length && <p className="px-2.5 py-1 text-xs text-muted-foreground">
                 {data.sections.positions === "unavailable" ? "Positions unavailable right now." : "Nothing open. Plan a trade to start a ticker."}
               </p>}
               {/* One list in the same order; only what needs the owner gets a heading. */}
@@ -402,6 +421,35 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
                   {more ? "Show fewer" : <>+<span className="tabular-nums">{quiet.length - shownQuiet.length}</span> more</>}
                 </button>
               ) : null}
+              {hiddenTickers.length > 0 && (
+                <div data-testid="rail-not-followed" className="mt-2 border-t pt-1">
+                  <button type="button" aria-expanded={hiddenShown} onClick={() => setHiddenShown(open => !open)}
+                    className="min-h-11 w-full rounded-md px-2.5 text-left text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">
+                    <span className="tabular-nums">{hiddenTickers.length}</span> not followed {hiddenShown ? "▴" : "▾"}
+                  </button>
+                  {hiddenShown && (
+                    <ul aria-label="Not followed" className="space-y-0.5">
+                      {hiddenTickers.map(ticker => (
+                        <li key={ticker.symbol} className="flex items-center gap-0.5">
+                          <button type="button" onClick={() => press(ticker)} aria-label={`${ticker.symbol}, not followed`}
+                            className={cn(box(openSymbol === ticker.symbol), "min-w-0 flex-1 text-muted-foreground")}>
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              <span className="shrink-0 font-semibold">{ticker.symbol}</span>
+                              {ticker.value && <span className={cn("ml-auto shrink-0 text-xs", TONE[ticker.value.tone], numeric(ticker.value.text) && "tabular-nums")}>{ticker.value.text}</span>}
+                            </span>
+                          </button>
+                          {onFollow && <button type="button" onClick={() => {
+                            setFollowFailed(null);
+                            onFollow(ticker.symbol, true).catch(() => setFollowFailed(`${ticker.symbol}: not saved. Try again.`));
+                          }}
+                            className="min-h-11 shrink-0 rounded-md px-2 text-xs font-medium text-primary hover:bg-secondary sm:min-h-8">Show again</button>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {followFailed && <p role="alert" className="px-2.5 text-xs text-primary">{followFailed}</p>}
+                </div>
+              )}
             </section>
           )}
         </>

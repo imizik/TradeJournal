@@ -87,13 +87,17 @@ def _mean(values: list[float]) -> float | None:
     return round(sum(values) / len(values), 2) if values else None
 
 
-def scorecard(store: RadarStore, db: Session, now: float, days: int = WINDOW_DAYS) -> dict:
+def scorecard(store: RadarStore, db: Session, now: float, days: int = WINDOW_DAYS, kinds: tuple[str, ...] = STOCK_KINDS,
+              only: set[str] | None = None) -> dict:
+    """``kinds``: the event kinds scored (the stock hits by default; the desk's "How the pings did" adds the setup kinds).
+    ``only``: when given, just these event ids are scored (the ones a ping reached), before the row cap."""
     today = datetime.fromtimestamp(now, ET).date()
     start = today - timedelta(days=days)
     since = start.isoformat()  # Radar's session names are ISO dates; the journal's day column is a date
     hits = []
     for session in sorted(s for s in store.sessions() if s >= since):
-        hits += [e for e in store.events(session) if e.get("kind") in STOCK_KINDS and e.get("symbols")]
+        hits += [e for e in store.events(session) if e.get("kind") in kinds and e.get("symbols")
+                 and (only is None or e["event_id"] in only)]
     hits.sort(key=lambda e: (e["first_seen_at"], e["event_id"]))
     symbols = {e["symbols"][0] for e in hits}
     decisions = list(db.exec(select(DayJournalEntry).where(DayJournalEntry.kind == "decision", DayJournalEntry.symbol.in_(symbols),

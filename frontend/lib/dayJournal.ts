@@ -74,6 +74,7 @@ export function kindLabel(kind: DayJournalEntry["kind"]) {
   if (kind === "horizon") return "Horizon";
   if (kind === "plan_ask") return "Plan question";
   if (kind === "plan_done") return "Plan done";
+  if (kind === "follow") return "Following";
   return DAY_JOURNAL_KINDS.find(([value]) => value === kind)?.[1] ?? kind;
 }
 

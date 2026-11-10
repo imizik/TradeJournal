@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { EyeOff } from "lucide-react";
 import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
 import { getExposure } from "@/lib/copilot";
 import { TONE, numeric } from "@/components/copilot/ThreadRail";
@@ -113,17 +114,65 @@ function RowButton({ row, line, open }: { row: DeskThread; line?: ReactNode; ope
   );
 }
 
+/** One ticker's follow switch on a Now row: Hide (an eye) on a followed one, Show again on one not followed. */
+function FollowButton({ symbol, following, onFollow }: { symbol: string; following: boolean; onFollow(symbol: string, following: boolean): void }) {
+  return following ? (
+    <button type="button" onClick={() => onFollow(symbol, false)} aria-label={`Hide ${symbol}: not following`}
+      title="Not following: hide this ticker from Now, the thread list and every count (Show again undoes it)"
+      className="flex min-h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-secondary hover:text-foreground sm:min-h-10 sm:w-9">
+      <EyeOff size={14} aria-hidden />
+    </button>
+  ) : (
+    <button type="button" onClick={() => onFollow(symbol, true)}
+      className="min-h-11 shrink-0 rounded-md px-2.5 text-xs font-medium text-primary hover:bg-secondary sm:min-h-8">Show again</button>
+  );
+}
+
+/** "3 not followed ▾" at the bottom of a list: each ticker the owner hid, with Show again. Nothing when none. */
+export function NotFollowed({ rows, open, onFollow }: { rows: DeskThread[]; open(row: DeskThread): void; onFollow(symbol: string, following: boolean): void }) {
+  const [shown, setShown] = useState(false);
+  const first = new Map<string, DeskThread>();
+  for (const row of rows) if (row.symbol && !first.has(row.symbol)) first.set(row.symbol, row);
+  if (!first.size) return null;
+  return (
+    <div data-testid="not-followed" className="mt-1 border-t pt-1">
+      <button type="button" aria-expanded={shown} onClick={() => setShown(was => !was)}
+        className="min-h-11 w-full rounded-md px-2.5 text-left text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">
+        <span className="tabular-nums">{first.size}</span> not followed {shown ? "▴" : "▾"}
+      </button>
+      {shown && (
+        <ul aria-label="Not followed">
+          {[...first.values()].map(row => (
+            <li key={row.symbol} className="flex items-center gap-1">
+              <div className="min-w-0 flex-1"><RowButton row={row} open={open} /></div>
+              <FollowButton symbol={row.symbol!} following={false} onFollow={onFollow} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /**
- * Now's open positions (docs/copilot-lab.md § The desk): one row per open position from the thread list's read, with its
- * contract, unrealized P&L and its plan's nearest line (distance to invalidation, else the time stop; "No plan yet"
- * without one), plus a time stop still ahead today when the line names something else. Then the armed plans near a
- * trigger. A row opens its thread (``open``, the desk's ``pick``).
+ * Now's open positions (docs/copilot-lab.md § The desk): one row per open position the owner follows, from the thread
+ * list's read, with its contract, unrealized P&L and its plan's nearest line (distance to invalidation, else the time
+ * stop; "No plan yet" without one), plus a time stop still ahead today when the line names something else. Each row's
+ * eye hides its ticker (``onFollow``); hidden ones sit behind "N not followed" at the bottom, each with Show again.
+ * Then the followed armed plans near a trigger. A row opens its thread (``open``, the desk's ``pick``).
  */
-export function NowPositions({ rows, stops, open, read }: {
+export function NowPositions({ rows, stops, open, read, onFollow }: {
   rows: DeskThread[]; stops: DeskSession["time_stops"]; open(row: DeskThread): void; read: boolean;
+  onFollow(symbol: string, following: boolean): Promise<void>;
 }) {
-  const positions = rows.filter(r => r.key.startsWith("trade:"));
-  const near = rows.filter(r => r.group === "near");
+  const [failed, setFailed] = useState<string | null>(null);
+  const held = rows.filter(r => r.key.startsWith("trade:"));
+  const positions = held.filter(r => !r.hidden);
+  const near = rows.filter(r => r.group === "near" && !r.hidden);
+  const follow = (symbol: string, following: boolean) => {
+    setFailed(null);
+    onFollow(symbol, following).catch(() => setFailed(`${symbol}: not saved. Try again.`));
+  };
   const line = (row: DeskThread) => {
     const stop = stops.find(s => s.symbol === row.symbol);
     return stop && !/time stop/i.test(row.status.text) ? `${row.status.text} · time stop ${stop.clock}` : row.status.text;
@@ -132,27 +181,34 @@ export function NowPositions({ rows, stops, open, read }: {
     <section aria-label="Open positions" data-testid="now-positions" className="mb-4 rounded-lg border bg-card p-1.5">
       <h2 className={cn(LABEL, "px-2.5 pb-1 pt-1")}>Open positions{positions.length > 0 && <> · <span className="tabular-nums">{positions.length}</span></>}</h2>
       {positions.length ? (
-        <ul>{positions.map(row => <li key={row.key}><RowButton row={row} line={line(row)} open={open} /></li>)}</ul>
-      ) : <p className="px-2.5 pb-1.5 text-xs text-muted-foreground">{read ? "No open positions." : "Reading positions…"}</p>}
+        <ul>{positions.map(row => (
+          <li key={row.key} className="flex items-center gap-1">
+            <div className="min-w-0 flex-1"><RowButton row={row} line={line(row)} open={open} /></div>
+            {row.symbol && <FollowButton symbol={row.symbol} following onFollow={follow} />}
+          </li>
+        ))}</ul>
+      ) : <p className="px-2.5 pb-1.5 text-xs text-muted-foreground">{!read ? "Reading positions…" : held.length ? "Only positions you don't follow are open." : "No open positions."}</p>}
       {near.length > 0 && (
         <>
           <h3 className={cn(LABEL, "mt-1 border-t px-2.5 pb-1 pt-2")}>Near a trigger</h3>
           <ul>{near.map(row => <li key={row.key}><RowButton row={row} open={open} /></li>)}</ul>
         </>
       )}
+      <NotFollowed rows={held.filter(r => r.hidden)} open={open} onFollow={follow} />
+      {failed && <p role="alert" className="px-2.5 pb-1 text-xs text-primary">{failed}</p>}
     </section>
   );
 }
 
 /**
- * What waits on the owner: each ticker's decision to make, card to confirm or close question still open (``needsYou``),
- * one row each opening its thread, then ``children`` (fills to link, alerts to answer, Radar hits to rate, Rate
- * yesterday), each answered in place or opened from its own count. ``quiet`` says nothing else waits.
+ * What waits on the owner: each followed ticker's decision to make, card to confirm or close question still open
+ * (``needsYou``), one row each opening its thread, then ``children`` (fills to link). Ratings of alerts and Radar hits
+ * are optional and never wait here. ``quiet`` says nothing else waits.
  */
 export function NowWaiting({ rows, day, open, quiet, children }: {
   rows: DeskThread[]; day: string; open(row: DeskThread): void; quiet: boolean; children?: ReactNode;
 }) {
-  const waiting = rows.filter(r => r.symbol && r.group !== "pinned" && !isRadar(r) && (r.group === "act" || r.group === "draft"
+  const waiting = rows.filter(r => r.symbol && !r.hidden && r.group !== "pinned" && !isRadar(r) && (r.group === "act" || r.group === "draft"
     || (!!r.close && !r.close.reviewed && !reviewSkipped(day, r.symbol))));
   const line = (row: DeskThread) => row.group === "draft" ? `Card to confirm · ${row.status.text}`
     : row.group !== "act" && row.close ? row.close.question : row.status.text;
@@ -201,7 +257,7 @@ export default function SessionTape({ data, error, tally }: {
   const next = ahead[0] ? <>{ahead[0].symbol} time stop {num(ahead[0].clock)}</>
     : before && open !== null ? <>the open {num(hhmm(open))}</> : live && close !== null ? <>the close {num(hhmm(close))}</> : null;
   if (next) facts.push(<>Next: <span className="text-foreground/80">{next}</span></>);
-  // After the close: how much of Close the day is answered (the desk's tally: close questions, alerts, Radar hits, fills).
+  // After the close: how much of Close the day is answered (the desk's tally: close questions and fills).
   if (tally.total) facts.unshift(<span data-testid="briefing-reviewed">{num(tally.done)} of {num(tally.total)} done</span>);
   if (exposure) facts.push(<span data-testid="exposure-line">{exposure}</span>);
   if (practice) facts.push(practice);

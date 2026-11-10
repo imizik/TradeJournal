@@ -5,9 +5,9 @@
  */
 
 import type { PlanPosition } from "@/components/dashboard/PlansCard";
-import type { AlertFeedback, AlertFeedbackRating } from "@/lib/alertFeedback";
+import type { AlertFeedback } from "@/lib/alertFeedback";
 import { api, apiUrl } from "@/lib/api";
-import { UUID_RE, type ExitLesson, type InvestigationSummary, type PlanBoardLevel, type PlanBoardRow, type PlansBoard, type Rating } from "@/lib/copilot";
+import { UUID_RE, type ExitLesson, type InvestigationSummary, type PlanBoardLevel, type PlanBoardRow, type PlansBoard } from "@/lib/copilot";
 import type { RadarRating } from "@/lib/radar";
 
 /** The phone's three tabs; on a wide screen every pane shows at once. */
@@ -73,6 +73,9 @@ export type DeskThread = {
   fillToLink: string | null;
   /** A position the copilot adopted after an unplanned entry (its draft or confirmed plan is the thread's). */
   adopted?: boolean;
+  /** A ticker the owner set to "Not following" (``saveFollow``): kept out of Now's lists, the thread list's groups and
+   * every "needs you" count, behind one "N not followed" line; it asks no close-of-day question. */
+  hidden: boolean;
 };
 
 /** How often the desk checks in after the close: a day trade every trading day, a swing on a day something happened to
@@ -87,6 +90,11 @@ const uid = () => typeof crypto !== "undefined" && "randomUUID" in crypto ? cryp
 export const saveHorizon = (symbol: string, horizon: DeskHorizon, operationId = `horizon-${uid()}`) =>
   api.addDayJournalEntry(nyDay(), { operation_id: operationId, kind: "horizon", symbol,
     text: HORIZONS.find(h => h.id === horizon)!.label });
+
+/** Follows a ticker again, or stops following it (Now's Hide, the thread header, Show again): a ``follow`` entry; the
+ * newest one wins, on every device. */
+export const saveFollow = (symbol: string, following: boolean) =>
+  api.addDayJournalEntry(nyDay(), { operation_id: `follow-${uid()}`, kind: "follow", symbol, text: following ? "Following" : "Not following" });
 
 /** Ends the symbol's plan from now on (its exit review answered or skipped, or Mark done): a ``plan_done`` entry. */
 export const savePlanDone = (symbol: string, text: "Exit reviewed" | "Exit review skipped" | "Marked done", day = nyDay()) =>
@@ -126,9 +134,9 @@ export type DeskThreads = {
 type Wire = {
   as_of: string; quotes_at: number | null; quote_issue: string | null; sections: DeskThreads["sections"];
   day: { phase: DeskDay["phase"]; need_you: number; streak: DeskDay["streak"] };
-  threads: (Omit<DeskThread, "investigationId" | "tradeId" | "radarEventId" | "changedAt" | "close" | "horizon" | "fillToLink"> &
+  threads: (Omit<DeskThread, "investigationId" | "tradeId" | "radarEventId" | "changedAt" | "close" | "horizon" | "fillToLink" | "hidden"> &
     { investigation_id: string | null; trade_id: string | null; radar_event_id: string | null; changed_at: number | null;
-      close?: DeskThread["close"]; horizon?: DeskHorizon | null; fill_to_link?: string | null })[];
+      close?: DeskThread["close"]; horizon?: DeskHorizon | null; fill_to_link?: string | null; hidden?: boolean })[];
   plans?: (Omit<DeskPlan, "investigationId" | "timeStop" | "lastExit"> &
     { investigation_id: string | null; time_stop: DeskPlan["timeStop"]; last_exit?: ExitLesson | null })[];
 };
@@ -157,9 +165,9 @@ export async function getDeskThreads(signal?: AbortSignal): Promise<DeskThreads>
   return {
     asOf: wire.as_of, quotesAt: wire.quotes_at, quoteIssue: wire.quote_issue, sections: wire.sections,
     day: { phase: wire.day.phase, needYou: wire.day.need_you, streak: wire.day.streak },
-    threads: wire.threads.map(({ investigation_id, trade_id, radar_event_id, changed_at, close, horizon, fill_to_link, ...row }) => ({
+    threads: wire.threads.map(({ investigation_id, trade_id, radar_event_id, changed_at, close, horizon, fill_to_link, hidden, ...row }) => ({
       ...row, investigationId: investigation_id, tradeId: trade_id, radarEventId: radar_event_id, changedAt: changed_at, close: close ?? null,
-      horizon: horizon ?? null, fillToLink: fill_to_link ?? null,
+      horizon: horizon ?? null, fillToLink: fill_to_link ?? null, hidden: !!hidden,
     })),
     plans: (wire.plans ?? []).map(({ investigation_id, time_stop, last_exit, ...plan }) =>
       ({ ...plan, investigationId: investigation_id, timeStop: time_stop, lastExit: last_exit ?? null })),
@@ -182,7 +190,7 @@ export function saveNoPlan(tradeId: string): string[] {
  * those answered here (``done``: "No plan", or linked before the list reads it back). */
 export function fillsToLink(rows: DeskThread[], done: ReadonlySet<string> | string[] = []) {
   const skip = new Set(done);
-  return rows.filter(r => r.fillToLink && !skip.has(r.fillToLink) && !!skip.add(r.fillToLink));
+  return rows.filter(r => r.fillToLink && !r.hidden && !skip.has(r.fillToLink) && !!skip.add(r.fillToLink));
 }
 
 /**
@@ -275,7 +283,7 @@ export function skipReview(day: string, symbol: string) {
 /** The close pass's order: one row per symbol still asking its close question today, in list order. */
 export function toReview(rows: DeskThread[], day: string, done: ReadonlySet<string> = new Set()) {
   const seen = new Set<string>();
-  return rows.filter(r => r.close && !r.close.reviewed && r.symbol && !done.has(r.symbol) && !reviewSkipped(day, r.symbol)
+  return rows.filter(r => r.close && !r.close.reviewed && r.symbol && !r.hidden && !done.has(r.symbol) && !reviewSkipped(day, r.symbol)
     && !seen.has(r.symbol) && !!seen.add(r.symbol));
 }
 
@@ -283,9 +291,9 @@ export function toReview(rows: DeskThread[], day: string, done: ReadonlySet<stri
 export const nyDay = (at: Date = new Date()) => nyDate(at);
 
 /** Does this row put a "needs you" dot on its ticker: a decision to make, a card waiting, a fill to link or a close
- * question not answered or skipped today. */
-export const needsYou = (row: DeskThread, day: string | null) => row.group === "act" || row.group === "draft" || !!row.fillToLink
-  || (!!row.close && !row.close.reviewed && !(day && row.symbol && reviewSkipped(day, row.symbol)));
+ * question not answered or skipped today. A ticker not followed never does. */
+export const needsYou = (row: DeskThread, day: string | null) => !row.hidden && (row.group === "act" || row.group === "draft" || !!row.fillToLink
+  || (!!row.close && !row.close.reviewed && !(day && row.symbol && reviewSkipped(day, row.symbol))));
 /** The desk's one "needs you" count: tickers with the dot. */
 export const needingCount = (rows: DeskThread[], day: string | null) =>
   new Set(rows.filter(r => r.symbol && r.group !== "pinned" && !r.key.startsWith("radar:") && needsYou(r, day)).map(r => r.symbol)).size;
@@ -447,27 +455,6 @@ export async function getDeskSession(signal?: AbortSignal): Promise<DeskSession>
   return body as DeskSession;
 }
 
-// --------------------------------------------------------------------------- Main chat's Rate yesterday card
-
-/** One thing still waiting on the owner's rating, with the ids its rating route takes and the answers it accepts:
- * a position alert (``PUT /trades/{trade_id}/phone-alerts/{id}/feedback``), an alerted Radar event
- * (``POST /radar/events/{event_id}/feedback``) or a copilot answer (``PUT /copilot/investigations/{id}/messages/{index}/rating``).
- * ``at`` is epoch seconds. */
-export type ToRateItem = { key: string; label: string; detail: string | null; at: number } & (
-  | { type: "alert"; id: string; trade_id: string; answers: AlertFeedbackRating[] }
-  | { type: "radar"; event_id: string; answers: RadarRating[] }
-  | { type: "answer"; investigation_id: string; index: number; answers: Rating[] });
-/** ``GET /copilot/desk/to-rate``: what waits since the previous trading session (``since``), newest first, capped;
- * ``count`` is all of it. */
-export type ToRate = { day: string; since: string; count: number; items: ToRateItem[]; sections: Record<string, "ok" | "unavailable" | "off"> };
-
-export async function getToRate(signal?: AbortSignal): Promise<ToRate> {
-  const response = await fetch(apiUrl("/copilot/desk/to-rate"), { cache: "no-store", signal });
-  const body = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
-  return body as ToRate;
-}
-
 // --------------------------------------------------------------------------- the alert scorecard
 
 /** What one alert's contracts did after it (``GET /copilot/desk/scorecard``); dollars, against selling at the alert. */
@@ -511,4 +498,27 @@ export async function getAlertScorecard(signal?: AbortSignal): Promise<AlertScor
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
   return body as AlertScorecard;
+}
+
+// --------------------------------------------------------------------------- Now's "How the pings did"
+
+/** One alerted Radar hit or setup card: the stock against SPY the way Radar flagged it (percent) an hour on and at the
+ * close, and a setup card's paper result (``pnl`` dollars per contract) when it has one. */
+export type PingsRadarRow = {
+  event_id: string; at: number; symbol: string; kind: string; kind_label: string; direction: "up" | "down"; summary: string | null;
+  after: { hour_pct: number | null; close_pct: number | null; why: string | null }; setup: boolean;
+  paper: { state: "none" | "pending" | "open" | "closed" | "unresolved"; pnl: number | null; exit_reason: string | null; note: string | null } | null;
+};
+/** ``GET /copilot/desk/pings``: each phone ping since the previous trading session (``since``) and what followed. */
+export type DeskPings = {
+  day: string; since: string;
+  alerts: { state: "ok" | "unavailable"; rows: ScorecardRow[] };
+  radar: { state: "ok" | "off" | "unavailable"; reason: string | null; rows: PingsRadarRow[] };
+};
+
+export async function getDeskPings(signal?: AbortSignal): Promise<DeskPings> {
+  const response = await fetch(apiUrl("/copilot/desk/pings"), { cache: "no-store", signal });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  return body as DeskPings;
 }

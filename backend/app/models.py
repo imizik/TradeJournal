@@ -907,8 +907,8 @@ class EveningReview(SQLModel, table=True):
     day: date = Field(unique=True)  # New York trading day
     detected_at: datetime = Field(default_factory=datetime.utcnow)  # UTC: when the day was counted
     review: int = 0  # symbols still asking their close question
-    alerts: int = 0  # position alerts waiting on an answer
-    radar: int = 0  # Radar hits not rated
+    alerts: int = 0  # retired 2026-11-10: ratings are no longer counted as waiting; kept 0 (no migration)
+    radar: int = 0  # retired 2026-11-10, as ``alerts``
     fills: int = 0  # fills waiting to link
     body: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     delivery: str = Field(default="pending", index=True)  # skipped | pending | sending | sent | expired | unknown | held
