@@ -19,7 +19,7 @@ export default async function CopilotLabPage({ searchParams }: { searchParams: P
   return (
     // Full screen beside the nav rail on a wide screen (AppMain), the desk fills the height left under the banner.
     <div className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
-      <CopilotLab key={JSON.stringify([link, daily, fresh])} link={link} close={close} daily={daily} fresh={fresh} />
+      <CopilotLab key={JSON.stringify([link, daily, fresh])} link={link} close={close} daily={daily} />
     </div>
   );
 }

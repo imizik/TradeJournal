@@ -73,7 +73,7 @@ function typing(target: EventTarget | null) {
  * While the lab is off only the conversation shows, saying so. ⌘K (Ctrl+K) or Jump to… opens the palette; while not
  * typing, J / K open the next or previous thread, N starts a plan, [ toggles Threads and ] toggles Context.
  */
-export default function CopilotLab({ link = null, close = false, daily = false, fresh = false }: { link?: PanelLink | null; close?: boolean; daily?: boolean; fresh?: boolean }) {
+export default function CopilotLab({ link = null, close = false, daily = false }: { link?: PanelLink | null; close?: boolean; daily?: boolean }) {
   const on = useCopilotOn();
   const router = useRouter();
   const navFolded = useFoldedNav();
@@ -122,7 +122,7 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
     },
   }), []);
   const fill = useCallback((text: string) => { setCommand({ kind: "fill", text, n: ++sent.current }); setTab("thread"); }, []);
-  // The thread list's Plan a trade link: a new conversation with "Plan a trade: " in the box, unsent. Already there,
+  // Plan a trade (the desk bar's New plan, N and ⌘K): a new conversation with "Plan a trade: " in the box, unsent. Already there,
   // the same link would not remount the lab, so the page reloads it.
   const planTrade = useCallback(() => {
     if (`${window.location.pathname}${window.location.search}` === PLAN_HREF) window.location.assign(PLAN_HREF);
@@ -281,7 +281,14 @@ export default function CopilotLab({ link = null, close = false, daily = false, 
   // The desk bar's phase action: before the open on a weekday, Arm today's plans (a checklist of the armed plans in the
   // conversation pane; nothing is armed, sized or sent from it); after 16:00, Close the day.
   const [arming, setArming] = useState(false);
-  useEffect(() => { setArming(false); setAnswering(false); }, [thread?.id]); // eslint-disable-line react-hooks/set-state-in-effect -- opening a thread leaves the checklist or the pass
+  // Opening another thread leaves the checklist or the pass; Main chat arriving under Now (a first open, from no thread)
+  // does not, so ?close=1's pass or an early Arm survives a Main chat that loads after it started.
+  const lastThread = useRef<string | null>(null);
+  useEffect(() => {
+    const was = lastThread.current;
+    lastThread.current = thread?.id ?? null;
+    if (was !== null) { setArming(false); setAnswering(false); }
+  }, [thread?.id]);
   const phaseAction = dayPhase === "pre" ? { label: "Arm today's plans", hint: "Each armed plan: still good, change or drop. Nothing is sent." }
     : dayPhase === "close" ? { label: left ? `Close the day · ${left} to review` : "Close the day",
       hint: left ? "Each thread's close question, then today's alerts, Radar hits and fills to link, one at a time"

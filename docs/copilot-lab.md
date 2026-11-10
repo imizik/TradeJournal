@@ -181,7 +181,7 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     open conversation stays saved. Radar hits, alerts to answer and Review my
     week are lines on Now, not rows in the list. The row shows the Radar count ("18 Radar", an amber dot while one
     is unseen in this browser) and, in amber, how many of today's alerts and Radar hits still wait for an answer
-    ("3 to answer"); older ones wait on Now, uncounted here. Open conversations about no ticker (an older Briefing
+    ("3 to answer"); older ones wait on Now, uncounted here. Open conversations about no ticker (an older
     turn, a week review) are listed under it, title and date: today's, the open one and the latest automatic week
     review, the rest under **Earlier · N**. **What matters right now?** (one turn, the fixed `lib/copilot.ts`
     `WHAT_MATTERS_PROMPT`) sits on Now beside Review my week, and in ⌘K.
@@ -720,8 +720,8 @@ desk thread for that position (see Review a trade or position), so a tap
 lands on the decision bar: on the plan's conversation when there is one, else
 on the symbol alone, where the bar shows without a saved conversation.
 
-**Alert scorecard** (`components/copilot/AlertScorecard.tsx`, under the
-Briefing's session timeline; `GET /copilot/desk/scorecard`,
+**Alert scorecard** (`components/copilot/AlertScorecard.tsx`, near the
+foot of Now; `GET /copilot/desk/scorecard`,
 `app/engine/alert_scorecard.py`). For each position alert sent to the
 phone in the last 30 days: what was decided after it (the first `decision`
 journal entry for the symbol that New York day, before the position's next
@@ -1556,7 +1556,7 @@ While the lab is on, **Review my week** sits on the Dashboard header and on a
 Friday's Daily Review (`components/copilot/ReviewMyWeek.tsx`), opening
 `/copilot-lab?context=Review my week` (a Friday's adds `of <its Monday>`) with
 the text in the message box, unsent. On the lab home it sits beside "What
-matters right now?" (the desk's Briefing and ⌘K) and sends the turn at once. The system prompt asks the
+matters right now?" (on Now and in ⌘K) and sends the turn at once. The system prompt asks the
 model to call:
 
 - `get_week_review(week_start?)` (read-only, provenance `saved`;
@@ -1747,7 +1747,7 @@ additive table `practice_goal`).
   - `max_trades_per_day`: trading days with at most the cap of trades opened.
 - `GET /copilot/practice` (owner-only) returns the active goal and its score
   for the week holding today (the week just ended, on a weekend), or no score
-  before its first week. The desk shows it in the Briefing's session line and the
+  before its first week. The desk shows it in Now's day line and the
   Dashboard's Review my week button carries it as a second line:
   "Practicing: exit at my invalidation · 2 of 3 this week" (or "starts Mon,
   Oct 26"). Nothing shows while no goal is active.
@@ -1766,7 +1766,7 @@ additive table `practice_goal`).
 
 ### Exposure
 
-One deterministic line beside the practice goal in the Briefing's session line,
+One deterministic line beside the practice goal in Now's day line,
 and in the 09:00 brief: "At risk now: $6,400 in 3 options · usual day $2,100"
 (`backend/app/engine/exposure.py`, `GET /copilot/exposure`, owner-only, refused
 while the lab is off; no model call). The owner sometimes panics at large
@@ -2220,7 +2220,7 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   has waiting through `copilot_desk.waiting`, what Close the day walks: the
   symbols still asking their close question, today's position alerts with no
   feedback, today's Radar hits not rated and the fills waiting to link (older
-  alerts and hits stay in the Briefing's lists and never ping), and the pings
+  alerts and hits stay in Now's lists and never ping), and the pings
   the policy held today (`notification_policy.held_text`). When any is waiting
   it sends one ping, "Close the day: To review: 2 threads · 3 alerts unanswered
   · 5 Radar hits unrated · 1 fill to link · 12 pings held today (Radar 11,
@@ -3067,7 +3067,7 @@ jobs' records (`source` other than `copilot`) and the scripted model are left
 out. Each part fails on its own (`{"state": "unavailable"}`), the rest stands.
 No answer text leaves the database.
 
-The desk shows it in the Briefing's Context pane, **This week** tab, above the
+The desk shows it in the Context pane (while Now is open), **This week** tab, above the
 two proofs (`frontend/components/copilot/Inspector.tsx`): "Copilot: Helped 7 of
 9 rated · 23 answers · first text 4.1 s median · $0.38", then pushbacks,
 follow-ups and failed turns, or "could not load". Nothing here changes a prompt,
