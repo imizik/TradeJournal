@@ -177,3 +177,19 @@ def test_the_practice_goal_is_the_owners_words_its_measure_and_this_weeks_count(
         out = copilot_context._practice(db, now)
     assert out["goal"] == "Plan before I enter." and out["measure"] == practice_goal.label("plan_before_entry", None)
     assert out["this_week"].startswith("0 of 0") and "target" not in out and out["as_of"].startswith("2026-11-10")
+
+
+def test_a_busy_session_never_pushes_the_symbols_own_events_out(tmp_path):
+    from app.ai.copilot_replay import ReplayEvidence, parse_at
+    from app.engine.radar_store import load_universe
+    store = _store(tmp_path / "busy.sqlite", with_future=False)
+    for n in range(15):  # newer events on another symbol, more than the read's limit of 12
+        at = BASE - 300 + n
+        store.append_event({"event_id": f"rad_busy_{n}", "session_date": "2026-10-23", "rule_version": "t",
+                            "universe_version": load_universe()["version"], "kind": "dip_turn", "direction": "up",
+                            "symbols": ["CRWV"], "benchmark": "SPY", "group": "Other", "first_seen_at": iso(at),
+                            "summary": f"CRWV event {n}", "measures": {}, "evidence": [],
+                            "coverage": {"passes_expected": 1, "passes_recorded": 1, "symbols_missing": []},
+                            "chart": {"symbol": "CRWV", "from": iso(at - 3600), "to": iso(at)}})
+    section = _market(ReplayEvidence(str(store.path), parse_at("2026-10-23T11:12")), "NBIS")
+    assert [e["line"] for e in section["radar_events"]] == ["NBIS turned up from its session low"]

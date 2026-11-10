@@ -1242,9 +1242,11 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
     and VIX; for the turn's symbol its last and day change, its off-hours move
     outside the regular session, its sector ETF from the latest Radar pass,
     and its Radar group against SPY since the open with the last 15 minutes'
-    breadth; then today's Radar events that name the symbol (summary, first
-    seen, latest status, at most 3). With no symbol: the index line and the
-    day's Radar leaders and laggards against SPY (three each) and every event.
+    breadth; then today's Radar events that name the symbol (read for that
+    symbol, so other events never push them out; summary, first seen, latest
+    status, at most 3, with their count). With no symbol: the index line and the
+    day's Radar leaders and laggards against SPY (three each) and the newest
+    three events, with the session's event count.
     A read that fails or is still running at `MARKET_TIMEOUT_S` (3 s) is listed
     under `unavailable` and the rest stand; the turn never waits longer for it.
     The pack's header tells the model these lines are fresh enough to answer

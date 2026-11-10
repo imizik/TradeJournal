@@ -448,7 +448,7 @@ def market_section(symbol: str | None, reads: dict, label: str = "") -> dict:
             out["radar_events"] = [{"line": _trim(e.get("summary"), 200), "first_seen": e.get("first_seen_at"),
                                     **({"now": (e.get("latest") or {}).get("status")} if (e.get("latest") or {}).get("status") else {})}
                                    for e in events[:MAX_MARKET_EVENTS]]
-            out["radar_events_total"] = len(events)
+            out["radar_events_total"] = max(len(events), radar.get("events_total") or 0)
         movers = radar.get("movers") or {}
         if not symbol and movers:
             def ranked(rows):
@@ -472,7 +472,8 @@ def _market_reads(evidence, symbol: str | None) -> dict:
     """The reads the market section takes, each the same call the matching tool makes for this evidence."""
     reads = {"quotes": lambda: evidence.get_quotes([symbol, "SPY", "QQQ"] if symbol else ["SPY", "QQQ"]),
              "regime": lambda: evidence.get_market_regime(symbol),
-             "radar": lambda: evidence.get_radar_today(None, 12)}
+             # A symbol passed as the group reads the events that name it, so a busy session never pushes them out.
+             "radar": lambda: evidence.get_radar_today(symbol, 12)}
     if symbol:
         reads["group"] = lambda: evidence.get_group_comparison(symbol)
     return reads
