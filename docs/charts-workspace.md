@@ -751,6 +751,12 @@ cd backend
   shown until a newer one arrives) by its session's rule, and a quote by the
   same rule in pre- and postmarket, otherwise its last regular-session price
   against the previous close (after the close, the day's closing change).
+  Before the open, until a premarket trade streams in, the row shows a dash and
+  the hover says no premarket trade is seen yet: Tradier's quote has no
+  premarket trade and its `prevclose` has already rolled to that same last
+  regular price, so it would read 0.00%. A phone's headline names the session
+  as Pre or AH. The Desk bar's SPY and QQQ read the last premarket minute
+  against the previous close before the open, a dash until one trades.
   Hidden or paused tabs disconnect; the stream reconnects after provider or
   network failures.
 - The 15-second visible-tab REST refresh remains the source of truth for volume,

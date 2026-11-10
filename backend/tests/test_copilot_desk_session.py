@@ -48,6 +48,23 @@ def test_a_quiet_day_is_the_session_and_the_indices(desk, quotes):  # noqa: F811
     assert body["sections"]["radar"] == "off" and set(body["sections"].values()) <= {"ok", "off"}
 
 
+def test_before_the_open_spy_and_qqq_read_the_premarket_trade_not_the_flat_quote(desk, quotes, clock, monkeypatch):  # noqa: F811
+    """Tradier's quote has no premarket trade, so before the open its change is 0.00%. The bar reads the last premarket
+    minute against the previous close instead; a symbol that has not traded yet is a dash, and VIX keeps its quote."""
+    from app.ai import copilot_extended
+    clock["t"] = int(datetime(2026, 10, 21, 13, 0, tzinfo=UTC).timestamp())  # 9:00 New York
+    quotes["rows"] += [{"symbol": "SPY", "last": 580.0, "previous_close": 580.0, "change_percentage": 0.0},
+                       {"symbol": "QQQ", "last": 500.0, "previous_close": 500.0, "change_percentage": 0.0},
+                       {"symbol": "VIX", "last": 16.9, "change_percentage": 3.1}]
+    minute = int(datetime(2026, 10, 21, 12, 55, tzinfo=UTC).timestamp())  # 8:55 New York
+    bars = {"SPY": [{"time": minute, "open": 581.0, "high": 583.0, "low": 580.5, "close": 582.9, "volume": 1200}], "QQQ": []}
+    monkeypatch.setattr(copilot_extended, "_bars", lambda symbol, day, now: bars[symbol])
+    body = read(desk)
+    assert body["phase"] == "pre"
+    assert body["indices"] == [{"symbol": "SPY", "last": 580.0, "change_pct": 0.5}, {"symbol": "QQQ", "last": 500.0, "change_pct": None},
+                               {"symbol": "VIX", "last": 16.9, "change_pct": 3.1}]
+
+
 def test_the_days_events_in_time_order_and_the_time_stops_ahead(desk, engine, tmp_path, monkeypatch):  # noqa: F811
     path = tmp_path / "radar.sqlite"
     monkeypatch.setenv("RADAR_ENABLED", "true")

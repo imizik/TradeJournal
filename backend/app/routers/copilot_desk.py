@@ -760,12 +760,35 @@ def _hits_to_rate(day) -> dict:
     return {"state": "ok", "count": sum(e["event_id"] not in rated for e in events), "rows": rows}
 
 
-def _indices() -> dict:
+def _indices(now: float) -> dict:
+    from app.ai import copilot_extended
     from app.engine.chart_feed import chart_feed
     rows, _at, issue = chart_feed.quote_rows(list(INDICES))
     found = {r["symbol"]: r for r in rows}
+    moment = datetime.fromtimestamp(now, ET)
+    premarket = copilot_extended.phase(moment) == "pre-market"
+
+    def change(symbol: str) -> float | None:
+        row = found[symbol]
+        if not premarket or symbol == "VIX":
+            return row.get("change_percentage")
+        # Tradier's quote carries no premarket trade, so its change reads 0.00% until the open. The Charts tab's own
+        # minutes give the last premarket trade against the previous close; none yet, or no read, is a dash, not a zero.
+        return _premarket_change(symbol, row.get("previous_close"), moment)
+
     return {"state": "ok", "issue": issue, "rows": [
-        {"symbol": s, "last": found[s].get("last"), "change_pct": found[s].get("change_percentage")} for s in INDICES if s in found]}
+        {"symbol": s, "last": found[s].get("last"), "change_pct": change(s)} for s in INDICES if s in found]}
+
+
+def _premarket_change(symbol: str, reference: float | None, moment: datetime) -> float | None:
+    from app.ai import copilot_extended
+    from app.engine.chart_feed import ChartFeedError
+    day = moment.date()
+    try:
+        bars = copilot_extended._part(copilot_extended._bars(symbol, day, moment), day, "pre")
+    except ChartFeedError:
+        return None
+    return copilot_extended.summary(bars, reference, range_=False).get("change_pct")
 
 
 @router.get("/desk/session")
@@ -788,7 +811,7 @@ def desk_session(db: Session = Depends(get_session)):
     decisions = today._section(db, "session decisions", lambda: _decision_events(db, day))
     stops = today._section(db, "session time stops", lambda: _time_stops(db, now))
     prep = today._section(db, "session prep", lambda: today._prep(db, day))
-    indices = today._section(db, "session indices", _indices)
+    indices = today._section(db, "session indices", lambda: _indices(now))
     alerts_due = today._section(db, "session alerts to answer", lambda: _alerts_to_answer(db, now))
     hits_due = today._section(db, "session radar to rate", lambda: _hits_to_rate(day))
     events = sorted((row for part in (fills, pings, radar, decisions) for row in part.get("rows", [])), key=lambda r: r["at"])
