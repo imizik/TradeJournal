@@ -305,7 +305,7 @@ export default function RadarFeedView() {
     setFeed((f) => f && { ...f, events: f.events.map((e) => e.event_id === id ? { ...e, rating } : e) });
   const planned = (next: RadarSetupCard) =>
     setSetups((s) => s && { ...s, setups: s.setups.map((c) => c.id === next.id ? next : c),
-      scorecard: s.scorecard.map((r) => r.kind === next.kind && r.direction === next.direction && next.plan_state === "planned"
+      scorecard: s.scorecard.map((r) => r.kind === next.kind && r.direction === next.direction && next.plan.state === "planned"
         ? { ...r, planned: r.planned + 1 } : r) });
   const shownSetups = setups && setups.session === feed.session ? setups : null;
   const setupOf = new Map((shownSetups?.setups ?? []).map((c) => [c.event_id, c]));

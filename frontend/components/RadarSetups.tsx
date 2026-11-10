@@ -15,16 +15,17 @@ export function SetupCard({ card, today, onPlanned }: { card: RadarSetupCard; to
     setBusy(true); setReply(null);
     try {
       const out = await planSetup(card.id);
-      if (out.plan_state && out.plan_state !== card.plan_state) {
-        onPlanned({ ...card, plan_state: out.plan_state, plan_note: out.plan_state === "refused" ? out.reply : card.plan_note });
+      if (out.plan_state && out.plan_state !== card.plan.state) {
+        onPlanned({ ...card, plan: { ...card.plan, state: out.plan_state, investigation_id: out.investigation_id ?? card.plan.investigation_id,
+          note: out.plan_state === "refused" ? out.reply : card.plan.note } });
       }
       setReply(out.reply);
     } catch { setReply("Plan it did not reach the server. Nothing was saved."); }
     setBusy(false);
   }
-  const planned = card.plan_state === "planned";
-  const refused = card.plan_state === "refused";
-  const note = reply ?? (refused && card.plan_note ? `Not planned: ${card.plan_note}` : null);
+  const planned = card.plan.state === "planned";
+  const refused = card.plan.state === "refused";
+  const note = reply ?? (refused && card.plan.note ? `Not planned: ${card.plan.note}` : null);
   return (
     <li className="space-y-1.5 rounded-lg border bg-card p-3" data-testid="radar-setup">
       <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
@@ -33,7 +34,7 @@ export function SetupCard({ card, today, onPlanned }: { card: RadarSetupCard; to
       </div>
       <p className="text-sm tabular-nums text-foreground">{card.levels_line}</p>
       {card.contract_line && <p className="break-words text-xs tabular-nums text-muted-foreground">{card.contract_line}</p>}
-      {card.record_text && <p className="text-xs text-muted-foreground">{card.record_text}</p>}
+      {card.record && <p className="text-xs text-muted-foreground">{card.record}</p>}
       <p className={cn("text-xs tabular-nums", card.paper.state === "closed" ? pnlTone(card.paper.pnl) : "text-muted-foreground")}
         data-testid="radar-setup-paper">{paperLine(card)}</p>
       {(planned || (!refused && card.session_date === today) || note) && <div className="flex flex-wrap items-center gap-2 pt-0.5">

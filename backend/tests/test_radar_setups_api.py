@@ -50,7 +50,8 @@ def test_setups_lists_the_session_newest_first_with_the_scorecard(boundary, monk
     assert second["contract_line"].startswith("Candidate: NBIS Nov 20 62C · 1.10 × 1.20 (8.7% wide)")
     assert second["paper"] == {"state": "closed", "entry_price": 1.2, "entry_at": None, "exit_price": 1.6, "exit_at": None,
                                "exit_reason": "time_stop", "pnl": 38.7, "note": None}
-    assert second["record_text"] == "Your dips: 5 trades · +$310" and second["plan_state"] == "none"
+    assert second["record"] == "Your dips: 5 trades · +$310" and second["plan"]["state"] == "none"
+    assert second["lines"][:3] == [second["levels_line"], second["contract_line"], "Your dips: 5 trades · +$310"]
     assert body["scorecard"] == [{"kind": "dip_turn", "direction": "up", "cards": 3, "with_contract": 2, "planned": 0,
                                   "paper_closed": 1, "paper_green": 1, "paper_pnl": 38.7, "unresolved": 0}]
     assert [s["event_id"] for s in boundary.owner.get("/radar/setups?session=2026-11-03").json()["setups"]] == ["c"]
@@ -72,14 +73,14 @@ def test_plan_it_on_the_web_plans_once_and_wakes_the_alert_monitor(boundary, mon
     out = boundary.owner.post(f"/radar/setups/{setup_id}/plan")
     assert out.status_code == 200, out.text
     body = out.json()
-    assert body["planned"] is True and body["plan_state"] == "planned" and body["reply"].startswith("Planned NBIS: out below 59.85.")
+    assert body["planned"] is True and body["plan_state"] == "planned" and body["investigation_id"] and body["reply"].startswith("Planned NBIS: out below 59.85.")
     assert calls == [1]
     again = boundary.owner.post(f"/radar/setups/{setup_id}/plan").json()
     assert (again["planned"], again["reply"]) == (True, "Already planned.")
     with Session(boundary.engine) as db:
         assert len(db.exec(select(TradeCapture)).all()) == 1
         assert [(a.plan_role, a.price) for a in db.exec(select(LevelAlert)).all()] == [("invalidation", 59.85)]
-    assert boundary.owner.get("/radar/setups").json()["setups"][0]["plan_state"] == "planned"
+    assert boundary.owner.get("/radar/setups").json()["setups"][0]["plan"]["state"] == "planned"
 
 
 def test_plan_it_refused_unknown_and_not_the_owner(boundary, monkeypatch):  # noqa: F811
@@ -87,10 +88,10 @@ def test_plan_it_refused_unknown_and_not_the_owner(boundary, monkeypatch):  # no
     monkeypatch.setattr(radar_setup_plan, "_live_price", lambda symbol: 59.5)  # already through the invalidation
     setup_id = _card(boundary.engine)
     body = boundary.owner.post(f"/radar/setups/{setup_id}/plan").json()
-    assert body["planned"] is False and body["plan_state"] == "refused"
+    assert (body["planned"], body["plan_state"], body["investigation_id"]) == (False, "refused", None)
     assert body["reply"] == "NBIS is already below 59.85, the level this setup was built on. No plan saved."
     assert calls == []
-    assert boundary.owner.get("/radar/setups").json()["setups"][0]["plan_note"] == body["reply"]
+    assert boundary.owner.get("/radar/setups").json()["setups"][0]["plan"]["note"] == body["reply"]
     monkeypatch.setattr(radar_setup_plan, "_live_price", lambda symbol: None)  # a stale quote: nothing written
     fresh = _card(boundary.engine, event="other")
     stale = boundary.owner.post(f"/radar/setups/{fresh}/plan").json()

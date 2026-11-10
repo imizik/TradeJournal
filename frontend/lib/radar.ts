@@ -263,17 +263,19 @@ export type RadarSetupPaper = {
 };
 export type RadarSetupCard = {
   id: string; event_id: string; session_date: string; kind: "dip_turn" | "gap_reversal"; symbol: string; direction: "up" | "down";
-  entry: number; invalidation: number; title: string; levels_line: string; contract_line: string | null;
-  contract: Record<string, unknown> | null; record_text: string | null; summary: string | null; created_at: string | null;
-  created_at_ny: string; plan_state: "none" | "planned" | "refused"; plan_note: string | null; planned_at: string | null;
-  paper: RadarSetupPaper;
+  entry: number; invalidation: number; title: string; lines: string[]; levels_line: string; contract_line: string | null;
+  contract: Record<string, unknown> | null; record: string | null; summary: string | null; created_at: string | null;
+  created_at_ny: string; plan: RadarSetupPlan; paper: RadarSetupPaper;
 };
+export type RadarSetupPlan = { state: "none" | "planned" | "refused"; planned_at: string | null; investigation_id: string | null; note: string | null };
 export type RadarSetupScore = {
   kind: string; direction: "up" | "down"; cards: number; with_contract: number; planned: number; paper_closed: number;
   paper_green: number; paper_pnl: number; unresolved: number;
 };
 export type RadarSetups = { session: string; setups: RadarSetupCard[]; scorecard: RadarSetupScore[] };
-export type RadarSetupPlanReply = { id: string; reply: string; planned: boolean; plan_state: RadarSetupCard["plan_state"] | null };
+export type RadarSetupPlanReply = {
+  id: string; reply: string; planned: boolean; plan_state: RadarSetupPlan["state"] | null; investigation_id: string | null;
+};
 
 export const getSetups = (session?: string, signal?: AbortSignal) =>
   call<RadarSetups>(`/setups${session ? `?session=${encodeURIComponent(session)}` : ""}`, { signal });

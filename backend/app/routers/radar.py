@@ -273,11 +273,12 @@ def _setup_row(row: RadarSetup, event: dict | None) -> dict:
     return {
         "id": str(row.id), "event_id": row.event_id, "session_date": row.session_date, "kind": row.kind,
         "symbol": row.symbol, "direction": row.direction, "entry": row.entry, "invalidation": row.invalidation,
-        "title": title, "levels_line": lines[0], "contract_line": lines[1] if len(lines) > 1 else None,
-        "contract": json.loads(row.contract_json) if row.contract_json else None, "record_text": row.record_text,
+        "title": title, "lines": lines, "levels_line": lines[0], "contract_line": lines[1] if len(lines) > 1 else None,
+        "contract": json.loads(row.contract_json) if row.contract_json else None, "record": row.record_text,
         "summary": event.get("summary") or None, "created_at": _utc_iso(row.created_at),
         "created_at_ny": f"{(created.hour - 1) % 12 + 1}:{created.minute:02d} {'AM' if created.hour < 12 else 'PM'} ET",
-        "plan_state": row.plan_state, "plan_note": row.plan_note, "planned_at": _utc_iso(row.planned_at),
+        "plan": {"state": row.plan_state, "planned_at": _utc_iso(row.planned_at), "investigation_id": row.investigation_id,
+                 "note": row.plan_note},
         "paper": {"state": row.paper_state, "entry_price": row.paper_entry_price, "entry_at": _utc_iso(row.paper_entry_at),
                   "exit_price": row.paper_exit_price, "exit_at": _utc_iso(row.paper_exit_at),
                   "exit_reason": row.paper_exit_reason, "pnl": row.paper_pnl, "note": row.paper_note},
@@ -329,8 +330,9 @@ def plan_setup(setup_id: UUID, request: Request, db: Session = Depends(get_sessi
             monitor.changed()
     with Session(engine) as fresh:
         row = fresh.get(RadarSetup, setup_id)
-        state = row.plan_state if row else None
-    return {"id": str(setup_id), "reply": reply, "planned": chosen == radar_setup_plan.PLANNED, "plan_state": state}
+        state, thread = (row.plan_state, row.investigation_id) if row else (None, None)
+    return {"id": str(setup_id), "reply": reply, "planned": chosen == radar_setup_plan.PLANNED, "plan_state": state,
+            "investigation_id": thread}
 
 
 @router.get("/shadow-book")
