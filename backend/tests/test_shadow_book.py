@@ -229,6 +229,7 @@ def test_eligible_is_the_radar_strong_bar_or_a_dip():
     assert book.eligible({**FIXTURE, "measures": STRONG}) == (True, "")
     assert book.eligible({**FIXTURE, "symbols": ["NBIS"], "measures": WEAK}) == (False, "Below the strong-event bar: NBIS +2.1% vs SPY")
     assert book.eligible({"kind": "dip_turn", "symbols": ["AMD"], "measures": {"day_change_pct": -1.2}}) == (True, "")
+    assert book.eligible({"kind": "gap_reversal", "symbols": ["AMD"], "measures": {"relative_pct": 1.9}}) == (True, "")
     group = {"kind": "group_move", "group": "Semis", "measures": {"median_relative_pct": 3.4, "members_with_data": 6,
                                                                   "members_same_direction": 5}}
     assert book.eligible(group) == (False, "Below the strong-event bar: Semis +3.4% vs SPY (5 of 6 the same way)")

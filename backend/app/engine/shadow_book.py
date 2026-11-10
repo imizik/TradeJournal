@@ -6,7 +6,7 @@ one unattended copilot turn on API credits (``app.ai.shadow_turn``), at most
 ``SHADOW_BOOK_MAX_TURNS`` a session (default 12). An event the book reaches more than ``FRESH_SECONDS`` after Radar
 first saw it, one in the session's last half hour, and one past the cap is recorded ``not_decided`` with no turn.
 Before any of that, ``eligible`` keeps the turns for events worth one: Radar's strong-event bar for a single ping
-(``radar_alerts.strong``) or a dip-buy candidate; any other event is recorded ``filtered`` with no turn, so the cap
+(``radar_alerts.strong``), a dip-buy candidate or a gap reversal; any other event is recorded ``filtered`` with no turn, so the cap
 counts eligible events only. Between sessions it is quiet.
 
 The answer is SKIP or one plan in the copilot's ``trade_plan`` shape plus a target and a New York clock time stop.
@@ -34,7 +34,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
-from app.engine import radar_alerts, radar_dip
+from app.engine import radar_alerts, radar_dip, radar_reversal
 from app.engine import scanner_rules as rules
 from app.engine import tradier
 from app.engine.chart_math import ET, normalize_bars
@@ -193,8 +193,8 @@ def exit_condition(plan: dict, minutes: list[dict], entry_at: float, close_at: i
 
 def eligible(event: dict) -> tuple[bool, str]:
     """Whether a Radar event is worth a turn: one strong enough for its own Radar ping (``radar_alerts.strong``) or a
-    dip-buy candidate; otherwise False with the short reason the record keeps."""
-    if event.get("kind") == radar_dip.KIND or radar_alerts.strong(event):
+    dip-buy candidate or a gap reversal; otherwise False with the short reason the record keeps."""
+    if event.get("kind") in (radar_dip.KIND, radar_reversal.KIND) or radar_alerts.strong(event):
         return True, ""
     m = event.get("measures") or {}
     if event.get("kind") == "group_move":

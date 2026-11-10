@@ -29,9 +29,14 @@ Right before every send, the app's notification policy (``notification_policy.de
 budget of its kind (4 singles and 2 digests a day by default), the daily ceiling, or, for a single
 (anchored to the stock's open position or the stock, or to the group), the quiet window after a ping for
 the same position. A held ping is written ``held`` with the reason and never sent later; a held single
-does not count toward the hourly rule, which counts one rule version's singles only. A dip-buy
-candidate (``radar_dip``, kind ``dip_turn``, only with ``RADAR_DIP_RULES=alert``) is always a single ping: the owner
-chose to be told the minute it turns, and the first-hour window would be over by the 10:00 digest. Rows live in the journal database (``RadarAlert``; the Radar file
+does not count toward the hourly rule, which counts one rule version's singles only. A setup event (``radar_setup.SETUP_KINDS``:
+a dip-buy candidate, ``radar_dip``, kind ``dip_turn``, only with ``RADAR_DIP_RULES=alert``, or a gap reversal,
+``radar_reversal``, kind ``gap_reversal``, only with ``RADAR_REVERSAL_RULES=alert``) is always a single ping: the owner
+chose to be told the minute it turns, and the first-hour window would be over by the 10:00 digest. One setup single a
+stock a session across setup kinds and versions: a later one waits for the digest. When the event has a setup card
+(``RadarSetup``, ``RADAR_SETUP_CARDS=true``) the ping is the card (``radar_setup.card_text``), it skips the
+``RADAR_ALERTS_LEAD_UNSEEN`` Movers demotion (its value is the trigger, not novelty), and on Telegram it also carries
+Plan it (``telegram_replies.plan_button``) on its own row after the ratings. Rows live in the journal database (``RadarAlert``; the Radar file
 stays append-only and alert-free). Delivery is the position alerts' at-most-once outbox: a send that may
 have reached ntfy is ``unknown`` and never resent, and one not sent within ``EXPIRE_SECONDS`` is dropped
 as late. ``sent`` proves ntfy accepted it, not that the phone showed it.
@@ -51,10 +56,10 @@ from sqlalchemy import or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import notification_policy, ntfy, phone, ping_images, radar_dip, telegram_replies
+from app.engine import notification_policy, ntfy, phone, ping_images, radar_dip, radar_reversal, radar_setup, telegram_replies
 from app.engine.chart_math import ET
 from app.engine.radar_movers import event_movers_tags
-from app.models import RadarAlert
+from app.models import RadarAlert, RadarSetup
 
 log = logging.getLogger(__name__)
 
@@ -160,12 +165,21 @@ def _minute_label(minute: int) -> str:
     return f"{(hour - 1) % 12 + 1}:{rest:02d} {'AM' if hour < 12 else 'PM'}"
 
 
+def _reversal(event: dict) -> str:
+    """``NBIS reversing up, +2.2% vs SPY from the open (gapped −3.1%)``: both moves against SPY."""
+    m = event["measures"]
+    return (f"{event['symbols'][0]} reversing {event['direction']}, {_signed(m['open_relative_pct'])} vs SPY from the open "
+            f"(gapped {_signed(m['gap_relative_pct'])})")
+
+
 def message(event: dict) -> tuple[str, str]:
     """Title and body: the event's own numbers, then the feed's summary and the time it was first seen."""
     m = event["measures"]
     if event["kind"] == "dip_turn":
         title = (f"Radar dip: {event['symbols'][0]} turning up, {_signed(m['day_change_pct'])} "
                  f"(low {_signed(m['low_change_pct'])})")
+    elif event["kind"] == radar_reversal.KIND:
+        title = f"Radar reversal: {_reversal(event)}"
     elif event["kind"] == "group_move":
         title = (f"Radar: {event['group']} {_signed(m['median_relative_pct'])} vs SPY "
                  f"({m['members_same_direction']} of {m['members_with_data']} {'up' if event['direction'] == 'up' else 'down'})")
@@ -181,6 +195,8 @@ def digest_line(event: dict) -> str:
     when = _clock(_parse(event["first_seen_at"])).removesuffix(" ET")
     if event["kind"] == radar_dip.KIND:
         return f"{event['symbols'][0]} dip turning up, {_signed(m['day_change_pct'])} (low {_signed(m['low_change_pct'])}) · {when}"
+    if event["kind"] == radar_reversal.KIND:
+        return f"{_reversal(event)} · {when}"
     if event["kind"] == "group_move":
         return (f"{event['group']} {way} {abs(m['median_relative_pct']):.1f}% vs SPY "
                 f"({m['members_same_direction']} of {m['members_with_data']}) · {when}")
@@ -208,6 +224,27 @@ def event_path(event_id: str, rating: str | None = None) -> str:
     return "/radar?" + urlencode({"event": event_id, **({"rate": rating} if rating else {})})
 
 
+def reply_buttons(alert_id, setup_id=None) -> tuple[tuple[str, str], ...]:
+    """A single's Telegram buttons: the four ratings, then Plan it when the event has a setup card. ``telegram.keyboard``
+    puts more than three buttons two to a row and ``phone.send`` adds Why? last, so the four ratings fill two rows and
+    Plan it shares the third with Why? only: a rating tap (``telegram_replies._mark``) never takes Plan it with it."""
+    buttons = telegram_replies.rating_buttons(alert_id)
+    return buttons + (telegram_replies.plan_button(setup_id),) if setup_id is not None else buttons
+
+
+def _setup(db: Session, event_id: str) -> RadarSetup | None:
+    return db.exec(select(RadarSetup).where(RadarSetup.event_id == event_id)).first()
+
+
+def _card(db: Session, event: dict, setup: RadarSetup) -> tuple[str, str]:
+    """The setup card as the ping's title and body; the plain message if the card cannot be written."""
+    try:
+        return radar_setup.card_text(event, setup, paper_line=radar_setup.paper_record(db, setup.kind, setup.direction))
+    except Exception:
+        log.exception("Radar setup card text failed for %s; the plain ping goes instead", event["event_id"])
+        return message(event)
+
+
 class RadarAlerts:
     def __init__(self, engine, *, clock: Callable[[], float] = time.time, store=None):
         self.engine = engine
@@ -217,8 +254,8 @@ class RadarAlerts:
     # ------------------------------------------------------------ record
 
     def record(self, events: list[dict]) -> list[RadarAlert]:
-        """One outbox row per new event: a strong one is a single ping, the rest wait for the digest (``digest``, the
-        body its digest line). An event already written is left alone."""
+        """One outbox row per new event: a strong or setup one is a single ping, the rest wait for the digest
+        (``digest``, the body its digest line). An event already written is left alone."""
         now = self.clock()
         tags = event_movers_tags(self.store, events) if lead_unseen() and self.store is not None else {}
         written = []
@@ -226,15 +263,16 @@ class RadarAlerts:
             for event in events:
                 if db.exec(select(RadarAlert.id).where(RadarAlert.event_id == event["event_id"])).first() is not None:
                     continue
-                title, body = message(event)
+                setup = _setup(db, event["event_id"]) if radar_setup.enabled() and radar_setup.is_setup(event) else None
+                title, body = _card(db, event, setup) if setup is not None else message(event)
                 alert = RadarAlert(event_id=event["event_id"], session_date=event["session_date"], rule_version=event["rule_version"],
                                    kind=event["kind"], subject=subject(event), title=title, body=body,
                                    first_seen_at=_utc(_parse(event["first_seen_at"])), detected_at=_utc(now))
-                if tags.get(event["event_id"]) is True:
+                if tags.get(event["event_id"]) is True and setup is None:
                     alert.delivery, alert.body = DIGEST, ALSO_ON_MOVERS + subject(event)
-                elif event["kind"] != radar_dip.KIND and not strong(event):
+                elif not radar_setup.is_setup(event) and not strong(event):
                     alert.delivery, alert.body = DIGEST, digest_line(event)
-                elif reason := self._hour_reason(db, alert, now):
+                elif reason := self._hour_reason(db, alert, now) or self._setup_reason(db, alert):
                     alert.delivery, alert.body, alert.last_error = DIGEST, digest_line(event), reason
                 db.add(alert)
                 try:
@@ -255,6 +293,19 @@ class RadarAlerts:
                          .order_by(RadarAlert.detected_at.desc())).first()
         if recent is not None:
             return f"{alert.subject} was already alerted at {_clock(_epoch(recent))}; one an hour, so this one waits for the digest."
+        return None
+
+    @staticmethod
+    def _setup_reason(db: Session, alert: RadarAlert) -> str | None:
+        """One setup single a stock a session, across setup kinds and versions (the hourly rule sees one version)."""
+        if alert.kind not in radar_setup.SETUP_KINDS:
+            return None
+        earlier = db.exec(select(RadarAlert.detected_at).where(
+            RadarAlert.subject == alert.subject, RadarAlert.session_date == alert.session_date,
+            RadarAlert.kind.in_(radar_setup.SETUP_KINDS), SINGLE).order_by(RadarAlert.detected_at)).first()
+        if earlier is not None:
+            return (f"{alert.subject} already had a Radar setup ping at {_clock(_epoch(earlier))}; one a stock a session, "
+                    "so this one waits for the digest.")
         return None
 
     # ------------------------------------------------------------ digest
@@ -349,6 +400,8 @@ class RadarAlerts:
                 db.commit()
                 return
             digest = alert.kind == DIGEST
+            setup_id = (db.exec(select(RadarSetup.id).where(RadarSetup.event_id == alert.event_id)).first()
+                        if radar_setup.enabled() and alert.kind in radar_setup.SETUP_KINDS else None)
             if digest:
                 kind, anchor, symbol, trade_id = "radar_digest", None, None, None
             elif alert.kind == "group_move":
@@ -375,7 +428,7 @@ class RadarAlerts:
                         alert.title, alert.body + ticket.append, kind=kind, image=image, priority=4, tags=("satellite",),
                         path=event_path(alert.event_id), direct_click=True,
                         more=tuple((label, event_path(alert.event_id, rating)) for label, rating in RATING_ACTIONS),
-                        buttons=telegram_replies.rating_buttons(alert.id))  # all four ratings; ntfy keeps RATING_ACTIONS
+                        buttons=reply_buttons(alert.id, setup_id))  # all four ratings; ntfy keeps RATING_ACTIONS
             except phone.SendError as exc:
                 if not _surely_unsent(exc):
                     alert.delivery, alert.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."

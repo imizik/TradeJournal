@@ -16,8 +16,7 @@ from app.engine.chart_math import ET
 from app.engine.radar_comparison import _endpoint, epoch
 from app.engine.radar_movers import build_movers
 from app.engine.radar_store import RadarStore
-from app.engine.radar_dip import is_dip
-from app.engine.radar_evidence import census, side_receipt
+from app.engine.radar_evidence import census, rule_side, side_receipt
 
 SCORER_VERSION = "radar-outcomes-v2"
 HORIZONS = (("30m", 30 * 60), ("60m", 60 * 60), ("close", None))
@@ -106,7 +105,7 @@ def score_store(store: RadarStore, universe: dict, done: set[str], today: str) -
         passes = sorted((p for p in store.passes(session) if p["status"] in USABLE), key=lambda p: (p["started_at"], p["id"]))
         quotes = store.pass_quotes(p["id"] for p in passes)
         for event in events:
-            side = "dip" if is_dip(event) else None
+            side = rule_side(event)
             views = (side_receipt(r, side) for r in receipts.values())
             matches = [r for r in views if r and event["event_id"] in r["event_ids"]]
             receipt = matches[0] if len(matches) == 1 else None
@@ -211,7 +210,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     today = args.today or datetime.now(ET).date().isoformat()
     store = RadarStore(args.store, read_only=True)
-    sessions = census(store, today) + census(store, today, side="dip")
+    sessions = census(store, today) + census(store, today, side="dip") + census(store, today, side="reversal")
     if args.census_only:
         print(json.dumps({"sessions": sessions}, indent=2))
         return

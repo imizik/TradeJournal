@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.engine import ntfy, radar_alerts, radar_runner, tradier
+from app.engine import ntfy, radar_alerts, radar_runner, telegram_replies, tradier
 from app.engine.radar_alerts import RadarAlerts, message
 from app.engine.radar_runner import RadarRunner
 from app.engine.tradier import TradierQuote
@@ -39,7 +39,7 @@ def engine():
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
-    for name in ("RADAR_ALERTS_ENABLED", "RADAR_ALERTS_LEAD_UNSEEN", "RADAR_DIGEST_AT", "RADAR_SINGLE_MIN_RELATIVE_PCT", "RADAR_SINGLE_MIN_GROUP_PCT", "ALERT_APP_URL",
+    for name in ("RADAR_ALERTS_ENABLED", "RADAR_ALERTS_LEAD_UNSEEN", "RADAR_SETUP_CARDS", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "RADAR_DIGEST_AT", "RADAR_SINGLE_MIN_RELATIVE_PCT", "RADAR_SINGLE_MIN_GROUP_PCT", "ALERT_APP_URL",
                  "COPILOT_ENABLED", "ALERT_POLICY_ENABLED", "PING_DAILY_CAP", "PING_QUIET_MINUTES", "PING_PREOPEN_ALLOWANCE",
                  "PING_BUDGET_RADAR_EVENT", "PING_BUDGET_RADAR_DIGEST"):
         monkeypatch.delenv(name, raising=False)
@@ -176,12 +176,12 @@ def test_unseen_events_keep_singles_and_digest_logic_and_lead_the_digest(engine,
         assert digest.body == "BBB up 5.0% vs SPY · 9:44 AM\nAAA up 5.0% vs SPY · 9:40 AM"
 
 
-@pytest.mark.parametrize("kind", ["relative_to_spy", "relative_to_sector", "group_move", "dip_turn"])
+@pytest.mark.parametrize("kind", ["relative_to_spy", "relative_to_sector", "group_move", "dip_turn", "gap_reversal"])
 def test_listed_events_never_get_singles_including_strong_groups_and_dips(engine, monkeypatch, kind):
     monkeypatch.setenv("RADAR_ALERTS_LEAD_UNSEEN", "true")
     monkeypatch.setattr(radar_alerts, "event_movers_tags", lambda store, events: {"e": True})
     event = _event("e", "AAA", 10, kind=kind, group="Chips" if kind == "group_move" else None, median=4, same=5)
-    event["measures"].update(spy_relative_pct=8, low_change_pct=-5)
+    event["measures"].update(spy_relative_pct=8, low_change_pct=-5, open_relative_pct=2.2, gap_relative_pct=-3.1)
     [row] = RadarAlerts(engine, store=object(), clock=Clock(at(10))).record([event])
     assert row.delivery == "digest" and row.attempts == 0
 
@@ -546,3 +546,149 @@ def test_a_dip_candidate_is_always_a_single_and_its_hour_counts_its_own_rule_onl
     [row] = alerts.record([dip])
     assert row.delivery == "pending" and row.title == "Radar dip: AAA turning up, −3.1% (low −4.6%)"
     assert radar_alerts.digest_line(dip) == "AAA dip turning up, −3.1% (low −4.6%) · 9:52 AM"
+
+
+# ------------------------------------------------------------ gap reversals and setup cards
+
+def _reversal(event_id="rg0-2030-01-15-reversal-aaa-up-1", symbol="AAA", minute=22, direction="up"):
+    event = _event(event_id, symbol, minute, kind="gap_reversal", direction=direction)
+    event.update(rule_version="radar-reversal-v0",
+                 summary=f"{symbol} reversing up after a gap down: gapped −3.1% vs SPY, +2.2% vs SPY from the open, +0.8% in the last 5 minutes",
+                 measures={"gap_relative_pct": -3.1, "open_relative_pct": 2.2, "five_minute_relative_pct": 0.8, "relative_pct": 2.2,
+                           "change_pct": 2.3, "benchmark_change_pct": 0.1, "day_change_pct": -0.9, "open_price": 97.0,
+                           "last_price": 99.2, "extreme_price": 96.4, "extreme_minutes_ago": 6, "spy_day_change_pct": 0.1},
+                 evidence=[{"symbol": symbol, "pass_id": minute, "last": 99.2}])
+    return event
+
+
+def _dip(event_id="rd0-1", symbol="AAA", minute=22):
+    dip = _event(event_id, symbol, minute, kind="dip_turn")
+    dip.update(rule_version="radar-dip-v0", measures={"day_change_pct": -3.1, "low_change_pct": -4.6, "extreme_price": 95.0},
+               evidence=[{"symbol": symbol, "pass_id": minute, "last": 97.0}])
+    return dip
+
+
+CONTRACT = {"symbol": "AAA300118C00100000", "option_type": "call", "strike": 100.0, "expiration": "2030-01-18", "bid": 1.1,
+            "ask": 1.2, "mid": 1.15, "spread_pct": 8.7, "delta": 0.42}
+
+
+def _card(engine, event, contract=CONTRACT):
+    import json
+    from app.models import RadarSetup
+    with Session(engine) as db:
+        row = RadarSetup(event_id=event["event_id"], session_date=event["session_date"], rule_version=event["rule_version"],
+                         kind=event["kind"], symbol=event["symbols"][0], direction=event["direction"], entry=99.2,
+                         invalidation=96.4, contract_json=json.dumps(contract) if contract else None,
+                         record_text="Your first-hour calls: 6 of 10 green, +$1.2k")
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+
+
+def test_a_plain_reversal_is_a_single_without_the_strong_test_with_its_own_message_and_digest_line(engine):
+    event = _reversal()
+    assert not radar_alerts.strong(event)  # +2.2% vs SPY: far below the strong bar, still its own ping
+    title, body = message(event)
+    assert title == "Radar reversal: AAA reversing up, +2.2% vs SPY from the open (gapped −3.1%)"
+    assert body == f"{event['summary']} · 9:52 AM ET"
+    assert radar_alerts.digest_line(event) == "AAA reversing up, +2.2% vs SPY from the open (gapped −3.1%) · 9:52 AM"
+    down = _reversal("rg0-down", "BBB", direction="down")
+    down["measures"].update(open_relative_pct=-1.9, gap_relative_pct=2.4)
+    assert message(down)[0] == "Radar reversal: BBB reversing down, −1.9% vs SPY from the open (gapped +2.4%)"
+    [row] = RadarAlerts(engine, clock=Clock(at(22))).record([event])
+    assert (row.delivery, row.kind, row.title) == ("pending", "gap_reversal", title)
+
+
+def test_one_setup_single_per_stock_a_session_across_setup_kinds(engine):
+    clock = Clock(at(22))
+    alerts = RadarAlerts(engine, clock=clock)
+    [dip] = alerts.record([_dip()])
+    assert dip.delivery == "pending"
+    clock.now = at(95)  # past the hour, so only the session rule can hold it
+    [later, other] = alerts.record([_reversal(minute=95), _reversal("rg0-bbb", "BBB", 95)])
+    assert later.delivery == "digest" and later.body == "AAA reversing up, +2.2% vs SPY from the open (gapped −3.1%) · 11:05 AM"
+    assert later.last_error == "AAA already had a Radar setup ping at 9:52 AM ET; one a stock a session, so this one waits for the digest."
+    assert other.delivery == "pending"
+    # A trial-rule single for the stock does not use up its setup ping, nor the other way round.
+    clock.now = at(100)
+    [trial] = alerts.record([_event("e-trial", "BBB", 100)])
+    assert trial.delivery == "pending"
+
+
+def test_with_cards_off_a_dip_ping_is_exactly_as_before_even_if_a_card_row_exists(engine, monkeypatch):
+    from app.engine import telegram
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    sent = []
+    monkeypatch.setattr(telegram, "publish", lambda title, body, **kw: sent.append((title, body, kw)) or "9")
+    dip = _dip()
+    _card(engine, dip)
+    alerts = RadarAlerts(engine, clock=Clock(at(22)))
+    [row] = alerts.record([dip])
+    assert (row.title, row.body) == message(dip) == ("Radar dip: AAA turning up, −3.1% (low −4.6%)", f"{dip['summary']} · 9:52 AM ET")
+    alerts.deliver()
+    [(title, body, kw)] = sent
+    assert (title, body) == message(dip)
+    assert kw["buttons"] == telegram_replies.rating_buttons(row.id) + (("Why?", "ask:radar_event"),)
+
+
+def test_a_card_ping_carries_the_card_and_plan_it_on_its_own_row(engine, monkeypatch):
+    from app.engine import radar_setup, telegram
+    monkeypatch.setenv("RADAR_SETUP_CARDS", "true")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    monkeypatch.setenv("ALERT_APP_URL", "https://journal.example")
+    sent = []
+    monkeypatch.setattr(telegram, "publish", lambda title, body, **kw: sent.append((title, body, kw)) or "9")
+    event = _reversal()
+    setup = _card(engine, event)
+    alerts = RadarAlerts(engine, clock=Clock(at(22)))
+    [row] = alerts.record([event])
+    assert (row.title, row.body) == radar_setup.card_text(event, setup)
+    assert row.title == "Radar setup: AAA reversing up after a gap down"
+    assert row.body.splitlines()[0] == "In near 99.20 · out below 96.40 (−2.8%)"
+    alerts.deliver()
+    [(title, _, kw)] = sent
+    assert title == row.title
+    assert kw["buttons"] == (*telegram_replies.rating_buttons(row.id), ("Plan it", f"rp:{setup.id}"), ("Why?", "ask:radar_event"))
+    keyboard = telegram.keyboard(kw["path"], kw["buttons"])["inline_keyboard"]
+    plan_row = next(r for r in keyboard if any(b.get("callback_data", "").startswith("rp:") for b in r))
+    assert [b["text"] for b in plan_row] == ["Plan it", "Why?"]  # never beside a rating
+    assert all(not any(b.get("callback_data", "").startswith("rp:") for b in r) for r in keyboard if r is not plan_row)
+
+    # A rating tap collapses the ratings and leaves Plan it; a Plan it tap leaves the ratings.
+    edits = []
+    replies = telegram_replies.Replies(engine, call=lambda method, **kw: edits.append(kw["json"]))
+    message_ = {"message_id": 55, "reply_markup": {"inline_keyboard": keyboard}}
+    replies._mark(message_, f"rr:{row.id}:useful", "Useful")
+    rated = edits[-1]["reply_markup"]["inline_keyboard"]
+    assert rated[0] == [{"text": "✓ Useful", "callback_data": f"done:{row.id}"}] and plan_row in rated
+    replies._mark({"message_id": 55, "reply_markup": {"inline_keyboard": rated}}, f"rp:{setup.id}", "Planned")
+    planned = edits[-1]["reply_markup"]["inline_keyboard"]
+    assert planned[0] == rated[0] and [b["text"] for b in planned[1]] == ["✓ Planned", "Why?"]
+
+
+def test_a_card_skips_the_movers_demotion_but_a_plain_setup_event_does_not(engine, monkeypatch):
+    monkeypatch.setenv("RADAR_ALERTS_LEAD_UNSEEN", "true")
+    monkeypatch.setenv("RADAR_SETUP_CARDS", "true")
+    monkeypatch.setattr(radar_alerts, "event_movers_tags", lambda store, events: {e["event_id"]: True for e in events})
+    carded, plain = _reversal(), _reversal("rg0-bbb", "BBB")
+    _card(engine, carded)
+    first, second = RadarAlerts(engine, store=object(), clock=Clock(at(22))).record([carded, plain])
+    assert first.delivery == "pending" and first.title.startswith("Radar setup: AAA")
+    assert second.delivery == "digest" and second.body == "Also on Movers: BBB"
+
+
+def test_a_card_ping_with_the_paper_record_adds_its_line(engine, monkeypatch):
+    from app.models import RadarSetup
+    monkeypatch.setenv("RADAR_SETUP_CARDS", "true")
+    with Session(engine) as db:
+        for i, pnl in enumerate((40.0, -20.0, 15.0, 60.0, -5.0)):
+            db.add(RadarSetup(event_id=f"old-{i}", session_date="2030-01-14", rule_version="radar-reversal-v0", kind="gap_reversal",
+                              symbol="ZZZ", direction="up", entry=10.0, invalidation=9.0, paper_state="closed", paper_pnl=pnl))
+        db.commit()
+    event = _reversal()
+    _card(engine, event)
+    [row] = RadarAlerts(engine, clock=Clock(at(22))).record([event])
+    assert "Paper record for this setup: 3 of 5 green, +$90" in row.body.splitlines()

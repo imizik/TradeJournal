@@ -66,8 +66,10 @@ through (still recorded, so the follow-up below keeps working).
 
 **Acted on.** ``FollowUps`` runs on the level alert monitor's loop and writes,
 from the fills and the plan links as they arrive and never by guessing, what
-followed each delivered ping (``then``): an entry trigger, did an entry fill in
-the symbol follow within ``ENTRY_MINUTES``; an invalidation, time stop or
+followed each delivered ping (``then``): an entry trigger or a Radar single
+ping (``radar_event``), did an entry fill in the symbol follow within
+``ENTRY_MINUTES`` (a Radar group ping has no symbol and is recorded
+``unmatched``, which no count reads); an invalidation, time stop or
 open-trade alert, was the position closed (or trimmed) within
 ``EXIT_MINUTES``; a nudge or link ping, was a plan linked within
 ``LINK_MINUTES``. The trade page's phone-alert list shows it per ping
@@ -113,7 +115,8 @@ ACTED = ("entered", "closed", "trimmed", "linked")
 EPS = 1e-9
 # What answers each kind: an entry fill in the symbol, an exit of the position, or a plan link.
 TRACKED = {"entry": "entry", "invalidation": "exit", "time_stop": "exit", "giveback": "exit", "hold_hour": "exit", "wrong_way": "exit",
-           "expiry_first": "exit", "expiry_final": "exit", "expiry_eve": "exit", "nudge": "link", "link": "link", "no_plan": "link"}
+           "expiry_first": "exit", "expiry_final": "exit", "expiry_eve": "exit", "nudge": "link", "link": "link", "no_plan": "link",
+           "radar_event": "entry"}
 WINDOW = {"entry": ENTRY_MINUTES, "exit": EXIT_MINUTES, "link": LINK_MINUTES}
 
 
@@ -581,7 +584,7 @@ def week_summary(db: Session, start_utc: datetime, end_utc: datetime) -> dict:
     return {"state": "ok", "sent": sum(t["sent"] for t in by_kind.values()), "held": sum(t["held"] for t in by_kind.values()),
             "judged": judged, "acted_on": acted, "acted_on_pct": round(100 * acted / judged, 1) if judged else None,
             "by_kind": {k: dict(t) for k, t in sorted(by_kind.items(), key=lambda kv: rank(kv[0]))},
-            "then": (f"acted_on: an entry trigger followed by an entry fill in the symbol within {ENTRY_MINUTES} min; an "
+            "then": (f"acted_on: an entry trigger or a Radar single ping followed by an entry fill in the symbol within {ENTRY_MINUTES} min; an "
                      f"invalidation, time stop or open-trade alert followed by the position closed or trimmed within {EXIT_MINUTES} "
                      f"min; a nudge or link ping followed by a plan link within {LINK_MINUTES} min. judged counts pings the fills "
                      "could answer. held: merged, suppressed by the quiet window, or over its budget or the pre-open allowance.")}

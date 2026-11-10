@@ -15,6 +15,8 @@ Scope: every event of the newest rule version (versions are never pooled).
   ``not_in_brief``. Shown, not part of the verdict: a brief names at most a handful of stocks.
 - **Planned and traded:** the events a pre-trade plan names as its origin (``TradeCapture.origin_kind``
   ``radar_event``), and those whose plan is linked to a trade. Shown, not part of the verdict.
+- **Setups:** the setup cards' scorecard (``radar_setup_paper.scorecard``: cards, contracts, plans and paper results
+  by kind and direction), from every card whatever its rule; shown apart, never part of the verdict.
 - **Alerted:** the events a Radar phone ping reached (``RadarAlert`` rows ``sent``, or ``unknown``, which
   may have reached the phone), with their ratings, apart from events only seen in the feed. Shown, not
   part of the verdict.
@@ -27,7 +29,8 @@ from statistics import median
 from sqlmodel import Session, select
 
 from app.engine.radar_comparison import epoch
-from app.engine.radar_dip import is_dip
+from app.engine import radar_setup_paper
+from app.engine.radar_evidence import rule_side
 from app.engine.radar_movers import build_movers
 from app.engine.radar_store import RATINGS, RadarStore
 from app.models import CaptureLink, MorningBriefingPacket, MorningBriefingRecord, RadarAlert, TradeCapture
@@ -125,7 +128,7 @@ def planned_events(db: Session, event_ids: list[str]) -> dict[str, dict]:
 
 
 def build(store: RadarStore, db: Session, universe: dict) -> dict:
-    events = [e for e in store.events() if not is_dip(e)]  # the dip rule is scored on its own, never here
+    events = [e for e in store.events() if rule_side(e) is None]  # the dip and reversal rules are scored on their own, never here
     newest = max(events, key=lambda e: epoch(e["first_seen_at"]), default=None)
     version = newest["rule_version"] if newest else None
     events = [e for e in events if e["rule_version"] == version]
@@ -158,4 +161,5 @@ def build(store: RadarStore, db: Session, universe: dict) -> dict:
         "alerted": {"events": len(alerted), "ratings": {r: alerted_ratings[r] for r in (*RATINGS, "unrated")}},
         "plans": {"planned": len(planned), "traded": sum(m["traded"] for m in planned.values())},
         "verdict": verdict(ratings, timing),
+        "setups": radar_setup_paper.scorecard(db),
     }

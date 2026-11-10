@@ -17,7 +17,7 @@ const DIRECTION = {
   up: { label: "Up", className: "bg-emerald-500/10 text-emerald-400" },
   down: { label: "Down", className: "bg-red-500/10 text-red-400" },
 };
-const KIND = { relative_to_spy: "vs SPY", relative_to_sector: "vs sector", group_move: "Group move", dip_turn: "Dip turning up" };
+const KIND = { relative_to_spy: "vs SPY", relative_to_sector: "vs sector", group_move: "Group move", dip_turn: "Dip turning up", gap_reversal: "Gap reversal" };
 
 function OutsideList({ checkpoints }: { checkpoints: OutsideCheckpoint[] }) {
   return <section aria-label="Outside your list" className="rounded-lg border bg-card p-3.5">

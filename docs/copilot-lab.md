@@ -2227,8 +2227,8 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   cannot read or write its table tells the sender to send.
 - **Acted on:** a pass on the level alert monitor's loop writes, from the fills
   and the plan links as they arrive and never by guessing, what followed each
-  delivered ping: an entry trigger, an entry fill in the symbol within 30
-  minutes; an invalidation, time stop or open-trade alert, the position closed
+  delivered ping: an entry trigger or a Radar single ping naming a stock
+  (since November 10, 2026), an entry fill in the symbol within 30 minutes; an invalidation, time stop or open-trade alert, the position closed
   or trimmed within 15 minutes; a nudge or link ping, a plan linked within 30
   minutes. The trade page shows it per ping (`then: closed in 6 min`) and
   [Review my week](#review-my-week) counts it by kind.

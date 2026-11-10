@@ -196,26 +196,28 @@ class TradierOptions:
         self._calls: deque[float] = deque()
         self._paused_until = 0.0
 
-    def expirations(self, symbol: str, wait: bool = False) -> list[date]:
-        """Every listed expiration date for ``symbol``, all roots included, sorted."""
+    def expirations(self, symbol: str, wait: bool = False, timeout: float = TIMEOUT_SECONDS) -> list[date]:
+        """Every listed expiration date for ``symbol``, all roots included, sorted. ``timeout``: seconds for the one
+        request (a caller on a minute loop passes a shorter one)."""
         symbol = _symbol(symbol)
-        payload = self._get(EXPIRATIONS_PATH, {"symbol": symbol, "includeAllRoots": "true", "strikes": "false"}, wait)
+        payload = self._get(EXPIRATIONS_PATH, {"symbol": symbol, "includeAllRoots": "true", "strikes": "false"}, wait, timeout)
         try:
             return parse_expirations(payload)
         except ValueError as exc:
             raise OptionsChainError(f"Tradier returned an unreadable expiration list for {symbol}.", "malformed") from exc
 
-    def chain(self, symbol: str, expiration: date, wait: bool = False) -> OptionChain:
+    def chain(self, symbol: str, expiration: date, wait: bool = False, timeout: float = TIMEOUT_SECONDS) -> OptionChain:
         """Every contract for one expiration date, with greeks, in one request."""
         symbol = _symbol(symbol)
-        payload = self._get(CHAINS_PATH, {"symbol": symbol, "expiration": expiration.isoformat(), "greeks": "true"}, wait)
+        payload = self._get(CHAINS_PATH, {"symbol": symbol, "expiration": expiration.isoformat(), "greeks": "true"}, wait,
+                            timeout)
         fetched_at = datetime.fromtimestamp(self._clock(), timezone.utc)
         try:
             return parse_chain(payload, symbol, expiration, fetched_at)
         except ValueError as exc:
             raise OptionsChainError(f"Tradier returned an unreadable {symbol} {expiration} option chain.", "malformed") from exc
 
-    def _get(self, path: str, params: dict[str, str], wait: bool) -> Any:
+    def _get(self, path: str, params: dict[str, str], wait: bool, timeout: float = TIMEOUT_SECONDS) -> Any:
         if not tradier.tradier_configured():
             raise OptionsChainError("Set TRADIER_API_KEY on the private backend to read option chains.", "not_configured")
         self._take(wait)
@@ -223,7 +225,7 @@ class TradierOptions:
             response = httpx.get(
                 f"{tradier.TRADIER_BASE_URL}{path}", params=params,
                 headers={"Authorization": f"Bearer {tradier.TRADIER_API_KEY}", "Accept": "application/json"},
-                timeout=TIMEOUT_SECONDS,
+                timeout=timeout,
             )
         except httpx.HTTPError as exc:
             raise OptionsChainError("The Tradier connection failed while reading options.") from exc

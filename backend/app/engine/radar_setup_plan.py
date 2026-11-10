@@ -1,0 +1,175 @@
+"""Plan it: one tap on a Radar setup ping saves the setup card as a real plan in the journal.
+
+The ping's ``rp:<RadarSetup id>`` button (``telegram_replies.plan_button``) runs ``plan`` with no model call. With a
+fresh quote for the stock on the idea's side of the setup's invalidation, it claims the card (``plan_state``
+``none`` to ``planned``, so a double tap or a retry never saves two plans), opens the plan's desk thread
+(``Radar setup: NBIS dip turning up``), saves the pre-trade plan capture as the plan card's Confirm saves one (a
+discretionary ``Copilot plan`` on the default, or only, account, long calls for ``up`` and long puts for ``down``, the
+candidate contract when the card has one, origin ``radar_event`` with the event id, so ``radar_proof`` counts the
+event as planned) and arms its invalidation alert (``plan_role="invalidation"``, ``source_kind="copilot"`` on the
+thread, so the plan ladder, the Plans board and the invalidation ping read it), then, best effort, a 60-minute time stop
+(``plan_time_stops.create``, text ``60m``: it counts from the tap, never runs past the close, and pings only if a
+position in the symbol was entered after the plan); a time stop refused or failed never fails the plan. There is no
+entry alert: the setup's entry is now, so a card from an earlier session (its ``session_date`` is not today's New York
+date by ``now``) is refused with nothing written. A failure after the claim and before the plan is saved releases the
+claim, so a later tap can plan it: a desk thread opened before the capture was saved is deleted, and a capture already
+saved is reused with its thread, so a retry ends with one thread, one capture and one alert. An alert the caps refuse
+or the database fails to save leaves the plan standing, and the reply says it is not armed. A stock already at or through the invalidation is refused once, with the reason kept on the card; a
+missing or stale quote leaves the card untouched for a later tap. Advice only: nothing places, sizes or suggests an
+order.
+"""
+
+from datetime import UTC, date, datetime
+import json
+import logging
+import time
+from typing import Callable
+import uuid
+
+from sqlalchemy import delete, update
+from sqlmodel import Session
+
+from app.engine.chart_math import ET
+from app.models import CopilotInvestigation, RadarSetup
+
+log = logging.getLogger(__name__)
+
+WORDS = {("dip_turn", "up"): "dip turning up", ("dip_turn", "down"): "pop turning down",
+         ("gap_reversal", "up"): "gap down turning up", ("gap_reversal", "down"): "gap up turning down"}
+PLANNED = "Planned"
+NOT_PLANNED = "Not planned"
+
+
+def _live_price(symbol: str) -> float | None:
+    """The copilot's fresh quote, as the plan card's Confirm reads it; None when it is stale or missing."""
+    from app.engine.telegram_replies import _fresh_quote
+    last, fresh = _fresh_quote(symbol)
+    return last if fresh and last else None
+
+
+def _uuid(value) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, TypeError):
+        return None
+
+
+def setup_words(row: RadarSetup) -> str:
+    return WORDS.get((row.kind, row.direction), f"{row.kind.replace('_', ' ')} {row.direction}")
+
+
+def plan(engine, setup_id: str, *, now: float | None = None, quote: Callable[[str], float | None] | None = None) -> tuple[str, str | None]:
+    """The Plan it tap: ``(reply, chosen label)``, the label None when a later tap may still plan it."""
+    from app.engine import captures, copilot_investigations as investigations, copilot_plans, plan_time_stops
+    from app.engine.chart_journal import contract_label
+    from app.engine.level_alert_monitor import create_alert
+    from app.engine.telegram_replies import _calendar, _plan_account
+    now = time.time() if now is None else now
+    key = _uuid(setup_id)
+    with Session(engine) as db:
+        row = db.get(RadarSetup, key) if key else None
+        if row is None:
+            return "That setup is no longer available.", None
+        if row.plan_state == "planned":
+            return "Already planned.", PLANNED
+        if row.plan_state == "refused":
+            return f"Not planned: {row.plan_note or 'this setup was refused.'}", NOT_PLANNED
+        today = datetime.fromtimestamp(now, ET).date()
+        if row.session_date != today.isoformat():
+            try:
+                day = date.fromisoformat(row.session_date)
+                when = f"{day:%b} {day.day}"
+            except ValueError:
+                when = "an earlier session"
+            return f"This setup is from {when}; its level no longer applies. No plan saved.", NOT_PLANNED
+        symbol, level, long, event_id = row.symbol, row.invalidation, row.direction == "up", row.event_id
+        side = "below" if long else "above"
+        account = _plan_account(db)
+        if account is None:
+            return "Set a default account for plans on the desk first; nothing was saved.", None
+        last = (quote or _live_price)(symbol)
+        if not last:
+            return f"The latest {symbol} quote is stale or missing, so nothing was saved. Tap again in a moment.", None
+        if (last <= level) if long else (last >= level):
+            note = f"{symbol} is already {side} {level:,.2f}, the level this setup was built on. No plan saved."
+            refused = db.exec(update(RadarSetup).where(RadarSetup.id == row.id, RadarSetup.plan_state == "none")
+                              .values(plan_state="refused", plan_note=note))
+            db.commit()
+            return (note, NOT_PLANNED) if refused.rowcount == 1 else ("Already planned.", PLANNED)
+
+        contract = json.loads(row.contract_json) if row.contract_json else None
+        option_type = "call" if long else "put"
+        if contract and contract.get("option_type") not in (None, option_type):
+            contract = None  # a candidate on the wrong side is not this idea's
+        strike = contract.get("strike") if contract else None
+        expiration = contract.get("expiration") if contract else None
+        words = setup_words(row)
+        thesis = f"{symbol} {words} on Radar ({row.event_id}); the idea is wrong {side} {level:,.2f}."
+        contract_text = (contract_label(symbol, "option", option_type, strike, datetime.fromisoformat(expiration).date())
+                         if strike is not None and expiration else None)
+
+        def body(thread_id: str | None) -> dict:  # the plan card's savePlanCapture body
+            return {
+                "client_id": row.id.hex, "underlying": symbol, "account_id": account, "side": "buy_calls" if long else "buy_puts",
+                "strike": strike, "expiration": expiration,
+                "wording": f"Entry: now, near {last:,.2f}. Invalidation: crosses {level:,.2f}."[:captures.WORDING_MAX],
+                "note": " ".join(filter(None, [f"Thesis: {thesis}", contract_text and f"Contract: {contract_text}."]))[:captures.NOTE_MAX],
+                "client_captured_at": now * 1000, "mode": "discretionary", "setup_label": copilot_plans.PLAN_LABEL, "image": False,
+                "origin": {"kind": "radar_event", "ref": row.event_id, "text": f"Radar setup: {symbol} {words}"},
+                "context": {"state": "unavailable", "reason": "Saved by Plan it on a Radar setup ping.", "investigation_id": thread_id}}
+        try:
+            captures.build(db, body(None))  # every check before anything is written
+        except captures.CaptureError as exc:
+            return f"Not planned: {exc}", None
+
+        setup_key, client_id = row.id, row.id.hex
+        claimed = db.exec(update(RadarSetup).where(RadarSetup.id == setup_key, RadarSetup.plan_state == "none")
+                          .values(plan_state="planned", planned_at=datetime.fromtimestamp(now, UTC).replace(tzinfo=None)))
+        db.commit()
+        if claimed.rowcount != 1:
+            return "Already planned.", PLANNED
+        saved = captures.by_client_id(db, client_id)  # an earlier tap's plan whose last step failed: reuse it
+        thread_id = json.loads(saved.context_json or "{}").get("investigation_id") if saved else None
+        created = None
+        try:
+            if thread_id is None:
+                thread_id = created = investigations.create(investigations.InvestigationFields(
+                    title=f"Radar setup: {symbol} {words}", symbol=symbol), session=db)["id"]
+                captures.save(db, captures.build(db, body(thread_id)))
+            db.exec(update(RadarSetup).where(RadarSetup.id == setup_key).values(investigation_id=thread_id))
+            db.commit()
+        except Exception:
+            log.exception("Radar setup %s: the plan failed after the claim; the claim is released", event_id)
+            db.rollback()
+            if created is not None and captures.by_client_id(db, client_id) is None:
+                try:  # the thread committed on its own and no plan points at it, so it goes
+                    db.exec(delete(CopilotInvestigation).where(CopilotInvestigation.id == uuid.UUID(created)))
+                    db.commit()
+                except Exception:
+                    log.exception("Radar setup %s: the unused desk thread %s was not removed", event_id, created)
+                    db.rollback()
+            db.exec(update(RadarSetup).where(RadarSetup.id == setup_key, RadarSetup.plan_state == "planned")
+                    .values(plan_state="none", planned_at=None))
+            db.commit()
+            return "The plan could not be saved, so nothing is planned. Tap again in a moment.", None
+        try:
+            create_alert(db, symbol=symbol, price=level, reference=last, condition="crosses", interval=None, session="regular",
+                         source_kind="copilot", source_id=thread_id, label=f"{symbol} invalidation: crosses {level:,.2f}",
+                         now=now, plan_role="invalidation")
+            armed = "Alert armed."
+        except ValueError as exc:
+            db.rollback()
+            armed = f"Alert not armed: {exc}"
+        except Exception:  # a database error: the plan stands, said plainly
+            log.exception("Radar setup %s: the invalidation alert could not be saved", event_id)
+            db.rollback()
+            armed = "Alert not armed: it could not be saved."
+        try:
+            plan_time_stops.create(db, client_id=client_id, investigation_id=thread_id, symbol=symbol, text="60m", now=now,
+                                   calendar=_calendar())
+            armed += " 60-minute check armed."
+        except Exception as exc:  # refused (after the close) or failed: the plan stands without it
+            db.rollback()
+            log.info("Radar setup %s: no 60-minute check (%s)", event_id, exc)
+    log.info("Radar setup %s planned for %s: %s", event_id, symbol, armed)
+    return f"Planned {symbol}: out {side} {level:,.2f}. {armed}", PLANNED

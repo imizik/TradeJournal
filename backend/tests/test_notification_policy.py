@@ -622,6 +622,28 @@ def test_an_entry_trigger_is_answered_by_an_entry_fill_in_the_symbol(engine):
     assert judged(engine, nothing) == ("no_entry", None, "no entry within 30 min")
 
 
+def test_a_radar_single_is_followed_up_like_an_entry_trigger_and_a_group_ping_is_skipped(engine):
+    entered = ping(engine, "radar_event", delivered="10:00", anchor="symbol:SNDK", symbol="SNDK", sender="radar_alerts")
+    nothing = ping(engine, "radar_event", delivered="10:00", anchor="symbol:CRWV", symbol="CRWV", sender="radar_alerts")
+    group = ping(engine, "radar_event", delivered="10:00", anchor="group:Semis", symbol=None, sender="radar_alerts")
+    digest = ping(engine, "radar_digest", delivered="10:00", anchor=None, symbol=None, sender="radar_alerts")
+    clock = Clock(at("10:13"))
+    follow = policy.FollowUps(engine, clock=clock)
+    buy(engine, "10:12")
+    follow.run()
+    assert judged(engine, entered) == ("entered", 12, "entered in 12 min")
+    assert judged(engine, nothing) == (None, None, None)
+    assert judged(engine, group) == ("unmatched", None, None)  # no symbol: recorded once, shown and counted nowhere
+    assert judged(engine, digest) == (None, None, None)  # a digest is not tracked
+    clock.now = at("10:31")
+    follow.run()
+    assert judged(engine, nothing) == ("no_entry", None, "no entry within 30 min")
+    with Session(engine) as db:
+        summary = policy.week_summary(db, utc(at("09:00")), utc(at("16:00")))
+    assert summary["by_kind"]["radar_event"] == {"sent": 3, "judged": 2, "acted_on": 1}
+    assert summary["by_kind"]["radar_digest"] == {"sent": 1} and "Radar single ping" in summary["then"]
+
+
 def test_a_nudge_is_answered_by_a_plan_link(engine):
     _, anchor = buy(engine, "10:00")
     _, other = buy(engine, "10:00", strike=240)

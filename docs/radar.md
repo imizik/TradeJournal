@@ -41,6 +41,14 @@ involve Jo.
 8. **Dip-buy candidates (built, off):** `backend/app/engine/radar_dip.py`, a
    separate first-hour rule `radar-dip-v0` with its own version, receipt and
    scoring. See [Dip-buy candidates](#dip-buy-candidates-radar-dip-v0-off-by-default).
+9. **Gap reversals (built, off):** `backend/app/engine/radar_reversal.py`, a
+   second separate rule `radar-reversal-v0` for the first two hours, beside the
+   dip rule and kept apart from the trial the same way. See
+   [Gap reversal](#gap-reversal-radar-reversal-v0-off-by-default).
+10. **Setup cards (built, off):** `backend/app/engine/radar_setup.py`,
+    `radar_setup_paper.py` and `radar_setup_plan.py`: a dip or reversal ping
+    becomes a card with its levels, a contract and records, paper traded, with
+    a Plan it button on Telegram. See [Setup cards](#setup-cards-off-by-default).
 
 ## Recorder
 
@@ -74,7 +82,9 @@ data. Rules and samples are shown on the page. See `backend/app/engine/radar_pro
 
 Beside alerted events, the read-out counts events that **led to a plan** (a
 pre-trade plan names the event as its origin) and **to a trade** (that plan is
-linked to a trade), shown on `/proof` and not part of the verdict. The event
+linked to a trade), shown on `/proof` and not part of the verdict. It also
+carries `setups`, the [setup cards'](#setup-cards-off-by-default) scorecard
+(backend only for now; `/proof` does not show it yet). The event
 detail (`GET /radar/events/{id}`, field `plans`) carries the same as
 **Planned** and **Traded** marks. See [Origin](copilot-lab.md#origin).
 
@@ -108,7 +118,9 @@ state, passes, missing symbols, universe) follows the events, with the Session
 picker beside the Developments heading; when Radar is off, has no data or is
 stale, that line leads the page instead. Events whose
 `rule_version` is `radar-rules-v0` carry a small "v0 · provisional rules" tag,
-and dip-rule events (`radar-dip-v0`) a "dip · discovery rule" tag.
+dip-rule events (`radar-dip-v0`) a "dip · discovery rule" tag, and
+reversal-rule events (`radar-reversal-v0`, kind label "Gap reversal") a
+"reversal · discovery rule" tag.
 
 The **Not on Movers** filter is on by default. Each row carries **On Movers**
 or **Not on Movers**, comparing the event's original evidence pass against
@@ -505,6 +517,160 @@ Tests: `backend/tests/test_radar_dip.py` (triggers, no-triggers, the window,
 liquidity, the cap, no future pass read, the daily closes before the session,
 the recorder's separate receipt, census and scoring, alert mode).
 
+## Gap reversal (radar-reversal-v0, off by default)
+
+A second discovery rule beside the trial rules and the dip rule, wired November
+10, 2026. In the first two hours it flags a tracked stock that gapped one way
+against SPY and has since reversed the other way from the open, still moving
+that way over the last five minutes. Both directions: a gap down turning up is
+`up`, a gap up turning down is `down`. Advice only, deterministic and
+model-free; it reads nothing after the pass it fires on.
+
+For each tracked stock (not an ETF or benchmark) and direction, every figure
+signed by the direction and taken against SPY over the same interval (stock
+return minus SPY return, in percentage points), all of these hold at one pass:
+
+| Test | `radar_reversal.V0` |
+| --- | --- |
+| Window | at most **120** minutes since the regular open; the first pass that can read every operand is 09:36 |
+| Gap against | previous close to today's open at most **−2.0** points |
+| Reversed from the open | today's open to now at least **+1.75** points |
+| Still going | the exact trailing five minutes at least **+0.5** points |
+
+The opening price is the `open` field of the 09:31 pass's quote, the
+five-minute start is the pass in the exact minute slot five minutes back, both
+from the current pass's universe version, and every quote must pass the trial
+rules' freshness test; a missing operand means no reading. One event per stock
+and direction a session, the first qualifying pass only, no revisions and no
+cap: kind `gap_reversal`, ids `rg0-<session>-reversal-<symbol>-<direction>-1`.
+Measures include the gap, the move from the open and over five minutes (all vs
+SPY), the day change, the open, the last, and the session extreme the reversal
+turned from (the lowest, or highest, recorded last or the open).
+
+**Where it comes from.** It is the registered candidate C05 ("reverse") of the
+[Radar v2 search](../research/notes/radar-v2-search-2026-11-04.md), with its
+registered numbers, not tuned since. Over the 36 confirmation sessions it made
+413 flags: 55.0% kept going in its direction at +30 minutes (mean +0.29 points
+against SPY) and 52.3% at +60 minutes (mean +0.22). It was one of 14 candidates
+and the only one with continuation that strong, so this is a small edge picked
+from many tries, which the live record must confirm.
+
+**Kept apart from the trial,** exactly as the dip rule is: its result is a
+`reversal` entry in the pass's detection receipt with its own frozen
+configuration, its event ids are never in the trial's `event_ids`, and
+`/radar/proof`, the desk's "to rate" list and the trial's session census leave
+its events out (`radar_evidence.rule_side`). The outcome scorer gives it its
+own census and read-out (`radar_evidence.census(..., side="reversal")`).
+Reversal events get news checks, appear in the feed and reach the shadow book
+when that is on (they are eligible like dip events).
+
+**Modes.** `RADAR_REVERSAL_RULES` in the VPS `backend.env`: `off` (default),
+`record` (events in the feed and scored; no phone) or `alert` (also a single
+ping per event, `Radar reversal: NBIS reversing up, +2.2% vs SPY from the open
+(gapped −3.1%)`, which still needs `RADAR_ALERTS_ENABLED=true`). Read at
+startup; switch it between sessions as the dip rule is switched, and undo by
+removing the line and restarting.
+
+**How it is judged.** `scripts/radar_outcomes.py` scores each event at its
+first-seen pass, signed by its direction, against SPY at +30 min, +60 min and
+the close, beside the Movers leaders and five random tracked stocks, and
+reports `radar-reversal-v0` separately. Decide after **20** verified sessions,
+on the dip rule's terms: its +60 min return against SPY positive more often
+than not, its interval against the leaders above zero, and Isaac's ratings. No
+tuning before that read-out.
+
+Tests: `backend/tests/test_radar_reversal.py` (the rule) and
+`backend/tests/test_radar_runner.py` (its receipt side, alert mode, failures).
+
+## Setup cards (off by default)
+
+Built November 10, 2026. With `RADAR_SETUP_CARDS=true` each new dip or
+reversal event (`radar_setup.SETUP_KINDS`) becomes a setup card the minute the
+recorder writes it, in `record` as well as `alert` mode, so a record-only rule
+still builds a paper record. The card is frozen once (`RadarSetup` in the
+journal database, one row per event) and is advice only: it describes the
+setup and never says to trade it. No model call.
+
+What the card shows, and where each part comes from:
+
+- **Title:** `Radar setup: NBIS reversing up after a gap down` (or `dip turning
+  up`).
+- **In and out:** `In near 61.20 · out below 59.85 (−2.2%)`. In is the stock's
+  last at the first sighting; out (the invalidation) is the session extreme the
+  setup turned from (the event's `extreme_price`, else the lowest or highest
+  recorded last in its evidence).
+- **Candidate:** one option contract, a call for up and a put for down, by the
+  setup scanner's expiration, delta and liquidity limits
+  (`scanner_rules.pick_expiration`, `choose_contract`), with its bid × ask and
+  how wide the spread is; or `No liquid contract found.`
+- **Your record:** the owner's own closed calls (up) or puts (down), first-hour
+  entries when there are at least 8, else all of them when there are 8.
+- **Paper record:** once five earlier cards of the same kind and direction have
+  closed on paper, their tally.
+- **The event's summary** and the time first seen.
+
+**The paper book** (`radar_setup_paper.SetupPaper`, one step after each usable
+inside-session pass, after the pings): each card with a contract buys one
+contract at the ask of the first option quote whose bid and ask both updated
+after the card (none within 2 minutes: `unresolved`), and sells at the bid of
+the first such quote after the first exit: the stock at or through the
+invalidation on a recorded pass, 60 minutes after the entry, or 5 minutes
+before the regular close. $0.65 a side. Nothing is carried overnight: a card
+still pending or open after its session is `unresolved`. It makes at most one
+batched quote request a minute and never touches the pass.
+
+**Plan it.** On Telegram a card ping carries Plan it on its own row with Why?,
+under the four ratings (so a rating tap never removes it). One tap
+(`radar_setup_plan.plan`) checks a fresh quote is still on the idea's side of
+the invalidation, then saves the card as a plan in the journal (a Copilot plan
+on the default account, long calls or puts, the candidate contract, origin
+`radar_event`, so `/radar/proof` counts the event as planned), arms its
+invalidation alert and, best effort, a 60-minute time stop (pings only if a
+position in the symbol was entered after the plan; never past the close). A
+card from an earlier session (its `session_date` is not today's New York date)
+is refused with nothing written: `This setup is from Nov 9; its level no longer
+applies. No plan saved.` A stock already through the level is refused once; a
+stale quote or a failure before the plan is saved leaves the card for a later
+tap, with no stray desk thread (a thread opened before the plan was saved is
+deleted; a plan already saved is reused with its thread, so a retry ends with
+one thread, one plan and one alert). An alert the caps refuse or the database
+fails to save leaves the plan standing and the reply says `Alert not armed`.
+Nothing places, sizes or suggests an order.
+
+**The scorecard.** `GET /radar/proof` carries `setups`: per kind and
+direction, cards, cards with a contract, planned, paper trades closed, green,
+their total P&L, and unresolved.
+
+**Switching on (Isaac's call).** Add `RADAR_SETUP_CARDS=true` to the VPS
+`backend.env` and restart `tradejournal-api.service` between sessions. Cards
+need a dip or reversal rule on (`record` or `alert`); pings need that rule in
+`alert` and `RADAR_ALERTS_ENABLED=true`. Undo: remove the line and restart;
+pings go back to the plain form, saved cards stay.
+
+**Known limits.**
+
+- Setup pings share the 4-a-day `radar_event` budget with the trial's strong
+  events, first come first served.
+- Each card is up to two option reads (expirations, then one chain, 5 seconds
+  each at most) out of the options budget of 30 a minute that charts and the
+  scanner share, never waiting for a slot; at most 3 cards are built a pass,
+  none is started once 15 seconds of the pass's card work have gone
+  (`radar_runner.CARD_SECONDS`), and an event past either cap has no card. The
+  owner's record is read once per direction a pass.
+- Order in a pass: the detection receipt, then the trial rules' pings
+  (recorded and delivered), then the cards, then the dip and reversal pings
+  (recorded and delivered again, only when there are any), so card work never
+  delays the receipt or the trial's pings. With cards off the pings are one
+  record-and-deliver, as before.
+- The scanner's expiration rule picks a same-day expiry when one is listed.
+- No card when the invalidation is not beyond the price, for example a stock at
+  its session low while SPY falls faster.
+- ntfy has no Plan it button; its tap opens the event page.
+
+Tests: `backend/tests/test_radar_setup.py`, `test_radar_setup_paper.py`,
+`test_radar_setup_plan.py`, and the wiring in `test_radar_runner.py` and
+`test_radar_alerts.py`.
+
 ## Movers now
 
 `GET /radar/movers?session=YYYY-MM-DD` (owner-only, read-only) supplies the
@@ -715,7 +881,9 @@ digests a session, and only a strong one is pinged on its own:
 `RADAR_ALERTS_LEAD_UNSEEN` is **off by default**. With it off, single/digest
 routing is unchanged. With `RADAR_ALERTS_LEAD_UNSEEN=true`, newly written
 alert rows compare their event's original pass as above: **On Movers** events
-never get a single ping, including strong groups and dip events. They wait
+never get a single ping, including strong groups and dip and reversal events
+without a setup card (an event with a card keeps its single: its value is the
+trigger, not novelty). They wait
 for a digest under one short **Also on Movers: AAA; BBB** footer. Other
 events retain today's strong-event/hourly/digest logic and lead the digest,
 newest first, up to 12 detail lines then `+N more`; the footer lists up to 12
@@ -741,7 +909,10 @@ or the live 20-session experiment's scoring.
   (default 7.0) against SPY (a sector event reads its SPY-relative move), or a
   group whose every member moved the same way with a median at least
   `RADAR_SINGLE_MIN_GROUP_PCT` (default 3.0) against SPY. Policy kind
-  `radar_event`. What follows describes a single ping.
+  `radar_event`. Raising both thresholds makes plain mover events digest-only
+  today. Dip and reversal events in `alert` mode are always singles, without
+  this test; with [setup cards](#setup-cards-off-by-default) on, such a ping is
+  the card, with Plan it on Telegram. What follows describes a single ping.
 - **Title:** the event's own numbers, `Radar: LAD +5.3% vs SPY +0.1%` for a
   stock (its 30-minute change and the benchmark's), `Radar: Neoclouds and AI
   hosting −2.4% vs SPY (6 of 7 down)` for a group (median member vs SPY).
@@ -765,8 +936,10 @@ or the live 20-session experiment's scoring.
 - **Only a new event pings.** Revisions (extended, faded, reversed) never do.
   Regular hours only: the recorder detects only inside the session and sends
   pending pings only on a pass.
-- **Caps:** one single ping per stock or group an hour; a strong event inside
-  that hour waits for the digest instead. A held single (below) does not count
+- **Caps:** one single ping per stock or group an hour (counted within one
+  rule version); a strong event inside that hour waits for the digest instead.
+  One setup single (dip or reversal) per stock a session across both rules: a
+  later one waits for the digest with the reason kept. A held single (below) does not count
   toward the hour. The old `RADAR_ALERTS_DAILY_CAP` is gone: the policy's
   budgets (4 singles and 2 digests a day by default) replace it.
 - **Notification policy:** right before every send, the app's
@@ -775,7 +948,9 @@ or the live 20-session experiment's scoring.
   is no shared daily ceiling), or, for a single (anchored to the stock's open position, else
   the stock, or to the group), the quiet window after a ping for the same
   position. A held ping is recorded `held` with the reason and never sent
-  later.
+  later. Since November 10, 2026 the policy also follows up a single that names
+  a stock like an entry trigger: did an entry fill in the stock follow within
+  30 minutes (a group ping has no stock and is not counted).
 - **Outbox:** table `radar_alert` in the journal database (`RadarAlert` in
   `backend/app/models.py`, additive migration
   `backend/alembic/versions/b9e4d2a7c1f3_add_radar_alerts.py`), not the Radar
@@ -823,7 +998,7 @@ Isaac's call, because it runs unattended plan turns in a new worker.
   `RADAR_SINGLE_MIN_RELATIVE_PCT`, default 7%, against SPY, or a group with
   every member the same way and a median at least
   `RADAR_SINGLE_MIN_GROUP_PCT`, default 3%), or is a dip-buy candidate (kind
-  `dip_turn`). Any other event is recorded once as `filtered` with a short
+  `dip_turn`) or a gap reversal (kind `gap_reversal`). Any other event is recorded once as `filtered` with a short
   reason ("Below the strong-event bar: NBIS +2.1% vs SPY") and costs no turn;
   the cap counts eligible events only. The week summary's `filtered` is that
   count, and the screen folds those rows into one line ("9 events below the
@@ -887,7 +1062,11 @@ or the [v2 opening drive](../research/notes/radar-v2-search-2026-11-04.md) expli
 own `RADAR_PREMARKET_ENABLED`, also off, and the shadow book its own
 `SHADOW_BOOK_ENABLED`, also off ([Shadow book](#shadow-book-off-by-default)),
 and the dip-buy rule its own `RADAR_DIP_RULES`, also off
-([Dip-buy candidates](#dip-buy-candidates-radar-dip-v0-off-by-default));
+([Dip-buy candidates](#dip-buy-candidates-radar-dip-v0-off-by-default)),
+the gap-reversal rule its own `RADAR_REVERSAL_RULES`, also off
+([Gap reversal](#gap-reversal-radar-reversal-v0-off-by-default)), and setup
+cards their own `RADAR_SETUP_CARDS`, also off
+([Setup cards](#setup-cards-off-by-default));
 turning any of them on is Isaac's call.
 
 

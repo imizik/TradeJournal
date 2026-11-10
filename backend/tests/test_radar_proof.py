@@ -133,9 +133,13 @@ def test_build_over_a_seeded_store(tmp_path, db):
     _brief(db, "2026-10-22", ["AAA"])
     _brief(db, "2026-10-23", ["BBB"])
     _brief(db, "2026-10-23", ["CCC"], redacted=True)
+    # The newest events are the dip and reversal rules': scored on their own, never here.
+    store.append_event(_event(10, "AAA", "11:00", kind="dip_turn", version="radar-dip-v0"))
+    store.append_event(_event(11, "BBB", "11:30", kind="gap_reversal", version="radar-reversal-v0"))
     out = radar_proof.build(RadarStore(tmp_path / "radar.sqlite", read_only=True), db, UNIVERSE)
     assert (out["state"], out["rule_version"], out["sessions"], out["events"], out["stock_events"], out["group_events"]) == (
         "ok", "radar-rules-v0", 2, 5, 4, 1)
+    assert out["setups"] == []
     assert out["ratings"] == {"useful": 1, "already_knew": 0, "too_late": 1, "irrelevant": 0, "unrated": 3}
     assert out["movers"] == {"radar_first": 1, "not_in_movers": 1, "movers_first": 1, "unavailable": 1}
     assert out["median_lead_minutes"] == 1.0
@@ -156,6 +160,18 @@ def test_build_over_a_seeded_store(tmp_path, db):
 def test_build_with_no_events(tmp_path, db):
     out = radar_proof.build(RadarStore(tmp_path / "radar.sqlite"), db, UNIVERSE)
     assert out["state"] == "no_data" and out["events"] == 0 and out["verdict"]["verdict"] == "not_enough_data"
+
+
+def test_proof_carries_the_setup_cards_scorecard(tmp_path, db):
+    from app.models import RadarSetup
+    for i, (state, pnl) in enumerate((("closed", 40.0), ("closed", -15.0), ("unresolved", None))):
+        db.add(RadarSetup(event_id=f"rg0-{i}", session_date=DAY, rule_version="radar-reversal-v0", kind="gap_reversal",
+                          symbol="AAA", direction="up", entry=10.0, invalidation=9.5, contract_json="{}" if i else None,
+                          paper_state=state, paper_pnl=pnl, plan_state="planned" if i == 0 else "none"))
+    db.commit()
+    out = radar_proof.build(RadarStore(tmp_path / "radar.sqlite"), db, UNIVERSE)
+    assert out["setups"] == [{"kind": "gap_reversal", "direction": "up", "cards": 3, "with_contract": 2, "planned": 1,
+                              "paper_closed": 2, "paper_green": 1, "paper_pnl": 25.0, "unresolved": 1}]
 
 
 def test_endpoint_off_and_on(tmp_path, monkeypatch, boundary):  # noqa: F811

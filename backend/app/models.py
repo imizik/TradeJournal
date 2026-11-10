@@ -642,7 +642,7 @@ class RadarAlert(SQLModel, table=True):
     event_id: str = Field(index=True)  # the Radar event, e.g. rv0-2026-10-22-spy-lad-up-1
     session_date: str = Field(index=True)
     rule_version: str
-    kind: str  # relative_to_spy | relative_to_sector | group_move | dip_turn
+    kind: str  # relative_to_spy | relative_to_sector | group_move | dip_turn | gap_reversal
     subject: str = Field(index=True)  # the stock, or the group name: the hourly cap's key
     title: str  # e.g. "Radar: LAD +5.3% vs SPY +0.1%"
     body: str  # the feed's summary and the time
@@ -654,6 +654,45 @@ class RadarAlert(SQLModel, table=True):
     claimed_at: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
     last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+
+class RadarSetup(SQLModel, table=True):
+    """One Radar setup card (``engine/radar_setup.py``): what a setup-kind Radar event (``dip_turn``,
+    ``gap_reversal``) looked like as a trade idea the minute it was first seen, frozen once per event. The
+    levels, the candidate contract and the owner's record line are what the phone ping showed; ``plan_*`` is
+    the owner's Plan it tap (``engine/radar_setup_plan.py``) and ``paper_*`` the paper result every card gets
+    (``engine/radar_setup_paper.py``). Advice only: nothing here places, changes or suggests an order.
+    Additive; the Radar file stays append-only and nothing here touches fills, trades or accounts."""
+
+    __tablename__ = "radar_setup"
+    __table_args__ = (
+        UniqueConstraint("event_id", name="uq_radar_setup_event"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    event_id: str = Field(index=True)  # the Radar event, e.g. rd0-2026-11-10-dip-nbis-up-1
+    session_date: str = Field(index=True)  # New York trading day
+    rule_version: str
+    kind: str  # dip_turn | gap_reversal
+    symbol: str = Field(index=True)
+    direction: str  # up | down
+    entry: float  # the stock's last at the first sighting
+    invalidation: float  # the session low (up) or high (down) the setup is built on
+    contract_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))  # the candidate contract as quoted then; None when no liquid one
+    record_text: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))  # the owner's record line shown
+    created_at: datetime = Field(default_factory=datetime.utcnow)  # UTC
+    plan_state: str = Field(default="none", sa_column_kwargs={"server_default": "none"})  # none | planned | refused
+    planned_at: Optional[datetime] = None  # UTC
+    investigation_id: Optional[str] = None  # the plan's desk thread
+    plan_note: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))  # why a tap was refused
+    paper_state: str = Field(default="none", index=True, sa_column_kwargs={"server_default": "none"})  # none | pending | open | closed | unresolved
+    paper_entry_price: Optional[float] = None  # the contract's ask at the first fresh quote after the card
+    paper_entry_at: Optional[datetime] = None  # UTC
+    paper_exit_price: Optional[float] = None  # the bid at the first fresh quote after the exit condition
+    paper_exit_at: Optional[datetime] = None  # UTC
+    paper_exit_reason: Optional[str] = None  # invalidation | time_stop | session_close
+    paper_pnl: Optional[float] = None  # dollars per contract, after commissions
+    paper_note: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))  # why it is unresolved
 
 
 class PlanNudge(SQLModel, table=True):

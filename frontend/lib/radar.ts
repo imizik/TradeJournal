@@ -11,7 +11,7 @@ export const RATINGS: { value: RadarRating; label: string }[] = [
 export type RadarEvidence = { symbol: string; pass_id: number; retrieved_at: string; last: number; change_pct: number };
 export type RadarEvent = {
   event_id: string; session_date: string; rule_version: string; universe_version: string;
-  kind: "relative_to_spy" | "relative_to_sector" | "group_move" | "dip_turn"; direction: "up" | "down";
+  kind: "relative_to_spy" | "relative_to_sector" | "group_move" | "dip_turn" | "gap_reversal"; direction: "up" | "down";
   symbols: string[]; benchmark: string; group: string | null; first_seen_at: string; summary: string;
   measures: Record<string, number>; evidence: RadarEvidence[];
   coverage: { passes_expected: number; passes_recorded: number; symbols_missing: string[] };
@@ -90,7 +90,7 @@ export const MEASURE_LABELS: Record<string, string> = {
 };
 
 /** A small tag for rules that are still rough, from the event's own rule_version. */
-export const RULE_TAGS: Record<string, string> = { "radar-rules-v0": "v0 · provisional rules", "radar-dip-v0": "dip · discovery rule" };
+export const RULE_TAGS: Record<string, string> = { "radar-rules-v0": "v0 · provisional rules", "radar-dip-v0": "dip · discovery rule", "radar-reversal-v0": "reversal · discovery rule" };
 export function measureText(key: string, value: number) {
   if (key === "volume_ratio") return `${value.toFixed(1)}×`;
   if (key.endsWith("_share_pct")) return `${value.toFixed(0)}%`;
