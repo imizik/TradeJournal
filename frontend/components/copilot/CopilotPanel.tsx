@@ -197,12 +197,17 @@ function Answer({ text, onPushBack }: { text: string; onPushBack?: (line: string
 /** What the answer read, folded into one line. The line still says what was unavailable, stale, partial, simulated or a
  * replay; opening it lists each source and the turn's model, timings and cost. */
 /** One-tap verdict under a finished answer: tap to choose, tap the other to switch, tap the chosen one to clear. */
-function RateAnswer({ rating, onRate }: { rating?: Rating; onRate: (next: Rating | null) => void }) {
+function RateAnswer({ rating, onRate, ask }: { rating?: Rating; onRate: (next: Rating | null) => void; ask?: boolean }) {
   const button = (value: Rating, label: string) => (
     <button type="button" aria-pressed={rating === value} onClick={() => onRate(rating === value ? null : value)}
-      className={`min-h-11 rounded border px-2 py-0.5 text-xs sm:min-h-0 ${rating === value ? "border-foreground/40 bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>
+      className={`min-h-11 rounded border px-2 py-0.5 text-xs sm:min-h-0 sm:px-3 sm:py-1 sm:text-sm ${rating === value ? "border-foreground/40 bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>
   );
-  return <div role="group" aria-label="Rate this answer" className="mt-1 flex gap-1.5">{button("helped", "Helped")}{button("didnt", "Didn't")}</div>;
+  return (
+    <div role="group" aria-label="Rate this answer" className="mt-1 flex items-center gap-1.5">
+      {ask && rating === undefined && <span aria-hidden className="mr-1 text-xs text-muted-foreground">Did this help?</span>}
+      {button("helped", "Helped")}{button("didnt", "Didn't")}
+    </div>
+  );
 }
 
 function Sources({ tools, metrics }: { tools: ToolEvent[]; metrics?: TurnMetrics }) {
@@ -1421,7 +1426,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
                 onOutcome={outcome => recordOutcome(proposal.id, outcome)} />
             ))}
             <Sources tools={message.tools ?? []} metrics={message.metrics} />
-            {message.content && !message.plan_context && (!current?.main_day || i < current.message_count) && !(busy && i === messages.length - 1) && <RateAnswer rating={message.rating} onRate={next => rateAnswer(i, next)} />}
+            {message.content && !message.plan_context && (!current?.main_day || i < current.message_count) && !(busy && i === messages.length - 1) && <RateAnswer ask={i === messages.length - 1} rating={message.rating} onRate={next => rateAnswer(i, next)} />}
           </div>
         ))}
         <div ref={end} />
