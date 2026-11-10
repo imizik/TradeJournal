@@ -8,8 +8,9 @@ discretionary ``Copilot plan`` on the default, or only, account, long calls for 
 candidate contract when the card has one, origin ``radar_event`` with the event id, so ``radar_proof`` counts the
 event as planned) and arms its invalidation alert (``plan_role="invalidation"``, ``source_kind="copilot"`` on the
 thread, so the plan ladder, the Plans board and the invalidation ping read it), then, best effort, a 60-minute time stop
-(``plan_time_stops.create``, text ``60m``: it counts from the tap, never runs past the close, and pings only if a
-position in the symbol was entered after the plan); a time stop refused or failed never fails the plan. There is no
+(``plan_time_stops.create``, text ``plan_time_stops.FROM_ENTRY``: due an hour after the tap, moved to an hour after the
+first entry fill in the symbol after the plan once that fill is in the journal, never past the close, and it pings only
+if such a position is open); a time stop refused or failed never fails the plan. There is no
 entry alert: the setup's entry is now, so a card from an earlier session (its ``session_date`` is not today's New York
 date by ``now``) is refused with nothing written. A failure after the claim and before the plan is saved releases the
 claim, so a later tap can plan it: a desk thread opened before the capture was saved is deleted, and a capture already
@@ -165,7 +166,7 @@ def plan(engine, setup_id: str, *, now: float | None = None, quote: Callable[[st
             db.rollback()
             armed = "Alert not armed: it could not be saved."
         try:
-            plan_time_stops.create(db, client_id=client_id, investigation_id=thread_id, symbol=symbol, text="60m", now=now,
+            plan_time_stops.create(db, client_id=client_id, investigation_id=thread_id, symbol=symbol, text=plan_time_stops.FROM_ENTRY, now=now,
                                    calendar=_calendar())
             armed += " 60-minute check armed."
         except Exception as exc:  # refused (after the close) or failed: the plan stands without it

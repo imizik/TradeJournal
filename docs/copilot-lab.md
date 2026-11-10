@@ -2203,8 +2203,10 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   by `PING_BUDGET_<KIND>`: `interrupt` 4 ([pattern interrupts](#pattern-interrupts)),
   `companion_update` 12 (the [position companion](#position-companion)'s updates and close notes),
   `nudge` 2 (link pings and the companion's adopt pings share it), `prep` 1 (shared
-  with the automatic week review and Watch your day), `radar_event` 4 (Radar's
-  single pings), `radar_digest` 2, `thesis_watch` 2, `research` 1. Before 09:30
+  with the automatic week review and Watch your day), `radar_setup` 4 (Radar
+  single pings that carry a [setup card](radar.md#setup-cards-off-by-default),
+  ranked just above `radar_event`), `radar_event` 4 (Radar's other single
+  pings), `radar_digest` 2, `thesis_watch` 2, `research` 1. Before 09:30
   New York these kinds together also have `PING_PREOPEN_ALLOWANCE` (default 2)
   pings, so pre-open headlines cannot spend the day. While the
   [morning brief](#pre-market-prep) is on and not yet decided today, one of them
@@ -2253,7 +2255,7 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   cannot read or write its table tells the sender to send.
 - **Acted on:** a pass on the level alert monitor's loop writes, from the fills
   and the plan links as they arrive and never by guessing, what followed each
-  delivered ping: an entry trigger or a Radar single ping naming a stock
+  delivered ping: an entry trigger or a Radar single or setup ping naming a stock
   (since November 10, 2026), an entry fill in the symbol within 30 minutes; an invalidation, time stop or open-trade alert, the position closed
   or trimmed within 15 minutes; a nudge or link ping, a plan linked within 30
   minutes. The trade page shows it per ping (`then: closed in 6 min`) and

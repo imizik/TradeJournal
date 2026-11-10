@@ -53,7 +53,7 @@ def test_plan_it_saves_the_plan_with_the_radar_origin_and_arms_the_invalidation(
     assert tap(engine, setup_id) == ("Planned NBIS: out below 59.85. Alert armed. 60-minute check armed.", "Planned")
     row, (capture,), (alert,), (thread,) = stored(engine, setup_id)
     [stop] = time_stops(engine)
-    assert (stop.client_id, stop.investigation_id, stop.symbol, stop.text) == (uuid.UUID(setup_id).hex, str(thread.id), "NBIS", "60m")
+    assert (stop.client_id, stop.investigation_id, stop.symbol, stop.text) == (uuid.UUID(setup_id).hex, str(thread.id), "NBIS", "60m from entry")
     assert stop.due_at == datetime(2026, 11, 10, 16, 5)  # 11:05 ET in naive UTC: 60 minutes from the tap
     assert thread.title == "Radar setup: NBIS dip turning up" and thread.symbol == "NBIS" and thread.status == "open"
     assert (row.plan_state, row.investigation_id, row.plan_note) == ("planned", str(thread.id), None)

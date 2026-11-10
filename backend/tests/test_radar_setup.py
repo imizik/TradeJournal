@@ -273,3 +273,15 @@ def test_build_returns_the_row_another_writer_saved_first(engine, feature_rows, 
     with Session(engine) as db:
         row = radar_setup.build(db, event, now=NOW, options=FakeOptions(GOOD))
         assert row.record_text == "theirs" and len(db.exec(select(RadarSetup)).all()) == 1
+
+
+def test_a_card_never_picks_a_same_day_expiry_and_takes_the_nearest_three_to_ten_days_out():
+    from app.engine import scanner_rules
+    listed = [TODAY, date(2026, 11, 11), date(2026, 11, 12), date(2026, 11, 13), date(2026, 11, 20), date(2026, 11, 27)]
+    assert radar_setup.card_expiration(listed, TODAY) == date(2026, 11, 13)  # 3 days out; today, 1 and 2 days are skipped
+    assert radar_setup.card_expiration([TODAY, date(2026, 11, 20)], TODAY) == date(2026, 11, 20)  # 10 days out
+    assert radar_setup.card_expiration([TODAY, date(2026, 11, 21)], TODAY) is None  # 11 days out
+    assert scanner_rules.pick_expiration(listed, TODAY) == TODAY  # the scanner's frozen rule is untouched
+    options = FakeOptions(GOOD, expirations=listed)
+    radar_setup.pick_contract("NBIS", "up", TODAY, options=options)
+    assert options.calls[-1] == ("chain", "NBIS", date(2026, 11, 13), False)

@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.engine import ntfy, radar_alerts, radar_runner, telegram_replies, tradier
+from app.engine import notification_policy, ntfy, radar_alerts, radar_runner, telegram_replies, tradier
 from app.engine.radar_alerts import RadarAlerts, message
 from app.engine.radar_runner import RadarRunner
 from app.engine.tradier import TradierQuote
@@ -41,7 +41,7 @@ def engine():
 def env(monkeypatch):
     for name in ("RADAR_ALERTS_ENABLED", "RADAR_ALERTS_LEAD_UNSEEN", "RADAR_SETUP_CARDS", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "RADAR_DIGEST_AT", "RADAR_SINGLE_MIN_RELATIVE_PCT", "RADAR_SINGLE_MIN_GROUP_PCT", "ALERT_APP_URL",
                  "COPILOT_ENABLED", "ALERT_POLICY_ENABLED", "PING_DAILY_CAP", "PING_QUIET_MINUTES", "PING_PREOPEN_ALLOWANCE",
-                 "PING_BUDGET_RADAR_EVENT", "PING_BUDGET_RADAR_DIGEST"):
+                 "PING_BUDGET_RADAR_EVENT", "PING_BUDGET_RADAR_DIGEST", "PING_BUDGET_RADAR_SETUP", "RADAR_SETUP_SIDES"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
 
@@ -651,7 +651,7 @@ def test_a_card_ping_carries_the_card_and_plan_it_on_its_own_row(engine, monkeyp
     alerts.deliver()
     [(title, _, kw)] = sent
     assert title == row.title
-    assert kw["buttons"] == (*telegram_replies.rating_buttons(row.id), ("Plan it", f"rp:{setup.id}"), ("Why?", "ask:radar_event"))
+    assert kw["buttons"] == (*telegram_replies.rating_buttons(row.id), ("Plan it", f"rp:{setup.id}"), ("Why?", "ask:radar_setup"))
     keyboard = telegram.keyboard(kw["path"], kw["buttons"])["inline_keyboard"]
     plan_row = next(r for r in keyboard if any(b.get("callback_data", "").startswith("rp:") for b in r))
     assert [b["text"] for b in plan_row] == ["Plan it", "Why?"]  # never beside a rating
@@ -692,3 +692,74 @@ def test_a_card_ping_with_the_paper_record_adds_its_line(engine, monkeypatch):
     _card(engine, event)
     [row] = RadarAlerts(engine, clock=Clock(at(22))).record([event])
     assert "Paper record for this setup: 3 of 5 green, +$90" in row.body.splitlines()
+
+
+def _deliver_one(engine, event, monkeypatch, *, card=True):
+    sent = []
+    sent_to(monkeypatch, sent)
+    if card:
+        _card(engine, event)
+    alerts = RadarAlerts(engine, clock=Clock(at(22)))
+    alerts.record([event])
+    alerts.deliver()
+    return sent
+
+
+def test_a_card_ping_has_its_own_kind_and_budget_and_a_setup_without_a_card_stays_radar_event(engine, monkeypatch):
+    monkeypatch.setenv("RADAR_SETUP_CARDS", "true")
+    monkeypatch.setenv("PING_BUDGET_RADAR_EVENT", "0")  # strong movers spent: the card ping still goes
+    sent = _deliver_one(engine, _reversal(), monkeypatch)
+    assert len(sent) == 1 and sent[0]["title"].startswith("Radar setup: AAA")
+    [ping] = pings(engine)
+    assert (ping.kind, ping.decision, ping.rank) == ("radar_setup", "sent", notification_policy.rank("radar_event") - 1)
+    # The same kind of event without a card is a plain radar_event ping, held by that budget.
+    _deliver_one(engine, _reversal("rg0-bbb", "BBB"), monkeypatch, card=False)
+    plain = [p for p in pings(engine) if p.symbol == "BBB"]
+    assert [(p.kind, p.decision, p.reason) for p in plain] == [
+        ("radar_event", "over_cap", "Not sent: Radar's 0 single pings for today are spent.")]
+
+
+def test_over_the_setup_budget_a_card_ping_is_held_and_strong_movers_keep_theirs(engine, monkeypatch):
+    monkeypatch.setenv("RADAR_SETUP_CARDS", "true")
+    monkeypatch.setenv("PING_BUDGET_RADAR_SETUP", "0")
+    sent = _deliver_one(engine, _reversal(), monkeypatch)
+    [row] = [r for r in rows(engine) if r.subject == "AAA"]
+    assert sent == [] and row.delivery == "held" and row.last_error == "Not sent: Radar's 0 setup pings for today are spent."
+    _deliver_one(engine, _event("e-strong", "CCC", 22), monkeypatch, card=False)
+    assert [(p.kind, p.decision) for p in pings(engine) if p.symbol == "CCC"] == [("radar_event", "sent")]
+
+
+def test_with_cards_off_a_setup_ping_stays_radar_event_even_with_a_card_row(engine, monkeypatch):
+    _deliver_one(engine, _reversal(), monkeypatch)
+    assert [(p.kind, p.decision) for p in pings(engine)] == [("radar_event", "sent")]
+
+
+@pytest.mark.parametrize("sides", (None, "both", "junk"))
+def test_by_default_both_sides_of_a_setup_ping(engine, monkeypatch, sides):
+    if sides:
+        monkeypatch.setenv("RADAR_SETUP_SIDES", sides)
+    monkeypatch.setenv("RADAR_SETUP_CARDS", "true")
+    _card(engine, down := _reversal("rg0-down", "BBB", direction="down"))
+    [row] = RadarAlerts(engine, clock=Clock(at(22))).record([down])
+    assert row.delivery == "pending" and row.title.startswith("Radar setup: BBB reversing down")
+
+
+@pytest.mark.parametrize("cards", ("true", ""))
+def test_with_sides_up_a_down_setup_waits_for_the_digest_and_an_up_setup_still_pings(engine, monkeypatch, cards):
+    monkeypatch.setenv("RADAR_SETUP_SIDES", "up")
+    monkeypatch.setenv("RADAR_SETUP_CARDS", cards)
+    down, up = _reversal("rg0-down", "BBB", direction="down"), _reversal()
+    _card(engine, down)
+    _card(engine, up)
+    clock = Clock(at(22))
+    first, second = RadarAlerts(engine, clock=clock).record([down, up])
+    assert first.delivery == "digest" and first.body == radar_alerts.digest_line(down)
+    assert first.last_error == "BBB is a down-side setup and RADAR_SETUP_SIDES is up, so this one waits for the digest."
+    assert second.delivery == "pending"
+    # A down-side strong mover that is not a setup is untouched.
+    [plain] = RadarAlerts(engine, clock=clock).record([_event("e-down", "DDD", 22, direction="down", relative=-7.2)])
+    assert plain.delivery == "pending"
+    # The held-back setup did not use the stock's one setup ping: a later up setup in BBB still pings.
+    clock.now = at(95)
+    [later] = RadarAlerts(engine, clock=clock).record([_reversal("rg0-bbb-up", "BBB", 95)])
+    assert later.delivery == "pending"
