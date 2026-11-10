@@ -10,8 +10,7 @@ the stock with the live card's exits (radar_setup.levels, radar_setup_paper), be
 the same minute and direction. Research only: nothing here is read by the app.
 """
 import argparse
-from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date
 from decimal import Decimal
 import gzip
 import hashlib
