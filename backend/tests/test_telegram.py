@@ -1237,7 +1237,7 @@ def test_plan_it_on_a_radar_setup_ping_is_routed_once_and_marks_only_its_button(
     label, data = telegram_replies.plan_button(setup_id)
     # The tap passes no clock; pin it to the card's session before the close, or the result depends on the wall clock.
     planner = radar_setup_plan.plan
-    monkeypatch.setattr(radar_setup_plan, "plan", lambda engine, key, **kw: planner(engine, key, now=NOW, **kw))
+    monkeypatch.setattr(radar_setup_plan, "plan", lambda db, key, **kw: planner(db, key, now=NOW, **kw))
     assert (label, data) == ("Plan it", f"rp:{setup_id}") and len(data.encode()) <= telegram.CALLBACK_MAX
     monkeypatch.setattr(radar_setup_plan, "_live_price", lambda symbol: 61.4)
     monkeypatch.setattr(telegram_replies, "_calendar", lambda: None)  # the 60-minute check reads clock hours; no calendar fetch
