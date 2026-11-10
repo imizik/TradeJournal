@@ -326,7 +326,10 @@ def main_chat_history(before: datetime | None = None, session: Session = Depends
 @router.get("/investigations")
 def list_investigations(limit: int = 20, symbol: str | None = None, q: str | None = None, session: Session = Depends(get_session)):
     _enabled()
-    return {"investigations": investigations.list_investigations(symbol=symbol, limit=limit, search=q, session=session)}
+    rows = investigations.list_investigations(symbol=symbol, limit=limit, search=q, session=session)
+    from app.engine import radar_setup_plan
+    radar = radar_setup_plan.thread_ids(session, [r["id"] for r in rows])  # "From Radar" in the desk's thread list
+    return {"investigations": [{**r, "origin": "radar" if r["id"] in radar else None} for r in rows]}
 
 
 @router.post("/investigations", status_code=201)

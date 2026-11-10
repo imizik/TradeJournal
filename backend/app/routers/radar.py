@@ -250,12 +250,22 @@ def proof(db: Session = Depends(get_session)):
     """Ratings and timing against Movers and the morning brief, for /proof; read-only."""
     store, reason = _store(read_only=True)
     if store is None:
-        return {"state": "off", "reason": reason}
+        return {"state": "off", "reason": reason, "setups": _setups(db)}
     try:
         return radar_proof.build(store, db, load_universe())
     except (sqlite3.Error, ValueError, KeyError, OSError, TypeError) as exc:
         log.warning("radar proof unreadable: %s", exc)
-        return {"state": "off", "reason": "The Radar file could not be read right now."}
+        return {"state": "off", "reason": "The Radar file could not be read right now.", "setups": _setups(db)}
+
+
+def _setups(db: Session) -> list[dict] | None:
+    """The setup cards' scorecard lives in the journal, so it reads even when the Radar file does not."""
+    try:
+        return radar_proof.radar_setup_paper.scorecard(db)
+    except Exception:
+        log.exception("radar setup scorecard unreadable")
+        db.rollback()
+        return None
 
 
 @router.get("/shadow-book")
@@ -277,7 +287,52 @@ def event_detail(event_id: str, db: Session = Depends(get_session)):
     # Whether a pre-trade plan names this event as its origin, and whether that plan was traded (docs/radar.md).
     plans = radar_proof.planned_events(db, [event_id]).get(event_id, {"planned": False, "traded": False})
     return {"event": event, "revisions": store.revisions(event_id), "rating": store.latest_ratings().get(event_id),
-            "news": checks[-1] if checks else None, "news_checks": checks, "plans": plans}
+            "news": checks[-1] if checks else None, "news_checks": checks, "plans": plans, "setup": _setup(store, db, event_id)}
+
+
+def _last_recorded(store: RadarStore, session: str, symbol: str) -> dict | None:
+    """The symbol's latest recorded Radar quote in ``session`` when that session is today; None otherwise."""
+    if session != datetime.fromtimestamp(_now(), ET).date().isoformat():
+        return None
+    rows = [r for r in store.quotes(session_date=session, symbol=symbol) if r.get("last")]
+    if not rows:
+        return None
+    row = max(rows, key=lambda r: r.get("retrieved_at") or "")
+    return {"price": row["last"], "at": row.get("retrieved_at")}
+
+
+def _setup(store: RadarStore, db: Session, event_id: str) -> dict | None:
+    """The event's setup card (docs/radar.md § Setup cards) as the desk shows it, or None for an event without one."""
+    from app.engine import radar_setup_plan
+    try:
+        row = radar_setup_plan.for_event(db, event_id)
+        if row is None:
+            return None
+        try:
+            last = _last_recorded(store, row.session_date, row.symbol)
+        except (sqlite3.Error, ValueError, KeyError, OSError) as exc:
+            log.warning("radar setup last quote unreadable: %s", exc)
+            last = None
+        return radar_setup_plan.view(db, row, last=last)
+    except Exception:  # the card is extra; the event still reads
+        log.exception("radar setup %s unreadable", event_id)
+        db.rollback()
+        return None
+
+
+@router.post("/setups/{setup_id}/plan")
+def plan_setup(setup_id: str, db: Session = Depends(get_session)):
+    """Plan it on the desk: the same claim, plan, alert and refusals as the setup ping's button
+    (``radar_setup_plan.plan``). ``planned`` once a plan stands (now or earlier); ``refused`` when it never can be."""
+    from app.engine import radar_setup_plan
+    reply, label = radar_setup_plan.plan(db.get_bind(), setup_id)
+    key = radar_setup_plan._uuid(setup_id)
+    db.expire_all()
+    row = db.get(radar_setup_plan.RadarSetup, key) if key else None
+    if row is None:
+        raise HTTPException(404, reply)
+    return {"reply": reply, "planned": label == radar_setup_plan.PLANNED, "refused": label == radar_setup_plan.NOT_PLANNED,
+            "setup": radar_setup_plan.view(db, row)}
 
 
 @router.post("/visits")

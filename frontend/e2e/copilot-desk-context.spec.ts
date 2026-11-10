@@ -40,6 +40,8 @@ const EXIT_HABITS = { go_live: "2026-10-21", window: 20, since_go_live: 12, rece
   alerts_total: 14, responses: {}, feedback: { total: 14, responded: 9, unanswered: 5, counts: {} },
   verdict: { verdict: "not_helping", reason: "Give-back rate went up.", rule: "Each habit's rate falls.", sample: 12 } };
 const RADAR_PROOF = { state: "ok", reason: null, rule_version: "rv1", sessions: 4, events: 30,
+  setups: [{ kind: "dip_turn", direction: "up", cards: 6, with_contract: 5, planned: 2, paper_closed: 4, paper_green: 3, paper_pnl: 210, unresolved: 1 },
+    { kind: "gap_reversal", direction: "down", cards: 1, with_contract: 1, planned: 0, paper_closed: 0, paper_green: 0, paper_pnl: 0, unresolved: 0 }],
   verdict: { verdict: "not_enough_data", reason: "Needs 20 rated.", rule: "60% useful and ahead.", rated: 6, timed: 4, useful_share: 0.5, ahead_share: null } };
 
 type Desk = { picture?: "ok" | string; timeline?: object; history?: object };
@@ -257,6 +259,8 @@ test("on the Briefing the pane shows the day: QQQ with your fills and pings, the
     "Wed Nov 4: 7 named, 3 moved, 2 without bars", "Tue Nov 3: 5 named, 1 moved"]);
   await expect(proof.getByTestId("week-proof-alerts")).toHaveText("Alerts: No consistent decrease · based on 9 of 14 alerts answered");
   await expect(proof.getByTestId("week-proof-radar")).toHaveText("Radar: Not enough data · 6 hits rated");
+  await expect(proof.getByTestId("week-proof-setup-line")).toHaveText(["Dip turning up: 6 cards · 2 planned · paper 3 of 4 green, +$210",
+    "Gap up turning down: 1 card · 0 planned · no paper result yet"]);
   await expect(proof.getByRole("link", { name: "Open Proof →" })).toHaveAttribute("href", "/proof");
   const tiles = pane.getByRole("list", { name: "This week's entries" }).getByRole("link");
   await expect(tiles).toHaveText(["+", "−", "+", "+"]);
@@ -275,7 +279,7 @@ test("this week's proof lines say when a proof read is missing or fails", async 
   await page.route("**/copilot/chat", (route) => route.abort());
   await page.route("**/charts/captures/streak", (route) => route.fulfill({ json: { show: false } }));
   await page.route("**/analytics/exit-habits", (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
-  await page.route("**/radar/proof", (route) => route.fulfill({ json: { state: "off", reason: "Radar is not recording." } }));
+  await page.route("**/radar/proof", (route) => route.fulfill({ json: { state: "off", reason: "Radar is not recording.", setups: [] } }));
   await page.route("**/copilot/answer-scorecard*", (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
   await page.route("**/copilot/brief-scorecard*", (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
   await page.goto("/copilot-lab?view=briefing");
@@ -287,7 +291,8 @@ test("this week's proof lines say when a proof read is missing or fails", async 
   await expect(pane.getByTestId("week-brief-line")).toHaveText("Morning brief: could not load");
   await expect(proof.getByTestId("week-proof-alerts")).toHaveText("Alerts: could not load");
   await expect(proof.getByTestId("week-proof-radar")).toHaveText("Radar: Not enough data · Radar is not recording.");
-  await expect(pane).toContainText("No entries are tracked yet."); // the week's record still shows below
+  await expect(proof.getByTestId("week-proof-setups")).toHaveText("Setup cards:No setup cards yet."); // the journal's cards read with Radar off
+  await expect(pane).toContainText("No entries are tracked yet.");  // the week's record still shows below
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
 });
 

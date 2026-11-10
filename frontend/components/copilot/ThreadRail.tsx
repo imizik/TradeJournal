@@ -140,13 +140,16 @@ function foldTalks(ticker: Ticker, active: string | null) {
   return { shown, earlier: open.filter(t => !shown.includes(t)), closed: ticker.conversations.filter(t => t.status === "closed") };
 }
 
+/** A thread planned from Radar: the server's origin, else a Plan it thread's own title. */
+const fromRadar = (talk: InvestigationSummary) => talk.origin === "radar" || talk.title.startsWith("Radar setup:");
+
 /** A ticker's subthreads: its newest open conversations (title and date; the plan's and the exit review's named), the
  * other open ones under Earlier and the closed ones under Closed. The open conversation always shows. */
 function Children({ ticker, active, actions }: { ticker: Ticker; active: string | null; actions: HomeActions }) {
   const planOf = new Set(ticker.rows.filter(r => r.key.startsWith("plan:") && r.close?.kind !== "exit").map(r => r.investigationId));
   const exitOf = new Set(ticker.rows.filter(r => r.close?.kind === "exit").map(r => r.investigationId));
   const row = (talk: InvestigationSummary) => <Talk key={talk.id} id={talk.id} title={talk.title} at={talk.updated_at} active={active} actions={actions}
-    tag={exitOf.has(talk.id) ? "Exit review" : planOf.has(talk.id) ? "Plan" : null} />;
+    tag={exitOf.has(talk.id) ? "Exit review" : fromRadar(talk) ? "From Radar" : planOf.has(talk.id) ? "Plan" : null} />;
   const { shown, earlier, closed } = foldTalks(ticker, active);
   return (
     <ul aria-label={`${ticker.symbol} threads`} className="ml-3.5 space-y-0.5 border-l pl-1.5">

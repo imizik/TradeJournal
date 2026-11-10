@@ -232,7 +232,8 @@ TOOLS: list[dict] = [
         "name": "get_radar_today",
         "description": "What Radar recorded this session, as its screen shows: saved events newest first (kind, symbols, benchmark, "
                        "group, first seen, summary, measures, latest revision, nearby headlines, the owner's rating), and the latest "
-                       "pass's movers (SPY and QQQ day %, five leaders and laggards against SPY, the curated groups). Recorded "
+                       "pass's movers (SPY and QQQ day %, five leaders and laggards against SPY, the curated groups), and the session's "
+                       "setup cards (setup, invalidation level, candidate contract, the owner's record line, plan state). Recorded "
                        "sampled observations with their own times, not live quotes. `group` keeps events of one curated group or "
                        "one symbol; `limit` caps the events (1-12).",
         "input_schema": {"type": "object", "additionalProperties": False,

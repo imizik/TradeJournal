@@ -426,6 +426,8 @@ export type Findings = {
 export type InvestigationSummary = {
   id: string; source: "copilot" | "research_job" | "jo"; has_findings: boolean; title: string; symbol: string | null; status: "open" | "closed"; conclusion: string | null;
   main_day?: string | null; main_at_capacity?: boolean;
+  /** "radar": a thread planned from a Radar hit or setup card (the plan capture's origin), tagged "From Radar" on the desk. */
+  origin?: "radar" | null;
   revision: number; message_count: number; created_at: string; updated_at: string;
 };
 export type Investigation = InvestigationSummary & {

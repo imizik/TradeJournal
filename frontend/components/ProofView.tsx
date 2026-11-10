@@ -18,7 +18,21 @@ export type RadarProof = { state: string; reason: string | null; rule_version?: 
   plans?: { planned: number; traded: number };
   stock_events?: number; group_events?: number; ratings?: Record<string, number>; movers?: Record<string, number>;
   median_lead_minutes?: number | null; brief?: Record<string, number>;
+  /** Setup cards (radar_setup_paper.scorecard), one row per kind and direction; read from the journal, so present when Radar is off. */
+  setups?: SetupScore[] | null;
   verdict?: { verdict: Verdict; reason: string; rule: string; rated: number; timed: number; useful_share: number | null; ahead_share: number | null } };
+
+export type SetupScore = { kind: string; direction: "up" | "down"; cards: number; with_contract: number; planned: number;
+  paper_closed: number; paper_green: number; paper_pnl: number; unresolved: number };
+const SETUP_NAME: Record<string, string> = { "dip_turn up": "Dip turning up", "dip_turn down": "Pop turning down",
+  "gap_reversal up": "Gap down turning up", "gap_reversal down": "Gap up turning down" };
+export const signedDollars = (v: number) => `${v >= 0 ? "+" : "−"}$${Math.abs(v) >= 1000 ? `${(Math.abs(v) / 1000).toFixed(1)}k` : Math.round(Math.abs(v)).toLocaleString("en-US")}`;
+/** "Dip turning up: 6 cards · 2 planned · paper 3 of 4 green, +$210", worded as the setup ping's record line. */
+export function setupLine(row: SetupScore): string {
+  const name = SETUP_NAME[`${row.kind} ${row.direction}`] ?? `${row.kind.replace(/_/g, " ")} ${row.direction}`;
+  const paper = row.paper_closed ? `paper ${row.paper_green} of ${row.paper_closed} green, ${signedDollars(row.paper_pnl)}` : "no paper result yet";
+  return `${name}: ${row.cards} card${row.cards === 1 ? "" : "s"} · ${row.planned} planned · ${paper}`;
+}
 
 type HabitTally = { n: number; trades: number; pct: number | null };
 type PlanGroup = { key: "planned" | "unplanned" | "late"; label: string; in_verdict: boolean; trades: number; pnl: number;
@@ -130,6 +144,28 @@ function AlertsProof() {
 
 function RadarProofCard() {
   const { body, error } = useJson<RadarProof>("/radar/proof");
+  return <><RadarVerdictCard body={body} error={error} />{(!body || body.setups !== undefined) && <RadarSetupsCard body={body} error={error} />}</>;
+}
+
+// Setup cards have no verdict rule: the chip says so, and the counts follow. Paper results are a record, not proof.
+function RadarSetupsCard({ body, error }: { body: RadarProof | null; error: boolean }) {
+  const rows = body?.setups ?? [];
+  const sum = (key: "paper_closed" | "paper_green" | "paper_pnl" | "cards" | "unresolved") => rows.reduce((n, r) => n + r[key], 0);
+  const closed = sum("paper_closed"), cards = sum("cards"), unresolved = sum("unresolved");
+  return <DashboardCard title="Radar setup cards">
+    {!body ? <Status error={error} what="Setup cards" />
+      : body.setups == null ? <p className="text-sm text-muted-foreground">Setup cards could not be read right now.</p>
+      : <div className="space-y-3" data-testid="proof-radar-setups">
+        <VerdictHead tone={VERDICT.not_enough_data.tone} label="Record only"
+          reason={cards ? `${cards} card${cards === 1 ? "" : "s"}; paper ${closed ? `${sum("paper_green")} of ${closed} green, ${signedDollars(sum("paper_pnl"))}` : "has no closed result yet"}.` : "No setup cards yet."} />
+        {rows.length > 0 && <ul className="space-y-0.5 text-sm">{rows.map(r => <li key={`${r.kind}-${r.direction}`} data-testid="proof-setup-line" className="break-words">{setupLine(r)}</li>)}</ul>}
+        <p className="text-xs text-muted-foreground">Paper: one contract, ask in and bid out, $0.65 a side, out at the invalidation, after 60 minutes or 5 minutes before the close.
+          {unresolved > 0 && ` ${unresolved} unresolved (no contract or no fresh quote).`} Not part of the Radar verdict; there is no verdict rule for setups yet.</p>
+      </div>}
+  </DashboardCard>;
+}
+
+function RadarVerdictCard({ body, error }: { body: RadarProof | null; error: boolean }) {
   return <DashboardCard title="Does Radar find what you'd miss, early enough?" action={<Link href="/radar" className={dashboardLink}>Open Radar →</Link>}>
     {!body ? <Status error={error} what="Radar proof" />
       : !body.verdict ? <div data-testid="proof-radar-verdict">

@@ -460,3 +460,17 @@ test("Context follows the ticker a Main conversation is about; going back to the
   await expect(page.getByText("NBIS is leading the group, answer 3.")).toBeVisible();
   await expect(pane.getByTestId("context-focus")).toContainText("NBIS"); // another conversation shows its ticker again
 });
+
+test("a thread planned from Radar is tagged From Radar, from the server's origin or a Plan it thread's title", async ({ page }) => {
+  await lab(page);
+  const radarPlan = { ...summary("44444444-4444-4444-8444-444444444444", "NBIS", "open", "2026-10-23T15:00:00Z"), title: "Plan a trade: Radar: NBIS turned up", origin: "radar" };
+  const setupPlan = { ...summary("55555555-5555-4555-8555-555555555555", "NBIS", "open", "2026-10-23T14:50:00Z"), title: "Radar setup: NBIS dip turning up" };
+  await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [
+    radarPlan, setupPlan, { ...saved, transcript: undefined, origin: null },
+  ] } }));
+  await page.reload();
+  await tickers(page).getByRole("button", { name: "NBIS, Held, needs you" }).click();
+  const children = list(page).getByRole("list", { name: "NBIS threads" });
+  await expect(children.getByRole("link")).toHaveText([/^From RadarPlan a trade: Radar: NBIS turned up/, /^From RadarRadar setup: NBIS dip turning up/, /^NBIS plan/]);
+  await children.screenshot({ path: test.info().outputPath("thread-list-from-radar.png") });
+});

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { REVIEW_WEEK, usePlanStreak, type PlanStreakEntry } from "@/components/PlanStreak";
-import { VERDICT, useJson, type RadarProof } from "@/components/ProofView";
+import { VERDICT, setupLine, useJson, type RadarProof } from "@/components/ProofView";
 import { EXIT_HABIT_VERDICT, type ExitHabitsBody } from "@/components/dashboard/ExitHabits";
 import {
   DESK_MARKET, DESK_TIMEFRAMES, deskSymbolThread, getDeskHistory, getDeskPicture, getDeskSession, getDeskTimeline,
@@ -258,6 +258,14 @@ function WeekProof() {
       {radar.body ? line("Radar", verdict ? VERDICT[verdict.verdict].label : VERDICT.not_enough_data.label,
         verdict ? <><span className="tabular-nums">{verdict.rated}</span> hit{verdict.rated === 1 ? "" : "s"} rated</> : radar.body.reason ?? "Radar is off", "week-proof-radar")
         : line("Radar", radar.error ? "could not load" : "reading…", null, "week-proof-radar")}
+      {radar.body && radar.body.setups !== undefined && (
+        <div data-testid="week-proof-setups">
+          <p className="text-muted-foreground">Setup cards:</p>
+          {radar.body.setups == null ? <p className="text-xs text-muted-foreground">could not load</p>
+            : radar.body.setups.length === 0 ? <p className="text-xs text-muted-foreground">No setup cards yet.</p>
+            : <ul className="space-y-0.5 text-xs">{radar.body.setups.map(r => <li key={`${r.kind}-${r.direction}`} data-testid="week-proof-setup-line" className="break-words">{setupLine(r)}</li>)}</ul>}
+        </div>
+      )}
       <Link href="/proof" className="inline-flex min-h-11 items-center text-xs font-medium text-primary hover:underline sm:min-h-0">Open Proof →</Link>
     </section>
   );

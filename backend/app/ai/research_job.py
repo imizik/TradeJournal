@@ -225,6 +225,8 @@ class _Recorder:
         block = {"id": call["id"], "name": name, "input": args}
         self.lab.append(block)
         result, event = await copilot._run_tool(self.evidence, block, self.cfg)
+        if name == "get_radar_today" and not result.get("is_error"):
+            result = {**result, "content": without_owner_book(result["content"])}
         if name == "get_symbol_news" and not result.get("is_error"):
             # Only each article's structured url: a URL planted in a headline or summary must not verify a citation.
             try:
@@ -235,6 +237,22 @@ class _Recorder:
                                   and a["url"].startswith(("https://", "http://")))
         block.update({k: event.get(k) for k in ("status", "summary", "provenance", "ms")}, input=event.get("input", args))
         return {"content": result["content"], "is_error": bool(result.get("is_error"))}
+
+
+# The owner's own lines on a Radar setup card (his record, his plan): the desk's copilot reads them, never this job.
+OWNER_SETUP_FIELDS = ("record", "plan")
+
+
+def without_owner_book(content: str) -> str:
+    """``get_radar_today``'s result with each setup card's owner fields removed; unreadable content is dropped whole."""
+    try:
+        data = json.loads(content)
+    except ValueError:
+        return json.dumps({"state": "error", "reason": "Radar today could not be read."})
+    if isinstance(data, dict) and isinstance(data.get("setups"), list):
+        data["setups"] = [{k: v for k, v in row.items() if k not in OWNER_SETUP_FIELDS}
+                          for row in data["setups"] if isinstance(row, dict)]
+    return json.dumps(data, default=str, separators=(",", ":"))
 
 
 def _url_fields(value) -> set[str]:

@@ -180,11 +180,33 @@ def live_radar_today(group: str | None, limit: int, now: datetime, most: int) ->
         out["prior_session"] = True
     if early:  # Radar's first pass is at the open; the pilot's scans are the pre-market's
         out["premarket_scan"] = copilot_extended.premarket_scan(str(store.path), today)
+    _with_setups(out, session, None, group)
     return radar_today.bounded(out, most)
 
 
 def replay_radar_today(store: RadarStore, session: str, now: float, group: str | None, limit: int, most: int) -> dict:
-    return radar_today.bounded(radar_today.feed(store, session, now, group=group, limit=limit), most)
+    out = radar_today.feed(store, session, now, group=group, limit=limit)
+    _with_setups(out, session, now, group)
+    return radar_today.bounded(out, most)
+
+
+def _with_setups(out: dict, session: str, before: float | None, group: str | None) -> None:
+    """The session's Radar setup cards (docs/radar.md § Setup cards) as compact rows; a group or ticker keeps its own.
+    ``before`` is replay's frozen moment: nothing made, planned or closed later is shown."""
+    from sqlmodel import Session
+    from app.database import engine
+    from app.engine import radar_setup_plan
+    try:
+        with Session(engine) as db:
+            rows = radar_setup_plan.copilot_rows(db, session, before)
+    except Exception:
+        log.exception("copilot radar setups unreadable")
+        out["setups_reason"] = "Setup cards could not be read right now."
+        return
+    if group:
+        symbols = {s for e in out["events"] for s in e["symbols"]} | {group.strip().upper()}
+        rows = [r for r in rows if r["symbol"] in symbols]
+    out["setups"] = rows
 
 
 # --------------------------------------------------------------------------- the fixture's NBIS scenario
@@ -248,6 +270,9 @@ def fixture_radar_today(group_name: str, session_pct: dict, group: str | None, l
          "news": {"status": "none_found", "checked_at": "2026-10-23T14:35:00Z", "headlines": []}, "rating": None},
     ]
     kept = [e for e in events if radar_today._matches(e, group)]
+    setups = [{"symbol": "NBIS", "event_id": "rad_sim_nbis_1", "setup": "dip turning up", "entry": 94.35, "invalidation": 92.40,
+               "contract": "NBIS Oct 31 95C · 3.10 × 3.25 (4.7% wide) · Δ0.48", "record": "Your first-hour calls: 9 of 17 green, +$1.2k",
+               "plan": "not planned", "first_seen": "2026-10-23T14:30:00Z"}]
     out = {"state": "ok", "session": "2026-10-23", "as_of": FIXTURE_AT, "events_total": len(kept), "events": kept[:limit],
            "movers": {"pass_at": FIXTURE_AT, "earlier_pass_at": "2026-10-23T14:57:00Z", "spy_day_pct": spy,
                       "qqq_day_pct": session_pct["QQQ"], "symbols_with_data": 9, "symbols_tracked": 9,
@@ -256,7 +281,8 @@ def fixture_radar_today(group_name: str, session_pct: dict, group: str | None, l
                       "groups": [{"name": group_name, "members_with_data": 7, "ahead": sum(stocks[s] > spy for s in stocks),
                                   "behind": sum(stocks[s] < spy for s in stocks), "median_vs_spy": round(sorted(stocks[s] - spy for s in stocks)[3], 3),
                                   "most": {"symbol": ranked[-1], "vs_spy": round(stocks[ranked[-1]] - spy, 3)}}]},
-           "passes_recorded": 103}
+           "passes_recorded": 103,
+           "setups": [r for r in setups if not group or any(r["event_id"] == e["event_id"] for e in kept) or r["symbol"] == group.strip().upper()]}
     if group:
         out["group"] = group
     return out
