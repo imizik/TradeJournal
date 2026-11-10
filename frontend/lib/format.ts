@@ -61,3 +61,34 @@ export function mondayOf(day: string, days = 0): string {
   date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
   return date.toISOString().slice(0, 10);
 }
+
+/**
+ * An expiration, or a journal timestamp's New York wall date, as a short
+ * calendar date ("Oct 9"), with the year when it is not this year ("Jan 15, 2027").
+ */
+export function fmtDate(value: string, thisYear: number) {
+  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", ...(year === thisYear ? {} : { year: "numeric" }) });
+}
+
+/** Keep the full option identity visible even when its detail columns are hidden. */
+export function contractName(trade: { ticker: string; strike?: number | null; expiration?: string | null; option_type?: string | null }) {
+  const expiry = trade.expiration;
+  const date = expiry ? fmtDate(expiry, Number(expiry.slice(0, 4))) : null;
+  const year = expiry?.slice(2, 4);
+  const side = trade.option_type === "call" ? "C" : trade.option_type === "put" ? "P" : "";
+  return `${trade.ticker} ${trade.strike ?? "—"}${side}${date ? ` · ${date} '${year}` : ""}`;
+}
+
+
+const SIDE_LABELS: Record<string, string> = {
+  buy_to_open: "Buy to open",
+  sell_to_close: "Sell to close",
+  buy_to_close: "Buy to close",
+  sell_to_open: "Sell to open",
+  buy: "Buy",
+  sell: "Sell",
+};
+
+/** A fill's side in words ("buy_to_open" -> "Buy to open"); anything unknown shows as stored. */
+export const sideLabel = (side: string) => SIDE_LABELS[side] ?? side;
