@@ -80,20 +80,11 @@ events with 40%+ useful and, over 10+ timed stock events, 50%+ where Movers did
 not already have it; otherwise not helping, and below either sample, not enough
 data. Rules and samples are shown on the page. See `backend/app/engine/radar_proof.py`.
 
-The Movers ranking at each recorded pass is the slow part of this read-out (about
-18 seconds a request in production before November 10, 2026). Each pass is now
-ranked once per backend process and kept in memory per Radar file and universe:
-passes and their quotes never change, so a request ranks only the passes
-recorded since the last one, and a session whose quotes were pruned is dropped
-and reads unavailable, as before. Ratings, plans, alerts and setup cards are
-read fresh on every request, so a rating or plan shows the moment it is saved.
-The first request after a restart still ranks everything.
-
 Beside alerted events, the read-out counts events that **led to a plan** (a
 pre-trade plan names the event as its origin) and **to a trade** (that plan is
 linked to a trade), shown on `/proof` and not part of the verdict. It also
 carries `setups`, the [setup cards'](#setup-cards-off-by-default) scorecard
-(`/proof` does not show it; `/radar`'s [Setups](#setups-screen) record lines do). The event
+(backend only for now; `/proof` does not show it yet). The event
 detail (`GET /radar/events/{id}`, field `plans`) carries the same as
 **Planned** and **Traded** marks. See [Origin](copilot-lab.md#origin).
 
@@ -173,6 +164,15 @@ becomes **Planned**; a refusal shows its reason. Below the cards, one record
 line per setup type and direction: cards, planned, paper closed, green,
 dollars. An expanded setup event in the feed shows its card too. The words
 describe; nothing says to buy.
+
+**Proof speed.** The Movers ranking at each recorded pass is the slow part of the [proof read-out](#proof-read-out) (about
+18 seconds a request in production before November 10, 2026). Each pass is now
+ranked once per backend process and kept in memory per Radar file and universe:
+passes and their quotes never change, so a request ranks only the passes
+recorded since the last one, and a session whose quotes were pruned is dropped
+and reads unavailable, as before. Ratings, plans, alerts and setup cards are
+read fresh on every request, so a rating or plan shows the moment it is saved.
+The first request after a restart still ranks everything.
 
 ### Outside your list
 
