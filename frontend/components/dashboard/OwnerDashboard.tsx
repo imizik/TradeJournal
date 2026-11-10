@@ -38,14 +38,12 @@ export function OwnerDashboardShell({ today, journal, attention }: { today: stri
       <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-baseline gap-2"><h1 className="text-xl font-semibold">Dashboard</h1><span className="text-sm text-muted-foreground">{today} ET</span></div>
         <div className="flex flex-wrap items-center gap-2"><PlanATrade origin="dashboard" /><ReviewMyWeek practice /><DashboardActions /></div></div>
     </header>
-    <JoTodayLine today={today} />
-    <ScalpShortlistPanel />
     <PlansCard />
     <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
       <aside className="min-w-0 xl:col-start-2 xl:row-start-1" aria-label="Attention and data status">
         <Suspense fallback={<AttentionLoading />}>{attention}</Suspense>
       </aside>
-      <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-1 xl:row-span-2" aria-label="Market and discovery"><MorningBriefing initialDay={today} compact /><RadarPreview /><ExitHabits /></div>
+      <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-1 xl:row-span-2" aria-label="Market and discovery"><JoTodayLine today={today} /><ScalpShortlistPanel /><MorningBriefing initialDay={today} compact /><RadarPreview /><ExitHabits /></div>
       {/* Exit habits sits with the left column so the two columns end near each other instead of leaving a gap. */}
       <div className="min-w-0 space-y-4 xl:col-start-2"><DataFreshness /></div>
     </div>
