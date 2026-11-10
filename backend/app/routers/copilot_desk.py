@@ -1011,15 +1011,16 @@ def _radar_outcomes(db: Session, now: float, first, start: datetime) -> dict:
         return {"state": "off", "reason": reason, "rows": []}
     day = datetime.fromtimestamp(now, ET).date()
     try:
-        card = radar_scorecard.scorecard(store, db, now, days=(day - first).days, kinds=(*radar_scorecard.STOCK_KINDS, *SETUP_KINDS))
+        # Only the events a ping reached are scored, so the scorecard's row cap never drops one of them.
+        sessions = [(first + timedelta(days=n)).isoformat() for n in range((day - first).days + 1)]
+        alerted = radar_proof.alerted_events(db, [e["event_id"] for s in sessions for e in store.events(s)])
+        card = radar_scorecard.scorecard(store, db, now, days=(day - first).days, kinds=(*radar_scorecard.STOCK_KINDS, *SETUP_KINDS),
+                                         only=alerted)
     except Exception as exc:  # noqa: BLE001 -- a busy or damaged Radar file must not take the alert rows down
-        db.rollback()
         log.warning("radar outcomes unreadable: %s", exc)
         return {"state": "unavailable", "reason": "The Radar file could not be read right now.", "rows": []}
     since = _utc_epoch(start)
     rows = [r for r in card["rows"] if r["at"] >= since]
-    alerted = radar_proof.alerted_events(db, [r["event_id"] for r in rows])
-    rows = [r for r in rows if r["event_id"] in alerted]
     setups = {s.event_id: s for s in db.exec(select(RadarSetup).where(col(RadarSetup.event_id).in_([r["event_id"] for r in rows])))} if rows else {}
     out = []
     for r in rows:

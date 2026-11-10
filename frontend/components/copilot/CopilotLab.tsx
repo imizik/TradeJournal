@@ -360,6 +360,11 @@ export default function CopilotLab({ link = null, close = false, daily = false }
     }
     setRefresh(n => n + 1);
   }, []);
+  const followRead = useCallback((symbol: string) => setFollow(prev => {
+    const next = { ...prev };
+    delete next[symbol];
+    return next;
+  }), []);
   // A ticker's follow switch for its header: null when the desk has no row about it.
   const followingOf = (symbol: string | null | undefined) =>
     symbol && rows.some(r => r.symbol === symbol) ? !rows.some(r => r.symbol === symbol && r.hidden) : null;
@@ -437,7 +442,7 @@ export default function CopilotLab({ link = null, close = false, daily = false }
         {on && (
           <aside aria-label="Threads" className={styles.rail}>
             <ThreadRail actions={actions} active={thread?.id ?? null} activeSymbol={thread ? thread.symbol : link?.symbol ?? null} main={onNow}
-              pick={pick} onRows={readRows} onWalk={setWalk} onSaved={setSaved} refresh={refresh} follow={follow} onFollow={changeFollow}
+              pick={pick} onRows={readRows} onWalk={setWalk} onSaved={setSaved} refresh={refresh} follow={follow} onFollow={changeFollow} onFollowRead={followRead}
               phase={fills.waiting.length > 0 && <FillsToLink count={fills.waiting.length} onStart={fills.start} />} />
           </aside>
         )}

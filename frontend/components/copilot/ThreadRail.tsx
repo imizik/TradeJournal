@@ -238,11 +238,13 @@ function DayLine({ data, needYou }: { data: DeskThreads; needYou: number }) {
  * shows them (under Main, then each ticker: its subthreads when shown, else its newest); ``onSaved`` the saved conversations, for
  * the breadcrumb. All | Plans switches to the Plans view (``PlanList``) from the same read, remembered in this browser.
  */
-export default function ThreadRail({ actions, active = null, activeSymbol = null, main = false, onRows, onWalk, onSaved, phase = null, refresh = 0, follow = {}, onFollow, pick }: {
+export default function ThreadRail({ actions, active = null, activeSymbol = null, main = false, onRows, onWalk, onSaved, phase = null, refresh = 0, follow = {}, onFollow, onFollowRead, pick }: {
   actions: HomeActions; active?: string | null; activeSymbol?: string | null; main?: boolean; onRows?(rows: DeskThread[]): void; onWalk?(ids: string[]): void;
   onSaved?(saved: InvestigationSummary[]): void; phase?: ReactNode; refresh?: number; pick(row: DeskThread): void;
   /** Follow changes made on this page, ahead of the next read (symbol → following). */
   follow?: Readonly<Record<string, boolean>>; onFollow?(symbol: string, following: boolean): Promise<void>;
+  /** A read that agrees with a follow change made here: the change is no longer needed ahead of the read. */
+  onFollowRead?(symbol: string): void;
 }) {
   const [data, setData] = useState<DeskThreads | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -302,6 +304,14 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
   const hiddenTickers = useMemo(() => tickersOf(rows.filter(r => r.hidden), data?.plans ?? [], saved.filter(t => !!t.symbol && hiddenSymbols.has(t.symbol)), () => false),
     [rows, data, saved, hiddenSymbols]);
   const [hiddenShown, setHiddenShown] = useState(false);
+  const [followFailed, setFollowFailed] = useState<string | null>(null);
+  // Once the server's read says what this page set, the server's word stands again (another device may change it later).
+  useEffect(() => {
+    for (const [symbol, following] of Object.entries(follow)) {
+      const own = data?.threads.filter(r => r.symbol === symbol) ?? [];
+      if (own.length && own.some(r => r.hidden) === !following) onFollowRead?.(symbol);
+    }
+  }, [data, follow, onFollowRead]);
   const briefing = rows.find(r => r.key === "briefing");
   const radar = rows.filter(isRadar);
   const radarNew = radar.filter(unread).length;
@@ -428,12 +438,16 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
                               {ticker.value && <span className={cn("ml-auto shrink-0 text-xs", TONE[ticker.value.tone], numeric(ticker.value.text) && "tabular-nums")}>{ticker.value.text}</span>}
                             </span>
                           </button>
-                          {onFollow && <button type="button" onClick={() => void onFollow(ticker.symbol, true).catch(() => undefined)}
+                          {onFollow && <button type="button" onClick={() => {
+                            setFollowFailed(null);
+                            onFollow(ticker.symbol, true).catch(() => setFollowFailed(`${ticker.symbol}: not saved. Try again.`));
+                          }}
                             className="min-h-11 shrink-0 rounded-md px-2 text-xs font-medium text-primary hover:bg-secondary sm:min-h-8">Show again</button>}
                         </li>
                       ))}
                     </ul>
                   )}
+                  {followFailed && <p role="alert" className="px-2.5 text-xs text-primary">{followFailed}</p>}
                 </div>
               )}
             </section>

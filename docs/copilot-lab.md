@@ -560,7 +560,8 @@ every device; `day_journal.not_following`), separate from the horizon, so a long
 week. A hidden ticker's rows carry `hidden` in `GET /copilot/desk/threads`: it leaves Now's positions and the thread
 list's groups for one collapsed "N not followed ▾" line at the bottom of each, every row with Show again; it is never
 counted in Waiting on you, "needs you" or the desk bar's count; it asks no close-of-day question and is not in Close
-the day or the evening review. Its thread still opens normally. Phone alerts, the position companion, the copilot's
+the day or the evening review. Its thread still opens normally. The setting belongs to the ticker, not one position:
+a new position in a hidden ticker starts hidden too, until Show again. Phone alerts, the position companion, the copilot's
 context and the day line's "At risk now" (the money actually at risk) still include it. The desk bar's **Now** button (a phone's
 first tab) comes back to it; `?view=briefing` (the old Briefing address) and the evening review's `?close=1` land on
 it too.
