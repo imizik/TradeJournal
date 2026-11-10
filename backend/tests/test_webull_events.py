@@ -43,8 +43,10 @@ def test_resolve_event_host_uat_us() -> None:
 
 
 def test_resolve_event_host_unknown_combo_raises() -> None:
-    from app.engine.webull_client import WebullClientError
-    with pytest.raises(WebullClientError):
+    # The class webull_events raises: test_webull_signer reloads webull_client, and a fresh import from there is a
+    # different class whenever both land on the same xdist worker in that order.
+    from app.engine import webull_events
+    with pytest.raises(webull_events.WebullClientError):
         resolve_event_host(env="prod", region="jp")
 
 
