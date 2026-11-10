@@ -742,13 +742,13 @@ Plan it still offered after Watching. Advice only. Proof:
 `frontend/e2e/copilot-radar-decision.spec.ts`.
 
 A hit that has a [setup card](radar.md#setup-cards-off-by-default) shows the
-card under the summary, worded as the phone ping words it (the event detail's
-`setup`): the setup in words, "In near 61.20 · out below 59.85 (−2.2%)", how
+card under the summary, worded as the phone ping words it
+(`GET /copilot/desk/radar-setup?event=<id>`): the setup in words, "In near 61.20 · out below 59.85 (−2.2%)", how
 far the latest recorded Radar price is from the level (today's session only),
 the candidate contract or "No liquid contract found.", the owner's record line,
 the paper record for the setup once there are enough, and this card's own paper
 result. Its **Plan it** does what the ping's button does
-(`POST /radar/setups/{id}/plan`, the same claim and refusals: an earlier
+(`POST /copilot/desk/radar-setup/{id}/plan`, the same claim and refusals: an earlier
 session, a price through the level, a stale quote), stays on the card and
 shows the reply; once planned the card says so and links **Open its thread →**
 instead of offering Plan it again, and a refused card shows why. A plan made

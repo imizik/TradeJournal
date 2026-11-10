@@ -195,10 +195,10 @@ def _with_setups(out: dict, session: str, before: float | None, group: str | Non
     ``before`` is replay's frozen moment: nothing made, planned or closed later is shown."""
     from sqlmodel import Session
     from app.database import engine
-    from app.engine import radar_setup_plan
+    from app.engine import desk_radar_setups
     try:
         with Session(engine) as db:
-            rows = radar_setup_plan.copilot_rows(db, session, before)
+            rows = desk_radar_setups.copilot_rows(db, session, before)
     except Exception:
         log.exception("copilot radar setups unreadable")
         out["setups_reason"] = "Setup cards could not be read right now."

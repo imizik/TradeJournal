@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from sqlmodel import Session, select
 
-from app.engine import captures as captures_engine, level_alerts, radar_proof, radar_setup_plan, telegram_replies
+from app.engine import captures as captures_engine, desk_radar_setups, level_alerts, radar_proof, radar_setup_plan, telegram_replies
 from app.models import CopilotInvestigation, LevelAlert, PlanTimeStop, RadarSetup, TradeCapture
 from tests.test_exit_habits import ROTH, engine  # noqa: F401
 
@@ -219,11 +219,11 @@ def desk(engine, tmp_path, monkeypatch):  # noqa: F811
     from app.database import get_session
     from app.engine.radar_store import RadarStore
     from app.main import app
-    from app.routers import radar
+    from app.routers import copilot_desk
     path = tmp_path / "radar.sqlite"
     monkeypatch.setenv("RADAR_ENABLED", "true")
     monkeypatch.setenv("RADAR_STORE", str(path))
-    monkeypatch.setattr(radar, "_now", lambda: NOW)
+    monkeypatch.setattr(copilot_desk, "_now", lambda: NOW)
     store = RadarStore(path)
 
     def session():
@@ -256,15 +256,14 @@ def test_the_event_detail_carries_its_setup_card_worded_as_the_ping(desk, engine
                             "requests_used": 1, "error": None, "skip_reason": None},
                            [{"symbol": "NBIS", "last": 61.0, "prev_close": 63.0, "open": 62.0, "high": 62.5, "low": 59.85, "volume": 1,
                              "bid": None, "ask": None, "trade_time_ms": None, "retrieved_at": "2026-11-10T15:04:00.000Z"}])
-    body = desk.client.get(f"/radar/events/{EVENT}").json()
-    setup = body["setup"]
+    setup = desk.client.get(f"/copilot/desk/radar-setup?event={EVENT}").json()["setup"]
     assert setup["id"] == setup_id and setup["words"] == "dip turning up" and setup["side"] == "below"
     assert setup["levels_line"] == "In near 61.20 · out below 59.85 (−2.2%)"
     assert setup["contract_line"].startswith("Candidate: NBIS Nov 20 62C · 1.10 × 1.20")
     assert (setup["plan_state"], setup["investigation_id"], setup["paper"]) == ("none", None, {"state": "none"})
     assert setup["last"] == {"price": 61.0, "at": "2026-11-10T15:04:00.000Z"} and setup["distance_pct"] == 1.89
     assert not {"account_id", "trade_id", "capture_id"} & set(setup)
-    assert desk.client.get("/radar/events/rd0-2026-11-10-plain").json()["setup"] is None  # no card: today's behaviour
+    assert desk.client.get("/copilot/desk/radar-setup?event=rd0-2026-11-10-plain").json() == {"setup": None}  # no card: today's behaviour
 
 
 def test_plan_it_on_the_desk_runs_the_pings_plan_and_reads_back_planned(desk, engine, monkeypatch):  # noqa: F811
@@ -272,28 +271,28 @@ def test_plan_it_on_the_desk_runs_the_pings_plan_and_reads_back_planned(desk, en
     setup_id = card(engine, contract=FULL)
     monkeypatch.setattr(radar_setup_plan.time, "time", lambda: NOW)
     monkeypatch.setattr(radar_setup_plan, "_live_price", lambda symbol: 61.4)
-    first = desk.client.post(f"/radar/setups/{setup_id}/plan").json()
+    first = desk.client.post(f"/copilot/desk/radar-setup/{setup_id}/plan").json()
     assert first["planned"] and not first["refused"] and first["reply"].startswith("Planned NBIS: out below 59.85. Alert armed.")
     thread = first["setup"]["investigation_id"]
     assert first["setup"]["plan_state"] == "planned" and thread
-    again = desk.client.post(f"/radar/setups/{setup_id}/plan").json()
+    again = desk.client.post(f"/copilot/desk/radar-setup/{setup_id}/plan").json()
     assert (again["reply"], again["planned"]) == ("Already planned.", True)
     _, captures, alerts, threads = stored(engine, setup_id)
     assert len(captures) == len(alerts) == len(threads) == 1
-    assert desk.client.get(f"/radar/events/{EVENT}").json()["setup"]["investigation_id"] == thread
+    assert desk.client.get(f"/copilot/desk/radar-setup?event={EVENT}").json()["setup"]["investigation_id"] == thread
     monkeypatch.setenv("COPILOT_ENABLED", "true")
     listed = {r["id"]: r["origin"] for r in desk.client.get("/copilot/investigations").json()["investigations"]}
     assert listed == {thread: "radar"}
     with Session(engine) as db:
-        assert radar_setup_plan.thread_ids(db, [thread, str(uuid.uuid4())]) == {thread}
-    assert desk.client.post(f"/radar/setups/{uuid.uuid4()}/plan").status_code == 404
+        assert desk_radar_setups.thread_ids(db, [thread, str(uuid.uuid4())]) == {thread}
+    assert desk.client.post(f"/copilot/desk/radar-setup/{uuid.uuid4()}/plan").status_code == 404
 
 
 def test_plan_it_on_the_desk_refuses_a_price_through_the_level_and_an_earlier_session(desk, engine, monkeypatch):  # noqa: F811
     setup_id = card(engine, contract=FULL)
     monkeypatch.setattr(radar_setup_plan.time, "time", lambda: NOW)
     monkeypatch.setattr(radar_setup_plan, "_live_price", lambda symbol: 59.5)
-    through = desk.client.post(f"/radar/setups/{setup_id}/plan").json()
+    through = desk.client.post(f"/copilot/desk/radar-setup/{setup_id}/plan").json()
     assert through["refused"] and not through["planned"] and through["setup"]["plan_state"] == "refused"
     assert "already below 59.85" in through["reply"]
     old = card(engine, event="rd0-2026-11-07-dip-nbis-up-1")
@@ -301,7 +300,7 @@ def test_plan_it_on_the_desk_refuses_a_price_through_the_level_and_an_earlier_se
         db.get(RadarSetup, uuid.UUID(old)).session_date = "2026-11-07"
         db.commit()
     monkeypatch.setattr(radar_setup_plan, "_live_price", lambda symbol: 61.4)
-    earlier = desk.client.post(f"/radar/setups/{old}/plan").json()
+    earlier = desk.client.post(f"/copilot/desk/radar-setup/{old}/plan").json()
     assert earlier["refused"] and earlier["reply"] == "This setup is from Nov 7; its level no longer applies. No plan saved."
     assert stored(engine, old)[1] == []
 
@@ -315,17 +314,17 @@ def test_copilot_rows_are_compact_and_replay_never_sees_a_later_plan_or_paper_re
         row.plan_state, row.planned_at = "planned", datetime(2026, 11, 10, 15, 10)
         row.paper_state, row.paper_pnl, row.paper_exit_reason, row.paper_exit_at = "closed", 45.0, "time_stop", datetime(2026, 11, 10, 16, 5)
         db.commit()
-        [live] = radar_setup_plan.copilot_rows(db, "2026-11-10")
+        [live] = desk_radar_setups.copilot_rows(db, "2026-11-10")
         assert live == {"symbol": "NBIS", "event_id": EVENT, "setup": "dip turning up", "entry": 61.2, "invalidation": 59.85,
                         "contract": "NBIS Nov 20 62C · 1.10 × 1.20 (8.7% wide) · Δ0.45", "record": "Your first-hour calls: 9 of 17 green, +$1.2k",
                         "plan": "planned", "first_seen": "2026-11-10T15:01:00Z", "paper": "+$45 per contract, out at 60-minute stop"}
         at = lambda hh, mm: datetime(2026, 11, 10, hh, mm, tzinfo=ZoneInfo("UTC")).timestamp()  # noqa: E731
-        assert radar_setup_plan.copilot_rows(db, "2026-11-10", at(15, 0)) == []
-        [early] = radar_setup_plan.copilot_rows(db, "2026-11-10", at(15, 5))
+        assert desk_radar_setups.copilot_rows(db, "2026-11-10", at(15, 0)) == []
+        [early] = desk_radar_setups.copilot_rows(db, "2026-11-10", at(15, 5))
         assert early["plan"] == "not planned" and "paper" not in early
-        [mid] = radar_setup_plan.copilot_rows(db, "2026-11-10", at(15, 30))
+        [mid] = desk_radar_setups.copilot_rows(db, "2026-11-10", at(15, 30))
         assert mid["plan"] == "planned" and "paper" not in mid
-        assert radar_setup_plan.copilot_rows(db, "2026-11-09") == []
+        assert desk_radar_setups.copilot_rows(db, "2026-11-09") == []
 
 
 def test_the_fixture_radar_today_carries_its_setup_card_and_bounded_drops_setups_last():

@@ -982,3 +982,49 @@ def desk_to_rate(db: Session = Depends(get_session)):
     items = sorted((row for part in (alerts, hits, answers) for row in part.get("rows", [])), key=lambda r: r["at"] or 0, reverse=True)
     return {"day": day.isoformat(), "since": first.isoformat(), "count": len(items), "items": items[:TO_RATE_ROWS],
             "sections": {"alerts": alerts["state"], "radar": hits["state"], "answers": answers["state"]}}
+
+
+def _now() -> float:
+    import time
+    return time.time()
+
+
+@router.get("/desk/radar-setup")
+def radar_setup(event: str, db: Session = Depends(get_session)):
+    """A Radar event's setup card as the desk's Radar card shows it (``desk_radar_setups.view``), or ``setup: null``
+    for an event without one. The distance from the level uses the latest recorded Radar quote, today's session only;
+    a Radar file that is off or unreadable just leaves it out. Read-only."""
+    import sqlite3
+    from app.engine import desk_radar_setups
+    from app.routers import radar
+    row = desk_radar_setups.for_event(db, event)
+    if row is None:
+        return {"setup": None}
+    last = None
+    store, _ = radar._store(read_only=True)
+    if store is not None:
+        try:
+            today = datetime.fromtimestamp(_now(), ET).date().isoformat()
+            last = desk_radar_setups.last_recorded(store, row.session_date, row.symbol, today)
+        except (sqlite3.Error, ValueError, KeyError, OSError) as exc:
+            log.warning("radar setup last quote unreadable: %s", exc)
+    return {"setup": desk_radar_setups.view(db, row, last=last)}
+
+
+@router.post("/desk/radar-setup/{setup_id}/plan")
+def plan_radar_setup(setup_id: str, db: Session = Depends(get_session)):
+    """Plan it on the desk's Radar card: the setup ping's own ``radar_setup_plan.plan``, unchanged (the same claim, plan,
+    alert, 60-minute check and refusals). ``planned`` once a plan stands (now or earlier); ``refused`` when it never can."""
+    from app.engine import desk_radar_setups, radar_setup_plan
+    from app.models import RadarSetup
+    reply, label = radar_setup_plan.plan(db.get_bind(), setup_id)
+    try:
+        key = uuid.UUID(setup_id)
+    except ValueError:
+        key = None
+    db.expire_all()
+    row = db.get(RadarSetup, key) if key else None
+    if row is None:
+        raise HTTPException(404, reply)
+    return {"reply": reply, "planned": label == radar_setup_plan.PLANNED, "refused": label == radar_setup_plan.NOT_PLANNED,
+            "setup": desk_radar_setups.view(db, row)}

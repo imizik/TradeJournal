@@ -18,7 +18,7 @@ export type RadarProof = { state: string; reason: string | null; rule_version?: 
   plans?: { planned: number; traded: number };
   stock_events?: number; group_events?: number; ratings?: Record<string, number>; movers?: Record<string, number>;
   median_lead_minutes?: number | null; brief?: Record<string, number>;
-  /** Setup cards (radar_setup_paper.scorecard), one row per kind and direction; read from the journal, so present when Radar is off. */
+  /** Setup cards (radar_setup_paper.scorecard), one row per kind and direction; absent from an older backend. */
   setups?: SetupScore[] | null;
   verdict?: { verdict: Verdict; reason: string; rule: string; rated: number; timed: number; useful_share: number | null; ahead_share: number | null } };
 

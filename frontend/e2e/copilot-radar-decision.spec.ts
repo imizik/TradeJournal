@@ -107,8 +107,9 @@ async function setupHit(page: Page, reply: Record<string, unknown>, setup = setu
     await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
     await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
     await page.route(`**/radar/events/${ID}`, (route) => route.fulfill({ json: { event: dip(), revisions: [], rating: null, news: null,
-      news_checks: [], plans: { planned: false, traded: false }, setup } }));
-    await page.route(`**/radar/setups/${SETUP_ID}/plan`, (route) => { plans.push(route.request().method()); return route.fulfill({ json: reply }); });
+      news_checks: [], plans: { planned: false, traded: false } } }));
+    await page.route(`**/copilot/desk/radar-setup?event=${ID}`, (route) => route.fulfill({ json: { setup } }));
+    await page.route(`**/copilot/desk/radar-setup/${SETUP_ID}/plan`, (route) => { plans.push(route.request().method()); return route.fulfill({ json: reply }); });
     await page.route(`**/day-journal/${DAY}`, (route) => route.fulfill({ json: { day: DAY, entries: [], trade_plans: {} } }));
     await page.route(`**/day-journal/${DAY}/entries`, (route) => {
       const body = route.request().postDataJSON();

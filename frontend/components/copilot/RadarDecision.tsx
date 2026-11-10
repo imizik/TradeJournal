@@ -18,7 +18,7 @@ const nyDay = (at: number) => new Date(at).toLocaleDateString("en-CA", { timeZon
 const WORD: Record<RadarChoice, string> = { watching: "Watching", passing: "Passing", planning: "Planning" };
 
 type RadarEvent = { event_id: string; session_date: string; kind: string; direction: "up" | "down"; symbols: string[]; summary: string | null; first_seen_at: string };
-/** The event's setup card (``radar_setup_plan.view``), worded as the phone ping words it; null for an event without one. */
+/** The event's setup card (``desk_radar_setups.view``), worded as the phone ping words it; null for an event without one. */
 export type RadarSetupCard = {
   id: string; event_id: string; session_date: string; kind: string; direction: "up" | "down"; symbol: string; words: string;
   entry: number; invalidation: number; side: "below" | "above"; levels_line: string; contract_line: string | null;
@@ -99,8 +99,11 @@ export default function RadarDecision({ eventId, symbol, fill }: { eventId: stri
       const response = await fetch(apiUrl(`/radar/events/${encodeURIComponent(eventId)}`), { cache: "no-store", signal: controller.signal });
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
-      const found = body as Detail;
-      const journal = await api.dayJournal(found.event.session_date);
+      const [journal, setup] = await Promise.all([api.dayJournal((body as Detail).event.session_date),
+        // The event's setup card, if it has one (GET /copilot/desk/radar-setup); a failed read just leaves it out.
+        fetch(apiUrl(`/copilot/desk/radar-setup?event=${encodeURIComponent(eventId)}`), { cache: "no-store", signal: controller.signal })
+          .then(r => r.ok ? r.json() as Promise<{ setup: RadarSetupCard | null }> : { setup: null }).then(r => r.setup).catch(() => null)]);
+      const found = { ...(body as Detail), setup };
       if (controller.signal.aborted) return;
       const seen = Date.parse(found.event.first_seen_at);
       const said = (found.event.summary ?? "").replace(/\.\s*$/, "");
@@ -152,13 +155,13 @@ export default function RadarDecision({ eventId, symbol, fill }: { eventId: stri
   const undo = () => { if (timer.current) clearTimeout(timer.current); timer.current = null; left.current = null; setPending(null); };
   const setup = detail.setup ?? null;
   const setupOpen = setup !== null && setup.plan_state === "none" && !closed;
-  // A setup card plans the way the ping's Plan it does (POST /radar/setups/{id}/plan): its levels, contract, alert and
+  // A setup card plans the way the ping's Plan it does (POST /copilot/desk/radar-setup/{id}/plan): its levels, contract, alert and
   // 60-minute check, or the same refusal. Without a card, Plan it opens a plan conversation naming the hit.
   const planSetup = async (card: RadarSetupCard) => {
     setError(null);
     setReply(null);
     try {
-      const response = await fetch(apiUrl(`/radar/setups/${encodeURIComponent(card.id)}/plan`), { method: "POST" });
+      const response = await fetch(apiUrl(`/copilot/desk/radar-setup/${encodeURIComponent(card.id)}/plan`), { method: "POST" });
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
       const result = body as PlanReply;

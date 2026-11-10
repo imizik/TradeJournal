@@ -291,7 +291,7 @@ test("this week's proof lines say when a proof read is missing or fails", async 
   await expect(pane.getByTestId("week-brief-line")).toHaveText("Morning brief: could not load");
   await expect(proof.getByTestId("week-proof-alerts")).toHaveText("Alerts: could not load");
   await expect(proof.getByTestId("week-proof-radar")).toHaveText("Radar: Not enough data · Radar is not recording.");
-  await expect(proof.getByTestId("week-proof-setups")).toHaveText("Setup cards:No setup cards yet."); // the journal's cards read with Radar off
+  await expect(proof.getByTestId("week-proof-setups")).toHaveText("Setup cards:No setup cards yet."); // an empty scorecard says so
   await expect(pane).toContainText("No entries are tracked yet.");  // the week's record still shows below
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
 });

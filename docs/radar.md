@@ -83,8 +83,8 @@ data. Rules and samples are shown on the page. See `backend/app/engine/radar_pro
 Beside alerted events, the read-out counts events that **led to a plan** (a
 pre-trade plan names the event as its origin) and **to a trade** (that plan is
 linked to a trade), shown on `/proof` and not part of the verdict. It also
-carries `setups`, the [setup cards'](#setup-cards-off-by-default) scorecard
-(read from the journal, so present even when Radar is off), shown on `/proof`
+carries `setups`, the [setup cards'](#setup-cards-off-by-default) scorecard,
+shown on `/proof`
 as its own "Radar setup cards" card under the Radar proof (chip "Record only":
 there is no verdict rule for setups) and on the desk's This week tab. The event
 detail (`GET /radar/events/{id}`, field `plans`) carries the same as
@@ -645,14 +645,14 @@ their total P&L, and unresolved; `/proof` and the desk's This week tab show
 one line per kind and direction ("Dip turning up: 6 cards · 2 planned · paper
 3 of 4 green, +$210").
 
-**On the desk.** `GET /radar/events/{id}` carries `setup` (null for an event
-without a card; `radar_setup_plan.view`): the card's id, words, entry and
+**On the desk.** `GET /copilot/desk/radar-setup?event=<id>` returns `setup`
+(null for an event without a card; `desk_radar_setups.view`): the card's id, words, entry and
 invalidation, the ping's levels and candidate lines, the owner's record and
 paper record lines, this card's paper result, its plan state, note and thread,
 and, for today's session, the symbol's latest recorded Radar quote with its
 distance from the level (no provider call). The desk's Radar card shows it
 ([Copilot Lab](copilot-lab.md#the-desk)), and its Plan it posts
-`POST /radar/setups/{id}/plan` (owner-only), which runs the ping's
+`POST /copilot/desk/radar-setup/{id}/plan` (owner-only), which runs the ping's
 `radar_setup_plan.plan` unchanged and returns its reply, `planned`, `refused`
 and the card as it now stands.
 
@@ -728,7 +728,7 @@ event, setup in words, entry, invalidation, the candidate contract, the
 owner's record line, plan state, first seen and, once closed, the paper
 result), kept to the tool's group or ticker when one is asked for and dropped
 last when the result must shrink; a replay never sees a card made, planned or
-closed after its frozen time (`radar_setup_plan.copilot_rows`). The research
+closed after its frozen time (`desk_radar_setups.copilot_rows`). The research
 job and the shadow trader read the same tool without the owner's record line
 and plan state (`research_job.without_owner_book`): they never see his book.
 
