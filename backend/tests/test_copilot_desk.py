@@ -252,6 +252,8 @@ def test_a_failing_draft_read_leaves_the_conversation_watching(desk, engine, mon
     body = read(desk)
     assert body["sections"]["drafts"] == "unavailable" and groups(body)["draft"] == []
     assert groups(body)["watch"] == [f"investigation:{APLD}"]
+    [row] = [r for r in body["threads"] if r["key"] == f"investigation:{APLD}"]
+    assert row["status"]["text"] == "Open question"  # no conclusion yet: a plain word, not "Open investigation"
 
 
 def test_an_unplanned_position_links_to_planning_it(desk, engine):  # noqa: F811

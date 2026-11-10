@@ -411,20 +411,28 @@ function scrollParent(node: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-/** A new conversation's name: its first answer's headline (what it concluded), else the first line of its first
- * message; at most 80 characters, cut at a word. */
-function threadTitle(messages: LabMessage[]): string {
-  const answer = messages.find(m => m.role === "assistant" && m.content.trim());
-  const text = ((answer && answerParts(answer.content)?.headline) || messages[0].content.split("\n")[0]).trim();
-  if (text.length <= 80) return text || "Untitled";
-  const cut = text.slice(0, 79);
-  return `${cut.slice(0, cut.lastIndexOf(" ") > 40 ? cut.lastIndexOf(" ") : 79)}…`;
+/** A new conversation's name, set once on its first save: its ticker and purpose, then a few of the owner's own words
+ * ("NBIS · plan", "AAPL · question: is the group confirming"). A plan is one started from Plan a trade (its context
+ * line) or one whose answer proposed a trade plan. Never the copilot's headline: that names its answer, not the thread. */
+export function threadTitle(messages: LabMessage[], symbol = ""): string {
+  const first = messages.find(m => m.role === "user")?.content ?? "";
+  const lines = first.split("\n").map(line => line.trim()).filter(Boolean);
+  const plan = /^(Context: )?Plan (a trade|this position)/i.test(lines[0] ?? "")
+    || messages.some(m => m.proposals?.some(p => p.kind === "trade_plan"));
+  const own = (lines.find(line => !line.startsWith("Context:")) ?? "").replace(/^Plan a trade:?\s*/i, "").replace(/[?.!:;,\s]+$/, "");
+  const ticker = symbol.trim().toUpperCase();
+  const head = ticker ? `${ticker} · ${plan ? "plan" : "question"}` : plan ? "Plan" : "Question";
+  if (!own) return head;
+  const words = own.split(/\s+/);
+  const few = words.slice(0, 7).join(" ");
+  const said = few.length > 48 ? `${few.slice(0, 47).replace(/\s+\S*$/, "")}…` : words.length > 7 ? `${few}…` : few;
+  return `${head}: ${/^[A-Z][a-z]/.test(said) ? said.charAt(0).toLowerCase() + said.slice(1) : said}`;
 }
 
 /** What is saved for a conversation: its title, symbol, status, conclusion, text and evidence references. */
 function savedFields(messages: LabMessage[], current: Current | null, symbol: string,
   next: Partial<Pick<Current, "status" | "conclusion">> = {}) {
-  return { title: current?.title ?? threadTitle(messages),
+  return { title: current?.title ?? threadTitle(messages, symbol),
     symbol: symbol.trim().toUpperCase() || null, status: next.status ?? current?.status ?? "open",
     conclusion: next.conclusion !== undefined ? next.conclusion : current?.conclusion ?? null, ...toSaved(messages) };
 }
@@ -441,10 +449,10 @@ function savedFields(messages: LabMessage[], current: Current | null, symbol: st
  * ``desk`` (page only) is the Copilot desk's hand-off: its thread list opens investigations or asks through
  * ``command``, the open investigation goes up through ``onThread``, and its activity shows in the desk's inspector.
  */
-function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose, home, strip, look, desk, daily = false, briefing = false }: {
+function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose, home, strip, look, desk, daily = false }: {
   link?: PanelLink | null; variant?: "page" | "panel"; pageSymbol?: string; pageContext?: string; onClose?(): void;
   home?: (actions: HomeActions) => ReactNode; strip?: (actions: PanelActions) => ReactNode; look?: () => Promise<ChartLook>;
-  desk?: DeskHooks; daily?: boolean; briefing?: boolean;
+  desk?: DeskHooks; daily?: boolean;
 }) {
   const panel = variant === "panel";
   const [openingMain, setOpeningMain] = useState(daily || !!link?.investigation);
@@ -684,7 +692,12 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         const request = ++selection.current;
         openDailyMain(controller.signal).then(saved => {
           if (!controller.signal.aborted && request === selection.current) open(saved);
-        }).catch(error => { if (!controller.signal.aborted) setSaveState({ state: "error", message: String(error) }); });
+        }).catch(error => {
+          if (controller.signal.aborted) return;
+          // Main chat would not open: the box still asks, as a new conversation, rather than waiting for it.
+          setOpeningMain(false);
+          setSaveState({ state: "error", message: String(error) });
+        });
         return;
       }
       activateDraft(keyFor(symbol, null, link), link?.image ? opening + IMAGE_PREFILL : opening, link);
@@ -814,11 +827,6 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   }, [stopLanding, status?.enabled]); // the conversation renders once the status read says the lab is on
   // On the desk the idle message box is one line, in the same row as its tools; a word in it, or a tap, opens it.
   const small = !!desk && !composing && !draft.trim() && !attached.length && !attaching && !tray;
-  // The briefing view before any of its buttons starts a thread: no second message box beside Main chat. Once a
-  // button has put words in the box (Close the day), the box stays, even if they are cleared.
-  const [boxKept, setBoxKept] = useState(false);
-  if (briefing && !boxKept && (draft.trim() || messages.length || current)) setBoxKept(true);
-  const toMain = briefing && !!desk && !boxKept && !draft.trim() && !messages.length && !current && !attached.length && !busy;
   useEffect(() => {
     if (!composing) return;
     // After the click, not on the press: the page shifts as the box shrinks, and a click must land where it was aimed.
@@ -1371,7 +1379,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       })}
 
       <div className={panel ? "space-y-4 py-1" : "space-y-5 py-2"} aria-live="polite">
-        {!messages.length && !current?.findings && !openingMain && !toMain && (
+        {!messages.length && !current?.findings && !openingMain && (
           <p className="text-sm text-muted-foreground">
             {current?.main_day ? "What’s on your mind today?" : <>Ask about an opportunity, push back on the read, then ask for a plan. Try: “{symbol || "NBIS"} looks like it might recover. Is the whole group confirming?”</>}
           </p>
@@ -1475,13 +1483,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       {/* One box: (on the desk, what the conversation is about,) the text, then a toolbar inside it. The text area gets the
           full width at every size, even in a narrow dock; a phone desk keeps attach and read-aloud behind "+". */}
       {lookOnSend.current && !look && <p className="text-xs text-muted-foreground">Your chart context is in the draft. Send from Charts to include its image.</p>}
-      {/* The briefing has no message box of its own until one of its buttons starts a thread: questions go to Main chat. */}
-      {toMain ? (
-        <div data-testid="briefing-to-main" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-card px-3 py-2.5 text-sm">
-          <span className="text-muted-foreground">Questions about your day go in Main chat.</span>
-          <Link href="/copilot-lab" className="inline-flex min-h-11 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 sm:min-h-8">Ask in Main chat →</Link>
-        </div>
-      ) : <form onSubmit={e => { e.preventDefault(); void send(draft); }}
+      <form onSubmit={e => { e.preventDefault(); void send(draft); }}
         className={cn("rounded-xl border bg-background transition-colors focus-within:border-primary/50", small && "flex items-center")}>
         {desk && !current?.main_day && (
             <div className={cn("flex min-h-7 items-center px-2 text-xs", small ? cn("shrink-0", !symbol && !scoping && "max-md:hidden") : "pt-1.5")}>
@@ -1522,9 +1524,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           {sendButton}
         </div>
         {pickerInput}
-      </form>}
-      {desk && !small && !toMain && <p className="px-1 text-[11px] text-muted-foreground">Research on read-only evidence. No orders: a plan, watch or revisit exists only once you confirm it.</p>}
-      {(voice.available || speak.available) && !small && !toMain && (
+      </form>
+      {desk && !small && <p className="px-1 text-[11px] text-muted-foreground">Research on read-only evidence. No orders: a plan, watch or revisit exists only once you confirm it.</p>}
+      {(voice.available || speak.available) && !small && (
         <div className="flex flex-wrap items-center justify-between gap-x-3">
           {spoken ? <span role="status" className="text-xs text-foreground">Heard you. Review the message, then Send.</span> : <span />}
           <span className={cn("flex flex-wrap items-center gap-x-3", desk && !tray && "max-md:hidden")}>{voice.setting}{speak.setting}</span>

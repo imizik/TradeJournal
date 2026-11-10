@@ -216,7 +216,7 @@ test("at 375 px the speaker waits behind + on the mic's row, the box takes the f
   await page.goto("/copilot-lab?view=new");
   await page.getByRole("tab", { name: "Threads", exact: true }).click();
   await expect(page.getByText("Nothing open. Plan a trade to start a ticker.")).toBeVisible();
-  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click(); // a phone shows the conversation on its own tab
+  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(2).click(); // a phone shows the conversation on its own tab, after Now and Threads
   await expect(speaker(page)).toBeHidden(); // attach and read-aloud wait behind "+"
   await page.getByRole("button", { name: "More: attach, read aloud" }).click();
   await speaker(page).click();

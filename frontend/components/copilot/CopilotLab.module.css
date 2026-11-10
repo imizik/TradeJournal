@@ -188,7 +188,8 @@
 
   .tabs {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
     gap: 4px;
     margin: 8px 12px 0;
     padding: 3px;
@@ -198,6 +199,11 @@
   }
 
   .tabs button {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding-inline: 4px;
     min-height: 44px;
     border-radius: 7px;
     font-size: 14px;
@@ -211,8 +217,8 @@
     box-shadow: 0 0 0 1px hsl(var(--border));
   }
 
-  .desk[data-tab="now"] .thread,
-  .desk[data-tab="now"] .inspector,
+  .desk[data-tab="threads"] .thread,
+  .desk[data-tab="threads"] .inspector,
   .desk[data-tab="thread"] .rail,
   .desk[data-tab="thread"] .inspector,
   .desk[data-tab="context"] .rail,

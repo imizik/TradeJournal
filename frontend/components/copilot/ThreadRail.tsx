@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactN
 import Link from "next/link";
 import { ChevronDown, ChevronRight, Home } from "lucide-react";
 import { KBD, useJumpKey } from "@/components/copilot/CommandPalette";
-import PlanATrade from "@/components/copilot/PlanATrade";
 import PlanList from "@/components/copilot/PlanList";
 import type { HomeActions } from "@/components/copilot/CopilotPanel";
 import { AUTO_WEEK_REVIEW_TITLE, type InvestigationSummary } from "@/lib/copilot";
@@ -79,10 +78,22 @@ export function tickersOf(rows: DeskThread[], plans: DeskPlan[], saved: Investig
     const newest = Math.max(0, ...own.map(r => r.changedAt ?? 0), ...conversations.map(t => Date.parse(t.updated_at) / 1000));
     return {
       symbol, rows: ranked, lead, state, needs: own.some(needs), changedAt: newest, conversations,
-      value: position?.value ?? exit?.value ?? null,
+      value: held(own) ?? position?.value ?? exit?.value ?? null,
       status: lead?.status ?? { text: conversations[0]?.conclusion ?? conversations[0]?.title ?? "", tone: "muted" as const },
     };
   }).sort((a, b) => Number(b.needs) - Number(a.needs) || RANK[a.state] - RANK[b.state] || pnl(a) - pnl(b) || b.changedAt - a.changedAt);
+}
+
+/** "+$1,234.50" or "−$80.00" (the desk's own money text) as a number; null for a word. */
+const dollars = (text: string) => numeric(text) ? (/^[−-]/.test(text) ? -1 : 1) * Number(text.replace(/[^\d.]/g, "")) : null;
+/** Two or more open positions on one ticker: their unrealized P&L summed, in the same words; null for one (its own row's
+ * figure stands) or when any has no figure. */
+function held(own: DeskThread[]): DeskThread["value"] {
+  const values = own.filter(r => r.tradeId).map(r => (r.value ? dollars(r.value.text) : null));
+  if (values.length < 2 || values.some(v => v === null)) return null;
+  const sum = Math.round((values as number[]).reduce((a, b) => a + b, 0) * 100) / 100;
+  const text = `${sum > 0 ? "+" : sum < 0 ? "−" : ""}$${Math.abs(sum).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return { text, tone: sum > 0 ? "gain" : sum < 0 ? "loss" : "muted" };
 }
 
 /** A ticker's loss as a negative number, so the biggest loss sorts first; a gain or no figure is 0 and keeps its place. */
@@ -343,16 +354,16 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
       {view === "plans" ? data && <PlanList plans={data.plans} actions={actions} active={active} /> : (
         <>
           {/* Pinned where the list scrolls on its own: the conversations under it scroll away, Main does not. */}
-          <section aria-label="Today’s briefing" className="z-10 bg-background lg:sticky lg:top-0 lg:shadow-[0_-12px_0_0_hsl(var(--background)),0_6px_0_0_hsl(var(--background))]">
+          <section aria-label="Now" className="z-10 bg-background lg:sticky lg:top-0 lg:shadow-[0_-12px_0_0_hsl(var(--background)),0_6px_0_0_hsl(var(--background))]">
             <button type="button" onClick={() => { setOpened(null); mark(radar); actions.home(); }} aria-current={main ? "page" : undefined}
-              title="The day, Radar hits to rate, alerts to answer and Review my week" className={cn(box(main), "border")}>
+              title="The day, your positions, what waits on you and today's conversation" className={cn(box(main), "border")}>
               <span className="flex items-center gap-1.5">
                 <Home size={14} aria-hidden className="shrink-0 text-muted-foreground" />
-                <span className="min-w-0 truncate font-semibold text-foreground">Today’s briefing</span>
+                <span className="min-w-0 truncate font-semibold text-foreground">Now</span>
                 {radarNew > 0 && <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
                 <span className="ml-auto flex shrink-0 gap-2 text-xs tabular-nums text-muted-foreground">
-                  {toAnswer > 0 && <span className="text-primary" title="Today's alerts to answer and Radar hits to rate, in the briefing; older ones wait there too">{toAnswer} to answer</span>}
-                  {radar.length > 0 && <span title="Radar hits since your last Radar visit; rate them in Main">{radar.length} Radar</span>}
+                  {toAnswer > 0 && <span className="text-primary" title="Today's alerts to answer and Radar hits to rate, on Now; older ones wait there too">{toAnswer} to answer</span>}
+                  {radar.length > 0 && <span title="Radar hits since your last Radar visit, on Now">{radar.length} Radar</span>}
                 </span>
               </span>
               <span className={cn("block truncate pl-5 text-xs", TONE[briefing?.status.tone ?? "muted"])}>{briefing?.status.text ?? "What matters right now? One turn across everything"}</span>
@@ -397,7 +408,6 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
       )}
       {data && missing.length > 0 && <p className="px-2.5 text-xs text-muted-foreground">Unavailable right now: {missing.join(", ")}.</p>}
       {data?.quoteIssue && <p className="px-2.5 text-xs text-muted-foreground">Prices: {data.quoteIssue}</p>}
-      {data && <div className="px-2.5"><PlanATrade origin="copilot" className="inline-flex min-h-11 items-center gap-1.5 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline sm:min-h-0" /></div>}
       {/* Each key stays with its word; the pairs wrap onto a second line in a narrow list instead of running off its edge. */}
       <p data-testid="desk-keys" className="hidden flex-wrap items-center gap-x-2.5 gap-y-1.5 border-t px-2.5 pt-3 text-[11px] text-muted-foreground md:flex">
         <span className="inline-flex items-center gap-1 whitespace-nowrap"><kbd className={KBD}>J</kbd><kbd className={KBD}>K</kbd>move</span>

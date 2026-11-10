@@ -272,10 +272,10 @@ test("the phone keeps its tabs: no pane toggle, and the Jump to button still ope
 });
 
 for (const [width, height] of [[1440, 900], [375, 812]] as const) {
-  test(`the Briefing opens on today's session at ${width} px`, async ({ page }) => {
+  test(`Now opens on today's session, the positions and what waits, each a tap from its thread, at ${width} px`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await lab(page);
-    if (width < 760) await page.getByRole("tab", { name: "Briefing" }).click();
+    if (width < 760) await page.getByRole("tab", { name: "Now" }).click();
     const tape = page.getByTestId("session-tape");
     await expect(tape).toBeVisible();
     await expect(tape).toContainText("Market open");
@@ -286,8 +286,19 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
     // 11:00 is 90 of the session's 390 minutes.
     await expect(tape.getByTestId("session-now")).toHaveAttribute("style", /left: 23\.07/);
     await expect(tape.getByTestId("session-labels")).toHaveText("9:3011:0012:3014:0016:00");
-    await expect(tape.getByTestId("briefing-numbers")).toHaveText(
-      "Positions1Needs you1Nearest triggerCRWV · 0.6% to entry 99.00Pings today14 sent · 1 held");
+    // Open positions with their P&L and plan line, then the armed plan near a trigger; what waits; today's pings.
+    const positions = page.getByTestId("now-positions");
+    await expect(positions.getByRole("heading", { level: 2 })).toHaveText("Open positions · 1");
+    const nbis = positions.getByRole("button", { name: /^NBIS/ });
+    await expect(nbis).toContainText("NBIS 10/23/26 100C");
+    await expect(nbis).toContainText("+$180.00");
+    await expect(nbis).toContainText("1.0% from invalidation 92.30");
+    await expect(positions.getByRole("button", { name: /^CRWV/ })).toContainText("0.6% to entry 99.00");
+    await expect(page.getByTestId("now-waiting").getByRole("button")).toHaveText([/^NBIS.*1\.0% from invalidation 92\.30/]);
+    const pings = page.getByTestId("now-pings");
+    await pings.locator("summary").click();
+    await expect(pings.locator("summary")).toHaveText("14 pings sent ▾");
+    await expect(pings.getByRole("listitem")).toHaveText([/10:31\s*NBIS\s*Give-back ping · NBIS/, "13 more not listed here."]);
     await expect(tape.getByTestId("session-facts")).toHaveText("Next: CRWV time stop 14:30 · Practicing: wait for the 15m close · 3 of 5 this week");
     // The desk bar: live, with the indices on a wide screen only.
     await expect(page.getByTestId("desk-status")).toContainText("Live");
@@ -296,11 +307,30 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
     await expect(page.getByRole("button", { name: "Close the day" })).toHaveCount(0); // no phase button mid-session
     await page.screenshot({ path: test.info().outputPath(`briefing-session-${width}.png`), fullPage: width < 760 });
 
-    await page.keyboard.press("j"); // a symbol's thread opens on its own header instead
-    if (width < 760) await expect(page.getByRole("tab", { name: "NBIS" })).toBeVisible();
+    await nbis.click(); // one tap opens the position's thread, on its own header
+    await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible();
+    if (width < 760) await expect(page.getByRole("tab", { name: "NBIS" })).toHaveAttribute("aria-selected", "true");
     await expect(tape).toBeHidden();
   });
 }
+
+test("a held ticker with no conversation opens its desk view in one tap from Now; two positions on it sum in the list", async ({ page }) => {
+  const aapl = (n: number, pnl: string, tone: string) => row({ key: `trade:aapl-${n}`, group: "watch", symbol: "AAPL", title: "AAPL 2/8/27 230C",
+    instrument: "2/8/27 230C", value: { text: pnl, tone }, status: { text: "No plan yet", tone: "muted" }, trade_id: `aapl-${n}`,
+    path: "/copilot-lab?symbol=AAPL&context=Plan%20this%20position%3A%20I%20just%20opened%20AAPL%202%2F8%2F27%20230C%20without%20a%20plan." });
+  await lab(page, { threads: () => ({ ...DESK, threads: [...DESK.threads, aapl(1, "+$100.00", "gain"), aapl(2, "−$40.00", "loss")] }) });
+  // The thread list's ticker shows both positions' P&L summed; Now lists each position.
+  await expect(page.getByRole("navigation", { name: "Thread list" }).getByRole("button", { name: /^AAPL, Held/ })).toContainText("+$60.00");
+  const rows = page.getByTestId("now-positions").getByRole("button", { name: /^AAPL/ });
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText("No plan yet");
+  // A production build follows the row's link at once (the 20 s "Rendering" stall seen once was the development server).
+  await rows.first().click();
+  await expect(page).toHaveURL(/\/copilot-lab\?symbol=AAPL&context=Plan/, { timeout: 10_000 });
+  await expect(page.getByTestId("desk-breadcrumb")).toHaveText("AAPL›Decision");
+  await expect(page.getByTestId("now")).toHaveCount(0);
+  await expect(page.getByLabel("Message")).toHaveValue(/^Context: Plan this position/);
+});
 
 test("before the open the strip waits and the prep line leads; a closed day says so", async ({ page }) => {
   const before = { ...SESSION, now: epoch("2026-10-23T12:45:00Z"), phase: "pre", events: [] };

@@ -81,7 +81,7 @@ test("while Radar is off the Radar scorecard stays out of the way", async ({ pag
 test("with no alerts it says so, and at 375 px the scorecard fits without sideways scrolling", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await briefing(page);
-  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click();
+  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab", { name: "Now" }).click();
   const card = page.getByRole("region", { name: "Alert scorecard" });
   await card.getByText("Each alert ▾").click();
   await expect(card).toContainText("Sold for $1,040");
@@ -92,6 +92,6 @@ test("with no alerts it says so, and at 375 px the scorecard fits without sidewa
   await page.route("**/copilot/desk/scorecard", (route) => route.fulfill({ json: { ...CARD, alerts: 0, rows: [],
     summary: { holding: tally({}), exiting: tally({}), none: tally({}) } } }));
   await page.reload();
-  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click();
+  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab", { name: "Now" }).click();
   await expect(page.getByRole("region", { name: "Alert scorecard" })).toContainText("No position alert was sent to your phone in the last 30 days.");
 });
