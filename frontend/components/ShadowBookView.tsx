@@ -98,7 +98,7 @@ export default function ShadowBookView() {
       </div>
       <p className="text-xs text-muted-foreground">
         The copilot&apos;s own paper book: it decides on Radar events by itself, one unit a position. Paper only; never your account, alerts or phone.
-        {!data.enabled && " Off now (SHADOW_BOOK_ENABLED)."}
+        {!data.enabled && " Switched off on the server."}
       </p>
       <p className="rounded-lg border bg-card px-3 py-2.5 text-sm" data-testid="shadow-week-line">
         Week of {data.week.start}: shadow {money(shadow.pnl_usd)} on {shadow.closed} closed of {shadow.plans} plans ({shadow.turns} turns{shadow.filtered ? `, ${shadow.filtered} below the bar` : ""})
