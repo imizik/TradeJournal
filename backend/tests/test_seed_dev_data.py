@@ -148,3 +148,19 @@ def test_seed_refuses_to_run_against_a_database_holding_real_fills(seeded, tmp_p
 
     with pytest.raises(SystemExit, match="Refusing to seed"):
         seed_module.seed(f"sqlite:///{database_path}")
+
+
+def test_finished_option_trades_stay_before_the_alerts_went_live(seeded):
+    """Proof's exit-habits read is asserted with every seeded option trade closed before go-live; the run date moving
+    must never carry one into the "since" sample (TSLA's run-date expiry did on 2026-11-10)."""
+    from sqlmodel import create_engine
+
+    from app.engine.exit_habits import GO_LIVE
+    from app.models import Trade
+
+    seed_module, database_url = seeded
+    assert seed_module.ALERTS_LIVE == GO_LIVE
+    with Session(create_engine(database_url)) as session:
+        finished = [t for t in session.exec(select(Trade)).all() if t.instrument_type == "option" and t.status in ("closed", "expired")]
+    assert {t.ticker for t in finished} == {"NVDA", "TSLA"}
+    assert all(t.closed_at.date() < GO_LIVE for t in finished)

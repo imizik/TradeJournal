@@ -119,6 +119,7 @@ test("drafted cards come back after a reload and a thread switch, a confirmed on
   expect(saved[0]).toMatchObject({ ...PLAN });
 
   // A reload brings both back with Confirm; nothing was saved or armed by bringing them back.
+  await expect(page).toHaveURL(new RegExp(`thread=${INV}`)); // the address holds the saved thread before it is reloaded
   await page.reload();
   await expect(page.getByText(ANSWER)).toBeVisible();
   await expect(planCard(page).getByRole("button", { name: "Confirm" })).toBeEnabled();
@@ -190,6 +191,7 @@ test("a dismissed card stays dismissed, and a card confirmed in another window i
   await expect(planCard(page).getByLabel("Thesis")).toHaveValue("Confirmed elsewhere.");
   expect(server.posts).toEqual([]);
 
+  await expect(page).toHaveURL(new RegExp(`thread=${INV}`)); // the address holds the saved thread before it is reloaded
   await page.reload();
   await expect(page.getByText(ANSWER)).toBeVisible();
   await expect(watchCard(page)).toHaveCount(0);

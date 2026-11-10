@@ -210,7 +210,7 @@ export default function PerformanceOverview({ trades, compact = false, analytics
           <h2 id="performance-heading" className="text-[13.5px] font-semibold tracking-tight">
             Trading Performance
           </h2>
-          <p className="mt-1 text-xs text-muted-foreground">{periodTrades.length} closed trades in the selected period</p>
+          <p className="mt-1 text-xs text-muted-foreground">{periodTrades.length} closed trade{periodTrades.length === 1 ? "" : "s"} in the selected period</p>
         </div>
         <div className="flex flex-wrap rounded-md border bg-card p-1" aria-label="Performance period">
           {PERIODS.map((option) => (
