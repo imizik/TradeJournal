@@ -16,7 +16,9 @@ events (PR 5), so a new event gets its news the same minute. With
 the same pass under its own version and receipt (off by default; its events ping only in ``alert`` mode, and
 only with ``RADAR_ALERTS_ENABLED`` too); ``RADAR_REVERSAL_RULES`` does the same for the ``radar_reversal`` rule. With
 ``RADAR_SETUP_CARDS=true`` each new dip or reversal event also gets its setup card (``radar_setup``, at most
-``MAX_CARDS`` a pass, in either mode) and, after the pings, the cards' paper book takes one step
+``MAX_CARDS`` a pass and none started after ``CARD_SECONDS`` of card work, in either mode): the trial rules' pings
+are recorded and delivered first, then the cards are built, then the dip and reversal pings are recorded and
+delivered (a second ``deliver`` only when there are any). After the pings the cards' paper book takes one step
 (``radar_setup_paper``). None of these failures affects the recorded pass. Outside the regular session an optional
 ``radar_premarket`` scanner (off unless ``RADAR_PREMARKET_ENABLED``) records its
 own pre-open lists in a separate file.
@@ -41,6 +43,7 @@ PASS_SECONDS = 60
 BATCH_SIZE = 50
 MAX_REQUESTS = 6
 MAX_CARDS = 3  # setup cards built a pass: each is up to two option reads out of the shared 30-a-minute budget
+CARD_SECONDS = 15  # card work a pass: no card is started once this much has gone, so the pass stays inside its minute
 
 
 def enabled() -> bool:
@@ -167,19 +170,17 @@ class RadarRunner:
         except Exception:
             # Keep collection/alerts running, but the scorer cannot certify this pass.
             log.exception("Radar detection receipt failed")
-        if self.setups is not None and (dip_events or reversal_events):
-            self.build_cards(dip_events + reversal_events)  # after the receipt: its option reads never delay it
-        if inside and self.alerts is not None:
-            try:
-                if new_events:
-                    self.alerts.record(new_events)
-                if self.dip_alerts and dip_events:
-                    self.alerts.record(dip_events)
-                if self.reversal_alerts and reversal_events:
-                    self.alerts.record(reversal_events)
-                self.alerts.deliver()
-            except Exception:  # a phone ping is extra; the recorded pass and its events stand either way
-                log.exception("Radar alerts failed")
+        setup_pings = [events for on, events in ((self.dip_alerts, dip_events), (self.reversal_alerts, reversal_events))
+                       if on and events]
+        cards = self.setups is not None and bool(dip_events or reversal_events)
+        # With cards on, the trial's pings go first, then the cards (after the receipt too), then the setup pings, so
+        # card reads never delay the receipt or the trial's pings. With cards off it is one record-and-deliver, as before.
+        if inside:
+            self._ping([new_events] + ([] if cards else setup_pings))
+        if cards:
+            self.build_cards(dip_events + reversal_events)
+            if inside and setup_pings:
+                self._ping(setup_pings)
         if inside and self.paper is not None and record["status"] in radar_rules.USABLE:
             try:  # step never raises; the guard keeps even a bad close time from touching the pass
                 self.paper.step(record["session_date"], self._close_at(record["session_date"]))
@@ -191,6 +192,18 @@ class RadarRunner:
             except Exception:  # news is extra context; the recorded pass stands either way
                 log.exception("Radar news enrichment failed")
         return pass_id
+
+    def _ping(self, batches: list[list[RadarEvent]]) -> None:
+        """Hand each non-empty batch of new events to the phone outbox, then deliver; never raises."""
+        if self.alerts is None:
+            return
+        try:
+            for events in batches:
+                if events:
+                    self.alerts.record(events)
+            self.alerts.deliver()
+        except Exception:  # a phone ping is extra; the recorded pass and its events stand either way
+            log.exception("Radar alerts failed")
 
     def detect(self, session_date: str, pass_id: int) -> tuple[list[RadarEvent], list[RadarEventRevision]]:
         """Append the rules' new events and revisions for one recorded pass; returns the rows written.
@@ -236,20 +249,29 @@ class RadarRunner:
         return written
 
     def build_cards(self, events: list[RadarEvent]) -> None:
-        """A setup card for each new setup-kind event, at most ``MAX_CARDS`` a pass; one past the cap, or whose levels do
-        not hold, has none. A failure leaves that event without a card and never touches the pass or its events."""
+        """A setup card for each new setup-kind event, at most ``MAX_CARDS`` a pass and none started once
+        ``CARD_SECONDS`` of the pass's card work (by the runner's clock) is spent; one past either cap, or whose levels
+        do not hold, has none. The owner's record is read once per direction a pass. A failure leaves that event
+        without a card and never touches the pass or its events."""
         from sqlmodel import Session
-        built = 0
+        built, started, records = 0, self.clock(), {}
         for event in events:
             if not radar_setup.is_setup(event):
                 continue
             if built >= MAX_CARDS:
                 log.info("Radar setup card cap %d reached; %s has no card", MAX_CARDS, event["event_id"])
                 continue
+            if self.clock() - started >= CARD_SECONDS:
+                log.info("Radar setup cards used their %ds this pass; %s has no card", CARD_SECONDS, event["event_id"])
+                continue
             built += 1
             try:
                 with Session(self.setups) as db:
-                    radar_setup.build(db, event, now=datetime.fromtimestamp(self.clock(), UTC), options=self.options)
+                    direction = event.get("direction")
+                    if direction not in records:
+                        records[direction] = radar_setup.owner_record(db, direction)
+                    radar_setup.build(db, event, now=datetime.fromtimestamp(self.clock(), UTC), options=self.options,
+                                      record=records[direction])
             except Exception:
                 log.exception("Radar setup card failed for %s", event["event_id"])
 

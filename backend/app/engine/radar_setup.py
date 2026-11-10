@@ -219,8 +219,14 @@ def _existing(db: Session, event_id: str) -> RadarSetup | None:
     return db.exec(select(RadarSetup).where(RadarSetup.event_id == event_id)).first()
 
 
-def build(db: Session, event: dict, *, now: datetime, options=None) -> RadarSetup | None:
-    """The event's card row, written once: an existing row comes back unchanged. None when the levels do not hold."""
+_READ = object()  # build's default: read the owner's record for this card
+
+
+def build(db: Session, event: dict, *, now: datetime, options=None, record: str | None | object = _READ) -> RadarSetup | None:
+    """The event's card row, written once: an existing row comes back unchanged. None when the levels do not hold.
+
+    ``record`` is the owner's record line when the caller already read it (``owner_record``, once a pass per
+    direction); left out, it is read here."""
     event_id = event["event_id"]
     found = _existing(db, event_id)
     if found is not None:
@@ -237,7 +243,7 @@ def build(db: Session, event: dict, *, now: datetime, options=None) -> RadarSetu
         rule_version=event.get("rule_version", ""), kind=event["kind"], symbol=symbol, direction=direction,
         entry=lv["entry"], invalidation=lv["invalidation"],
         contract_json=json.dumps(contract, sort_keys=True) if contract else None,
-        record_text=owner_record(db, direction), created_at=utc,
+        record_text=owner_record(db, direction) if record is _READ else record, created_at=utc,
         paper_state="pending" if contract else "none")
     db.add(row)
     try:

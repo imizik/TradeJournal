@@ -267,7 +267,7 @@ def test_at_most_three_cards_a_pass_and_a_failing_card_skips_only_itself(tmp_pat
     runner, _ = record_reversal(tmp_path, 0, setups=db_engine, paper=Paper())
     built = []
 
-    def build(db, event, *, now, options=None):
+    def build(db, event, *, now, options=None, record=None):
         built.append(event["event_id"])
         if event["event_id"] == "e1":
             raise RuntimeError("chain read blew up")
@@ -275,6 +275,55 @@ def test_at_most_three_cards_a_pass_and_a_failing_card_skips_only_itself(tmp_pat
     events = [{"event_id": f"e{i}", "kind": "dip_turn" if i % 2 else "gap_reversal"} for i in range(1, 6)]
     runner.build_cards([{"event_id": "plain", "kind": "relative_to_spy"}] + events)
     assert built == ["e1", "e2", "e3"]  # a non-setup event takes no slot; e1's failure still used one
+
+
+def test_card_work_stops_starting_cards_once_its_time_is_spent(tmp_path, db_engine, monkeypatch):
+    from app.engine import radar_setup
+    runner, _ = record_reversal(tmp_path, 0, setups=db_engine, paper=Paper())
+    built = []
+
+    def slow_build(db, event, *, now, options=None, record=None):
+        built.append(event["event_id"])
+        runner.clock.now += 10  # two slow option reads
+    monkeypatch.setattr(radar_setup, "owner_record", lambda db, direction: None)
+    monkeypatch.setattr(radar_setup, "build", slow_build)
+    runner.build_cards([{"event_id": f"e{i}", "kind": "dip_turn", "direction": "up"} for i in range(1, 4)])
+    assert radar_runner.CARD_SECONDS == 15 and built == ["e1", "e2"]  # 20 s spent before e3: it has no card
+
+
+def test_the_owner_record_is_read_once_per_direction_a_pass(tmp_path, db_engine, monkeypatch):
+    from app.engine import radar_setup
+    runner, _ = record_reversal(tmp_path, 0, setups=db_engine, paper=Paper())
+    reads, built = [], []
+
+    def owner_record(db, direction):
+        reads.append(direction)
+        return f"record {direction}"
+    monkeypatch.setattr(radar_setup, "owner_record", owner_record)
+    monkeypatch.setattr(radar_setup, "build", lambda db, event, *, now, options=None, record=None: built.append(record))
+    runner.build_cards([{"event_id": f"e{i}", "kind": "dip_turn", "direction": d} for i, d in enumerate(["up", "down", "up"])])
+    assert reads == ["up", "down"] and built == ["record up", "record down", "record up"]
+
+
+def test_trial_pings_go_before_card_work_and_setup_pings_after_it(tmp_path, db_engine, monkeypatch):
+    from app.engine import radar_setup
+    from tests import test_radar_dip as dipfix
+    log = []
+
+    class Alerts(dipfix.Alerts):
+        def record(self, events):
+            super().record(events)
+            log.append(("record", [e["event_id"] for e in events]))
+
+        def deliver(self):
+            log.append(("deliver",))
+    monkeypatch.setattr(radar_setup, "build", lambda db, event, **k: log.append(("card", event["event_id"])))
+    monkeypatch.setattr(dipfix, "Alerts", Alerts)
+    record_reversal(tmp_path, 12, setups=db_engine, reversal_alerts=True, paper=Paper())
+    event = "rg0-2030-01-15-reversal-aaa-up-1"
+    at = log.index(("card", event))
+    assert log[at - 1] == ("deliver",) and log[at + 1:at + 3] == [("record", [event]), ("deliver",)]
+    assert log.count(("deliver",)) == 13  # one a pass, plus the one after the setup ping
 
 
 def test_a_card_or_paper_failure_never_touches_the_pass_or_its_events(tmp_path, db_engine, monkeypatch):

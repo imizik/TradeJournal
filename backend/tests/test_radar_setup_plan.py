@@ -155,9 +155,56 @@ def test_a_failure_after_the_claim_releases_it_for_a_later_tap(engine, monkeypat
         raise RuntimeError("disk full")
     monkeypatch.setattr(captures_engine, "save", broken)
     assert tap(engine, setup_id) == ("The plan could not be saved, so nothing is planned. Tap again in a moment.", None)
-    row, captures, alerts, _ = stored(engine, setup_id)
-    assert (row.plan_state, row.planned_at, captures, alerts) == ("none", None, [], [])
+    row, captures, alerts, threads = stored(engine, setup_id)
+    assert (row.plan_state, row.planned_at, captures, alerts, threads) == ("none", None, [], [], [])  # no stray thread
     monkeypatch.setattr(captures_engine, "save", real)
     assert tap(engine, setup_id)[1] == "Planned"
-    row, (capture,), (alert,), _ = stored(engine, setup_id)
+    row, (capture,), (alert,), (thread,) = stored(engine, setup_id)
     assert row.plan_state == "planned" and capture.origin_ref == EVENT
+    assert row.investigation_id == alert.source_id == json.loads(capture.context_json)["investigation_id"] == str(thread.id)
+
+
+def test_a_failure_after_the_capture_is_saved_is_retried_onto_the_same_thread(engine, monkeypatch):  # noqa: F811
+    setup_id = card(engine)
+    real = captures_engine.save
+
+    def saved_then_lost(*a, **k):
+        real(*a, **k)
+        raise RuntimeError("connection lost after the commit")
+    monkeypatch.setattr(captures_engine, "save", saved_then_lost)
+    assert tap(engine, setup_id)[1] is None
+    row, (capture,), alerts, (thread,) = stored(engine, setup_id)
+    assert (row.plan_state, alerts) == ("none", []) and json.loads(capture.context_json)["investigation_id"] == str(thread.id)
+    monkeypatch.setattr(captures_engine, "save", real)
+    assert tap(engine, setup_id)[1] == "Planned"
+    row, (capture,), (alert,), (thread,) = stored(engine, setup_id)
+    assert row.investigation_id == alert.source_id == json.loads(capture.context_json)["investigation_id"] == str(thread.id)
+    assert [s.investigation_id for s in time_stops(engine)] == [str(thread.id)]
+
+
+def test_a_database_error_arming_the_alert_keeps_the_plan_and_says_so(engine, monkeypatch):  # noqa: F811
+    from sqlalchemy.exc import OperationalError
+    from app.engine import level_alert_monitor
+
+    def broken(*a, **k):
+        raise OperationalError("INSERT INTO level_alert", {}, Exception("database is locked"))
+    monkeypatch.setattr(level_alert_monitor, "create_alert", broken)
+    setup_id = card(engine)
+    assert tap(engine, setup_id) == (
+        "Planned NBIS: out below 59.85. Alert not armed: it could not be saved. 60-minute check armed.", "Planned")
+    row, (capture,), alerts, (thread,) = stored(engine, setup_id)
+    assert (row.plan_state, row.investigation_id, alerts) == ("planned", str(thread.id), [])
+    assert len(time_stops(engine)) == 1
+
+
+def test_a_setup_from_an_earlier_session_is_refused_and_writes_nothing(engine):  # noqa: F811
+    with Session(engine) as db:
+        row = RadarSetup(event_id=EVENT, session_date="2026-11-09", rule_version="rd0", kind="dip_turn", symbol="NBIS",
+                         direction="up", entry=61.2, invalidation=59.85)
+        db.add(row)
+        db.commit()
+        setup_id = str(row.id)
+    assert tap(engine, setup_id) == ("This setup is from Nov 9; its level no longer applies. No plan saved.", "Not planned")
+    row, captures, alerts, threads = stored(engine, setup_id)
+    assert (row.plan_state, row.plan_note, row.planned_at, captures, alerts, threads) == ("none", None, None, [], [], [])
+    assert time_stops(engine) == []

@@ -624,9 +624,15 @@ on the default account, long calls or puts, the candidate contract, origin
 `radar_event`, so `/radar/proof` counts the event as planned), arms its
 invalidation alert and, best effort, a 60-minute time stop (pings only if a
 position in the symbol was entered after the plan; never past the close). A
-stock already through the level is refused once; a stale quote or a failure
-before the plan is saved leaves the card for a later tap. Nothing places,
-sizes or suggests an order.
+card from an earlier session (its `session_date` is not today's New York date)
+is refused with nothing written: `This setup is from Nov 9; its level no longer
+applies. No plan saved.` A stock already through the level is refused once; a
+stale quote or a failure before the plan is saved leaves the card for a later
+tap, with no stray desk thread (a thread opened before the plan was saved is
+deleted; a plan already saved is reused with its thread, so a retry ends with
+one thread, one plan and one alert). An alert the caps refuse or the database
+fails to save leaves the plan standing and the reply says `Alert not armed`.
+Nothing places, sizes or suggests an order.
 
 **The scorecard.** `GET /radar/proof` carries `setups`: per kind and
 direction, cards, cards with a contract, planned, paper trades closed, green,
@@ -645,7 +651,14 @@ pings go back to the plain form, saved cards stay.
 - Each card is up to two option reads (expirations, then one chain, 5 seconds
   each at most) out of the options budget of 30 a minute that charts and the
   scanner share, never waiting for a slot; at most 3 cards are built a pass,
-  and an event past that has no card.
+  none is started once 15 seconds of the pass's card work have gone
+  (`radar_runner.CARD_SECONDS`), and an event past either cap has no card. The
+  owner's record is read once per direction a pass.
+- Order in a pass: the detection receipt, then the trial rules' pings
+  (recorded and delivered), then the cards, then the dip and reversal pings
+  (recorded and delivered again, only when there are any), so card work never
+  delays the receipt or the trial's pings. With cards off the pings are one
+  record-and-deliver, as before.
 - The scanner's expiration rule picks a same-day expiry when one is listed.
 - No card when the invalidation is not beyond the price, for example a stock at
   its session low while SPY falls faster.
