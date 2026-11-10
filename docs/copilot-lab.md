@@ -1228,6 +1228,28 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
     research jobs that name it (question jobs) or are linked to one of its
     investigations (reassessments); Radar event jobs name an event, not a
     symbol, so they are not matched. At most 6.
+  - `practice` (owner said; its count measured): the active practice goal the
+    owner confirmed from a Review my week card (`practice_goal.current`, the
+    same read as the briefing's grey line): their words, the measure, the
+    target and this week's count so far (or the week it starts), cached two
+    minutes. `{"goal": null}` when none is active.
+  - `market` (measured), read beside the pack (`copilot_context.market`, added
+    by `with_market` in `copilot.owner_context`, placed right after the pack's
+    header): the same reads the tools make through the turn's evidence
+    (`get_quotes`, `get_market_regime`, `get_group_comparison`,
+    `get_radar_today`, run side by side in worker threads), compacted to
+    lines, each with `as_of` and `from` (its source): SPY and QQQ day change
+    and VIX; for the turn's symbol its last and day change, its off-hours move
+    outside the regular session, its sector ETF from the latest Radar pass,
+    and its Radar group against SPY since the open with the last 15 minutes'
+    breadth; then today's Radar events that name the symbol (summary, first
+    seen, latest status, at most 3). With no symbol: the index line and the
+    day's Radar leaders and laggards against SPY (three each) and every event.
+    A read that fails or is still running at `MARKET_TIMEOUT_S` (3 s) is listed
+    under `unavailable` and the rest stand; the turn never waits longer for it.
+    The pack's header tells the model these lines are fresh enough to answer
+    from and that the tools are for anything beyond them. It is the turn's
+    block only: `get_owner_context` and the Open threads read do not carry it.
 - **No symbol** (a turn with an empty symbol box, and the Open threads read): there is
   no `history`, and memories are the general ones. `investigations` are the
   open ones across every symbol, newest first, at most 4, each with its symbol.
@@ -1247,7 +1269,12 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
   the mark past the symbol's first position, those positions' decisions, alerts
   and plan notes, investigations, memories, then positions beyond three) and
   marks itself
-  `trimmed`; positions and habits go last.
+  `trimmed`; positions and habits go last. With the `market` section the
+  turn's block may hold 1,400 characters more (`MAX_MARKET_CHARS`; the section
+  itself runs 500 to 1,100); past the cap it sheds the market's source labels
+  and all but one Radar event right after today's notes, and its events,
+  leaders and laggards after the memories. Its lines and the practice goal are
+  never dropped.
 - The UI shows it as the first evidence row of every answer ("Your context",
   provenance `saved`, with a one-line summary such as "2 open (NBIS +6.1%,
   give-back armed) · 3 memories · 1 investigations"), and the saved
@@ -1255,13 +1282,16 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
 - `get_owner_context(symbol)` returns the same pack for a different symbol.
   Research jobs never get it (it is not in their allowlist): it carries the
   book.
-- Fixture mode serves a simulated pack marked `simulated`; replay says the
-  pack is unavailable, as the book is. The fake model reads only the owner's
+- Fixture mode serves a simulated pack marked `simulated` (its market lines
+  too); replay says the pack is unavailable, as the book is, but still carries
+  the market lines, read from the snapshot at the frozen moment (no VIX, as
+  `get_market_regime` in replay; nothing after the clock). The fake model reads only the owner's
   words after the block (`copilot_context.user_text`), so the pack's text never
   steers its scripted tool choice.
 - No account number, account id, trade id, fill id or broker id is in it; the
   only ids are saved investigations'.
-- Tests: `backend/tests/test_copilot_context.py`, `backend/tests/test_trader_context.py`.
+- Tests: `backend/tests/test_copilot_context.py`, `backend/tests/test_trader_context.py`,
+  `backend/tests/test_copilot_market_pack.py`.
 
 ## Trader context
 
@@ -3124,6 +3154,17 @@ test: `latency.ask.first_text_ms` against the 15 s median, and the new
 `timings` section, which says how much of what remains is the owner context,
 the model's rounds, the reads, and within the reads Tradier, queueing or a
 busy worker pool.
+
+**The market read in the pack (2026-11-10).** The prefetch only warmed the
+quote cache: the model still spent a round asking for quotes, the regime and
+the group before answering "why is NBIS moving?". The owner pack now carries
+those reads as its `market` section (§ Owner context), read beside the pack
+within 3 s, so a plain question can be answered in the first round, the
+no-read path that measured about 8 s. The free eval completes 23 of 23 with
+the same check rates as before (the scripted model reads only the owner's
+words). Unproven live: the next answer scorecard's
+`latency.ask.first_text_ms` and tool-call counts on the owner's questions are
+the test.
 
 ## Live measurements (2026-10-24)
 

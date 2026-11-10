@@ -178,7 +178,10 @@ class FixtureEvidence:
                            "source": "SIMULATED scorecard shaped like the behavior audit's"},
                 "memories": {"state": "ok", "memories": self.get_memories(8, symbol)["memories"]},
                 "today": {"state": "ok", "day": SESSION, "entries": [
-                    {"kind": "outlook", "at": "2026-10-23T12:40:00Z", "text": "Simulated: semis heavy premarket; I want to see whether the neoclouds hold their lows before I touch calls."}]}}
+                    {"kind": "outlook", "at": "2026-10-23T12:40:00Z", "text": "Simulated: semis heavy premarket; I want to see whether the neoclouds hold their lows before I touch calls."}]},
+                "practice": {"state": "ok", "goal": "Simulated: get out within 15 minutes when my invalidation level breaks.",
+                             "measure": "exit at my invalidation", "target": 0.8, "since": "2026-10-19T21:05:00Z",
+                             "this_week": "2 of 3 invalidations hit while held", "as_of": AT}}
         if symbol:
             pack["history"] = {"state": "ok", "symbol": symbol, "closed_trades": 2, "wins": 1, "realized_usd": 8.0,
                                "recent": [{k: v for k, v in t.items() if k != "account"} for t in self.get_trades(symbol, 4)["trades"]]}
