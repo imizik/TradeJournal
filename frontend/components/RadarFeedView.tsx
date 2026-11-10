@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  MEASURE_LABELS, RATINGS, RULE_TAGS, STATUS_TEXT, coverageLine, getEvent, getFeed, headlineMeta, measureText, newsLine, nyTime, rateEvent,
+  MEASURE_LABELS, RATINGS, RULE_TAGS, STATUS_TEXT, coverageLine, getEvent, getFeed, getSetups, headlineMeta, measureText, newsLine, nyTime, rateEvent,
   recordVisit, radarEventChartHref, radarEventId, radarRating, radarSession, type OutsideCheckpoint, type RadarDetail, type RadarFeed, type RadarFeedEvent, type RadarNews, type RadarRating,
+  type RadarSetupCard, type RadarSetups as Setups,
 } from "@/lib/radar";
 import AskCopilot from "@/components/copilot/AskCopilot";
 import PlanATrade from "@/components/copilot/PlanATrade";
 import RadarMovers from "@/components/RadarMovers";
+import RadarSetups, { SetupCard } from "@/components/RadarSetups";
 import { cn } from "@/lib/utils";
 
 const NEVER_VISITED = "1970-01-01T00:00:00Z";
@@ -105,7 +107,9 @@ function News({ news, checks, sessionDate }: { news: RadarNews | null; checks: R
   );
 }
 
-function Detail({ event, onRated }: { event: RadarFeedEvent; onRated: (rating: RadarRating) => void }) {
+function Detail({ event, onRated, setup }: {
+  event: RadarFeedEvent; onRated: (rating: RadarRating) => void; setup?: { card: RadarSetupCard; today: string; onPlanned: (card: RadarSetupCard) => void };
+}) {
   const [detail, setDetail] = useState<RadarDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rating, setRating] = useState<RadarRating | null>(event.rating);
@@ -123,6 +127,7 @@ function Detail({ event, onRated }: { event: RadarFeedEvent; onRated: (rating: R
   const symbol = detail.event.chart?.symbol ?? detail.event.symbols[0];
   return (
     <div className="space-y-3">
+      {setup && <ul aria-label="Setup card"><SetupCard card={setup.card} today={setup.today} onPlanned={setup.onPlanned} /></ul>}
       <section aria-label="Original evidence" className="space-y-1.5">
         <h3 className="text-xs font-semibold text-foreground">As first saved · {nyTime(detail.event.first_seen_at, true)}</h3>
         <Measures values={detail.event.measures} />
@@ -175,8 +180,9 @@ function Detail({ event, onRated }: { event: RadarFeedEvent; onRated: (rating: R
   );
 }
 
-function EventCard({ event, fresh, open, linked, onToggle, onRated }: {
+function EventCard({ event, fresh, open, linked, onToggle, onRated, setup }: {
   event: RadarFeedEvent; fresh: boolean; open: boolean; linked: boolean; onToggle: () => void; onRated: (rating: RadarRating) => void;
+  setup?: { card: RadarSetupCard; today: string; onPlanned: (card: RadarSetupCard) => void };
 }) {
   const ref = useRef<HTMLLIElement>(null);
   useEffect(() => { if (linked && open) ref.current?.scrollIntoView({ block: "start" }); }, [linked, open]);
@@ -210,7 +216,7 @@ function EventCard({ event, fresh, open, linked, onToggle, onRated }: {
         </div>
         <p className="mt-1 break-words text-xs text-muted-foreground" data-testid="radar-news-line">{newsLine(event.news, event.session_date)}</p>
       </button>
-      {open && <div className="border-t p-3"><Detail event={event} onRated={onRated} /></div>}
+      {open && <div className="border-t p-3"><Detail event={event} onRated={onRated} setup={setup} /></div>}
     </li>
   );
 }
@@ -224,6 +230,7 @@ export default function RadarFeedView() {
   const [open, setOpen] = useState<string | null>(null);
   const [linked, setLinked] = useState<string | null>(null); // the event a phone alert's tap asked for
   const [unseenOnly, setUnseenOnly] = useState(true);
+  const [setups, setSetups] = useState<Setups | null>(null);
   useEffect(() => {
     let live = true;
     (async () => {
@@ -264,6 +271,7 @@ export default function RadarFeedView() {
       }
       setFeed(next);
       setError(null);
+      getSetups(next.session ?? day, signal).then((s) => { if (wanted.current === day) setSetups(s); }, () => {});
     } catch (e) {
       if ((e as Error).name !== "AbortError") setError("Radar could not be reached. Try again in a moment.");
     }
@@ -295,10 +303,20 @@ export default function RadarFeedView() {
   const earlier = visible.filter((e) => !fresh.has(e.event_id)).reverse();
   const rated = (id: string) => (rating: RadarRating) =>
     setFeed((f) => f && { ...f, events: f.events.map((e) => e.event_id === id ? { ...e, rating } : e) });
-  const card = (e: RadarFeedEvent) => (
-    <EventCard key={e.event_id} event={e} fresh={fresh.has(e.event_id)} open={open === e.event_id} linked={linked === e.event_id}
-      onToggle={() => setOpen(open === e.event_id ? null : e.event_id)} onRated={rated(e.event_id)} />
-  );
+  const planned = (next: RadarSetupCard) =>
+    setSetups((s) => s && { ...s, setups: s.setups.map((c) => c.id === next.id ? next : c),
+      scorecard: s.scorecard.map((r) => r.kind === next.kind && r.direction === next.direction && next.plan_state === "planned"
+        ? { ...r, planned: r.planned + 1 } : r) });
+  const shownSetups = setups && setups.session === feed.session ? setups : null;
+  const setupOf = new Map((shownSetups?.setups ?? []).map((c) => [c.event_id, c]));
+  const card = (e: RadarFeedEvent) => {
+    const setup = setupOf.get(e.event_id);
+    return (
+      <EventCard key={e.event_id} event={e} fresh={fresh.has(e.event_id)} open={open === e.event_id} linked={linked === e.event_id}
+        onToggle={() => setOpen(open === e.event_id ? null : e.event_id)} onRated={rated(e.event_id)}
+        setup={setup && { card: setup, today, onPlanned: planned }} />
+    );
+  };
 
   // Off, no-data or stale recordings lead the page; a healthy recording is one quiet line after the developments.
   const warn = feed.state !== "recording";
@@ -361,6 +379,7 @@ export default function RadarFeedView() {
           <ul className="space-y-2">{earlier.map(card)}</ul>
         </section>
       )}
+      {shownSetups && <RadarSetups data={shownSetups} today={today} onPlanned={planned} />}
       {!warn && status}
       {feed.outside_list && <OutsideList checkpoints={feed.outside_list} />}
       {feed.state !== "off" && <RadarMovers session={session ?? feed.session ?? undefined} />}

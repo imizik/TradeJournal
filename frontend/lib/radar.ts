@@ -253,3 +253,55 @@ export function radarEventChartHref(event: RadarEvent): string {
     radar_at: event.first_seen_at, radar_event: event.event_id });
   return `/charts?${query}`;
 }
+
+// ------------------------------------------------------------------ setup cards (docs/radar.md § Setups screen)
+
+export type RadarSetupPaper = {
+  state: "none" | "pending" | "open" | "closed" | "unresolved"; entry_price: number | null; entry_at: string | null;
+  exit_price: number | null; exit_at: string | null; exit_reason: "invalidation" | "time_stop" | "session_close" | null;
+  pnl: number | null; note: string | null;
+};
+export type RadarSetupCard = {
+  id: string; event_id: string; session_date: string; kind: "dip_turn" | "gap_reversal"; symbol: string; direction: "up" | "down";
+  entry: number; invalidation: number; title: string; levels_line: string; contract_line: string | null;
+  contract: Record<string, unknown> | null; record_text: string | null; summary: string | null; created_at: string | null;
+  created_at_ny: string; plan_state: "none" | "planned" | "refused"; plan_note: string | null; planned_at: string | null;
+  paper: RadarSetupPaper;
+};
+export type RadarSetupScore = {
+  kind: string; direction: "up" | "down"; cards: number; with_contract: number; planned: number; paper_closed: number;
+  paper_green: number; paper_pnl: number; unresolved: number;
+};
+export type RadarSetups = { session: string; setups: RadarSetupCard[]; scorecard: RadarSetupScore[] };
+export type RadarSetupPlanReply = { id: string; reply: string; planned: boolean; plan_state: RadarSetupCard["plan_state"] | null };
+
+export const getSetups = (session?: string, signal?: AbortSignal) =>
+  call<RadarSetups>(`/setups${session ? `?session=${encodeURIComponent(session)}` : ""}`, { signal });
+export const planSetup = (id: string) =>
+  call<RadarSetupPlanReply>(`/setups/${encodeURIComponent(id)}/plan`, { method: "POST" });
+
+export const SETUP_WORDS: Record<string, string> = {
+  "dip_turn:up": "Dip turning up", "dip_turn:down": "Pop turning down",
+  "gap_reversal:up": "Gap down turning up", "gap_reversal:down": "Gap up turning down",
+};
+export const setupWords = (kind: string, direction: string) => SETUP_WORDS[`${kind}:${direction}`] ?? `${kind.replace("_", " ")} ${direction}`;
+
+export const dollarsText = (value: number) => `${value > 0 ? "+" : value < 0 ? "−" : ""}$${Math.abs(value).toFixed(2)}`;
+
+const EXIT_TEXT: Record<NonNullable<RadarSetupPaper["exit_reason"]>, string> = {
+  invalidation: "at the invalidation", time_stop: "after 60 minutes", session_close: "before the close",
+};
+
+/** The paper result in one line; it describes what the paper trade did, never what to do. */
+export function paperLine(card: RadarSetupCard): string {
+  const p = card.paper;
+  if (p.state === "none") return card.contract ? "Paper: not started." : "Paper: none (no liquid contract).";
+  if (p.state === "pending") return "Paper: waiting for a fill.";
+  if (p.state === "open") return `Paper: open, in at ${p.entry_price?.toFixed(2) ?? "—"}${p.entry_at ? ` (${nyTime(p.entry_at)})` : ""}.`;
+  if (p.state === "unresolved") return `Paper: unresolved${p.note ? ` (${p.note})` : ""}.`;
+  const reason = p.exit_reason ? ` ${EXIT_TEXT[p.exit_reason]}` : "";
+  return `Paper: closed${reason} · ${p.entry_price?.toFixed(2) ?? "—"} → ${p.exit_price?.toFixed(2) ?? "—"} · ${p.pnl == null ? "—" : dollarsText(p.pnl)}`;
+}
+
+export const scoreLine = (s: RadarSetupScore) =>
+  `${s.cards} card${s.cards === 1 ? "" : "s"} · ${s.planned} planned · ${s.paper_closed} paper closed · ${s.paper_green} green · ${dollarsText(s.paper_pnl)}`;

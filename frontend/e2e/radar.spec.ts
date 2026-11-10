@@ -296,3 +296,70 @@ for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 390, 844]
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   });
 }
+
+test.describe("Radar setup cards", () => {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+  test.beforeEach(async ({ request }) => {
+    expect((await request.post(`${API}/__test/radar-setups-seed?today=${today}`)).ok()).toBeTruthy();
+  });
+  test.afterEach(async ({ request }) => {
+    await request.post(`${API}/__test/radar-setups-seed?clear=true`);
+  });
+
+  for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 390, 844]] as const) {
+    test(`today's setup cards, their record and Plan it on ${size}`, async ({ page }) => {
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.setViewportSize({ width, height });
+      let planned = 0;
+      // The server's Plan it path is covered by the backend tests; here the button shows what the server answered.
+      await page.route("**/radar/setups/*/plan", async (route) => {
+        planned += 1;
+        await route.fulfill({ json: { id: "x", reply: "Planned NBIS: out below 59.85. Alert armed. 60-minute check armed.", planned: true, plan_state: "planned" } });
+      });
+      await page.goto(`/radar?session=${today}`);
+      const section = page.getByTestId("radar-setups");
+      const cards = section.getByTestId("radar-setup");
+      await expect(cards).toHaveCount(2);
+      const nbis = cards.first();
+      await expect(nbis).toContainText("NBIS dip turning up");
+      await expect(nbis).toContainText("10:05 AM ET");
+      await expect(nbis).toContainText("In near 61.20 · out below 59.85 (−2.2%)");
+      await expect(nbis).toContainText("Candidate: NBIS Nov 20 62C · 1.10 × 1.20 (8.7% wide) · Δ0.45");
+      await expect(nbis).toContainText("Your dip buys: 9 trades · 6 green · +$412");
+      await expect(nbis.getByTestId("radar-setup-paper")).toHaveText("Paper: waiting for a fill.");
+      const amd = cards.nth(1);
+      await expect(amd).toContainText("AMD reversing down after a gap up");
+      await expect(amd).toContainText("No liquid contract found.");
+      await expect(amd.getByTestId("radar-setup-paper")).toHaveText("Paper: none (no liquid contract).");
+      await expect(amd).toContainText("Not planned: AMD is already above 153.00");
+      await expect(amd.getByRole("button", { name: "Plan it" })).toHaveCount(0);
+      const record = page.getByTestId("radar-setup-record");
+      await expect(record).toContainText("Dip turning up");
+      await expect(record).toContainText("2 cards · 1 planned · 1 paper closed · 1 green · +$50.70");
+      await expect(record).toContainText("Gap up turning down");
+      await expect(section).not.toContainText(/\bbuy\b/i);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+      await page.screenshot({ path: test.info().outputPath(`radar-setups-${size}.png`), fullPage: true });
+      await nbis.getByRole("button", { name: "Plan it" }).click();
+      await expect(nbis.getByText("Planned", { exact: true })).toBeVisible();
+      await expect(nbis).toContainText("Planned NBIS: out below 59.85. Alert armed.");
+      await expect(nbis.getByRole("button", { name: "Plan it" })).toHaveCount(0);
+      await expect(record).toContainText("2 cards · 2 planned");
+      expect(planned).toBe(1);
+      expect(errors).toEqual([]);
+    });
+  }
+
+  test("a setup event's detail shows its card, and an empty session says so", async ({ page }) => {
+    await page.goto("/radar?session=2026-10-20");
+    const card = page.getByTestId("radar-event").first();
+    await card.getByRole("button").first().click();
+    const inDetail = card.getByTestId("radar-setup");
+    await expect(inDetail).toContainText("In near 104.10 · out below 101.50");
+    await expect(inDetail.getByTestId("radar-setup-paper")).toHaveText("Paper: closed after 60 minutes · 2.10 → 2.62 · +$50.70");
+    await expect(inDetail.getByText("Planned", { exact: true })).toBeVisible();
+    await page.goto("/radar?session=2026-10-19");
+    await expect(page.getByTestId("radar-setups")).toContainText("No setup cards for this session.");
+  });
+});

@@ -10,7 +10,6 @@ from app.engine import radar_setup_plan, telegram_replies
 from app.engine.chart_math import ET
 from app.main import app
 from app.models import Account, LevelAlert, RadarSetup, TradeCapture
-from app.routers import radar
 from tests.test_browser_access import boundary  # noqa: F401  (the shared access fixture)
 
 CONTRACT = {"symbol": "NBIS261120C00062000", "option_type": "call", "strike": 62.0, "expiration": "2026-11-20",
