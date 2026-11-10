@@ -120,35 +120,27 @@ TOOLS: list[dict] = [
     },
     {
         "name": "get_positions",
-        "description": "The owner's open positions from their journal: symbol, stock or option (side, strike, expiry), "
+        "description": "Every open position in the owner's journal: symbol, stock or option (side, strike, expiry), "
                        "quantity, average entry, current mark, unrealized P&L in $ and %, days held, and an account "
-                       "label. Use it when the owner asks about their own holdings. No account identifiers.",
+                       "label. The owner context block already lists them up to its limit: call this only when it shows "
+                       "fewer than its count, or every position is needed (a broker screenshot to check). No account "
+                       "identifiers.",
         "input_schema": {"type": "object", "additionalProperties": False, "properties": {}},
     },
     {
         "name": "get_trades",
-        "description": "The owner's recent closed trades in one symbol from their journal, newest first: entry and exit "
-                       "time and price, P&L, hold time, and tags. Their own history, for how they have traded it.",
+        "description": "The owner's closed trades in one symbol from their journal, newest first: entry and exit time "
+                       "and price, P&L, hold time, and tags. The owner context block shows the latest few for the turn's "
+                       "symbol; call this for more of them, or for another symbol's.",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol"],
                          "properties": {"symbol": _SYMBOL_SCHEMA,
                                         "limit": {"type": "integer", "description": "1-10, default 5"}}},
     },
     {
-        "name": "get_memories",
-        "description": "The owner's approved memories (statements, theses, preferences and lessons they confirmed for "
-                       "Jo), newest first; with `symbol`, that symbol's memories first, then the general ones. Read-only; "
-                       "take them as the owner's own words about how they trade.",
-        "input_schema": {"type": "object", "additionalProperties": False,
-                         "properties": {"limit": {"type": "integer", "description": "1-10, default 5"},
-                                        "symbol": _SYMBOL_SCHEMA}},
-    },
-    {
         "name": "get_owner_context",
-        "description": "The owner context pack for another symbol: their open positions (that symbol first, with hold "
-                       "time, days to expiry, give-back watch, phone alerts and any captured plan), closed trades in it, "
-                       "their exit-habit scorecard, approved memories, today's notes, saved investigations and armed "
-                       "watches. The turn's own symbol arrives with every message already; call this only for a "
-                       "different symbol. Journal facts and the owner's words, not market data.",
+        "description": "The owner context block for a different symbol: the same pack the turn's own symbol arrives "
+                       "with (positions, history, memories and saved work for that symbol). Call it only for a symbol "
+                       "other than the turn's. Journal facts and the owner's words, not market data.",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol"],
                          "properties": {"symbol": _SYMBOL_SCHEMA}},
     },
@@ -572,12 +564,10 @@ def validate(name: str, args: Any) -> dict:
         return {"symbols": list(dict.fromkeys(_symbol(s) for s in symbols))}
     if name == "get_positions":
         return {}
-    if name in ("get_trades", "get_memories"):
+    if name == "get_trades":
         limit = args.get("limit", 5)
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 10:
             raise ToolInputError("limit must be 1-10")
-        if name == "get_memories":
-            return {"limit": limit, **({"symbol": _symbol(args["symbol"])} if args.get("symbol") is not None else {})}
         return {"symbol": _symbol(args.get("symbol")), "limit": limit}
     if name == "get_owner_context":
         return {"symbol": _symbol(args.get("symbol"))}
@@ -991,10 +981,6 @@ class LiveEvidence:
         from app.ai import copilot_book
         return copilot_book.trades(symbol, limit)
 
-    def get_memories(self, limit: int = 5, symbol: str | None = None) -> dict:
-        from app.ai import copilot_book
-        return copilot_book.memories(limit, symbol)
-
     def owner_context(self, symbol: str | None, bounded: bool = True) -> dict:
         """The pack prepended to every turn (docs/copilot-lab.md § Owner context); unbounded for the lab's Open threads."""
         from app.ai import copilot_context
@@ -1059,7 +1045,6 @@ PROVENANCE = {
                    "recorded passes · Alpaca (Benzinga) / Polygon news · journal fills and phone pings (TradeJournal)", "fetched"),
     "get_positions": ("Journal open positions (fills) · Tradier marks", "fetched"),
     "get_trades": ("Journal closed trades (TradeJournal)", "saved"),
-    "get_memories": ("Owner-approved Jo memories (TradeJournal)", "saved"),
     "get_owner_context": ("Owner context: journal positions, trades and exit habits · approved memories · day journal · "
                           "saved investigations and armed watches (TradeJournal)", "saved"),
     "owner_context": ("Owner context: journal positions, trades and exit habits · approved memories · day journal · "

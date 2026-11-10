@@ -662,7 +662,8 @@ def test_why_on_any_ping_asks_copilot_about_that_pings_text(case, monkeypatch):
 
     run(go())
     [(question, symbol)] = asked
-    assert question.startswith(text) and telegram_replies.WHY_QUESTION in question and symbol is None
+    # The ping's one name (its rr: row is gone, so from the text; "vs SPY" is the yardstick) goes with the question.
+    assert question.startswith(text) and telegram_replies.WHY_QUESTION in question and symbol == "AMD"
     [reply] = bot.named("sendMessage")
     assert reply["text"].startswith("Verdict: Watch.") and reply["reply_parameters"]["message_id"] == 55
     assert [a["text"] for a in bot.named("answerCallbackQuery")] == ["Asking copilot…", "Already asked; the answer comes in the chat."]
@@ -1251,3 +1252,37 @@ def test_plan_it_on_a_radar_setup_ping_is_routed_once_and_marks_only_its_button(
         assert len(db.exec(select(TradeCapture)).all()) == 1 and len(db.exec(select(LevelAlert)).all()) == 1
     assert changed == [1, 1]
     assert run(replies.handle(tap(f"rp:{setup_id}", chat="999", update_id=7))) is None
+
+
+def test_a_why_or_reply_on_any_ping_resolves_the_symbol_it_is_about(case):
+    """Before 2026-11-10 only a position alert's buttons gave the turn a symbol, so a Radar or setup ping's Why? ran with
+    no owner context for the name and nothing prefetched (docs/copilot-lab.md § Jobs)."""
+    from app.models import CopilotInvestigation, RadarSetup
+    from tests.test_radar_setup_plan import card
+    db_engine, _ = case
+    setup_id = card(db_engine)
+    with Session(db_engine) as db:
+        hit = RadarAlert(event_id="rv0-x-lad-up-1", session_date="2026-11-10", rule_version="v0", kind="relative_to_spy",
+                         subject="LAD", title="Radar: LAD +5.3% vs SPY +0.1%", body="b", first_seen_at=datetime(2026, 11, 10, 15))
+        group = RadarAlert(event_id="rv0-x-semis-1", session_date="2026-11-10", rule_version="v0", kind="group_move",
+                           subject="Semis", title="Radar: Semis +2.1%", body="b", first_seen_at=datetime(2026, 11, 10, 15))
+        thread = CopilotInvestigation(title="CRWV thesis", symbol="CRWV", transcript_json="[]", evidence_json="[]")
+        db.add_all([hit, group, thread])
+        db.commit()
+        ids = hit.id, group.id, thread.id
+        setup_symbol = db.get(RadarSetup, uuid.UUID(setup_id)).symbol
+
+    def ping(text, *data, url=""):
+        row = [{"text": "b", "callback_data": d} for d in data] + ([{"text": "Open", "url": url}] if url else [])
+        return {"message_id": 1, "text": text, "reply_markup": {"inline_keyboard": [row]}}
+
+    with Session(db_engine) as db:
+        assert telegram_replies.ping_symbol(db, ping("Radar: LAD +5.3% vs SPY", f"rr:{ids[0]}:useful", "ask:radar")) == "LAD"
+        assert telegram_replies.ping_symbol(db, ping("Setup", f"rp:{setup_id}")) == setup_symbol
+        assert telegram_replies.ping_symbol(db, ping("Answer", f"hd:{ids[2].hex}:3:h")) == "CRWV"
+        # A group's subject is no symbol: the text decides, and two names are no one name.
+        assert telegram_replies.ping_symbol(db, ping("Radar: Semis +2.1%, NVDA and AMD lead", f"rr:{ids[1]}:useful")) is None
+        assert telegram_replies.ping_symbol(db, ping("Thesis watch: NBIS reclaimed VWAP", "ask:thesis_watch")) == "NBIS"
+        assert telegram_replies.ping_symbol(db, ping("Research done", "ask:research", url="https://x/charts?symbol=smh&tf=5m")) == "SMH"
+        assert telegram_replies.ping_symbol(db, ping("SPY gapped down 1.2%", "ask:nudge")) == "SPY"  # a benchmark alone is the subject
+        assert telegram_replies.ping_symbol(db, ping("Nothing named here", "ask:nudge")) is None

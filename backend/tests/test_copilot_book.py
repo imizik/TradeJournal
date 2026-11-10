@@ -71,7 +71,7 @@ def _secret_free(out):
 @pytest.mark.parametrize("name,args", [
     ("get_chart_context", {"symbol": "NBIS"}), ("get_chart_context", {"symbol": "NBIS", "timeframe": "2m"}),
     ("get_positions", {"account": "x"}), ("get_trades", {"symbol": "NBIS", "limit": 11}),
-    ("get_trades", {"limit": 3}), ("get_memories", {"limit": 0}), ("get_memories", {"symbol": "nb!s"}),
+    ("get_trades", {"limit": 3}), ("get_memories", {"limit": 5}),  # no memories tool: the owner block carries them
     ("get_owner_context", {}), ("get_owner_context", {"symbol": "NBIS", "limit": 1}),
 ])
 def test_inputs_are_validated(name, args):
@@ -83,7 +83,6 @@ def test_inputs_are_normalized():
     assert copilot_tools.validate("get_chart_context", {"symbol": "nbis", "timeframe": "15m"}) == {"symbol": "NBIS", "timeframe": "15m"}
     assert copilot_tools.validate("get_positions", {}) == {}
     assert copilot_tools.validate("get_trades", {"symbol": "crwv"}) == {"symbol": "CRWV", "limit": 5}
-    assert copilot_tools.validate("get_memories", {}) == {"limit": 5}
 
 
 # --------------------------------------------------------------------------- the chart
@@ -221,7 +220,7 @@ def test_memories_fit_at_their_cap(db):
 # --------------------------------------------------------------------------- fixture, replay and the turn
 
 @pytest.mark.parametrize("name,args", [("get_chart_context", {"symbol": "NBIS", "timeframe": "5m"}), ("get_positions", {}),
-                                       ("get_trades", {"symbol": "NBIS", "limit": 5}), ("get_memories", {"limit": 5})])
+                                       ("get_trades", {"symbol": "NBIS", "limit": 5})])
 def test_fixture_book_is_simulated_and_replay_is_unavailable(name, args):
     cfg = copilot.Settings(enabled=True, backend="fake", evidence="fixture", model="m", effort="medium", fallbacks=False,
                            key_configured=False)
@@ -229,7 +228,7 @@ def test_fixture_book_is_simulated_and_replay_is_unavailable(name, args):
     data = json.loads(result["content"])
     assert event["status"] == "ok" and event["provenance"]["kind"] == "simulated" and data["simulated"] is True
     assert "SIMULATED" in event["provenance"]["source"] and len(result["content"]) <= copilot_tools.MAX_RESULT_CHARS
-    replay = ReplayEvidence.__new__(ReplayEvidence)  # these four read no snapshot state
+    replay = ReplayEvidence.__new__(ReplayEvidence)  # these three read no snapshot state
     assert getattr(replay, name)(**args)["state"] == "unavailable"
 
 
