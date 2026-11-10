@@ -77,14 +77,15 @@ def seeded(tmp_path_factory):
     return url
 
 
-def _days_from_today(value) -> int | None:
+def _days_from_today(value, anchor: date | None = None) -> int | None:
     """
     Dates as an offset, not an absolute.
 
     The fixture builds itself relative to `date.today()`, so a snapshot holding
     absolute dates would pass on the day it was written and fail the next
     morning. An offset keeps `opened_at`, `closed_at` and `expiration` under
-    test without that.
+    test without that. The seed's history trades (``HISTORY_TICKERS``) are built
+    back from its fixed ``HISTORY`` day instead, so they count from ``anchor``.
     """
     if value is None:
         return None
@@ -92,7 +93,7 @@ def _days_from_today(value) -> int | None:
         value = value.date()
     if isinstance(value, str):
         value = datetime.fromisoformat(value).date()
-    return (value - date.today()).days
+    return (value - (anchor or date.today())).days
 
 
 def _jsonable(value):
@@ -168,6 +169,8 @@ def _capture_with(engine) -> dict:
             assigned = sorted(f.raw_email_id for f in trade_fills)
 
             audit = compute_audit(trade, trade_fills, {}, paths.get(trade.id))
+            seed = sys.modules["seed_snapshot_seed_data"]
+            anchor = seed.HISTORY if trade.ticker in seed.HISTORY_TICKERS else None
             captured.append({
                 "ticker": trade.ticker,
                 "account": accounts.get(trade.account_id),
@@ -184,11 +187,11 @@ def _capture_with(engine) -> dict:
                 "hold_duration_mins": trade.hold_duration_mins,
                 "entry_time_bucket": trade.entry_time_bucket,
                 "expired_worthless": trade.expired_worthless,
-                "opened_days_from_today": _days_from_today(trade.opened_at),
-                "closed_days_from_today": _days_from_today(trade.closed_at),
-                "expiration_days_from_today": _days_from_today(trade.expiration),
+                "opened_days_from_today": _days_from_today(trade.opened_at, anchor),
+                "closed_days_from_today": _days_from_today(trade.closed_at, anchor),
+                "expiration_days_from_today": _days_from_today(trade.expiration, anchor),
                 "fills": assigned,
-                "audit": _normalize_audit(audit),
+                "audit": _normalize_audit(audit, anchor),
             })
 
     # Trade ids are random per rebuild, so sort by something stable.
@@ -200,7 +203,7 @@ def _capture_with(engine) -> dict:
 _ET_STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2})( \d{2}:\d{2})?$")
 
 
-def _relative_dates(value):
+def _relative_dates(value, anchor: date | None = None):
     """
     Every remaining absolute date in the audit, as an offset from today.
 
@@ -213,18 +216,18 @@ def _relative_dates(value):
     The date part becomes "T-118"; the time of day stays under test.
     """
     if isinstance(value, dict):
-        return {key: _relative_dates(item) for key, item in value.items()}
+        return {key: _relative_dates(item, anchor) for key, item in value.items()}
     if isinstance(value, list):
-        return [_relative_dates(item) for item in value]
+        return [_relative_dates(item, anchor) for item in value]
     if isinstance(value, str):
         match = _ET_STAMP.match(value)
         if match:
-            offset = _days_from_today(match.group(1))
+            offset = _days_from_today(match.group(1), anchor)
             return f"T{offset:+d}{match.group(2) or ''}"
     return value
 
 
-def _normalize_audit(audit: dict) -> dict:
+def _normalize_audit(audit: dict, anchor: date | None = None) -> dict:
     """
     The audit minus what cannot be stable: the random trade id, and absolute
     dates. Detailed comparisons become coverage totals; financial values and nulls stay -- enrichment fields
@@ -243,15 +246,15 @@ def _normalize_audit(audit: dict) -> dict:
         "accounting": validation.get("accounting"), "limits": validation.get("limits")}
     for fill in normalized.get("fills", []):
         fill["check_counts"] = dict(Counter(c["status"] for c in fill.pop("checks", [])))
-    normalized["opened_days_from_today"] = _days_from_today(audit.get("opened_at_et"))
-    normalized["closed_days_from_today"] = _days_from_today(audit.get("closed_at_et"))
+    normalized["opened_days_from_today"] = _days_from_today(audit.get("opened_at_et"), anchor)
+    normalized["closed_days_from_today"] = _days_from_today(audit.get("closed_at_et"), anchor)
     for fill_audit in normalized.get("fills") or []:
         fill_audit.pop("fill_id", None)
         for date_key in ("executed_at", "executed_at_et"):
             if date_key in fill_audit:
                 fill_audit[f"{date_key}_days_from_today"] = _days_from_today(
-                    fill_audit.pop(date_key))
-    return _relative_dates(_jsonable(normalized))
+                    fill_audit.pop(date_key), anchor)
+    return _relative_dates(_jsonable(normalized), anchor)
 
 
 def test_the_seed_fixture_reconstructs_to_its_recorded_snapshot(seeded):

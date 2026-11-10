@@ -69,11 +69,11 @@ test.describe("dashboard", () => {
     await expect(page.getByText("+$339.67", { exact: true })).toBeVisible();
 
     // A period selection recomputes the total and trader metrics from the
-    // closes inside that window. The seed's TSLA expiry and RCAT close are in 1M.
+    // closes inside that window. Only RCAT's close (19 days before the run) is in 1M;
+    // NVDA and TSLA are fixed history from before the alerts went live.
     await page.getByRole("button", { name: "1M" }).click();
-    await expect(page.getByText("1M Closed P&L")).toBeVisible();
-    await expect(page.getByText("-$281.00", { exact: true })).toBeVisible();
-    await expect(page.getByText("2 closed trades in the selected period", { exact: true })).toBeVisible();
+    await expect(page.getByText("1M Closed P&L").locator("xpath=following-sibling::p[1]")).toHaveText("+$19.00");
+    await expect(page.getByText("1 closed trade in the selected period", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "ALL" }).click();
     await expect(page.getByText("+$1,019.00", { exact: true }).first()).toBeVisible();
 
