@@ -106,6 +106,7 @@ def test_a_failed_or_slow_read_reads_as_unavailable_and_never_holds_the_turn(tmp
     evidence = _live(tmp_path, monkeypatch, broken)
     monkeypatch.setattr(type(evidence), "get_group_comparison", lambda self, symbol, group=None: time.sleep(2) or {})
     monkeypatch.setattr(type(evidence), "get_quotes", lambda self, symbols: 1 / 0)
+    monkeypatch.setattr(type(evidence), "get_market_regime", lambda self, symbol=None: 1 / 0)
     async def timed():
         started = time.monotonic()
         out = await copilot_context.market(evidence, "NBIS", 0.5)
@@ -114,9 +115,8 @@ def test_a_failed_or_slow_read_reads_as_unavailable_and_never_holds_the_turn(tmp
     section, took = asyncio.run(timed())  # (asyncio.run itself then waits for the slow thread; the turn's loop does not)
     assert took < 1.5
     assert section["unavailable"]["quotes"] == "the read failed" and section["unavailable"]["group"].startswith("slower than 0.5")
-    # The Radar pass still answers for the indices and the sector; VIX's failure is not invented as a number.
-    assert _lines(section)[0].startswith("day change SPY ") and "VIX" not in _lines(section)[0]
-    assert section["radar_events"]
+    assert section["unavailable"]["regime"] == "the read failed" and "lines" not in section
+    assert section["radar_events"] and section["state"] == "ok"  # Radar's own read still stands
 
     class Bare:  # evidence without market reads gets no section, and a pack without one is untouched
         label = "live"

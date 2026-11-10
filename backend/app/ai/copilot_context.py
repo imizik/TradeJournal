@@ -470,11 +470,13 @@ def market_section(symbol: str | None, reads: dict, label: str = "") -> dict:
 
 def _market_reads(evidence, symbol: str | None) -> dict:
     """The reads the market section takes, each the same call the matching tool makes for this evidence."""
-    reads = {"quotes": lambda: evidence.get_quotes([symbol, "SPY", "QQQ"] if symbol else ["SPY", "QQQ"]),
-             "regime": lambda: evidence.get_market_regime(symbol),
+    # The symbol's quote is the prefetch's own call (copilot.prefetch), so live it is one Tradier read through the chart
+    # feed's 15 s cache; the indices come from the regime's Radar pass, which is read anyway.
+    reads = {"regime": lambda: evidence.get_market_regime(symbol),
              # A symbol passed as the group reads the events that name it, so a busy session never pushes them out.
              "radar": lambda: evidence.get_radar_today(symbol, 12)}
     if symbol:
+        reads["quotes"] = lambda: evidence.get_quotes([symbol])
         reads["group"] = lambda: evidence.get_group_comparison(symbol)
     return reads
 

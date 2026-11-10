@@ -1237,9 +1237,11 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
     by `with_market` in `copilot.owner_context`, placed right after the pack's
     header): the same reads the tools make through the turn's evidence
     (`get_quotes`, `get_market_regime`, `get_group_comparison`,
-    `get_radar_today`, run side by side in worker threads), compacted to
+    `get_radar_today`, run side by side in worker threads; the quote is the
+    symbol's alone, the prefetch's own call, so live both are one Tradier read
+    through the chart feed's 15 s cache), compacted to
     lines, each with `as_of` and `from` (its source): SPY and QQQ day change
-    and VIX; for the turn's symbol its last and day change, its off-hours move
+    from the latest Radar pass, and VIX; for the turn's symbol its last and day change, its off-hours move
     outside the regular session, its sector ETF from the latest Radar pass,
     and its Radar group against SPY since the open with the last 15 minutes'
     breadth; then today's Radar events that name the symbol (read for that
