@@ -45,7 +45,7 @@ _journal_logging()
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
 # The models the panel may pick for a turn when COPILOT_MODELS is unset; COPILOT_MODEL is always offered first.
-DEFAULT_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1")
+DEFAULT_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2", "claude-fable-5-1")
 DEFAULT_FOLLOWUP_MODEL = "off"  # set from the offline eval (docs/copilot-lab.md § Follow-ups keep the evidence)
 MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9.\-]{0,60}$")
 # "Explain this candle: NBIS 5m at 10:40 ET" (the Charts menu's line), with "on 2026-10-23" for an earlier session.
@@ -57,7 +57,8 @@ PROGRESS_BETA = "thinking-display-updates-2026-08-18"
 # USD per million tokens: input, output, cache read, 5-minute cache write. Haiku 5.5 is its rate for prompts of
 # 100K tokens or fewer (a copilot turn's prompt stays well under that); longer prompts bill at 5x.
 PRICES = {"claude-sonnet-5-5": (2.00, 10.00, 0.20, 2.50), "claude-opus-5-5": (4.00, 20.00, 0.20, 5.00),
-          "claude-haiku-5-5": (0.10, 0.50, 0.01, 0.125)}
+          "claude-haiku-5-5": (0.10, 0.50, 0.01, 0.125),
+          "claude-fable-5-2": (8.00, 40.00, 0.20, 10.00), "claude-fable-5-1": (10.00, 50.00, 0.25, 12.50)}
 
 SYSTEM_PROMPT = """You are the research copilot inside TradeJournal, a single trader's private journal and charting app. \
 You are a sparring partner for investigating trading ideas and managing positions, not an autonomous trader.
@@ -1791,6 +1792,13 @@ WEB_SEARCH_USD = 0.01  # per search, as api_runner prices it
 WEB_TURN_EXTRA_USD = 0.15  # a turn that may search reads pages of results: its cap is the turn budget plus this
 
 
+def turn_cap(cfg: Settings, web: bool) -> float:
+    """A turn's spend cap. The turn budget is set at Opus's price; a dearer model (Fable) gets the same room in tokens,
+    so its cap scales with its output price. The daily budget is the same for every model."""
+    scale = max(1.0, _price(cfg.model)[1] / PRICES["claude-opus-5-5"][1])
+    return (cfg.turn_budget_usd + (WEB_TURN_EXTRA_USD if web else 0.0)) * scale
+
+
 def web_tool() -> list[dict]:
     """The search tool, the same in every request of a turn. Once offered it stays in every later round, unchanged: a
     search's result (and its code-execution filtering) can arrive in the next round, and the API binds each thinking
@@ -1880,7 +1888,7 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                     "rounds_ms": [], "prefetch": [name for name, _ in warming]})
     calls = searched = 0
     web = web and cfg.backend == "anthropic" and mode == "live"
-    cap = cfg.turn_budget_usd + (WEB_TURN_EXTRA_USD if web else 0.0)
+    cap = turn_cap(cfg, web)
     web_offered = False
     waiting: dict[str, str] = {}  # web searches whose result has not arrived yet: id -> query
     turn: dict = {"images": len(images or [])}  # per-turn state for _run_tool (one practice proposal, two images)
