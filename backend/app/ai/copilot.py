@@ -1541,6 +1541,7 @@ async def owner_context(evidence, symbol: str | None, cfg: Settings) -> tuple[st
     started = time.monotonic()
     event = {"type": "tool", "id": "owner_context", "name": "owner_context"}
     read = getattr(evidence, "owner_context", None)
+    market = asyncio.ensure_future(copilot_context.market(evidence, symbol))  # beside the pack; never raises
     try:
         if read is None:
             raise LookupError("evidence has no owner context")
@@ -1548,11 +1549,12 @@ async def owner_context(evidence, symbol: str | None, cfg: Settings) -> tuple[st
         label = getattr(evidence, "label", "")
         if label == "fixture":
             pack = {**SIMULATED_MARKER, **pack}
+        pack = copilot_context.with_market(pack, await market)
         event.update(status="ok", provenance=copilot_tools.provenance("owner_context", pack, label),
                      summary=copilot_context.summary(pack))
     except Exception as exc:  # noqa: BLE001 - the pack is a convenience; the turn goes on without it
         log.warning("owner context unavailable: %s", type(exc).__name__)
-        pack = {"state": "unavailable", "reason": "The owner context could not be read this turn."}
+        pack = copilot_context.with_market({"state": "unavailable", "reason": "The owner context could not be read this turn."}, await market)
         event.update(status="error", summary="unavailable")
     event["ms"] = round((time.monotonic() - started) * 1000)
     return copilot_context.block(pack), event

@@ -141,8 +141,9 @@ def test_a_live_turn_starts_its_symbols_quote_while_the_owner_context_is_read():
     evidence, adapter = LiveRecording(), Asks([("get_peer_moves", {"symbol": "NBIS"})])
     events = _run(adapter, evidence, question="Is NBIS lagging its group?")
     assert events[-1]["metrics"]["prefetch"] == ["get_quotes"]
-    [(name, args, at)] = evidence.reads
-    assert (name, args) == ("get_quotes", (["NBIS"],)) and at < adapter.started[0]  # before the first model call
+    # The prefetch and the owner pack's market read make the same call: live, one Tradier read through the feed's cache.
+    assert [(name, args) for name, args, _ in evidence.reads] == [("get_quotes", (["NBIS"],))] * 2
+    assert all(at < adapter.started[0] for _, _, at in evidence.reads)  # before the first model call
 
 
 def test_a_named_price_also_starts_the_chart_and_nothing_starts_without_a_symbol():
@@ -150,7 +151,7 @@ def test_a_named_price_also_starts_the_chart_and_nothing_starts_without_a_symbol
     events = _run(adapter, evidence, question="Should I take NBIS at 142.50?")
     assert events[-1]["metrics"]["prefetch"] == ["get_quotes", "get_chart_context"]
     assert sorted((n, a) for n, a, _ in evidence.reads) == [("get_chart_context", ("NBIS", copilot.PREFETCH_TIMEFRAME)),
-                                                            ("get_quotes", (["NBIS"],))]
+                                                            ("get_quotes", (["NBIS"],)), ("get_quotes", (["NBIS"],))]  # + the market read
     assert all(at < adapter.started[0] for _, _, at in evidence.reads)
     quiet = LiveRecording()
     assert _run(Asks([]), quiet, symbol=None, question="What matters at 142.50?")[-1]["metrics"]["prefetch"] == []
@@ -165,7 +166,8 @@ def test_a_prefetch_that_fails_leaves_the_turn_and_the_models_own_call_alone():
 
     evidence, adapter = Down(), Asks([("get_quotes", {"symbols": ["NBIS"]})])
     events = _run(adapter, evidence)
-    assert [n for n, _, _ in evidence.reads] == ["get_quotes", "get_quotes"]  # the prefetch, then the model's own call
+    # the prefetch and the owner pack's market read, then the model's own call
+    assert [n for n, _, _ in evidence.reads] == ["get_quotes", "get_quotes", "get_quotes"]
     assert adapter.sent[1][-1]["content"][0]["content"] == "Evidence source unavailable."
     assert events[-1]["type"] == "done"
 

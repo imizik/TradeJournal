@@ -22,6 +22,14 @@ already exist, so the model spends no tool rounds rediscovering the owner:
   jobs that name it (question jobs) or are linked to one of its investigations
   (reassessments); Radar event jobs name an event, not a symbol, so they are not matched.
   With no symbol, armed level alerts across every symbol and every waiting job.
+- ``practice``: the active practice goal the owner confirmed from a week review card
+  (``practice_goal.current``): its words, measure, target and this week's count so far.
+- ``market`` (added by ``with_market`` from ``market``, read beside the pack through the
+  turn's own evidence, so live, fixture and replay each answer as their tools do): SPY,
+  QQQ and VIX; for the symbol its quote, off-hours move, sector ETF, Radar group against
+  SPY and today's Radar events that name it; with no symbol, the day's Radar leaders and
+  laggards. Each line carries its as_of and source; a read that fails or runs past
+  ``MARKET_TIMEOUT_S`` is listed as unavailable and never holds the turn.
 
 Every section carries a provenance label the system prompt explains: ``owner said``
 (their own words), ``measured`` (journal facts) or ``saved`` (earlier conclusions,
@@ -32,6 +40,7 @@ pass to ``get_investigation_changes``.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -44,6 +53,7 @@ from app.ai.copilot_answer import ANSWER_SHAPE
 log = logging.getLogger(__name__)
 
 MAX_PACK_CHARS = 5500  # fits a tool result (copilot_tools.MAX_RESULT_CHARS) with headroom
+MAX_MARKET_CHARS = 1400  # the turn's block also carries the market section (never a tool result): its own room
 MAX_POSITIONS = 8
 MAX_SYMBOL_TRADES = 4
 MAX_MEMORIES = 8
@@ -54,6 +64,10 @@ MAX_WAITING_JOBS = 3  # no-symbol pack: jobs listed after up to MAX_WATCHES aler
 TEXT = 240
 SHORT = 120
 HABITS_TTL_S = 600
+PRACTICE_TTL_S = 120
+MARKET_TIMEOUT_S = 3.0  # the market reads run beside the pack read; past this they read as unavailable
+MAX_MARKET_EVENTS = 3
+MAX_MOVERS = 3
 
 PROVENANCE = {
     "positions": "measured: journal fills and current marks; give-back watch and phone alerts; since_entry lines each name their source and as_of, and 'unavailable' means the input is missing, not zero; a plan's wording is owner said, a thesis_guess is the companion's",
@@ -63,9 +77,12 @@ PROVENANCE = {
     "today": "owner said: today's day-journal entries",
     "investigations": "saved: earlier copilot conclusions and research results; re-check before relying on them",
     "watches": "saved: armed level alerts and research jobs still waiting",
+    "practice": "owner said: the goal they confirmed from a week review; this_week measured",
 }
+MARKET_PROVENANCE = "measured: quotes, the regime and Radar read for this turn, each line with its as_of and source"
 
 _habits_cache: dict = {"at": 0.0, "value": None}
+_practice_cache: dict = {"at": 0.0, "day": None, "value": None}
 
 
 def _trim(text, most: int = TEXT) -> str | None:
@@ -197,6 +214,29 @@ def _habits(db, now: datetime) -> dict:
 
 def clear_habits_cache() -> None:
     _habits_cache.update(at=0.0, value=None)
+    _practice_cache.update(at=0.0, day=None, value=None)
+
+
+def _practice(db, now_et: datetime) -> dict:
+    """The active practice goal and this week's count so far (``GET /copilot/practice``), cached briefly: scoring
+    reads the week's trades."""
+    from app.engine import practice_goal
+    stamp, day = time.monotonic(), now_et.date()
+    if _practice_cache["value"] is not None and _practice_cache["day"] == day and stamp - _practice_cache["at"] < PRACTICE_TTL_S:
+        return _practice_cache["value"]
+    found = practice_goal.current(db, day)
+    goal, week = found["goal"], found["this_week"]
+    if goal is None:
+        value = {"state": "ok", "goal": None}
+    else:
+        value = {k: v for k, v in {
+            "state": "ok", "goal": _trim(goal["text"], SHORT), "measure": goal["label"], "target": goal["target"],
+            "since": goal["since"],
+            "this_week": f"{week['text']} {week['of_what']}" + ("" if week.get("met") is None else (" (met)" if week["met"] else " (not met yet)"))
+            if week else f"starts the week of {goal['week_start']}",
+            "as_of": copilot_book._iso(now_et)}.items() if v is not None}
+    _practice_cache.update(at=stamp, day=day, value=value)
+    return value
 
 
 def _memories(db, symbol: str | None) -> dict:
@@ -309,7 +349,177 @@ def owner_context(symbol: str | None, session=None, now: datetime | None = None,
         pack["investigations"] = _section("investigations", lambda: _investigations(db, symbol))
         ids = {r["id"] for r in pack["investigations"].get("investigations", [])}
         pack["watches"] = _section("watches", lambda: _watches(db, symbol, ids))
+        pack["practice"] = _section("practice", lambda: _practice(db, now_et))
     return shed(pack) if bounded else pack
+
+
+# --------------------------------------------------------------------------- the market read
+
+def _pct_text(value) -> str:
+    return "n/a" if value is None else f"{value:+.2f}%"
+
+
+def _line(text: str, as_of, source: str) -> dict:
+    return {k: v for k, v in {"line": text, "as_of": as_of, "from": source}.items() if v}
+
+
+def _extended_line(symbol: str, block: dict | None) -> dict | None:
+    """The symbol's off-hours move from a quote or regime read's ``extended`` block (pre-market, after-hours or the
+    last session's after-hours), or None during the regular session."""
+    if not block or symbol not in (block.get("symbols") or {}):
+        return None
+    row = block["symbols"][symbol]
+    for key, label in (("premarket", "pre-market"), ("today", "after-hours"), ("last_session", "last after-hours")):
+        part = row.get(key)
+        part = part.get("after_hours") if isinstance(part, dict) and "after_hours" in part else part
+        if isinstance(part, dict) and part.get("change_pct") is not None:
+            return _line(f"{symbol} {label} {_pct_text(part['change_pct'])} at {part.get('last')}"
+                         + (f" ({part['last_at']} ET)" if part.get("last_at") else ""), block.get("as_of"), "chart feed minute bars")
+    return None
+
+
+def _group_line(symbol: str, found: dict) -> dict | None:
+    """The symbol against its Radar group's median and SPY since the open, and the last 15 minutes' breadth."""
+    if found.get("state") != "ok" or not found.get("group"):
+        return None
+    session = found.get("session_context") or {}
+    rows = {r["symbol"]: r for r in session.get("rows") or []}
+    peers = sorted(r["change_pct"] for r in session.get("rows") or [] if r.get("role") == "peer" and r.get("change_pct") is not None)
+    mine, spy = (rows.get(symbol) or {}).get("change_pct"), (rows.get("SPY") or {}).get("change_pct")
+    median = peers[len(peers) // 2] if peers else None
+    text = (f"{found['group']}: {symbol} {_pct_text(mine)} since the open vs group median {_pct_text(median)}, "
+            f"SPY {_pct_text(spy)}")
+    recent = found.get("recent_15m") or {}
+    cover = recent.get("coverage") or {}
+    if cover.get("peers_total"):
+        own = next((r["change_pct"] for r in recent.get("rows") or [] if r["symbol"] == symbol), None)
+        text += f"; last 15 min {cover.get('peers_up', 0)} of {cover['peers_total']} peers up, {symbol} {_pct_text(own)}"
+    return _line(text, found.get("generated_at"), "Radar group comparison (sampled passes)")
+
+
+def market_section(symbol: str | None, reads: dict, label: str = "") -> dict:
+    """The pack's ``market`` section from the turn's reads: ``reads`` maps ``quotes``, ``regime``, ``group`` and
+    ``radar`` to a tool result, or to a short reason when that read failed or was slow. Pure: tests feed it results."""
+    lines: list[dict] = []
+    missing = {name: value for name, value in reads.items() if isinstance(value, str)}
+    got = {name: value for name, value in reads.items() if isinstance(value, dict)}
+    quotes, regime, group, radar = (got.get(k) or {} for k in ("quotes", "regime", "group", "radar"))
+    if quotes and quotes.get("state") != "ok":
+        missing["quotes"] = quotes.get("reason") or quotes.get("issue") or "no quotes"
+    q = quotes.get("quotes") or {}
+    vix = regime.get("vix") or {}
+    parts = [f"{s} {_pct_text(q[s].get('change_pct'))}" for s in ("SPY", "QQQ") if q.get(s)]
+    indices = ((regime.get("radar") or {}).get("indices") or {}) if not parts else {}
+    parts += [f"{s} {_pct_text(row.get('day_pct'))}" for s, row in indices.items() if s in ("SPY", "QQQ") and row]
+    if vix.get("state") == "ok":
+        parts.append(f"VIX {vix.get('last')} ({_pct_text(vix.get('change_pct'))})")
+    if parts:
+        source = "quotes" if q.get("SPY") or q.get("QQQ") else "Radar pass"
+        lines.append(_line("day change " + " · ".join(parts), quotes.get("fetched_at") if source == "quotes" else
+                           (regime.get("radar") or {}).get("pass_at"), source + (", VIX index quote" if vix.get("state") == "ok" else "")))
+    if symbol:
+        mine = q.get(symbol)
+        if mine and mine.get("last") is not None:
+            lines.append(_line(f"{symbol} last {mine['last']}, {_pct_text(mine.get('change_pct'))} on the day",
+                               mine.get("trade_time") or quotes.get("fetched_at"), quotes.get("source_note") or "quote"))
+        elif quotes:
+            missing.setdefault("quote", f"no quote for {symbol}")
+        ext = _extended_line(symbol, quotes.get("extended")) or _extended_line(symbol, regime.get("extended"))
+        if ext:
+            lines.append(ext)
+        sector = (regime.get("radar") or {}).get("sector") or {}
+        if sector.get("state") == "ok":
+            lines.append(_line(f"sector {sector['etf']} {_pct_text(sector.get('day_pct'))}; {symbol} "
+                               f"{sector.get('symbol_vs_sector_pct'):+.2f} pts vs {sector['etf']}" if sector.get("symbol_vs_sector_pct") is not None
+                               else f"sector {sector['etf']} {_pct_text(sector.get('day_pct'))}",
+                               (regime.get("radar") or {}).get("pass_at"), "Radar pass"))
+        elif sector.get("reason"):
+            missing["sector"] = sector["reason"]
+        line = _group_line(symbol, group) if group else None
+        if line:
+            lines.append(line)
+        elif group and group.get("state") not in ("ok", None):
+            missing["group"] = group.get("reason") or group.get("state")
+    out: dict = {"state": "ok" if lines or radar.get("state") == "ok" else "unavailable", "lines": lines}
+    if radar.get("state") == "ok":
+        at = radar.get("as_of")
+        events = [e for e in radar.get("events") or [] if not symbol or symbol in (e.get("symbols") or [])]
+        if events:
+            out["radar_events"] = [{"line": _trim(e.get("summary"), 200), "first_seen": e.get("first_seen_at"),
+                                    **({"now": (e.get("latest") or {}).get("status")} if (e.get("latest") or {}).get("status") else {})}
+                                   for e in events[:MAX_MARKET_EVENTS]]
+            out["radar_events_total"] = max(len(events), radar.get("events_total") or 0)
+        movers = radar.get("movers") or {}
+        if not symbol and movers:
+            def ranked(rows):
+                return ", ".join(f"{r['symbol']} {r['vs_spy']:+.2f}" for r in rows[:MAX_MOVERS] if r.get("vs_spy") is not None)
+            if movers.get("leaders"):
+                out["leaders_vs_spy"] = ranked(movers["leaders"])
+            if movers.get("laggards"):
+                out["laggards_vs_spy"] = ranked(movers["laggards"])
+            out["movers_as_of"] = movers.get("pass_at") or at
+        out["radar_session"] = radar.get("session") + (" (prior session)" if radar.get("prior_session") else "") if radar.get("session") else None
+    elif radar:
+        missing["radar"] = radar.get("reason") or radar.get("state")
+    if label == "fixture":
+        out["simulated"] = True
+    if missing:
+        out["unavailable"] = {k: _trim(str(v), 100) for k, v in missing.items()}
+    return {k: v for k, v in out.items() if v not in (None, [], {})} | {"state": out["state"]}
+
+
+def _market_reads(evidence, symbol: str | None) -> dict:
+    """The reads the market section takes, each the same call the matching tool makes for this evidence."""
+    # The symbol's quote is the prefetch's own call (copilot.prefetch), so live it is one Tradier read through the chart
+    # feed's 15 s cache; the indices come from the regime's Radar pass, which is read anyway.
+    reads = {"regime": lambda: evidence.get_market_regime(symbol),
+             # A symbol passed as the group reads the events that name it, so a busy session never pushes them out.
+             "radar": lambda: evidence.get_radar_today(symbol, 12)}
+    if symbol:
+        reads["quotes"] = lambda: evidence.get_quotes([symbol])
+        reads["group"] = lambda: evidence.get_group_comparison(symbol)
+    return reads
+
+
+def _settle(task: asyncio.Future) -> None:
+    if not task.cancelled():
+        task.exception()  # retrieved, so a slow read that fails later logs nothing
+
+
+async def market(evidence, symbol: str | None, timeout: float = MARKET_TIMEOUT_S) -> dict | None:
+    """The ``market`` section for one turn, read side by side (worker threads) and never raising: a read that fails or
+    is still running at ``timeout`` reads as unavailable. None when the evidence has no market reads."""
+    if not all(hasattr(evidence, name) for name in ("get_quotes", "get_market_regime", "get_radar_today")):
+        return None
+    symbol = symbol.upper() if symbol else None
+    try:
+        tasks = {name: asyncio.ensure_future(asyncio.to_thread(read)) for name, read in _market_reads(evidence, symbol).items()}
+        await asyncio.wait(tasks.values(), timeout=timeout)
+        reads: dict = {}
+        for name, task in tasks.items():
+            if not task.done():
+                task.add_done_callback(_settle)
+                reads[name] = f"slower than {timeout:g} s"
+            elif task.exception() is not None:
+                log.info("copilot market read %s unavailable: %s", name, type(task.exception()).__name__)
+                reads[name] = "the read failed"
+            else:
+                reads[name] = task.result()
+        return market_section(symbol, reads, getattr(evidence, "label", ""))
+    except Exception as exc:  # noqa: BLE001 - the market lines are a head start; the tools still answer
+        log.warning("copilot market section unavailable: %s", type(exc).__name__)
+        return {"state": "unavailable", "unavailable": {"market": "the market read failed"}}
+
+
+def with_market(pack: dict, section: dict | None) -> dict:
+    """The pack with ``market`` placed after its header (as_of, symbol), then shed to the cap again."""
+    if section is None:
+        return pack
+    head = {k: pack[k] for k in ("state", "as_of", "symbol", "simulated", "note", "reason") if k in pack}
+    out = {**head, "market": section, **{k: v for k, v in pack.items() if k not in head}}
+    if isinstance(out.get("provenance"), dict):
+        out["provenance"] = {**out["provenance"], "market": MARKET_PROVENANCE}
+    return shed(out, MAX_PACK_CHARS + MAX_MARKET_CHARS) if out.get("state") == "ok" else out
 
 
 def _drop_sources(pack: dict) -> None:
@@ -337,23 +547,35 @@ def _slim_rows(pack: dict) -> None:
             plan.pop(key, None)
 
 
+def _slim_market(pack: dict) -> None:
+    """One Radar event and no source labels on the market lines (their as_of stays)."""
+    market = pack.get("market") or {}
+    if market.get("radar_events"):
+        market["radar_events"] = market["radar_events"][:1]
+    for line in market.get("lines", []):
+        line.pop("from", None)
+
+
 def _shed_steps(pack: dict):
     yield lambda: pack.get("history", {}).pop("recent", None)
     yield lambda: pack.get("today", {}).pop("entries", None)
+    yield lambda: _slim_market(pack)
     yield lambda: _drop_sources(pack)
     yield lambda: _trim_diffs(pack)
     yield lambda: _slim_rows(pack)
     yield lambda: pack.get("investigations", {}).pop("investigations", None)
     yield lambda: pack.get("memories", {}).pop("memories", None)
+    yield lambda: [pack.get("market", {}).pop(k, None) for k in ("radar_events", "leaders_vs_spy", "laggards_vs_spy", "unavailable")]
     yield lambda: pack.get("positions", {}).update(positions=pack["positions"].get("positions", [])[:3],
                                                    shown=min(3, len(pack["positions"].get("positions", []))))
     yield lambda: pack.pop("provenance", None)
 
 
-def shed(pack: dict) -> dict:
-    """Drop the least decision-relevant parts until the pack fits ``MAX_PACK_CHARS`` (positions and habits last)."""
+def shed(pack: dict, most: int = MAX_PACK_CHARS) -> dict:
+    """Drop the least decision-relevant parts until the pack fits ``most`` characters (positions and habits last; the
+    market lines and the practice goal are never dropped, only slimmed)."""
     for step in _shed_steps(pack):
-        if len(json.dumps(pack, default=str, separators=(",", ":"))) <= MAX_PACK_CHARS:
+        if len(json.dumps(pack, default=str, separators=(",", ":"))) <= most:
             return pack
         step()
         pack["trimmed"] = True
@@ -363,7 +585,8 @@ def shed(pack: dict) -> dict:
 def summary(pack: dict) -> str:
     """One line for the UI's evidence row."""
     if pack.get("state") != "ok":
-        return (pack.get("reason") or "unavailable")[:160]
+        lines = len((pack.get("market") or {}).get("lines", []))
+        return ((pack.get("reason") or "unavailable") + (f" · {lines} market lines" if lines else ""))[:160]
     parts = []
     held = pack.get("positions", {})
     if held.get("state") == "ok":
@@ -378,6 +601,12 @@ def summary(pack: dict) -> str:
             rows = section.get(key if key != "today" else "entries", [])
             if rows:
                 parts.append(f"{len(rows)} {label}")
+    if (pack.get("practice") or {}).get("goal"):
+        parts.append("practice goal")
+    market = pack.get("market") or {}
+    if market.get("state") == "ok":
+        parts.append(f"{len(market.get('lines', []))} market lines" + (f", {market['radar_events_total']} Radar events"
+                                                                       if market.get("radar_events_total") else ""))
     history = pack.get("history", {})
     if history.get("state") == "ok" and history.get("closed_trades"):
         parts.append(f"{history['closed_trades']} past trades in {history['symbol']}")
@@ -393,10 +622,12 @@ BLOCK_END = "[end of owner context]"
 def block(pack: dict) -> str:
     """The text that precedes the owner's message: framed so the model never mistakes it for their words."""
     head = ("[Owner context, assembled by TradeJournal for this turn; not the owner's message. Labels: \"owner said\" = their own "
-            "words (memories, today's notes, a captured plan); \"measured\" = journal facts (positions, trades, habit counts); "
-            "\"saved\" = earlier copilot conclusions and armed watches, possibly stale. Use it before answering. Read market "
-            "evidence with the tools (or the earlier evidence, when it covers the question); do not re-read positions, "
-            "trades or memories it already shows.]\n")
+            "words (memories, today's notes, a captured plan, the practice goal); \"measured\" = journal facts and market reads "
+            "(positions, trades, habit counts, quotes, Radar); "
+            "\"saved\" = earlier copilot conclusions and armed watches, possibly stale. Use it before answering. The market "
+            "section's lines were read for this turn, each with its as-of: fresh enough to answer from, so do not re-read "
+            "them; use the tools for anything beyond them (charts, news, other symbols, older windows) or for a line marked "
+            "unavailable. Do not re-read positions, trades or memories it already shows.]\n")
     return head + json.dumps(pack, default=str, separators=(",", ":")) + "\n" + BLOCK_END + "\n\n"
 
 

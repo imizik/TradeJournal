@@ -133,7 +133,7 @@ def test_the_pack_puts_the_symbol_first_and_labels_every_section(db):
     pack = copilot_context.owner_context("NBIS", session=db, now=NOW)
     text = _secret_free(pack)
     assert len(text) <= copilot_context.MAX_PACK_CHARS and "trimmed" not in pack
-    assert set(pack["provenance"]) == {"positions", "history", "habits", "memories", "today", "investigations", "watches"}
+    assert set(pack["provenance"]) == {"positions", "history", "habits", "memories", "today", "investigations", "watches", "practice"}
     assert all(pack[k]["state"] == "ok" for k in pack["provenance"])
 
     held = pack["positions"]
@@ -152,6 +152,7 @@ def test_the_pack_puts_the_symbol_first_and_labels_every_section(db):
     assert [m["text"] for m in pack["memories"]["memories"]] == ["NBIS is a two-year infrastructure thesis for me.",
                                                                   "I give gains back after the first hour."]  # symbol, then general; CRWV's and the proposal left out
     assert pack["today"]["entries"][0]["kind"] == "outlook" and "neocloud" in pack["today"]["entries"][0]["text"]
+    assert pack["practice"] == {"state": "ok", "goal": None}  # none confirmed (the goal itself: test_copilot_market_pack)
     by_source = {r["source"]: r for r in pack["investigations"]["investigations"]}  # both open; newest first
     inv, job = by_source["copilot"], by_source["research_job"]
     assert inv["id"] == saved["id"] and inv["conclusion"] == "Group confirms; NBIS lags." and inv["status"] == "open"
