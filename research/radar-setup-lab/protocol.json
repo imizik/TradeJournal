@@ -1,0 +1,38 @@
+{
+  "study": "Radar setup lab: which setup types and filters, scored with the live setup card's own exit rules on the underlying stock, would have paid on the saved historical sessions. Registered before any DESIGN or CONFIRM number was computed.",
+  "design": ["2026-06-15", "2026-08-31"],
+  "confirm": ["2026-09-01", "2026-10-21"],
+  "inputs": "The Radar v2 search's inputs: the #665 minute price snapshot (radar_historical_replay fetch: regular-session SIP minute open and close, raw and split daily bars), its SIP minute volume snapshot (radar_volume_snapshot, 20 warm-up sessions), the 169-symbol roster in backend/app/data/radar_universe.json, and the same split. One addition, fetched once by the lab's fetch-daily step: Alpaca SIP daily bars (adjustment all, as the live dip rule reads them) from 2026-04-01 through 2026-10-21, used only for the dip rule's 20-day test through radar_dip.daily_context, which drops bars on or after the session date. Headlines are not available historically: catalysts are left out.",
+  "clock": "Minute t = 1..390 is the end of the regular-session bar that started at 09:30 + (t-1) minutes. At minute t a setup may read only bars ending at or before t, the previous close and completed daily bars before the session. The flag minute's close is the entry price.",
+  "setups": {
+    "dip": "The live rule radar-dip-v0, unchanged: radar_dip.replay over the passes radar_historical_replay.reconstruct builds, each quote also carrying the stock's cumulative SIP volume through that bar (for the dollar-volume floor and the sampled VWAP).",
+    "reversal": "The live rule radar-reversal-v0, unchanged: radar_reversal.replay over the same passes.",
+    "pullback": "First pullback after a strong open on a tracked stock: the live first_pullback.first_trigger, unchanged, run on each non-benchmark stock's minute bars from 09:30 to 11:00 (high = max(open, close), low = min(open, close), volume from the volume snapshot, as the snapshot has no intrabar high or low). Its trigger must end at 09:47 or later, as live. Both sides. A missing minute ends the stock's evaluation for the day, as live.",
+    "laggard": "Group laggard: at minute 10 <= t <= 120, a fixed roster group with at least 5 roster stocks in which at least 4 other members have a move since the open vs SPY (O) and at least 75% of them have signed O >= 1.0 pp, while this member's signed O <= 0.25 pp. Direction is the group's. First qualifying minute per stock and direction.",
+    "drive": "Registered v2 clause 'drive' (frozen opt-in radar-rules-v2): t >= 5, signed O >= 2 pp and signed trailing five-minute move vs SPY >= 0.5 pp. Justification: the v2 champion caught the most movers; test whether catching them pays as a trade.",
+    "hold": "Registered v2 clause 'hold': 5 <= t <= 45, signed gap vs SPY >= 2, signed day vs SPY >= 0.8 x gap, signed O >= -0.25. Justification: the most precise clause of the v2 search (about 42% on the previous-close label)."
+  },
+  "card": "As radar_setup.levels: entry = the flag minute's close. Invalidation = the lowest (up) or highest (down) minute close from minute 1 through the flag minute; for reversal also the session open, as its live extreme_price measure includes it. No card unless the invalidation is strictly beyond the entry (below for up, above for down). Risk = |entry - invalidation| / entry in percent.",
+  "exit": "As radar_setup_paper on the stock: scan later minutes in order. Stop: the first minute close at or through the invalidation; exit at that close. Time stop: the first available close at or after flag minute + 60. Session close: if flag minute + 60 > 385, the first available close at or after minute 385 (15:55 ET). The earliest of these wins (a stop on the time-stop minute counts as a stop). Only minute closes are checked, never intrabar lows or highs (the snapshot has none). A card with no later close is unscored.",
+  "result": "Result % = direction sign x (exit / entry - 1) x 100 on the stock. R = result % / risk %. Green = result > 0. No commissions, spread or slippage are modelled; an option's spread and decay would come on top. Options are not scored: historical option quotes for these names are not saved.",
+  "baseline": "For each card, 20 draws without replacement from the other non-benchmark roster stocks that have a valid card at the same session, minute and direction (same invalidation and exit rules), from a generator seeded by SHA-256 of session|setup|symbol|minute|direction. Baseline result = mean of the draws (fewer if fewer exist; none = card excluded from edge). Edge = card result % minus its baseline result %; also in R.",
+  "filters": {
+    "all": "every card",
+    "dir_up": "direction up",
+    "dir_down": "direction down",
+    "time_0_30": "flag minute <= 30",
+    "time_31_60": "31 <= flag minute <= 60",
+    "time_61_plus": "flag minute > 60",
+    "spy_with": "SPY's move from its previous close to the flag minute's close, signed by the setup's direction, >= 0",
+    "spy_against": "the same, < 0",
+    "vol_heavy": "the stock's cumulative SIP volume through the flag minute >= 2.0 x the mean cumulative volume through the same minute over the prior 20 scheduled sessions (all 20 required)",
+    "vol_normal": "the same ratio < 2.0",
+    "gap_big": "the stock's own gap, previous close to the first minute's open, >= 2% in absolute size",
+    "gap_small": "the same, < 2%"
+  },
+  "cells": "Every setup x every filter: 6 x 12 = 72 cells. A card with an unavailable filter input is in no level of that filter but stays in 'all'.",
+  "metrics": "Per cell: flags, cards, cards per session, green share, mean and median result % and R, stopped-out share, baseline mean % and green share, mean edge % and R, and a 90% bootstrap interval of mean edge % (2,000 resamples of sessions with replacement, seed 20261110).",
+  "selection": "On DESIGN only, cells with at least 40 scored cards that have a baseline are ranked by the lower end of their 90% edge interval (descending; ties by mean edge, then cell name). The shortlist is the top 5 with a lower end above zero (it may be shorter or empty). Commit it before CONFIRM runs. No reselection.",
+  "win": "On CONFIRM, all 72 cells are computed in one run. A shortlisted cell passes when it has at least 25 scored cards with a baseline, its mean edge % is above zero with the 90% interval's lower end above zero, and its mean R is above zero. Only shortlisted cells can pass; every other cell is descriptive. For the two live rules (dip, reversal), the 'all' cell on CONFIRM says 'demote' if its 90% edge interval's upper end is below zero, 'keep' if the lower end is above zero, and 'no evidence either way' otherwise.",
+  "limits": "Historical and observational. The roster was assembled on 2026-10-21, after the period. The reversal rule was selected from the v2 search on the same sessions, so its DESIGN and CONFIRM numbers here are not independent of that selection. Minute-end SIP closes stand in for the recorder's live quote snapshots. The stock's move is scored, not an option's."
+}
