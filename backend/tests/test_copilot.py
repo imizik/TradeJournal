@@ -435,7 +435,7 @@ def test_a_turn_can_pick_an_offered_model(monkeypatch):
         assert refused.status_code == 422 and "not one of the models" in refused.json()["detail"] and seen[-1] == "claude-sonnet-5-5"
         assert client.post("/copilot/chat", json={**turn, "model": "Bad Model"}).status_code == 422
     monkeypatch.delenv("COPILOT_MODELS")
-    assert copilot.settings().models == ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1")
+    assert copilot.settings().models == ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2", "claude-fable-5-1")
     monkeypatch.setenv("COPILOT_MODELS", "")
     assert copilot.settings().models == ("claude-sonnet-5-5",)
     monkeypatch.setenv("COPILOT_MODEL", "claude-opus-5-5")
@@ -466,6 +466,14 @@ def test_a_haiku_turn_is_priced_at_haikus_rates():
     usage = {"input_tokens": 10_000, "output_tokens": 1_000, "cache_read_input_tokens": 20_000, "cache_creation_input_tokens": 4_000}
     expected = (10_000 * 0.10 + 1_000 * 0.50 + 20_000 * 0.01 + 4_000 * 0.125) / 1e6
     assert copilot.cost_usd("claude-haiku-5-5", usage) == pytest.approx(expected)
+
+
+def test_every_offered_model_has_its_own_price():
+    """Fable is dearer than Opus, so the unknown-model fallback would undercount it and the spend caps would trip late."""
+    assert set(copilot.DEFAULT_MODELS) <= set(copilot.PRICES)
+    usage = {"input_tokens": 10_000, "output_tokens": 1_000, "cache_read_input_tokens": 20_000, "cache_creation_input_tokens": 4_000}
+    assert copilot.cost_usd("claude-fable-5-2", usage) == pytest.approx((10_000 * 8 + 1_000 * 40 + 20_000 * 0.20 + 4_000 * 10) / 1e6)
+    assert copilot.cost_usd("claude-fable-5-1", usage) == pytest.approx((10_000 * 10 + 1_000 * 50 + 20_000 * 0.25 + 4_000 * 12.5) / 1e6)
 
 
 def test_anthropic_backend_without_key_is_an_honest_unavailable_state(monkeypatch):

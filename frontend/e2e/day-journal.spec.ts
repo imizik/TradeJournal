@@ -1,8 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const fixtureApi = `http://127.0.0.1:${Number(process.env.E2E_BACKEND_PORT || 8099)}`;
-/** The seeded TSLA calls expire 20 days before the server's own date (`seed_dev_data._expiry_ago(20)`), so the traded day moves with it. */
-const tradedDay = (() => { const day = new Date(); day.setDate(day.getDate() - 20); return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`; })();
+/** The seeded TSLA calls expire 20 days before the seed's fixed history day (`seed_dev_data.HISTORY`, 2026-10-20). */
+const tradedDay = "2026-09-30";
 
 // Actual owner routes, persistence, review context and review saving. Only the
 // external market/model boundary is a clearly labeled, disposable-server fixture.
