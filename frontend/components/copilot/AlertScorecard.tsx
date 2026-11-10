@@ -18,7 +18,8 @@ function held(t: ScorecardTally, verb: string) {
   return { text: `You ${verb} ${t.alerts}${parts.length ? `: ${parts.join(", ")}` : ""}`, net: t.closed ? t.vs_alert_usd : null };
 }
 
-function Outcome({ row }: { row: ScorecardRow }) {
+/** What one alert's contracts fetched against selling at the alert (``outcome``), in plain counts. */
+export function Outcome({ row }: { row: ScorecardRow }) {
   const o = row.outcome;
   if (o.state === "not_measured") return <span className="text-muted-foreground">Not measured: {o.why}</span>;
   const basis = o.basis === "bid" ? "the alert's bid" : "the alert's mark";
@@ -41,7 +42,8 @@ function radarLine(t: RadarTally, verb: string) {
   return <span>You {verb} {t.hits}{t.measured ? <> ({t.kept_going} kept going, avg <Pct value={t.avg_close_pct ?? 0} />)</> : null}. </span>;
 }
 
-function RadarAfter({ row }: { row: RadarScorecardRow }) {
+/** The stock against SPY the way Radar flagged it, an hour on and at the close. */
+export function RadarAfter({ row }: { row: Pick<RadarScorecardRow, "after"> }) {
   const { hour_pct: hour, close_pct: close, why } = row.after;
   if (hour === null && close === null) return <span className="text-muted-foreground">Not measured: {why}</span>;
   return (
@@ -93,7 +95,7 @@ function RadarCard({ card }: { card: RadarScorecard }) {
 }
 
 /**
- * The Briefing's alert scorecard (``GET /copilot/desk/scorecard``): for the position alerts sent to the phone in
+ * The 30-day alert scorecard (``GET /copilot/desk/scorecard``), under "How the pings did"'s Last 30 days: for the position alerts sent to the phone in
  * the last 30 days, what was decided after each and what its contracts then fetched against selling at the alert. One
  * line, with each alert behind a disclosure. Alerts are prompts to decide, not exit rules; this is how their value shows.
  * The same read carries the Radar scorecard, shown under it while Radar records.

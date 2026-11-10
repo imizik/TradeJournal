@@ -520,13 +520,15 @@ test("the close link with nothing left to review, or before the close, opens the
   await expect(page).toHaveURL(/\/copilot-lab\?close=1$/);
 });
 
-test("the close link with no close question left opens the pass on today's alerts", async ({ page }) => {
+test("the close link with only an unanswered alert left asks nothing about it: ratings are optional", async ({ page }) => {
   const at = epoch("2026-10-23T20:30:00Z"); // 16:30 New York
   const to_answer = { alerts: { count: 1, rows: [{ id: "a1111111-1111-4111-8111-111111111111", trade_id: TRADE, symbol: "NBIS",
     contract: "NBIS 10/23/26 100C", kind: "giveback", at: at - 3600, today: true, feedback: null }] }, radar: null };
   const { chats } = await lab(page, { time: new Date(at * 1000), path: "/copilot-lab?close=1",
     session: { ...SESSION, now: at, phase: "post", time_stops: [], to_answer } });
-  await expect(page.getByRole("region", { name: "Close the day" }).getByTestId("alert-answer")).toContainText("Give-back · NBIS 10/23/26 100C");
+  await expect(page.getByRole("button", { name: "Close the day", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Close the day" })).toHaveCount(0);
+  await expect(page.getByText(/alerts? to answer|Radar hits? to rate/)).toHaveCount(0);
   expect(chats).toEqual([]);
 });
 
@@ -605,7 +607,7 @@ test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip 
   expect(chats).toEqual([]);
 });
 
-test("after the close questions, Close the day asks today's alerts, Radar hits and fills to link, one at a time", async ({ page }) => {
+test("after the close questions, Close the day asks only the fills to link, never today's alerts or Radar hits", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const DAY = "2026-10-23";
   const at = epoch("2026-10-23T21:00:00Z"); // 17:00 New York, a Friday
@@ -644,30 +646,24 @@ test("after the close questions, Close the day asks today's alerts, Radar hits a
       received_at: epoch("2026-10-23T14:20:00Z"), timing: "pre_entry", investigation_id: null }], linked: [], plan_path: "/copilot-lab?symbol=AMD" } }));
   await page.route("**/charts/captures/*/link", (route) => { writes.push("link"); return route.fulfill({ json: {} }); });
   const { chats } = await lab(page, { time: new Date(at * 1000), threads, session: { ...SESSION, now: at, phase: "post", time_stops: [], to_answer } });
-  const rail = page.getByRole("navigation", { name: "Thread list" });
-  // One close question, one alert and one Radar hit from today still unanswered, one fill to link; one alert already answered.
-  await expect(page.getByTestId("briefing-reviewed")).toHaveText("1 of 5 done");
-  await page.getByRole("button", { name: "Close the day · 4 to review" }).click();
+  // One close question and one fill to link; today's unanswered alert and Radar hit are not asked or counted.
+  await expect(page.getByTestId("briefing-reviewed")).toHaveText("0 of 2 done");
+  await page.getByRole("button", { name: "Close the day · 2 to review" }).click();
   await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible();
   await page.getByRole("region", { name: "Close of day" }).getByRole("button", { name: "Skip" }).click();
 
   const pass = page.getByRole("region", { name: "Close the day" });
-  await expect(pass.getByTestId("alert-answer")).toContainText("Give-back · NBIS 10/23/26 100C");
-  await expect(pass.getByTestId("close-pass-done")).toHaveText("1 of 5 done");
-  await expect(page.getByRole("button", { name: "Close the day · 3 to review" })).toBeVisible();
-  await page.screenshot({ path: test.info().outputPath("close-the-day-alert-1440.png") });
-  await pass.getByRole("button", { name: "Prompted a review" }).click();
-
-  await expect(pass.getByTestId("hit-to-rate")).toContainText("MU vs sector");
-  await expect(pass.getByTestId("close-pass-done")).toHaveText("2 of 5 done");
-  await pass.getByRole("button", { name: "Skip" }).click(); // nothing saved for the hit
+  await expect(pass.getByTestId("alert-answer")).toHaveCount(0);
+  await expect(pass.getByTestId("close-pass-done")).toHaveText("0 of 2 done");
+  await expect(page.getByRole("button", { name: "Close the day · 1 to review" })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("close-the-day-fill-1440.png") });
 
   const fill = pass.getByRole("group", { name: "Fill to link" });
   await expect(fill).toContainText("Bought AMD 10/23/26 150C");
   await fill.getByRole("button", { name: "No plan" }).click();
   await expect(pass).toHaveCount(0); // the last one ends the pass
   await expect(page.getByRole("button", { name: "Close the day", exact: true })).toBeVisible();
-  expect(writes).toEqual([`alert ${GIVEBACK.id} prompted_review`]);
+  expect(writes).toEqual([]);
   expect(chats).toEqual([]);
 });
 

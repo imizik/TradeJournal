@@ -116,10 +116,35 @@ export function HorizonPick({ horizon, onChange }: { horizon: DeskHorizon; onCha
   );
 }
 
+/** Following a ticker on the desk, switched in place: "Not following" hides it from Now, the thread list and every
+ * count; "Show again" undoes it. A failed save puts it back and says so. */
+export function FollowPick({ following, onChange }: { following: boolean; onChange(following: boolean): Promise<void> }) {
+  const [shown, setShown] = useState(following);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setShown(following); }, [following]); // eslint-disable-line react-hooks/set-state-in-effect -- the list's read wins
+  const change = () => {
+    const next = !shown;
+    setShown(next);
+    setFailed(false);
+    onChange(next).catch(() => { setShown(!next); setFailed(true); });
+  };
+  return (
+    <span className="inline-flex items-center gap-1">
+      {!shown && <span className="inline-flex h-5 items-center rounded bg-secondary px-1.5 text-[11px] font-medium text-muted-foreground">Not followed</span>}
+      <button type="button" onClick={change} aria-pressed={!shown} data-testid="follow-pick"
+        title={shown ? "Hide this ticker from Now, the thread list and every count; Show again undoes it" : "Back on Now and in the thread list"}
+        className="inline-flex min-h-11 items-center rounded px-1 text-[11px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline sm:min-h-5">
+        {shown ? "Not following" : "Show again"}
+      </button>
+      {failed && <span role="status" className="text-primary">Not saved</span>}
+    </span>
+  );
+}
+
 /** The header alone, for a thread whose plan and position were already read. */
-export function ThreadHead({ thread, data, draft = false, horizon = null, onHorizon, stage = null, adopted = false }: {
+export function ThreadHead({ thread, data, draft = false, horizon = null, onHorizon, stage = null, adopted = false, following = null, onFollow }: {
   thread: DeskThreadRef; data: DeskThreadPlan | null; draft?: boolean; horizon?: DeskHorizon | null; onHorizon?(horizon: DeskHorizon): Promise<void>;
-  stage?: string | null; adopted?: boolean;
+  stage?: string | null; adopted?: boolean; following?: boolean | null; onFollow?(following: boolean): Promise<void>;
 }) {
   const chip = chipOf(data, draft, stage, adopted), meta = stage ? "Position closed" : metaOf(data);
   const chartSymbol = thread.symbol ?? data?.plan?.symbol ?? null;
@@ -132,6 +157,7 @@ export function ThreadHead({ thread, data, draft = false, horizon = null, onHori
           {chip && <span className={cn("inline-flex h-5 items-center whitespace-nowrap rounded px-1.5 text-[11px] font-medium", chip.tone)}>{chip.text}</span>}
           {horizon && onHorizon && !draft && !stage && <HorizonPick horizon={horizon} onChange={onHorizon} />}
           {meta && <span>{meta}</span>}
+          {following !== null && onFollow && <FollowPick following={following} onChange={onFollow} />}
         </div>
         <h2 className="text-3xl font-semibold leading-none tracking-tight text-foreground">
           {chartSymbol ? <Link href={`/charts?symbol=${encodeURIComponent(chartSymbol)}`} aria-label={`Open ${chartSymbol} chart`} title={`Open ${chartSymbol} in Charts`} className="inline-flex items-baseline gap-1.5 decoration-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">{symbol}<ChartCandlestick size={15} aria-hidden className="self-center text-muted-foreground" /></Link> : symbol}
@@ -152,9 +178,11 @@ export function ThreadHead({ thread, data, draft = false, horizon = null, onHori
  * the thread has a conversation so the latest answer stays near the top. ``heldOnly``: a symbol opened with no
  * conversation shows the header only while it has an open position, and ``fallback`` otherwise.
  */
-export default function DeskThreadTop({ thread, draft = false, hero = null, compact = false, horizon = null, onHorizon, stage = null, adopted = false, heldOnly = false, fallback = null }: {
+export default function DeskThreadTop({ thread, draft = false, hero = null, compact = false, horizon = null, onHorizon, stage = null, adopted = false, heldOnly = false, fallback = null, following = null, onFollow }: {
   thread: DeskThreadRef | null; draft?: boolean; hero?: ReactNode; compact?: boolean; horizon?: DeskHorizon | null;
   onHorizon?(horizon: DeskHorizon): Promise<void>; stage?: string | null; adopted?: boolean; heldOnly?: boolean; fallback?: ReactNode;
+  /** The ticker's follow switch (``FollowPick``): null for a thread about no ticker. */
+  following?: boolean | null; onFollow?(following: boolean): Promise<void>;
 }) {
   const [read, setRead] = useState<{ id: string; data: DeskThreadPlan } | null>(null);
   const [full, setFull] = useState(false);
@@ -187,7 +215,7 @@ export default function DeskThreadTop({ thread, draft = false, hero = null, comp
   const held = data?.position && thread.symbol ? data.position : null;
   return (
     <div className="mb-4 space-y-4 border-b pb-4">
-      <ThreadHead thread={thread} data={data} draft={draft} horizon={horizon} onHorizon={onHorizon} stage={stage} adopted={adopted} />
+      <ThreadHead thread={thread} data={data} draft={draft} horizon={horizon} onHorizon={onHorizon} stage={stage} adopted={adopted} following={following} onFollow={onFollow} />
       {held && thread.symbol && !compact && <SinceEntry symbol={thread.symbol} tradeId={held.trade_id} collapsible={!thread.id.startsWith("symbol:")} />}
       {hero}
       {data?.plan && <PlanLadder plan={data.plan} position={data.position} dimmed={draft} compact={compact || !full} onToggle={compact ? undefined : toggleLadder} />}

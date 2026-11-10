@@ -101,6 +101,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/desk/threads',
     'GET /copilot/desk/session',
     'GET /copilot/desk/scorecard',
+    'GET /copilot/desk/pings',
     'GET /copilot/desk/to-rate',
     'GET /copilot/desk/radar-setup',
     'POST /copilot/desk/radar-setup/{setup_id}/plan',

@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { ALERT_FEEDBACK_LABELS, saveAlertFeedback, type AlertFeedback, type AlertFeedbackRating } from "@/lib/alertFeedback";
-import type { DeskAlertToAnswer, DeskHitToRate } from "@/lib/desk";
+import type { DeskAlertToAnswer } from "@/lib/desk";
 import { getEvent, rateEvent, RATINGS, type RadarRating } from "@/lib/radar";
 import { cn } from "@/lib/utils";
 
 /**
- * The two answers /proof measures, asked where the owner sees the pings and hits: a sent position alert's feedback
+ * The two answers /proof measures, offered (never counted as waiting) where the owner sees the pings and hits: a sent position alert's feedback
  * (``PUT /trades/{trade_id}/phone-alerts/{id}/feedback``, the trade page's route) and a Radar hit's rating
  * (``POST /radar/events/{id}/feedback``, the Radar feed's). One tap saves; an answered one is a line with Change.
  */
@@ -113,19 +113,6 @@ export function HitRating({ eventId, initial, onRated }: { eventId: string; init
   );
 }
 
-/** A waiting Radar hit: what and when, then its rating. */
-export function HitToRate({ hit, onRated }: { hit: DeskHitToRate; onRated?(id: string): void }) {
-  return (
-    <div data-testid="hit-to-rate" className="min-w-0 space-y-1.5">
-      <p className="text-xs">
-        <span className="font-medium text-foreground">{hit.symbol ?? "Group"} {hit.kind}</span>
-        <span className="text-muted-foreground"> · {when(hit.at, hit.today)}</span>
-      </p>
-      <HitRating eventId={hit.event_id} initial={hit.rating} onRated={onRated} />
-    </div>
-  );
-}
-
 const SECTION = "rounded-lg border bg-card p-3";
 
 /** A position's thread: the alerts sent today for its symbol, each asking whether it was useful. Nothing when none. */
@@ -134,7 +121,7 @@ export function ThreadAlertAnswers({ symbol, rows }: { symbol: string | null; ro
   if (!symbol || !today.length) return null;
   return (
     <section aria-label="Today's alerts" data-testid="thread-alert-answers" className={cn(SECTION, "space-y-3")}>
-      <p className="text-xs text-muted-foreground">Was {today.length === 1 ? "this alert" : "each alert"} useful? Your answer counts on Proof.</p>
+      <p className="text-xs text-muted-foreground">Was {today.length === 1 ? "this alert" : "each alert"} useful? Optional; an answer counts on Proof.</p>
       {today.map(alert => <AlertAnswer key={alert.id} alert={alert} />)}
     </section>
   );
@@ -151,49 +138,8 @@ export function ThreadHitRating({ eventId }: { eventId: string }) {
   if (!read) return null;
   return (
     <section aria-label="Rate this hit" data-testid="thread-hit-rating" className={cn(SECTION, "mb-4 space-y-2")}>
-      <p className="text-xs text-muted-foreground">Did Radar find this early enough to matter? Your rating counts on Proof.</p>
+      <p className="text-xs text-muted-foreground">Did Radar find this early enough to matter? Optional; a rating counts on Proof.</p>
       <HitRating eventId={eventId} initial={read.rating} />
     </section>
-  );
-}
-
-/** The Briefing's "N alerts to answer" and "N Radar hits to rate": each opens its waiting rows to answer in place. */
-export function BriefingToAnswer({ toAnswer }: { toAnswer: { alerts: { count: number; rows: DeskAlertToAnswer[] } | null;
-  radar: { count: number; rows: DeskHitToRate[] } | null } | undefined }) {
-  const [answered, setAnswered] = useState<Set<string>>(() => new Set());
-  const mark = (id: string) => setAnswered(prev => new Set(prev).add(id));
-  const alerts = toAnswer?.alerts;
-  const radar = toAnswer?.radar;
-  // Rows answered here stay listed (as a line with Change) until the Briefing reloads; the counts drop at once.
-  const alertRows = alerts?.rows.filter(r => !r.feedback || answered.has(r.id)) ?? [];
-  const hitRows = radar?.rows.filter(r => !r.rating || answered.has(r.event_id)) ?? [];
-  const alertsLeft = alerts ? Math.max(0, alerts.count - alerts.rows.filter(r => !r.feedback && answered.has(r.id)).length) : 0;
-  const hitsLeft = radar ? Math.max(0, radar.count - radar.rows.filter(r => !r.rating && answered.has(r.event_id)).length) : 0;
-  const more = (left: number, listed: number) => left > listed && <p className="text-xs text-muted-foreground">{left - listed} older not listed here.</p>;
-  return (
-    <>
-      {alerts && (alerts.count > 0 || alertRows.length > 0) && (
-        <details className="min-w-0 basis-full sm:basis-auto open:basis-full" data-testid="briefing-alerts-to-answer">
-          <summary className="w-fit cursor-pointer list-none text-xs font-medium text-primary hover:underline [&::-webkit-details-marker]:hidden">
-            {alertsLeft} alert{alertsLeft === 1 ? "" : "s"} to answer ▾
-          </summary>
-          <div className="mt-2 space-y-3">
-            {alertRows.map(alert => <AlertAnswer key={alert.id} alert={alert} onAnswered={mark} />)}
-            {more(alertsLeft, alertRows.filter(r => !r.feedback && !answered.has(r.id)).length)}
-          </div>
-        </details>
-      )}
-      {radar && (radar.count > 0 || hitRows.length > 0) && (
-        <details className="min-w-0 basis-full sm:basis-auto open:basis-full" data-testid="briefing-hits-to-rate">
-          <summary className="w-fit cursor-pointer list-none text-xs font-medium text-primary hover:underline [&::-webkit-details-marker]:hidden">
-            {hitsLeft} Radar hit{hitsLeft === 1 ? "" : "s"} to rate ▾
-          </summary>
-          <div className="mt-2 space-y-3">
-            {hitRows.map(hit => <HitToRate key={hit.event_id} hit={hit} onRated={mark} />)}
-            {more(hitsLeft, hitRows.filter(r => !r.rating && !answered.has(r.event_id)).length)}
-          </div>
-        </details>
-      )}
-    </>
   );
 }

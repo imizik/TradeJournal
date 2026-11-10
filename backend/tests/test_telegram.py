@@ -1241,6 +1241,9 @@ def test_plan_it_on_a_radar_setup_ping_is_routed_once_and_marks_only_its_button(
     assert (label, data) == ("Plan it", f"rp:{setup_id}") and len(data.encode()) <= telegram.CALLBACK_MAX
     monkeypatch.setattr(radar_setup_plan, "_live_price", lambda symbol: 61.4)
     monkeypatch.setattr(telegram_replies, "_calendar", lambda: None)  # the 60-minute check reads clock hours; no calendar fetch
+    from types import SimpleNamespace
+    from tests.test_radar_setup_plan import NOW
+    monkeypatch.setattr(radar_setup_plan, "time", SimpleNamespace(time=lambda: NOW))  # the card's session, 10:05 New York
     keyboard = rows(telegram_replies.rating_buttons(uuid.uuid4()) + (telegram_replies.plan_button(setup_id), ("Why?", "ask:radar")))
     bot, changed = Bot(), []
     replies = telegram_replies.Replies(db_engine, call=bot, alerts_changed=lambda: changed.append(1))

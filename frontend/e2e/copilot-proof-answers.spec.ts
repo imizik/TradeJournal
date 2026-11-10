@@ -1,7 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// The two answers /proof measures, asked on the desk (docs/copilot-lab.md#the-desk): a sent position alert's feedback and a
-// Radar hit's rating, saved through the routes the trade page and the Radar feed use. Every route is stubbed in the
+// The two answers /proof measures, offered on the desk where the item itself shows (docs/copilot-lab.md#the-desk): a sent
+// position alert's feedback on its position's thread and a Radar hit's rating on its card, saved through the routes the
+// trade page and the Radar feed use. Now never asks for either. Every route is stubbed in the
 // browser; no model runs.
 const ON = {
   enabled: true, backend: "fake", evidence: "live", model: "fake-scripted", effort: "medium", fallbacks: false, key_configured: false,
@@ -94,32 +95,13 @@ test("a Radar hit's thread rates it beside the decision, through the Radar feed'
 });
 
 for (const width of [1440, 375]) {
-  test(`the Briefing counts what waits on an answer and answers it in place (${width} px)`, async ({ page }) => {
+  test(`Now never asks for a rating, however many wait (${width} px)`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
-    const { feedback, ratings } = await desk(page, "/copilot-lab?view=briefing");
+    await desk(page, "/copilot-lab?view=briefing");
     if (width === 375) await page.getByRole("tab", { name: "Now" }).click(); // the fixture opened the thread list
-    const alerts = page.getByTestId("briefing-alerts-to-answer");
-    const hits = page.getByTestId("briefing-hits-to-rate");
-    await expect(alerts.locator("summary")).toHaveText("3 alerts to answer ▾");
-    await expect(hits.locator("summary")).toHaveText("2 Radar hits to rate ▾");
-
-    await alerts.locator("summary").click();
-    await expect(alerts.getByTestId("alert-answer")).toHaveCount(2); // the answered one is not listed
-    await expect(alerts).toContainText("1 older not listed here.");
-    const expiry = alerts.getByTestId("alert-answer").filter({ hasText: "APLD" });
-    await expiry.getByRole("button", { name: "Not useful" }).click();
-    await expect(expiry).toContainText("Answered: Not useful");
-    await expect(alerts.locator("summary")).toHaveText("2 alerts to answer ▾");
-    expect(feedback).toEqual([{ url: `/trades/${APLD_TRADE}/phone-alerts/${EXPIRY.id}/feedback`, body: { rating: "not_useful", reason: null, base_version: 0 } }]);
-
-    await hits.locator("summary").click();
-    const old = hits.getByTestId("hit-to-rate").filter({ hasText: "CRWV" });
-    await old.getByRole("button", { name: "Already knew" }).click();
-    await expect(old).toContainText("Rated: Already knew");
-    await expect(hits.locator("summary")).toHaveText("1 Radar hit to rate ▾");
-    expect(ratings).toEqual([{ url: `/radar/events/${OLD_HIT}/feedback`, body: { rating: "already_knew" } }]);
-
+    await expect(page.getByTestId("now-waiting")).toContainText("Nothing waits on you right now.");
+    await expect(page.getByText(/alerts? to answer|Radar hits? to rate|Rate yesterday/)).toHaveCount(0);
+    await expect(page.getByTestId("alert-answer")).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-    await page.getByRole("region", { name: "Conversation" }).screenshot({ path: test.info().outputPath(`proof-answers-briefing-${width}.png`) });
   });
 }
