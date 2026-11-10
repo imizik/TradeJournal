@@ -76,6 +76,26 @@ def _expiry_ago(days: int) -> date:
     return TODAY - timedelta(days=days)
 
 
+# The finished option trades (NVDA, TSLA) are history from before the phone
+# alerts went live, and Proof's exit-habits read is asserted that way. Anchored
+# to the run date they walked across that fixed day (TSLA's expiry did on
+# 2026-11-10 and moved it into the "since" sample), so they count back from the
+# day before go-live instead. A past date stays past, so their status and P&L
+# never change.
+ALERTS_LIVE = date(2026, 10, 21)  # app.engine.exit_habits.GO_LIVE (tests/test_seed_dev_data.py keeps them equal)
+HISTORY = ALERTS_LIVE - timedelta(days=1)
+HISTORY_TICKERS = ("NVDA", "TSLA")  # the trades built back from HISTORY
+
+
+def _history_ago(days: int, hour: int, minute: int) -> datetime:
+    day = HISTORY - timedelta(days=days)
+    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=ET)
+
+
+def _history_expiry_ago(days: int) -> date:
+    return HISTORY - timedelta(days=days)
+
+
 def _fills() -> list[dict]:
     """
     The dataset. Each entry becomes one Fill row.
@@ -88,11 +108,11 @@ def _fills() -> list[dict]:
         #    2 @ 500 and 3 @ 400 = 2200 cost, sold 5 @ 700 = 3500. PnL +1300.
         #    Already closed, so its expiry being past is irrelevant.
         _option(ROTH_ACCOUNT_ID, "NVDA", "buy_to_open", "2", "500",
-                _days_ago(120, 10, 15), "call", "900", _expiry_ago(75)),
+                _history_ago(120, 10, 15), "call", "900", _history_expiry_ago(75)),
         _option(ROTH_ACCOUNT_ID, "NVDA", "buy_to_open", "3", "400",
-                _days_ago(119, 11, 30), "call", "900", _expiry_ago(75)),
+                _history_ago(119, 11, 30), "call", "900", _history_expiry_ago(75)),
         _option(ROTH_ACCOUNT_ID, "NVDA", "sell_to_close", "5", "700",
-                _days_ago(113, 14, 45), "call", "900", _expiry_ago(75)),
+                _history_ago(113, 14, 45), "call", "900", _history_expiry_ago(75)),
 
         # 2. AAPL calls, partial exit, expiry still ahead -> stays OPEN with
         #    realized PnL banked on the exited portion.
@@ -105,7 +125,7 @@ def _fills() -> list[dict]:
         # 3. TSLA calls held past expiration, never sold -> EXPIRED, full loss.
         #    2 @ 150 = 300 written off.
         _option(ROTH_ACCOUNT_ID, "TSLA", "buy_to_open", "2", "150",
-                _days_ago(60, 13, 20), "call", "400", _expiry_ago(20)),
+                _history_ago(60, 13, 20), "call", "400", _history_expiry_ago(20)),
 
         # 4. Two buys sharing one timestamp, then a partial exit. Real orders
         #    fill in multiple prints within the same second. The fixed ids put
