@@ -15,7 +15,15 @@ the symbol whose first entry came after the plan, or the open position the
 plan's capture is linked to (a plan saved for a position already held, as the
 position companion's Confirm saves one), one ntfy notification goes
 out (``NBIS time stop: you planned to be out by 15:30.``) and its tap opens the
-trade; otherwise it is recorded ``skipped`` and nothing is sent. Nothing here
+trade; otherwise it is recorded ``skipped`` and nothing is sent.
+
+A stop saved with the text ``FROM_ENTRY`` (``60m from entry``, Plan it on a
+Radar setup ping) counts its hour from the owner's first entry fill instead of
+the tap: it is saved due an hour after the tap, and each pass before judging,
+once an open position in the symbol whose first entry came after the plan is in
+the journal, its time moves to an hour after that entry (never past that day's
+close). An entry first seen after the tap's hour is not counted: the stop has
+been judged ``skipped`` by then. Nothing here
 places, changes or suggests an order.
 
 Off unless ``PLAN_TIME_STOPS_ENABLED=true``. It runs on the level alert
@@ -52,6 +60,8 @@ MAX_DAYS = 30  # trading days ahead a time stop may be
 
 _CLOCK = re.compile(r"\b(\d{1,2})(?::([0-5]\d))?\s*(a\.?m\.?|p\.?m\.?)?(?![\w:])", re.I)
 _DURATION = re.compile(r"(?<![\d.])\b(\d{1,3})\s*(m|mins?|minutes?|h|hrs?|hours?|d|days?|trading\s+days?)\b(\s+\w+)?", re.I)
+FROM_ENTRY = "60m from entry"  # Plan it's check: the hour starts at the first entry fill after the plan
+FROM_ENTRY_SECONDS = 60 * 60
 # "10 minutes before the close", "5m closes under 92": an offset or a candle, not a length
 _NOT_A_LENGTH = {"before", "after", "close", "closes", "closing", "candle", "candles", "bar", "bars", "chart"}
 
@@ -203,6 +213,7 @@ class PlanTimeStops:
         """Judge each time stop that has come due: ping about a position opened after the plan, or skip."""
         now = self.clock()
         with Session(self.engine) as db:
+            self._retime(db)
             due = db.exec(select(PlanTimeStop).where(PlanTimeStop.delivery == "scheduled", PlanTimeStop.due_at <= _utc(now))).all()
             for row in due:
                 row.detected_at = _utc(now)
@@ -216,6 +227,40 @@ class PlanTimeStops:
                 db.commit()
                 log.info("Plan time stop %s for %s", row.delivery, row.symbol)
 
+    def _retime(self, db: Session) -> None:
+        """A scheduled ``FROM_ENTRY`` stop is due an hour after the first entry of the open position(s) entered after
+        the plan, no later than that day's close."""
+        waiting = db.exec(select(PlanTimeStop).where(PlanTimeStop.delivery == "scheduled", PlanTimeStop.text == FROM_ENTRY)).all()
+        for row in waiting:
+            entries = self._entries(db, row)
+            if not entries:
+                continue
+            entered = stamp(min(entries)[0])
+            day = datetime.fromtimestamp(entered, ET).date()
+            regular = _regular(self.calendar, day)
+            due = entered + FROM_ENTRY_SECONDS
+            if regular is not None:
+                due = min(due, _at(day, regular[2]))
+            if row.due_at != _utc(due):
+                row.due_at = _utc(due)
+                log.info("Plan time stop for %s now counts from the %s entry", row.symbol, min(entries)[0])
+        db.commit()
+
+    def _entries(self, db: Session, row: PlanTimeStop) -> list[tuple[datetime, uuid.UUID]]:
+        """Each open trade in the symbol (Webull left out) whose first entry came after the plan, with that entry's
+        time; whole-minute fill times count the plan's own minute."""
+        trades = db.exec(select(Trade).join(Account, Account.id == Trade.account_id)
+                         .where(Trade.status == "open", Trade.ticker == row.symbol,
+                                or_(Account.broker.is_(None), Account.broker != "webull"))).all()
+        planned = _epoch(row.created_at)
+        found = []
+        for trade in trades:
+            first = db.exec(select(Fill.executed_at).join(TradeFill, TradeFill.fill_id == Fill.id)
+                            .where(TradeFill.trade_id == trade.id, TradeFill.role == "entry").order_by(Fill.executed_at)).first()
+            if first is not None and stamp(first) + 60 > planned:
+                found.append((first, trade.id))
+        return found
+
     def _position(self, db: Session, row: PlanTimeStop) -> uuid.UUID | None:
         """The open trade the plan's capture is linked to (a plan saved for a position already held, as the position
         companion's Confirm saves one), else the newest open trade in the symbol whose first entry came after the plan
@@ -223,17 +268,8 @@ class PlanTimeStops:
         linked = _linked_position(db, row)
         if linked is not None:
             return linked
-        trades = db.exec(select(Trade).join(Account, Account.id == Trade.account_id)
-                         .where(Trade.status == "open", Trade.ticker == row.symbol,
-                                or_(Account.broker.is_(None), Account.broker != "webull"))).all()
-        planned = _epoch(row.created_at)
-        best = None
-        for trade in trades:
-            first = db.exec(select(Fill.executed_at).join(TradeFill, TradeFill.fill_id == Fill.id)
-                            .where(TradeFill.trade_id == trade.id, TradeFill.role == "entry").order_by(Fill.executed_at)).first()
-            if first is not None and stamp(first) + 60 > planned and (best is None or first > best[0]):
-                best = (first, trade.id)
-        return best[1] if best else None
+        entries = self._entries(db, row)
+        return max(entries, key=lambda e: e[0])[1] if entries else None
 
     # ------------------------------------------------------------ deliver
 

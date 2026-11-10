@@ -35,6 +35,9 @@ FIRST_HOUR = (dtime(9, 30), dtime(10, 30))
 # chain reader's 20-second default) can never hold the pass for long; a timeout just means no contract on the card.
 READ_TIMEOUT_SECONDS = 5
 MINUS = "−"
+# A card's expiration: the nearest 3 to 10 calendar days out, never same-day (the owner's audit flagged options left
+# to expire). Cards only: the setup scanner keeps scanner_rules.pick_expiration for its frozen S1 rules.
+CARD_DTE = (3, 10)
 
 
 def is_setup(event: dict) -> bool:
@@ -78,17 +81,24 @@ def levels(event: dict) -> dict | None:
 # ------------------------------------------------------------------ the contract
 
 
+def card_expiration(expirations, today: date) -> date | None:
+    """The nearest listed expiration ``CARD_DTE`` calendar days out; None when none is listed."""
+    later = sorted(e for e in expirations if CARD_DTE[0] <= (e - today).days <= CARD_DTE[1])
+    return later[0] if later else None
+
+
 def pick_contract(symbol: str, direction: str, today: date, *, options=None) -> dict | None:
-    """One liquid contract, a call for up and a put for down, by the setup scanner's limits; None when none qualifies.
+    """One liquid contract, a call for up and a put for down, by the setup scanner's liquidity limits on the nearest
+    expiration 3 to 10 days out (``card_expiration``); None when none qualifies.
 
     Two reads at most (the expiration list, then one chain) on the shared options budget, never waiting for a slot.
     Never raises."""
     try:
         if options is None:
             from app.engine.options_chain import options_chain as options
-        expiration = scanner_rules.pick_expiration(options.expirations(symbol, timeout=READ_TIMEOUT_SECONDS), today)
+        expiration = card_expiration(options.expirations(symbol, timeout=READ_TIMEOUT_SECONDS), today)
         if expiration is None:
-            log.info("Radar setup %s: no expiration today or 3-7 days out", symbol)
+            log.info("Radar setup %s: no expiration 3-10 days out", symbol)
             return None
         chosen = scanner_rules.choose_contract(options.chain(symbol, expiration, timeout=READ_TIMEOUT_SECONDS).contracts,
                                                "long" if direction == "up" else "short")

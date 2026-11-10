@@ -492,7 +492,9 @@ always a single ping (never held for the digest: the first-hour window is
 over by 10:00), and the one-per-stock-an-hour rule counts one rule version's
 singles at a time. The app-wide [ping policy](copilot-lab.md#phone-ping-policy)
 applies to both, and dip singles share Radar's single-ping budget
-(`PING_BUDGET_RADAR_EVENT`, 4 a day) with the trial's strong events. Dip events do get news checks (the same 3 a pass),
+(`PING_BUDGET_RADAR_EVENT`, 4 a day) with the trial's strong events, except a
+ping that carries a [setup card](#setup-cards-off-by-default), which has its
+own (`PING_BUDGET_RADAR_SETUP`, 4 a day). Dip events do get news checks (the same 3 a pass),
 appear in the feed, where they can be rated, and reach the shadow book when
 that is on.
 
@@ -599,10 +601,12 @@ What the card shows, and where each part comes from:
   last at the first sighting; out (the invalidation) is the session extreme the
   setup turned from (the event's `extreme_price`, else the lowest or highest
   recorded last in its evidence).
-- **Candidate:** one option contract, a call for up and a put for down, by the
-  setup scanner's expiration, delta and liquidity limits
-  (`scanner_rules.pick_expiration`, `choose_contract`), with its bid × ask and
-  how wide the spread is; or `No liquid contract found.`
+- **Candidate:** one option contract, a call for up and a put for down, on the
+  nearest expiration 3 to 10 calendar days out (`radar_setup.card_expiration`:
+  never same-day, since the owner's audit flagged options left to expire), by
+  the setup scanner's delta and liquidity limits (`choose_contract`), with its
+  bid × ask and how wide the spread is; or `No liquid contract found.` The
+  setup scanner keeps its own expiration rule (`scanner_rules.pick_expiration`).
 - **Your record:** the owner's own closed calls (up) or puts (down), first-hour
   entries when there are at least 8, else all of them when there are 8.
 - **Paper record:** once five earlier cards of the same kind and direction have
@@ -625,8 +629,13 @@ under the four ratings (so a rating tap never removes it). One tap
 the invalidation, then saves the card as a plan in the journal (a Copilot plan
 on the default account, long calls or puts, the candidate contract, origin
 `radar_event`, so `/radar/proof` counts the event as planned), arms its
-invalidation alert and, best effort, a 60-minute time stop (pings only if a
-position in the symbol was entered after the plan; never past the close). A
+invalidation alert and, best effort, a 60-minute time stop
+(`plan_time_stops.FROM_ENTRY`, `60m from entry`) whose hour counts from his
+first entry fill in the symbol after the plan: due an hour after the tap, then,
+once such a fill is in the journal, moved to an hour after it (never past the
+close). It pings only if that position is still open; an entry first seen in
+the journal after the tap's hour is not covered (the stop was already judged
+`skipped`). A
 card from an earlier session (its `session_date` is not today's New York date)
 is refused with nothing written: `This setup is from Nov 9; its level no longer
 applies. No plan saved.` A stock already through the level is refused once; a
@@ -641,6 +650,16 @@ Nothing places, sizes or suggests an order.
 direction, cards, cards with a contract, planned, paper trades closed, green,
 their total P&L, and unresolved.
 
+**Pings.** A card ping is policy kind `radar_setup`, with its own budget
+(`PING_BUDGET_RADAR_SETUP`, default 4 a day) ranked just above `radar_event`,
+so setup cards and strong movers never spend each other's pings (with cards on,
+up to 4 + 4 Radar singles a day by default). A setup event without a card
+stays `radar_event`. `RADAR_SETUP_SIDES` is `both` (default) or `up`: with
+`up`, a down-side setup event (a put idea) still gets its card and paper
+record but never a single ping; it waits for the digest with its digest line
+and the reason. The one-setup-ping-per-stock-a-session rule, the Movers
+bypass and at-most-once delivery are unchanged.
+
 **Switching on (Isaac's call).** Add `RADAR_SETUP_CARDS=true` to the VPS
 `backend.env` and restart `tradejournal-api.service` between sessions. Cards
 need a dip or reversal rule on (`record` or `alert`); pings need that rule in
@@ -649,8 +668,6 @@ pings go back to the plain form, saved cards stay.
 
 **Known limits.**
 
-- Setup pings share the 4-a-day `radar_event` budget with the trial's strong
-  events, first come first served.
 - Each card is up to two option reads (expirations, then one chain, 5 seconds
   each at most) out of the options budget of 30 a minute that charts and the
   scanner share, never waiting for a slot; at most 3 cards are built a pass,
@@ -662,7 +679,8 @@ pings go back to the plain form, saved cards stay.
   (recorded and delivered again, only when there are any), so card work never
   delays the receipt or the trial's pings. With cards off the pings are one
   record-and-deliver, as before.
-- The scanner's expiration rule picks a same-day expiry when one is listed.
+- A stock with no expiration listed 3 to 10 days out (only same-day or
+  monthly ones) gets no candidate contract.
 - No card when the invalidation is not beyond the price, for example a stock at
   its session low while SPY falls faster.
 - ntfy has no Plan it button; its tap opens the event page.
@@ -912,7 +930,8 @@ or the live 20-session experiment's scoring.
   `radar_event`. Raising both thresholds makes plain mover events digest-only
   today. Dip and reversal events in `alert` mode are always singles, without
   this test; with [setup cards](#setup-cards-off-by-default) on, such a ping is
-  the card, with Plan it on Telegram. What follows describes a single ping.
+  the card, with Plan it on Telegram, under policy kind `radar_setup`. What
+  follows describes a single ping.
 - **Title:** the event's own numbers, `Radar: LAD +5.3% vs SPY +0.1%` for a
   stock (its 30-minute change and the benchmark's), `Radar: Neoclouds and AI
   hosting −2.4% vs SPY (6 of 7 down)` for a group (median member vs SPY).
@@ -941,10 +960,12 @@ or the live 20-session experiment's scoring.
   One setup single (dip or reversal) per stock a session across both rules: a
   later one waits for the digest with the reason kept. A held single (below) does not count
   toward the hour. The old `RADAR_ALERTS_DAILY_CAP` is gone: the policy's
-  budgets (4 singles and 2 digests a day by default) replace it.
+  budgets (4 singles, 4 setup-card singles and 2 digests a day by default)
+  replace it.
 - **Notification policy:** right before every send, the app's
   [phone ping policy](copilot-lab.md#phone-ping-policy) may hold it: its
-  kind's budget (`PING_BUDGET_RADAR_EVENT`, `PING_BUDGET_RADAR_DIGEST`; there
+  kind's budget (`PING_BUDGET_RADAR_EVENT`, `PING_BUDGET_RADAR_SETUP`,
+  `PING_BUDGET_RADAR_DIGEST`; there
   is no shared daily ceiling), or, for a single (anchored to the stock's open position, else
   the stock, or to the group), the quiet window after a ping for the same
   position. A held ping is recorded `held` with the reason and never sent
