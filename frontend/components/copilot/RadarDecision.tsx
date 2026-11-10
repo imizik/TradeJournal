@@ -154,7 +154,10 @@ export default function RadarDecision({ eventId, symbol, fill }: { eventId: stri
   };
   const undo = () => { if (timer.current) clearTimeout(timer.current); timer.current = null; left.current = null; setPending(null); };
   const setup = detail.setup ?? null;
-  const setupOpen = setup !== null && setup.plan_state === "none" && !closed;
+  // An earlier session's card can only be refused (its level no longer applies), so an older hit keeps Plan it's
+  // conversation path instead.
+  const setupOpen = setup !== null && setup.plan_state === "none" && !closed && today;
+  const loggedPlanning = Boolean(logged && radarChoice(logged.text) === "planning");
   // A setup card plans the way the ping's Plan it does (POST /copilot/desk/radar-setup/{id}/plan): its levels, contract, alert and
   // 60-minute check, or the same refusal. Without a card, Plan it opens a plan conversation naming the hit.
   const planSetup = async (card: RadarSetupCard) => {
@@ -168,7 +171,7 @@ export default function RadarDecision({ eventId, symbol, fill }: { eventId: stri
       setDetail(current => current ? { ...current, setup: result.setup } : current);
       setReply(result.reply);
       if (result.refused) setClosed(true);
-      if (result.planned && today && !(logged && radarChoice(logged.text) === "planning")) await send(write("planning"));
+      if (result.planned && today && !loggedPlanning) await send(write("planning"));
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "Could not plan it.");
     }
@@ -177,10 +180,13 @@ export default function RadarDecision({ eventId, symbol, fill }: { eventId: stri
     if (left.current || pending || planning.current) return;
     planning.current = true;
     if (setupOpen && setup) { await planSetup(setup); planning.current = false; return; }
+    if (setup && setup.plan_state === "planned") { if (today && !loggedPlanning) await send(write("planning")); planning.current = false; return; }
     if (today && !(logged && radarChoice(logged.text) === "planning") && !(await send(write("planning")))) { planning.current = false; return; }
     router.push(planHref);
   };
-  const planButton = !setup || setupOpen;
+  // A desk plan saved while its "Planning." entry failed to log: one tap logs it again, nothing else.
+  const relog = setup?.plan_state === "planned" && today && !loggedPlanning && error !== null;
+  const planButton = !setup || setupOpen || relog || (!today && setup.plan_state !== "planned");
 
   const choice = logged ? radarChoice(logged.text) : null;
   return (
@@ -201,7 +207,7 @@ export default function RadarDecision({ eventId, symbol, fill }: { eventId: stri
       ) : choice && logged ? (
         <p data-testid="radar-decision-logged" className="mt-3 flex flex-wrap items-center gap-x-3 text-sm text-muted-foreground">
           You logged {choice} at {hhmm(logged.created_at)}.
-          {(setup ? setupOpen : choice !== "planning") && <button type="button" onClick={() => void plan()} className="min-h-11 font-medium text-foreground underline underline-offset-2 sm:min-h-0">Plan it</button>}
+          {(setup ? setupOpen || relog || (!today && setup.plan_state !== "planned") : choice !== "planning") && <button type="button" onClick={() => void plan()} className="min-h-11 font-medium text-foreground underline underline-offset-2 sm:min-h-0">Plan it</button>}
         </p>
       ) : (
         <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -209,7 +215,7 @@ export default function RadarDecision({ eventId, symbol, fill }: { eventId: stri
             <button type="button" onClick={() => choose("watching")} className={`${BUTTON} bg-primary text-primary-foreground`}>Watching</button>
             <button type="button" onClick={() => choose("passing")} className={`${BUTTON} border text-foreground hover:bg-secondary`}>Pass</button>
           </>}
-          {planButton && <button type="button" onClick={() => void plan()} className={`${BUTTON} border text-foreground hover:bg-secondary`}>Plan it</button>}
+          {planButton && <button type="button" onClick={() => void plan()} className={`${BUTTON} border text-foreground hover:bg-secondary`}>{relog ? "Log planning" : "Plan it"}</button>}
           <button type="button" onClick={() => fill(setup
             ? `Radar setup on ${symbol}: ${setup.words}, out ${setup.side} ${setup.invalidation.toFixed(2)}. Is it worth planning, and what would make it a pass?`
             : `Radar flagged ${symbol}: ${summary}. Is it worth watching or planning, and what would make it a pass?`)}

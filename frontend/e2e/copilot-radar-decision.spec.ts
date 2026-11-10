@@ -100,17 +100,17 @@ const setupCard = (over: Record<string, unknown> = {}) => ({
   paper: { state: "closed", pnl: 45, exit_reason: "time_stop" }, ...over,
 });
 
-async function setupHit(page: Page, reply: Record<string, unknown>, setup = setupCard()) {
+async function setupHit(page: Page, reply: Record<string, unknown>, setup = setupCard(), day = DAY) {
   const plans: string[] = [];
   const { posts } = await (async () => {
     const posts: { text: string }[] = [];
     await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
     await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
-    await page.route(`**/radar/events/${ID}`, (route) => route.fulfill({ json: { event: dip(), revisions: [], rating: null, news: null,
+    await page.route(`**/radar/events/${ID}`, (route) => route.fulfill({ json: { event: dip(day), revisions: [], rating: null, news: null,
       news_checks: [], plans: { planned: false, traded: false } } }));
     await page.route(`**/copilot/desk/radar-setup?event=${ID}`, (route) => route.fulfill({ json: { setup } }));
     await page.route(`**/copilot/desk/radar-setup/${SETUP_ID}/plan`, (route) => { plans.push(route.request().method()); return route.fulfill({ json: reply }); });
-    await page.route(`**/day-journal/${DAY}`, (route) => route.fulfill({ json: { day: DAY, entries: [], trade_plans: {} } }));
+    await page.route(`**/day-journal/${day}`, (route) => route.fulfill({ json: { day, entries: [], trade_plans: {} } }));
     await page.route(`**/day-journal/${DAY}/entries`, (route) => {
       const body = route.request().postDataJSON();
       posts.push(body);
@@ -161,4 +161,14 @@ test("an already planned setup links its thread instead of Plan it; a refusal sa
   await card.getByRole("button", { name: "Plan it" }).click();
   await expect(card.getByTestId("radar-setup-refused")).toHaveText(`Not planned: ${note}`);
   await expect(card.getByRole("button", { name: "Plan it" })).toHaveCount(0);
+});
+
+test("an earlier day's setup card is shown, and Plan it opens a plan conversation instead of a plan the server would refuse", async ({ page }) => {
+  const { plans } = await setupHit(page, {}, setupCard({ session_date: "2026-10-20", last: null, distance_pct: null }), "2026-10-20");
+  const card = page.getByRole("region", { name: "Radar hit" });
+  await expect(card.getByTestId("radar-setup-levels")).toHaveText("In near 99.60 · out below 98.20 (−1.4%)");
+  await expect(card.getByTestId("radar-setup-distance")).toHaveCount(0);
+  await card.getByRole("button", { name: "Plan it" }).click();
+  await expect(page).toHaveURL(/origin=radar_event%3Arv1-/);
+  expect(plans).toEqual([]);
 });

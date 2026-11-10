@@ -61,7 +61,7 @@ import logging
 import uuid
 from urllib.parse import parse_qs, urlencode, urlparse
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import or_
 from sqlmodel import Session, col, select
 
@@ -1012,12 +1012,15 @@ def radar_setup(event: str, db: Session = Depends(get_session)):
 
 
 @router.post("/desk/radar-setup/{setup_id}/plan")
-def plan_radar_setup(setup_id: str, db: Session = Depends(get_session)):
+def plan_radar_setup(setup_id: str, request: Request, db: Session = Depends(get_session)):
     """Plan it on the desk's Radar card: the setup ping's own ``radar_setup_plan.plan``, unchanged (the same claim, plan,
     alert, 60-minute check and refusals). ``planned`` once a plan stands (now or earlier); ``refused`` when it never can."""
     from app.engine import desk_radar_setups, radar_setup_plan
     from app.models import RadarSetup
     reply, label = radar_setup_plan.plan(db.get_bind(), setup_id)
+    monitor = getattr(request.app.state, "level_alerts", None)
+    if label == radar_setup_plan.PLANNED and monitor is not None:
+        monitor.changed()  # the new invalidation alert is watched at once, as the ping's tap does
     try:
         key = uuid.UUID(setup_id)
     except ValueError:

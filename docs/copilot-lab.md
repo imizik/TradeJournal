@@ -750,9 +750,13 @@ the paper record for the setup once there are enough, and this card's own paper
 result. Its **Plan it** does what the ping's button does
 (`POST /copilot/desk/radar-setup/{id}/plan`, the same claim and refusals: an earlier
 session, a price through the level, a stale quote), stays on the card and
-shows the reply; once planned the card says so and links **Open its thread →**
-instead of offering Plan it again, and a refused card shows why. A plan made
-today also logs "Planning. …" as above. Ask about it asks about the setup.
+shows the reply, and wakes the alert monitor as the ping's tap does; once
+planned the card says so and links **Open its thread →** instead of offering
+Plan it again, and a refused card shows why. A plan made today also logs
+"Planning. …" as above (if that entry fails to save, **Log planning** retries
+it). A card from an earlier session is shown, but its Plan it opens a plan
+conversation as for any older hit, since its level no longer applies. Ask
+about it asks about the setup.
 
 **Radar scorecard** (under the alert scorecard, from the same
 `GET /copilot/desk/scorecard` read, its `radar` part;

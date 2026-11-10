@@ -271,8 +271,11 @@ def test_plan_it_on_the_desk_runs_the_pings_plan_and_reads_back_planned(desk, en
     setup_id = card(engine, contract=FULL)
     monkeypatch.setattr(radar_setup_plan.time, "time", lambda: NOW)
     monkeypatch.setattr(radar_setup_plan, "_live_price", lambda symbol: 61.4)
+    woken = []
+    monkeypatch.setattr(desk.client.app.state, "level_alerts", type("Monitor", (), {"changed": lambda self: woken.append(1)})(), raising=False)
     first = desk.client.post(f"/copilot/desk/radar-setup/{setup_id}/plan").json()
     assert first["planned"] and not first["refused"] and first["reply"].startswith("Planned NBIS: out below 59.85. Alert armed.")
+    assert woken == [1]  # the invalidation alert is watched at once, as after the ping's tap
     thread = first["setup"]["investigation_id"]
     assert first["setup"]["plan_state"] == "planned" and thread
     again = desk.client.post(f"/copilot/desk/radar-setup/{setup_id}/plan").json()
@@ -327,12 +330,12 @@ def test_copilot_rows_are_compact_and_replay_never_sees_a_later_plan_or_paper_re
         assert desk_radar_setups.copilot_rows(db, "2026-11-09") == []
 
 
-def test_the_fixture_radar_today_carries_its_setup_card_and_bounded_drops_setups_last():
+def test_the_fixture_radar_today_carries_its_setup_card_and_bounded_trims_the_longer_list_first():
     from app.ai import copilot_fixture
     from app.engine import radar_today
     out = copilot_fixture.FixtureEvidence().get_radar_today()
     assert [s["symbol"] for s in out["setups"]] == ["NBIS"]
     assert copilot_fixture.FixtureEvidence().get_radar_today(group="CRWV")["setups"] == []
-    big = {"events": [{"x": "y" * 100}] * 3, "setups": [{"x": "y" * 100}] * 3}
-    radar_today.bounded(big, 300)
-    assert big["events"] == [] and len(big["setups"]) == 2 and big["setups_shown"] == 2
+    big = {"events": [{"x": "y" * 100}] * 6, "setups": [{"x": "y" * 100}] * 2}
+    radar_today.bounded(big, 450)
+    assert (len(big["events"]), len(big["setups"]), big["events_shown"]) == (1, 2, 1) and "setups_shown" not in big

@@ -726,8 +726,8 @@ writes to the store. `get_radar_today` also carries `setups`, the session's
 [setup cards](#setup-cards-off-by-default) newest first (at most 8; symbol,
 event, setup in words, entry, invalidation, the candidate contract, the
 owner's record line, plan state, first seen and, once closed, the paper
-result), kept to the tool's group or ticker when one is asked for and dropped
-last when the result must shrink; a replay never sees a card made, planned or
+result), kept to the tool's group or ticker when one is asked for; when the
+result must shrink, the longer of events and setup cards gives way first; a replay never sees a card made, planned or
 closed after its frozen time (`desk_radar_setups.copilot_rows`). The research
 job and the shadow trader read the same tool without the owner's record line
 and plan state (`research_job.without_owner_book`): they never see his book.

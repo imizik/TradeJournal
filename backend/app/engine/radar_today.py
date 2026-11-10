@@ -104,10 +104,9 @@ def bounded(out: dict, most: int) -> dict:
     """Fewer events, never a cut string: the result must stay valid JSON within the tool limit."""
     import json
     size = lambda: len(json.dumps(out, default=str, separators=(",", ":")))  # noqa: E731
-    while out["events"] and size() > most:
-        out["events"].pop()
-        out["events_shown"] = len(out["events"])
-    while out.get("setups") and size() > most:  # setup cards go last, once no event is left to drop
-        out["setups"].pop()
-        out["setups_shown"] = len(out["setups"])
+    while (out["events"] or out.get("setups")) and size() > most:
+        # The longer list gives way first, so neither events nor setup cards crowd the other out.
+        key = "events" if len(out["events"]) >= len(out.get("setups") or []) else "setups"
+        out[key].pop()
+        out[f"{key}_shown"] = len(out[key])
     return out
