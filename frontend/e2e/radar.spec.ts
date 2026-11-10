@@ -27,6 +27,10 @@ for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 390, 844]
       "News nearby: Micron raises quarterly revenue forecast on AI memory demand · benzinga · 10:41 AM (before the move)");
     await expect(page.getByTestId("radar-movers")).toBeVisible();
     expect((await card.boundingBox())!.y).toBeLessThan((await page.getByTestId("radar-movers").boundingBox())!.y);
+    // Discoveries lead; the healthy recording status is one quiet line after them, the Session picker stays beside the heading.
+    expect((await card.boundingBox())!.y).toBeLessThan((await page.getByTestId("radar-coverage").boundingBox())!.y);
+    await expect(page.getByTestId("radar-coverage")).toContainText("Universe radar-universe-v2");
+    await expect(page.getByLabel("Session")).toBeVisible();
     await page.screenshot({ path: test.info().outputPath(`radar-first-glance-${page.viewportSize()!.width}.png`) });
     await card.getByRole("button").first().click();
     const original = page.getByRole("region", { name: "Original evidence" });
@@ -176,6 +180,19 @@ test("Radar empty events and stale rankings remain explicit on phone", async ({ 
   expect((await empty.boundingBox())!.y).toBeLessThan((await panel.boundingBox())!.y);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.screenshot({ path: test.info().outputPath("radar-empty-stale-phone.png") });
+});
+
+test("a stale recording still leads the Radar page, above the developments", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/radar/feed*", async route => {
+    const response = await route.fetch();
+    await route.fulfill({ json: { ...await response.json(), state: "stale" } });
+  });
+  await page.goto("/radar");
+  const coverage = page.getByTestId("radar-coverage");
+  await expect(coverage).toContainText("Stale since");
+  expect((await coverage.boundingBox())!.y).toBeLessThan((await page.getByTestId("radar-event").first().boundingBox())!.y);
+  await page.screenshot({ path: test.info().outputPath("radar-stale-leads-phone.png") });
 });
 
 for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 375, 812]] as const) {
