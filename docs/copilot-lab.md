@@ -1369,6 +1369,16 @@ next turn gets the reads as an "Earlier evidence" block, each with the time
 it was read and its data's as-of, ahead of the owner context block, and
 keeps them on when it reads nothing new.
 
+Each answer in the history the panel sends also ends with one line per card
+it proposed and what the owner did with it (`lib/copilot.ts` `cardLine` /
+`historyAnswer`), for example `[card trade_plan NBIS long calls entry 95.9
+stop 92.3: confirmed]`, `[card watch CRWV touches 88: dismissed]` or
+`: waiting`, so the model knows a plan, watch, memory or practice card it
+drafted two messages ago was confirmed or dismissed. A confirmed plan's
+levels are the ones confirmed. The lines are never shown, and the answer's
+text is clipped to leave room for them within the 4,000-character message
+limit. The outcome records no time, so the lines carry none.
+
 The system prompt tells the model to answer a follow-up from that block
 without calling those tools again, saying when it was read, and to read
 again when the owner asks for fresh data, asks about a symbol or question the

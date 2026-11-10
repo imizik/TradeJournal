@@ -102,6 +102,31 @@ export type ProposalOutcome = { state: "confirmed" | "dismissed"; note?: string;
   parts?: Partial<Record<"plan" | "entry" | "invalidation" | "timeStop", { state: "done" | "failed"; text: string }>>;
   fields?: { thesis: string; contract: string; entry: string; invalidation: string; time_stop: string; size_note: string; horizon?: "" | "day" | "swing" | "long" } };
 export type PlanLevel = { condition: "touches" | "crosses" | "closes_beyond"; price: number; interval: string | null };
+
+/** One line per card for the history sent with the next message (never shown): what the card proposed and what the
+ * owner did with it, so the model knows a plan, watch, memory or practice card was confirmed, dismissed or still waits.
+ * e.g. ``[card trade_plan NBIS long calls entry 95.9 stop 92.3: confirmed]``. */
+export function cardLine(card: Proposal): string {
+  const words = (text: string | null | undefined, most = 60) => (text ?? "").replace(/[[\]\s]+/g, " ").trim().slice(0, most);
+  const fields = card.outcome?.state === "confirmed" ? card.outcome.fields : undefined;
+  const what = card.kind === "trade_plan"
+    ? `${card.symbol} ${card.direction} ${card.instrument}${card.contract ? ` ${words(fields?.contract || card.contract, 30)}` : ""} `
+      + `entry ${words(fields?.entry, 20) || card.entry_trigger.price} stop ${words(fields?.invalidation, 20) || card.invalidation.price}`
+    : card.kind === "watch" ? `${card.symbol} ${card.condition} ${card.price}${card.interval ? ` ${card.interval}` : ""}`
+    : card.kind === "memory" ? `${card.memory_kind}${card.symbol ? ` ${card.symbol}` : ""} "${words(card.outcome?.text || card.text)}"`
+    : card.kind === "practice" ? `"${words(card.outcome?.text || card.label)}"`
+    : `"${words(card.question)}" in ${card.horizon_days}d`;
+  return `[card ${card.kind} ${what}: ${card.outcome?.state ?? "waiting"}]`;
+}
+
+/** An answer as the history sends it: its text clipped to leave room for its card lines, the lines after it, all within
+ * ``most`` characters (the server's per-message limit). */
+export function historyAnswer(content: string, cards: Proposal[] | undefined, most: number): string {
+  const lines = (cards ?? []).map(cardLine).join("\n").slice(0, Math.floor(most / 2));
+  const room = lines ? most - lines.length - 2 : most;
+  const text = content.length <= room ? content : `${content.slice(0, room - 12)} [clipped]`;
+  return lines ? `${text}\n\n${lines}` : text;
+}
 export type TradePlan = Extract<Proposal, { kind: "trade_plan" }>;
 
 /** ``images``: an owner message's screenshot thumbnails (this browser only; the saved text carries SHARED_MARKER). */
