@@ -231,3 +231,13 @@ test("no page throws an uncaught error or fails a request", async ({ page }) => 
 
   expect(problems, `pages reported errors:\n${problems.join("\n")}`).toEqual([]);
 });
+
+test("an unknown route shows the in-app not-found page", async ({ page }) => {
+  for (const [name, size] of [["desktop", { width: 1280, height: 800 }], ["phone", { width: 390, height: 844 }]] as const) {
+    await page.setViewportSize(size);
+    await page.goto("/no-such-page");
+    await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Back to Dashboard" })).toHaveAttribute("href", "/");
+    await page.screenshot({ path: test.info().outputPath(`not-found-${name}.png`) });
+  }
+});
