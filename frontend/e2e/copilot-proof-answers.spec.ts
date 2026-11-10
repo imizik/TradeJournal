@@ -97,7 +97,7 @@ for (const width of [1440, 375]) {
   test(`the Briefing counts what waits on an answer and answers it in place (${width} px)`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
     const { feedback, ratings } = await desk(page, "/copilot-lab?view=briefing");
-    if (width === 375) await page.getByRole("tab", { name: "Briefing" }).click(); // a phone opens on the thread list
+    if (width === 375) await page.getByRole("tab", { name: "Now" }).click(); // the fixture opened the thread list
     const alerts = page.getByTestId("briefing-alerts-to-answer");
     const hits = page.getByTestId("briefing-hits-to-rate");
     await expect(alerts.locator("summary")).toHaveText("3 alerts to answer ▾");

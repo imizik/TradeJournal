@@ -11,7 +11,7 @@ import { UUID_RE, type ExitLesson, type InvestigationSummary, type PlanBoardLeve
 import type { RadarRating } from "@/lib/radar";
 
 /** The phone's three tabs; on a wide screen every pane shows at once. */
-export type DeskTab = "now" | "thread" | "context";
+export type DeskTab = "threads" | "thread" | "context";
 
 /** What the desk asks the conversation to do: open a saved investigation (with ``text`` in the box, unsent), send one
  * prompt across everything, put a question in the message box unsent (the decision bar's Ask why), or leave the open

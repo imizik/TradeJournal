@@ -150,12 +150,16 @@ test("on a wide screen the app's navigation folds into the desk bar's Menu, and 
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1440);
 });
 
-test("daily Main reopens across devices, keeps drafts in their tab and opens earlier dates without sending", async ({ page, browser }) => {
+const SESSION = { as_of: "2026-10-23T15:00:00Z", now: 1792767600, day: "2026-10-23", phase: "regular", open: null, close: null, events: [],
+  time_stops: [], pings: null, prep: null, indices: [], quote_issue: null, sections: {} };
+
+test("daily Main reopens across devices under Now, keeps drafts in their tab and opens earlier dates without sending", async ({ page, browser }) => {
   const prior = { ...saved, main_day: "2026-10-22", title: "Main chat · 2026-10-22", symbol: null };
   const today = { ...prior, id: "33333333-3333-4333-8333-333333333333", main_day: "2026-10-23", title: "Main chat · 2026-10-23" };
   let sends = 0;
   async function fixture(p: Page) {
     await p.route("**/copilot/status", route => route.fulfill({ json: ON }));
+    await p.route("**/copilot/desk/session", route => route.fulfill({ json: SESSION }));
     await p.route("**/copilot/main-chat", route => route.fulfill({ json: today }));
     await p.route("**/copilot/main-chat/history", route => route.fulfill({ json: { chats: [today, prior] } }));
     for (const chat of [prior, today]) await p.route(`**/copilot/investigations/${chat.id}`, route => route.fulfill({ json: chat }));
@@ -173,19 +177,15 @@ test("daily Main reopens across devices, keeps drafts in their tab and opens ear
     await expect(mobile.getByLabel("Message")).toHaveValue("");
     await expect(mobile.getByText("Not yet: it lags CRWV.")).toBeVisible();
     await mobile.screenshot({ path: test.info().outputPath("daily-main-phone.png") });
-    // A phone opens the briefing from its thread list; the bar's Daily switch is for wider screens.
-    await mobile.getByRole("tab", { name: "Threads" }).click();
-    await mobile.getByRole("region", { name: "Today’s briefing" }).getByRole("button").first().click();
+    // A phone opens on its first tab, Now: the day above today's conversation, its box at the bottom.
+    await expect(mobile.getByRole("tab", { name: "Now" })).toHaveAttribute("aria-selected", "true");
     await expect(mobile.getByRole("button", { name: "What matters right now?" })).toBeVisible();
+    await expect(mobile.getByRole("link", { name: "Now", exact: true })).toBeHidden(); // the bar's Now is for wider screens
   } finally { await phone.close(); }
-  await expect(page.getByRole("link", { name: "Main chat", exact: true }).first()).toHaveAttribute("aria-current", "page");
-  await page.getByRole("link", { name: "Today’s briefing", exact: true }).click();
+  // Now and today's conversation are one screen: the day's sections, then Main chat and its message box.
+  await expect(page.getByRole("link", { name: "Now", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByTestId("now")).toBeVisible();
   await expect(page.getByRole("button", { name: "What matters right now?" })).toBeVisible();
-  // The briefing has no message box of its own: it points to Main chat, and marks itself as the open view.
-  await expect(page.getByTestId("briefing-to-main")).toContainText("Ask in Main chat →");
-  await expect(page.getByLabel("Message")).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Today’s briefing", exact: true })).toHaveAttribute("aria-current", "page");
-  await page.getByRole("link", { name: "Main chat", exact: true }).first().click();
   await expect(page.getByLabel("Message")).toHaveValue("Follow up after lunch");
   await page.getByText("Previous days", { exact: true }).click();
   await page.getByRole("button", { name: "Main chat · Thu, Oct 22" }).click();
@@ -197,8 +197,11 @@ test("daily Main reopens across devices, keeps drafts in their tab and opens ear
   await page.getByText("Previous days", { exact: true }).click();
   await page.getByRole("button", { name: "Main chat · Thu, Oct 22" }).click();
   await expect(page.getByRole("heading", { name: "Main chat · Thu, Oct 22" })).toBeVisible();
-  await page.getByRole("link", { name: "Main chat", exact: true }).first().click();
+  await expect(page.getByTestId("now")).toHaveCount(0); // an earlier day is that day's conversation only
+  await expect(page.getByRole("link", { name: "Now", exact: true })).not.toHaveAttribute("aria-current", "page");
+  await page.getByRole("link", { name: "Now", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Main chat · Fri, Oct 23" })).toBeVisible();
+  await expect(page.getByTestId("now")).toBeVisible();
   expect(sends).toBe(0);
   await page.screenshot({ path: test.info().outputPath("daily-main-desktop.png") });
 });
@@ -276,8 +279,8 @@ test("today's Main chat opens on the morning brief and asks about it here; an ea
   await page.screenshot({ path: test.info().outputPath("main-chat-brief-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(card).toBeInViewport();
-  // A phone's tabs already name Main chat, so the bar drops the Daily switch and keeps Desk, search and New plan on one line.
-  await expect(page.getByRole("group", { name: "Daily" })).toBeHidden();
+  // A phone's first tab is Now, so the bar drops its Now button and keeps Desk, search and New plan on one line.
+  await expect(page.getByRole("link", { name: "Now", exact: true })).toBeHidden();
   const middle = async (box: Promise<{ y: number; height: number } | null>) => { const b = await box; return b ? b.y + b.height / 2 : NaN; };
   const desk = await middle(page.getByRole("heading", { name: "Desk", level: 1 }).boundingBox());
   for (const button of [page.getByRole("button", { name: "Jump to a thread or command" }), page.getByRole("button", { name: "New plan" })])

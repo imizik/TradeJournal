@@ -150,8 +150,8 @@ test("an answer leads with its verdict and headline, keeps Changes if plain, and
   // Saved, the thread's next steps are offered instead.
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await expect(chips.getByRole("button")).toHaveText(["What changed?", "More", "Look at my chart", "Close with a lesson"]);
-  // The new thread is named after what its first answer concluded, not the first words typed.
-  expect(seen.posts[0].title).toBe("The thesis has not broken.");
+  // The new thread is named by its ticker, its purpose and the owner's own first words, not the answer's headline.
+  expect(seen.posts[0].title).toBe("NBIS · question: is NBIS still a hold");
   await page.screenshot({ path: test.info().outputPath("answer-format-1440.png") });
 
   // × on the scope chip asks across everything.

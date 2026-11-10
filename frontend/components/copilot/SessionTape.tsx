@@ -3,7 +3,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
 import { getExposure } from "@/lib/copilot";
-import { getDeskSession, needingCount, nyDay, type DeskSession, type DeskSessionEvent, type DeskThread } from "@/lib/desk";
+import { TONE, numeric } from "@/components/copilot/ThreadRail";
+import { getDeskSession, reviewSkipped, type DeskSession, type DeskSessionEvent, type DeskThread } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
 const REFRESH_MS = 60_000;
@@ -92,40 +93,89 @@ export function DeskStatus({ data }: { data: DeskSession | null }) {
   );
 }
 
-/** The Briefing's numbers: open positions, what needs a decision, the nearest armed trigger and phone-ping counts. */
-function Numbers({ data, rows }: { data: DeskSession; rows: DeskThread[] }) {
-  const positions = new Set(rows.filter(r => r.tradeId).map(r => r.tradeId)).size;
-  const needYou = needingCount(rows, nyDay());
-  const near = rows.find(r => r.group === "near");
-  const cells: [string, ReactNode, string?][] = [
-    ["Positions", num(positions)],
-    ["Needs you", num(needYou), needYou ? "text-primary" : undefined],
-    ["Nearest trigger", near ? <>{near.symbol ?? near.title} · <span className="tabular-nums">{near.status.text}</span></> : "None", near ? undefined : "text-muted-foreground"],
-    ["Pings today", data.pings ? <>{num(data.pings.sent)} sent{data.pings.held > 0 && <span className="text-muted-foreground"> · {num(data.pings.held)} held</span>}</> : "—"],
-  ];
+const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
+const ROW = "flex min-h-11 w-full min-w-0 flex-col justify-center gap-0.5 rounded-md px-2.5 py-1.5 text-left hover:bg-secondary sm:min-h-10";
+const isRadar = (row: DeskThread) => row.key.startsWith("radar:");
+
+/** One desk row as a button: the symbol, what the row is (a contract, a plan), its figure on the right, and its status
+ * line (or ``line``) under it. Amber only when the row's own tone asks for the owner. */
+function RowButton({ row, line, open }: { row: DeskThread; line?: ReactNode; open(row: DeskThread): void }) {
+  const what = row.title && row.title !== row.symbol ? row.title : null;
   return (
-    <dl data-testid="briefing-numbers" className="grid grid-cols-2 border-t pt-2 sm:grid-cols-4">
-      {cells.map(([label, value, tone], i) => (
-        <div key={label} className={cn("min-w-0 py-1", i % 2 === 1 && "border-l pl-3", i > 1 && "sm:border-l sm:pl-3", i === 2 && "border-t sm:border-t-0", i === 3 && "border-t sm:border-t-0")}>
-          <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
-          <dd className={cn("truncate text-sm font-semibold text-foreground", tone)}>{value}</dd>
-        </div>
-      ))}
-    </dl>
+    <button type="button" onClick={() => open(row)} className={ROW}>
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span className="shrink-0 text-sm font-semibold text-foreground">{row.symbol ?? row.title}</span>
+        {what && <span className="min-w-0 truncate text-xs text-muted-foreground" title={what}>{what}</span>}
+        {row.value && <span className={cn("ml-auto shrink-0 text-xs", TONE[row.value.tone], numeric(row.value.text) && "tabular-nums")}>{row.value.text}</span>}
+      </span>
+      <span className={cn("block truncate text-xs", TONE[row.status.tone])}>{line ?? row.status.text}</span>
+    </button>
   );
 }
 
 /**
- * The Briefing's day at a glance (docs/copilot-lab.md § The desk), shown at the top of the thread while the Briefing (or
- * no thread) is open: one strip of the regular session in New York time with a "now" marker, today's fills, pings,
- * Radar events and logged decisions as ticks by kind, the time stops still ahead as hollow ticks, SPY and QQQ beside the
- * title, a numbers row (positions, needs you, the nearest trigger, phone-ping counts; ``rows`` are the thread
- * list's) and one quiet line (what is next: a time stop, else the open or the close; at risk now; the practice goal). Before the open
- * it says whether the prep is written; after the close it shows the whole day. ``data`` is the desk's one session read
- * (``useDeskSession``); read-only.
+ * Now's open positions (docs/copilot-lab.md § The desk): one row per open position from the thread list's read, with its
+ * contract, unrealized P&L and its plan's nearest line (distance to invalidation, else the time stop; "No plan yet"
+ * without one), plus a time stop still ahead today when the line names something else. Then the armed plans near a
+ * trigger. A row opens its thread (``open``, the desk's ``pick``).
  */
-export default function SessionTape({ data, error, rows, tally }: {
-  data: DeskSession | null; error: string | null; rows: DeskThread[]; tally: { done: number; total: number };
+export function NowPositions({ rows, stops, open, read }: {
+  rows: DeskThread[]; stops: DeskSession["time_stops"]; open(row: DeskThread): void; read: boolean;
+}) {
+  const positions = rows.filter(r => r.key.startsWith("trade:"));
+  const near = rows.filter(r => r.group === "near");
+  const line = (row: DeskThread) => {
+    const stop = stops.find(s => s.symbol === row.symbol);
+    return stop && !/time stop/i.test(row.status.text) ? `${row.status.text} · time stop ${stop.clock}` : row.status.text;
+  };
+  return (
+    <section aria-label="Open positions" data-testid="now-positions" className="mb-4 rounded-lg border bg-card p-1.5">
+      <h2 className={cn(LABEL, "px-2.5 pb-1 pt-1")}>Open positions{positions.length > 0 && <> · <span className="tabular-nums">{positions.length}</span></>}</h2>
+      {positions.length ? (
+        <ul>{positions.map(row => <li key={row.key}><RowButton row={row} line={line(row)} open={open} /></li>)}</ul>
+      ) : <p className="px-2.5 pb-1.5 text-xs text-muted-foreground">{read ? "No open positions." : "Reading positions…"}</p>}
+      {near.length > 0 && (
+        <>
+          <h3 className={cn(LABEL, "mt-1 border-t px-2.5 pb-1 pt-2")}>Near a trigger</h3>
+          <ul>{near.map(row => <li key={row.key}><RowButton row={row} open={open} /></li>)}</ul>
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * What waits on the owner: each ticker's decision to make, card to confirm or close question still open (``needsYou``),
+ * one row each opening its thread, then ``children`` (fills to link, alerts to answer, Radar hits to rate, Rate
+ * yesterday), each answered in place or opened from its own count. ``quiet`` says nothing else waits.
+ */
+export function NowWaiting({ rows, day, open, quiet, children }: {
+  rows: DeskThread[]; day: string; open(row: DeskThread): void; quiet: boolean; children?: ReactNode;
+}) {
+  const waiting = rows.filter(r => r.symbol && r.group !== "pinned" && !isRadar(r) && (r.group === "act" || r.group === "draft"
+    || (!!r.close && !r.close.reviewed && !reviewSkipped(day, r.symbol))));
+  const line = (row: DeskThread) => row.group === "draft" ? `Card to confirm · ${row.status.text}`
+    : row.group !== "act" && row.close ? row.close.question : row.status.text;
+  return (
+    <section aria-label="Waiting on you" data-testid="now-waiting" className="mb-4 space-y-2 rounded-lg border bg-card p-1.5">
+      <h2 className={cn(LABEL, "px-2.5 pt-1")}>Waiting on you{waiting.length > 0 && <> · <span className="tabular-nums text-primary">{waiting.length}</span></>}</h2>
+      {waiting.length > 0 && <ul>{waiting.map(row => <li key={row.key}><RowButton row={row} line={line(row)} open={open} /></li>)}</ul>}
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-2 px-2.5 pb-1.5 text-sm empty:hidden">{children}</div>
+      {!waiting.length && quiet && <p className="px-2.5 pb-1.5 text-xs text-muted-foreground">Nothing waits on you right now.</p>}
+    </section>
+  );
+}
+
+/**
+ * Now's day line (docs/copilot-lab.md § The desk), at the top of the desk's front door: the market phase with SPY, QQQ
+ * and VIX (a phone too), one strip of the regular session in New York time with a "now" marker, today's fills, pings,
+ * Radar events and logged decisions as ticks by kind, the time stops still ahead as hollow ticks, and one quiet line
+ * (what is next: a time stop, else the open or the close; at risk now; the practice goal). Before the open it says
+ * whether the prep is written; after the close it shows the whole day and how much of Close the day is done. ``data``
+ * is the desk's one session read (``useDeskSession``); read-only.
+ */
+export default function SessionTape({ data, error, tally }: {
+  data: DeskSession | null; error: string | null; tally: { done: number; total: number };
 }) {
   const practice = usePracticeLine(true);
   const exposure = useExposureLine(data?.as_of);
@@ -199,7 +249,6 @@ export default function SessionTape({ data, error, rows, tally }: {
       ) : (
         <p className="text-xs text-muted-foreground">{data.sections.hours === "unavailable" ? "Market hours are unavailable right now." : "No regular session today."}</p>
       )}
-      <Numbers data={data} rows={rows} />
       {facts.length > 0 && (
         <p data-testid="session-facts" className="text-xs text-muted-foreground">
           {facts.map((fact, i) => <span key={i}>{i > 0 && " · "}{fact}</span>)}
