@@ -4,28 +4,10 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Trade, Account } from "@/lib/api";
 import { formatHoldDuration } from "@/lib/dashboard";
-import { money } from "@/lib/format";
+import { contractName, fmtDate, money } from "@/lib/format";
 
 /** Rows shown at first and added by each "Show more": a long history stays quick to open and scroll. */
 const PAGE = 50;
-
-/**
- * An expiration, or a journal timestamp's New York wall date, as a short
- * calendar date ("Oct 9"), with the year when it is not this year ("Jan 15, 2027").
- */
-function fmtDate(value: string, thisYear: number) {
-  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", ...(year === thisYear ? {} : { year: "numeric" }) });
-}
-
-/** Keep the full option identity visible even when its detail columns are hidden. */
-function contractName(trade: Trade) {
-  const expiry = trade.expiration;
-  const date = expiry ? fmtDate(expiry, Number(expiry.slice(0, 4))) : null;
-  const year = expiry?.slice(2, 4);
-  const side = trade.option_type === "call" ? "C" : trade.option_type === "put" ? "P" : "";
-  return `${trade.ticker} ${trade.strike ?? "—"}${side}${date ? ` · ${date} '${year}` : ""}`;
-}
 
 /** The entry-time bucket in words ("open" → "Open"). */
 const bucketName = (value: string) => value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, " ");

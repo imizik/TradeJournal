@@ -188,6 +188,10 @@ test.describe("fills", () => {
     // The table is server-rendered; Sync Center above covers browser fetches.
     await expect(page.getByText("RNXT").first()).toBeVisible();
     await expect(page.getByText("RCAT").first()).toBeVisible();
+
+    // Sides read as words and no raw database value leaks into the table.
+    await expect(page.getByRole("cell", { name: "Buy to open" }).first()).toBeVisible();
+    await expect(page.getByRole("cell", { name: /^(buy|sell)_to_(open|close)$/ })).toHaveCount(0);
   });
 });
 

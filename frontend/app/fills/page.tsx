@@ -2,7 +2,7 @@ import { api } from "@/lib/serverApi";
 import type { Account, Fill } from "@/lib/api";
 import { AddManualFill } from "@/components/ManualFillForm";
 import { cn } from "@/lib/utils";
-import { wallClockET } from "@/lib/format";
+import { contractName, sideLabel, wallClockET } from "@/lib/format";
 
 function sourceLabel(fill: Fill) {
   return fill.raw_email_id.startsWith("manual:") ? "Manual" : "Email";
@@ -27,11 +27,7 @@ function fmtQty(fill: Fill) {
 }
 
 function detailLabel(fill: Fill) {
-  if (fill.instrument_type === "stock") return "Stock";
-  const optionType = fill.option_type ? fill.option_type.toUpperCase() : "-";
-  const strike = fill.strike != null ? `$${fill.strike}` : "-";
-  const expiration = fill.expiration ?? "-";
-  return `${optionType} ${strike} | ${expiration}`;
+  return fill.instrument_type === "stock" ? "Stock" : contractName(fill);
 }
 
 export default async function FillsPage() {
@@ -63,7 +59,7 @@ export default async function FillsPage() {
             No fills yet. Import email fills or add a manual fill.
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="scroll-shadow-x overflow-x-auto">
             <table className="w-full text-sm sm:min-w-[1280px]">
               <thead className="border-b text-xs font-medium text-muted-foreground">
                 <tr>
@@ -101,7 +97,7 @@ export default async function FillsPage() {
                       <Td wide>
                         <span className="capitalize">{fill.instrument_type}</span>
                       </Td>
-                      <Td>{fill.side}</Td>
+                      <Td>{sideLabel(fill.side)}</Td>
                       <Td num>{fmtQty(fill)}</Td>
                       <Td num>{fmtPrice(fill)}</Td>
                       <Td wide num>{fill.underlying_price_at_fill != null ? `$${fill.underlying_price_at_fill.toFixed(2)}` : "-"}</Td>
