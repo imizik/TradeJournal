@@ -191,7 +191,7 @@ test("at 375 px the mic is a 44 px thumb target beside Send, and nothing scrolls
   await page.goto("/copilot-lab?view=new");
   await page.getByRole("tab", { name: "Threads", exact: true }).click();
   await expect(page.getByText("Nothing open. Plan a trade to start a ticker.")).toBeVisible();
-  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click(); // a phone shows the conversation on its own tab
+  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(2).click(); // a phone shows the conversation on its own tab, after Now and Threads
   await page.getByLabel("Message").click(); // the idle box opens when used
   const mic = (await page.getByTestId("copilot-mic").boundingBox())!;
   const send = (await page.getByRole("button", { name: "Send", exact: true }).boundingBox())!;
