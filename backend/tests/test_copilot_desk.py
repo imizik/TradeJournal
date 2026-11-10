@@ -376,6 +376,21 @@ def test_an_answer_before_the_position_opened_does_not_count_and_a_long_hold_is_
     assert by_key(read(desk))[f"trade:{unplanned}"]["close"] is None
 
 
+def test_a_ticker_not_followed_is_hidden_asks_nothing_and_shows_again(desk, engine, clock):  # noqa: F811
+    unplanned = buy(engine, 700, "CRWV", expiration=WED)  # expires today: Act now
+    clock["t"] = WED_CLOSE
+    body = read(desk)
+    assert by_key(body)[f"trade:{unplanned}"]["hidden"] is False and body["day"]["need_you"] == 1
+    entry(engine, "follow", "CRWV", "Not following", minute=300)
+    body = read(desk)
+    row = by_key(body)[f"trade:{unplanned}"]
+    assert row["hidden"] is True and row["close"] is None  # still listed, but no close-of-day question
+    assert body["day"]["need_you"] == 0
+    entry(engine, "follow", "CRWV", "Following", minute=310)  # Show again: the newest entry wins
+    body = read(desk)
+    assert by_key(body)[f"trade:{unplanned}"]["hidden"] is False and by_key(body)[f"trade:{unplanned}"]["close"] is not None
+
+
 def test_one_failing_source_leaves_the_rest(desk, engine, monkeypatch):  # noqa: F811
     buy(engine, 700, "CRWV", expiration=WED)  # expires today: Act now
 

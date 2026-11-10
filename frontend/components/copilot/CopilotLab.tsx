@@ -12,11 +12,10 @@ import DecisionBar from "@/components/copilot/DecisionBar";
 import FillLinkBar, { FillsToLink, useFillLinks } from "@/components/copilot/FillLinkBar";
 import RadarDecision from "@/components/copilot/RadarDecision";
 import Inspector from "@/components/copilot/Inspector";
-import { AlertAnswer, BriefingToAnswer, HitToRate, ThreadAlertAnswers, ThreadHitRating } from "@/components/copilot/ProofAnswers";
-import RateYesterday from "@/components/copilot/RateYesterday";
+import { ThreadAlertAnswers, ThreadHitRating } from "@/components/copilot/ProofAnswers";
+import PingsRecap from "@/components/copilot/PingsRecap";
 import { planContext } from "@/components/copilot/PlanATrade";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
-import AlertScorecard from "@/components/copilot/AlertScorecard";
 import ArmChecklist from "@/components/copilot/ArmChecklist";
 import BriefingExtras from "@/components/copilot/BriefingExtras";
 import SessionTape, { DeskStatus, NowPositions, NowWaiting, useDeskSession } from "@/components/copilot/SessionTape";
@@ -27,7 +26,7 @@ import { ScalpShortlistNudge } from "@/components/ScalpShortlistPanel";
 import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { WHAT_MATTERS_PROMPT, copilotLabHref, mainChatLabel, type InvestigationSummary } from "@/lib/copilot";
-import { afterClose, answerSymbol, deskSymbolThread, needingCount, nyDay, saveHorizon, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
+import { afterClose, answerSymbol, deskSymbolThread, needingCount, nyDay, saveFollow, saveHorizon, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import styles from "./CopilotLab.module.css";
 
@@ -204,9 +203,9 @@ export default function CopilotLab({ link = null, close = false, daily = false }
   }, []);
 
   // Close the day: a pass through each thread still asking its close question (``toReview``, list order). Each opens on its
-  // question; an answer or Skip opens the next. Then, in the conversation pane, today's unanswered alerts, unrated Radar
-  // hits and fills waiting to link (``closeSteps``), one at a time; the last one ends the pass. With none left it puts
-  // the day's question in the box, unsent. Nothing goes to the model.
+  // question; an answer or Skip opens the next. Then, in the conversation pane, the fills waiting to link
+  // (``closeSteps``), one at a time; the last one ends the pass. With none left it puts the day's question in the box,
+  // unsent. Alert and Radar ratings are never asked here. Nothing goes to the model.
   const reviewed = useRef(new Set<string>()); // answered or skipped this visit, before the list reads it back
   const closing = useRef(false);
   useEffect(() => {
@@ -220,28 +219,17 @@ export default function CopilotLab({ link = null, close = false, daily = false }
     if (row.investigationId) actions.open(row.investigationId);
     else router.push(`/copilot-lab?${new URLSearchParams({ symbol: row.symbol! })}`); // opens on the symbol's question
   }, [actions, router]);
-  const toAnswer = session.data?.to_answer;
-  const answerLeft = (toAnswer?.alerts?.count ?? 0) + (toAnswer?.radar?.count ?? 0);
   const [passed, setPassed] = useState<ReadonlySet<string>>(() => new Set()); // answered or skipped this visit
-  const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set()); // answered this visit, before the session reads it back
-  const steps = dayPhase === "close" ? closeSteps(toAnswer?.alerts?.rows, toAnswer?.radar?.rows, fills.waiting, passed) : [];
+  const steps = dayPhase === "close" ? closeSteps(fills.waiting, passed) : [];
   const [answering, setAnswering] = useState(false);
-  const pass = useCallback((id: string, saved: boolean) => {
-    setPassed(prev => new Set(prev).add(id));
-    if (saved) setAnswered(prev => new Set(prev).add(id));
-  }, []);
+  const pass = useCallback((id: string) => setPassed(prev => new Set(prev).add(id)), []);
   const left = toReview(rows, nyDay()).length + steps.length; // the list reads a review back on the refresh it triggers
-  // "N of M done": every thread asked today (one per symbol) and, after 16:00, today's alerts and Radar hits and the fills
-  // to link. A skip is not done.
-  const asked = new Map(rows.filter(r => r.close && r.symbol).map(r => [r.symbol, !!r.close!.reviewed]));
-  const todays = <T extends { today: boolean }>(list: T[] | undefined) => (dayPhase === "close" ? list ?? [] : []).filter(r => r.today);
-  const alertsToday = todays(toAnswer?.alerts?.rows);
-  const hitsToday = todays(toAnswer?.radar?.rows);
+  // "N of M done": every followed thread asked today (one per symbol) and, after 16:00, the fills to link. A skip is not done.
+  const asked = new Map(rows.filter(r => r.close && r.symbol && !r.hidden).map(r => [r.symbol, !!r.close!.reviewed]));
   const fillsHere = dayPhase === "close" ? fills.answeredHere : 0;
   const tally = {
-    done: [...asked.values()].filter(Boolean).length + alertsToday.filter(a => a.feedback || answered.has(a.id)).length
-      + hitsToday.filter(h => h.rating || answered.has(h.event_id)).length + fillsHere,
-    total: asked.size + alertsToday.length + hitsToday.length + (dayPhase === "close" ? fills.waiting.length : 0) + fillsHere,
+    done: [...asked.values()].filter(Boolean).length + fillsHere,
+    total: asked.size + (dayPhase === "close" ? fills.waiting.length : 0) + fillsHere,
   };
   const closeDay = useCallback(() => {
     const [next] = toReview(rows, nyDay(), reviewed.current);
@@ -251,8 +239,7 @@ export default function CopilotLab({ link = null, close = false, daily = false }
     else fill(CLOSE_PROMPT);
   }, [rows, review, fill, setClosing, steps.length]);
   // ``?close=1`` (the evening review ping) starts the pass once the list and the session have read, after the close: the
-  // first unreviewed thread by a page load of its link (the pass carries on in this tab), else today's alerts, Radar hits
-  // and fills here. With nothing left, or read before the close (a tab kept open stays as it is), the desk just opens.
+  // first unreviewed thread by a page load of its link (the pass carries on in this tab), else the fills to link here. With nothing left, or read before the close (a tab kept open stays as it is), the desk just opens.
   const closeLink = useRef(close);
   const sessionRead = !!(session.data || session.error);
   useEffect(() => {
@@ -291,7 +278,7 @@ export default function CopilotLab({ link = null, close = false, daily = false }
   }, [thread?.id]);
   const phaseAction = dayPhase === "pre" ? { label: "Arm today's plans", hint: "Each armed plan: still good, change or drop. Nothing is sent." }
     : dayPhase === "close" ? { label: left ? `Close the day · ${left} to review` : "Close the day",
-      hint: left ? "Each thread's close question, then today's alerts, Radar hits and fills to link, one at a time"
+      hint: left ? "Each thread's close question, then the fills to link, one at a time"
         : "Puts a close-of-day question in the box, unsent" } : null;
   const runPhase = useCallback(() => {
     if (dayPhase !== "pre") closeDay();
@@ -303,7 +290,7 @@ export default function CopilotLab({ link = null, close = false, daily = false }
     { id: "week", name: "Review my week", hint: "One turn: planned vs unplanned, follow-through, exits", run: () => actions.ask(WEEK_REVIEW_CONTEXT) },
     { id: "matters", name: "What matters right now?", hint: "One turn across your positions, watches and investigations", run: () => actions.ask(WHAT_MATTERS_PROMPT) },
     ...(dayPhase === "pre" ? [{ id: "prep", name: "Prep the day", hint: "Puts a prep question in the box, unsent", run: () => fill(PREP_PROMPT) }] : []),
-    ...(dayPhase === "close" ? [{ id: "close", name: "Close the day", hint: "Each close question, alert, Radar hit and fill to link, one at a time. Nothing is sent.", run: closeDay }] : []),
+    ...(dayPhase === "close" ? [{ id: "close", name: "Close the day", hint: "Each close question and fill to link, one at a time. Nothing is sent.", run: closeDay }] : []),
   ], [actions, dayPhase, fill, planTrade, closeDay]);
 
   // J / K walk the conversations the thread list shows, subthreads included, in its order.
@@ -360,8 +347,24 @@ export default function CopilotLab({ link = null, close = false, daily = false }
     await saveHorizon(symbol, horizon);
     setRefresh(n => n + 1);
   }, []);
+  // Following a ticker: shown at once (the thread list applies ``follow`` ahead of its next read), saved as a day-journal
+  // entry so every device agrees; a failed save puts it back and the caller says so.
+  const [follow, setFollow] = useState<Readonly<Record<string, boolean>>>({});
+  const changeFollow = useCallback(async (symbol: string, following: boolean) => {
+    setFollow(prev => ({ ...prev, [symbol]: following }));
+    try {
+      await saveFollow(symbol, following);
+    } catch (failure) {
+      setFollow(prev => ({ ...prev, [symbol]: !following }));
+      throw failure;
+    }
+    setRefresh(n => n + 1);
+  }, []);
+  // A ticker's follow switch for its header: null when the desk has no row about it.
+  const followingOf = (symbol: string | null | undefined) =>
+    symbol && rows.some(r => r.symbol === symbol) ? !rows.some(r => r.symbol === symbol && r.hidden) : null;
   const linkRow = !thread && link?.symbol ? deskRow(link.symbol) : null;
-  const alertRows = session.data?.to_answer?.alerts?.rows; // a position's thread asks about its alerts sent today
+  const alertRows = session.data?.to_answer?.alerts?.rows; // a position's thread offers its alerts sent today a rating
 
   // The Context pane shows the day while no symbol is open: the Briefing, a thread about no symbol, or no thread at all
   // (a deep link naming a symbol waits for its thread instead).
@@ -434,25 +437,25 @@ export default function CopilotLab({ link = null, close = false, daily = false }
         {on && (
           <aside aria-label="Threads" className={styles.rail}>
             <ThreadRail actions={actions} active={thread?.id ?? null} activeSymbol={thread ? thread.symbol : link?.symbol ?? null} main={onNow}
-              pick={pick} onRows={readRows} onWalk={setWalk} onSaved={setSaved} refresh={refresh}
-              toAnswer={(session.data?.to_answer?.alerts?.rows.filter(a => a.today && !a.feedback).length ?? 0) + (session.data?.to_answer?.radar?.rows.filter(h => h.today && !h.rating).length ?? 0)}
+              pick={pick} onRows={readRows} onWalk={setWalk} onSaved={setSaved} refresh={refresh} follow={follow} onFollow={changeFollow}
               phase={fills.waiting.length > 0 && <FillsToLink count={fills.waiting.length} onStart={fills.start} />} />
           </aside>
         )}
         <section aria-label="Conversation" className={styles.thread}>
           {/* One reading column, centred however wide the pane is: lines stay short enough to read at a glance. */}
           <div className="mx-auto w-full max-w-[46rem]">
-          {/* Now: the day line, open positions, what waits on the owner, today's pings and Radar, the day's phase action and
-              the morning brief, then today's conversation under its heading. Every count opens what it counts. */}
+          {/* Now: the day line, followed open positions, what waits on the owner, how the pings did, today's Radar, the
+              day's phase action and the morning brief, then today's conversation under its heading. Every count opens
+              what it counts; nothing asks for a rating. */}
           {showNow && (
             <div data-testid="now">
               <SessionTape data={session.data} error={session.error} tally={tally} />
-              <NowPositions rows={rows} stops={(session.data?.time_stops ?? []).filter(stop => stop.at > (session.data?.now ?? 0))} open={openRow} read={rowsRead} />
-              <NowWaiting rows={rows} day={nyDay()} open={openRow} quiet={!fills.waiting.length && !answerLeft}>
+              <NowPositions rows={rows} stops={(session.data?.time_stops ?? []).filter(stop => stop.at > (session.data?.now ?? 0))} open={openRow} read={rowsRead}
+                onFollow={changeFollow} />
+              <NowWaiting rows={rows} day={nyDay()} open={openRow} quiet={!fills.waiting.length}>
                 {fills.waiting.length > 0 && <div className="basis-full"><FillsToLink count={fills.waiting.length} onStart={fills.start} /></div>}
-                <BriefingToAnswer toAnswer={toAnswer} />
               </NowWaiting>
-              <RateYesterday />
+              <PingsRecap />
               <BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} onWhatMatters={() => actions.ask(WHAT_MATTERS_PROMPT)}
                 session={session.data} radar={rows.filter(r => r.key.startsWith("radar:"))} />
               {phaseAction && (
@@ -462,7 +465,6 @@ export default function CopilotLab({ link = null, close = false, daily = false }
                 </div>
               )}
               <MorningBrief prep={session.data?.prep} fill={fill} />
-              <AlertScorecard />
             </div>
           )}
           {on && thread?.mainDay && (
@@ -481,11 +483,9 @@ export default function CopilotLab({ link = null, close = false, daily = false }
               change={(plan, text) => { setArming(false); setCommand({ kind: "open", id: plan.investigationId!, text, n: ++sent.current }); setTab("thread"); }} />
           )}
           {on && !arming && closeStep && (
-            <ClosePass key={closeStep.id} step={closeStep} done={tally.done} total={tally.total}
-              onSkip={() => pass(closeStep.id, false)} onEnd={() => { setAnswering(false); setClosing(false); }} body={
-                closeStep.kind === "alert" ? <AlertAnswer alert={closeStep.alert} onAnswered={id => pass(id, true)} />
-                  : closeStep.kind === "hit" ? <HitToRate hit={closeStep.hit} onRated={id => pass(id, true)} />
-                    : <FillLinkBar tradeId={closeStep.id} titles={fills.titles} onDone={(id, how) => { fills.answer(id, how); pass(id, true); }} />} />
+            <ClosePass key={closeStep.id} done={tally.done} total={tally.total}
+              onSkip={() => pass(closeStep.id)} onEnd={() => { setAnswering(false); setClosing(false); }} body={
+                <FillLinkBar tradeId={closeStep.id} titles={fills.titles} onDone={(id, how) => { fills.answer(id, how); pass(id); }} />} />
           )}
           {on && !arming && !closeStep && (!thread && link?.symbol && link.radar ? (
             <><RadarDecision key={link.radar} eventId={link.radar} symbol={link.symbol} fill={fill} /><ThreadHitRating key={`rate-${link.radar}`} eventId={link.radar} /></>
@@ -494,7 +494,8 @@ export default function CopilotLab({ link = null, close = false, daily = false }
               {/* An open position, planned or not, still gets its header and since-entry lines. */}
               {/* Held: the header row carries the symbol and its horizon. Not held: they sit on their own line. */}
               <DeskThreadTop thread={deskSymbolThread(link.symbol)} heldOnly compact={deciding} horizon={linkRow?.horizon ?? null}
-                onHorizon={horizon => changeHorizon(link.symbol, horizon)} fallback={
+                onHorizon={horizon => changeHorizon(link.symbol, horizon)} following={followingOf(link.symbol)}
+                onFollow={following => changeFollow(link.symbol!, following)} fallback={
                 <p className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Link href={`/charts?symbol=${encodeURIComponent(link.symbol)}`} aria-label={`Open ${link.symbol} chart`} title={`Open ${link.symbol} in Charts`}
                     className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-2 hover:text-primary hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">{link.symbol}<ChartCandlestick size={13} aria-hidden className="text-muted-foreground" /></Link>
@@ -505,7 +506,8 @@ export default function CopilotLab({ link = null, close = false, daily = false }
               <ThreadAlertAnswers symbol={link.symbol} rows={alertRows} />
             </div>
           ) : thread && !thread.mainDay ? (
-            <DeskThreadTop key={fills.linked} thread={thread} compact={deciding} horizon={threadRow?.horizon ?? null} stage={threadRow?.close?.kind === "exit" ? "Exited" : null} adopted={threadRow?.adopted ?? false} onHorizon={horizon => changeHorizon(thread.symbol, horizon)} hero={
+            <DeskThreadTop key={fills.linked} thread={thread} compact={deciding} horizon={threadRow?.horizon ?? null} stage={threadRow?.close?.kind === "exit" ? "Exited" : null} adopted={threadRow?.adopted ?? false} onHorizon={horizon => changeHorizon(thread.symbol, horizon)}
+              following={followingOf(thread.symbol)} onFollow={following => changeFollow(thread.symbol!, following)} hero={
               <>{fills.bar(thread.symbol)}<DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} {...barFor(thread.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
                 <ThreadAlertAnswers symbol={thread.symbol ?? null} rows={alertRows} /></>} />
           ) : null)}

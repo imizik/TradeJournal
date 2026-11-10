@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// The Briefing's alert scorecard (docs/copilot-lab.md#the-desk): what was decided after each position alert and what
+// The 30-day alert scorecard, under Now's "How the pings did" › Last 30 days (docs/copilot-lab.md#the-desk): what was decided after each position alert and what
 // its contracts then fetched against selling at the alert. Every lab route is stubbed; no model runs.
 const ON = {
   enabled: true, backend: "fake", evidence: "live", model: "fake-scripted", effort: "medium", fallbacks: false, key_configured: false,
@@ -44,12 +44,22 @@ async function briefing(page: Page, card: unknown = CARD) {
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route("**/copilot/desk/scorecard", (route) => { reads += 1; return route.fulfill({ json: card }); });
+  await page.route("**/copilot/desk/pings", (route) => route.fulfill({ json: { day: "2026-10-28", since: "2026-10-27",
+    alerts: { state: "ok", rows: [] }, radar: { state: "off", reason: null, rows: [] } } }));
   await page.goto("/copilot-lab?view=briefing");
   return { reads: () => reads };
 }
 
-test("the Briefing's scorecard says in one line how holding past alerts compared with selling at them, each alert one click away", async ({ page }) => {
+/** Opens How the pings did and its Last 30 days, where the scorecards live. */
+async function month(page: Page) {
+  const pings = page.getByRole("region", { name: "How the pings did" });
+  await pings.locator("summary").click();
+  await pings.getByRole("button", { name: /Last 30 days/ }).click();
+}
+
+test("the 30-day scorecard says in one line how holding past alerts compared with selling at them, each alert one click away", async ({ page }) => {
   const { reads } = await briefing(page);
+  await month(page);
   const card = page.getByRole("region", { name: "Alert scorecard" });
   await expect(card).toContainText("last 30 days · against selling at the alert");
   await expect(card).toContainText("4 alerts. You held 2: 1 better than selling at the alert, 1 worse (net +$335). You exited 1: 1 still open. No decision logged on 1.");
@@ -74,6 +84,7 @@ test("the Briefing's scorecard says in one line how holding past alerts compared
 
 test("while Radar is off the Radar scorecard stays out of the way", async ({ page }) => {
   await briefing(page, { ...CARD, radar: { state: "off", reason: "Radar recording is not switched on." } });
+  await month(page);
   await expect(page.getByRole("region", { name: "Alert scorecard" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Radar scorecard" })).toHaveCount(0);
 });
@@ -82,6 +93,7 @@ test("with no alerts it says so, and at 375 px the scorecard fits without sidewa
   await page.setViewportSize({ width: 375, height: 812 });
   await briefing(page);
   await page.getByRole("tablist", { name: "Desk" }).getByRole("tab", { name: "Now" }).click();
+  await month(page);
   const card = page.getByRole("region", { name: "Alert scorecard" });
   await card.getByText("Each alert ▾").click();
   await expect(card).toContainText("Sold for $1,040");
@@ -93,5 +105,6 @@ test("with no alerts it says so, and at 375 px the scorecard fits without sidewa
     summary: { holding: tally({}), exiting: tally({}), none: tally({}) } } }));
   await page.reload();
   await page.getByRole("tablist", { name: "Desk" }).getByRole("tab", { name: "Now" }).click();
+  await month(page);
   await expect(page.getByRole("region", { name: "Alert scorecard" })).toContainText("No position alert was sent to your phone in the last 30 days.");
 });

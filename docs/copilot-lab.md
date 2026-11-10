@@ -178,10 +178,9 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   in `DESK_GROUPS` order (Act now, Near a trigger, Waiting for you, New since
   you looked, Watching); the list regroups them by symbol in the browser.
   - **Now**: the desk's front door (below, § The desk). Pressing it opens Now and sends nothing; the
-    open conversation stays saved. Radar hits, alerts to answer and Review my
+    open conversation stays saved. Radar hits and Review my
     week are lines on Now, not rows in the list. The row shows the Radar count ("18 Radar", an amber dot while one
-    is unseen in this browser) and, in amber, how many of today's alerts and Radar hits still wait for an answer
-    ("3 to answer"); older ones wait on Now, uncounted here. Open conversations about no ticker (an older
+    is unseen in this browser); alert and Radar ratings are optional and never counted here. Open conversations about no ticker (an older
     turn, a week review) are listed under it, title and date: today's, the open one and the latest automatic week
     review, the rest under **Earlier · N**. **What matters right now?** (one turn, the fixed `lib/copilot.ts`
     `WHAT_MATTERS_PROMPT`) sits on Now beside Review my week, and in ⌘K.
@@ -528,38 +527,50 @@ Main chat and Today's briefing views). Top to bottom, from reads the desk alread
 
 - **The day line** (`SessionTape.tsx`): the market phase with SPY, QQQ and VIX (a phone too), the session strip and one
   quiet line (what is next, at risk now, the practice goal; after the close, how much of Close the day is done).
-- **Open positions** (`NowPositions`): one row per open position: symbol, contract, unrealized P&L and the plan's
-  nearest line (distance to invalidation, else the time stop; "No plan yet" without a plan), plus a time stop still
-  ahead today when the line names something else; then armed plans **Near a trigger**. A row opens its thread in one
-  tap: its own conversation, else the ticker's newest open one, else its link (a position whose link would leave the
-  desk opens the symbol's desk view instead).
-- **Waiting on you** (`NowWaiting`): each ticker's decision to make, card to confirm or close question still open (one
-  row each, opening its thread), then **N fills to link** (the fill pass), **N alerts to answer** and **N Radar hits to
-  rate** (answered in place), and the Rate yesterday card. "Nothing waits on you right now." when that is so.
+- **Open positions** (`NowPositions`): one row per open position the owner follows: symbol, contract, unrealized P&L
+  and the plan's nearest line (distance to invalidation, else the time stop; "No plan yet" without a plan), plus a time
+  stop still ahead today when the line names something else; then armed plans **Near a trigger**. A row opens its
+  thread in one tap: its own conversation, else the ticker's newest open one, else its link (a position whose link
+  would leave the desk opens the symbol's desk view instead). Each row's eye (**Hide**) sets its ticker to **Not
+  following**; see **Not following** below.
+- **Waiting on you** (`NowWaiting`): each followed ticker's decision to make, card to confirm or close question still
+  open (one row each, opening its thread), then **N fills to link** (the fill pass). Ratings of alerts and Radar hits
+  are never asked or counted here. "Nothing waits on you right now." when that is so.
+- **How the pings did** (`PingsRecap.tsx`, from `GET /copilot/desk/pings`), collapsed to one line: what followed the
+  phone pings since the previous trading session (the market calendar's), in counts, for example "Since yesterday: 4
+  alerts · selling at the alert would have been better on 3, worse on 1 · 2 Radar hits · 1 kept going". On tap, each
+  position alert with its alert-scorecard outcome (sold or expired for how much against selling at the alert, still
+  open, or not measured and why) and each Radar stock hit or setup card a ping reached, with the stock's move against
+  SPY the way Radar flagged it an hour on and at the close ("not measured" with why, as while its session is open) and a setup
+  card's paper result. Nothing to answer and no advice. **Last 30 days** unfolds the alert and Radar scorecards below.
 - **Today** (`BriefingExtras.tsx`): **N pings sent ▾** (each ping's time and words; a symbol opens its desk view),
   **N new on Radar ▾** (each opening the desk on its decision, or Radar for a group event), **Held back · N ▾**, and
   What matters right now?, Review my week and today's replay. Both buttons ask in today's conversation.
 - **The day's phase**: before the open on a weekday, **Arm today's plans**; after 16:00, **Close the day · N to
-  review**. Then the morning brief and the alert scorecard.
+  review**. Then the morning brief.
 - **Today's conversation**: Main chat for the current New York date with its message box at the bottom, so asking is
   one tap away.
 
-Every count on Now opens the list it counts. Now opens scrolled to its top. The desk bar's **Now** button (a phone's
+Every count on Now opens the list it counts; nothing on Now asks for a rating. Now opens scrolled to its top.
+
+**Not following.** A ticker the owner does not follow (an old position no longer watched)
+is hidden in one tap from its Now row (the eye) or its thread header (**Not following**), and back with **Show again**
+in the same places. It is saved as a `follow` day-journal entry ("Not following" or "Following"; the newest wins, on
+every device; `day_journal.not_following`), separate from the horizon, so a long hold stays a long hold for Review my
+week. A hidden ticker's rows carry `hidden` in `GET /copilot/desk/threads`: it leaves Now's positions and the thread
+list's groups for one collapsed "N not followed ▾" line at the bottom of each, every row with Show again; it is never
+counted in Waiting on you, "needs you" or the desk bar's count; it asks no close-of-day question and is not in Close
+the day or the evening review. Its thread still opens normally. Phone alerts, the position companion, the copilot's
+context and the day line's "At risk now" (the money actually at risk) still include it. The desk bar's **Now** button (a phone's
 first tab) comes back to it; `?view=briefing` (the old Briefing address) and the evening review's `?close=1` land on
 it too.
 
 Main chat is the same saved conversation on desktop and phone. Unsent words belong to their browser tab. Returning to a saved link keeps its original
 conversation, including after midnight. The heading names the day ("Main chat · Wed, Nov 4"; a busy day's next
-part adds "(continued)"). Today's Main chat starts with **Rate yesterday** (`RateYesterday.tsx`, from
-`GET /copilot/desk/to-rate`): everything since the previous trading session (the market calendar's) still waiting on a
-rating, newest first, at most 30 with a count of the older ones: position alerts sent (or maybe sent) with no feedback,
-Radar events a phone ping reached and not rated (the dip rule's stay out, as on /proof), and the copilot's answers with
-no Helped / Didn't (the automatic morning brief and week review are not asked about). Each row is a label (contract,
-symbol or group, or the question's first words), its time and one-tap answers saved through the item's existing route:
-`PUT /trades/{trade_id}/phone-alerts/{id}/feedback`, `POST /radar/events/{event_id}/feedback` or
-`PUT /copilot/investigations/{id}/messages/{index}/rating`, so they count on /proof and the answer scorecard as any other
-answer does. A saved row leaves the card and the card hides once nothing is left; it is read once when Main chat opens.
-Under it, the day's **Morning brief** card
+part adds "(continued)"). The Rate yesterday card that used to open Main chat was removed on 2026-11-10 (the owner
+did not rate from memory at the end of the day; How the pings did shows what followed instead). Its read,
+`GET /copilot/desk/to-rate`, still answers but nothing on the desk calls it.
+Above the conversation, the day's **Morning brief** card
 (`MorningBrief.tsx`, from the desk session read's `prep`: the brief's saved lines with its verdict, headline and
 Changes if line, the time it was written, and "Copilot turn failed: raw facts" when the turn failed), with **Ask about
 it →** putting the brief in this Main chat's message box as context, unsent, so questions about it stay in the day's
@@ -726,8 +737,8 @@ desk thread for that position (see Review a trade or position), so a tap
 lands on the decision bar: on the plan's conversation when there is one, else
 on the symbol alone, where the bar shows without a saved conversation.
 
-**Alert scorecard** (`components/copilot/AlertScorecard.tsx`, near the
-foot of Now; `GET /copilot/desk/scorecard`,
+**Alert scorecard** (`components/copilot/AlertScorecard.tsx`, under How the
+pings did › Last 30 days on Now; `GET /copilot/desk/scorecard`,
 `app/engine/alert_scorecard.py`). For each position alert sent to the
 phone in the last 30 days: what was decided after it (the first `decision`
 journal entry for the symbol that New York day, before the position's next
@@ -792,22 +803,20 @@ file reads unavailable and the alert scorecard stands. Read-only. Proof:
 
 **Answers for /proof** (`components/copilot/ProofAnswers.tsx`). The two answers
 the [/proof page](product-roadmap.md#end-goal--october-22-2026) measures are
-asked where the pings and hits are seen. A position's thread (a ping opens the
-desk on its decision bar) lists the alerts sent today for its symbol under the
-decision bar, each with Prompted a review, Already aware, Too late and Not useful
-and an optional reason saved with the tap. A Radar hit's thread puts Useful,
-Already knew, Too late and Irrelevant in its own box under the hit's decision,
-not inside it. Now's Waiting on you says "N alerts to answer" and "N Radar hits
-to rate", in /proof's scope: every sent or delivery-unconfirmed position alert
-with no feedback, and every unrated event of Radar's newest rule version. Each
-opens its waiting rows (today's, then the newest from before, up to 20) to
-answer in place, and its count drops at once. An answer is a line with
+optional, offered only where the item itself is seen and never counted as
+waiting (since 2026-11-10). A position's thread (a ping opens the desk on its
+decision bar) lists the alerts sent today for its symbol under the decision
+bar, each with Prompted a review, Already aware, Too late and Not useful and an
+optional reason saved with the tap. A Radar hit's thread puts Useful, Already
+knew, Too late and Irrelevant in its own box under the hit's decision, not
+inside it. The Telegram ping buttons stay too. Now, the thread list, Close the
+day and the evening review never ask for them. An answer is a line with
 Change. Saves go through the routes the trade page and the Radar feed use
 (`PUT /trades/{trade_id}/phone-alerts/{id}/feedback`,
-`POST /radar/events/{id}/feedback`), so /proof counts each one at once. The rows
-come from the session read's `to_answer` (below); an alert whose position is
-no longer in the journal is counted but not listed. Proof:
-`tests/test_copilot_desk_session.py`, `frontend/e2e/copilot-proof-answers.spec.ts`.
+`POST /radar/events/{id}/feedback`), so /proof counts each one at once. The
+thread's rows come from the session read's `to_answer` (below), which still
+carries /proof's counts. Proof: `tests/test_copilot_desk_session.py`,
+`frontend/e2e/copilot-proof-answers.spec.ts`.
 
 **One main element per thread.** The thread's top reads header, then its
 main element, then the conversation: while the decision bar (below) is
@@ -882,20 +891,19 @@ command) is a pass through them: it opens the first unreviewed thread in list
 order on its question (a position with no conversation opens by its symbol,
 `/copilot-lab?symbol=…`, and the pass carries on in this tab), and each answer
 or Skip opens the next. Then, in the conversation pane (`ClosePass.tsx`), it
-asks the rest one at a time with the same answers Now and the thread top
-use: today's position alerts with no feedback, today's Radar hits not rated,
-then the fills waiting to link (the link bar). An answer or Skip moves on, the
-✕ ends the pass, and the last one ends it. Older alerts and hits stay in the
-"to answer" lists on Now. With nothing left it puts the day's question in
+asks the fills waiting to link one at a time (the link bar). An answer or Skip
+moves on, the ✕ ends the pass, and the last one ends it. Alert and Radar
+ratings are never asked (since 2026-11-10), and a ticker not followed asks
+nothing. With nothing left it puts the day's question in
 the message box, unsent. Nothing is sent to the model, and the answers go
 through the same routes as everywhere else. The button counts all of it
-("Close the day · 6 to review", less what was skipped; on Now too), and Now's day
-line says "N of M done": the close questions (one per symbol), today's alerts
-and hits, and the fills to link, a skip not counting as done.
+("Close the day · 3 to review", less what was skipped; on Now too), and Now's day
+line says "N of M done": the close questions (one per symbol) and the fills to
+link, a skip not counting as done.
 `/copilot-lab?close=1` (the [evening review ping](#phone-ping-policy)'s link)
 starts the same pass once the list and the session have read, after 16:00
-only: the first unreviewed thread by its link, else today's alerts, hits and
-fills; with nothing left, or read before 16:00, it opens the desk as usual.
+only: the first unreviewed thread by its link, else the fills; with nothing
+left, or read before 16:00, it opens the desk as usual.
 Browser proof:
 `frontend/e2e/copilot-decision-bar.spec.ts` and
 `frontend/e2e/copilot-desk-keys.spec.ts`.
@@ -2366,16 +2374,15 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   holiday) at `EVENING_REVIEW_PING_AT` (default `16:30` New York; a time before
   16:00 keeps the default), `app/engine/evening_review.py` reads what the desk
   has waiting through `copilot_desk.waiting`, what Close the day walks: the
-  symbols still asking their close question, today's position alerts with no
-  feedback, today's Radar hits not rated and the fills waiting to link (older
-  alerts and hits stay in Now's lists and never ping), and the pings
-  the policy held today (`notification_policy.held_text`). When any is waiting
-  it sends one ping, "Close the day: To review: 2 threads · 3 alerts unanswered
-  · 5 Radar hits unrated · 1 fill to link · 12 pings held today (Radar 11,
-  evening 1)", that opens `/copilot-lab?close=1` on Close the day (kind
-  `evening_review`, never held by the policy). Whatever is still unrated the
-  next morning, answers included, waits in Main chat's Rate yesterday card. Nothing waiting, the lab off, or a desk source (positions, plans,
-  alerts, Radar) that cannot be read is recorded `skipped` with why and sends nothing. One `evening_review` row a day (unique day, additive
+  followed symbols still asking their close question and the fills waiting to
+  link, and the pings the policy held today (`notification_policy.held_text`).
+  Alert and Radar ratings are never counted (since 2026-11-10; the row's
+  `alerts` and `radar` columns stay 0). When any is waiting it sends one ping,
+  "Close the day: To review: 2 threads · 1 fill to link · 12 pings held today
+  (Radar 11, evening 1)", that opens `/copilot-lab?close=1` on Close the day (kind
+  `evening_review`, never held by the policy). Nothing waiting, the lab off, or a
+  desk source (positions, plans) that cannot be read is recorded `skipped` with
+  why and sends nothing. One `evening_review` row a day (unique day, additive
   migration `d2e7a4c9b1f6`): `skipped`, `held`, `sent`, `unknown` (may have
   reached the phone, never resent) or `expired`. A day not counted by two hours
   after its time waits for the next. A Skip or "No plan" kept only in a browser

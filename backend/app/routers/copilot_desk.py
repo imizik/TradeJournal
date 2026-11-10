@@ -49,8 +49,11 @@ An option position's value is its own unrealized P&L (the option's mark), never 
 levels and meter are on the underlying, and the status line says so by naming it.
 
 ``GET /copilot/desk/scorecard`` is the alert scorecard (``app/engine/alert_scorecard.py``), with the Radar scorecard
-(``app/engine/radar_scorecard.py``) under ``radar``. ``GET /copilot/desk/to-rate`` is Main chat's Rate yesterday card:
-everything since the previous trading session still waiting on the owner's rating.
+(``app/engine/radar_scorecard.py``) under ``radar``. ``GET /copilot/desk/to-rate`` is what the retired Rate yesterday card read
+(nothing on the desk calls it since 2026-11-10): everything since the previous trading session still waiting on the
+owner's rating.
+``GET /copilot/desk/pings`` is Now's "How the pings did": each alert and alerted Radar hit since the previous trading
+session and what followed it.
 ``GET /copilot/desk/session`` (at the end) is the Briefing's session timeline: today's regular session and what
 happened in it, from the same kind of existing readers, and the alerts and Radar hits still waiting on an answer.
 """
@@ -112,7 +115,7 @@ def _row(key: str, group: str, title: str, status: dict, *, symbol: str | None =
     return {"key": key, "group": group, "symbol": symbol, "title": title, "instrument": instrument, "value": value,
             "status": status, "meter": meter, "investigation_id": investigation_id, "trade_id": trade_id,
             "radar_event_id": radar_event_id, "path": path, "changed_at": changed_at, "horizon": None, "close": None,
-            "fill_to_link": fill_to_link, "adopted": False}
+            "fill_to_link": fill_to_link, "adopted": False, "hidden": False}
 
 
 def meter(entry: float | None, invalidation: float | None, last: float | None, tone: str) -> dict | None:
@@ -235,6 +238,7 @@ def _check_ins(db: Session) -> dict:
     from app.engine import day_journal
     horizons, asked = day_journal.check_ins(db)
     return {"state": "ok", "horizons": horizons, "asked": {symbol: (e.day, e.text) for symbol, e in asked.items()},
+            "hidden": day_journal.not_following(db),
             "done": {symbol: at.replace(tzinfo=UTC).timestamp() for symbol, at in day_journal.done(db).items()}}
 
 
@@ -305,7 +309,7 @@ def _closing(rows: list[dict], reflections: dict[str, str], touched: set[str] | 
     position with no plan and the day it opened; ``asked``: each symbol's newest "Want a plan" answer (day, text)."""
     for row in rows:
         symbol, horizon = row["symbol"], row["horizon"]
-        if horizon is None or horizon == "long" or row["close"]:  # an exited plan already asks its exit review
+        if horizon is None or horizon == "long" or row["close"] or row["hidden"]:  # an exited plan already asks its exit review
             continue
         if row["trade_id"] in unplanned:
             answer = asked.get(symbol)
@@ -613,6 +617,9 @@ def threads(db: Session, now: float) -> dict:
                           changed_at=_epoch(r["updated_at"])))
 
     _horizons(act + near + watch, checks.get("horizons", {}))
+    hidden = checks.get("hidden", set())
+    for row in act + near + draft + new + watch:
+        row["hidden"] = bool(row["symbol"]) and row["symbol"] in hidden
     if _after_close(now):
         touched = today._section(db, "desk touched", lambda: _touched(db, now, day))
         happened = None
@@ -624,7 +631,7 @@ def threads(db: Session, now: float) -> dict:
     streak = {"current": week["current"], "best": week["best"]} if week["state"] == "ok" and week["show"] else None
     return {
         "as_of": today._iso(now), "quotes_at": quotes.at, "quote_issue": quotes.issue,
-        "day": {"phase": phase.get("phase"), "need_you": len(act), "streak": streak},
+        "day": {"phase": phase.get("phase"), "need_you": sum(not r["hidden"] for r in act), "streak": streak},
         "threads": _pinned(prep, week) + act + near + draft + new + watch,
         "plans": _plan_list(board if board["state"] == "ok" else {}, exited, finals.get("rows", []), checks.get("horizons", {}),
                             lessons.get("map", {})),
@@ -838,23 +845,17 @@ def desk_session(db: Session = Depends(get_session)):
 
 def waiting(db: Session, now: float) -> dict:
     """What Close the day walks at ``now``, for the evening review ping (``app/engine/evening_review.py``): ``review``,
-    the symbols still asking their close question (``toReview``, one per symbol); ``alerts`` and ``radar``, today's
-    position alerts with no feedback and today's Radar hits not rated (``closeSteps``; older ones stay in the Briefing's
-    lists); ``fills``, the fills waiting to link (``fillsToLink``, one per trade). A Skip or "No plan" kept only in a
-    browser is not seen here. Raises when the positions, plans, alerts or Radar could not be read."""
-    day = datetime.fromtimestamp(now, ET).date()
+    the symbols still asking their close question (``toReview``, one per symbol); ``fills``, the fills waiting to link
+    (``fillsToLink``, one per trade). Ratings of alerts and Radar hits are optional and never counted as waiting; a
+    ticker the owner does not follow is left out. A Skip or "No plan" kept only in a browser is not seen here. Raises
+    when the positions or plans could not be read."""
     listed = threads(db, now)
-    rows = listed["threads"]
-    alerts = today._section(db, "waiting alerts to answer", lambda: _alerts_to_answer(db, now))
-    radar = today._section(db, "waiting radar to rate", lambda: _hits_to_rate(day))
+    rows = [r for r in listed["threads"] if not r["hidden"]]
     # A source that could not be read is not "nothing waiting": the caller records the failure instead.
     failed = [name for name in ("positions", "plans") if listed["sections"][name] == "unavailable"]
-    failed += [name for name, part in (("alerts", alerts), ("radar", radar)) if part["state"] == "unavailable"]  # Radar off counts 0
     if failed:
         raise RuntimeError(f"Desk sections unavailable: {', '.join(failed)}")
     return {"review": len({r["symbol"] for r in rows if r["close"] and not r["close"]["reviewed"] and r["symbol"]}),
-            "alerts": sum(r["today"] and not r["feedback"] for r in alerts.get("rows", [])),
-            "radar": sum(r["today"] and not r["rating"] for r in radar.get("rows", [])),
             "fills": len({r["fill_to_link"] for r in rows if r["fill_to_link"]})}
 
 
@@ -883,7 +884,7 @@ def desk_scorecard(db: Session = Depends(get_session)):
     return {**alerts, "radar": hits}
 
 
-# --------------------------------------------------------------------------- Main chat's Rate yesterday card
+# --------------------------------------------------------------------------- the retired Rate yesterday card's read
 
 TO_RATE_ROWS = 30  # the card's list, newest first; ``count`` is every item waiting
 AUTOMATIC_KINDS = ("prep", "week_review")  # the morning brief and the week review, written unasked: not asked about here
@@ -963,7 +964,7 @@ def _answers_to_rate(db: Session, start: datetime) -> dict:
 
 @router.get("/desk/to-rate")
 def desk_to_rate(db: Session = Depends(get_session)):
-    """Main chat's Rate yesterday card (docs/copilot-lab.md § The desk): what still waits on the owner's rating from the
+    """The retired Rate yesterday card's read (docs/copilot-lab.md § The desk; kept, unused by the desk): what still waits on the owner's rating from the
     previous trading session (``since``) through now, newest first, at most ``TO_RATE_ROWS`` (``count`` is all of them).
     Each item names its ``type`` and the ids its rating route takes: a position alert (``id``, ``trade_id``:
     ``PUT /trades/{trade_id}/phone-alerts/{id}/feedback``), an alerted Radar event (``event_id``:
@@ -982,6 +983,74 @@ def desk_to_rate(db: Session = Depends(get_session)):
     items = sorted((row for part in (alerts, hits, answers) for row in part.get("rows", [])), key=lambda r: r["at"] or 0, reverse=True)
     return {"day": day.isoformat(), "since": first.isoformat(), "count": len(items), "items": items[:TO_RATE_ROWS],
             "sections": {"alerts": alerts["state"], "radar": hits["state"], "answers": answers["state"]}}
+
+
+# --------------------------------------------------------------------------- Now's "How the pings did" card
+
+SETUP_KINDS = ("dip_turn", "gap_reversal")
+
+
+def _alert_outcomes(db: Session, now: float, first, start: datetime) -> dict:
+    """The alert scorecard's rows (``alert_scorecard.scorecard``) for the alerts sent since ``start`` (naive UTC)."""
+    from app.engine import alert_scorecard
+    day = datetime.fromtimestamp(now, ET).date()
+    card = alert_scorecard.scorecard(db, now, days=(day - first).days + 1)
+    since = _utc_epoch(start)
+    return {"state": "ok", "rows": [r for r in card["rows"] if r["at"] >= since]}
+
+
+def _radar_outcomes(db: Session, now: float, first, start: datetime) -> dict:
+    """Radar's stock hits and setup cards first seen since ``start`` that a phone ping reached
+    (``radar_proof.alerted_events``), each with the radar scorecard's move after it and, for a setup card, its paper
+    result (``radar_setup_paper``) when one exists."""
+    from app.engine import radar_proof, radar_scorecard
+    from app.models import RadarSetup
+    from app.routers import radar
+    store, reason = radar._store(read_only=True)
+    if store is None:
+        return {"state": "off", "reason": reason, "rows": []}
+    day = datetime.fromtimestamp(now, ET).date()
+    try:
+        card = radar_scorecard.scorecard(store, db, now, days=(day - first).days, kinds=(*radar_scorecard.STOCK_KINDS, *SETUP_KINDS))
+    except Exception as exc:  # noqa: BLE001 -- a busy or damaged Radar file must not take the alert rows down
+        db.rollback()
+        log.warning("radar outcomes unreadable: %s", exc)
+        return {"state": "unavailable", "reason": "The Radar file could not be read right now.", "rows": []}
+    since = _utc_epoch(start)
+    rows = [r for r in card["rows"] if r["at"] >= since]
+    alerted = radar_proof.alerted_events(db, [r["event_id"] for r in rows])
+    rows = [r for r in rows if r["event_id"] in alerted]
+    setups = {s.event_id: s for s in db.exec(select(RadarSetup).where(col(RadarSetup.event_id).in_([r["event_id"] for r in rows])))} if rows else {}
+    out = []
+    for r in rows:
+        setup = setups.get(r["event_id"])
+        paper = None
+        if setup is not None:
+            paper = {"state": setup.paper_state, "pnl": setup.paper_pnl, "exit_reason": setup.paper_exit_reason,
+                     "note": setup.paper_note}
+        out.append({"event_id": r["event_id"], "at": r["at"], "symbol": r["symbol"], "kind": r["kind"],
+                    "kind_label": RADAR_KIND.get(r["kind"], r["kind_label"]), "direction": r["direction"],
+                    "summary": r["summary"], "after": r["after"], "setup": setup is not None, "paper": paper})
+    return {"state": "ok", "rows": out}
+
+
+@router.get("/desk/pings")
+def desk_pings(db: Session = Depends(get_session)):
+    """Now's "How the pings did" card (docs/copilot-lab.md § The desk): what followed each phone ping since the previous
+    trading session (``since``), with nothing to answer. ``alerts``: each position alert sent, with the alert
+    scorecard's ``outcome`` (sold or expired for how much against selling at the alert, still open, or not measured).
+    ``radar``: each alerted Radar stock hit and setup card, with the stock's move against SPY the way Radar flagged it an
+    hour on and at the close (``after``), and a setup card's ``paper`` result. Counts, not advice. Each source fails on
+    its own; Radar ``off`` while it does not record. Read-only, owner-only, refused while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    now = today._now()
+    first, start = _rate_since(now)
+    alerts = today._section(db, "pings alert outcomes", lambda: _alert_outcomes(db, now, first, start))
+    hits = today._section(db, "pings radar outcomes", lambda: _radar_outcomes(db, now, first, start))
+    return {"day": datetime.fromtimestamp(now, ET).date().isoformat(), "since": first.isoformat(),
+            "alerts": {"state": alerts["state"], "rows": alerts.get("rows", [])},
+            "radar": {"state": hits["state"], "reason": hits.get("reason"), "rows": hits.get("rows", [])}}
 
 
 def _now() -> float:
