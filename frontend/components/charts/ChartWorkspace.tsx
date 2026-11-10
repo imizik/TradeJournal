@@ -157,7 +157,7 @@ function LiveQuote({ live, quote, candle, market }: { live: LiveFeed; quote?: Ch
   </div>;
   return <div className="flex min-w-0 items-baseline gap-2" aria-label="Selected symbol quote" title={[sessionName && `${sessionName} price, change from ${extended === "post" ? "the regular close" : "the previous close"}`, closeText].filter(Boolean).join(". ") || undefined}><span className="sr-only">{live.symbol}</span><span className="font-mono text-base font-medium tracking-tight text-foreground">{price(shown.price)}</span>
     <span className={`font-mono text-xs ${change != null && change < 0 ? "text-rose-400" : "text-emerald-400"}`}>{change == null ? "—" : signed(change)}</span>
-    {sessionName && <span className="hidden whitespace-nowrap text-[10px] text-muted-foreground sm:inline">{sessionName}</span>}
+    {sessionName && <span className="whitespace-nowrap text-[10px] text-muted-foreground"><span className="sm:hidden">{extended === "post" ? "AH" : "Pre"}</span><span className="hidden sm:inline">{sessionName}</span></span>}
     {close != null && <span className="hidden whitespace-nowrap font-mono text-[10px] text-muted-foreground lg:inline">· {extended === "post" ? "Close" : "Prev close"} <span className="text-foreground/80">{price(close)}</span>{closeChange != null && <span className={closeChange < 0 ? " text-rose-400" : " text-emerald-400"}> {signed(closeChange)}</span>}</span>}
     {/* The status strip names the source too; here it shows where the toolbar has room. */}<span className="sr-only whitespace-nowrap text-[10px] text-muted-foreground min-[1800px]:not-sr-only">{shown.source}</span></div>;
 }
@@ -215,14 +215,20 @@ function WatchlistQuote({ live, quote, market, paused, wide }: { live: LiveFeed;
   // seconds stays shown until a newer one arrives, so it keeps its change; a quote's after the close
   // is the day's closing change.
   const closing = shownTick ? !tickFresh : !freshQuote;
-  const change = shownTick ? sessionChange(shownTick.price, shownTick.session, quote)
+  // Tradier's quote carries no premarket trade and its previous close has already rolled to the last session's, so
+  // before the open, until a trade streams in, it reads 0.00% whatever the stock has done since. Say so instead.
+  // (After hours the same quote is the day's closing change, which stays, dimmed.)
+  const window = market?.sessions.find((part) => now >= part.start && now < part.end);
+  const noSessionTrade = !shownTick && window?.part === "pre" && (quote?.trade_time == null || quote.trade_time <= window.start);
+  const change = noSessionTrade ? null : shownTick ? sessionChange(shownTick.price, shownTick.session, quote)
     : freshQuote ? sessionChange(freshQuote.last, quoteSession, freshQuote) : quoteChange(quote, quoteSession);
   const quoteAge = quote?.trade_time == null || now < quote.trade_time ? null : Math.floor(now - quote.trade_time);
   const source = shownTick
     ? `${tickIsLive ? "Live trade" : paused ? "Paused trade" : tickAge! <= 45 ? "Recent trade" : "Stale streamed trade"} · ${tickAge}s old`
     : quoteAge == null ? "Tradier quote · timestamp unavailable"
       : `${quoteAge <= 45 ? "Tradier quote" : "Stale Tradier quote"} · ${quoteAge}s old`;
-  const changeSource = closing && change != null ? `${source} · change as of this ${shownTick ? "trade" : "quote"}` : source;
+  const changeSource = noSessionTrade ? `${source} · last regular-session price; no premarket trade seen yet`
+    : closing && change != null ? `${source} · change as of this ${shownTick ? "trade" : "quote"}` : source;
   if (isMacroSymbol(live.symbol)) {
     const observed = quote?.trade_time ? `Tradier index · observed ${instrumentTime(quote.trade_time)}` : "Tradier index · observation time unavailable";
     const relative = quote?.change_percentage;
@@ -235,7 +241,7 @@ function WatchlistQuote({ live, quote, market, paused, wide }: { live: LiveFeed;
   // The dollar change against the same reference the percent uses (the previous close, or today's close after hours).
   const dollars = change != null && displayPrice != null ? displayPrice - displayPrice / (1 + change / 100) : null;
   const tone = change == null ? "text-muted-foreground" : change < 0 ? "text-rose-400" : "text-emerald-400";
-  return <><span title={source} className="text-right font-mono text-foreground/80">{price(displayPrice)}</span>
+  return <><span title={noSessionTrade ? changeSource : source} className={`text-right font-mono text-foreground/80 ${noSessionTrade ? "opacity-70" : ""}`}>{price(displayPrice)}</span>
     {wide && <span aria-hidden title={changeSource} className={`text-right font-mono ${tone} ${closing ? "opacity-70" : ""}`}>{dollars == null ? "—" : `${dollars >= 0 ? "+" : ""}${dollars.toFixed(2)}`}</span>}
     <span title={changeSource} aria-label={`${change == null ? "Change unavailable" : `${change >= 0 ? "+" : ""}${change.toFixed(2)} percent`}; ${changeSource}`}
       className={`text-right font-mono ${change == null ? "text-muted-foreground" : change < 0 ? "text-rose-400" : "text-emerald-400"} ${closing ? "opacity-70" : ""}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}</span>

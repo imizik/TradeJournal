@@ -334,6 +334,32 @@ test("after hours the headline names its session beside the regular close, and t
   await expect(page.locator("footer[aria-label='Chart status']")).toContainText("may be forming");
 });
 
+test("before the open the watchlist says no premarket trade yet instead of 0.00%, and a phone names the session", async ({ page }) => {
+  const at = Date.parse("2026-09-29T12:10:00Z") / 1000; // 8:10 AM New York
+  await openAt(page, at, (url) => {
+    const data = currentFixture(url, at);
+    data.market = { date: "2026-09-29", status: "open", source: "tradier", description: null, note: null, sessions: [
+      { part: "pre", start: Date.parse("2026-09-29T08:00:00Z") / 1000, end: Date.parse("2026-09-29T13:30:00Z") / 1000 },
+      { part: "regular", start: Date.parse("2026-09-29T13:30:00Z") / 1000, end: Date.parse("2026-09-29T20:00:00Z") / 1000 },
+      { part: "post", start: Date.parse("2026-09-29T20:00:00Z") / 1000, end: Date.parse("2026-09-30T00:00:00Z") / 1000 }] };
+    // Tradier before the open: yesterday's last regular trade, and a previous close already rolled to it.
+    for (const quote of data.quotes) Object.assign(quote, { last: 260, previous_close: 260, change_percentage: 0, trade_time: Date.parse("2026-09-28T19:59:00Z") / 1000 });
+    for (const panel of Object.values(data.panels)) {
+      const bar = panel?.bars.at(-1);
+      if (bar && bar.end_time - bar.time < 86400) Object.assign(bar, { close: 255.5, low: Math.min(bar.low, 255.5), extended: true });
+    }
+    return data;
+  });
+  const row = page.locator("[data-watch-row]").filter({ hasText: "MRVL" });
+  await expect(row).toContainText("260.00");
+  await expect(row).not.toContainText("0.00%");
+  await expect(row.getByLabel(/Change unavailable/)).toHaveAttribute("title", /no premarket trade seen yet/);
+  // The headline keeps the premarket candle against the previous close.
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("-1.73%");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("Pre");
+});
+
 test("refreshes once per cycle, stops while hidden or paused, and retains data on errors", async ({ page }) => {
   await page.clock.install();
   let requests = 0;
