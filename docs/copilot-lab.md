@@ -1313,11 +1313,20 @@ since-entry comparison, the news reader) and writes nothing.
   updates add it under the answer, with the underlying the companion already
   read, and the update prompt gets it too. No new alert kinds, triggers or
   senders.
-- **Screens.** `frontend/components/SinceEntry.tsx` shows the thesis and the
-  lines with their sources and times, refreshed each minute while visible: under
-  the desk's thread header for an open position (a symbol opened with no
-  conversation now gets the header too) and in Charts' Holding context for the
-  selected trade. Act now rows show the thesis line.
+- **Screens.** `frontend/components/SinceEntry.tsx`, refreshed each minute while
+  visible, leads with at most three plain lines worked out from the lines'
+  values: P&L and the mark (an option's per share, as the header shows it); the
+  plan's distance to its invalidation and its time stop, or "No plan saved"
+  once; and what changed (the underlying since entry, SPY and the group's
+  peers, the headline count). The thesis, every line as the record wrote it
+  with its source and time, the headlines and every `unavailable` line wait
+  behind **Sources and gaps**, in muted grey, never amber. Times are New York
+  time (the headline line's UTC clock is rewritten). It sits under the desk's
+  thread header for an open position and in Charts' Holding context for the
+  selected trade. On a thread with a conversation it starts folded to one
+  summary line that opens on tap, so the latest answer stays near the top; a
+  symbol opened with no conversation shows it open, and its header row carries
+  the symbol and horizon (no second ticker line while it is held). Act now rows show the thesis line.
 - **Telegram on the desk.** Each Telegram question and Why? answer is saved on
   the symbol's desk thread (its plan, the companion's adopted conversation, or
   its newest open conversation, with that thread's `updated_at` kept so thesis
@@ -1966,7 +1975,10 @@ nothing exists until the owner confirms.
     from the entry with the move it takes (a share, or in the underlying for an
     option plan). It follows an edit; a stop on the wrong side of the entry
     gets no distance. A plan carries no target, so there is no reward:risk.
-  - **Size it for me.** A `Risk $` field beside the size (numeric keypad,
+  - **Size it for me.** `Risk $` and the size note wait behind a **Size it**
+    disclosure, open from the start when a risk is typed or remembered or a
+    confirmed card kept a size, and otherwise on tap; folded, its line shows
+    the drafted size note, which Confirm still saves. A `Risk $` field beside the size (numeric keypad,
     remembered per browser in `localStorage` key `copilot.risk`, blank until
     typed; no server setting) turns a dollar risk into a size as it is typed,
     on the card itself with nothing saved: a stock plan gets whole shares =
@@ -1993,8 +2005,12 @@ nothing exists until the owner confirms.
       `discretionary`, side from direction and instrument (`buy_stock`,
       `short_stock`, `buy_calls`, `buy_puts`), `setup_label` "Copilot plan",
       `wording` built from the levels, time stop and size, and `note` holding
-      the thesis and contract hint, on the capture default account (or the
-      only one; the card asks when neither exists). A discretionary capture may
+      the thesis and contract hint, on the card's journal account: the
+      account of the last plan confirmed in this browser (`localStorage` key
+      `copilot.plan-account`), else the capture default account, else the
+      only one, so Confirm needs no pick; with more than one account the
+      picker stays visible to change it, and the card asks only when none of
+      those applies. A discretionary capture may
       carry its own setup name and wording for this (`captures.build`). One
       client id per card, so a retried save never makes a second plan. Capture
       linking then suggests it for the trade when the fill arrives, and the

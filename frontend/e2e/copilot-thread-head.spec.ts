@@ -189,10 +189,13 @@ test("an unplanned open position opened by its symbol shows the header and the s
         time_stop: null, revisions: [] },
       alerts: [], decisions: [],
       since_entry: { as_of: "2026-10-23T11:00:00-04:00", lines: [
-        line("underlying", "ok", "AAPL 268.40 · +0.85% since entry (266.14) · no invalidation (no plan)", "quote (≤60 s cache); entry: fill context (alpaca_sip)"),
+        { ...line("underlying", "ok", "AAPL 268.40 · +0.85% since entry (266.14) · no invalidation (no plan)", "quote (≤60 s cache); entry: fill context (alpaca_sip)"),
+          now: 268.4, entry: 266.14, change_pct: 0.85 },
         line("group", "unavailable", "unavailable: Only entries from today's regular session are supported; overnight positions are unavailable", "Radar since-entry"),
-        line("mark", "ok", "mark 640.00 vs entry 590.00 a contract (+8.5%)", "journal cost; option mid"),
+        { ...line("mark", "ok", "mark 640.00 vs entry 590.00 a contract (+8.5%)", "journal cost; option mid"), mark: 640, entry: 590, change_pct: 8.5 },
         line("iv", "ok", "IV 31.2% now vs 33.0% at the fill (-1.8 pts)", "fill: Black-Scholes on its premium; now: provider (different methods)"),
+        { ...line("headlines", "ok", "4 headlines naming it since the entry, newest 14:05 UTC", "news reader"), count: 4,
+          headlines: [{ headline: "Apple supplier note", publisher: "benzinga", at: "2026-10-23T14:05+00:00" }] },
         line("held", "ok", "held 55 min · 29 days to expiry · no horizon or time stop on file", "journal; the plan"),
       ] } }] } }));
   await page.goto("/copilot-lab?symbol=AAPL");
@@ -200,13 +203,51 @@ test("an unplanned open position opened by its symbol shows the header and the s
   await expect(head).toContainText("In position");
   await expect(head).toContainText("270C · Nov 21");
   await expect(head.getByTestId("thread-price")).toContainText("option mark6.40+8.5%");
+  // No conversation yet: the symbol and its horizon sit in the header row, not on a second line.
+  await expect(conversation(page).getByRole("link", { name: "Open AAPL chart" })).toHaveCount(1);
   const since = conversation(page).getByRole("region", { name: "Since you entered" });
-  await expect(since).toContainText("No plan saved for this position");
-  await expect(since).toContainText("AAPL 268.40 · +0.85% since entry (266.14)");
-  await expect(since.locator("li[data-state=unavailable]")).toContainText("overnight positions are unavailable");
-  await expect(since).toContainText("IV 31.2% now vs 33.0% at the fill");
-  await expect(since).toContainText("Radar since-entry");  // every line names its source
+  // At most three plain lines lead: P&L and the mark, the plan (here none, said once), what changed.
+  const facts = since.getByRole("list", { name: "Since entry facts" }).getByRole("listitem");
+  await expect(facts).toHaveText(["P&L +8.5% · option mark 6.40 (entry 5.90)", "No plan saved", "AAPL +0.85% since entry · 4 headlines"]);
+  // The plumbing waits behind Sources and gaps, muted, never amber; headline times in New York time.
+  const sources = since.getByTestId("since-entry-sources");
+  await expect(sources.getByText("Sources and gaps · 1 unavailable")).toBeVisible();
+  await expect(sources.locator("li[data-state=unavailable]")).toBeHidden();
+  await sources.getByText("Sources and gaps").click();
+  await expect(sources.locator("li[data-state=unavailable]")).toContainText("overnight positions are unavailable");
+  await expect(sources).toContainText("IV 31.2% now vs 33.0% at the fill");
+  await expect(sources).toContainText("Radar since-entry");  // every line still names its source
+  await expect(sources).toContainText("4 headlines naming it since the entry, newest 10:05 AM ET");
+  await expect(since).not.toContainText("UTC");
+  expect(await since.locator(".text-amber-300").count()).toBe(0);
   await page.screenshot({ path: test.info().outputPath("thread-head-unplanned.png") });
+});
+
+test("a thread with a conversation folds Since you entered to one line that opens on tap", async ({ page }) => {
+  await page.route("**/charts/journal/positions/NBIS/context", (route) => route.fulfill({ json: { state: "ok", as_of: "2026-10-23T11:00:00-04:00",
+    symbol: "NBIS", units: "", positions: [{ trade_id: "t-nbis", symbol: "NBIS", contract: "NBIS 11/21/26 100C",
+      thesis: { source: "plan_card", label: "Plan card", text: NBIS_THESIS, text_is_guess: false, direction: "long", horizon: "swing",
+        invalidation: { price: 85, state: "armed" }, time_stop: { text: "out by 14:30", due_at: "2026-10-23T18:30:00Z", state: "pending" }, revisions: [] },
+      alerts: [], decisions: [],
+      since_entry: { as_of: "2026-10-23T11:00:00-04:00", lines: [
+        { key: "underlying", state: "ok", text: "NBIS 87.74 · −0.41% since entry (88.10) · 3.22% above the invalidation 85.00", as_of: "2026-10-23T14:59:00Z",
+          source: "quote (≤60 s cache); entry: fill context (alpaca_sip)", now: 87.74, entry: 88.1, change_pct: -0.41, invalidation: 85, from_invalidation_pct: 3.22 },
+        { key: "mark", state: "ok", text: "mark 314.00 vs entry 421.00 a contract (-25.4%)", as_of: "2026-10-23T14:59:00Z", source: "journal cost; option mid",
+          mark: 314, entry: 421, change_pct: -25.4 },
+        { key: "iv", state: "unavailable", text: "unavailable: neither IV now nor IV at the fill is on file", as_of: null,
+          source: "fill: Black-Scholes on its premium; now: provider (different methods)" },
+      ] } }] } }));
+  await lab(page, NBIS);
+  const since = conversation(page).getByRole("region", { name: "Since you entered" });
+  const toggle = since.getByRole("button", { name: /Since you entered/ });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(since.getByTestId("since-entry-summary")).toHaveText("· P&L −25.4% · 3.2% above the 85.00 invalidation · NBIS −0.41% since entry");
+  await expect(since.getByRole("list", { name: "Since entry facts" })).toHaveCount(0);
+  await toggle.click();
+  await expect(since.getByRole("list", { name: "Since entry facts" }).getByRole("listitem")).toHaveText([
+    "P&L −25.4% · option mark 3.14 (entry 4.21)", "3.2% above the 85.00 invalidation · time stop 2:30 PM ET", "NBIS −0.41% since entry"]);
+  await expect(since.getByText("Sources and gaps · 1 unavailable")).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("thread-head-since-open.png") });
 });
 
 test("the header and ladder fit a 375 px phone, the underlying still labelled", async ({ page }) => {
