@@ -37,7 +37,9 @@ A button's callback data is ``<verb>:<id>[:<answer>]``, at most 64 bytes:
 
 A typed message is a question for copilot: one bounded turn, as Why? runs, answered as a reply to it. Sent as a
 reply to a ping, the ping is its context: a position alert's (found from the ping's ``fb:``/``why:``/``done:`` button) is
-``ask_context`` on that alert, any other ping's is its text. ``/start`` and ``/help`` (or any command) get a short
+``ask_context`` on that alert, any other ping's is its text, with the symbol it is about (``ping_symbol``: from the row
+behind its buttons, its Open link, or the one known ticker its text names) so the turn reads that name's owner
+context. The turn runs as the ``telegram`` job (``ai/copilot_prompt.py``): a chat-shaped answer. ``/start`` and ``/help`` (or any command) get a short
 note on what the bot does. One turn runs at a time, shared with Why?; a question while one runs is not asked, and the
 reply says so. A question is cut to ``QUESTION_MAX`` characters.
 
@@ -457,6 +459,15 @@ class Replies:
             symbol = (alert.contract or "").split(" ")[0]
             return position_alerts.ask_context(alert), symbol if SYMBOL.match(symbol) else None
 
+    def _ping_symbol(self, ping: dict) -> str | None:
+        """The symbol a ping is about (``ping_symbol``); None when it names none or more than one, or the read fails."""
+        try:
+            with Session(self.engine) as db:
+                return ping_symbol(db, ping)
+        except Exception:  # noqa: BLE001 - the question is still asked, without a symbol
+            log.warning("Telegram ping symbol not resolved", exc_info=True)
+            return None
+
     async def why_text(self, alert_id: str) -> str:
         """One bounded copilot turn on the alert, as plain text for the chat."""
         from app.ai import copilot
@@ -483,6 +494,9 @@ class Replies:
                 context, symbol = found
             else:
                 context = str(replied.get("text") or replied.get("caption") or "").strip()[:QUESTION_MAX] or None
+                # Any other ping that is about one name gets that name, so the turn reads its owner context and
+                # prefetches its quote as a position alert's does.
+                symbol = await asyncio.to_thread(self._ping_symbol, replied)
         question = f"{context}\n\nMy question about this: {text}" if context else text
         # The desk keeps only the owner's own words: a ping's text (a headline, a research result) never becomes theirs.
         said = "Why? on a ping" if text == WHY_QUESTION else text if not context else f"(replying to a ping) {text}"
@@ -650,6 +664,60 @@ class Replies:
 
 
 FROM_TELEGRAM = "From Telegram: "
+
+
+PING_TICKER = re.compile(r"(?<![A-Za-z0-9$])\$?([A-Z][A-Z0-9]{1,4}(?:\.[A-Z])?)(?![A-Za-z0-9])")
+BENCHMARKS = frozenset({"SPY", "QQQ", "IWM", "DIA", "RSP"})  # "vs SPY" in a ping is the yardstick, not its subject
+YARDSTICK = re.compile(r"\b(?:vs\.?|versus|of|than)\s+\$?(SPY|QQQ|IWM|DIA|RSP)\b", re.I)
+# Tickers in the Radar universe that are also words a ping writes in capitals ("AI software", "NOW reports"): never read
+# from text. A ping about one of them still resolves through its own row.
+WORD_TICKERS = frozenset({"AI", "AN", "DE", "MA", "CI", "PL", "NOW", "LOW", "HOOD"})
+SYMBOL_IN_PATH = re.compile(r"[?&]symbol=([A-Za-z][A-Za-z0-9.\-]{0,9})(?:&|$)")
+
+
+def ping_symbol(db: Session, ping: dict) -> str | None:
+    """The one symbol a ping (a Telegram message the bot sent) is about, for a question or Why? on it. First from the
+    row behind its buttons: a Radar ping's alert (its subject, when that is a stock and not a group), a Radar setup, a
+    position companion message, a trade plan card, or the conversation under a copilot answer; then a ``symbol=`` in
+    its Open link; last, the single known ticker (Radar's universe or one the owner traded) its text names. Not counted there:
+    a benchmark it is compared with ("vs SPY", "ahead of SPY") or named beside another ticker, and a ticker that is also a
+    word ("AI"). None when it names none, or more than one. Known limit: a one-letter ticker (F, V) is never read from
+    text."""
+    from app.models import CopilotInvestigation, PositionCompanion, RadarAlert, RadarSetup
+    for row in (ping.get("reply_markup") or {}).get("inline_keyboard") or []:
+        for button in row:
+            verb, _, rest = str(button.get("callback_data") or "").partition(":")
+            key = rest.split(":")[0]
+            found = None
+            if verb == "rr" and (row_id := _uuid(key)):
+                alert = db.get(RadarAlert, row_id)
+                found = alert.subject if alert else None
+            elif verb == "rp" and (row_id := _uuid(key)):
+                setup = db.get(RadarSetup, row_id)
+                found = setup.symbol if setup else None
+            elif verb in ("pc", "pu") and (row_id := _uuid(key)):
+                companion = db.get(PositionCompanion, row_id)
+                found = companion.ticker if companion else None
+            elif verb == "pl":
+                plan = find_plan(db, key)
+                found = plan[1].get("symbol") if plan else None
+            elif verb == "hd" and (row_id := _uuid(key)):
+                thread = db.get(CopilotInvestigation, row_id)
+                found = thread.symbol if thread else None
+            if found and SYMBOL.match(str(found)):  # as stored: a group's name ("Semis") is not a ticker
+                return str(found)
+            if (link := SYMBOL_IN_PATH.search(str(button.get("url") or ""))) and SYMBOL.match(link.group(1).upper()):
+                return link.group(1).upper()
+    text = str(ping.get("text") or ping.get("caption") or "")
+    from app.engine import spoken_tickers
+    named = {m for m in PING_TICKER.findall(text)}
+    if not named:
+        return None
+    yardsticks = {m.upper() for m in YARDSTICK.findall(text)}  # "vs SPY", "ahead of QQQ": the comparison, not the subject
+    known = (named - WORD_TICKERS - yardsticks) & spoken_tickers.known_symbols(spoken_tickers.traded(db))
+    if known - BENCHMARKS:  # a benchmark beside a name is the yardstick; alone, it is the subject
+        known -= BENCHMARKS
+    return next(iter(known)) if len(known) == 1 else None
 
 
 def thread_for(db: Session, symbol: str) -> str | None:

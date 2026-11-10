@@ -1264,13 +1264,15 @@ def test_the_confirmed_memory_shape_is_what_the_store_accepts():
 
 def test_the_prompt_frames_the_owner_the_four_questions_and_memory_without_rules_or_diagnoses():
     prompt = copilot.SYSTEM_PROMPT
-    for phrase in ("working hypotheses", "never a diagnosis", "exits, not entries", "associations in past trades, not rules",
-                   "rejected all three mechanical exits", "1. Thesis", "2. Setup", "3. Instrument", "4. The decision now",
+    for phrase in ("working hypotheses", "never a diagnosis", "Their exits, more than their entries", "associations in past trades, not rules",
+                   "rejected the mechanical exits as rules", "1. Thesis", "2. Setup", "3. Instrument", "4. The decision now",
                    "provider's implied volatility and Greeks", "\"Nothing here changes the plan\"", "propose_plan kind=memory",
                    "nothing is remembered", "never one that characterizes their psychology",
                    "you cannot create alerts or research jobs yourself", "never turn a measured count into a judgement"):
         assert phrase in prompt, phrase
     assert "always exit" not in prompt.lower() and "you must sell" not in prompt.lower()
+    # The audit's figures are the owner context block's live habit counts now, not fixed text (2026-11-10).
+    assert "1,528" not in prompt and "15,304" not in prompt and "53 losers" not in prompt
 
 
 def test_investigations_keep_an_answers_rating_and_metrics(monkeypatch):
