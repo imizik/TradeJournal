@@ -6,6 +6,7 @@ reported as ``state: off`` rather than an error. Visits and feedback are
 append-only rows in the same Radar file.
 """
 from datetime import UTC, date, datetime
+import json
 import logging
 import os
 import sqlite3
@@ -13,12 +14,12 @@ import time
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlmodel import Session
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlmodel import Session, select
 from pydantic import BaseModel
 
 from app.database import get_session
-from app.models import Trade
+from app.models import RadarSetup, Trade
 from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_math import ET, session_windows
 from app.engine.radar_comparison import compare_group, empty_comparison
@@ -256,6 +257,82 @@ def proof(db: Session = Depends(get_session)):
     except (sqlite3.Error, ValueError, KeyError, OSError, TypeError) as exc:
         log.warning("radar proof unreadable: %s", exc)
         return {"state": "off", "reason": "The Radar file could not be read right now."}
+
+
+def _utc_iso(value: datetime | None) -> str | None:
+    return value.replace(tzinfo=UTC).isoformat(timespec="seconds").replace("+00:00", "Z") if value else None
+
+
+def _setup_row(row: RadarSetup, event: dict | None) -> dict:
+    """One setup card as /radar shows it: the phone card's own words (``radar_setup.card_text``) and the row's state."""
+    from app.engine.radar_setup import card_text
+    event = event or {"kind": row.kind, "direction": row.direction, "summary": "", "first_seen_at": None}
+    title, body = card_text(event, row)
+    lines = body.split("\n")
+    created = row.created_at.replace(tzinfo=UTC).astimezone(ET)
+    return {
+        "id": str(row.id), "event_id": row.event_id, "session_date": row.session_date, "kind": row.kind,
+        "symbol": row.symbol, "direction": row.direction, "entry": row.entry, "invalidation": row.invalidation,
+        "title": title, "lines": lines, "levels_line": lines[0], "contract_line": lines[1] if len(lines) > 1 else None,
+        "contract": json.loads(row.contract_json) if row.contract_json else None, "record": row.record_text,
+        "summary": event.get("summary") or None, "created_at": _utc_iso(row.created_at),
+        "created_at_ny": f"{(created.hour - 1) % 12 + 1}:{created.minute:02d} {'AM' if created.hour < 12 else 'PM'} ET",
+        "plan": {"state": row.plan_state, "planned_at": _utc_iso(row.planned_at), "investigation_id": row.investigation_id,
+                 "note": row.plan_note},
+        "paper": {"state": row.paper_state, "entry_price": row.paper_entry_price, "entry_at": _utc_iso(row.paper_entry_at),
+                  "exit_price": row.paper_exit_price, "exit_at": _utc_iso(row.paper_exit_at),
+                  "exit_reason": row.paper_exit_reason, "pnl": row.paper_pnl, "note": row.paper_note},
+    }
+
+
+@router.get("/setups")
+def setups(session: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"), db: Session = Depends(get_session)):
+    """One session's Radar setup cards (docs/radar.md § Setups screen), newest first, with the paper scorecard; read-only."""
+    from app.engine import radar_setup_paper
+    if session:
+        try:
+            date.fromisoformat(session)
+        except ValueError:
+            raise HTTPException(422, "session must be a real date")
+    store, _ = _store(read_only=True)
+    if not session:
+        today = datetime.fromtimestamp(_now(), ET).date().isoformat()
+        try:
+            sessions = store.sessions() if store else []
+        except (sqlite3.Error, OSError):
+            sessions = []
+        session = today if today in sessions or not sessions else sessions[0]
+    rows = db.exec(select(RadarSetup).where(RadarSetup.session_date == session)
+                   .order_by(RadarSetup.created_at.desc(), RadarSetup.event_id.desc())).all()
+    events: dict[str, dict] = {}
+    if store is not None and rows:
+        try:
+            events = {e["event_id"]: e for e in store.events(session)}
+        except (sqlite3.Error, ValueError, KeyError, OSError) as exc:
+            log.warning("radar setups: events unreadable: %s", exc)
+    return {"session": session, "setups": [_setup_row(r, events.get(r.event_id)) for r in rows],
+            "scorecard": radar_setup_paper.scorecard(db)}
+
+
+@router.post("/setups/{setup_id}/plan")
+def plan_setup(setup_id: UUID, request: Request, db: Session = Depends(get_session)):
+    """The web's Plan it: the Telegram ``rp`` tap's own path (``radar_setup_plan.plan``), then the level alert monitor
+    reloads, as the Telegram reply does."""
+    from app.engine import radar_setup_plan
+    if db.get(RadarSetup, setup_id) is None:
+        raise HTTPException(404, "Radar setup not found")
+    engine = db.get_bind()
+    db.close()  # plan writes in its own session
+    reply, chosen = radar_setup_plan.plan(engine, str(setup_id))
+    if chosen == radar_setup_plan.PLANNED:
+        monitor = getattr(request.app.state, "level_alerts", None)
+        if monitor is not None:
+            monitor.changed()
+    with Session(engine) as fresh:
+        row = fresh.get(RadarSetup, setup_id)
+        state, thread = (row.plan_state, row.investigation_id) if row else (None, None)
+    return {"id": str(setup_id), "reply": reply, "planned": chosen == radar_setup_plan.PLANNED, "plan_state": state,
+            "investigation_id": thread}
 
 
 @router.get("/shadow-book")

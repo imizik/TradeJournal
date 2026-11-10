@@ -54,7 +54,10 @@ def radar_seed(news: str = "found"):
     import json
     from app.engine.radar_store import RadarStore
 
+    # Built beside the live file and swapped in whole, so a page from the previous test still reading Radar never
+    # opens a half-created file (CI saw "disk I/O error" when the old file was unlinked under a reader).
     path = Path(os.environ["RADAR_STORE"])
+    final, path = path, path.with_name(path.name + ".seed")
     path.unlink(missing_ok=True)
     store = RadarStore(path)
     sample = json.loads((Path(__file__).resolve().parents[3] / "backend/tests/fixtures/radar/sample_event.json").read_text())
@@ -78,6 +81,41 @@ def radar_seed(news: str = "found"):
         {"event_id": sample["event"]["event_id"], "checked_at": "2026-10-20T15:13:05.000Z", "status": news, "headlines": []}]
     for check in checks:
         store.append_news(check)
+    os.replace(path, final)
+    return {"seeded": True}
+
+
+@core_app.post("/__test/radar-setups-seed", include_in_schema=False)
+def radar_setups_seed(today: str = "", clear: bool = False):
+    """Setup cards, replaced each call: a closed paper card on the sample event's 2026-10-20 session, and on ``today`` a
+    dip card waiting for its paper fill and a refused gap reversal with no liquid contract. ``clear`` only removes them."""
+    import json
+    from sqlalchemy import delete
+    from sqlmodel import Session
+    from app.database import engine
+    from app.models import RadarSetup
+
+    contract = {"symbol": "NBIS261120C00062000", "option_type": "call", "strike": 62.0, "expiration": "2026-11-20",
+                "bid": 1.1, "ask": 1.2, "mid": 1.15, "spread_pct": 8.7, "delta": 0.45}
+    with Session(engine) as db:
+        db.exec(delete(RadarSetup))
+        if clear:
+            db.commit()
+            return {"seeded": False}
+        db.add(RadarSetup(event_id="rad_sample_mu_20261020_1", session_date="2026-10-20", rule_version="radar-dip-v0",
+                          kind="dip_turn", symbol="MU", direction="up", entry=104.1, invalidation=101.5,
+                          contract_json=json.dumps({**contract, "symbol": "MU261023C00105000", "strike": 105.0, "expiration": "2026-10-23"}),
+                          record_text="Your dip buys: 9 trades · 6 green · +$412", created_at=datetime(2026, 10, 20, 15, 11),
+                          plan_state="planned", paper_state="closed", paper_entry_price=2.1, paper_exit_price=2.62,
+                          paper_exit_reason="time_stop", paper_pnl=50.7))
+        db.add(RadarSetup(event_id="e2e-setup-nbis", session_date=today, rule_version="radar-dip-v0", kind="dip_turn",
+                          symbol="NBIS", direction="up", entry=61.2, invalidation=59.85, contract_json=json.dumps(contract),
+                          record_text="Your dip buys: 9 trades · 6 green · +$412", created_at=datetime(2026, 11, 10, 15, 5),
+                          paper_state="pending"))
+        db.add(RadarSetup(event_id="e2e-setup-amd", session_date=today, rule_version="radar-reversal-v0", kind="gap_reversal",
+                          symbol="AMD", direction="down", entry=150.0, invalidation=153.0, created_at=datetime(2026, 11, 10, 14, 50),
+                          plan_state="refused", plan_note="AMD is already above 153.00, the level this setup was built on. No plan saved."))
+        db.commit()
     return {"seeded": True}
 
 

@@ -92,7 +92,7 @@ detail (`GET /radar/events/{id}`, field `plans`) carries the same as
 
 ## Feed API and screen
 
-All four routes are owner-only (assistant sessions are denied) and read-only
+The feed routes are owner-only (assistant sessions are denied) and read-only
 apart from two append-only tables, `visit` and `feedback`, in the same Radar
 file (older files gain them when opened).
 
@@ -141,6 +141,40 @@ unavailable, the tag says **Movers unavailable** and the row stays visible.
 Clearing the filter shows all rows; phone/chart links always show the linked
 event, even if it was on Movers. An all-filtered feed explains how to show it.
 The filter does not change the Movers panel, detection or outcome scoring.
+
+### Setups screen
+
+`GET /radar/setups?session=YYYY-MM-DD` (owner-only, read-only; default the
+feed's session) returns that session's [setup cards](#setup-cards-off-by-default)
+from `radar_setup`, newest first, in the phone card's own words
+(`radar_setup.card_text`: title, "In near … · out below …", the candidate
+contract and its spread or "No liquid contract found.", his record line),
+with each card's plan state and paper result, and `scorecard`
+(`radar_setup_paper.scorecard`, every session). It reads the journal database,
+so the cards show even when the Radar file is off.
+
+`POST /radar/setups/{id}/plan` is the web's **Plan it**: the Telegram `rp` tap's
+own path (`radar_setup_plan.plan`), after which the level alert monitor reloads,
+as the Telegram reply does. It returns the reply text, `planned` and the card's
+plan state; an unknown id is a 404. Owner-only, no new auth or ingress.
+
+On `/radar` a **Setups** section follows the developments: one card per setup
+(title, time, levels line, candidate contract, record line, paper result:
+waiting for a fill, open, closed with its reason and dollars per contract, or
+unresolved) with Plan it on the current session's unplanned cards, which
+becomes **Planned**; a refusal shows its reason. Below the cards, one record
+line per setup type and direction: cards, planned, paper closed, green,
+dollars. An expanded setup event in the feed shows its card too. The words
+describe; nothing says to buy.
+
+**Proof speed.** The Movers ranking at each recorded pass is the slow part of the [proof read-out](#proof-read-out) (about
+18 seconds a request in production before November 10, 2026). Each pass is now
+ranked once per backend process and kept in memory per Radar file and universe:
+passes and their quotes never change, so a request ranks only the passes
+recorded since the last one, and a session whose quotes were pruned is dropped
+and reads unavailable, as before. Ratings, plans, alerts and setup cards are
+read fresh on every request, so a rating or plan shows the moment it is saved.
+The first request after a restart still ranks everything.
 
 ### Outside your list
 

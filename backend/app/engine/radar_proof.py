@@ -10,6 +10,10 @@ Scope: every event of the newest rule version (versions are never pooled).
   sighting but was later; ``not_in_movers``: never that session; ``movers_first``: it already was, at or
   before the sighting; ``unavailable``: the session's quotes are gone (pruned after 20 sessions).
   Group events are rated but not timed: Movers lists stocks.
+  Each pass's ranking is kept in memory per Radar file and universe (passes and their quotes are never changed, only
+  pruned whole sessions at a time), so a request ranks only the passes recorded since the last one; a session whose
+  quotes were pruned is dropped and reads ``unavailable``. Ratings, plans, alerts and setup cards are read fresh on
+  every request.
 - **Morning brief:** the stock as an opportunity or item in a saved, unredacted briefing within
   ``BRIEF_DAYS`` days: ``brief_first`` (on or before the event's day), ``radar_first`` (only after),
   ``not_in_brief``. Shown, not part of the verdict: a brief names at most a handful of stocks.
@@ -23,6 +27,7 @@ Scope: every event of the newest rule version (versions are never pooled).
 """
 from collections import Counter, defaultdict
 from datetime import date
+import hashlib
 import json
 from statistics import median
 
@@ -51,6 +56,40 @@ def movers_timeline(universe: dict, passes: list[dict], quotes: dict[int, dict[s
         ranked = build_movers(universe, list(quotes.get(p["id"], {}).values()), None, latest=p)
         if ranked["header"] is not None:
             out.append((epoch(p["started_at"]), {r["symbol"] for r in ranked["leaders"]}, {r["symbol"] for r in ranked["laggards"]}))
+    return out
+
+
+# {(Radar file, inode): (universe digest, {session: {pass id: (pass start, timeline entry or None)}})}
+_RANKED: dict[tuple[str, int], tuple[str, dict[str, dict[int, tuple[str, tuple | None]]]]] = {}
+
+
+def session_timelines(store: RadarStore, universe: dict, sessions: set[str]) -> dict[str, list[tuple[float, set, set]]]:
+    """``movers_timeline`` for each session, ranking each recorded pass once per process (see the module notes)."""
+    try:
+        key = (str(store.path), store.path.stat().st_ino)
+    except OSError:
+        key = (str(store.path), 0)
+    digest = hashlib.sha256(json.dumps(universe, sort_keys=True, default=str).encode()).hexdigest()
+    cached = _RANKED.get(key)
+    known = cached[1] if cached and cached[0] == digest else {}
+    kept = dict(known)
+    out = {}
+    for session in sorted(sessions):
+        if not store.quotes(session_date=session, symbol="SPY"):  # pruned (or never quoted): nothing can be ranked
+            out[session] = []
+            kept.pop(session, None)
+            continue
+        ranked = known.get(session, {})
+        passes = [p for p in store.passes(session) if p["status"] in USABLE]
+        fresh = [p for p in passes if ranked.get(p["id"], ("",))[0] != p["started_at"]]
+        if fresh:
+            quotes = store.pass_quotes(p["id"] for p in fresh)
+            ranked = {**ranked, **{p["id"]: (p["started_at"], next(iter(movers_timeline(universe, [p], quotes)), None))
+                                   for p in fresh}}
+        kept[session] = ranked
+        out[session] = [ranked[p["id"]][1] for p in sorted(passes, key=lambda p: (p["started_at"], p["id"]))
+                        if ranked[p["id"]][1] is not None]
+    _RANKED[key] = (digest, kept)
     return out
 
 
@@ -139,10 +178,7 @@ def build(store: RadarStore, db: Session, universe: dict) -> dict:
     planned = planned_events(db, [e["event_id"] for e in events])
     briefs = briefed_symbols(db)
     stocks = [e for e in events if e["kind"] in STOCK_KINDS]
-    timeline_of = {}
-    for session in sorted({e["session_date"] for e in stocks}):
-        passes = store.passes(session)
-        timeline_of[session] = movers_timeline(universe, passes, store.pass_quotes(p["id"] for p in passes))
+    timeline_of = session_timelines(store, universe, {e["session_date"] for e in stocks})
     timing, brief, leads = Counter(), Counter(), []
     for e in stocks:
         moved = movers_timing(e, timeline_of[e["session_date"]])
