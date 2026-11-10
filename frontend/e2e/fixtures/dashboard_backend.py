@@ -54,7 +54,10 @@ def radar_seed(news: str = "found"):
     import json
     from app.engine.radar_store import RadarStore
 
+    # Built beside the live file and swapped in whole, so a page from the previous test still reading Radar never
+    # opens a half-created file (CI saw "disk I/O error" when the old file was unlinked under a reader).
     path = Path(os.environ["RADAR_STORE"])
+    final, path = path, path.with_name(path.name + ".seed")
     path.unlink(missing_ok=True)
     store = RadarStore(path)
     sample = json.loads((Path(__file__).resolve().parents[3] / "backend/tests/fixtures/radar/sample_event.json").read_text())
@@ -78,6 +81,7 @@ def radar_seed(news: str = "found"):
         {"event_id": sample["event"]["event_id"], "checked_at": "2026-10-20T15:13:05.000Z", "status": news, "headlines": []}]
     for check in checks:
         store.append_news(check)
+    os.replace(path, final)
     return {"seeded": True}
 
 
