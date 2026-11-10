@@ -1286,3 +1286,6 @@ def test_a_why_or_reply_on_any_ping_resolves_the_symbol_it_is_about(case):
         assert telegram_replies.ping_symbol(db, ping("Research done", "ask:research", url="https://x/charts?symbol=smh&tf=5m")) == "SMH"
         assert telegram_replies.ping_symbol(db, ping("SPY gapped down 1.2%", "ask:nudge")) == "SPY"  # a benchmark alone is the subject
         assert telegram_replies.ping_symbol(db, ping("Nothing named here", "ask:nudge")) is None
+        assert telegram_replies.ping_symbol(db, ping("SPY dropping, IV rising", "ask:nudge")) == "SPY"
+        assert telegram_replies.ping_symbol(db, ping("AI software ahead of SPY: 3 of 4 up", "ask:radar")) is None
+        assert telegram_replies.ping_symbol(db, ping("Radar digest: NOW reports, NBIS +4%", "ask:radar")) == "NBIS"

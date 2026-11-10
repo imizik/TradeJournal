@@ -2,6 +2,7 @@
 the contradictions they removed, and the cached prefix. Offline: a recording adapter, nothing reaches Anthropic."""
 import asyncio
 import copy
+import re
 
 import pytest
 
@@ -135,3 +136,13 @@ def test_the_request_caches_the_jobs_fixed_prefix_and_still_the_tail():
         assert [t["name"] for t in kwargs["tools"]] == [t["name"] for t in copilot_prompt.TOOLS[job]]
         # Nothing volatile in the cached prefix: built once, identical every turn.
         assert copilot_prompt.system_prompt(job) == copilot_prompt.PROMPTS[job] and "ET]" not in copilot_prompt.PROMPTS[job]
+
+
+def test_a_jobs_prompt_names_only_the_tools_it_is_offered():
+    """A rule naming a tool the job is not offered spends a round on a refused call (review of 2026-11-10)."""
+    every = {t["name"] for t in copilot_tools.TOOLS}
+    for job in JOBS:
+        named = set(re.findall(r"\b(get_[a-z_]+|propose_plan)\b", copilot_prompt.PROMPTS[job])) & (every | {"get_memories"})
+        offered = {t["name"] for t in copilot_prompt.TOOLS[job]}
+        assert named <= offered, (job, sorted(named - offered))
+    assert "get_week_review" in copilot_prompt.PROMPTS["telegram"]  # a typed "review my week" keeps its rules

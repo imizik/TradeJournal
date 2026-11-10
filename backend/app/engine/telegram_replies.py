@@ -668,6 +668,10 @@ FROM_TELEGRAM = "From Telegram: "
 
 PING_TICKER = re.compile(r"(?<![A-Za-z0-9$])\$?([A-Z][A-Z0-9]{1,4}(?:\.[A-Z])?)(?![A-Za-z0-9])")
 BENCHMARKS = frozenset({"SPY", "QQQ", "IWM", "DIA", "RSP"})  # "vs SPY" in a ping is the yardstick, not its subject
+YARDSTICK = re.compile(r"\b(?:vs\.?|versus|of|than)\s+\$?(SPY|QQQ|IWM|DIA|RSP)\b", re.I)
+# Tickers in the Radar universe that are also words a ping writes in capitals ("AI software", "NOW reports"): never read
+# from text. A ping about one of them still resolves through its own row.
+WORD_TICKERS = frozenset({"AI", "AN", "DE", "MA", "CI", "PL", "NOW", "LOW", "HOOD"})
 SYMBOL_IN_PATH = re.compile(r"[?&]symbol=([A-Za-z][A-Za-z0-9.\-]{0,9})(?:&|$)")
 
 
@@ -675,8 +679,10 @@ def ping_symbol(db: Session, ping: dict) -> str | None:
     """The one symbol a ping (a Telegram message the bot sent) is about, for a question or Why? on it. First from the
     row behind its buttons: a Radar ping's alert (its subject, when that is a stock and not a group), a Radar setup, a
     position companion message, a trade plan card, or the conversation under a copilot answer; then a ``symbol=`` in
-    its Open link; last, the single known ticker (Radar's universe or one the owner traded) its text names, a benchmark
-    beside another name ("vs SPY") not counted. None when it names none, or more than one."""
+    its Open link; last, the single known ticker (Radar's universe or one the owner traded) its text names. Not counted there:
+    a benchmark it is compared with ("vs SPY", "ahead of SPY") or named beside another ticker, and a ticker that is also a
+    word ("AI"). None when it names none, or more than one. Known limit: a one-letter ticker (F, V) is never read from
+    text."""
     from app.models import CopilotInvestigation, PositionCompanion, RadarAlert, RadarSetup
     for row in (ping.get("reply_markup") or {}).get("inline_keyboard") or []:
         for button in row:
@@ -707,8 +713,9 @@ def ping_symbol(db: Session, ping: dict) -> str | None:
     named = {m for m in PING_TICKER.findall(text)}
     if not named:
         return None
-    known = named & spoken_tickers.known_symbols(spoken_tickers.traded(db))
-    if len(named) > 1:
+    yardsticks = {m.upper() for m in YARDSTICK.findall(text)}  # "vs SPY", "ahead of QQQ": the comparison, not the subject
+    known = (named - WORD_TICKERS - yardsticks) & spoken_tickers.known_symbols(spoken_tickers.traded(db))
+    if known - BENCHMARKS:  # a benchmark beside a name is the yardstick; alone, it is the subject
         known -= BENCHMARKS
     return next(iter(known)) if len(known) == 1 else None
 

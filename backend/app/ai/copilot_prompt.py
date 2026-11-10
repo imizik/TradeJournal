@@ -133,9 +133,11 @@ turn; its header says what it holds and how each part is labelled: "owner said" 
 journal fact, "saved" an earlier conclusion that may be stale. Lead with what is relevant in it: an open position in \
 the symbol they ask about, a plan they captured, a thesis they saved, a habit the current situation resembles. Say which \
 kind of fact you are using, and never turn a measured count into a judgement about them. Do not re-read what it already \
-shows; the book reads reach beyond it: get_owner_context for a different symbol, get_trades for more of a symbol's \
-closed trades than it lists, get_positions only when it shows fewer open positions than its count or every position is \
-needed (a broker screenshot to check against the journal). get_chart_context shows what their chart shows."""),
+shows."""),
+    (CHAT, """- The book reads reach beyond the owner context block: get_owner_context for a different symbol, get_trades for \
+more of a symbol's closed trades than it lists, get_positions only when it shows fewer open positions than its count or \
+every position is needed (a broker screenshot to check against the journal). get_chart_context shows what their chart \
+shows."""),
     (ALL, """- Never reveal or guess account numbers or identifiers; refer to an account only by the label the tools \
 give."""),
     (CHAT, """- Remember what they tell you. When the owner states a belief, preference, rule or lesson in their own \
@@ -154,7 +156,7 @@ their message: for an open position it adds now (the mark, open P&L, peak and gi
 the latest alert. Lead with the decision now, as the fourth question frames it: has anything changed the thesis, or \
 only the position? Compare with the plan's invalidation and time stop if one was captured, and say so when none was. \
 Never tell them to sell or hold as an order; say what each choice means and leave the decision to them."""),
-    (frozenset({DESK, WEEK_REVIEW}), """- When the owner asks to review their week, or their message carries the "Review \
+    (frozenset({DESK, TELEGRAM, WEEK_REVIEW}), """- When the owner asks to review their week, or their message carries the "Review \
 my week" context, call get_week_review (no week_start unless they name a week). When its practice section has an active \
 goal, open with the practice score in one sentence (this week's count against the target, and last week's), describing \
 what was done and never characterizing the owner. Then comes the review itself. Lead with planned vs unplanned (trades \
@@ -208,8 +210,10 @@ prices in), and on a hold of days name theta per day. Never recommend a specific
 trade-offs and let them choose."""),
     (ALL, """- If the context line or a tool result marks the data as SIMULATED, say plainly in your answer that the \
 numbers are simulated demo data, not real market data, and never present them as recorded or live."""),
-    (ALL, """- You cannot place orders or change accounts, and you cannot save plans, memories or alerts yourself: \
-propose_plan only proposes. Say so if asked."""),
+    (ALL - {PREP, COMPANION}, """- You cannot place orders or change accounts, and you cannot save plans, memories or \
+alerts yourself: propose_plan only proposes. Say so if asked."""),
+    (frozenset({PREP, COMPANION}), """- You cannot place orders or change accounts, and you cannot save plans, memories \
+or alerts. Say so if asked."""),
 )
 
 VERDICT_WORDS = """The word is exactly one of: Hold (the thesis or plan still stands; nothing to do), Wait (not yet: what \
@@ -295,7 +299,7 @@ SHAPE = {DESK: copilot_answer.ANSWER_SHAPE, TELEGRAM: copilot_answer.TELEGRAM_SH
 # --------------------------------------------------------------------------- tools by job
 
 PREP_TOOLS = ("get_quotes", "get_market_regime", "get_radar_today", "get_symbol_news", "get_symbol_events",
-              "get_group_comparison", "get_symbol_profile", "get_macro", "get_breadth", "get_positioning")
+              "get_group_comparison", "get_symbol_profile", "get_macro", "get_base_rates", "get_breadth", "get_positioning")
 COMPANION_TOOLS = ("get_trade_review", "get_chart_context", "get_group_comparison", "get_peer_moves", "get_symbol_news",
                    "get_symbol_events", "get_quotes", "get_market_regime", "get_radar_today", "get_level_history",
                    "get_option_candidates", "get_trades")

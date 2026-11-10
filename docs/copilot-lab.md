@@ -1199,15 +1199,18 @@ is, the four questions, the evidence, time, untrusted-text, account,
 SIMULATED and no-order rules), a line framing its own job, only the working
 rules it uses, its own answer format and its own shape reminder
 (`copilot_answer.*_SHAPE`, sent where `ANSWER_SHAPE` is on a desk turn), and
-only its own tools; a tool call outside them is refused like an invalid one.
+only its own tools; a tool call outside them is refused like an invalid one,
+and no job's prompt names a tool it is not offered (`tests/test_copilot_jobs.py`).
+Telegram keeps the week-review rule, so a typed "review my week" there is
+answered as on the desk, in the chat format.
 
 | Job | Who runs it | Answer format | Tools | Prompt + tools |
 | --- | --- | --- | --- | --- |
-| `desk` | desk, Charts, Radar, panel | as above, unchanged | all 25 | 3,717 words + 22,200 chars, about 11,700 tokens |
-| `telegram` | typed, spoken or photo question, Why? | Verdict line, at most three short plain lines, Against, Changes if; no Read line, no Compare rows, no markdown; under 120 words | all 25 | 2,816 words, about 10,400 tokens |
-| `prep` | morning brief (`premarket_prep`) | the lines its message lists, plain, no Verdict/Read/Against, no headings | 10 market reads | 1,177 words + 5,900 chars, about 3,400 tokens |
-| `companion` | position companion (`position_companion`) | exactly the shape its message gives (the adopt draft's six lines, an update's 80 words, the exit note) | 12: the trade review, chart, group, news, quotes, level history, option candidates, trades | 1,400 words + 9,200 chars, about 4,700 tokens |
-| `week_review` | automatic week review (`week_review_auto`) | Verdict line, then the review in short one-fact lines | 5: week and trade review, trades, proof, `propose_plan` | 1,330 words + 7,700 chars, about 4,100 tokens |
+| `desk` | desk, Charts, Radar, panel | as above, unchanged | all 25 | 3,715 words + 22,200 chars, about 11,700 tokens |
+| `telegram` | typed, spoken or photo question, Why? | Verdict line, at most three short plain lines, Against, Changes if; no Read line, no Compare rows, no markdown; under 120 words | all 25 | 3,207 words, about 11,000 tokens |
+| `prep` | morning brief (`premarket_prep`) | the lines its message lists, plain, no Verdict/Read/Against, no headings | 11 market reads | 1,173 words + 6,800 chars, about 3,700 tokens |
+| `companion` | position companion (`position_companion`) | exactly the shape its message gives (the adopt draft's six lines, an update's 80 words, the exit note) | 12: the trade review, chart, group, news, quotes, level history, option candidates, trades | 1,342 words + 9,200 chars, about 4,600 tokens |
+| `week_review` | automatic week review (`week_review_auto`) | Verdict line, then the review in short one-fact lines | 5: week and trade review, trades, proof, `propose_plan` | 1,278 words + 7,700 chars, about 4,100 tokens |
 
 Token figures are estimates (characters ÷ 4 for prose, ÷ 3.5 for tool JSON);
 the scorecard's input and cache figures are the measured ones. The brief
