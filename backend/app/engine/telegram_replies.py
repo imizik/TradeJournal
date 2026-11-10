@@ -26,6 +26,8 @@ A button's callback data is ``<verb>:<id>[:<answer>]``, at most 64 bytes:
   Confirm parts in its order (``confirm_plan``): the pre-trade plan capture on the default (or only) account, then the
   entry and invalidation alerts and a readable time stop, each with its own result on the card's outcome; a later tap
   retries only the parts not done. Nothing is placed or sized;
+- ``rp:<Radar setup id>``: Plan it on a Radar setup ping (``radar_setup_plan.plan``): the setup card saved once as a
+  plan with the Radar event as its origin, and its invalidation alert armed; no model call, nothing placed;
 - ``why:<position alert id>``: one bounded copilot turn on the alert (``position_alerts.ask_context``, the configured
   backend and its turn and daily budgets), answered in the chat with the Verdict line and body cut to 1,500
   characters; with Copilot Lab off the reply says so. One turn runs at a time, and a message's Why? is asked once.
@@ -133,6 +135,11 @@ def rating_buttons(radar_alert_id, ratings: tuple[str, ...] = tuple(RADAR_LABELS
     return tuple((RADAR_LABELS[r], f"rr:{radar_alert_id}:{r}") for r in ratings)
 
 
+def plan_button(setup_id) -> tuple[str, str]:
+    """Plan it on a Radar setup ping, keyed by its ``RadarSetup`` row (``radar_setup_plan.plan``)."""
+    return ("Plan it", f"rp:{setup_id}")
+
+
 def rate_buttons(investigation_id, index: int, rating: str | None = None) -> tuple[tuple[str, str], ...]:
     """Helped and Didn't under a copilot answer saved on the desk at ``index``: the saved one checked, carrying ``n`` so a
     second tap clears it, as the desk's buttons toggle."""
@@ -197,6 +204,11 @@ class Replies:
             reply, chosen = await asyncio.to_thread(self._companion, *rest.partition(":")[::2])
         elif verb == "pl":
             reply, chosen = await asyncio.to_thread(self._plan, *rest.partition(":")[::2])
+        elif verb == "rp":
+            from app.engine import radar_setup_plan
+            reply, chosen = await asyncio.to_thread(radar_setup_plan.plan, self.engine, rest)
+            if chosen == radar_setup_plan.PLANNED and self.alerts_changed is not None:
+                self.alerts_changed()
         elif verb == "hd":
             reply, chosen = await asyncio.to_thread(self._rate, rest)
         elif verb == "pu":
