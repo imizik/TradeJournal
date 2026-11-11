@@ -31,11 +31,22 @@ A button's callback data is ``<verb>:<id>[:<answer>]``, at most 64 bytes:
 - ``why:<position alert id>``: one bounded copilot turn on the alert (``position_alerts.ask_context``, the configured
   backend and its turn and daily budgets), answered in the chat with the Verdict line and body cut to 1,500
   characters; with Copilot Lab off the reply says so. One turn runs at a time, and a message's Why? is asked once.
+- ``cc:<check id as 32 hex>:pass``: Pass under a checked call's card (``engine/call_check.py``), recorded on its row
+  once; the keyboard then shows "✓ Passed" (Plan it, a link, goes). ``cc:q``: Check as a call under the answer to an
+  ambiguous message: the message it answered (Telegram sends it with the tap) is checked as a call;
 - ``ask:<kind>``: the Why? ``phone.send`` adds to every other factual ping (Radar, thesis watch, research, plan and
   level pings, interrupts): the same bounded turn, asked about the ping's own text, as a typed reply to it is. A
   ping too old for Telegram to show its text again says so instead.
 
-A typed message is a question for copilot: one bounded turn, as Why? runs, answered as a reply to it. Sent as a
+A typed message that is a trade call (``call_check.classify``: a ``check`` prefix, or two or more call markers and no
+question marker; a call shared from Discord arrives as typed text) is checked instead (``call_check.run``, the
+``check_call`` job): the reply is the check card in chat lines (the verdict, what was read with blanks named, the tiles,
+Against, Changes if) with Plan it (a link to the desk's plan flow with the call's levels as editable text; never a
+ticket), Pass and Why?. An ambiguous one is answered as a question with Check as a call beside Helped and Didn't. A photo
+with no caption is first checked as a call; when the model says it is not one, it is the broker screenshot below. A
+captioned photo whose caption is a call is checked with the image.
+
+A typed message is otherwise a question for copilot: one bounded turn, as Why? runs, answered as a reply to it. Sent as a
 reply to a ping, the ping is its context: a position alert's (found from the ping's ``fb:``/``why:``/``done:`` button) is
 ``ask_context`` on that alert, any other ping's is its text, with the symbol it is about (``ping_symbol``: from the row
 behind its buttons, its Open link, or the one known ticker its text names) so the turn reads that name's owner
@@ -80,6 +91,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -97,7 +109,8 @@ RETRY_SECONDS = 30
 ANSWER_MAX = 1500
 QUESTION_MAX = 1000
 HELP = ("I send TradeJournal's phone pings. Tap a ping's buttons to answer it, or type or speak a question for copilot "
-        "(or send a screenshot of your positions). Reply to a ping to ask about that alert.")
+        "(or send a screenshot of your positions). Reply to a ping to ask about that alert. Share a Discord trade call "
+        "here (or start a message with check) to get it checked.")
 BUSY = "Copilot is still answering the last question; ask again in a moment."
 WHY_QUESTION = "Why does this matter for me right now, and what should I check before acting?"
 RECONCILE_QUESTION = ("What positions does this screenshot show? For each one you can read, give the contract, quantity and "
@@ -112,6 +125,8 @@ RATE_LABELS = {"helped": "Helped", "didnt": "Didn't"}  # the desk's ratings of a
 RATE_CODES = {"h": "helped", "d": "didnt", "n": None}  # ``hd:`` answer codes; ``n`` clears
 DONE = "done"  # a button that shows a chosen answer (``done:<id>``, so a reply still finds the alert); a tap does nothing
 WHY = object()  # _mark's marker for a Why? tap
+CHECKING = object()  # _mark's marker for a Check as a call tap
+CHECK_AS_CALL = ("Check as a call", "cc:q")
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 PLAN_CARDS = 2  # trade plan cards sent per turn
 PLAN_KEY = re.compile(r"^[0-9a-f]{32}$")  # a Telegram card's client id
@@ -228,6 +243,21 @@ class Replies:
                 task = asyncio.create_task(self._why(rest, message) if verb == "why" else self._ask_ping(message))
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
+        elif verb == "cc":
+            key, _, action = rest.partition(":")
+            original = message.get("reply_to_message") or {}
+            if key != "q":
+                reply, chosen = await asyncio.to_thread(self._pass, key) if action == "pass" else ("That button is not one the app knows.", None)
+            elif not str(original.get("text") or "").strip():
+                reply, chosen = "Telegram no longer shows that message; send it again starting with check.", None
+            elif message.get("message_id") in self._asked:
+                reply, chosen = "Already checking; the card comes in the chat.", None
+            elif self._tasks:
+                reply, chosen = BUSY, None
+            else:
+                self._asked.add(message.get("message_id"))
+                reply, chosen = "Checking the call…", CHECKING
+                self._start(self._check(str(original["text"]).strip()[:QUESTION_MAX], original))
         elif verb == DONE:
             reply, chosen = None, None
         else:
@@ -249,11 +279,16 @@ class Replies:
         document = message.get("document") or {}
         photo = (max(message["photo"], key=lambda p: (p.get("width") or 0) * (p.get("height") or 0)) if message.get("photo")
                  else document if str(document.get("mime_type") or "").startswith("image/") else None)
+        call, said = None, ""
         if text:
             if text.startswith("/"):
                 await asyncio.to_thread(self._reply, message, HELP)
                 return "help"
-            kind = "ask"
+            from app.engine import call_check
+            call, said = call_check.classify(text)
+            if call == "call" and not said:  # "check" alone, as a reply to a message: that message is the call
+                said = str((message.get("reply_to_message") or {}).get("text") or "").strip()
+            kind = "check" if call == "call" and said else "ask"
         elif voice:
             refusal = (VOICE_TOO_LONG if int(voice.get("duration") or 0) * 1000 > captures.CLIP_MS
                        or int(voice.get("file_size") or 0) > captures.AUDIO_MAX else None)
@@ -270,13 +305,17 @@ class Replies:
         if self._tasks:
             await asyncio.to_thread(self._reply, message, BUSY)
             return "busy"
-        work = (self._ask(text[:QUESTION_MAX], message) if kind == "ask"
+        work = (self._ask(text[:QUESTION_MAX], message, offer_check=call == "maybe") if kind == "ask"
+                else self._check(said[:QUESTION_MAX], message) if kind == "check"
                 else self._voice(str(voice.get("file_id") or ""), message) if kind == "voice"
                 else self._photo(str(photo.get("file_id") or ""), message))
+        self._start(work)
+        return kind
+
+    def _start(self, work) -> None:
         task = asyncio.create_task(work)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
-        return kind
 
     # -------------------------------------------------------------- the writes
 
@@ -375,14 +414,58 @@ class Replies:
         await asyncio.to_thread(self._reply, message, answer, self._rate_row())
         await asyncio.to_thread(self._send_plans, message)
 
-    async def _ask(self, text: str, message: dict) -> None:
+    async def _ask(self, text: str, message: dict, offer_check: bool = False) -> None:
         try:
             answer = await self.question_text(text, message.get("reply_to_message"))
         except Exception:  # noqa: BLE001 - the owner hears that it failed, never silence
             log.exception("Telegram question turn failed")
             answer = FAILED
-        await asyncio.to_thread(self._reply, message, answer, self._rate_row())
+        await asyncio.to_thread(self._reply, message, answer, self._rate_row() + ((CHECK_AS_CALL,) if offer_check else ()))
         await asyncio.to_thread(self._send_plans, message)
+
+    async def _check(self, text: str, message: dict, images: list[dict] | None = None) -> dict | None:
+        """Check a call and reply with its card; returns the check (``{"not_a_call": True}`` for an image with no call,
+        not replied to: the caller decides), or None when it was refused or failed (the reply says so)."""
+        from app.engine import call_check
+        try:
+            check = await call_check.run(text, source="telegram", images=images, db_engine=self.engine)
+        except call_check.CheckRefused as exc:
+            await asyncio.to_thread(self._reply, message, str(exc))
+            return None
+        except Exception:  # noqa: BLE001 - the owner hears that it failed, never silence
+            log.exception("Telegram call check failed")
+            await asyncio.to_thread(self._reply, message, FAILED)
+            return None
+        if not check.get("not_a_call"):
+            await asyncio.to_thread(self._send_check, message, check)
+        return check
+
+    def _send_check(self, message: dict, check: dict) -> None:
+        """The check card as a reply: its chat lines, then Plan it (a link, when the app's address is set), Pass and Why?.
+        A check with nothing read gets no buttons."""
+        from app.engine import call_check
+        text = call_check.telegram_text(check)
+        row = []
+        if check.get("symbol"):
+            app_url = os.environ.get("ALERT_APP_URL", "").strip().rstrip("/")
+            if app_url and check.get("plan_href"):
+                row.append({"text": "Plan it", "url": app_url + check["plan_href"]})
+            row += [{"text": "Pass", "callback_data": f"cc:{uuid.UUID(check['id']).hex}:pass"}, {"text": "Why?", "callback_data": "ask:check"}]
+        payload = {"chat_id": telegram.chat_id(), "text": text, "link_preview_options": {"is_disabled": True},
+                   "reply_parameters": {"message_id": message.get("message_id"), "allow_sending_without_reply": True}}
+        if row:
+            payload["reply_markup"] = {"inline_keyboard": [row]}
+        try:
+            self.call("sendMessage", json=payload)
+        except telegram.TelegramError as exc:
+            log.warning("Telegram check card not delivered: %s", exc)
+
+    def _pass(self, key: str) -> tuple[str, str | None]:
+        from app.engine import call_check
+        if not PLAN_KEY.match(key or ""):
+            return "That button is not one the app knows.", None
+        with Session(self.engine) as db:
+            return call_check.pass_check(db, key)
 
     async def _voice(self, file_id: str, message: dict) -> None:
         """A voice note: downloaded, transcribed with the owner's tickers as vocabulary, confirmed back, then asked."""
@@ -421,14 +504,24 @@ class Replies:
 
     async def _photo(self, file_id: str, message: dict) -> None:
         """A photo: processed into the image store, attached to one turn (its caption, else the reconcile question),
-        and deleted when the turn ends, whatever happens."""
+        and deleted when the turn ends, whatever happens. With no caption, or a caption that is a call, it is first
+        checked as a call; with no caption and no call in it, it is the broker screenshot."""
         from app.ai import copilot_images
+        from app.engine import call_check
         image_id = None
         try:
             data = await asyncio.to_thread(telegram.download, file_id, copilot_images.MAX_IN, call=self.call)
             image_id = (await asyncio.to_thread(copilot_images.store, data))["id"]
             caption = str(message.get("caption") or "").strip()
             images = [copilot_images.block(copilot_images.load(image_id))]
+            call, said = call_check.classify(caption) if caption else ("call", "")
+            if call == "call":
+                check = await self._check(said[:QUESTION_MAX], message, images=images)
+                if check is None or not check.get("not_a_call"):
+                    return  # the card, or what stopped it, is already in the chat
+                if caption:
+                    await asyncio.to_thread(self._reply, message, "That screenshot does not show a trade call.")
+                    return
             answer = await self.question_text(caption[:QUESTION_MAX] or RECONCILE_QUESTION, message.get("reply_to_message"),
                                               images=images)
         except telegram.FileTooLarge:
@@ -629,13 +722,14 @@ class Replies:
         rows = ((message.get("reply_markup") or {}).get("inline_keyboard")) or []
         done = f"{DONE}:{data.split(':')[1]}" if data.count(":") >= 1 else DONE  # keeps the alert for a typed reply
         edited = []
-        if chosen is WHY or isinstance(chosen, tuple):
+        if chosen is WHY or chosen is CHECKING or isinstance(chosen, tuple):
             for row in rows:
                 tapped = next((b for b in row if b.get("callback_data") == data), None)
                 if tapped is None:
                     edited.append(row)
-                elif chosen is WHY:
-                    edited.append([{"text": "✓ Why? (answer below)", "callback_data": done} if b is tapped else b for b in row])
+                elif chosen is WHY or chosen is CHECKING:
+                    label = "✓ Why? (answer below)" if chosen is WHY else "✓ Checked (card below)"
+                    edited.append([{"text": label, "callback_data": done} if b is tapped else b for b in row])
                 else:
                     edited.append([{"text": label, "callback_data": value} for label, value in chosen])
         else:

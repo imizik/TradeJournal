@@ -406,6 +406,20 @@ class FakeAdapter:
         lower = prompt.lower()
         symbol = self._symbol(messages)
         results = _results(messages)
+        if prompt.startswith("Check this call."):  # the check_call job (engine/call_check.py): read, the facts, the card
+            from app.engine import call_check
+            reading = call_check.fake_reading(call_check.quoted(prompt), call_check.today())
+            if isinstance(last["content"], str) and allow_tools and reading["ticker"]:
+                yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_call_facts",
+                                       "input": call_check.tool_input(reading)}], "tool_use", _zero_usage(), self.model)
+                return
+            text = call_check.fake_answer(reading, results.get("get_call_facts") or {})
+            for piece in re.findall(r"\S+\s*", text):
+                if self.delay_s:
+                    await asyncio.sleep(self.delay_s)
+                yield "text", piece
+            yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+            return
         changed = re.search(r"investigation ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", prompt)
         if changed and "what changed" in lower:
             if isinstance(last["content"], str) and allow_tools:

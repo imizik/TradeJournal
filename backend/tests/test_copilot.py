@@ -12,7 +12,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.ai import copilot, copilot_tools
+from app.ai import copilot, copilot_prompt, copilot_tools
 from app.ai.copilot_fixture import FixtureEvidence
 from app.main import app
 from tests.test_browser_access import boundary, signin  # noqa: F401  (the shared access fixture)
@@ -287,7 +287,7 @@ def test_anthropic_adapter_streams_bounded_tools_and_reports_cost(monkeypatch):
     assert [e["text"] for e in events if e["type"] == "progress"] == ["Checking ", "Checking the group."]
     order = [e["type"] for e in events if e.get("name") != "owner_context"]  # the pack's row precedes the model
     assert order.index("progress") < order.index("tool") < order.index("text")
-    assert {t["name"] for t in first["tools"]} == copilot_tools.TOOL_NAMES and all(t["eager_input_streaming"] for t in first["tools"])
+    assert {t["name"] for t in first["tools"]} == copilot_tools.TOOL_NAMES - copilot_prompt.JOB_ONLY and all(t["eager_input_streaming"] for t in first["tools"])
     # The thinking block and tool_use go back unchanged within the turn; the tool result follows.
     second = calls[1]["messages"]  # the turn's live list: user, assistant(thinking, tool_use), tool results, ...
     assert second[1]["content"][0]["signature"] == "sig" and second[2]["content"][0]["tool_use_id"] == "u1"

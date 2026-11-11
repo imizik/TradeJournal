@@ -695,6 +695,31 @@ class RadarSetup(SQLModel, table=True):
     paper_note: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))  # why it is unresolved
 
 
+class CallCheck(SQLModel, table=True):
+    """One checked call (``engine/call_check.py``): a trade call the owner shared from Discord (Telegram or the desk's
+    Check a call tab), what the copilot read from it, the card it gave, and the underlying's price and the contract's
+    quote at the moment he checked, so a later report can score it from that price, never from the posted one.
+    ``outcome`` is his Pass; a plan he saved from it is the pre-trade plan whose origin is ``checked_call:<id>``.
+    Advice only: nothing here places, sizes or suggests an order. Additive; touches no fills, trades or accounts."""
+
+    __tablename__ = "call_check"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    checked_at: datetime = Field(default_factory=datetime.utcnow, index=True)  # UTC
+    day: date = Field(index=True)  # New York day
+    source: str  # desk | telegram
+    raw_text: str = Field(sa_column=Column(Text, nullable=False))  # the shared message as sent ("(screenshot)" for an image)
+    symbol: Optional[str] = Field(default=None, index=True)  # the ticker read, None when none could be read
+    reading_json: str = Field(sa_column=Column(Text, nullable=False))  # ticker, expiry, strike, side, entry, stop, target
+    verdict: Optional[str] = None  # Pass | Wait | Draft; None when nothing could be checked
+    card_json: str = Field(sa_column=Column(Text, nullable=False))  # headline, tiles, against, changes_if, others, note
+    underlying_price: Optional[float] = None  # the underlying's last at the check
+    quote_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))  # underlying and contract quote then
+    outcome: Optional[str] = None  # passed; None until he answers
+    outcome_at: Optional[datetime] = None  # UTC
+    turn_id: Optional[str] = None  # its copilot_turn row
+
+
 class PlanNudge(SQLModel, table=True):
     """One plan phone ping for a new position (``engine/plan_nudges.py``): the
     unplanned-entry nudge, or the one-tap link ping when a saved plan is suggested

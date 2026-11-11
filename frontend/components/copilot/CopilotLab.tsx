@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ChartCandlestick, Menu, MessageCircle, MessagesSquare, PanelLeft, Plus, Search, X } from "lucide-react";
 import { openNavMenu, useFoldedNav } from "@/components/Nav";
+import CheckACall from "@/components/copilot/CheckACall";
 import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
 import CopilotPanel, { rememberedThread, type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
@@ -104,7 +105,7 @@ export default function CopilotLab({ link = null, close = false, daily = false }
   // or Today.
   const [picked, setPicked] = useState<string | null>(null);
   const [pickedKey, setPickedKey] = useState<string | null>(null);
-  const [centreTab, setCentreTab] = useState<"chart" | "today">("chart");
+  const [centreTab, setCentreTab] = useState<"chart" | "today" | "check">("chart");
   const [seen, setSeen] = useState<string[]>([]);
   useEffect(() => { setSeen(readSeen(nyDay())); }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
   const jumpKey = useJumpKey();
@@ -512,15 +513,16 @@ export default function CopilotLab({ link = null, close = false, daily = false }
           <section id="desk-centre" aria-label="Chart and today" className={styles.centre}>
             {/* Chart first; Feed, Check a call and Ticket join this strip when they exist. */}
             <div role="tablist" aria-label="Centre" className="flex gap-1 border-b px-2 pt-1.5">
-              {([["chart", "Chart"], ["today", "Today"]] as const).map(([id, label]) => (
+              {([["chart", "Chart"], ["today", "Today"], ["check", "Check a call"]] as const).map(([id, label]) => (
                 <button key={id} type="button" role="tab" aria-selected={centreTab === id} onClick={() => setCentreTab(id)}
                   className={cn("-mb-px min-h-11 border-b-2 px-2.5 text-sm sm:min-h-9", centreTab === id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
                   {label}
                 </button>
               ))}
             </div>
-            <div role="tabpanel" aria-label={centreTab === "chart" ? "Chart" : "Today"} className="p-3">
-              {centreTab === "chart"
+            <div role="tabpanel" aria-label={centreTab === "chart" ? "Chart" : centreTab === "check" ? "Check a call" : "Today"} className="p-3">
+              {centreTab === "check" ? <CheckACall />
+                : centreTab === "chart"
                 ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} day={today} />
                 : <BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} onWhatMatters={() => actions.ask(WHAT_MATTERS_PROMPT)}
                   session={session.data} radar={rows.filter(r => r.key.startsWith("radar:"))} />}

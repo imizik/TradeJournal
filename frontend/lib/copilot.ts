@@ -629,7 +629,7 @@ export type PlanConfirmed = { symbol: string; side: "long" | "short"; entry: num
 
 /** What prompted a plan, carried by a deep link as `origin=<kind>[:<ref>]` (docs/copilot-lab.md § Origin). */
 export type LinkOrigin = { kind: OriginKind; ref: string | null };
-const ORIGIN_KINDS: readonly OriginKind[] = ["radar_event", "thesis_watch", "premarket_prep", "chart", "dashboard", "copilot", "manual"];
+const ORIGIN_KINDS: readonly OriginKind[] = ["radar_event", "thesis_watch", "premarket_prep", "chart", "dashboard", "copilot", "manual", "checked_call"];
 const ORIGIN_REF_RE = /^[A-Za-z0-9:._-]{1,80}$/;
 export const originParam = (origin: LinkOrigin) => origin.ref ? `${origin.kind}:${origin.ref}` : origin.kind;
 /** `kind` or `kind:ref`; anything else is dropped. */

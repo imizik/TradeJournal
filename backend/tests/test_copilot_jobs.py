@@ -75,7 +75,8 @@ def test_each_job_is_offered_only_its_tools_in_a_stable_order():
     for job in JOBS:
         names = [t["name"] for t in copilot_prompt.TOOLS[job]]
         assert names == [n for n in order if n in names], job  # TOOLS order: the cached prefix never reshuffles
-    assert len(copilot_prompt.TOOLS["desk"]) == len(copilot_tools.TOOLS) == len(copilot_prompt.TOOLS["telegram"])
+    every = len(copilot_tools.TOOLS) - len(copilot_prompt.JOB_ONLY)  # the check's facts tool is its own job's alone
+    assert len(copilot_prompt.TOOLS["desk"]) == every == len(copilot_prompt.TOOLS["telegram"])
     assert set(n["name"] for n in copilot_prompt.TOOLS["prep"]) == set(copilot_prompt.PREP_TOOLS)
     assert "propose_plan" not in {t["name"] for t in copilot_prompt.TOOLS["prep"]} | {t["name"] for t in copilot_prompt.TOOLS["companion"]}
     assert {"get_week_review", "propose_plan"} <= {t["name"] for t in copilot_prompt.TOOLS["week_review"]}

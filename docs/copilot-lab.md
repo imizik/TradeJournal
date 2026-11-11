@@ -1099,6 +1099,61 @@ the cleaned conversation and the 375 px composer) and
 `frontend/e2e/copilot-desk-context.spec.ts` (the centre's chart and timeline, the
 timeframe buttons and legend, unavailable states, 375 px, the market chart and This week).
 
+## Check a call
+
+Isaac shares a trade call from his Discord group and gets one card back saying
+what the evidence shows (`backend/app/engine/call_check.py`). From the iPhone:
+long-press the Discord message, Share, Telegram, the TradeJournal bot; or paste
+it in the desk's **Check a call** tab (the centre tab strip).
+
+- **The check.** One bounded copilot turn as the `check_call` job (§ Jobs),
+  under the turn and daily budgets, recorded like every turn (`kind`
+  `check_call`). The model reads the call (ticker, expiry, strike, call or put,
+  entry, stop, target: a value or `?`), reads `get_call_facts` (the underlying
+  now; when expiry, strike and side are known, the contract's bid and ask
+  against the posted entry and whether the ask is already past it; the
+  contract's cost against his usual opening option premium, the plan card's
+  sizing median; his closed option trades in the symbol, in it on that side,
+  and on that side with the same kind of expiry: 0DTE, 1-7 days or longer)
+  and writes the card: a verdict (Pass, Wait or Draft), three or four tiles,
+  Against and Changes if. The verdict weighs his record, not only freshness.
+  "0dte"/"odte" is today's expiry; several calls: the first is checked, the
+  rest listed. Nothing is guessed: for a text message `call_check.confirm`
+  blanks any ticker, number, call/put marker or expiry the message does not
+  state, and with no ticker the card says "Could not read a ticker" and has no
+  buttons. A screenshot is read by the model alone.
+- **Call or question (Telegram).** `call_check.classify` counts call markers:
+  a strike with c/p counts two; 0DTE, a month/day, an entry word or `@ price`,
+  a stop/target/"hits" word, a `$` price and a `$TICKER` one each. Two or more
+  with no question marker (a closing `?`, a first word such as what/why/should,
+  or "my") is checked at once; two or more with one, or exactly one, is
+  ambiguous: answered as a normal question with **Check as a call** beside
+  Helped and Didn't; none is a question. A message starting with `check` is
+  always checked (`check` alone, as a reply, checks the message replied to). A
+  photo with no caption is checked first and, when the model says it holds no
+  call, answered as the broker-screenshot reconcile as before.
+- **The reply.** The card in chat lines: the verdict line, `Read:` with blanks
+  named ("call or put: not stated"), the tiles, Against, Changes if, and the
+  other calls. Buttons: **Plan it** (a link, `call_check.plan_href`: the desk's
+  plan flow for the symbol with the poster's levels as editable text in the
+  message box and the check as the plan's origin, never a ticket), **Pass**
+  (`cc:<id>:pass`, recorded once; the keyboard shows "✓ Passed") and **Why?**
+  (the existing ping Why?). No rating ask.
+- **The tab.** A paste box, the reading as chips (blank entry, stop and target
+  are inputs he can set; they join the Plan it text as "my stop 664"), the
+  card, Plan it and Pass, then **Checked today** (from the desk and Telegram:
+  time, contract, verdict, the underlying's price then, passed or plan saved).
+  Only a saved plan counts as planned; nothing further (a ticket) exists yet.
+- **The log.** `call_check` table, one row per check: when (UTC and its New
+  York day), the source, the raw text, the reading, the verdict and card, the
+  underlying's price and the contract's quote at that moment (`quote_json`),
+  Pass (`outcome`) and the turn. Planned is read from `TradeCapture` with
+  `origin_kind = checked_call` and the check's id. `GET /copilot/checks?day=`
+  is the day's list for the tab and, later, the evening report, which is to
+  score a check from the price when he checked, never from the posted price
+  (the scoring is not built). `POST /copilot/checks` checks a pasted call;
+  `POST /copilot/checks/{id}/pass` records Pass.
+
 ## How the copilot reasons (system prompt)
 
 Every model turn has a job, and its instructions are assembled for that job
@@ -1239,8 +1294,8 @@ headings" and then the Verdict / Read / bullets / Against shape, and the
 companion "at most 80 words" beside the same five-part shape.
 `copilot.run_turn(..., job=)` now takes the turn's job, which
 `copilot_spend.recorded_turn` works out from what its callers already pass
-(`copilot_prompt.job_for`: source `telegram`, else kind `prep`, `companion`
-or `week_review`, else `desk`). Each job gets the shared core (who the owner
+(`copilot_prompt.job_for`: kind `check_call`, else source `telegram`, else
+kind `prep`, `companion` or `week_review`, else `desk`). Each job gets the shared core (who the owner
 is, the four questions, the evidence, time, untrusted-text, account,
 SIMULATED and no-order rules), a line framing its own job, only the working
 rules it uses, its own answer format and its own shape reminder
@@ -1257,6 +1312,7 @@ answered as on the desk, in the chat format.
 | `prep` | morning brief (`premarket_prep`) | the lines its message lists, plain, no Verdict/Read/Against, no headings | 11 market reads | 1,173 words + 6,800 chars, about 3,700 tokens |
 | `companion` | position companion (`position_companion`) | exactly the shape its message gives (the adopt draft's six lines, an update's 80 words, the exit note) | 12: the trade review, chart, group, news, quotes, level history, option candidates, trades | 1,342 words + 9,200 chars, about 4,600 tokens |
 | `week_review` | automatic week review (`week_review_auto`) | Verdict line, then the review in short one-fact lines | 5: week and trade review, trades, proof, `propose_plan` | 1,278 words + 7,700 chars, about 4,100 tokens |
+| `check_call` | Check a call (`call_check.run`, from Telegram or the desk tab) | a Reading line (`?` for anything not stated), Verdict (Pass, Wait or Draft; Unclear only with no ticker), three or four `Tile: label \| value` lines, Against, Changes if, Also for other calls; "Not a call" for an image with none | 5: `get_call_facts` (its own job's alone), quotes, chart, level history, trades | 1,271 words + 5,000 chars, about 3,300 tokens |
 
 Token figures are estimates (characters ÷ 4 for prose, ÷ 3.5 for tool JSON);
 the scorecard's input and cache figures are the measured ones. The brief
@@ -2298,7 +2354,8 @@ Every pre-trade plan records what prompted it, so a trade can be traced back to
 the observation behind it (the end goal's step 5).
 
 - **On the plan.** `TradeCapture` has `origin_kind` (`radar_event`,
-  `thesis_watch`, `premarket_prep`, `chart`, `dashboard`, `copilot`, `manual`),
+  `thesis_watch`, `premarket_prep`, `chart`, `dashboard`, `copilot`, `manual`,
+  `checked_call`: a Discord call checked first, its ref the check's id),
   `origin_ref` (the Radar event id, the thesis-watch trigger id or the
   investigation id) and `origin_text` (the context line, at most 300
   characters). `captures.build` refuses an unknown kind; a plan saved with no
@@ -3153,7 +3210,8 @@ shadow book). Besides the model, rounds, tokens and cost it already kept, a row
 now says what the turn was for and how it went:
 
 - `kind`: `ask`, `briefing`, `plan`, `review`, `week_review`, `moment`,
-  `changes`, `compare`, `pushback`, `prep`, `companion` or `shadow`. For a
+  `changes`, `compare`, `pushback`, `prep`, `companion`, `shadow` or
+  `check_call`. For a
   desk, dock or Telegram question the server works it out from the owner's
   words, the tools read, the cards proposed and the answer's shape
   (`copilot_spend.kind_of`); the scheduled senders name theirs.

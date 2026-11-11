@@ -72,11 +72,11 @@ export type CaptureBody = {
   origin?: { kind: OriginKind; ref?: string | null; text?: string | null };
 };
 /** What prompted a plan: a Radar event, a thesis-watch ping, the pre-market prep, a page's Plan a trade, or the owner. */
-export type OriginKind = "radar_event" | "thesis_watch" | "premarket_prep" | "chart" | "dashboard" | "copilot" | "manual";
+export type OriginKind = "radar_event" | "thesis_watch" | "premarket_prep" | "chart" | "dashboard" | "copilot" | "manual" | "checked_call";
 export type CaptureOrigin = { kind: OriginKind; ref: string | null; text: string | null };
 export const ORIGIN_LABEL: Record<OriginKind, string> = {
   radar_event: "Radar event", thesis_watch: "Thesis watch ping", premarket_prep: "Pre-market prep", chart: "Chart",
-  dashboard: "Dashboard", copilot: "Copilot Lab", manual: "Your own idea" };
+  dashboard: "Dashboard", copilot: "Copilot Lab", manual: "Your own idea", checked_call: "A Discord call you checked" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** "From: Radar event, MU +4.1% vs SMH, 10:41", and where it leads: the Radar event, or the investigation. */
 export function originLine(capture: Capture): { text: string; href: string | null } | null {
