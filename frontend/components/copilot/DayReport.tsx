@@ -87,7 +87,7 @@ export default function DayReport({ realized, rows, rowsRead, onOpen }: {
     getDeskPings(controller.signal, true).then(setPings).catch(() => { if (!controller.signal.aborted) setPings(null); });
     return () => controller.abort();
   }, []);
-  if (report === undefined || pings === undefined || !rowsRead) return null;
+  if (report === undefined || pings === undefined) return null;
 
   const entries = report?.entries ?? null;
   const showToday = (realized ?? 0) !== 0 || (entries?.entries ?? 0) > 0;
@@ -98,6 +98,7 @@ export default function DayReport({ realized, rows, rowsRead, onOpen }: {
   const bySymbol = [...new Set(unplanned.map(r => r.symbol!))];
 
   if (!showToday && !pingParts.length && !calls && !bySymbol.length) {
+    if (!rowsRead) return null; // the positions are not read yet: not yet "nothing"
     return <p data-testid="day-report-card" className="rounded-lg border bg-card px-3 py-2.5 text-xs text-muted-foreground">Nothing to report today: no entries, pings, checked calls or open positions without a plan.</p>;
   }
   return (

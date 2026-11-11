@@ -621,7 +621,7 @@ report today: …").
    (sold or expired for how much, still open, or not measured and why); for each alerted Radar stock hit or setup card,
    the stock's move against SPY the way Radar flagged it an hour on and at the close ("not measured" with why, as while
    its session is open) and a setup card's paper result. On tap, each ping, and **Last 30 days** unfolds the alert and
-   Radar scorecards. Example line: "4 alerts · selling at the alert would have been better on 2, worse on 1 · 2 Radar
+   Radar scorecards (the line, and so that button, shows only on a day with a ping). Example line: "4 alerts · selling at the alert would have been better on 2, worse on 1 · 2 Radar
    hits · 1 kept going".
 3. **Calls checked, last 30 days**: the running total leads ("14 · 5 up since you checked, 7 down, 2 not measured"),
    then today's. On tap, each call checked today with its verdict, whether he planned it, passed it or did neither, and

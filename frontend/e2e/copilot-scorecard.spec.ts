@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// The 30-day alert scorecard, under Now's "How the pings did" › Last 30 days (docs/copilot-lab.md#the-desk): what was decided after each position alert and what
+// The 30-day alert scorecard, under the day report's How the pings did › Last 30 days (docs/copilot-lab.md#the-desk): what was decided after each position alert and what
 // its contracts then fetched against selling at the alert. Every lab route is stubbed; no model runs.
 const ON = {
   enabled: true, backend: "fake", evidence: "live", model: "fake-scripted", effort: "medium", fallbacks: false, key_configured: false,
@@ -44,9 +44,13 @@ async function briefing(page: Page, card: unknown = CARD) {
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route("**/copilot/desk/scorecard", (route) => { reads += 1; return route.fulfill({ json: card }); });
-  await page.route("**/copilot/desk/pings", (route) => route.fulfill({ json: { day: "2026-10-28", since: "2026-10-27",
-    alerts: { state: "ok", rows: [] }, radar: { state: "off", reason: null, rows: [] } } }));
-  // How the pings did sits in the day report, after 16:00 New York: Wednesday 17:30.
+  // How the pings did is a line of the day report, after 16:00 New York (Wednesday 17:30), and shows only when a ping did
+  // something that day; its rows hold the Last 30 days.
+  await page.route("**/copilot/desk/pings*", (route) => route.fulfill({ json: { day: "2026-10-28", since: "2026-10-28",
+    alerts: { state: "ok", rows: [{ at: at(28, 10, 31), kind: "giveback", kind_label: "Give-back", contract: "NBIS 11/21/26 100C", symbol: "NBIS",
+      pnl_pct_at_alert: 40, decision: null, decided_at: null, outcome: { state: "not_measured", why: "no price at the alert" } }] },
+    radar: { state: "off", reason: null, rows: [] } } }));
+  await page.route("**/copilot/desk/day-report", (route) => route.fulfill({ json: { day: "2026-10-28", as_of: "2026-10-28T21:30:00Z", entries: null, checks: null, sections: {} } }));
   await page.clock.install({ time: new Date("2026-10-28T21:30:00Z") });
   await page.goto("/copilot-lab?view=briefing");
   return { reads: () => reads };
@@ -54,7 +58,7 @@ async function briefing(page: Page, card: unknown = CARD) {
 
 /** Opens How the pings did and its Last 30 days, where the scorecards live. */
 async function month(page: Page) {
-  const pings = page.getByRole("region", { name: "How the pings did" });
+  const pings = page.getByTestId("report-pings");
   await pings.locator("summary").click();
   await pings.getByRole("button", { name: /Last 30 days/ }).click();
 }
