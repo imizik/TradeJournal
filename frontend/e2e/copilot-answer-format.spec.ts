@@ -96,7 +96,7 @@ test("an answer leads with its verdict and headline, keeps Changes if plain, and
   await expect(page.getByTestId("copilot-scope")).toHaveText("About NBIS");
   // A fresh thread offers its first steps; nothing is sent until one is pressed.
   const chips = page.getByRole("group", { name: "Suggestions" });
-  await expect(chips.getByRole("button")).toHaveText(["Is NBIS's group confirming?", "Plan a trade"]);
+  await expect(chips.getByRole("button")).toHaveText(["Why is it moving?", "What changed since I looked?", "What does my plan say?"]);
   expect(seen.chats).toEqual([]);
 
   await page.getByLabel("Message").fill("Is NBIS still a hold?");
@@ -120,6 +120,7 @@ test("an answer leads with its verdict and headline, keeps Changes if plain, and
   await expect(page.getByLabel("Message")).toBeFocused();
   expect(seen.chats).toHaveLength(1);
   await page.getByLabel("Message").fill("");
+  await page.getByLabel("Message").blur(); // the expanded box shrinks on blur; leave it before clicking above it
   await expect(answer).toContainText("(Simulated model — scripted text from the tool results, not Claude.)");
   expect(seen.chats[0].symbol).toBe("NBIS");
 
@@ -149,7 +150,7 @@ test("an answer leads with its verdict and headline, keeps Changes if plain, and
 
   // Saved, the thread's next steps are offered instead.
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
-  await expect(chips.getByRole("button")).toHaveText(["What changed?", "More", "Look at my chart", "Close with a lesson"]);
+  await expect(chips.getByRole("button")).toHaveText(["Why is it moving?", "What changed since I looked?", "What does my plan say?", "More", "Look at my chart"]);
   // The new thread is named by its ticker, its purpose and the owner's own first words, not the answer's headline.
   expect(seen.posts[0].title).toBe("NBIS · question: is NBIS still a hold");
   await page.screenshot({ path: test.info().outputPath("answer-format-1440.png") });
@@ -178,7 +179,7 @@ test("the thread menu keeps a lesson and closes the thread; a plan card offers S
   await expect(conversation(page).getByTestId("copilot-verdict")).toHaveText("Draft");
   await expect(page.getByRole("region", { name: "Proposed trade plan" })).toBeVisible();
   const chips = page.getByRole("group", { name: "Suggestions" });
-  await expect(chips.getByRole("button")).toHaveText(["What changed?", "More", "Look at my chart", "Size it", "Close with a lesson"]);
+  await expect(chips.getByRole("button")).toHaveText(["Why is it moving?", "What changed since I looked?", "What does my plan say?", "Size it", "More"]);
   await expect(page.getByLabel("Message")).toHaveValue(/^What changed\?/); // the deep link's question, unsent
 
   await chips.getByRole("button", { name: "Size it" }).click();
@@ -186,9 +187,8 @@ test("the thread menu keeps a lesson and closes the thread; a plan card offers S
   await expect(page.getByLabel("Message")).toBeFocused();
   expect(seen.chats).toEqual([]);
 
-  await chips.getByRole("button", { name: "Close with a lesson" }).click();
+  await page.getByRole("button", { name: "Thread actions" }).click(); // Close with a lesson lives in the thread menu here
   const menu = page.getByRole("group", { name: "Thread actions" });
-  await expect(menu.getByLabel("Conclusion")).toBeFocused();
   await menu.getByLabel("Conclusion").fill("Wait for the 5m close; the group led and NBIS lagged.");
   await menu.getByRole("button", { name: "Close thread" }).click();
   await expect.poll(() => seen.puts.at(-1)).toMatchObject({ status: "closed", conclusion: "Wait for the 5m close; the group led and NBIS lagged." });

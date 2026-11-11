@@ -112,6 +112,19 @@ def test_a_position_near_its_invalidation_is_act_now_with_its_pnl_and_the_underl
     assert quotes["asked"][-1] == ["NBIS"] and len(quotes["asked"]) == 2  # one batched read per request
 
 
+def test_every_position_row_carries_its_book_line(desk, engine, quotes):  # noqa: F811
+    trade = planned_nbis(engine)
+    alert(engine, NBIS, "NBIS", "entry", 95.9, state="fired", fired=T0 + timedelta(minutes=10))
+    [row] = [r for r in read(desk)["threads"] if r["key"] == f"trade:{trade}"]
+    book = row["book"]  # watching: no Act now meter, but the book still places NBIS between its lines
+    assert row["meter"] is None and book["track"] == {"last": 37.8, "entry": 80.0, "tone": "muted"}
+    assert (book["usd"], book["pct"], book["expiry"], book["state"], book["planned"]) == (180.0, 29.0, "2026-10-23", "on_plan", True)
+    assert round(abs(book["stop_pct"]), 1) == 1.8 and isinstance(book["days_held"], int)
+    quotes["rows"][0]["last"] = 93.2  # 0.97% from 92.30: Act now names it near the invalidation
+    [row] = [r for r in read(desk)["threads"] if r["key"] == f"trade:{trade}"]
+    assert row["group"] == "act" and row["book"]["state"] == "near_stop" and row["book"]["track"]["last"] == 20.0
+
+
 def test_a_decision_logged_today_moves_the_row_to_watching(desk, engine, quotes):  # noqa: F811
     trade = planned_nbis(engine)
     quotes["rows"][0]["last"] = 93.2

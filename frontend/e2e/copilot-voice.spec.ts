@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openDeskThreads } from "./desk-fixtures";
 
 // Hold-to-talk in the copilot's composer. The lab routes are stubbed in the browser (the e2e backend keeps the lab
 // off); the microphone, MediaRecorder and the browser's speech recognition are fakes, so nothing records or listens.
@@ -189,9 +190,11 @@ test("at 375 px the mic is a 44 px thumb target beside Send, and nothing scrolls
   await page.setViewportSize({ width: 375, height: 812 });
   await lab(page);
   await page.goto("/copilot-lab?view=new");
-  await page.getByRole("tab", { name: "Threads", exact: true }).click();
+  await page.getByRole("button", { name: "Back to the desk" }).click(); // a new conversation opens on the copilot's sheet
+  await openDeskThreads(page);
   await expect(page.getByText("Nothing open. Plan a trade to start a ticker.")).toBeVisible();
-  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(2).click(); // a phone shows the conversation on its own tab, after Now and Threads
+  await page.getByRole("button", { name: "Close the thread list" }).click();
+  await page.getByRole("button", { name: /^Ask the copilot/ }).click();
   await page.getByLabel("Message").click(); // the idle box opens when used
   const mic = (await page.getByTestId("copilot-mic").boundingBox())!;
   const send = (await page.getByRole("button", { name: "Send", exact: true }).boundingBox())!;

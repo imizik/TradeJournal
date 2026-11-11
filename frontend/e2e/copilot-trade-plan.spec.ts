@@ -82,7 +82,7 @@ async function lab(page: Page, server: Server, { alertsSupported = true, default
     server.alerts = [...server.alerts, { id: `a${server.alerts.length + 1}`, created_on: "2026-10-24", direction: "up", state: "active", armed_at: 1, event: null, ...body }];
     return route.fulfill({ json: { alerts: server.alerts, phone: true } });
   });
-  // The desk's Context pane reads the thread's timeline from the server; this one answers from the alerts and time
+  // The desk's centre reads the thread's timeline from the server; this one answers from the alerts and time
   // stops above, as GET /copilot/desk/{id}/timeline would (its composition is tests/test_copilot_desk_context.py).
   await page.route(`**/copilot/desk/${INV}/timeline`, (route) => {
     type Alert = { price: number; condition: string; label: string; plan_role: "entry" | "invalidation" | null; state: string; event: { price: number; event_at: number } | null };
@@ -101,12 +101,19 @@ async function lab(page: Page, server: Server, { alertsSupported = true, default
   await page.goto("/copilot-lab?view=new");
 }
 
-/** The Context pane's Timeline tab, opened. */
+/** On a phone, the copilot's sheet, opened unless the page opened on it. */
+async function copilotSheet(page: Page) {
+  const ask = page.getByRole("button", { name: /^Ask the copilot/ });
+  await expect(page.getByRole("button", { name: "Back to the desk" }).or(ask).first()).toBeVisible();
+  if (await ask.isVisible()) await ask.click();
+}
+
+/** The centre's Timeline, under the open thread's chart, unfolded. */
 async function timeline(page: Page) {
-  await page.getByRole("button", { name: "Context pane" }).click();
-  const pane = page.getByRole("complementary", { name: "Context" });
-  await pane.getByRole("tab", { name: "Timeline" }).click();
-  return pane.getByRole("list", { name: "Timeline" });
+  const centre = page.getByRole("region", { name: "Chart and today" });
+  const fold = centre.getByRole("button", { name: /^Timeline/ });
+  if (await fold.getAttribute("aria-expanded") !== "true") await fold.click();
+  return centre.getByRole("list", { name: "Timeline" });
 }
 
 async function aboutNbis(page: Page) { // the desk starts across everything
@@ -292,7 +299,7 @@ test("the plan card fits a 375 px phone with large tap targets, and Dismiss remo
   await page.setViewportSize({ width: 375, height: 812 });
   const server: Server = { alerts: [], posts: [] };
   await lab(page, server);
-  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(2).click(); // a phone shows the conversation on its own tab, after Now and Threads
+  await copilotSheet(page); // a phone shows the conversation on the copilot's sheet
   const card = await askForPlan(page);
   const box = (await card.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
@@ -464,7 +471,7 @@ test("size it for me: a risk becomes a contract count at the chosen contract's a
   await expect(sizing).toContainText("Priced at the 6.92 ask ($692 a contract) from the option chain read at 10:00 AM ET.");
   await expect(sizing).toContainText("Confirm puts this size in front of the size note.");
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(2).click(); // a phone shows the conversation on its own tab, after Now and Threads
+  await copilotSheet(page); // a phone shows the conversation on the copilot's sheet
   await card.screenshot({ path: test.info().outputPath("plan-size-it.png") });
   await card.getByLabel("Risk $").fill("500");
   await expect(sizing).toContainText("Max loss: $500 does not buy one contract at the $692 ask.");
@@ -481,7 +488,7 @@ test("size it for me: a risk becomes a contract count at the chosen contract's a
   // The risk is remembered in this browser for the next card.
   await page.reload();
   await page.route("**/copilot/chat", (route) => route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turnWith(PLAN, null) }));
-  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(2).click(); // still a phone after the reload: the conversation tab, after Now and Threads
+  await copilotSheet(page); // a phone shows the conversation on the copilot's sheet
   const next = await askForPlan(page);
   await expect(next.getByLabel("Risk $")).toHaveValue("1400");
   await expect(next.getByLabel("Size it for me")).toHaveText(

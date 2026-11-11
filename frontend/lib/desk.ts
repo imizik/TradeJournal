@@ -76,6 +76,18 @@ export type DeskThread = {
   /** A ticker the owner set to "Not following" (``saveFollow``): kept out of Now's lists, the thread list's groups and
    * every "needs you" count, behind one "N not followed" line; it asks no close-of-day question. */
   hidden: boolean;
+  /** An open position's book line for the desk's left column (``_book`` in copilot_desk.py): unrealized P&L, expiry
+   * (ISO date, an option's), days held, the plan's track (``meter``'s shape; null without entry and invalidation), the
+   * signed distance to the invalidation in percent, and one state. Absent on any other row. */
+  book?: DeskBook;
+};
+
+export type DeskBookState = "near_stop" | "giving_back" | "no_plan" | "on_plan";
+export type DeskBook = {
+  usd: number | null; pct: number | null; expiry: string | null; days_held: number | null;
+  track: { last: number; entry: number; tone: DeskTone } | null; state: DeskBookState; stop_pct: number | null;
+  /** A confirmed invalidation or time stop (an adopted draft is not yet a plan); absent from an older backend. */
+  planned?: boolean;
 };
 
 /** How often the desk checks in after the close: a day trade every trading day, a swing on a day something happened to
@@ -437,6 +449,8 @@ export type DeskSession = {
    * and the raw facts stand in, and the path of its thread. */
   prep: { at: number | null; line: string | null; lines?: string[]; fallback?: boolean; path?: string | null } | null;
   indices: { symbol: string; last: number | null; change_pct: number | null }[]; quote_issue: string | null;
+  /** Realized P&L of the trades closed today (New York); null when unread, absent from an older backend. */
+  realized_today?: number | null;
   /** What waits on the owner's answer for /proof: ``count`` in the proof's scope, ``rows`` today's then the newest waiting.
    * Null when that source is off or unavailable; absent from an older backend. */
   to_answer?: { alerts: { count: number; rows: DeskAlertToAnswer[] } | null; radar: { count: number; rows: DeskHitToRate[] } | null };
@@ -521,4 +535,132 @@ export async function getDeskPings(signal?: AbortSignal): Promise<DeskPings> {
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
   return body as DeskPings;
+}
+
+// --------------------------------------------------------------------------- the book's sparklines
+
+/** ``GET /copilot/desk/sparks``: each symbol's closes today (thinned), its change today and SPY's. */
+export type DeskSparks = { as_of: string; rows: Record<string, { points: number[]; change_pct: number | null }>; spy_change_pct: number | null };
+
+export async function getDeskSparks(symbols: string[], signal?: AbortSignal): Promise<DeskSparks> {
+  const response = await fetch(apiUrl(`/copilot/desk/sparks?${new URLSearchParams({ symbols: symbols.join(",") })}`), { cache: "no-store", signal });
+  if (!response.ok) throw new Error(`Request failed (${response.status}).`);
+  return await response.json() as DeskSparks;
+}
+
+// --------------------------------------------------------------------------- the cockpit's Needs-you strip
+
+/** One thing waiting on the owner, for the strip: ``rank`` is its place in the strip's order (``deskNeeds``). */
+export type DeskNeedKind = "decision" | "card" | "trigger" | "expiring" | "fill" | "close";
+export type DeskNeed = { key: string; kind: DeskNeedKind; rank: number; symbol: string | null; title: string; detail: string | null; row: DeskThread | null };
+
+/** Days from ``day`` (YYYY-MM-DD) to ``iso`` (YYYY-MM-DD), by the calendar. */
+export const daysTo = (iso: string, day: string) => Math.round((Date.parse(`${iso}T12:00:00Z`) - Date.parse(`${day}T12:00:00Z`)) / 86_400_000);
+/** An option this close to expiry with no plan asks for one in the strip (calendar days: today, tomorrow, the day after). */
+export const EXPIRING_DAYS = 3;
+export const money = (value: number) => `${value > 0 ? "+" : value < 0 ? "−" : ""}$${Math.abs(value).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+export const signedPct = (value: number, digits = 0) => `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(digits)}%`;
+
+/** A position row's facts in one line: open P&L and the distance to its invalidation. */
+export function bookFacts(row: DeskThread): string | null {
+  const book = row.book;
+  if (!book) return null;
+  const parts = [book.usd !== null ? `Open ${money(book.usd)}${book.pct !== null ? ` (${signedPct(book.pct)})` : ""}` : null,
+    book.stop_pct !== null ? `invalidation ${Math.abs(book.stop_pct).toFixed(1)}% away` : null];
+  return parts.filter(Boolean).join(" · ") || null;
+}
+
+/**
+ * What waits on the owner, in the strip's documented order (docs/copilot-lab.md § The desk), followed tickers only:
+ * 1. a position alert asking for a decision (Act now);
+ * 2. a plan at or near its trigger (the thread list's Near a trigger), or a card to confirm;
+ * 3. an option expiring within ``EXPIRING_DAYS`` with no plan;
+ * 4. before the close, the fills waiting to link to a plan (one item);
+ * 5. after the close, the close-of-day questions and fills to link (one item: Close the day).
+ * Within a rank the thread list's order holds. Nothing here is a rating ask.
+ */
+export function deskNeeds(rows: DeskThread[], day: string, { closing, fills }: { closing: boolean; fills: number }): DeskNeed[] {
+  const followed = rows.filter(r => r.symbol && !r.hidden && r.group !== "pinned" && !r.key.startsWith("radar:"));
+  const needs: DeskNeed[] = [];
+  const seen = new Set<string>();
+  const add = (need: DeskNeed) => { if (!seen.has(need.key)) { seen.add(need.key); needs.push(need); } };
+  for (const row of followed.filter(r => r.group === "act"))
+    add({ key: `decision:${row.key}:${row.status.text}`, kind: "decision", rank: 1, symbol: row.symbol, row, title: `${row.title}: ${row.status.text}`, detail: bookFacts(row) });
+  for (const row of followed.filter(r => r.group === "near" || r.group === "draft"))
+    add(row.group === "near"
+      ? { key: `trigger:${row.key}:${row.status.text}`, kind: "trigger", rank: 2, symbol: row.symbol, row, title: `${row.symbol} plan: ${row.status.text}`, detail: row.title !== row.symbol ? row.title : null }
+      : { key: `card:${row.key}:${row.status.text}`, kind: "card", rank: 2, symbol: row.symbol, row, title: `${row.symbol}: a card to confirm`, detail: row.status.text });
+  for (const row of followed) {
+    const book = row.book;
+    const expiry = book && !(book.planned ?? book.state !== "no_plan") ? book.expiry : null;
+    const left = expiry ? daysTo(expiry, day) : -1;
+    if (left < 0 || left >= EXPIRING_DAYS) continue;
+    add({ key: `expiring:${row.key}:${left}`, kind: "expiring", rank: 3, symbol: row.symbol, row,
+      title: `${row.title} expires ${left === 0 ? "today" : left === 1 ? "tomorrow" : `in ${left} days`} and has no plan.`, detail: bookFacts(row) });
+  }
+  if (!closing && fills > 0)
+    add({ key: `fills:${fills}`, kind: "fill", rank: 4, symbol: null, row: null, title: `${fills} fill${fills === 1 ? "" : "s"} to link to a plan`, detail: null });
+  const review = closing ? toReview(rows, day).length + fills : 0;
+  if (review > 0)
+    add({ key: `close:${review}`, kind: "close", rank: 5, symbol: null, row: null, title: `Close the day: ${review} to review`,
+      detail: "Each close question, then the fills to link, one at a time." });
+  return needs;
+}
+
+/** Strip items marked Seen today, in this browser: they leave the strip; "+N more" still lists them. A key carries what
+ * the item says (its status line, days left, a count), so an item that changes asks again. */
+const SEEN_KEY = "desk.seen.v1";
+export function readSeen(day: string): string[] {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(SEEN_KEY) ?? "null");
+    return saved?.day === day && Array.isArray(saved.keys) ? saved.keys : [];
+  } catch { return []; }
+}
+export function saveSeen(day: string, key: string): string[] {
+  const keys = [...readSeen(day).filter(k => k !== key), key];
+  try { window.localStorage.setItem(SEEN_KEY, JSON.stringify({ day, keys })); } catch { /* this visit only */ }
+  return keys;
+}
+
+/** What the desk looked like when the owner last left it, for "Since you looked" (this browser only), by position (the
+ * row's key), so two contracts on one ticker stay apart. */
+export type DeskLook = { at: number; pnl: Record<string, number>; contracts: Record<string, string> };
+const LOOK_KEY = "desk.looked.v2";
+export function readLook(): DeskLook | null {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(LOOK_KEY) ?? "null");
+    return saved && typeof saved.at === "number" && saved.pnl ? saved as DeskLook : null;
+  } catch { return null; }
+}
+export function saveLook(look: DeskLook) {
+  try { window.localStorage.setItem(LOOK_KEY, JSON.stringify(look)); } catch { /* this visit only */ }
+}
+
+/**
+ * "Since you looked": at most ``max`` lines, comparing the followed positions now with ``look`` (by symbol) and counting
+ * today's fills, pings and Radar events after it. Biggest P&L moves first (a move under $25 and 10% is left out); a
+ * position opened or closed since says so; the counts close the list.
+ */
+export function sinceLines(look: DeskLook, rows: DeskThread[], events: DeskSessionEvent[], max = 4): string[] {
+  const now = new Map(rows.filter(r => r.book && r.symbol && !r.hidden).map(r => [r.key, r]));
+  const lines: { weight: number; text: string }[] = [];
+  for (const [key, row] of now) {
+    const usd = row.book!.usd;
+    if (!(key in look.pnl)) lines.push({ weight: 1e9, text: `${row.title} opened` });
+    else if (usd !== null) {
+      const was = look.pnl[key];
+      const moved = Math.abs(usd - was);
+      if (moved >= 25 && moved >= Math.abs(was) * 0.1) lines.push({ weight: moved, text: `${row.title} ${money(was)} → ${money(usd)}` });
+    }
+  }
+  for (const key of Object.keys(look.pnl)) if (!now.has(key) && !rows.some(r => r.key === key && r.hidden))
+    lines.push({ weight: 1e9 - 1, text: `${look.contracts[key] ?? "A position"} closed` });
+  const after = events.filter(e => e.at > look.at);
+  const count = (kind: DeskSessionEvent["kind"], one: string, many: string) => {
+    const n = after.filter(e => e.kind === kind).length;
+    return n ? `${n} ${n === 1 ? one : many}` : null;
+  };
+  const counts = [count("fill", "fill", "fills"), count("ping", "ping", "pings"), count("radar", "Radar event", "Radar events")].filter(Boolean);
+  const top = lines.sort((a, b) => b.weight - a.weight).map(l => l.text).slice(0, counts.length ? max - 1 : max);
+  return counts.length ? [...top, counts.join(" · ")] : top;
 }

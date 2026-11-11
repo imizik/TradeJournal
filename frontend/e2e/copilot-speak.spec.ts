@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openDeskThreads } from "./desk-fixtures";
 import { speechText, type Proposal } from "../lib/copilot";
 
 // Read it back: the copilot's answer spoken by the browser's own speech synthesis. The lab routes are stubbed in the
@@ -214,9 +215,11 @@ test("at 375 px the speaker waits behind + on the mic's row, the box takes the f
   await page.setViewportSize({ width: 375, height: 812 });
   await lab(page);
   await page.goto("/copilot-lab?view=new");
-  await page.getByRole("tab", { name: "Threads", exact: true }).click();
+  await page.getByRole("button", { name: "Back to the desk" }).click(); // a new conversation opens on the copilot's sheet
+  await openDeskThreads(page);
   await expect(page.getByText("Nothing open. Plan a trade to start a ticker.")).toBeVisible();
-  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(2).click(); // a phone shows the conversation on its own tab, after Now and Threads
+  await page.getByRole("button", { name: "Close the thread list" }).click();
+  await page.getByRole("button", { name: /^Ask the copilot/ }).click();
   await expect(speaker(page)).toBeHidden(); // attach and read-aloud wait behind "+"
   await page.getByRole("button", { name: "More: attach, read aloud" }).click();
   await speaker(page).click();

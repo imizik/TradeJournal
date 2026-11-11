@@ -95,11 +95,10 @@ test("a Radar hit's thread rates it beside the decision, through the Radar feed'
 });
 
 for (const width of [1440, 375]) {
-  test(`Now never asks for a rating, however many wait (${width} px)`, async ({ page }) => {
+  test(`the desk never asks for a rating, however many wait (${width} px)`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
     await desk(page, "/copilot-lab?view=briefing");
-    if (width === 375) await page.getByRole("tab", { name: "Now" }).click(); // the fixture opened the thread list
-    await expect(page.getByTestId("now-waiting")).toContainText("Nothing waits on you right now.");
+    await expect(page.getByTestId("desk-book")).toBeAttached();
     await expect(page.getByText(/alerts? to answer|Radar hits? to rate|Rate yesterday/)).toHaveCount(0);
     await expect(page.getByTestId("alert-answer")).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);

@@ -1,7 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// The desk's Context pane: Chart (default), Timeline and Your history for the open thread, and on the Briefing the day.
-// Every lab route is stubbed in the browser, so no model runs and nothing reaches the e2e backend; the pane only reads.
+// The cockpit's centre: the Chart of the open thread's ticker (or the market), its timeframes, and its Timeline folded
+// under it; and This week, folded at the foot of the thread list's drawer. Every lab route is stubbed in the browser, so
+// no model runs and nothing reaches the e2e backend; the centre only reads.
 const ON = {
   enabled: true, backend: "fake", evidence: "fixture", model: "fake-scripted", effort: "medium", fallbacks: false, key_configured: false,
   plan_configured: false, tools: [], capabilities: { copilot_alerts: true },
@@ -46,7 +47,7 @@ const RADAR_PROOF = { state: "ok", reason: null, rule_version: "rv1", sessions: 
 
 type Desk = { picture?: "ok" | string; timeline?: object; history?: object };
 
-async function lab(page: Page, desk: Desk = {}, showContext = true) {
+async function lab(page: Page, desk: Desk = {}) {
   const reads: string[] = [];
   const timeframes: (string | null)[] = [];
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
@@ -66,41 +67,21 @@ async function lab(page: Page, desk: Desk = {}, showContext = true) {
   });
   await page.goto(`/copilot-lab?investigation=${INV}`);
   await expect(page.getByText("It held the open; the group leads.")).toBeVisible();
-  if (showContext) {
-    const phoneTabs = page.getByRole("tablist", { name: "Desk" });
-    if (await phoneTabs.isVisible()) {
-      const tab = phoneTabs.getByRole("tab", { name: "Context" });
-      if (await tab.getAttribute("aria-selected") !== "true") await tab.click();
-    } else {
-      const button = page.getByRole("button", { name: "Context pane" });
-      if (await button.getAttribute("aria-pressed") !== "true") await button.click();
-    }
-  }
-  return { reads, timeframes, pane: page.getByRole("complementary", { name: "Context" }) };
+  return { reads, timeframes, pane: page.getByRole("region", { name: "Chart and today" }) };
 }
 
-test("the conversation opens first and Context is available on demand", async ({ page }) => {
-  const { pane } = await lab(page, {}, false);
-  await expect(page.getByRole("region", { name: "Conversation" }).getByText("It held the open; the group leads.")).toBeVisible();
-  await expect(pane).toBeHidden();
-  const toggle = page.getByRole("button", { name: "Context pane" });
-  await expect(toggle).toHaveAttribute("title", /market context/); // an icon, named for a screen reader
-  await toggle.click();
-  await expect(pane).toBeVisible();
-});
-
-test("the Context pane opens on today's chart, and Timeline and Your history read only when asked", async ({ page }) => {
+test("the centre opens on the open thread's chart beside the conversation, and its Timeline reads only when unfolded", async ({ page }) => {
   const { reads, pane } = await lab(page);
-  await expect(pane).toContainText("NBIS");
-  await expect(pane).toContainText("today");
+  await expect(page.getByRole("region", { name: "Conversation" }).getByText("It held the open; the group leads.")).toBeVisible();
+  await expect(pane.getByRole("tab", { name: "Chart" })).toHaveAttribute("aria-selected", "true");
+  await expect(pane.getByRole("tab")).toHaveText(["Chart", "Today"]); // no tab for what does not exist yet
+  await expect(pane.getByTestId("desk-chart")).toContainText("NBIS");
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
-  const tabs = pane.getByRole("tablist", { name: "Context" });
-  await expect(tabs.getByRole("tab", { name: "Chart" })).toHaveAttribute("aria-selected", "true");
   await expect(pane.getByRole("img", { name: /NBIS today: minute bars/ })).toBeVisible();
   await page.waitForTimeout(200);
-  expect(reads).toEqual(["GET picture"]); // the other tabs wait
+  expect(reads).toEqual(["GET picture"]); // the timeline waits
 
-  await tabs.getByRole("tab", { name: "Timeline" }).click();
+  await pane.getByRole("button", { name: "Timeline ▾" }).click();
   const timeline = pane.getByRole("list", { name: "Timeline" });
   await expect(timeline.getByRole("listitem")).toHaveCount(4);
   await expect(timeline.getByRole("listitem").first()).toContainText("Decision: Decision");
@@ -109,13 +90,8 @@ test("the Context pane opens on today's chart, and Timeline and Your history rea
   // Today's rows by the New York clock, an earlier one by its day.
   await expect(timeline.getByRole("listitem").first().locator("time")).toHaveText(/^\d{2}:\d{2}$/);
   await expect(timeline.getByRole("listitem").last().locator("time")).toHaveText(/^[A-Z][a-z]{2} \d{1,2}$/);
-
-  await tabs.getByRole("tab", { name: "Your history" }).click();
-  await expect(pane.getByRole("img", { name: "3 won, 9 did not" })).toBeVisible();
-  await expect(pane).toContainText(HISTORY.sentence);
-  await expect(pane).toContainText("At 92.3, 3.8% below the planned entry 95.9, over the last 180 days. Evidence to weigh, not a rule.");
-  expect(reads).toEqual(["GET picture", "GET timeline", "GET history"]); // reads only, nothing posted
-  await pane.screenshot({ path: test.info().outputPath("desk-context-history.png") });
+  expect(reads).toEqual(["GET picture", "GET timeline"]); // reads only, nothing posted
+  await pane.screenshot({ path: test.info().outputPath("desk-centre-timeline.png") });
 });
 
 test("the chart's timeframe buttons switch the picture read, and the legend names fills, pings and Radar", async ({ page }) => {
@@ -138,36 +114,31 @@ test("the chart's timeframe buttons switch the picture read, and the legend name
   expect(reads).toEqual(["GET picture", "GET picture", "GET picture"]); // reads only
 });
 
-test("each tab says what is unavailable or missing", async ({ page }) => {
+test("the chart and the timeline each say what is unavailable or missing", async ({ page }) => {
   const { pane } = await lab(page, {
     picture: "No NBIS minute bars for today yet.",
     timeline: { state: "ok", symbol: "NBIS", rows: [], count: 0, unavailable: ["pings"], recent_days: 7 },
-    history: { state: "missing", symbol: "NBIS", reason: "No plan invalidation yet. Once you confirm a plan card, your record at its invalidation shows here." },
   });
-  const tabs = pane.getByRole("tablist", { name: "Context" });
   await expect(pane).toContainText("Chart unavailable: No NBIS minute bars for today yet.");
   await expect(pane.getByRole("img")).toHaveCount(0);
-  await tabs.getByRole("tab", { name: "Timeline" }).click();
+  await pane.getByRole("button", { name: "Timeline ▾" }).click();
   await expect(pane).toContainText("Nothing has touched this thread in the last 7 days.");
   await expect(pane).toContainText("Could not read: pings.");
-  await tabs.getByRole("tab", { name: "Your history" }).click();
-  await expect(pane).toContainText("No plan invalidation yet. Once you confirm a plan card, your record at its invalidation shows here.");
 });
 
-test("on a 375 px phone the Context tab shows the pane, and its tabs fit", async ({ page }) => {
+test("on a 375 px phone the centre sits under the book and the copilot is a sheet over it", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  const { pane } = await lab(page);
-  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab", { name: "Context" }).click();
+  const { pane } = await lab(page); // a thread's link opens on the copilot's sheet
+  await page.getByRole("button", { name: "Back to the desk" }).click();
   await expect(pane.getByRole("img", { name: /NBIS today: minute bars/ })).toBeVisible();
-  const tabs = pane.getByRole("tablist", { name: "Context" });
-  await tabs.getByRole("tab", { name: "Timeline" }).click();
+  await pane.getByRole("button", { name: "Timeline ▾" }).click();
   await expect(pane.getByRole("list", { name: "Timeline" }).getByRole("listitem")).toHaveCount(4);
-  expect((await tabs.getByRole("tab", { name: "Timeline" }).boundingBox())!.height).toBeGreaterThanOrEqual(36);
+  expect((await pane.getByRole("tab", { name: "Today" }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
-  await page.screenshot({ path: test.info().outputPath("desk-context-375.png"), fullPage: true });
+  await page.screenshot({ path: test.info().outputPath("desk-centre-375.png"), fullPage: true });
 });
 
-test("a symbol opened with no saved conversation loads its Context on request, by the symbol", async ({ page }) => {
+test("a symbol opened with no saved conversation charts it by the symbol", async ({ page }) => {
   const reads: string[] = [];
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
@@ -176,25 +147,18 @@ test("a symbol opened with no saved conversation loads its Context on request, b
     const part = new URL(route.request().url()).pathname.split("/").pop()!;
     reads.push(`${route.request().method()} ${part}`);
     if (part === "picture") return route.fulfill({ status: 200, contentType: "image/png", body: PNG });
-    return route.fulfill({ json: part === "timeline"
-      ? { ...TIMELINE, count: 1, rows: [{ kind: "fill", at: now - 900, text: "Bought 5 NBIS stock at 94.20", detail: "the open position" }] }
-      : { state: "missing", symbol: "NBIS", reason: "No plan invalidation yet. Once you confirm a plan card, your record at its invalidation shows here." } });
+    return route.fulfill({ json: { ...TIMELINE, count: 1, rows: [{ kind: "fill", at: now - 900, text: "Bought 5 NBIS stock at 94.20", detail: "the open position" }] } });
   });
   await page.goto("/copilot-lab?symbol=NBIS");
-  const pane = page.getByRole("complementary", { name: "Context" });
-  await expect(pane).toBeHidden();
-  await page.getByRole("button", { name: "Context pane" }).click();
+  const pane = page.getByRole("region", { name: "Chart and today" });
   await expect(pane.getByRole("img", { name: /NBIS today: minute bars/ })).toBeVisible();
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
-  const tabs = pane.getByRole("tablist", { name: "Context" });
-  await tabs.getByRole("tab", { name: "Timeline" }).click();
+  await pane.getByRole("button", { name: "Timeline ▾" }).click();
   await expect(pane.getByRole("list", { name: "Timeline" }).getByRole("listitem")).toHaveText([/Bought 5 NBIS stock at 94.20.*the open position/]);
-  await tabs.getByRole("tab", { name: "Your history" }).click();
-  await expect(pane).toContainText("No plan invalidation yet.");
-  expect(reads).toEqual(["GET picture", "GET timeline", "GET history"]); // reads only, nothing posted
+  expect(reads).toEqual(["GET picture", "GET timeline"]); // reads only, nothing posted
 });
 
-test("on the Briefing the pane shows the day: QQQ with your fills and pings, the day's timeline and this week's record", async ({ page }) => {
+test("with no ticker the centre charts the market, and This week sits folded at the foot of the thread list", async ({ page }) => {
   const reads: string[] = [];
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
@@ -235,21 +199,15 @@ test("on the Briefing the pane shows the day: QQQ with your fills and pings, the
       { day: "2026-11-03", named: 5, moved: 1, unknown: 0, state: "ok" },
     ] } }));
   await page.goto("/copilot-lab?view=briefing");
-  const pane = page.getByRole("complementary", { name: "Context" });
-  await expect(pane).toBeHidden();
-  await page.getByRole("button", { name: "Context pane" }).click();
-  await expect(pane.getByRole("img", { name: /QQQ today: minute bars with your fills/ })).toBeVisible();
-  await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=QQQ");
-  await expect(pane).toContainText("your fills");
+  const centre = page.getByRole("region", { name: "Chart and today" });
+  await expect(centre.getByRole("img", { name: /QQQ today: minute bars with your fills/ })).toBeVisible();
+  await expect(centre.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=QQQ");
+  await expect(centre).toContainText("your fills");
   expect(reads).toEqual(["market"]);
 
-  const tabs = pane.getByRole("tablist", { name: "Context" });
-  await tabs.getByRole("tab", { name: "Timeline" }).click();
-  const items = pane.getByRole("list", { name: "Timeline" }).getByRole("listitem");
-  await expect(items).toHaveText([/CRWV time stop/, /Give-back ping · NBIS/, /Bought NBIS/, /Pre-market prep written.*Two positions/]);
-  await expect(pane).toContainText("Could not read: pings.");
-
-  await tabs.getByRole("tab", { name: "This week" }).click();
+  await page.getByRole("button", { name: /^Threads(?:,|$)/ }).click();
+  const pane = page.getByRole("complementary", { name: "Threads" });
+  await pane.getByTestId("this-week").locator("summary").click();
   // The two proofs first, as /proof reads them, each with what it rests on.
   const proof = pane.getByRole("region", { name: "Proof this week" });
   await expect(pane.getByTestId("week-copilot-line")).toHaveText("Copilot: Helped 7 of 9 rated · 23 answers · first text 4.1 s median · $0.38");
@@ -283,9 +241,9 @@ test("this week's proof lines say when a proof read is missing or fails", async 
   await page.route("**/copilot/answer-scorecard*", (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
   await page.route("**/copilot/brief-scorecard*", (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
   await page.goto("/copilot-lab?view=briefing");
-  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab", { name: "Context" }).click();
-  const pane = page.getByRole("complementary", { name: "Context" });
-  await pane.getByRole("tablist", { name: "Context" }).getByRole("tab", { name: "This week" }).click();
+  await page.getByRole("button", { name: /^Threads(?:,|$)/ }).click();
+  const pane = page.getByRole("complementary", { name: "Threads" });
+  await pane.getByTestId("this-week").locator("summary").click();
   const proof = pane.getByRole("region", { name: "Proof this week" });
   await expect(pane.getByTestId("week-copilot-line")).toHaveText("Copilot: could not load");
   await expect(pane.getByTestId("week-brief-line")).toHaveText("Morning brief: could not load");
@@ -307,9 +265,9 @@ test("this week says so quietly when no morning brief was written", async ({ pag
   await page.route("**/copilot/brief-scorecard*", (route) => route.fulfill({ json: {
     state: "ok", days: 7, briefs: 0, named: 0, moved: 0, unknown: 0, rows: [], as_of: "2026-11-06T15:00:00-05:00" } }));
   await page.goto("/copilot-lab?view=briefing");
-  await page.getByRole("button", { name: "Context pane" }).click();
-  const pane = page.getByRole("complementary", { name: "Context" });
-  await pane.getByRole("tablist", { name: "Context" }).getByRole("tab", { name: "This week" }).click();
+  await page.getByRole("button", { name: /^Threads(?:,|$)/ }).click();
+  const pane = page.getByRole("complementary", { name: "Threads" });
+  await pane.getByTestId("this-week").locator("summary").click();
   await expect(pane).toContainText("No morning brief in the last 7 days.");
   await expect(pane.getByTestId("week-brief")).toHaveCount(0);
 });

@@ -50,12 +50,11 @@ async function lab(page: Page, url = "/copilot-lab?view=briefing") {
   return chats;
 }
 
-test("a reopened investigation's What changed? runs one turn with its id and shows the answer", async ({ page }) => {
+test("a reopened investigation's What changed since I looked? runs one turn with its id and shows the answer", async ({ page }) => {
   const chats = await lab(page);
-  await expect(page.getByRole("button", { name: "What changed?" })).toHaveCount(0); // a new conversation has nothing to compare
   await page.getByRole("navigation", { name: "Thread list" }).getByRole("button", { name: /^NBIS, / }).click();
   await expect(page.getByText("Not yet: it lags CRWV.")).toBeVisible();
-  const button = page.getByRole("button", { name: "What changed?" });
+  const button = page.getByRole("button", { name: "What changed since I looked?" });
   await expect(button).toBeVisible();
   expect(chats).toEqual([]); // opening costs nothing
   await button.click();

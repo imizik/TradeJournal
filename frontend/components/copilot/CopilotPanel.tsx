@@ -168,16 +168,16 @@ function Answer({ text, onPushBack }: { text: string; onPushBack?: (line: string
   if (!parts) return <Prose text={text} onPushBack={onPushBack} />;
   return (
     <div className="space-y-2" data-testid="copilot-answer">
-      <p className="flex items-baseline gap-2">
+      <p className="flex items-baseline gap-2 border-l-2 border-primary/70 pl-2.5">
         <span data-testid="copilot-verdict" className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary">
           {parts.verdict}
         </span>
         <strong className="text-sm font-semibold leading-snug text-foreground">{parts.headline}<PushBack line={parts.headline} onPushBack={onPushBack} /></strong>
       </p>
       {parts.read && (
-        <p data-testid="copilot-read" className="text-xs text-muted-foreground">
+        <p data-testid="copilot-read" className="grid grid-cols-3 gap-1.5 text-xs text-muted-foreground">
           {parts.read.map((part, i) => (
-            <span key={part.label}>{i > 0 && " · "}{part.label} <span className="font-medium text-foreground">{part.value}</span></span>
+            <span key={part.label} className="rounded-md bg-secondary px-2 py-1"><span className="sr-only">{i > 0 && " · "}</span>{part.label} <span className="block font-medium text-foreground">{part.value}</span></span>
           ))}
         </p>
       )}
@@ -188,7 +188,7 @@ function Answer({ text, onPushBack }: { text: string; onPushBack?: (line: string
           <span className="font-medium text-amber-300">Against</span> {parts.against}<PushBack line={`Against: ${parts.against}`} onPushBack={onPushBack} />
         </p>
       )}
-      {parts.changesIf && <p className="text-sm text-muted-foreground">Changes if {parts.changesIf}</p>}
+      {parts.changesIf && <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">Changes if</span> {parts.changesIf}</p>}
     </div>
   );
 }
@@ -1217,20 +1217,25 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const planned = messages.some(m => m.proposals?.some(p => p.kind === "trade_plan"));
   const lastMessage = messages[messages.length - 1];
   const moreReady = !busy && lastMessage?.role === "assistant" && !!lastMessage.content.trim();
+  // The cockpit's three asks lead, each one turn in this conversation about its symbol (or across everything).
+  const about = symbol || null;
   const offered: (Suggestion | false | null | undefined | "")[] = !desk || !enabled ? [] : [
-    current && messages.length > 0 && { label: "What changed?", title: "One copilot turn: what changed since this investigation was last discussed",
-      run: () => void send(whatChangedPrompt(current.id)) },
-    moreReady && { label: "More", title: "One copilot turn: the full reasoning behind the last answer",
-      run: () => void send("More: the full reasoning behind that answer.") },
-    current && symbol && { label: "Look at my chart", title: `Send today's ${symbol} chart from the Context pane and ask what the copilot sees`,
-      run: () => void lookAtChart(deskChart) },
+    { label: "Why is it moving?", title: "One copilot turn: what is moving the price today, from read-only evidence",
+      run: () => void send(about ? `Why is ${about} moving today?` : "Why is the market moving today?") },
+    { label: "What changed since I looked?", title: "One copilot turn: what changed since this conversation was last discussed",
+      run: () => void send(current && messages.length > 0 ? whatChangedPrompt(current.id) : about ? `What changed on ${about} today?` : "What changed today across my positions and watches?") },
+    { label: "What does my plan say?", title: "One copilot turn: the saved plan's entry, invalidation and time stop against where price is now",
+      run: () => void send(about ? `What does my plan say on ${about}, against where it is now?` : "What do my plans say, against where each is now?") },
     planned && { label: "Size it", title: "Put a sizing question in the box, unsent: you add the dollars at risk",
       run: () => fill("Size it: with this plan's entry and invalidation, how many shares or contracts keep the loss at the invalidation to $") },
+    moreReady && { label: "More", title: "One copilot turn: the full reasoning behind the last answer",
+      run: () => void send("More: the full reasoning behind that answer.") },
+    current && symbol && { label: "Look at my chart", title: `Send today's ${symbol} chart from the centre and ask what the copilot sees`,
+      run: () => void lookAtChart(deskChart) },
     !current?.main_day && current?.status === "open" && messages.length > 0 && { label: "Close with a lesson", title: "Write the one-line lesson, then close the thread",
       run: () => { setMenu(true); window.setTimeout(() => lesson.current?.focus(), 0); } },
-    !current && !messages.length && symbol && { label: `Is ${symbol}'s group confirming?`, run: () => void send(`Is ${symbol}'s group confirming the move?`) },
-    !current && !messages.length && symbol && { label: "Plan a trade", run: () => void send(`Plan a trade on ${symbol}.`) },
   ];
+  // The three asks, then at most two of the thread's own next steps (the thread menu keeps Close with a lesson).
   const suggestions = offered.filter((item): item is Suggestion => !!item).slice(0, 5);
   const handoffPending = busy || attaching?.state === "busy" || saveState?.state === "saving" || (!current && messages.length > 0);
   return (
@@ -1442,7 +1447,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       {/* On the desk the box stays in reach while the conversation scrolls; a phone keeps it above the tab bar. */}
       <div ref={composer} onFocus={e => { if ((e.target as HTMLElement) === box.current) setComposing(true); }}
         onBlur={e => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) setComposing(false); }}
-        className={cn("space-y-1", panel && "sticky bottom-0 bg-card py-1",
+        data-composer className={cn("space-y-1", panel && "sticky bottom-0 bg-card py-1",
         desk && "sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 bg-background py-2 md:bottom-0")}>
       {voice.banner}
       {(attached.length > 0 || attaching) && (
@@ -1471,7 +1476,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         </button>
       )}
       {suggestions.length > 0 && (
-        <div role="group" aria-label="Suggestions" className="-mx-1 flex gap-1.5 overflow-x-auto px-1 max-md:[scrollbar-width:none] md:flex-wrap">
+        <div role="group" aria-label="Suggestions" className="-mx-1 flex gap-1.5 overflow-x-auto px-1 [scrollbar-width:none]">
           {suggestions.map(item => (
             <button key={item.label} type="button" onClick={item.run} disabled={busy} title={item.title}
               className="min-h-11 shrink-0 rounded-full border px-3 text-xs text-muted-foreground hover:border-primary/50 hover:text-foreground disabled:opacity-40 md:min-h-7">

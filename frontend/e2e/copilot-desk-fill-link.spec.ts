@@ -101,7 +101,8 @@ test("2 fills to link opens each in turn: Link calls the link route, No plan wri
   const list = page.getByRole("navigation", { name: "Thread list" });
   // One fill per trade: NBIS's plan and its position are one fill to link.
   await expect(list.getByRole("button", { name: "2 fills to link" })).toBeVisible();
-  await expect(conversation(page).getByRole("button", { name: "2 fills to link" })).toBeVisible(); // the Briefing counts them too
+  await page.getByTestId("needs-you").getByRole("button", { name: /more/ }).click(); // the strip counts them too, after the decision
+  await expect(page.getByRole("list", { name: "More waiting" })).toContainText("2 fills to link to a plan");
 
   // The first in list order opens by its symbol link (the desk remounts); No plan there opens the next.
   await list.getByRole("button", { name: "2 fills to link" }).click();
@@ -112,6 +113,7 @@ test("2 fills to link opens each in turn: Link calls the link route, No plan wri
 
   await expect(conversation(page).getByText("NBIS answer: enter at 95.90.")).toBeVisible(); // the plan's thread, next in the list
   await expect(bar(page)).toContainText("Bought NBIS 10/23/26 95C 10:31");
+  await openDeskThreads(page); // the symbol link was a page load: the drawer starts closed
   await expect(list.getByRole("button", { name: "1 fill to link" })).toBeVisible();
   await bar(page).getByRole("button", { name: "Link to plan “NBIS 95C long”" }).click(); // named by its desk thread
   await expect(bar(page).getByRole("status")).toHaveText("Linked to plan “NBIS 95C long”");

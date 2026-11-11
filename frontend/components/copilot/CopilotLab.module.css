@@ -1,10 +1,12 @@
 /*
- * The Copilot desk (/copilot-lab). Its palette and type are the app's (globals.css, app/layout.tsx) since the restyle;
- * the tokens are restated here so the desk reads the same under either theme, and every component inside (bg-card,
- * text-muted-foreground, bg-primary) picks them up. Warm graphite surfaces; amber is the one accent and means
- * "needs you". Numbers set in tabular-nums use Plex Mono.
- * Panes follow the desk's own width: three at 1100 px, two below that, and three tabs below 760 px. On a wide screen the
- * desk takes the whole screen beside the nav rail, as Charts does (AppMain), and each pane scrolls on its own.
+ * The Copilot desk (/copilot-lab), laid out as a cockpit (docs/copilot-lab.md § The desk). Its palette and type are the
+ * app's (globals.css, app/layout.tsx) since the restyle; the tokens are restated here so the desk reads the same under
+ * either theme, and every component inside (bg-card, text-muted-foreground, bg-primary) picks them up. Warm graphite
+ * surfaces; amber is the one accent and means "needs you". Numbers set in tabular-nums use Plex Mono.
+ *
+ * Layout by the screen's width: from 1180 px the book, the centre and the copilot sit side by side and each scrolls on
+ * its own; from 768 px the book and the centre do, and the copilot opens as a sheet on the right; below that the strip,
+ * the book and the centre stack and the copilot is a full-screen sheet. The thread list is a drawer at every width.
  */
 .desk {
   --background: 240 6% 6%;
@@ -24,7 +26,7 @@
   --border: 240 4% 16%;
   --input: 240 4% 16%;
   --ring: 36 88% 59%;
-  container-type: inline-size;
+  position: relative;
   font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   background: hsl(var(--background));
   color: hsl(var(--foreground));
@@ -42,9 +44,9 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
+  gap: 8px 14px;
   min-height: 52px;
-  padding: 8px 16px;
+  padding: 8px 14px;
   border-bottom: 1px solid hsl(var(--border));
 }
 
@@ -69,205 +71,187 @@
   margin-left: auto;
 }
 
-.tabs {
-  display: none;
-}
-
-.panes {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.desk[data-on="true"] .panes {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "thread";
-  grid-template-rows: minmax(0, 1fr);
-}
-
-.rail,
-.thread,
-.inspector {
+.strip {
+  grid-area: strip;
   min-width: 0;
 }
 
-.rail {
-  grid-area: rail;
+.cockpit {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "strip" "book" "centre";
+  gap: 10px;
+  padding: 10px 12px 12px;
+}
+
+.desk[data-on="false"] .cockpit {
+  grid-template-areas: "thread";
+}
+
+.book,
+.centre,
+.thread {
+  min-width: 0;
+}
+
+.book {
+  grid-area: book;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 12px;
-  border-right: 1px solid hsl(var(--border));
+  gap: 10px;
+}
+
+.centre {
+  grid-area: centre;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  background: hsl(var(--card));
 }
 
 .thread {
   grid-area: thread;
-  padding: 16px 20px 0;
+  container-type: inline-size;
+  padding: 4px 4px 0;
+  /* Where the copilot scrolls on its own, whatever is scrolled into view (a card's Confirm, a focused field, the
+     latest turn) stops clear of the sticky breadcrumb above and the message box below. */
+  scroll-padding: 56px 0 50%;
 }
 
-.inspector {
-  grid-area: inspector;
-  padding: 12px;
-  border-top: 1px solid hsl(var(--border));
-  border-right: 1px solid hsl(var(--border));
+.sheetBar,
+.ask {
+  display: none;
 }
 
-@container (min-width: 1100px) {
-  .desk[data-on="true"][data-threads="shown"][data-context="shown"] .panes {
-    grid-template-columns: 260px minmax(0, 1fr) 320px;
-    grid-template-areas: "rail thread inspector";
-    grid-template-rows: auto;
+/* The thread list: a drawer opened from the top bar or with [: over the whole screen on a phone, over the book's column
+   under the top bar from 768 px. */
+.rail {
+  display: none;
+}
+
+.desk[data-threads="shown"] .rail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: fixed;
+  z-index: 46;
+  inset: 0;
+  overflow-y: auto;
+  padding: calc(12px + env(safe-area-inset-top)) 12px 12px;
+  background: hsl(var(--background));
+  scrollbar-width: thin;
+}
+
+@media (min-width: 768px) {
+  .desk[data-threads="shown"] .rail {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 320px;
+    padding: 10px 12px 12px;
+    border-right: 1px solid hsl(var(--border));
+    box-shadow: 24px 0 48px rgb(0 0 0 / 0.5);
+  }
+}
+
+/* Below 1180 px the copilot is a sheet: hidden until opened, then over the page. */
+@media (max-width: 1179px) {
+  .desk[data-on="true"] .thread {
+    display: none;
   }
 
-  .desk[data-on="true"][data-threads="shown"][data-context="hidden"] .panes {
-    grid-template-columns: 260px minmax(0, 1fr);
-    grid-template-areas: "rail thread";
-    grid-template-rows: auto;
+  .desk[data-on="true"][data-sheet="open"] .thread {
+    display: block;
+    position: fixed;
+    z-index: 45;
+    inset: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 12px;
+    background: hsl(var(--background));
   }
 
-  .desk[data-on="true"][data-threads="hidden"][data-context="shown"] .panes {
-    grid-template-columns: minmax(0, 1fr) 320px;
-    grid-template-areas: "thread inspector";
-    grid-template-rows: auto;
+  .desk[data-on="true"][data-sheet="open"] .thread [data-composer] {
+    bottom: 0;
   }
 
-  /* The side panes stay in view while the conversation scrolls the page. */
-  .rail,
-  .inspector {
+  .desk[data-on="true"] .sheetBar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     position: sticky;
     top: 0;
-    align-self: start;
-    max-height: 100dvh;
-    overflow-y: auto;
-    scrollbar-width: thin;
+    z-index: 20;
+    margin: 0 -12px 8px;
+    padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--background));
   }
 
-  .inspector {
-    border-top: 0;
-    border-right: 0;
+  .desk[data-on="true"][data-sheet="closed"] .ask {
+    display: inline-flex;
+    position: sticky;
+    bottom: calc(4.5rem + env(safe-area-inset-bottom));
+    z-index: 30;
+    margin: 0 12px 12px auto;
+    float: right;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1179px) {
+  .cockpit {
+    grid-template-columns: 300px minmax(0, 1fr);
+    grid-template-areas: "strip strip" "book centre";
+    align-items: start;
+  }
+
+  .desk[data-on="true"][data-sheet="open"] .thread {
+    left: auto;
+    width: min(460px, 100%);
     border-left: 1px solid hsl(var(--border));
+    box-shadow: -24px 0 48px rgb(0 0 0 / 0.5);
+  }
+
+  .desk[data-on="true"][data-sheet="closed"] .ask {
+    bottom: 16px;
+  }
+}
+
+@media (min-width: 1180px) {
+  /* The copilot runs the full height beside the strip, the book and the centre. */
+  .cockpit {
+    grid-template-columns: 300px minmax(0, 1fr) clamp(380px, 33vw, 480px);
+    grid-template-areas: "strip strip thread" "book centre thread";
+    grid-template-rows: auto minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .desk[data-on="false"] .cockpit {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "thread";
+    grid-template-rows: minmax(0, 1fr);
   }
 
   .thread {
-    padding: 24px 32px 0;
+    border-left: 1px solid hsl(var(--border));
+    padding: 0 0 0 12px;
   }
 }
 
-@container (min-width: 760px) and (max-width: 1099px) {
-  .desk[data-on="true"][data-threads="shown"][data-context="shown"] .panes {
-    grid-template-columns: 240px minmax(0, 1fr);
-    grid-template-areas: "rail thread" "inspector thread";
-    grid-template-rows: minmax(0, 1fr) minmax(0, 40%);
-  }
-
-  .desk[data-on="true"][data-threads="shown"][data-context="hidden"] .panes {
-    grid-template-columns: 240px minmax(0, 1fr);
-    grid-template-areas: "rail thread";
-    grid-template-rows: minmax(0, 1fr);
-  }
-
-  .desk[data-on="true"][data-threads="hidden"][data-context="shown"] .panes {
-    grid-template-columns: 240px minmax(0, 1fr);
-    grid-template-areas: "inspector thread";
-    grid-template-rows: minmax(0, 1fr);
-  }
-}
-
-/* A phone: the desk runs edge to edge inside the page's 8 px padding, so the message row keeps its full width. */
+/* A phone: the desk runs edge to edge inside the page's 8 px padding. */
 @media (max-width: 767px) {
   .desk {
     margin-inline: -8px;
     border-inline: 0;
     border-radius: 0;
   }
-}
 
-@container (max-width: 759px) {
-  .desk[data-on="true"] .panes {
-    display: block;
-  }
-
-  .tabs {
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(0, 1fr);
-    gap: 4px;
-    margin: 8px 12px 0;
-    padding: 3px;
-    border-radius: 10px;
-    background: hsl(var(--card));
-    border: 1px solid hsl(var(--border));
-  }
-
-  .tabs button {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    padding-inline: 4px;
-    min-height: 44px;
-    border-radius: 7px;
-    font-size: 14px;
-    font-weight: 500;
-    color: hsl(var(--muted-foreground));
-  }
-
-  .tabs button[aria-selected="true"] {
-    background: hsl(var(--secondary));
-    color: hsl(var(--foreground));
-    box-shadow: 0 0 0 1px hsl(var(--border));
-  }
-
-  .desk[data-tab="threads"] .thread,
-  .desk[data-tab="threads"] .inspector,
-  .desk[data-tab="thread"] .rail,
-  .desk[data-tab="thread"] .inspector,
-  .desk[data-tab="context"] .rail,
-  .desk[data-tab="context"] .thread {
-    display: none;
-  }
-
-  .rail,
-  .thread,
-  .inspector {
-    padding: 12px;
-    border: 0;
+  .cockpit {
+    padding-inline: 8px;
   }
 }
 
-/* Desktop side panes are opt-in, leaving the active conversation the full width at first. */
-@container (min-width: 760px) {
-  .desk[data-on="true"][data-threads="hidden"][data-context="hidden"] .thread {
-    width: 100%;
-    max-width: 58rem;
-    margin-inline: auto;
-  }
-
-  .desk[data-threads="hidden"] .rail {
-    display: none;
-  }
-
-  .desk[data-context="hidden"] .inspector {
-    display: none;
-  }
-}
-
-@container (min-width: 1100px) {
-  .desk[data-on="true"][data-threads="hidden"][data-context="hidden"] .panes {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "thread";
-  }
-}
-
-@container (max-width: 759px) {
-  .paneToggle,
-  .contextToggle,
-  .daily {
-    display: none !important;
-  }
-}
-
-/* A wide screen: the desk fills the height beside the nav rail and under the banner, and each pane scrolls on its own, so
-   the thread list and the Context pane stay put while the conversation scrolls. Two panes keep Context under the list. */
+/* A wide screen: the desk fills the height beside the nav rail and under the banner; the book, the centre and the
+   copilot each scroll on their own. */
 @media (min-width: 1024px) {
   .desk {
     flex: 1;
@@ -278,35 +262,29 @@
     border-radius: 0;
   }
 
-  .panes {
+  .cockpit {
     flex: 1;
     min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .desk[data-on="true"] .panes {
-    grid-template-rows: minmax(0, 1fr) minmax(0, 40%);
-  }
-
-  .rail,
-  .thread,
-  .inspector {
+  .book,
+  .centre {
+    align-self: stretch;
     overflow-y: auto;
     scrollbar-width: thin;
-    position: static;
-    max-height: none;
+  }
+
+  .centre {
+    align-self: start;
+    max-height: 100%;
+  }
+}
+
+@media (min-width: 1180px) {
+  .thread {
     align-self: stretch;
-  }
-
-  @container (min-width: 1100px) {
-    .desk[data-on="true"] .panes {
-      grid-template-rows: minmax(0, 1fr);
-    }
-  }
-
-  @container (min-width: 760px) {
-    .desk[data-on="true"][data-threads="hidden"] .panes,
-    .desk[data-on="true"][data-context="hidden"] .panes {
-      grid-template-rows: minmax(0, 1fr);
-    }
+    overflow-y: auto;
+    scrollbar-width: thin;
   }
 }

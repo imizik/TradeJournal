@@ -127,7 +127,7 @@ test("a position ping with no plan conversation opens the desk on its symbol, st
   const { posts } = await desk(page, { path: "/copilot-lab?symbol=NBIS" });
   const bar = page.getByRole("region", { name: "Decision" });
   await expect(bar).toContainText("Give-back fired at 10:31.");
-  await expect(page.getByTestId("session-tape")).toHaveCount(0); // not the Briefing's day at a glance
+  await expect(page.getByRole("region", { name: "Conversation" }).getByTestId("desk-book")).toHaveCount(0); // the decision, not the book
   await page.setViewportSize({ width: 375, height: 812 });
   await expect(bar.getByRole("button", { name: "Holding" })).toBeInViewport(); // a phone lands on the Thread tab
   expect(posts).toEqual([]);

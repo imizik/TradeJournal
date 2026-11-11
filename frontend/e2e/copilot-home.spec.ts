@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { openDeskThreads } from "./desk-fixtures";
 
-// The lab's home: the desk's thread list beside the conversation. Every lab route is stubbed in the browser and the one
+// The lab's home: the desk's thread list (a drawer) beside the conversation. Every lab route is stubbed in the browser and the one
 // turn is a fixed SSE stream, so no model runs. Opening the lab reads /copilot/desk/threads and sends nothing; only a
 // Briefing button sends, and only when pressed. The list itself: copilot-thread-list.spec.ts.
 const ON = {
@@ -62,7 +62,12 @@ async function lab(page: Page) {
 }
 
 const list = (page: Page) => page.getByRole("navigation", { name: "Thread list" });
-const briefing = (page: Page) => page.getByRole("region", { name: "Conversation" });
+/** The centre's Today tab: today's pings and Radar with What matters right now? and Review my week. */
+async function today(page: Page) {
+  const centre = page.getByRole("region", { name: "Chart and today" });
+  await centre.getByRole("tab", { name: "Today" }).click();
+  return centre;
+}
 
 test("the list sends nothing on open, and What matters right now? asks across everything beside it", async ({ page }) => {
   const { chats, saves, reads } = await lab(page);
@@ -72,7 +77,7 @@ test("the list sends nothing on open, and What matters right now? asks across ev
   expect(chats).toEqual([]); // opening costs nothing
   expect(reads()).toBe(1);
 
-  await briefing(page).getByRole("button", { name: "What matters right now?" }).click();
+  await (await today(page)).getByRole("button", { name: "What matters right now?" }).click();
   await expect(page.getByText(ANSWER)).toBeVisible();
   expect(chats).toEqual([{ messages: [{ role: "user", content: PROMPT }], symbol: null, source: "desk" }]);
   await expect(threads).toBeVisible(); // the desk keeps the thread list beside the open conversation
@@ -91,18 +96,18 @@ test("an open investigation opens in place without sending", async ({ page }) =>
   expect(chats).toEqual([]);
 });
 
-test("on a phone the desk shows one pane at a time, and opening a thread moves to it", async ({ page }) => {
+test("on a phone the thread list covers the desk, and opening a thread moves to the copilot sheet", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   const { chats } = await lab(page);
   const threads = list(page);
-  const tabs = page.getByRole("tablist", { name: "Desk" });
-  await expect(tabs.getByRole("tab", { name: "Threads" })).toHaveAttribute("aria-selected", "true");
+  await expect(threads).toBeVisible();
   await expect(page.getByLabel("Message")).toBeHidden();
   await threads.getByRole("button", { name: "NBIS, Watching" }).click();
   await expect(page.getByText("Not yet: it lags CRWV.")).toBeVisible();
   await expect(threads).toBeHidden();
-  await expect(tabs.getByRole("tab", { name: "NBIS" })).toHaveAttribute("aria-selected", "true");
-  await tabs.getByRole("tab", { name: "Threads" }).click();
+  await page.getByRole("button", { name: "Back to the desk" }).click();
+  await expect(page.getByLabel("Message")).toBeHidden();
+  await openDeskThreads(page);
   await expect(threads).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   expect(chats).toEqual([]);
@@ -116,9 +121,9 @@ test("the list says so when its read fails, and the Briefing and Review my week 
   await openDeskThreads(page);
   const threads = list(page);
   await expect(threads).toContainText("Threads unavailable: Copilot Lab is off.");
-  await expect(briefing(page).getByRole("button", { name: "What matters right now?" })).toBeEnabled();
+  await expect((await today(page)).getByRole("button", { name: "What matters right now?" })).toBeEnabled();
   await expect(threads.getByRole("button", { name: "Review my week" })).toHaveCount(0); // in ⌘K and the Briefing now
-  await expect(page.getByRole("region", { name: "Conversation" }).getByRole("button", { name: "Review my week" })).toBeEnabled();
+  await expect(page.getByRole("region", { name: "Chart and today" }).getByRole("button", { name: "Review my week" })).toBeEnabled();
 });
 
 test("on a wide screen the app's navigation folds into the desk bar's Menu, and keeping the sidebar open is remembered", async ({ page }) => {
@@ -153,7 +158,7 @@ test("on a wide screen the app's navigation folds into the desk bar's Menu, and 
 const SESSION = { as_of: "2026-10-23T15:00:00Z", now: 1792767600, day: "2026-10-23", phase: "regular", open: null, close: null, events: [],
   time_stops: [], pings: null, prep: null, indices: [], quote_issue: null, sections: {} };
 
-test("daily Main reopens across devices under Now, keeps drafts in their tab and opens earlier dates without sending", async ({ page, browser }) => {
+test("daily Main reopens across devices in the copilot, keeps drafts in their tab and opens earlier dates without sending", async ({ page, browser }) => {
   const prior = { ...saved, main_day: "2026-10-22", title: "Main chat · 2026-10-22", symbol: null };
   const today = { ...prior, id: "33333333-3333-4333-8333-333333333333", main_day: "2026-10-23", title: "Main chat · 2026-10-23" };
   let sends = 0;
@@ -165,8 +170,9 @@ test("daily Main reopens across devices under Now, keeps drafts in their tab and
     for (const chat of [prior, today]) await p.route(`**/copilot/investigations/${chat.id}`, route => route.fulfill({ json: chat }));
     await p.route("**/copilot/chat", route => { sends++; return route.abort(); });
     await p.goto("/copilot-lab");
-    await expect(p.getByRole("heading", { name: "Main chat · Fri, Oct 23" })).toBeVisible();
     await expect(p).toHaveURL(`/copilot-lab?thread=${today.id}`);
+    // A phone's copilot waits behind Ask the copilot: there the heading is checked once it is open.
+    if (p.viewportSize()!.width >= 1180) await expect(p.getByRole("heading", { name: "Main chat · Fri, Oct 23" })).toBeVisible();
   }
   await fixture(page);
   await page.getByLabel("Message").fill("Follow up after lunch");
@@ -174,18 +180,17 @@ test("daily Main reopens across devices under Now, keeps drafts in their tab and
   try {
     const mobile = await phone.newPage();
     await fixture(mobile);
+    // A phone opens on the cockpit; today's conversation waits behind Ask the copilot, its box at the bottom.
+    await expect(mobile.getByTestId("desk-book")).toBeVisible();
+    await expect(mobile.getByRole("link", { name: "Now", exact: true })).toBeHidden(); // already there: the bar drops it
+    await mobile.getByRole("button", { name: /^Ask the copilot/ }).click();
     await expect(mobile.getByLabel("Message")).toHaveValue("");
     await expect(mobile.getByText("Not yet: it lags CRWV.")).toBeVisible();
     await mobile.screenshot({ path: test.info().outputPath("daily-main-phone.png") });
-    // A phone opens on its first tab, Now: the day above today's conversation, its box at the bottom.
-    await expect(mobile.getByRole("tab", { name: "Now" })).toHaveAttribute("aria-selected", "true");
-    await expect(mobile.getByRole("button", { name: "What matters right now?" })).toBeVisible();
-    await expect(mobile.getByRole("link", { name: "Now", exact: true })).toBeHidden(); // the bar's Now is for wider screens
   } finally { await phone.close(); }
-  // Now and today's conversation are one screen: the day's sections, then Main chat and its message box.
+  // The cockpit and today's conversation are one screen: the book and the centre, the copilot on Main chat beside them.
   await expect(page.getByRole("link", { name: "Now", exact: true })).toHaveAttribute("aria-current", "page");
-  await expect(page.getByTestId("now")).toBeVisible();
-  await expect(page.getByRole("button", { name: "What matters right now?" })).toBeVisible();
+  await expect(page.getByTestId("desk-book")).toBeVisible();
   await expect(page.getByLabel("Message")).toHaveValue("Follow up after lunch");
   await page.getByText("Previous days", { exact: true }).click();
   await page.getByRole("button", { name: "Main chat · Thu, Oct 22" }).click();
@@ -197,11 +202,10 @@ test("daily Main reopens across devices under Now, keeps drafts in their tab and
   await page.getByText("Previous days", { exact: true }).click();
   await page.getByRole("button", { name: "Main chat · Thu, Oct 22" }).click();
   await expect(page.getByRole("heading", { name: "Main chat · Thu, Oct 22" })).toBeVisible();
-  await expect(page.getByTestId("now")).toHaveCount(0); // an earlier day is that day's conversation only
   await expect(page.getByRole("link", { name: "Now", exact: true })).not.toHaveAttribute("aria-current", "page");
   await page.getByRole("link", { name: "Now", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Main chat · Fri, Oct 23" })).toBeVisible();
-  await expect(page.getByTestId("now")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Now", exact: true })).toHaveAttribute("aria-current", "page");
   expect(sends).toBe(0);
   await page.screenshot({ path: test.info().outputPath("daily-main-desktop.png") });
 });
@@ -252,7 +256,8 @@ test("two devices keep their own exchange and feedback targets when both opened 
   } finally { await other.close(); }
 });
 
-test("today's Main chat opens on the morning brief and asks about it here; an earlier day's does not", async ({ page }) => {
+test("before the open the book's lower block is the morning brief, cut short with its thread a tap away, and asks about it in Main chat", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-10-23T12:45:00Z") }); // 8:45 New York, a Friday
   const BRIEF = "44444444-4444-4444-8444-444444444444";
   const prior = { ...saved, main_day: "2026-10-22", title: "Main chat · 2026-10-22", symbol: null };
   const today = { ...prior, id: "33333333-3333-4333-8333-333333333333", main_day: "2026-10-23", title: "Main chat · 2026-10-23" };
@@ -273,13 +278,14 @@ test("today's Main chat opens on the morning brief and asks about it here; an ea
   const card = page.getByRole("region", { name: "Morning brief" });
   await expect(card).toContainText("09:00 ET");
   await expect(card).toContainText("FocusSemis lead pre-market.");
-  // The saved lines read as words: no list marker or bold, and the closing line stays apart from the bullets.
+  // The saved lines read as words: no list marker or bold; the closing line waits with the rest in the brief's thread.
   await expect(card.getByRole("listitem")).toHaveText(["SPY +0.4% and SMH +1.1% before the open.", "NBIS 100C expires Friday."]);
-  await expect(card).toContainText("Changes if: SMH loses its gap.");
+  await expect(card).not.toContainText("Changes if");
+  await expect(card.getByRole("link", { name: "Read the whole brief →" })).toHaveAttribute("href", `/copilot-lab?investigation=${BRIEF}`);
   await page.screenshot({ path: test.info().outputPath("main-chat-brief-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(card).toBeInViewport();
-  // A phone's first tab is Now, so the bar drops its Now button and keeps Desk, search and New plan on one line.
+  // On Now the bar drops its Now button and keeps Desk, search and New plan on one line.
   await expect(page.getByRole("link", { name: "Now", exact: true })).toBeHidden();
   const middle = async (box: Promise<{ y: number; height: number } | null>) => { const b = await box; return b ? b.y + b.height / 2 : NaN; };
   const desk = await middle(page.getByRole("heading", { name: "Desk", level: 1 }).boundingBox());
@@ -290,7 +296,6 @@ test("today's Main chat opens on the morning brief and asks about it here; an ea
   await page.getByText("Previous days", { exact: true }).click();
   await page.getByRole("button", { name: "Main chat · Thu, Oct 22" }).click();
   await expect(page.getByRole("heading", { name: "Main chat · Thu, Oct 22" })).toBeVisible();
-  await expect(card).toHaveCount(0); // an earlier day's Main chat is that day's conversation only
   await page.goBack();
   await expect(page.getByRole("heading", { name: "Main chat · Fri, Oct 23" })).toBeVisible();
   // Ask about it stays in today's Main chat: the brief goes in the message box as context, unsent, for the question after it.

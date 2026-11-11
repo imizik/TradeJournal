@@ -3,7 +3,7 @@ import { openDeskThreads } from "./desk-fixtures";
 
 // The practice goal: Review my week proposes one thing to practice as a card; the owner edits the text, Confirm posts it
 // to /copilot/practice (and a lesson memory only when "Remember this too" is ticked), and the goal's line appears in the
-// Briefing's session line on the desk and on the Dashboard's Review my week button. The e2e backend runs with the lab off, so these tests
+// desk's facts line under the book and on the Dashboard's Review my week button. The e2e backend runs with the lab off, so these tests
 // stand in for its status read and its lab routes.
 const ON = {
   enabled: true, backend: "fake", evidence: "fixture", model: "fake-scripted", effort: "medium", fallbacks: false,
@@ -75,7 +75,9 @@ async function reviewToCard(page: Page) {
   await expect(home.getByTestId("desk-day")).toBeVisible();
   await expect(home).not.toContainText("Practicing:");
   const saved = page.waitForRequest((request) => request.url().endsWith("/copilot/investigations") && request.method() === "POST");
-  await page.getByRole("region", { name: "Conversation" }).getByRole("button", { name: "Review my week" }).click();
+  const centre = page.getByRole("region", { name: "Chart and today" });
+  await centre.getByRole("tab", { name: "Today" }).click();
+  await centre.getByRole("button", { name: "Review my week" }).click();
   const card = page.getByRole("region", { name: "Proposed practice" });
   await expect(card).toBeVisible();
   await saved;
@@ -121,7 +123,7 @@ test("without Remember this too, Confirm saves only the practice", async ({ page
   expect(posts.memories).toHaveLength(0);
 });
 
-// At risk now (docs/copilot-lab.md § Exposure): the Briefing's session line carries the open long options' premium beside
+// At risk now (docs/copilot-lab.md § Exposure): the desk's facts line under the book carries the open long options' premium beside
 // the practice goal, and draws nothing when the read fails.
 const EXPOSURE = { state: "ok", at_risk_usd: 6400, positions: 3, usual_day_usd: 2100, sample_days: 60, as_of: "2026-10-24T11:12:00-04:00",
   line: "At risk now: $6,400 in 3 options · usual day $2,100" };
@@ -144,6 +146,6 @@ test("a failed exposure read draws no line", async ({ page }) => {
   const read = page.waitForResponse("**/copilot/exposure");
   await page.goto("/copilot-lab?view=briefing");
   await read;
-  await expect(page.getByTestId("session-tape")).toBeVisible();
+  await expect(page.getByTestId("desk-book")).toBeVisible();
   await expect(page.getByTestId("exposure-line")).toHaveCount(0);
 });

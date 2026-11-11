@@ -63,7 +63,7 @@ async function lab(page: Page, server: Server, { alertsSupported = true, url = "
       attempts: 0, error: null, cost_usd: null, investigation_id: null, created_at: "2026-10-24T14:01:00", next_attempt_at: "2026-10-25T14:01:00", finished_at: null }];
     return route.fulfill({ status: 201, json: { job: server.jobs[0], created: true, queue_enabled: !server.queueOff } });
   });
-  // The desk's Context pane reads the thread's timeline from the server; this one answers from the alerts and revisits
+  // The desk's centre reads the thread's timeline from the server; this one answers from the alerts and revisits
   // above, as GET /copilot/desk/{id}/timeline would (its composition is tests/test_copilot_desk_context.py).
   await page.route(`**/copilot/desk/${INV}/timeline`, (route) => route.fulfill({ json: { state: "ok", symbol: "NBIS", unavailable: [],
     recent_days: 7, count: 0, rows: [
@@ -76,12 +76,12 @@ async function lab(page: Page, server: Server, { alertsSupported = true, url = "
   await page.goto(url);
 }
 
-/** The Context pane's Timeline tab, opened. */
+/** The centre's Timeline, under the open thread's chart, unfolded. */
 async function timeline(page: Page) {
-  await page.getByRole("button", { name: "Context pane" }).click();
-  const pane = page.getByRole("complementary", { name: "Context" });
-  await pane.getByRole("tab", { name: "Timeline" }).click();
-  return pane.getByRole("list", { name: "Timeline" });
+  const centre = page.getByRole("region", { name: "Chart and today" });
+  const fold = centre.getByRole("button", { name: /^Timeline/ });
+  if (await fold.getAttribute("aria-expanded") !== "true") await fold.click();
+  return centre.getByRole("list", { name: "Timeline" });
 }
 
 async function aboutNbis(page: Page) { // the desk starts across everything
