@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 export const TICKET_EVENT = "tradejournal:open-ticket";
 const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
 const READ_MS = 60_000;
+const STALE_S = 15 * 60;  // the server's QUOTE_STALE_S
 
 /** Opens a saved plan's ticket: on the desk the Ticket tab takes it; anywhere else the desk opens on it. */
 export function openTicket(investigationId: string) {
@@ -183,6 +184,11 @@ function TicketView({ investigationId, onClose, onPlaced }: { investigationId: s
   const [limit, setLimit] = useState("");
   const [qty, setQty] = useState("");
   const [setup, setSetup] = useState<SetupRecord | null>(null);
+  const [reload, setReload] = useState(0);
+  const [seeded, setSeeded] = useState("");  // the limit as the quote set it, so an ageing quote can take it back
+  // The server judges the quote's age once; an open ticket keeps judging it on this clock.
+  const [nowS, setNowS] = useState(() => Date.now() / 1000);
+  useEffect(() => { const timer = setInterval(() => setNowS(Date.now() / 1000), 30_000); return () => clearInterval(timer); }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -190,11 +196,15 @@ function TicketView({ investigationId, onClose, onPlaced }: { investigationId: s
     read<Ticket>(`/copilot/tickets/${encodeURIComponent(investigationId)}${query}`, controller.signal).then(found => {
       setTicket(found); setError(null);
       setAccount(was => was ?? found.account);
-      setLimit(found.limit !== null ? found.limit.toFixed(2) : "");
+      const mid = found.limit !== null ? found.limit.toFixed(2) : "";
+      setLimit(mid); setSeeded(mid);
       setQty(was => was || (found.contracts ? String(found.contracts) : ""));
     }).catch(e => { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "The ticket could not be read."); });
     return () => controller.abort();
-  }, [investigationId, pick]);
+  }, [investigationId, pick, reload]);
+
+  const ageing = !!ticket?.quote && ticket.quote.state === "ok" && ticket.quote.as_of != null && nowS - ticket.quote.as_of > STALE_S;
+  useEffect(() => { if (ageing && seeded) { setLimit(was => (was === seeded ? "" : was)); setSeeded(""); } }, [ageing, seeded]); // eslint-disable-line react-hooks/set-state-in-effect -- the quote aged on the clock
 
   const symbol = ticket?.symbol;
   useEffect(() => {
@@ -282,7 +292,8 @@ function TicketView({ investigationId, onClose, onPlaced }: { investigationId: s
   const spot = ticket.underlying?.state === "ok" ? ticket.underlying.last ?? null : null;
   const f = ticketFigures(k.type, k.strike, limitN, qtyN, k.multiplier, spot, ticket.expected_move_pct);
   const premium = premiumLine(setup, f.cost);
-  const fresh = q?.state === "ok";
+  const aged = q?.state === "ok" && q.as_of != null && nowS - q.as_of > STALE_S;
+  const fresh = q?.state === "ok" && !aged;
   const all = copyAllText({ symbol: ticket.symbol, type: k.type, expiry: k.expiry, strike: k.strike, limit: limitN !== null ? limitN.toFixed(2) : "", contracts: qtyN ? String(qtyN) : "" });
   const field = "w-24 rounded border bg-background px-2 py-1.5 text-base tabular-nums sm:text-sm";
   return (
@@ -293,13 +304,14 @@ function TicketView({ investigationId, onClose, onPlaced }: { investigationId: s
         <Row name="Contract" copy={<CopyButton text={k.label} label="contract" />}>
           <span className="font-mono tabular-nums">{k.label}</span>
           {k.source === "picked" && <span className="block text-xs text-muted-foreground">Your pick from the chain</span>}
+          {k.source === "plan" && ticket.plan_contract_words && <span className="block text-xs text-muted-foreground">Your plan says: {ticket.plan_contract_words}</span>}
         </Row>
         <Row name="Quantity" copy={<CopyButton text={qtyN ? String(qtyN) : ""} label="quantity" disabled={!qtyN} />}>
           <input aria-label="Quantity in contracts" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/[^\d]/g, "").slice(0, 4))} placeholder="set it" className={field} />
           <span className="block text-xs text-muted-foreground">{ticket.size.text ? `Plan's size: ${ticket.size.text}` : "Your plan gives no size."}</span>
         </Row>
         <Row name="Limit price" copy={<CopyButton text={limitN !== null ? limitN.toFixed(2) : ""} label="limit price" disabled={limitN === null} />}>
-          <input aria-label="Limit price per share" inputMode="decimal" value={limit} onChange={e => setLimit(e.target.value.replace(/[^\d.]/g, "").slice(0, 10))} placeholder="set it" className={field} />
+          <input aria-label="Limit price per share" inputMode="decimal" value={limit} onChange={e => setLimit(e.target.value.replace(/[^\d.]/g, "").replace(/^(\d{0,6}(?:\.\d{0,2})?).*$/, "$1"))} placeholder="set it" className={field} />
           <span className="block text-xs text-muted-foreground">{fresh ? `The mid as of ${clock(q!.as_of)}` : "No fresh quote: set it yourself."}</span>
         </Row>
         <Row name="Cost"><span className="tabular-nums">{f.cost !== null ? usd(f.cost) : "—"}</span></Row>
@@ -322,7 +334,10 @@ function TicketView({ investigationId, onClose, onPlaced }: { investigationId: s
           {fresh ? (
             <span data-testid="ticket-quote" className="text-xs tabular-nums">Bid {q!.bid!.toFixed(2)} · Ask {q!.ask!.toFixed(2)} · Spread ${q!.spread!.toFixed(2)}{q!.spread_pct != null ? ` (${q!.spread_pct}% of the mid)` : ""} · as of {clock(q!.as_of)}</span>
           ) : (
-            <span data-testid="ticket-quote" className="text-xs text-amber-300">{q?.state === "stale" ? `Quote stale (last ${clock(q.as_of)}): ${q.reason}` : `No quote: ${q?.reason ?? "the chain could not be read."}`}</span>
+            <span data-testid="ticket-quote" className="text-xs text-amber-300">
+              {aged ? `Quote stale (last ${clock(q!.as_of)}): it is now older than 15 minutes.` : q?.state === "stale" ? `Quote stale (last ${clock(q.as_of)}): ${q.reason}` : `No quote: ${q?.reason ?? "the chain could not be read."}`}
+              {" "}<button type="button" onClick={() => setReload(r => r + 1)} className="text-foreground underline underline-offset-2">Read the quote again</button>
+            </span>
           )}
         </Row>
       </div>

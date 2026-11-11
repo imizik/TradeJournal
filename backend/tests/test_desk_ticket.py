@@ -2,6 +2,7 @@
 saved plan. Only a saved, armed, not-entered plan has a ticket; the figures are arithmetic on the quote; a stale or
 missing quote carries no number; nothing here places or sends anything. No network."""
 
+import dataclasses
 from datetime import UTC, date, datetime, timedelta
 import inspect
 from pathlib import Path
@@ -127,6 +128,23 @@ def test_an_entered_plan_has_no_ticket_and_leaves_the_list(engine):
         assert desk_ticket.armed(db) == []
 
 
+def test_an_unlinked_fill_after_the_plan_counts_as_entered(engine):
+    from app.models import Fill
+    from app.routers.fills import _rebuild_trades
+    plan(engine)
+    with Session(engine) as db:  # bought 45 minutes after the plan, never linked to it
+        db.add(Fill(id=UUID(int=600), account_id=ROTH, ticker="NBIS", instrument_type="option", side="buy_to_open", contracts=1,
+                    price=320, executed_at=datetime(2026, 10, 21, 10, 45), raw_email_id="gmail:600", option_type="call", strike=100,
+                    expiration=EXPIRY))
+        db.commit()
+        _rebuild_trades(db, "test")
+        db.commit()
+        assert desk_ticket.armed(db) == []
+    with pytest.raises(desk_ticket.TicketError) as entered:
+        ticket(engine, chain_read=chain_read(contract()))
+    assert entered.value.code == "entered"
+
+
 def test_the_list_is_newest_first_and_needs_the_capture(engine):
     plan(engine, NBIS, "NBIS", minute=0, client_id="a")
     plan(engine, CRWV, "CRWV", minute=30, client_id="b")
@@ -189,6 +207,13 @@ def test_the_captures_own_contract_and_quantity_win_over_the_words(engine):
     ("100C Nov 13", (100.0, date(2026, 11, 13), "call")),
     ("NBIS 11/13/26 92.5 put", (92.5, date(2026, 11, 13), "put")),
     ("Jan 15 2027 $120 calls", (120.0, date(2027, 1, 15), "call")),
+    ("Nov 14 '26 102.5C", (102.5, date(2026, 11, 14), "call")),
+    ("Nov 14 95 calls", (95.0, date(2026, 11, 14), "call")),  # a two-digit strike after the day is not a year
+    ("SOFI Nov 21 30 calls", (30.0, date(2026, 11, 21), "call")),
+    ("Nov 21 105-110 call spread", None),  # a spread is not one long call
+    ("Nov 21 105/110C call spread", None),
+    ("Nov 21 105/110C", None),
+    ("105C, a decent 2 week hold", None),  # "decent 2" is not a date
     ("a 100 strike next week", None),  # no type, no date: not stated plainly
     ("100C or 105C Nov 13", None),  # two strikes: not one contract
     ("calls", None),
@@ -231,6 +256,19 @@ def test_a_stale_contract_quote_says_so_and_shows_no_number(engine):
     # An old chain read is stale too, however fresh the quote times inside it.
     old = ticket(engine, chain_read=chain_read(contract(), fetched=NOW - 3600))
     assert old["quote"]["state"] == "stale" and "mid" not in old["quote"]
+
+
+def test_a_stale_bid_is_stale_however_fresh_the_ask(engine):
+    plan(engine)
+    old_bid = dataclasses.replace(contract(), bid_time=datetime.fromtimestamp(NOW - 3 * 3600, UTC))
+    found = ticket(engine, chain_read=chain_read(old_bid))
+    assert found["quote"]["state"] == "stale" and "mid" not in found["quote"] and found["limit"] is None
+    no_time = dataclasses.replace(contract(), ask_time=None)  # a side with no time is not fresh either
+    assert ticket(engine, chain_read=chain_read(no_time))["quote"]["state"] == "stale"
+
+
+def test_a_size_range_is_not_one_count():
+    assert desk_ticket.read_size("Size: 1-2 contracts; risk $500.", None) == {"contracts": None, "risk_usd": 500.0, "text": "1-2 contracts; risk $500"}
 
 
 def test_a_missing_quote_says_so(engine):

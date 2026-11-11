@@ -1133,20 +1133,25 @@ placed, previewed or staged, no broker API or Robinhood connection is called, an
 that nothing in it places or sends anything.
 
 - **Only a saved plan has a ticket:** a confirmed plan on the Plans board with its pre-trade plan capture (a plan card's
-  Confirm, a Radar setup's Plan it, a checked call's plan), still armed and not yet entered. Anything else (no capture,
+  Confirm, a Radar setup's Plan it, a checked call's plan), still armed and not yet entered (no fill linked to it and no
+  open trade in the symbol opened since the plan, linked or not). Anything else (no capture,
   an open position, a feed item, a chat message) gets 404 or 409. It opens from the Ticket tab's list of those plans,
   newest first; **Open its ticket** on a confirmed plan card and on the plan thread's header; and the ticket icon on a
   book row whose ticker has such a plan. With none, the tab says so and offers **Plan a trade**.
 - **Contract:** the capture's own strike and expiry, else the plan's "Contract: …" words when they state one strike,
-  one type and one date plainly ("NBIS 11/14 105C", "Nov 14 '26 105C"); anything vaguer is not guessed. Then the tab
+  one type and one date plainly ("NBIS 11/14 105C", "Nov 14 '26 105C"; a year only as "'26" or four digits, so
+  "Nov 21 30 calls" is the 30 strike); a spread, a strike range or anything vaguer is not guessed, and the plan's own
+  words show under the contract. Then the tab
   offers three real contracts from the option-candidates read (the expiry first at or after the horizon: a pending
   time stop's day, else the symbol's horizon) with the premium a contract, spread, break-even move and the expiry's
   expected move; none is picked for him. A long call or put only; any other plan says so.
 - **Quantity** comes from the capture, else the plan's size note (a contract count, else "risk $X" at the default
   limit, rounded down); otherwise blank. **Limit** defaults to the contract's mid, only from a fresh quote, and is
   editable; cost, the most he can lose (the premium) and break-even with the move it needs follow what he types.
-- **Quotes:** every figure carries its quote time. A bid or ask older than 15 minutes, or a chain or price read older
-  than 5, reads **stale** with no number (and no default limit); no usable bid and ask reads **missing**. Fixture mode
+- **Quotes:** every figure carries its quote time. A bid or ask older than 15 minutes (or with no time), or a chain or
+  price read older than 5, reads **stale** with no number (and no default limit); an open ticket keeps judging the
+  quote's age and turns stale on screen (taking back the default limit unless he typed his own), with **Read the quote
+  again**; no usable bid and ask reads **missing**. Fixture mode
   shows the copilot's simulated NBIS chain, labelled; replay shows no ticket.
 - **Your record** is the plan card's setup lines (`SetupRecordLines`) and the premium against his usual size.
 - **Accounts:** the plan's journal account selected, then the Roth IRA and the MCP account, by journal label and the

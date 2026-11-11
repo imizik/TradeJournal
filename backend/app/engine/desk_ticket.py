@@ -75,7 +75,12 @@ def contracts_for_risk(risk_usd: float | None, limit: float | None, multiplier: 
 
 _STRIKE = re.compile(r"\$?(\d+(?:\.\d+)?)\s?(C|P|calls?|puts?)\b", re.I)
 _SLASH = re.compile(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{4}|\d{2}))?\b")
-_MONTH = re.compile(r"\b(" + "|".join(MONTHS) + r")[a-z]*\.?\s+(\d{1,2})\b(?:,?\s+'?(\d{4}|\d{2})\b)?", re.I)
+_MONTH_WORDS = r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+# A month word as itself, the day, and a year only when it is marked as one: "'26" or a four-digit year.
+_MONTH = re.compile(r"\b(" + _MONTH_WORDS + r")\.?\s+(\d{1,2})\b(?:\s*'(\d{2})\b|,?\s+(\d{4})\b)?", re.I)
+# More than one leg (a strike range, two strikes, a spread): not one contract.
+_LEGS = re.compile(r"\bspreads?\b|\bverticals?\b|\bstraddles?\b|\bstrangles?\b|\bcondors?\b|\bbutterfl(?:y|ies)\b|\brolls?\b"
+                   r"|\d(?:\.\d+)?\s*-\s*\$?\d|\b\d+(?:\.\d+)?\s*/\s*\d+(?:\.\d+)?\s*(?:C|P|calls?|puts?)\b", re.I)
 
 
 def _year(text: str | None, month: int, day: int, since: date) -> date | None:
@@ -92,11 +97,11 @@ def _year(text: str | None, month: int, day: int, since: date) -> date | None:
 def read_contract(text: str | None, since: date) -> tuple[float, date, str] | None:
     """``(strike, expiry, "call"|"put")`` when the plan's contract words state all three plainly ("NBIS 11/14 105C",
     "Nov 14 '26 105C", "100C Oct 24"); a missing year is the next such date on or after ``since``. None otherwise."""
-    if not text:
+    if not text or _LEGS.search(text):
         return None
     strikes = {(float(m.group(1)), "call" if m.group(2)[0].lower() == "c" else "put") for m in _STRIKE.finditer(text)}
     dates = {d for m in _SLASH.finditer(text) if (d := _year(m.group(3), int(m.group(1)), int(m.group(2)), since))}
-    dates |= {d for m in _MONTH.finditer(text) if (d := _year(m.group(3), MONTHS[m.group(1).lower()[:3]], int(m.group(2)), since))}
+    dates |= {d for m in _MONTH.finditer(text) if (d := _year(m.group(3) or m.group(4), MONTHS[m.group(1).lower()[:3]], int(m.group(2)), since))}
     if len(strikes) != 1 or len(dates) != 1:
         return None  # none, or more than one: not stated plainly
     (strike, kind), = strikes
@@ -113,7 +118,8 @@ def read_size(wording: str | None, quantity: float | None) -> dict:
     said = re.search(r"Size: (.+?)\.(?:\s|$)", wording or "")
     text = said.group(1).strip() if said else None
     count = int(quantity) if quantity and quantity > 0 and float(quantity).is_integer() else None
-    if count is None and text and (m := re.search(r"\b(\d+)\s+contracts?\b", text, re.I)):
+    if count is None and text and (m := re.search(r"(?<![\d.\-/])\b(\d+)\s+contracts?\b", text, re.I)) \
+            and not re.search(r"\d\s*(?:-|to|or)\s*\d+\s+contracts?\b", text, re.I):  # "1-2 contracts" is no one count
         count = int(m.group(1)) or None
     risk = None
     if text and (m := re.search(r"risk \$?([\d,]+(?:\.\d+)?)", text, re.I)):
@@ -169,9 +175,10 @@ def contract_quote(contract, fetched: float | None, now: float, simulated: bool)
     """The contract's bid, ask and mid with their quote time; ``stale`` or ``missing`` (with why) carries no number."""
     if contract is None:
         return {"state": "missing", "reason": "The option chain has no quote for this contract."}
-    stamps = [s for s in (_epoch(contract.bid_time), _epoch(contract.ask_time)) if s]
-    quoted = max(stamps) if stamps else fetched
-    base = {"as_of": quoted, "read_at": fetched, "simulated": simulated, "multiplier": contract.multiplier}
+    stamps = [_epoch(contract.bid_time), _epoch(contract.ask_time)]
+    # The older of bid and ask: both must be fresh, and a side with no time is not (``options_implied``'s rule).
+    quoted = None if None in stamps else min(stamps)
+    base = {"as_of": quoted if quoted is not None else (fetched if simulated else None), "read_at": fetched, "simulated": simulated, "multiplier": contract.multiplier}
     if contract.bid is None or contract.ask is None or not contract.ask > 0 or not 0 <= contract.bid <= contract.ask:
         return {**base, "state": "missing", "reason": "No usable bid and ask for this contract."}
     if not simulated and (quoted is None or fetched is None or now - quoted > QUOTE_STALE_S or now - fetched > READ_STALE_S):
@@ -201,7 +208,7 @@ def _live_chain(symbol: str, expiry: date) -> dict:
         return {**out, "issue": f"{symbol} is not an optionable symbol."}
     read = next((r for r in reads if r.value.expiration == expiry), None)
     if read is None:
-        return {**out, "issue": problem or f"{expiry:%b} {expiry.day} is not a listed {symbol} expiry."}
+        return {**out, "issue": problem or f"{expiry:%b} {expiry.day}, {expiry.year} is not a listed {symbol} expiry."}
     return {**out, "chain": read.value, "fetched": read.fetched, "issue": None}
 
 
@@ -229,10 +236,27 @@ def _no_quotes(symbols):
     return {}, None, None
 
 
+def _entered(db: Session, plans: list[dict]) -> set[str]:
+    """Plans whose symbol has an open trade opened since the plan, linked or not: the fill arrives by email, often
+    later than the linker's window, and a ticket is only for an entry not yet made. Webull stays out."""
+    from sqlalchemy import or_
+    from app.engine.chart_math import ET
+    from app.models import Account, Trade
+    if not plans:
+        return set()
+    trades = db.exec(select(Trade.ticker, Trade.opened_at).join(Account, Account.id == Trade.account_id)
+                     .where(Trade.status == "open", Trade.ticker.in_({p["symbol"] for p in plans}))
+                     .where(or_(Account.broker.is_(None), Account.broker != "webull"))).all()
+    wall = lambda moment: moment.replace(tzinfo=UTC).astimezone(ET).replace(tzinfo=None)  # noqa: E731 -- trades keep New York wall time
+    return {p["investigation_id"] for p in plans
+            if any(t == p["symbol"] and opened >= wall(p["since"]) for t, opened in trades)}
+
+
 def armed(db: Session) -> list[dict]:
     """The saved plans a ticket can open: on the board, armed, not yet entered, with a pre-trade plan; newest first."""
     board = copilot_plans.board(db, quotes=_no_quotes)["plans"]
-    saved = {p["investigation_id"] for p in copilot_plans._plans(db)[0] if p["capture"] is not None}
+    plans = copilot_plans._plans(db)[0]
+    saved = {p["investigation_id"] for p in plans if p["capture"] is not None} - _entered(db, plans)
     rows = [{"investigation_id": p["investigation_id"], "symbol": p["symbol"], "direction": p["direction"],
              "instrument": p["instrument"], "thesis": p["thesis"], "confirmed_at": p["confirmed_at"],
              "entry": p["entry"] and p["entry"]["price"], "invalidation": p["invalidation"] and p["invalidation"]["price"]}
@@ -246,7 +270,7 @@ def _plan(db: Session, investigation_id: str) -> tuple[dict, object]:
     plan = next((p for p in copilot_plans._plans(db)[0] if p["investigation_id"] == investigation_id), None)
     if row is None or plan is None or plan["capture"] is None:
         raise TicketError("no_plan", "There is no saved plan for this ticket. A ticket opens only from a saved plan.")
-    if row["position"] != "waiting":
+    if row["position"] != "waiting" or _entered(db, [plan]):
         raise TicketError("entered", "This plan's position is already open; its ticket is only for an entry not yet made.")
     return row, plan["capture"]
 
