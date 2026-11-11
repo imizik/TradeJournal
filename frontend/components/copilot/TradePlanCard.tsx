@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { confirmedElsewhere, createPlanAlert, freshQuote, getSymbolLoop, PLAN_CONFIRMED, previewTimeStop, rememberRisk, savedRisk, savePlanCapture, saveTimeStop, type DrawnPlan, type ExitLesson, type FreshQuote, type LevelHistory, type OptionCandidates, type OptionPick, type PlanConfirmed, type PlanLevel, type ProposalOutcome, type SetupRecord, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
 import { fetchSetup, newClientId, SIDE_LABEL, type CaptureOrigin, type CaptureSetup, type CaptureSide } from "@/lib/captures";
+import { openTicket } from "@/components/copilot/DeskTicket";
 import JoCaseAgainst from "@/components/copilot/JoCaseAgainst";
 import LastExitLine from "@/components/copilot/LastExitLine";
 import SetupRecordLines, { premiumLine } from "@/components/copilot/SetupRecordLines";
@@ -481,6 +482,9 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
         </div>
       )}
       {finished && <p role="status" className="text-xs text-emerald-300">Plan confirmed.</p>}
+      {investigationId && results.plan.state === "done" && side !== "buy_stock" && side !== "short_stock" && (
+        <button type="button" onClick={() => openTicket(investigationId)} className="inline-flex min-h-11 items-center rounded-md border px-3 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-8">Open its ticket</button>
+      )}
       {investigationId && (finished || saved) && <JoCaseAgainst investigationId={investigationId} proposalId={plan.id} />}
     </section>
   );

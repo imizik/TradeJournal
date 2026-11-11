@@ -9,7 +9,8 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { EyeOff } from "lucide-react";
+import { EyeOff, Ticket } from "lucide-react";
+import { openTicket, type TicketPlan } from "@/components/copilot/DeskTicket";
 import { NotFollowed } from "@/components/copilot/SessionTape";
 import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
 import { getExposure } from "@/lib/copilot";
@@ -174,9 +175,11 @@ const left = (expiry: string | null, day: string) => {
  * Selecting a row (``onSelect``) drives the centre and the copilot; its eye stops following the ticker (``onFollow``),
  * and those sit behind "N not followed" at the bottom.
  */
-export function Book({ rows, sparks, selected, selectedKey = null, day, read, onSelect, onFollow, children }: {
+export function Book({ rows, sparks, selected, selectedKey = null, day, read, onSelect, onFollow, tickets = null, children }: {
   rows: DeskThread[]; sparks: DeskSparks | null; selected: string | null; selectedKey?: string | null; day: string; read: boolean;
-  onSelect(row: DeskThread): void; onFollow(symbol: string, following: boolean): Promise<void>; children?: ReactNode;
+  onSelect(row: DeskThread): void; onFollow(symbol: string, following: boolean): Promise<void>;
+  /** Saved plans armed and not yet entered: a row whose ticker has one opens its ticket (the newest). */
+  tickets?: TicketPlan[] | null; children?: ReactNode;
 }) {
   const [failed, setFailed] = useState<string | null>(null);
   const held = positionRows(rows);
@@ -222,6 +225,16 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, on
                     {book?.pct != null && <span className="block text-[11px]">{signedPct(book.pct)}</span>}
                   </span>
                 </button>
+                {(() => {
+                  const plan = tickets?.find(t => t.symbol === row.symbol);
+                  return plan && (
+                    <button type="button" onClick={() => openTicket(plan.investigation_id)} aria-label={`Open the ticket for your saved ${row.symbol} plan`}
+                      title="Open the ticket for your saved plan (copies; never sends)"
+                      className="flex shrink-0 items-center px-1.5 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground">
+                      <Ticket size={13} aria-hidden />
+                    </button>
+                  );
+                })()}
                 {row.symbol && (
                   <button type="button" onClick={() => follow(row.symbol!, false)} aria-label={`Hide ${row.symbol}: not following`}
                     title="Not following: hide this ticker from the desk and every count (Show again undoes it)"
