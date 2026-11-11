@@ -566,8 +566,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   `POST /copilot/desk/robinhood/refresh`, no input) or, signed out, expired or stale, says so; then the book is exactly
   the journal's. Off, nothing changes and no line shows. Not followed tickers stay hidden. Display only: nothing is
   written to the journal and nothing from Robinhood reaches the copilot.
-- **Centre.** A tab strip, **Chart** first, **Feed** and **Check a call** (§ Check a call; Ticket joins it in a
-  later stage; no tab shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
+- **Centre.** A tab strip, **Chart** first, **Feed**, **Check a call** (§ Check a call) and **Ticket** (see
+  [Ticket](#ticket); no tab shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
   position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's
   fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D, with **Open in Charts →**; then, for a held
   position, tiles: Open P&L, To your stop, vs SPY today (the stock's change today less SPY's, from the sparks read),
@@ -1144,6 +1144,45 @@ the cleaned conversation and the 375 px composer) and
 `frontend/e2e/copilot-desk-context.spec.ts` (the centre's chart and timeline: the plan's lines, the marks, the time
 stop, the timeframe buttons and their memory, the no-chart-data state, 375 px, the market chart and This week).
 
+### Ticket
+
+**The Ticket copies; it never sends.** It fills in what the owner types into the Robinhood app by hand. No order is
+placed, previewed or staged, no broker API or Robinhood connection is called, and its two routes only read
+(`GET /copilot/tickets`, `GET /copilot/tickets/{investigation_id}`; `app/routers/copilot_ticket.py`,
+`app/engine/desk_ticket.py`, `frontend/components/copilot/DeskTicket.tsx`). `backend/tests/test_desk_ticket.py` checks
+that nothing in it places or sends anything.
+
+- **Only a saved plan has a ticket:** a confirmed plan on the Plans board with its pre-trade plan capture (a plan card's
+  Confirm, a Radar setup's Plan it, a checked call's plan), still armed and not yet entered (no fill linked to it and no
+  open trade in the symbol opened since the plan, linked or not). Anything else (no capture,
+  an open position, a feed item, a chat message) gets 404 or 409. It opens from the Ticket tab's list of those plans,
+  newest first; **Open its ticket** on a confirmed plan card and on the plan thread's header; and the ticket icon on a
+  book row whose ticker has such a plan. With none, the tab says so and offers **Plan a trade**.
+- **Contract:** the capture's own strike and expiry, else the plan's "Contract: …" words when they state one strike,
+  one type and one date plainly ("NBIS 11/14 105C", "Nov 14 '26 105C"; a year only as "'26" or four digits, so
+  "Nov 21 30 calls" is the 30 strike); a spread, a strike range or anything vaguer is not guessed, and the plan's own
+  words show under the contract. Then the tab
+  offers three real contracts from the option-candidates read (the expiry first at or after the horizon: a pending
+  time stop's day, else the symbol's horizon) with the premium a contract, spread, break-even move and the expiry's
+  expected move; none is picked for him. A long call or put only; any other plan says so.
+- **Quantity** comes from the capture, else the plan's size note (a contract count, else "risk $X" at the default
+  limit, rounded down); otherwise blank. **Limit** defaults to the contract's mid, only from a fresh quote, and is
+  editable; cost, the most he can lose (the premium) and break-even with the move it needs follow what he types.
+- **Quotes:** every figure carries its quote time. A bid or ask older than 15 minutes (or with no time), or a chain or
+  price read older than 5, reads **stale** with no number (and no default limit); an open ticket keeps judging the
+  quote's age and turns stale on screen (taking back the default limit unless he typed his own), with **Read the quote
+  again**; no usable bid and ask reads **missing**. Fixture mode
+  shows the copilot's simulated NBIS chain, labelled; replay shows no ticket.
+- **Your record** is the plan card's setup lines (`SetupRecordLines`) and the premium against his usual size.
+- **Accounts:** the plan's journal account selected, then the Roth IRA and the MCP account, by journal label and the
+  last four digits only (Webull stays out; an MCP account not yet in the journal shows as "MCP"). Roth IRA: he places
+  it himself in Robinhood. MCP: **Send to Robinhood for your approval** is drawn disabled with the reason (Robinhood
+  has not given his account the approvals setting, and the account is empty); there is no sending code behind it.
+- Each of contract, quantity and limit has **Copy**; **Copy all for Robinhood** puts them on the clipboard in the order
+  Robinhood's option order screen asks for them (symbol, Buy · Call/Put, expiration, strike, limit price, contracts),
+  with a fallback copy where the page has no clipboard API. **I placed it** records nothing (the fill arrives by
+  Robinhood's email as today) and returns to the symbol's chart; **Not now** closes the ticket.
+
 ## Check a call
 
 Isaac shares a trade call from his Discord group and gets one card back saying
@@ -1196,7 +1235,7 @@ it in the desk's **Check a call** tab (the centre tab strip).
   are inputs he can set; they join the Plan it text as "my stop 664"), the
   card, Plan it and Pass, then **Checked today** (from the desk and Telegram:
   time, contract, verdict, the underlying's price then, passed or plan saved).
-  Only a saved plan counts as planned; nothing further (a ticket) exists yet.
+  Only a saved plan counts as planned; its ticket then opens from the saved plan ([Ticket](#ticket)).
 - **The log.** `call_check` table, one row per check: when (UTC and its New
   York day), the source, the raw text, the reading, the verdict and card, the
   underlying's price and the contract's quote at that moment (`quote_json`),
