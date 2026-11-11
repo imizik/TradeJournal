@@ -46,7 +46,7 @@ CLIP_MS = 30_000
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9./-]{0,14}$")
 CLIENT_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 # What prompted a plan (docs/copilot-lab.md § Origin). A plan saved without one was the owner's own idea.
-ORIGIN_KINDS = ("radar_event", "thesis_watch", "premarket_prep", "chart", "dashboard", "copilot", "manual")
+ORIGIN_KINDS = ("radar_event", "thesis_watch", "premarket_prep", "chart", "dashboard", "copilot", "manual", "checked_call")
 ORIGIN_REF = re.compile(r"^[A-Za-z0-9:._-]{1,80}$")
 ORIGIN_TEXT_MAX = 300
 

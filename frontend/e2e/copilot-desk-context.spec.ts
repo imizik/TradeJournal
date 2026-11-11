@@ -74,7 +74,7 @@ test("the centre opens on the open thread's chart beside the conversation, and i
   const { reads, pane } = await lab(page);
   await expect(page.getByRole("region", { name: "Conversation" }).getByText("It held the open; the group leads.")).toBeVisible();
   await expect(pane.getByRole("tab", { name: "Chart" })).toHaveAttribute("aria-selected", "true");
-  await expect(pane.getByRole("tab")).toHaveText(["Chart", "Feed"]); // no tab for what does not exist yet
+  await expect(pane.getByRole("tab")).toHaveText(["Chart", "Feed", "Check a call"]); // no tab for what does not exist yet
   await expect(pane.getByTestId("desk-chart")).toContainText("NBIS");
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
   await expect(pane.getByRole("img", { name: /NBIS today: minute bars/ })).toBeVisible();

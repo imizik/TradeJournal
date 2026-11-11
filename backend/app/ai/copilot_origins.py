@@ -19,7 +19,7 @@ TEXT = 240
 LABELS = {
     "radar_event": "a Radar event", "thesis_watch": "a thesis-watch ping", "premarket_prep": "the pre-market prep",
     "chart": "Plan a trade on the chart", "dashboard": "Plan a trade on the dashboard", "copilot": "a Copilot Lab conversation",
-    "manual": "the owner's own idea",
+    "manual": "the owner's own idea", "checked_call": "a call shared from Discord and checked",
 }
 UUIDS = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 

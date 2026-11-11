@@ -75,7 +75,8 @@ def test_each_job_is_offered_only_its_tools_in_a_stable_order():
     for job in JOBS:
         names = [t["name"] for t in copilot_prompt.TOOLS[job]]
         assert names == [n for n in order if n in names], job  # TOOLS order: the cached prefix never reshuffles
-    assert len(copilot_prompt.TOOLS["desk"]) == len(copilot_tools.TOOLS) == len(copilot_prompt.TOOLS["telegram"])
+    every = len(copilot_tools.TOOLS) - len(copilot_prompt.JOB_ONLY)  # the check's facts tool is its own job's alone
+    assert len(copilot_prompt.TOOLS["desk"]) == every == len(copilot_prompt.TOOLS["telegram"])
     assert set(n["name"] for n in copilot_prompt.TOOLS["prep"]) == set(copilot_prompt.PREP_TOOLS)
     assert "propose_plan" not in {t["name"] for t in copilot_prompt.TOOLS["prep"]} | {t["name"] for t in copilot_prompt.TOOLS["companion"]}
     assert {"get_week_review", "propose_plan"} <= {t["name"] for t in copilot_prompt.TOOLS["week_review"]}
@@ -155,8 +156,8 @@ def test_the_three_book_reads_are_offered_only_where_a_job_needs_them():
     reads = {"get_positions", "get_trades", "get_owner_context", "get_memories"}
     assert {job: reads & n for job, n in names.items()} == {
         "desk": {"get_positions", "get_trades", "get_owner_context"}, "telegram": {"get_positions", "get_trades", "get_owner_context"},
-        "prep": set(), "companion": {"get_trades"}, "week_review": {"get_trades"}}
-    assert len(copilot_tools.TOOLS) == 25
+        "prep": set(), "companion": {"get_trades"}, "week_review": {"get_trades"}, "check_call": {"get_trades"}}
+    assert len(copilot_tools.TOOLS) == 26  # 25 and the check job's own get_call_facts
 
 
 @pytest.mark.parametrize("job,deep", [("desk", False), ("telegram", False), ("prep", False), ("companion", True), ("week_review", True)])

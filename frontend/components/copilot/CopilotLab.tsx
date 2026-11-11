@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ChartCandlestick, Menu, MessageCircle, MessagesSquare, PanelLeft, Plus, Search, X } from "lucide-react";
 import { openNavMenu, useFoldedNav } from "@/components/Nav";
+import CheckACall from "@/components/copilot/CheckACall";
 import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
 import CopilotPanel, { rememberedThread, type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
@@ -105,9 +106,9 @@ export default function CopilotLab({ link = null, close = false, daily = false }
   // or the Feed.
   const [picked, setPicked] = useState<string | null>(null);
   const [pickedKey, setPickedKey] = useState<string | null>(null);
-  const [centreTab, setCentreTab] = useState<"chart" | "feed">("chart");
-  // The tab survives a link that reopens the desk (a feed item's Ask or Plan it) for this browser tab.
-  useEffect(() => { try { if (window.sessionStorage.getItem(CENTRE_KEY) === "feed") setCentreTab("feed"); } catch { /* chart */ } }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+  const [centreTab, setCentreTab] = useState<"chart" | "feed" | "check">("chart");
+  // The tab survives a link that reopens the desk (a feed item's Ask or Plan it, a checked call's Plan it) for this browser tab.
+  useEffect(() => { try { const kept = window.sessionStorage.getItem(CENTRE_KEY); if (kept === "feed" || kept === "check") setCentreTab(kept); } catch { /* chart */ } }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
   useEffect(() => { try { window.sessionStorage.setItem(CENTRE_KEY, centreTab); } catch { /* this view only */ } }, [centreTab]);
   const feed = useDeskFeed(on);
   const feedNew = useFeedNew(feed.data, on && centreTab === "feed");
@@ -539,9 +540,9 @@ export default function CopilotLab({ link = null, close = false, daily = false }
         )}
         {on && (
           <section id="desk-centre" aria-label="Chart and feed" className={styles.centre}>
-            {/* Chart first; Check a call and Ticket join this strip when they exist. */}
+            {/* Chart first; Ticket joins this strip when it exists. */}
             <div role="tablist" aria-label="Centre" className="flex gap-1 border-b px-2 pt-1.5">
-              {([["chart", "Chart"], ["feed", "Feed"]] as const).map(([id, label]) => (
+              {([["chart", "Chart"], ["feed", "Feed"], ["check", "Check a call"]] as const).map(([id, label]) => (
                 <button key={id} type="button" role="tab" aria-selected={centreTab === id} onClick={() => setCentreTab(id)}
                   className={cn("-mb-px min-h-11 border-b-2 px-2.5 text-sm sm:min-h-9", centreTab === id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
                   {label}
@@ -549,8 +550,9 @@ export default function CopilotLab({ link = null, close = false, daily = false }
                 </button>
               ))}
             </div>
-            <div role="tabpanel" aria-label={centreTab === "chart" ? "Chart" : "Feed"} className="p-3">
-              {centreTab === "chart"
+            <div role="tabpanel" aria-label={centreTab === "chart" ? "Chart" : centreTab === "check" ? "Check a call" : "Feed"} className="p-3">
+              {centreTab === "check" ? <CheckACall />
+                : centreTab === "chart"
                 ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} day={today} />
                 : <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed}
                   onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} onWhatMatters={() => actions.ask(WHAT_MATTERS_PROMPT)} />}

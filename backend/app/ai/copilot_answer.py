@@ -68,7 +68,12 @@ WEEK_SHAPE = (
     "[Answer shape: the Verdict line, then the review in short one-fact lines with their counts, in the order the "
     "instructions give; take the room the review needs and no more. No closing note or repeated card fields.]"
 )
-SHAPES = (ANSWER_SHAPE, TELEGRAM_SHAPE, PREP_SHAPE, COMPANION_SHAPE, WEEK_SHAPE)
+CHECK_SHAPE = (
+    "[Answer shape: a call check: the Reading line (\"?\" for anything not stated), the Verdict line (Pass, Wait or "
+    "Draft; Unclear only when no ticker can be read), three or four Tile lines (label | value), Against, Changes if, and "
+    "Also only for other calls in the message. Nothing else: no preamble, bullets, markdown or closing note.]"
+)
+SHAPES = (ANSWER_SHAPE, TELEGRAM_SHAPE, PREP_SHAPE, COMPANION_SHAPE, WEEK_SHAPE, CHECK_SHAPE)
 
 
 def without_shape(content: str) -> str:

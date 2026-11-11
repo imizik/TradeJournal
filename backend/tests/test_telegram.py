@@ -882,7 +882,8 @@ def scripted_turn(monkeypatch, seen):
 
     async def scripted(history, symbol, *args, images=None, **kwargs):
         seen.append({"question": history[-1]["content"], "images": images})
-        yield {"type": "text", "delta": "Verdict: Matches."}
+        # A screenshot with no caption is first checked as a call; this one holds none.
+        yield {"type": "text", "delta": "Not a call" if history[-1]["content"].startswith("Check this call.") else "Verdict: Matches."}
         yield {"type": "done"}
     monkeypatch.setattr(copilot_spend, "recorded_turn", scripted)
 
@@ -927,7 +928,9 @@ def test_a_photo_without_a_caption_asks_the_reconcile_question_and_an_image_docu
         await asyncio.gather(*replies._tasks)
 
     run(go())
-    assert seen[0]["question"] == telegram_replies.RECONCILE_QUESTION and len(seen[0]["images"]) == 1
+    # Checked as a call first, with the image; the model saw no call, so it is the broker screenshot.
+    assert seen[0]["question"].startswith("Check this call.") and len(seen[0]["images"]) == 1
+    assert seen[1]["question"] == telegram_replies.RECONCILE_QUESTION and len(seen[1]["images"]) == 1
     assert list(image_store.glob("*.jpg")) == []
 
 
@@ -1292,3 +1295,143 @@ def test_a_why_or_reply_on_any_ping_resolves_the_symbol_it_is_about(case):
         assert telegram_replies.ping_symbol(db, ping("SPY dropping, IV rising", "ask:nudge")) == "SPY"
         assert telegram_replies.ping_symbol(db, ping("AI software ahead of SPY: 3 of 4 up", "ask:radar")) is None
         assert telegram_replies.ping_symbol(db, ping("Radar digest: NOW reports, NBIS +4%", "ask:radar")) == "NBIS"
+
+
+# ------------------------------------------------------------------ check a call (engine/call_check.py)
+
+
+def test_a_shared_call_gets_the_check_card_with_plan_it_pass_and_why(case, monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+    from app.engine import call_check
+    from app.models import CallCheck
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    monkeypatch.setenv("ALERT_APP_URL", "https://journal.example")
+    bot = Bot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+
+    async def go():
+        assert await replies.handle(said("entry: odte qqq 660 p")) == "check"
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    card = bot.named("sendMessage")[-1]
+    assert card["reply_parameters"]["message_id"] == 61
+    lines = card["text"].split("\n")
+    assert lines[0].startswith("Verdict: ") and lines[1].startswith("Read: QQQ · ")
+    assert "put" in lines[1] and "entry price: not stated" in lines[1] and "stop: not stated" in lines[1]
+    plan, passed, why = card["reply_markup"]["inline_keyboard"][0]
+    assert plan["text"] == "Plan it" and "callback_data" not in plan
+    link = urlsplit(plan["url"])
+    assert link.netloc == "journal.example" and link.path == "/copilot-lab"
+    query = parse_qs(link.query)
+    with Session(db_engine) as db:
+        row = db.exec(select(CallCheck)).one()
+    assert query["symbol"] == ["QQQ"] and query["origin"] == [f"checked_call:{row.id}"]
+    assert query["context"][0].startswith("Plan a trade: QQQ 660 put")
+    assert row.source == "telegram" and row.underlying_price is not None
+    assert passed == {"text": "Pass", "callback_data": f"cc:{row.id.hex}:pass"} and why == {"text": "Why?", "callback_data": "ask:check"}
+
+    # Pass: recorded on the check, the card's buttons show it (Plan it goes; Why? stays).
+    keyboard = card["reply_markup"]["inline_keyboard"]
+    assert run(replies.handle(tap(passed["callback_data"], keyboard=keyboard, update_id=2))) == "cc"
+    assert bot.named("answerCallbackQuery")[-1]["text"] == "Passed. It stays in today's checked calls."
+    edited = bot.named("editMessageReplyMarkup")[-1]["reply_markup"]["inline_keyboard"]
+    assert edited == [[{"text": "✓ Passed", "callback_data": f"done:{row.id.hex}"}, why]]
+    with Session(db_engine) as db:
+        assert db.get(CallCheck, row.id).outcome == "passed"
+    assert call_check.classify("entry: odte qqq 660 p")[0] == "call"
+
+
+def test_an_ambiguous_message_is_answered_as_a_question_with_check_as_a_call(case, monkeypatch):
+    from app.models import CallCheck
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    monkeypatch.setattr(telegram_replies, "save_on_desk", lambda *a, **k: (str(uuid.UUID(int=1)), 1))
+    bot = Bot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+
+    async def go():
+        assert await replies.handle(said("Should I take NBIS 105c?")) == "ask"
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    answer = bot.named("sendMessage")[-1]
+    rating, row = answer["reply_markup"]["inline_keyboard"]
+    assert [b["text"] for b in rating] == ["Helped", "Didn't"]
+    assert row == [{"text": "Check as a call", "callback_data": "cc:q"}]  # its own row: rating the answer keeps it
+    with Session(db_engine) as db:
+        assert db.exec(select(CallCheck)).all() == []  # answered as a question, nothing checked
+
+    # The tap checks the message the answer replied to (Telegram sends it with the tap).
+    update = tap("cc:q", keyboard=[rating, row], update_id=2)
+    update["callback_query"]["message"]["reply_to_message"] = {"message_id": 61, "text": "Should I take NBIS 105c?"}
+
+    async def check():
+        assert await replies.handle(update) == "cc"
+        await asyncio.gather(*replies._tasks)
+
+    run(check())
+    assert bot.named("editMessageReplyMarkup")[-1]["reply_markup"]["inline_keyboard"] == [
+        rating, [{"text": "✓ Checked (card below)", "callback_data": "done:q"}]]
+    card = bot.named("sendMessage")[-1]
+    assert card["text"].startswith("Verdict: ") and "Read: NBIS · " in card["text"] and card["reply_parameters"]["message_id"] == 61
+    with Session(db_engine) as db:
+        assert db.exec(select(CallCheck)).one().symbol == "NBIS"
+
+
+def test_a_reply_to_a_ping_that_looks_like_a_call_keeps_the_pings_context(case, monkeypatch):
+    from app.models import CallCheck
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    monkeypatch.setattr(telegram_replies, "save_on_desk", lambda *a, **k: (str(uuid.UUID(int=1)), 1))
+    asked = []
+    replies = telegram_replies.Replies(db_engine, call=Bot())
+
+    async def question_text(text, replied, images=None):
+        asked.append((text, replied["text"]))
+        return "ok"
+    monkeypatch.setattr(replies, "question_text", question_text)
+
+    async def go():
+        ping = {"message_id": 9, "text": "APLD 30C gave back half its gain"}
+        assert await replies.handle(said("adding 2 more at 1.05, stop 0.80", replied=ping)) == "ask"
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    assert asked == [("adding 2 more at 1.05, stop 0.80", "APLD 30C gave back half its gain")]
+    with Session(db_engine) as db:
+        assert db.exec(select(CallCheck)).all() == []
+
+
+def test_check_forces_a_check_and_check_alone_checks_the_message_replied_to(case, monkeypatch):
+    from app.models import CallCheck
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    bot = Bot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+
+    async def go():
+        assert await replies.handle(said("check AAPL")) == "check"
+        await asyncio.gather(*replies._tasks)
+        assert await replies.handle(said("check this", update_id=2, replied={"message_id": 9, "text": "i think AAPL $320 11/27 hits"})) == "check"
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    with Session(db_engine) as db:
+        assert [r.raw_text for r in db.exec(select(CallCheck).order_by(CallCheck.checked_at))] == ["AAPL", "i think AAPL $320 11/27 hits"]
+
+
+def test_a_message_with_no_ticker_gets_no_guess_and_no_buttons(case, monkeypatch):
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    bot = Bot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+
+    async def go():
+        assert await replies.handle(said("check: 11/14 calls going to rip 🚀")) == "check"
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    card = bot.named("sendMessage")[-1]
+    assert card["text"].startswith("Could not read a ticker") and "reply_markup" not in card

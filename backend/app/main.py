@@ -593,6 +593,8 @@ from app.routers import copilot_practice as copilot_practice_router  # owner-onl
 app.include_router(copilot_practice_router.router, prefix="/copilot", tags=["copilot lab"])
 from app.routers import copilot_desk as copilot_desk_router  # owner-only desk thread list
 app.include_router(copilot_desk_router.router, prefix="/copilot", tags=["copilot lab"])
+from app.routers import copilot_checks as copilot_checks_router  # owner-only Check a call (one bounded copilot turn each)
+app.include_router(copilot_checks_router.router, prefix="/copilot", tags=["copilot lab"])
 from app.routers import today as today_router  # owner-only Today screen; composes existing readers, read-only
 app.include_router(today_router.router, prefix="/today", tags=["today"])
 from app.routers import replay as replay_router  # owner-only Watch your day clips; read-only

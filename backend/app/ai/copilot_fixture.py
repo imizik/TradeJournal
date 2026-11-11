@@ -149,6 +149,10 @@ class FixtureEvidence:
                  "hold_minutes": 35, "status": "closed", "expired_worthless": False, "tags": ["chased"]}]
         return {"symbol": symbol, "state": "ok", "as_of": AT, "simulated": True, "trades": rows[:limit]}
 
+    def get_call_facts(self, symbol: str, **reading) -> dict:
+        from app.engine import call_check
+        return call_check.simulated_facts(symbol, **reading)
+
     def get_memories(self, limit: int = 5, symbol: str | None = None) -> dict:
         rows = [{"kind": "lesson", "symbol": None, "text": "Simulated: I chase green opens and give the gains back.", "saved_at": AT},
                 {"kind": "thesis", "symbol": "NBIS", "text": "Simulated: NBIS is a financing story until the debt settles.", "saved_at": AT}]

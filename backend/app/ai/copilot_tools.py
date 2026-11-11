@@ -293,6 +293,25 @@ TOOLS: list[dict] = [
                          "properties": {"symbol": {**_SYMBOL_SCHEMA, "description": "Optional underlying, default SPY"}}},
     },
     {
+        "name": "get_call_facts",
+        "description": "The facts for checking a trade call someone posted (engine/call_check.py), from what was read in "
+                       "it: the underlying now (last, day change, high and low, as-of); when expiry, strike and side are all "
+                       "known, that contract's bid, ask and mid with their as-of, days to expiry, cost per contract at the "
+                       "ask and, with `entry`, how far the mid is from the posted entry (past_entry when above it); distance "
+                       "to the strike, stop and target; the owner's usual opening option premium and the contract's cost "
+                       "against it; and the owner's own closed option trades like it: in the symbol, in the symbol on that "
+                       "side, and on that side with the same kind of expiry (0DTE, 1-7 days, longer), each as trades, how "
+                       "many ended up and net P&L. Quotes with as_of and journal counts, never a recommendation.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol"],
+                         "properties": {"symbol": _SYMBOL_SCHEMA,
+                                        "side": {"type": "string", "enum": ["call", "put"]},
+                                        "expiry": {"type": "string", "description": "YYYY-MM-DD"},
+                                        "strike": {"type": "number"},
+                                        "entry": {"type": "number", "description": "The posted entry price, as written"},
+                                        "stop": {"type": "number", "description": "The posted stop, as written"},
+                                        "target": {"type": "number", "description": "The posted target, as written"}}},
+    },
+    {
         "name": "propose_plan",
         "description": "Propose ONE concrete next step for the owner to confirm in the lab. It saves and activates "
                        "nothing: the owner sees a card and only their Confirm creates anything. kind=watch: a price "
@@ -565,6 +584,12 @@ def validate(name: str, args: Any) -> dict:
         return {"symbols": list(dict.fromkeys(_symbol(s) for s in symbols))}
     if name == "get_positions":
         return {}
+    if name == "get_call_facts":
+        from app.engine import call_check
+        try:
+            return call_check.facts_args(args)
+        except ValueError as exc:
+            raise ToolInputError(str(exc))
     if name == "get_trades":
         limit = args.get("limit", 5)
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 10:
@@ -982,6 +1007,10 @@ class LiveEvidence:
         from app.ai import copilot_book
         return copilot_book.trades(symbol, limit)
 
+    def get_call_facts(self, symbol: str, **reading) -> dict:
+        from app.engine import call_check
+        return call_check.live_facts(symbol, **reading)
+
     def owner_context(self, symbol: str | None, bounded: bool = True) -> dict:
         """The pack prepended to every turn (docs/copilot-lab.md § Owner context); unbounded for the lab's Open threads."""
         from app.ai import copilot_context
@@ -1046,6 +1075,7 @@ PROVENANCE = {
                    "recorded passes · Alpaca (Benzinga) / Polygon news · journal fills and phone pings (TradeJournal)", "fetched"),
     "get_positions": ("Journal open positions (fills) · Tradier marks", "fetched"),
     "get_trades": ("Journal closed trades (TradeJournal)", "saved"),
+    "get_call_facts": ("Tradier quote and option chain (Charts feed caches) · journal closed option trades (TradeJournal)", "fetched"),
     "get_owner_context": ("Owner context: journal positions, trades and exit habits · approved memories · day journal · "
                           "saved investigations and armed watches (TradeJournal)", "saved"),
     "owner_context": ("Owner context: journal positions, trades and exit habits · approved memories · day journal · "
