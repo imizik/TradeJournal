@@ -1155,13 +1155,16 @@ remaining-calls header runs low). It never loads reddit.com pages or the unauthe
 are counted in post titles against the app's known symbols (Radar's universe, his traded tickers, SPY/QQQ/SMH), each
 post once, by when it was posted; all-caps words that are not tickers (the brief scorecard's list plus the
 subreddit's own: YOLO, DD, CALLS, ALL, ON...) count only written as a cashtag (`$ON`). Thirty days of mentions are kept
-in `backend/data/chatter/reddit.json` (no table). Rows:
+in `backend/data/chatter/reddit.json` (no table). Only an error's type is logged or saved (an HTTP error's text could
+hold a request URL with the NYT key), and a failed read waits the full 15 minutes even when its state cannot be saved.
+Rows:
 
 - **Buzz**: a ticker named in at least 3 posts in the last hour and at least 3× its usual rate, where usual is the same
   New York hour on up to 5 recent weekdays the reader covered ("NBIS mentioned 6.2× its usual rate in the last hour";
   "usually none at this hour" when it was never named then). Until 3 such days exist, the raw count and "No usual yet."
-  Beside it, when the journal can compute one, his own record on entries made while that ticker was buzz: "Your
-  entries during a mention spike: 12 closed trades, 5 up, net −$1,240." At most five; the same tickers show as chips
+  Beside it, when the journal can compute one, his own record on entries made while the entered ticker was buzz (one
+  total across every ticker in the 30 days kept, not-followed tickers left out; Webull left out): "Your entries during a
+  mention spike: 12 closed trades, 5 up, net −$1,240." At most five; the same tickers show as chips
   (ticker and multiple) at the top of the filter, outlined when he holds the name. Its link is the subreddit's search
   for the ticker.
 - **Rising posts**: the top five rising posts (not pinned, not marked NSFW): title, points, comments, and a link to

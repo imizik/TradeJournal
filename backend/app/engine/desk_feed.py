@@ -344,7 +344,7 @@ def _chatter(db: Session, now: float, held: set[str], blocked: set[str]) -> dict
     if not (chatter.reddit_enabled() or chatter.nyt_enabled()):
         return chatter.off()  # nothing set up: nothing read
     try:
-        trades = _spike_trades(db, now) if chatter.reddit_enabled() else []
+        trades = [t for t in _spike_trades(db, now) if t[0] not in blocked] if chatter.reddit_enabled() else []
         return chatter.view(trades, held, blocked, now)
     except Exception as exc:  # chatter failing leaves the feed alone
         log.warning("feed chatter unavailable: %s", type(exc).__name__)

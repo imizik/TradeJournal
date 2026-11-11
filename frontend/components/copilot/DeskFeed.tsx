@@ -114,6 +114,8 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, onWhatMat
   const chatter = data?.chatter ?? null;
   const chatterOn = (chatter?.items.length ?? 0) > 0;
   const filter: Filter = picked === "chatter" && !chatterOn ? "mine" : picked;
+  // Chatter gone (nothing to show this minute): back to Mine for good, so it never reopens without a tap.
+  useEffect(() => { if (picked === "chatter" && data && !chatterOn) setFilter("mine"); }, [picked, data, chatterOn]); // eslint-disable-line react-hooks/set-state-in-effect -- follows the feed's own read
   const items = useMemo(() => {
     if (filter === "chatter" && !symbol) return chatter?.items ?? [];
     const all = (data?.items ?? []).filter(i => !i.chatter);

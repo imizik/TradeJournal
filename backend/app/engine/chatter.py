@@ -369,6 +369,7 @@ class Chatter:
     def __init__(self, engine, calendar, *, clock=_time.time, root: Path | None = None, client_factory=None):
         self.engine, self.calendar, self.clock, self.root = engine, calendar, clock, root
         self.client_factory = client_factory or (lambda: httpx.Client(timeout=TIMEOUT))
+        self._failed: dict[str, float] = {}  # a failure whose state could not be saved
 
     def _market_day(self, day: date) -> bool:
         hours = self.calendar.hours(day) if self.calendar is not None else None
@@ -379,7 +380,8 @@ class Chatter:
         if not READ_FROM <= local.time() < until or (market_only and not self._market_day(local.date())):
             return False
         state = load(name, self.root)
-        return now - max(state.get("ok_at") or 0, state.get("error_at") or 0) >= PASS_SECONDS
+        last = max(state.get("ok_at") or 0, state.get("error_at") or 0, self._failed.get(name, 0))
+        return now - last >= PASS_SECONDS
 
     def run_once(self) -> None:
         now = self.clock()
@@ -397,15 +399,22 @@ class Chatter:
                 state = read(client)
             save(name, {**state, "ok_at": now, "error": None}, self.root)
         except Exception as error:  # one source failing leaves the other and the app alone
-            log.warning("Chatter %s read unavailable (%s)", name, type(error).__name__)
-            save(name, {**load(name, self.root), "error_at": now, "error": type(error).__name__}, self.root)
+            # Only the error's type is logged or saved: an httpx error's message holds the request URL, which carries
+            # NYT_API_KEY on the API path.
+            kind = type(error).__name__
+            log.warning("Chatter %s read unavailable (%s)", name, kind)
+            try:
+                save(name, {**load(name, self.root), "error_at": now, "error": kind}, self.root)
+            except OSError:
+                log.warning("Chatter %s state could not be saved", name)
+                self._failed[name] = now  # still wait PASS_SECONDS before the next read
 
     async def loop(self) -> None:
         while True:
             try:
                 await asyncio.to_thread(self.run_once)
-            except Exception:
-                log.exception("Chatter pass failed")
+            except Exception as error:  # the type only: a traceback could carry a request URL with a key in it
+                log.warning("Chatter pass failed (%s)", type(error).__name__)
             await asyncio.sleep(60)
 
 

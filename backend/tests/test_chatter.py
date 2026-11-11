@@ -345,3 +345,44 @@ def test_a_ticker_he_does_not_follow_is_left_out_of_chatter_too(desk, engine, re
     block = read(desk)["chatter"]
     assert [b["symbol"] for b in block["buzz"]] == ["MU"]
     assert all("NBIS" not in i["text"] and i["symbol"] != "NBIS" for i in block["items"])
+
+
+def test_an_api_failure_never_logs_or_saves_the_key_even_when_saving_fails(monkeypatch, flags, caplog):
+    flags(nyt=True)
+    monkeypatch.setenv("NYT_API_KEY", "SECRET_NYT_KEY_123")
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url)
+        return httpx.Response(401)
+
+    def refuse(*_a, **_k):
+        raise OSError("read-only")
+    monkeypatch.setattr(chatter, "save", refuse)
+    now = {"t": NOW}
+    reader = chatter.Chatter(None, Calendar(), clock=lambda: now["t"],
+                             client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)))
+    with caplog.at_level("DEBUG"):
+        reader.run_once()
+        now["t"] = NOW + 60
+        reader.run_once()  # the failure could not be saved: it still waits a full pass
+    assert len(calls) == 1
+    assert "SECRET_NYT_KEY_123" not in caplog.text and "HTTPStatusError" in caplog.text
+
+
+def test_a_hidden_tickers_trades_stay_out_of_the_spike_record(desk, engine, reads, flags, clock):  # noqa: F811
+    flags(reddit=True)
+    now = clock["t"]
+    state = history(now, 5, {"NBIS": 1, "MU": 1}, {"NBIS": 6, "MU": 6})
+    chatter.save("reddit", {**state, "posts": [], "ok_at": now})
+    with Session(engine) as db:
+        opened = datetime.fromtimestamp(now - 60, UTC).replace(tzinfo=None)
+        for n, symbol in ((11, "NBIS"), (12, "MU")):
+            db.add(Trade(id=UUID(int=n), account_id=ROTH, ticker=symbol, instrument_type="option", option_type="call",
+                         strike=100, expiration=date(2026, 10, 23), contracts=1, avg_entry_premium=3.1, total_premium_paid=310,
+                         opened_at=opened, closed_at=opened, status="closed", realized_pnl=-120 if symbol == "NBIS" else 500))
+        db.add(DayJournalEntry(operation_id="f2", day=date(2026, 10, 21), kind="follow", symbol="NBIS", text="Not following",
+                               created_at=T0))
+        db.commit()
+    block = read(desk)["chatter"]
+    assert block["record"] == "Your entries during a mention spike: 1 closed trade, 1 up, net +$500."
