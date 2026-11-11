@@ -281,3 +281,33 @@ def test_what_a_multi_round_turn_records_passes_the_save_rules():
         if event["type"] == "tool" and event.get("status") == "ok" and event.get("provenance"):
             EvidenceRef.model_validate({"tool": event["name"], "as_of": event["provenance"]["as_of"],
                                         "kind": event["provenance"]["kind"], "message": 1})
+
+
+def test_plan_and_review_turns_get_more_room_than_an_ordinary_question():
+    """A deep turn (a review job, or one that asked for a plan's or review's read) gets the turn budget times 1.6; an ordinary
+    one keeps the budget as set; both scale with a dearer model's price and take the search extra on top."""
+    ordinary = copilot.turn_cap(_cfg(model="claude-opus-5-5"), web=False)
+    deep = copilot.turn_cap(_cfg(model="claude-opus-5-5"), web=False, deep=True)
+    assert (ordinary, deep) == pytest.approx((0.25, 0.40))
+    assert copilot.turn_cap(_cfg(model="claude-fable-5-2"), web=False, deep=True) == pytest.approx(0.80)
+    assert copilot.turn_cap(_cfg(model="claude-opus-5-5"), web=True, deep=True) == pytest.approx(0.55)
+    assert copilot.DEEP_JOBS == {"companion", "week_review"}
+    assert copilot.DEEP_TOOLS == {"get_trade_review", "get_week_review", "get_level_history", "get_option_candidates"}
+
+
+def _spend(read, text="Answer.", tokens=30_000, **kw):
+    # 30,000 output tokens at Sonnet's price is $0.30: over $0.25, under $0.40.
+    adapter = Priced(([read], "tool_use", usage(tokens)), ([{"type": "text", "text": text}], "end_turn", usage(0)))
+    return [e for e in turn(adapter, web=False, **kw) if e["type"] == "error"]
+
+
+def test_a_desk_turn_that_reads_a_level_history_is_not_stopped_at_the_ordinary_cap():
+    level = {"type": "tool_use", "id": "t0", "name": "get_level_history", "input": {"symbol": "SPY", "level": 500.0}}
+    assert not _spend(level)
+    assert [e["code"] for e in _spend(QUOTE)] == ["budget"]  # an ordinary read stays at $0.25
+
+
+def test_a_deep_turn_that_reaches_its_own_cap_still_ends_with_the_budget_message():
+    review = {"type": "tool_use", "id": "t0", "name": "get_trade_review", "input": {"trade_id": "x"}}
+    errors = _spend(review, tokens=50_000)  # $0.50 at Sonnet's price, over $0.40
+    assert [(e["code"], e["message"]) for e in errors] == [("budget", "Stopped: this turn reached its $0.40 API spend cap.")]
