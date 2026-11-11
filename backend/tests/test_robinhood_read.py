@@ -72,6 +72,9 @@ def test_the_wire_refuses_a_write_even_past_the_reader(name, monkeypatch):
             rh._post(rh.MCP_URL, bad, {})
     with pytest.raises(rh.ReadError):
         rh._post("https://example.com/mcp", b"{}", {})
+    dup = b'{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "place_option_order", "name": "get_accounts"}}'
+    with pytest.raises(rh.ReadError):  # a key given twice could read as another tool on the other side
+        rh._post(rh.MCP_URL, dup, {})
     with pytest.raises(rh.ReadError):  # the token endpoint takes a renewal only
         rh._post(rh.TOKEN_URL, b"grant_type=authorization_code&code=x", {})
     assert sent == []
@@ -83,12 +86,19 @@ def test_no_generic_call_entry_point():
                       "get_option_instruments", "get_option_quotes", "get_equity_quotes"}
 
 
+SKIP_DIRS = {".git", "node_modules", ".next", ".venv", "venv", "__pycache__", ".pytest_cache", "test-results", "playwright-report"}
+TESTS = (REPO / "backend" / "tests",)  # the fake server and these checks name the endpoint on purpose
+
+
 def _app_files():
-    roots = [REPO / "backend" / "app", REPO / "backend" / "scripts", REPO / "scripts", REPO / "frontend" / "app",
-             REPO / "frontend" / "components", REPO / "frontend" / "lib", REPO / "deploy"]
-    for root in roots:
-        if root.exists():
-            yield from (p for p in root.rglob("*") if p.is_file() and p.suffix in (".py", ".ts", ".tsx", ".js", ".sh", ".json", ".env", ".example"))
+    """Every text file in the repository (worktrees, dependencies and build output aside), tests excluded."""
+    for path in REPO.rglob("*"):
+        parts = set(path.relative_to(REPO).parts)
+        if parts & SKIP_DIRS or ".claude" in parts and "worktrees" in parts or any(path.is_relative_to(t) for t in TESTS):
+            continue
+        if path.is_file() and path.stat().st_size < 2_000_000 and path.suffix not in (".png", ".jpg", ".jpeg", ".gif", ".ico",
+                                                                                         ".woff", ".woff2", ".sqlite", ".db", ".pyc"):
+            yield path
 
 
 def test_only_the_client_names_the_endpoint_or_builds_a_tools_call():
@@ -102,12 +112,14 @@ def test_only_the_client_names_the_endpoint_or_builds_a_tools_call():
         # The app's own MCP servers' smoke checks under deploy/ build tools/call for those servers, never Robinhood's.
         if "tools/call" in text and (path.is_relative_to(REPO / "backend") or "robinhood" in text.lower()):
             call.append(path)
-        if "robinhood_read" in text and path != client:
+        if path.suffix in (".py", ".ts", ".tsx", ".js", ".mjs", ".cjs") and path != client and (
+                "robinhood_read" in text or "robinhood_book" in text or re.search(r"\bimport\s+rh\b", text)):
             users.append(path.relative_to(REPO).as_posix())
     assert sorted(endpoint) == sorted([client, signin])
     assert call == [client]
     assert "tools/call" not in signin.read_text() and "_transport" not in signin.read_text()
-    assert users == ["backend/app/engine/robinhood_book.py"]  # the feed is the client's one caller
+    # The feed is the client's one caller, and the desk's thread read the feed's one caller.
+    assert sorted(users) == ["backend/app/engine/robinhood_book.py", "backend/app/routers/copilot_desk.py"]
 
 
 # --------------------------------------------------------------------------- a read on the wire
@@ -283,3 +295,28 @@ def test_a_redirect_is_never_followed_with_the_sign_in():
         other.shutdown()
         bounce.shutdown()
     assert status == 302 and text == "" and seen == []
+
+
+@pytest.mark.parametrize("trouble", ["infinite", "write", "wire"])
+def test_any_renewal_failure_expires_the_sign_in_once(tmp_path, fake, monkeypatch, trouble):
+    import http.client
+    path = token_file(tmp_path / "t.json", expires_in=3600)
+    if trouble == "infinite":
+        fake.token_reply = {"access_token": RENEWED, "refresh_token": RENEWED_REFRESH, "expires_in": 1e999}
+    elif trouble == "write":
+        monkeypatch.setattr(rh.TokenFile, "write", lambda self, s: (_ for _ in ()).throw(OSError("disk full")))
+    else:
+        monkeypatch.setattr(rh, "_transport", lambda *a: (_ for _ in ()).throw(http.client.IncompleteRead(b"")))
+    sign = rh.Sign(path)
+    for _ in range(3):
+        with pytest.raises(rh.ReadError) as exc:
+            sign.access_token()
+        assert exc.value.kind == "expired"
+    assert sign.expired and len(fake.token_posts) == (0 if trouble == "wire" else 1)
+
+
+def test_what_the_wire_checks_is_what_it_sends(monkeypatch):
+    sent = []
+    monkeypatch.setattr(rh, "_transport", lambda url, body, headers: sent.append(body) or (200, {}, ""))
+    rh._post(rh.MCP_URL, b'{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_accounts","arguments":{}}}', {})
+    assert json.loads(sent[0])["params"]["name"] == "get_accounts"

@@ -21,8 +21,10 @@ Stdlib only.
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
+import math
 import os
 import stat
 import threading
@@ -96,15 +98,23 @@ def _transport(url: str, body: bytes, headers: dict[str, str]) -> tuple[int, dic
             return reply.status, dict(reply.headers), reply.read(MAX_REPLY_BYTES).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         return exc.code, dict(exc.headers or {}), ""  # an error body is never read: it may echo the request
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+    except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError, ValueError) as exc:
         raise ReadError("network", type(exc).__name__) from None
+
+
+def _unique(pairs: list) -> dict:
+    """A JSON object with a key given twice is refused: a reader that takes the first one could see another tool."""
+    keys = [k for k, _v in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
 
 
 def _post(url: str, body: bytes, headers: dict[str, str]) -> tuple[int, dict[str, str], str]:
     """Every byte bound for Robinhood passes here, and is checked on its way out."""
     if url == MCP_URL:
         try:
-            message = json.loads(body)
+            message = json.loads(body, object_pairs_hook=_unique)
         except ValueError:
             raise ReadError("refused", "not a JSON-RPC message") from None
         if not isinstance(message, dict) or message.get("method") not in MCP_METHODS:
@@ -113,6 +123,7 @@ def _post(url: str, body: bytes, headers: dict[str, str]) -> tuple[int, dict[str
             name = (message.get("params") or {}).get("name") if isinstance(message.get("params"), dict) else None
             if name not in READ_TOOLS:
                 raise RefusedTool(name)
+        body = json.dumps(message).encode()  # what was checked is exactly what is sent
     elif url == TOKEN_URL:
         form = urllib.parse.parse_qs(body.decode("ascii", "replace"))
         if form.get("grant_type") != ["refresh_token"]:
@@ -242,11 +253,12 @@ class Sign:
                 return signin.access_token
             try:
                 renewed = self._renew(signin)
-            except ReadError as exc:
-                log.warning("Robinhood sign-in renewal failed (%s); the feed stops until a new sign-in", exc.kind)
+                self.file.write(renewed)
+            except Exception as exc:  # noqa: BLE001 - any renewal failure stops the feed; never a retry each refresh
+                log.warning("Robinhood sign-in renewal failed (%s); the feed stops until a new sign-in",
+                            exc.kind if isinstance(exc, ReadError) else type(exc).__name__)
                 self._dead = signature
                 raise ReadError("expired", "renewal failed; sign in again") from None
-            self.file.write(renewed)
             log.info("Robinhood sign-in renewed")
             return renewed.access_token
 
@@ -264,7 +276,7 @@ class Sign:
             access, expires_in = str(got["access_token"]), float(got["expires_in"])
         except (ValueError, KeyError, TypeError):
             raise ReadError("shape", "token endpoint reply") from None
-        if not access or expires_in <= 0:
+        if not access or not math.isfinite(expires_in) or expires_in <= 0:
             raise ReadError("shape", "token endpoint reply")
         return Signin(access_token=access, refresh_token=str(got.get("refresh_token") or signin.refresh_token),
                       expires_at=self._now() + expires_in, client_id=signin.client_id)

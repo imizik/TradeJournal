@@ -318,6 +318,9 @@ class Feed:
             except rh.ReadError as exc:
                 self._issue = exc.kind
                 log.warning("Robinhood feed refresh failed (%s)", exc.kind)
+            except Exception as exc:  # noqa: BLE001 - an odd reply must not take the desk or the refresh route down
+                self._issue = "error"
+                log.warning("Robinhood feed refresh failed (%s)", type(exc).__name__)
         finally:
             self._flight.release()
         return self.view(kick=False)
