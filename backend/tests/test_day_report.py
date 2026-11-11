@@ -22,7 +22,9 @@ EVENING = datetime(2026, 11, 11, 17, 0, tzinfo=ET).timestamp()  # 17:00 New York
 
 
 @pytest.fixture(autouse=True)
-def fresh_caches():
+def fresh_caches(monkeypatch):
+    from app.engine.chart_calendar import chart_calendar
+    monkeypatch.setattr(chart_calendar, "hours", lambda day: None)  # no calendar: the usual 16:00
     day_report._scored.clear()
     day_report._closes.clear()
 
@@ -301,3 +303,47 @@ def test_the_feeds_peek_at_what_they_hold_and_never_request(monkeypatch):
         {"series": {"data": [row]}}, stamp, stamp - 1)  # expired: still the last read
     bars, fetched = feed.peek_minutes("QQQ", TODAY)
     assert fetched == stamp and bars and bars[-1]["close"] == 1.5
+
+
+def test_a_pass_or_plan_saved_after_the_numbers_were_final_shows_at_once(engine, monkeypatch):  # noqa: F811
+    made = make(engine, "NVDA", side="call", price=100.0, mid=None, contract=False)
+    closes(monkeypatch, {"NVDA": 101.0})
+    assert report(engine)["rows"][0]["decision"] == "neither"
+    assert made["id"] in day_report._scored  # the numbers are kept...
+    with Session(engine) as db:
+        call_check.pass_check(db, made["id"])
+    row = report(engine)["rows"][0]
+    assert row["decision"] == "passed" and row["way"] == "up"  # ...his answer is read fresh
+
+
+def test_an_early_close_day_ends_at_the_calendars_close_not_at_16_00(monkeypatch):
+    from app.engine import ping_images
+    from app.engine.chart_calendar import chart_calendar
+    monkeypatch.setattr(chart_calendar, "hours", lambda day: {"status": "open", "open": 570, "close": 780})  # 13:00
+    # Extended-hours minutes run on after the early close: the 13:00 last regular minute is the close, not 15:59.
+    bars = minutes(TODAY, {"09:30": 10.0, "12:59": 12.0, "15:59": 14.0})
+    monkeypatch.setattr(ping_images, "stored_bars", lambda symbol, day: bars)
+    assert day_report.underlying_close("QQQ", TODAY, EVENING) == 12.0
+    assert day_report._close_epoch(TODAY) == datetime(2026, 11, 11, 13, 0, tzinfo=ET).timestamp()
+
+
+def test_a_check_between_the_early_close_and_16_00_is_after_the_close(engine, monkeypatch):  # noqa: F811
+    from app.engine.chart_calendar import chart_calendar
+    monkeypatch.setattr(chart_calendar, "hours", lambda day: {"status": "open", "open": 570, "close": 780})
+    make(engine, "NVDA", hour=14, side="call", price=100.0, mid=None, contract=False)
+    closes(monkeypatch, {"NVDA": 101.0})
+    row = report(engine)["rows"][0]
+    assert row["state"] == "not_measured" and "after the close" in row["why"]
+
+
+def test_the_entries_day_is_midnight_to_midnight_on_a_daylight_saving_day(engine, monkeypatch):  # noqa: F811
+    from app.engine import plan_streak
+    day = date(2026, 11, 1)  # clocks go back: 25 hours
+    start = datetime(2026, 11, 1, 0, 0, tzinfo=ET).timestamp()
+    nxt = datetime(2026, 11, 2, 0, 0, tzinfo=ET).timestamp()
+    rows = [{"short": "A 1C", "state": "planned", "entry_time": nxt - 1800, "trade_id": "a"},  # 23:30, inside
+            {"short": "B 1C", "state": "planned", "entry_time": nxt + 60, "trade_id": "b"},  # Monday 00:01, outside
+            {"short": "C 1C", "state": "planned", "entry_time": start + 60, "trade_id": "c"}]
+    monkeypatch.setattr(plan_streak, "streak", lambda db: {"this_week": {"entries": rows}})
+    with Session(engine) as db:
+        assert day_report.entries_today(db, day, set())["entries"] == 2

@@ -61,6 +61,7 @@ function CheckRow({ row }: { row: CheckedCallRow }) {
             ? <> · contract <span className="tabular-nums">{price(row.contract.at_check)} → {price(row.contract.close)}</span>{" "}
               <span className={cn("tabular-nums font-medium", tone(row.contract.pct))}>{signedPct(row.contract.pct, 0)}</span></>
             : row.contract_note ? <> · contract: {row.contract_note}</> : null}
+          {row.way && <> · <span className="text-foreground/85">reads {row.way}{row.way !== "flat" ? " since you checked" : ""}</span></>}
         </p>
       ) : <p className="text-muted-foreground">Not measured: {row.why}</p>}
     </li>
@@ -132,7 +133,7 @@ export default function DayReport({ realized, rows, rowsRead, onOpen }: {
             : <p className="text-xs text-muted-foreground">No call checked today.</p>}
           <p className="mt-2.5 text-xs text-muted-foreground">
             Up and down are the contract&apos;s move when both its prices are known, otherwise the stock&apos;s (reversed for a put), from the
-            price when you checked to the 4:00 close; never the price in the post. Nothing here needs an answer.
+            price when you checked to the close; never the price in the post. Nothing here needs an answer.
           </p>
         </Line>
       )}

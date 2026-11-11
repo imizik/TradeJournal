@@ -634,7 +634,8 @@ underlying's regular-session close that New York day, and when the call named a 
 the check, from that quote's mid to the contract's mid at the close. **Up**, **down** or **flat** is the contract's move when
 both its prices are known, otherwise the stock's (reversed for a put); a row prints the stock's and the contract's move
 as numbers. **Not measured** (with why) when a price is missing: no ticker read, no price stored at the check, a check
-from the fake backend, a check made after 16:00, or no closing price. Nothing is ever fetched for the card. The closing
+from the fake backend, a check made after the close, or no closing price. The session's end is the market calendar's close (13:00 on an
+early-close day), else 16:00, and a row says "reads up", "down" or "flat" so a put's reversal is never silent. Nothing is ever fetched for the card. The closing
 price is the last regular-session minute of the completed session in the chart cache on disk
 (`ping_images.stored_bars`) or, for today after 16:00, of the chart feed's cached minutes if they were read after the
 close (`ChartFeed.peek_minutes`); the contract's close is the options feed's cached chain for that expiry, if it was read

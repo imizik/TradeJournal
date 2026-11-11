@@ -10,7 +10,8 @@ session close on the check's New York day:
 - the contract's close comes from the options feed's cached chain for that expiry when it was read after today's close;
   a past day's contract is measured only if an earlier read scored it (a measured score is kept in memory per check);
 - either price missing is "not measured", with the reason. A check made after the close, one with no stored price, and
-  one from the fake backend (``simulated``) are not measured either.
+  one from the fake backend (``simulated``) are not measured either. The session's end is the market
+calendar's (an early-close day ends at 13:00), else 16:00.
 
 ``way`` is what the owner would have held: the contract's move when both of its prices are known, otherwise the stock's
 (reversed for a put). ``up`` or ``down`` is that move's sign; ``flat`` is exactly zero. A passed call is scored the
@@ -46,11 +47,22 @@ def _remember(store: dict, key, value) -> None:
 
 
 def _close_epoch(day: date) -> float:
+    """The regular session's end on ``day``: the market calendar's close (an early-close day ends at 13:00), else 16:00.
+    The calendar is the desk's own month-at-a-time cache."""
+    minutes = None
+    try:
+        from app.engine.chart_calendar import chart_calendar
+        hours = chart_calendar.hours(day)
+        minutes = hours.get("close") if hours and hours.get("status") == "open" else None
+    except Exception as exc:  # noqa: BLE001 -- an unreadable calendar means the usual 16:00
+        log.warning("day report calendar unreadable for %s: %s", day, exc)
+    if isinstance(minutes, int) and 0 < minutes <= 24 * 60:
+        return datetime.combine(day, wall_time(0), ET).timestamp() + minutes * 60
     return datetime.combine(day, CLOSE, ET).timestamp()
 
 
 def _last_regular_close(bars: list[dict], day: date) -> float | None:
-    """The close of the last minute that started before 16:00 New York on ``day`` (the regular session's last bar)."""
+    """The close of the last minute that started before the session's end on ``day`` (the regular session's last bar)."""
     end = _close_epoch(day)
     start = datetime.combine(day, wall_time(9, 30), ET).timestamp()
     regular = [b for b in bars if start <= b["time"] < end]
@@ -131,7 +143,7 @@ def score(check: dict, now: float) -> dict:
     """One check, scored (see the module text). ``state``: ``measured`` or ``not_measured`` with ``why``."""
     cached = _scored.get(check["id"])
     if cached:
-        return cached
+        return {**_base(check), **cached}  # his Pass or plan can change after the numbers are final: never cached
     symbol, day = check["symbol"], date.fromisoformat(check["day"])
     if not symbol:
         return _not_measured(check, "no ticker was read")
@@ -165,7 +177,7 @@ def score(check: dict, now: float) -> dict:
                             else "no contract quote stored at the check" if not mid_then else "no contract close stored")
     today = datetime.fromtimestamp(now, ET).date()
     if day < today or out["contract"] or not contract_wanted or not mid_then:
-        _remember(_scored, check["id"], out)  # final: nothing later can add to it
+        _remember(_scored, check["id"], {k: v for k, v in out.items() if k not in _base(check)})  # the numbers are final
     return out
 
 
@@ -195,7 +207,8 @@ def entries_today(db: Session, day: date, hidden: set[str]) -> dict:
     from app.engine import plan_streak
     week = plan_streak.streak(db).get("this_week") or {}
     start = datetime.combine(day, wall_time(0), ET).timestamp()
-    mine = [e for e in week.get("entries", []) if e["entry_time"] and start <= e["entry_time"] < start + 86400
+    end = datetime.combine(day + timedelta(days=1), wall_time(0), ET).timestamp()  # not start + 86400: a DST day is 23 or 25 hours
+    mine = [e for e in week.get("entries", []) if e["entry_time"] and start <= e["entry_time"] < end
             and e["short"].split(" ")[0] not in hidden]
     return {"state": "ok", "entries": len(mine), "planned": sum(e["state"] == "planned" for e in mine),
             "late": sum(e["state"] == "late" for e in mine), "pending": sum(e["state"] == "pending" for e in mine),
