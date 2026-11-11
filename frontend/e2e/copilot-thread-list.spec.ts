@@ -209,13 +209,20 @@ test("a long conversation opens on its latest question; the ladder is one line a
   await page.getByRole("region", { name: "Conversation" }).screenshot({ path: test.info().outputPath("desk-latest-turn-desktop.png") });
 });
 
-test("Radar hits sit inside Main: one line, each hit opening its event", async ({ page }) => {
+test("Radar hits sit in the Feed, not the ticker list: each hit opening its event", async ({ page }) => {
+  await page.route("**/copilot/desk/feed", (route) => route.fulfill({ json: {
+    as_of: "2026-10-23T15:00:00Z", now: epoch("2026-10-23T15:00:00Z"), day: "2026-10-23", total: 1, sources: { radar: "ok" }, unavailable: [],
+    items: [{ id: `radar:${EVENT}`, source: "Radar", at: epoch("2026-10-23T14:12:00Z"), has_time: true, symbol: "MU", text: "MU up 4.1% while SMH is up 0.6%",
+      detail: "vs sector", publisher: null, url: null, href: `/radar?event=${EVENT}`, investigation_id: null, radar_event_id: EVENT, setup: null,
+      plan: null, mine: false, upcoming: false }] } }));
   await lab(page);
-  await page.getByRole("region", { name: "Chart and today" }).getByRole("tab", { name: "Today" }).click();
-  const radar = page.getByTestId("briefing-radar-new");
-  await expect(radar.locator("summary")).toHaveText("1 new on Radar ▾");
-  await radar.locator("summary").click();
-  await expect(radar.getByRole("link", { name: /MU/ })).toHaveAttribute("href", `/radar?event=${EVENT}`);
+  const centre = page.getByRole("region", { name: "Chart and feed" });
+  await centre.getByRole("tab", { name: "Feed" }).click();
+  await centre.getByRole("button", { name: "Market", exact: true }).click();
+  const hit = centre.getByTestId("feed-item");
+  await expect(hit).toContainText("MU up 4.1% while SMH is up 0.6%");
+  await expect(hit.getByRole("link", { name: "Open", exact: true })).toHaveAttribute("href", `/radar?event=${EVENT}`);
+  await expect(hit.getByRole("button", { name: "Plan it" })).toHaveCount(0); // a Radar event carries no Plan it
   await expect(tickers(page).getByRole("button", { name: /^MU/ })).toHaveCount(0);
 });
 
