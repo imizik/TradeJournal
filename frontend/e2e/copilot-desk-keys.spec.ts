@@ -89,7 +89,7 @@ const ANSWER: Record<string, [string, string]> = {
   [NBIS]: ["NBIS", "NBIS answer: hold above 92.30."], [CRWV]: ["CRWV", "CRWV answer: short under 99.00."], [APLD]: ["APLD", "APLD answer: enter at 31.00."],
 };
 
-async function lab(page: Page, { time = NOW, session = SESSION, threads = () => DESK as unknown, path = "/copilot-lab?view=briefing", showThreads = true }: { time?: Date; session?: unknown; threads?(): unknown; path?: string; showThreads?: boolean } = {}) {
+async function lab(page: Page, { time = NOW, session = SESSION, threads = () => DESK as unknown, path = "/copilot-lab?view=briefing", showThreads = true, feed = FEED as unknown }: { time?: Date; session?: unknown; threads?(): unknown; path?: string; showThreads?: boolean; feed?: unknown } = {}) {
   const chats: unknown[] = [];
   await page.clock.install({ time });
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
@@ -104,7 +104,7 @@ async function lab(page: Page, { time = NOW, session = SESSION, threads = () => 
   await page.route("**/copilot/time-stops?*", (route) => route.fulfill({ json: { time_stops: [], enabled: true } }));
   await page.route("**/copilot/research-jobs?*", (route) => route.fulfill({ json: { jobs: [], queue_enabled: false, daily_budget_usd: 2, spent_today_usd: 0 } }));
   await page.route("**/copilot/desk/sparks?*", (route) => route.fulfill({ json: SPARKS }));
-  await page.route("**/copilot/desk/feed", (route) => route.fulfill({ json: FEED }));
+  await page.route("**/copilot/desk/feed", (route) => route.fulfill({ json: feed }));
   await page.route("**/copilot/desk/*/picture*", (route) => route.fulfill({ status: 503, json: { detail: "No chart in this test." } }));
   await page.goto(path);
   if (showThreads) await openDeskThreads(page);
@@ -766,6 +766,7 @@ for (const width of [1440, 375] as const) {
     await expect(rows.nth(0).getByRole("link", { name: "Open in Charts" })).toHaveAttribute("href", "/charts?symbol=NBIS");
     await expect(feed.getByTestId("feed-unavailable")).toHaveText("Could not read: market news.");
     await expect(feed.getByText(/\b(buy|sell|hold)\b/i)).toHaveCount(0); // facts, never orders
+    await expect(feed.getByRole("button", { name: "Chatter" })).toHaveCount(0); // no chatter source: no filter
     // Market: the Radar setup card with its level, contract and his record, and the market headline.
     await feed.getByRole("button", { name: "Market", exact: true }).click();
     await expect(rows.getByTestId("feed-source")).toHaveText(["Radar setup", "News"]);
@@ -794,3 +795,72 @@ for (const width of [1440, 375] as const) {
     expect(chats).toEqual([]);
   });
 }
+
+// The Feed's chatter block (app/engine/chatter.py): buzz and rising posts from r/wallstreetbets and NYT headlines.
+const CHATTER = {
+  sources: { "r/wallstreetbets": "on", NYT: "unavailable" },
+  buzz: [{ symbol: "NBIS", count: 9, usual: 1.5, multiple: 6.2, history: true, held: true },
+    { symbol: "RKLB", count: 4, usual: 0, multiple: null, history: true, held: false }],
+  record: "Your entries during a mention spike: 12 closed trades, 5 up, net −$1,240.",
+  items: [
+    item({ id: "r/wallstreetbets:buzz:NBIS", source: "r/wallstreetbets", at: epoch("2026-10-23T15:00:00Z"), symbol: "NBIS",
+      text: "NBIS mentioned 6.2× its usual rate in the last hour",
+      detail: "9 posts in the last hour; usually 1.5 at this hour. Your entries during a mention spike: 12 closed trades, 5 up, net −$1,240.",
+      publisher: "r/wallstreetbets", url: "https://www.reddit.com/r/wallstreetbets/search/?q=NBIS&restrict_sr=1&sort=new", chatter: true }),
+    item({ id: "r/wallstreetbets:post:rise1", source: "r/wallstreetbets", at: epoch("2026-10-23T14:40:00Z"), symbol: "NBIS",
+      text: "NBIS 105c 11/14, all in before the compute deal", detail: "1,240 points · 341 comments", publisher: "r/wallstreetbets",
+      url: "https://www.reddit.com/r/wallstreetbets/comments/rise1/x/", chatter: true }),
+    item({ id: "nyt:1", source: "NYT", at: epoch("2026-10-23T13:10:00Z"), text: "Chipmakers brace for new export rules",
+      detail: "A draft rule would widen limits on advanced chip sales.", publisher: "NYT",
+      url: "https://www.nytimes.com/2026/10/23/business/chips.html", chatter: true }),
+  ],
+};
+
+for (const width of [1440, 375] as const) {
+  test(`Chatter: its own filter only, buzz chips outlined when held, his spike record, only Ask and the link, at ${width} px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width < 768 ? 812 : 900 });
+    const { chats } = await lab(page, { showThreads: false, feed: { ...FEED, chatter: CHATTER } });
+    // The tab's new count is the feed's own items only: chatter never counts.
+    await expect(page.getByTestId("feed-new")).toHaveText("5 new");
+    const centre = page.getByRole("region", { name: "Chart and feed" });
+    await centre.getByRole("tab", { name: "Feed" }).click();
+    const feed = centre.getByTestId("desk-feed");
+    const rows = feed.getByTestId("feed-item");
+    // Mine, Market and both never show chatter.
+    await expect(rows.getByTestId("feed-source")).toHaveText(["Alert", "News", "Copilot note", "Plan"]);
+    await feed.getByRole("button", { name: "Mine + Market" }).click();
+    await expect(rows).toHaveCount(6);
+    await expect(rows.getByTestId("feed-source")).not.toContainText(["r/wallstreetbets"]);
+    await feed.getByRole("button", { name: "Chatter" }).click();
+    await expect(rows.getByTestId("feed-source")).toHaveText(["r/wallstreetbets", "r/wallstreetbets", "NYT"]);
+    const chips = feed.getByTestId("buzz-chip");
+    await expect(chips).toHaveText(["NBIS 6.2×", "RKLB 4, usually none"]);
+    await expect(chips.nth(0)).toHaveAttribute("data-held", "true");
+    await expect(chips.nth(1)).not.toHaveAttribute("data-held", "true");
+    await expect(rows.nth(0)).toContainText("Your entries during a mention spike: 12 closed trades, 5 up, net −$1,240.");
+    await expect(rows.locator('[aria-label="new"]')).toHaveCount(0); // chatter is never "new"
+    await expect(feed.getByTestId("feed-chatter-note")).toHaveText("NYT could not be read.");
+    // Only Ask the copilot and the outbound link: no Plan it, no Open in Charts, no symbol story.
+    await expect(rows.getByRole("button", { name: "Plan it" })).toHaveCount(0);
+    await expect(rows.getByRole("link", { name: "Open in Charts" })).toHaveCount(0);
+    await expect(rows.getByRole("button", { name: "NBIS", exact: true })).toHaveCount(0);
+    await expect(rows.nth(1).getByRole("link", { name: /Open on Reddit/ })).toHaveAttribute("href", "https://www.reddit.com/r/wallstreetbets/comments/rise1/x/");
+    await expect(rows.nth(1).getByRole("link", { name: /Open on Reddit/ })).toHaveAttribute("target", "_blank");
+    await expect(rows.nth(2).getByRole("link", { name: /Read at NYT/ })).toHaveAttribute("href", "https://www.nytimes.com/2026/10/23/business/chips.html");
+    if (width >= 768) await page.screenshot({ path: test.info().outputPath(`desk-chatter-${width}.png`) });
+    else await page.screenshot({ path: test.info().outputPath(`desk-chatter-${width}.png`), fullPage: true });
+    // Ask quotes the post as posted, unsent.
+    await rows.nth(1).getByRole("button", { name: "Ask the copilot" }).click();
+    await expect(conversation(page).getByLabel("Message")).toHaveValue(/^About this r\/wallstreetbets item \(10:40, NBIS\), quoted as posted: "NBIS 105c 11\/14, all in before the compute deal"\./);
+    expect(chats).toEqual([]);
+  });
+}
+
+test("Chatter that is on but has nothing yet: no filter, and the feed's foot says why", async ({ page }) => {
+  await lab(page, { showThreads: false, feed: { ...FEED, chatter: { ...CHATTER, sources: { "r/wallstreetbets": "on", NYT: "not set up" }, buzz: [], record: null, items: [] } } });
+  const centre = page.getByRole("region", { name: "Chart and feed" });
+  await centre.getByRole("tab", { name: "Feed" }).click();
+  const feed = centre.getByTestId("desk-feed");
+  await expect(feed.getByRole("button", { name: "Chatter" })).toHaveCount(0);
+  await expect(feed.getByTestId("feed-chatter-note")).toHaveText("Chatter: nothing from r/wallstreetbets yet.");
+});

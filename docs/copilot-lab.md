@@ -587,8 +587,9 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   holds What matters right now?, Review my week and today's replay. The route reads the journal for his symbols (no
   quote read) and makes at most two news-provider reads (one batched for his symbols, one for the broad tape), each
   cached 120 seconds, plus the earnings cache, which refreshes stale symbols in the background; the screen reads it
-  once a minute. Social chatter (Reddit, NYT) and the Discord intake are later sources: a **Chatter** filter appears
-  only once one exists.
+  once a minute. A fourth filter, **Chatter** (r/wallstreetbets buzz and NYT headlines, [§ Chatter](#chatter)), appears
+  only while a chatter source is on and has rows; chatter rows never show under the other three filters or a symbol's
+  story and never count toward the tab's new number.
 - **Right: the copilot**, always open from 1180 px: today's Main chat or the open thread (its header, decision bar,
   close pass or checklist on top), scoped to its ticker, with **Why is it moving?**, **What changed since I looked?**
   and **What does my plan say?** first above the box (one turn each in that conversation; then at most two of the
@@ -1123,6 +1124,78 @@ Browser proof: `frontend/e2e/copilot-home.spec.ts` (including a 375 px phone),
 the cleaned conversation and the 375 px composer) and
 `frontend/e2e/copilot-desk-context.spec.ts` (the centre's chart and timeline, the
 timeframe buttons and legend, unavailable states, 375 px, the market chart and This week).
+
+## Chatter
+
+Buzz from r/wallstreetbets and NYT business headlines, behind the desk Feed's own **Chatter** filter
+(`backend/app/engine/chatter.py`, read through `GET /copilot/desk/feed` as its `chatter` block). Isaac asked for it;
+his own trade audit says unplanned entries lost the money and buzz is where those start, so it is fenced:
+
+- Only behind the **Chatter** filter: never in Mine, Market or Mine + Market, never in a symbol's story, never counted
+  as new, never on the home view or the Needs-you strip, never a phone or Telegram ping. The filter appears only while
+  at least one source is on and has rows; when a source is on but cannot be read or has nothing yet, the Feed's foot
+  says so. `chatter.sources` names each source's state: `on`, `not set up` or `unavailable`.
+- A chatter row's only actions are **Ask the copilot** (the row, quoted, in the box unsent) and the outbound link,
+  which opens Reddit or the NYT in his own browser. No Plan it, no Open in Charts, no countdowns, no hype relayed as a
+  headline. Facts and counts; nothing tells him to buy, sell or hold.
+- Third-party text (post titles, headlines, summaries) is data shown as data. None of it enters the copilot's owner
+  context, no model reads it in the background, and a ticker set to not followed is left out here too.
+
+**r/wallstreetbets.** Every 15 minutes on market days, 06:00–20:00 New York, the reader takes the subreddit's hot,
+rising and new listings (three calls, 100 posts each) through Reddit's official API with the app's own credentials
+(application-only OAuth, the user-agent Reddit's rules ask for; it waits for the window to reset if Reddit's
+remaining-calls header runs low). It never loads reddit.com pages or the unauthenticated JSON endpoints. Ticker mentions
+are counted in post titles against the app's known symbols (Radar's universe, his traded tickers, SPY/QQQ/SMH), each
+post once, by when it was posted; all-caps words that are not tickers (the brief scorecard's list plus the
+subreddit's own: YOLO, DD, CALLS, ALL, ON...) count only written as a cashtag (`$ON`). Thirty days of mentions are kept
+in `backend/data/chatter/reddit.json` (no table). Rows:
+
+- **Buzz**: a ticker named in at least 3 posts in the last hour and at least 3× its usual rate, where usual is the same
+  New York hour on up to 5 recent weekdays the reader covered ("NBIS mentioned 6.2× its usual rate in the last hour";
+  "usually none at this hour" when it was never named then). Until 3 such days exist, the raw count and "No usual yet."
+  Beside it, when the journal can compute one, his own record on entries made while that ticker was buzz: "Your
+  entries during a mention spike: 12 closed trades, 5 up, net −$1,240." At most five; the same tickers show as chips
+  (ticker and multiple) at the top of the filter, outlined when he holds the name. Its link is the subreddit's search
+  for the ticker.
+- **Rising posts**: the top five rising posts (not pinned, not marked NSFW): title, points, comments, and a link to
+  the post.
+
+**NYT.** Every 15 minutes, 06:00–22:00 New York, every day: the public Business and Economy RSS feeds, or the official
+Top Stories API (business section) when `NYT_API_KEY` is set. Headline, the feed's own summary, time and link, at most
+eight from the last 36 hours, tagged **NYT**. No article page is ever fetched and no subscription login is used.
+
+### Switching chatter on
+
+Both are off until set up; while off nothing is read and nothing is spent. Setting these on the server is Isaac's call.
+They go in the server's private backend settings file (`/etc/tradejournal/backend.env` on the VPS), then the API is
+restarted.
+
+**r/wallstreetbets** (free):
+
+1. Sign in to Reddit in a browser and open https://www.reddit.com/prefs/apps.
+2. Choose **create another app...** (or **create app**). Name: `tradejournal-chatter`. Pick **script**. Redirect URI:
+   `http://localhost:8080` (required by the form, never used). Choose **create app**.
+3. The app's box now shows two values: the short string under the app's name ("personal use script") is the
+   **client id**; the longer one labelled **secret** is the **client secret**.
+4. Add these lines to the settings file, with your own values:
+
+   ```
+   CHATTER_REDDIT_ENABLED=true
+   REDDIT_CLIENT_ID=<the client id>
+   REDDIT_CLIENT_SECRET=<the secret>
+   REDDIT_USERNAME=<your Reddit username, without u/>
+   ```
+
+   The username only goes into the polite name the app gives itself when it calls Reddit, as Reddit's rules ask.
+
+**NYT headlines** (free, no account needed):
+
+1. Add `CHATTER_NYT_ENABLED=true` to the settings file. That alone reads the public RSS headline feeds.
+2. Optional: create a free key at https://developer.nytimes.com (sign up, **My Apps**, **New App**, enable the
+   **Top Stories API**, save, copy the key) and add `NYT_API_KEY=<the key>`. With a key the reader uses the API instead
+   of the RSS feeds.
+
+To switch either off again, set its `CHATTER_..._ENABLED` line to `false` (or delete it) and restart the API.
 
 ## Check a call
 
