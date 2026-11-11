@@ -158,8 +158,10 @@ def test_after_the_close_the_picture_keeps_the_after_hours_minutes_and_says_so(l
     assert lab.get(f"/copilot/desk/{NBIS}/picture").status_code == 200
     [chart] = seen
     assert chart.title == "NBIS + AFTER HOURS" and chart.note == "NOW 96.20"
-    assert chart.bars[0].get("extended") is None and [b["time"] for b in chart.bars[-3:]] == [b["time"] for b in late]
-    assert len(chart.bars) == 120 + 3  # the pre-market before the open stays off
+    # Drawn as 2-minute candles: 120 session minutes and 3 after-hours ones make 62, the last two after hours.
+    assert chart.bars[0].get("extended") is None and [b["time"] for b in chart.bars[-2:]] == [late[0]["time"], late[2]["time"]]
+    assert [b["extended"] for b in chart.bars[-2:]] == [True, True] and chart.bars[-1]["close"] == 96.2
+    assert len(chart.bars) == 62  # the pre-market before the open stays off
 
 
 def test_the_market_picture_is_qqq_today_with_the_days_fills_and_pings(lab, engine, monkeypatch):  # noqa: F811
@@ -582,3 +584,17 @@ def test_a_picture_request_finding_every_worker_busy_says_so_at_once(engine, mon
         assert time.monotonic() - started < 0.2
         desk_context._free.release()
         assert desk_context.picture(db, inv, NOW, bars=lambda symbol: bars()).startswith(b"\x89PNG")
+
+
+def test_a_whole_day_of_minutes_draws_as_candles_that_fit():
+    """Past the renderer's candle limit a day of minutes would draw as a line: the desk groups them into candles of two
+    minutes or more instead, each with its minutes' open, high, low, close and volume."""
+    from app.engine import chart_render
+    minutes = [{"time": 1_000_000 + 60 * m, "open": 100 + m, "high": 101 + m, "low": 99 + m, "close": 100.5 + m, "volume": 10,
+                "extended": m < 4} for m in range(390)]
+    candles = desk_context._candles(minutes)
+    assert len(candles) <= chart_render.CANDLE_LIMIT and candles[1]["time"] - candles[0]["time"] == 180  # 390 / 180 → 3 min
+    assert candles[0] == {"time": 1_000_000, "open": 100, "high": 103, "low": 99, "close": 102.5, "volume": 30, "extended": True}
+    assert candles[1]["extended"] is False  # one regular minute makes the candle regular
+    assert len(desk_context._candles(minutes[:100])) == 50  # a short day still groups by two minutes
+    assert desk_context._candles([]) == []
