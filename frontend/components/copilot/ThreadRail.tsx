@@ -8,7 +8,7 @@ import PlanList from "@/components/copilot/PlanList";
 import type { HomeActions } from "@/components/copilot/CopilotPanel";
 import { AUTO_WEEK_REVIEW_TITLE, type InvestigationSummary } from "@/lib/copilot";
 import {
-  getDeskThreads, getSavedConversations, needsYou, nyDay, reviewSkipped, type DeskGroup, type DeskPlan, type DeskThread, type DeskThreads, type DeskTone,
+  getDeskThreads, getSavedConversations, needsYou, nyDay, reviewSkipped, type DeskGroup, type DeskLive, type DeskPlan, type DeskThread, type DeskThreads, type DeskTone,
 } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
@@ -239,7 +239,7 @@ function DayLine({ data, needYou }: { data: DeskThreads; needYou: number }) {
  * the breadcrumb. All | Plans switches to the Plans view (``PlanList``) from the same read, remembered in this browser.
  */
 export default function ThreadRail({ actions, active = null, activeSymbol = null, main = false, onRows, onWalk, onSaved, phase = null, refresh = 0, follow = {}, onFollow, onFollowRead, pick }: {
-  actions: HomeActions; active?: string | null; activeSymbol?: string | null; main?: boolean; onRows?(rows: DeskThread[]): void; onWalk?(ids: string[]): void;
+  actions: HomeActions; active?: string | null; activeSymbol?: string | null; main?: boolean; onRows?(rows: DeskThread[], live: DeskLive): void; onWalk?(ids: string[]): void;
   onSaved?(saved: InvestigationSummary[]): void; phase?: ReactNode; refresh?: number; pick(row: DeskThread): void;
   /** Follow changes made on this page, ahead of the next read (symbol → following). */
   follow?: Readonly<Record<string, boolean>>; onFollow?(symbol: string, following: boolean): Promise<void>;
@@ -325,7 +325,7 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
   }, [rows, saved]);
   const ordered = useMemo(() => [...rows.filter(r => r.group === "pinned"), ...tickers.flatMap(t => t.rows), ...hiddenTickers.flatMap(t => t.rows),
     ...rows.filter(isRadar)], [rows, tickers, hiddenTickers]);
-  useEffect(() => { if (data) onRows?.(ordered); }, [data, ordered, onRows]); // once read: the placeholder is not the list
+  useEffect(() => { if (data) onRows?.(ordered, data.robinhood); }, [data, ordered, onRows]); // once read: the placeholder is not the list
   const jumpKey = useJumpKey();
   const livePlans = data?.plans.filter(p => p.stage === "armed" || p.stage === "in_position").length ?? 0;
   // Under Main: today's conversations, the open one and the latest automatic week review; the rest wait under Earlier.

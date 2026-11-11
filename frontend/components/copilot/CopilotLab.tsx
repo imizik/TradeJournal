@@ -19,7 +19,7 @@ import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import ArmChecklist from "@/components/copilot/ArmChecklist";
 import DeskFeed, { feedQuestion, useDeskFeed, useFeedNew, type FeedItem } from "@/components/copilot/DeskFeed";
 import { DeskStatus, useDeskSession } from "@/components/copilot/SessionTape";
-import { Book, CentreChart, DayFacts, DayPnl, NeedsStrip, SinceYouLooked, positionRows, useSparks } from "@/components/copilot/Cockpit";
+import { AccountChips, Book, CentreChart, DayFacts, DayPnl, NeedsStrip, SinceYouLooked, positionRows, useSparks } from "@/components/copilot/Cockpit";
 import MorningBrief from "@/components/copilot/MorningBrief";
 import PreviousDays from "@/components/copilot/PreviousDays";
 import ThreadRail from "@/components/copilot/ThreadRail";
@@ -28,7 +28,7 @@ import { ScalpShortlistNudge } from "@/components/ScalpShortlistPanel";
 import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { WHAT_MATTERS_PROMPT, copilotLabHref, mainChatLabel, type InvestigationSummary } from "@/lib/copilot";
-import { afterClose, answerSymbol, deskNeeds, deskSymbolThread, needingCount, nyDay, readSeen, saveFollow, saveHorizon, saveSeen, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
+import { afterClose, answerSymbol, deskNeeds, refreshRobinhood, type DeskLive, deskSymbolThread, needingCount, nyDay, readSeen, saveFollow, saveHorizon, saveSeen, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import styles from "./CopilotLab.module.css";
 
@@ -96,7 +96,8 @@ export default function CopilotLab({ link = null, close = false, daily = false }
   const onNow = thread ? !!thread.mainDay && thread.mainDay === today : daily;
   const [rows, setRows] = useState<DeskThread[]>([]);
   const [rowsRead, setRowsRead] = useState(false);
-  const readRows = useCallback((next: DeskThread[]) => { setRows(next); setRowsRead(true); }, []);
+  const [live, setLive] = useState<DeskLive | null>(null);
+  const readRows = useCallback((next: DeskThread[], feed?: DeskLive) => { setRows(next); setLive(feed ?? null); setRowsRead(true); }, []);
   const needYouCount = needingCount(rows, nyDay());
   const [saved, setSaved] = useState<InvestigationSummary[]>([]);
   const [palette, setPalette] = useState(false);
@@ -485,6 +486,7 @@ export default function CopilotLab({ link = null, close = false, daily = false }
         <h1 className={styles.title}><MessagesSquare size={17} aria-hidden />Desk</h1>
         {on && <DeskStatus data={session.data} />}
         {on && <DayPnl session={session.data} rows={rows} read={rowsRead} />}
+        {on && <AccountChips live={live} />}
         {on && <ScalpShortlistNudge />}
         {on && (
           <div className={styles.barActions}>
@@ -533,7 +535,8 @@ export default function CopilotLab({ link = null, close = false, daily = false }
         )}
         {on && (
           <div className={styles.book}>
-            <Book rows={rows} sparks={sparks} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} onSelect={select} onFollow={changeFollow} />
+            <Book rows={rows} sparks={sparks} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} onSelect={select} onFollow={changeFollow}
+              live={live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} />
             {lower}
             <DayFacts session={session.data} />
           </div>

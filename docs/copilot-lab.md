@@ -553,6 +553,19 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   opens the symbol's desk view). Each row's eye sets its ticker to **Not following**; those sit behind "N not followed
   ▾" at the bottom, each with Show again. Under the book, the time of day's block (below), then one quiet facts line:
   **At risk now** (see Exposure) and the practice goal.
+- **Live from Robinhood** ([robinhood-read-feed.md](robinhood-read-feed.md); off unless `ROBINHOOD_READ_ENABLED=true`
+  and a usable sign-in file). `GET /copilot/desk/threads` carries `robinhood`: its `state` (`off`, `signed_out`,
+  `expired`, `loading`, `unavailable`, `stale` or `ok`), `as_of`, and each shown account's label, masked number, total
+  value, cash and buying power. While it is `ok` (and `joined`): the top bar shows one chip per account (label, `••last
+  four`, value); each book row carries its account tag and quantity; a journal position matched by contract (same
+  account first) takes Robinhood's P&L, quantity and mark (`book.live` `matched`) and keeps its plan, meter, state and
+  thread; a position only Robinhood shows (the fill email has not arrived) is a `robinhood:` row tagged **New · not in
+  the journal yet** with no plan; a journal position Robinhood does not show stays as the journal has it, tagged **Not
+  on Robinhood** (only when every account's positions read). Options come first; stocks with no plan wait behind
+  "N stock positions ▾". A quiet line beside the heading says **live from Robinhood · as of HH:MM** (tap: read again,
+  `POST /copilot/desk/robinhood/refresh`, no input) or, signed out, expired or stale, says so; then the book is exactly
+  the journal's. Off, nothing changes and no line shows. Not followed tickers stay hidden. Display only: nothing is
+  written to the journal and nothing from Robinhood reaches the copilot.
 - **Centre.** A tab strip, **Chart** first, **Feed** and **Check a call** (§ Check a call; Ticket joins it in a
   later stage; no tab shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
   position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's
@@ -3133,6 +3146,9 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `POSITION_COMPANION_ENABLED` | unset (off) | `true` runs the [position companion](#position-companion): unplanned long options are adopted with a drafted plan, updated and closed in one Telegram thread (needs `COPILOT_ENABLED` and Telegram). `COMPANION_MODEL` (default: `COPILOT_MODEL`), `COMPANION_MOVE_PCT` (3), `COMPANION_MAX_UPDATES` (4 a position a day), `COMPANION_MAX_POSITIONS` (6 watched at once). |
 | `DAY_REPLAY_ENABLED` | unset (off) | `true` builds [Watch your day](#watch-your-day) at 16:20 New York on a trading day with a fill and pings it (needs `NTFY_URL`; not the lab). |
 | `ANTHROPIC_API_KEY` | none | Read only by the backend process for `anthropic`. It is never sent to the browser. |
+| `ROBINHOOD_READ_ENABLED` | unset (off) | `true` turns on the desk's [read-only Robinhood feed](robinhood-read-feed.md) when `ROBINHOOD_TOKEN_FILE` is a usable sign-in file. |
+| `ROBINHOOD_TOKEN_FILE` | none | Path of the Robinhood sign-in file (owned by the service user, mode 0600; never in the database). |
+| `ROBINHOOD_ACCOUNTS` | `Roth IRA,MCP` | Accounts always shown (label, type or last four); any other shows only while it holds something. |
 
 A model id the price table doesn't know (a dated id, or a fallback model the API reports) is priced at its
 known base model, otherwise at the dearest known price, so the per-turn cap always applies.

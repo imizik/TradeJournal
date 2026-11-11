@@ -16,8 +16,8 @@ import { getExposure } from "@/lib/copilot";
 import { DeskChart } from "@/components/copilot/DeskChart";
 import { DeskTimeline } from "@/components/copilot/Inspector";
 import {
-  DESK_MARKET, DESK_TIMEFRAMES, bookFacts, daysTo, deskSymbolThread, getDeskSparks, money, readLook, saveLook, signedPct, sinceLines,
-  type DeskBookState, type DeskLook, type DeskTimeframe, type DeskNeed, type DeskSession, type DeskSparks, type DeskThread, type DeskThreadRef,
+  DESK_MARKET, DESK_TIMEFRAMES, bookFacts, daysTo, deskSymbolThread, getDeskSparks, liveOn, money, readLook, saveLook, signedPct, sinceLines,
+  type DeskBookState, type DeskLive, type DeskLook, type DeskTimeframe, type DeskNeed, type DeskSession, type DeskSparks, type DeskThread, type DeskThreadRef,
 } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
@@ -27,8 +27,9 @@ const REFRESH_MS = 60_000;
 const tone = (value: number | null | undefined) => value == null || value === 0 ? "text-muted-foreground" : value > 0 ? "text-emerald-300" : "text-rose-300";
 const clockOf = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" });
 
-/** The open positions' rows (the thread list's ``trade:`` rows), followed first. */
-export const positionRows = (rows: DeskThread[]) => rows.filter(r => r.key.startsWith("trade:"));
+/** The open positions' rows: the journal's ``trade:`` rows and, while the Robinhood feed is live, the ``robinhood:`` rows
+ * of positions the journal does not have yet. */
+export const positionRows = (rows: DeskThread[]) => rows.filter(r => r.key.startsWith("trade:") || r.key.startsWith("robinhood:"));
 
 // ------------------------------------------------------------------------------------------------ top bar
 
@@ -45,6 +46,42 @@ export function DayPnl({ session, rows, read }: { session: DeskSession | null; r
       {read && open.length > 0 && <span><span className="text-muted-foreground">Open </span><span className={cn("tabular-nums", tone(total))}>{money(total)}</span></span>}
     </span>
   );
+}
+
+/** The top bar's account chips while the Robinhood feed is live (docs/robinhood-read-feed.md): each account's label,
+ * number masked to the last four and total value. Nothing otherwise. */
+export function AccountChips({ live }: { live: DeskLive | null }) {
+  if (!liveOn(live) || !live?.accounts?.length) return null;
+  return (
+    <span data-testid="desk-accounts" aria-label="Accounts" className="flex flex-wrap items-center gap-1.5">
+      {live.accounts.map(a => (
+        <span key={a.masked} className="whitespace-nowrap rounded-md border px-2 py-0.5 text-xs text-foreground">
+          {a.label} <span className="tabular-nums text-muted-foreground">{a.masked}</span>{" "}
+          <span className="tabular-nums text-muted-foreground">{a.total_value != null ? `$${a.total_value.toLocaleString("en-US", { maximumFractionDigits: 0 })}` : "—"}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+const LIVE_WORDS: Record<DeskLive["state"], string> = {
+  off: "", signed_out: "Robinhood signed out · from the journal", expired: "Robinhood sign-in expired · from the journal",
+  loading: "reading Robinhood…", unavailable: "Robinhood unavailable · from the journal", stale: "Robinhood stale · from the journal",
+  ok: "live from Robinhood",
+};
+
+/** One quiet line beside the book's heading: where its numbers come from, and as of when (nothing while the feed is off:
+ * the book is the journal's, as it always was). Live, it is a button that reads Robinhood again. */
+function LiveLine({ live, onRefresh }: { live: DeskLive | null; onRefresh?(): void }) {
+  if (!live || live.state === "off") return null;
+  const on = liveOn(live);
+  const words = live.state === "ok" && !on ? LIVE_WORDS.unavailable : LIVE_WORDS[live.state] ?? LIVE_WORDS.unavailable;
+  const at = live.as_of ? ` · as of ${clockOf(live.as_of)}` : "";
+  const text = `${words}${on || live.state === "stale" ? at : ""}`;
+  return on && onRefresh ? (
+    <button type="button" data-testid="book-live" onClick={onRefresh} title="Read Robinhood again"
+      className="ml-auto min-h-11 text-[11px] text-muted-foreground hover:text-foreground sm:min-h-0">{text}</button>
+  ) : <span data-testid="book-live" className="ml-auto text-[11px] text-muted-foreground">{text}</span>;
 }
 
 // ------------------------------------------------------------------------------------------------ the strip
@@ -174,13 +211,20 @@ const left = (expiry: string | null, day: string) => {
  * Selecting a row (``onSelect``) drives the centre and the copilot; its eye stops following the ticker (``onFollow``),
  * and those sit behind "N not followed" at the bottom.
  */
-export function Book({ rows, sparks, selected, selectedKey = null, day, read, onSelect, onFollow, children }: {
+export function Book({ rows, sparks, selected, selectedKey = null, day, read, live = null, onRefreshLive, onSelect, onFollow, children }: {
   rows: DeskThread[]; sparks: DeskSparks | null; selected: string | null; selectedKey?: string | null; day: string; read: boolean;
+  live?: DeskLive | null; onRefreshLive?(): void;
   onSelect(row: DeskThread): void; onFollow(symbol: string, following: boolean): Promise<void>; children?: ReactNode;
 }) {
   const [failed, setFailed] = useState<string | null>(null);
+  const [stocksOpen, setStocksOpen] = useState(false);
   const held = positionRows(rows);
-  const followed = held.filter(r => !r.hidden);
+  const shown = held.filter(r => !r.hidden);
+  // Live from Robinhood: options first; a stock without a plan (a long-term holding) waits behind "N stock positions".
+  const isLive = liveOn(live);
+  const folded = isLive ? shown.filter(r => r.instrument === "stock" && !r.book?.planned) : [];
+  const followed = isLive ? [...shown.filter(r => r.instrument !== "stock"), ...shown.filter(r => r.instrument === "stock" && r.book?.planned),
+    ...(stocksOpen ? folded : [])] : shown;
   // One row is marked: the one tapped, else the first on the centre's ticker (two contracts can share a ticker).
   const marked = followed.find(r => r.key === selectedKey && r.symbol === selected)?.key ?? followed.find(r => r.symbol === selected)?.key;
   const follow = (symbol: string, following: boolean) => {
@@ -189,9 +233,12 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, on
   };
   return (
     <section aria-label="Your book" data-testid="desk-book" className="rounded-lg border bg-card">
-      <h2 className={cn(LABEL, "px-3 pb-1.5 pt-2.5")}>
-        Your book{followed.length > 0 && <> · <span className="tabular-nums">{followed.length}</span> followed</>}
-      </h2>
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 px-3 pb-1.5 pt-2.5">
+        <h2 className={cn(LABEL, "shrink-0")}>
+          Your book{shown.length > 0 && <> · <span className="tabular-nums">{shown.length}</span> followed</>}
+        </h2>
+        <LiveLine live={live} onRefresh={onRefreshLive} />
+      </div>
       {followed.length ? (
         <ul>
           {followed.map(row => {
@@ -199,6 +246,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, on
             const spark = row.symbol ? sparks?.rows[row.symbol] : undefined;
             const state = book ? STATE[book.state] : null;
             const contract = row.instrument && row.instrument !== row.symbol ? row.instrument : row.title;
+            const count = book?.quantity != null ? ` ×${book.quantity.toLocaleString("en-US", { maximumFractionDigits: 4 })}` : "";
             const on = row.key === marked;
             return (
               <li key={row.key} className={cn("flex items-stretch border-t", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")}>
@@ -207,13 +255,16 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, on
                   <span className="min-w-0">
                     <span className="flex items-baseline gap-1.5">
                       <span className="text-sm font-semibold text-foreground">{row.symbol}</span>
-                      <span className="min-w-0 truncate text-xs tabular-nums text-muted-foreground">{contract}</span>
+                      <span className="min-w-0 truncate text-xs tabular-nums text-muted-foreground">{contract}{count}</span>
                     </span>
                     {book ? <Track track={book.track} /> : <span className="block truncate text-xs text-muted-foreground">{row.status.text}</span>}
                     <span className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-muted-foreground">
+                      {book?.account && <span data-testid="book-account" title={`${book.account.label} ${book.account.masked}`}>{book.account.label}</span>}
                       {book?.stop_pct != null && <span className="tabular-nums">{Math.abs(book.stop_pct).toFixed(1)}% to stop</span>}
                       {book && left(book.expiry, day) && <span className="tabular-nums">{left(book.expiry, day)}</span>}
-                      {state && <span data-testid="book-state" className={cn("rounded border px-1", state.className)}>{state.label}</span>}
+                      {book?.live === "new" ? <span data-testid="book-state" className="rounded border border-sky-300/40 px-1 text-sky-300">New · not in the journal yet</span>
+                        : state && <span data-testid="book-state" className={cn("rounded border px-1", state.className)}>{state.label}</span>}
+                      {book?.live === "not_on_robinhood" && <span data-testid="book-not-live" className="rounded border px-1">Not on Robinhood</span>}
                     </span>
                   </span>
                   <Spark points={spark?.points} label={`${row.symbol} today`} />
@@ -234,6 +285,12 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, on
           })}
         </ul>
       ) : <p className="border-t px-3 py-2.5 text-xs text-muted-foreground">{!read ? "Reading positions…" : held.length ? "Only positions you don't follow are open." : "No open positions."}</p>}
+      {folded.length > 0 && (
+        <button type="button" aria-expanded={stocksOpen} onClick={() => setStocksOpen(open => !open)} data-testid="book-stocks"
+          className="flex min-h-11 w-full items-center gap-1 border-t px-3 text-left text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">
+          {stocksOpen ? "Hide" : <span className="tabular-nums">{folded.length}</span>} stock position{folded.length === 1 ? "" : "s"} {stocksOpen ? "▴" : "▾"}
+        </button>
+      )}
       <div className="px-1.5 pb-1"><NotFollowed rows={held.filter(r => r.hidden)} open={onSelect} onFollow={follow} /></div>
       {failed && <p role="alert" className="px-3 pb-2 text-xs text-primary">{failed}</p>}
       {children}
