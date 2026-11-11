@@ -13,10 +13,11 @@ import { EyeOff } from "lucide-react";
 import { NotFollowed } from "@/components/copilot/SessionTape";
 import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
 import { getExposure } from "@/lib/copilot";
-import { DeskTimeline, ThreadChart } from "@/components/copilot/Inspector";
+import { DeskChart } from "@/components/copilot/DeskChart";
+import { DeskTimeline } from "@/components/copilot/Inspector";
 import {
-  bookFacts, daysTo, deskSymbolThread, getDeskSparks, money, readLook, saveLook, signedPct, sinceLines,
-  type DeskBookState, type DeskLook, type DeskNeed, type DeskSession, type DeskSparks, type DeskThread, type DeskThreadRef,
+  DESK_MARKET, DESK_TIMEFRAMES, bookFacts, daysTo, deskSymbolThread, getDeskSparks, money, readLook, saveLook, signedPct, sinceLines,
+  type DeskBookState, type DeskLook, type DeskTimeframe, type DeskNeed, type DeskSession, type DeskSparks, type DeskThread, type DeskThreadRef,
 } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
@@ -321,6 +322,28 @@ function Tile({ label, children, className }: { label: string; children: ReactNo
   );
 }
 
+const SPAN: Record<DeskTimeframe, string> = { "2m": "today: 2-minute candles", "15m": "recent sessions: 15-minute candles", "1D": "the last few months: daily candles" };
+const TIMEFRAME_KEY = "desk.chart.timeframe.v1";
+const Key = ({ color, glyph, children }: { color: string; glyph: string; children: ReactNode }) => (
+  <span><span aria-hidden style={{ color }}>{glyph}</span> {children}</span>
+);
+
+/** The chart's timeframe, kept for the tab's session so it holds its place across positions and tab switches. */
+function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
+  const [timeframe, setTimeframe] = useState<DeskTimeframe>("2m");
+  useEffect(() => {
+    try {
+      const saved = window.sessionStorage.getItem(TIMEFRAME_KEY);
+      if (saved && (DESK_TIMEFRAMES as readonly string[]).includes(saved)) setTimeframe(saved as DeskTimeframe); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+    } catch { /* 2m */ }
+  }, []);
+  const pick = (next: DeskTimeframe) => {
+    setTimeframe(next);
+    try { window.sessionStorage.setItem(TIMEFRAME_KEY, next); } catch { /* private mode: the choice lasts this view */ }
+  };
+  return [timeframe, pick];
+}
+
 const expiryWords = (iso: string, day: string) => {
   const n = daysTo(iso, day);
   const date = new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
@@ -328,16 +351,18 @@ const expiryWords = (iso: string, day: string) => {
 };
 
 /**
- * The centre's Chart: the selected symbol's picture (the desk's server-drawn chart with the plan's entry and invalidation
- * lines, the owner's fills and today's pings and Radar hits, on 2m, 15m or 1D) with Open in Charts, then a row of
+ * The centre's Chart: the selected symbol's interactive chart (``DeskChart``: candles with the plan's entry and invalidation
+ * lines, the owner's fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D; the timeframe
+ * holds across positions) with Open in Charts, then a row of
  * tiles for a held position (open P&L, distance to the invalidation, the stock against SPY today, time held, expiry)
- * and, folded, what touched the thread. No symbol: QQQ's day with the owner's fills and pings.
+ * and, folded, what touched the thread. No symbol: QQQ with the owner's fills and pings.
  */
 export function CentreChart({ symbol, thread, row, sparks, day }: {
   symbol: string | null; thread: DeskThreadRef | null; row: DeskThread | null; sparks: DeskSparks | null; day: string;
 }) {
   const ref = useMemo(() => thread ?? (symbol ? deskSymbolThread(symbol) : null), [thread, symbol]);
   const [timeline, setTimeline] = useState(false);
+  const [timeframe, pickTimeframe] = useDeskTimeframe();
   const book = row?.book;
   const change = symbol ? sparks?.rows[symbol]?.change_pct ?? null : null;
   const spy = sparks?.spy_change_pct ?? null;
@@ -350,8 +375,26 @@ export function CentreChart({ symbol, thread, row, sparks, day }: {
         {change !== null && <span className={cn("text-sm tabular-nums", tone(change))}>{signedPct(change, 2)}</span>}
         <span className="min-w-0 truncate text-xs text-muted-foreground">{row ? row.title : symbol ? "today" : "market today"}</span>
       </div>
-      {ref ? <ThreadChart key={ref.id} thread={ref} extra={<Link href={charts} className="ml-auto text-xs text-muted-foreground hover:text-primary">Open in Charts →</Link>} />
-        : <ThreadChart key="market" market extra={<Link href={charts} className="ml-auto text-xs text-muted-foreground hover:text-primary">Open in Charts →</Link>} />}
+      <div className="flex items-center gap-1">
+        <div role="group" aria-label="Timeframe" className="flex gap-1">
+          {DESK_TIMEFRAMES.map(item => (
+            <button key={item} type="button" aria-pressed={timeframe === item} onClick={() => pickTimeframe(item)}
+              className={cn("min-h-9 rounded border px-2 text-xs tabular-nums sm:min-h-0 sm:py-0.5",
+                timeframe === item ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+              {item}
+            </button>
+          ))}
+        </div>
+        <Link href={charts} className="ml-auto text-xs text-muted-foreground hover:text-primary">Open in Charts →</Link>
+      </div>
+      <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0}
+        label={`${symbol ?? "QQQ"} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />
+      <p aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <Key color="#e9a23b" glyph="▲▼">your fills</Key>
+        <Key color="#a78bfa" glyph="●">pings</Key>
+        {ref && <Key color="#60a5fa" glyph="■">Radar</Key>}
+        <span>· hover a mark for what and when</span>
+      </p>
       {book && (
         <div data-testid="desk-tiles" className="grid grid-cols-[repeat(auto-fit,minmax(104px,1fr))] gap-1.5">
           <Tile label="Open P&L" className={tone(book.usd)}>{book.usd != null ? money(book.usd) : "—"}{book.pct != null && <span className="ml-1 text-xs">{signedPct(book.pct)}</span>}</Tile>

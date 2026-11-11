@@ -555,13 +555,14 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   **At risk now** (see Exposure) and the practice goal.
 - **Centre.** A tab strip, **Chart** first, **Feed** and **Check a call** (§ Check a call; Ticket joins it in a
   later stage; no tab shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
-  position; none is QQQ, the market) as the desk's server-drawn picture with the plan's entry and invalidation lines,
-  the owner's fills and today's pings and Radar hits, on 2m, 15m or 1D, with **Open in Charts →**; then, for a held
+  position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's
+  fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D, with **Open in Charts →**; then, for a held
   position, tiles: Open P&L, To your stop, vs SPY today (the stock's change today less SPY's, from the sparks read),
   Held, Expires; and **Timeline ▾** folded under it. The sparks read takes at most 12 symbols (the centre's first) and
-  answers a repeat within 30 seconds from memory, so several open desks cost one chart-feed read a minute. The picture is the server's, not the `/charts` workspace's
-  interactive chart: that chart is bound to the workspace's live feed, crosshair and command stores and could not be
-  embedded cleanly with the plan lines and markers in this stage.
+  answers a repeat within 30 seconds from memory, so several open desks cost one chart-feed read a minute. The chart is
+  its own small component on the library `/charts` uses (lightweight-charts), not the workspace's `PriceChart`: that
+  chart is bound to the workspace's live feed, crosshair links, command bus and clock stores, so the desk draws from
+  its own read instead of embedding it.
 - **Feed** (`components/copilot/DeskFeed.tsx`, `GET /copilot/desk/feed`, `app/engine/desk_feed.py`): one stream of what
   the app already knows today, so there is a reason to open the desk that is not a ping. Its tab carries a grey count of
   the items new since the Feed was last opened in this browser. Each item is one row: its source (**Alert**, **Plan**,
@@ -699,32 +700,40 @@ The cockpit's panes in detail:
   investigation) and `GET /copilot/plans/positions` (the open position in its
   symbol, matched by the plan's invalidation; none for an armed plan not yet
   entered), once a minute; a thread with no plan shows only the header.
-- **Centre** (above): the chart and its folded timeline (`components/copilot/Inspector.tsx`, reads in
-  `backend/app/engine/desk_context.py`). A ticker with no saved conversation (a position or plan from the book or the
+- **Centre** (above): the chart (`components/copilot/DeskChart.tsx`) and its folded timeline
+  (`components/copilot/Inspector.tsx`), reads in
+  `backend/app/engine/desk_context.py`. A ticker with no saved conversation (a position or plan from the book or the
   thread list, a `?symbol=` link, a Radar hit) reads them by the symbol at once, as `symbol:<SYMBOL>` on the same
   routes: its plan's lines when it has one (in a position first, else armed), else the fills of its open trade; a
   position whose plan has a conversation, or the open conversation's own ticker, reads by that conversation. The
   timeline reads only when unfolded, and again when something is confirmed in the conversation; nothing here arms or
   sends.
-  - **Chart**: the server's ping picture of the symbol
-    (`GET /copilot/desk/{id}/picture?timeframe=`, `chart_render`) with
-    timeframe buttons **2m** (the default: today's minute bars from the same
-    cached chart-feed read as a ping, the regular session once it has bars, drawn as candles of two minutes or more
-    so the whole day fits as candles, `desk_context._candles`; the dots keep their own minute's price),
-    **15m** (regular-session 15-minute bars of today and the two completed
-    sessions before it, those from the chart history: disk, or fetched once
-    and stored) and **1D** (the last 120 days of the chart feed's daily bars).
-    The intraday views carry the plan's entry (TRIG) and invalidation (INV)
-    lines, the owner's fills in the symbol today (amber, IN and OUT; an option
-    fill at the underlying's recorded price, else a line at its time; a
-    pre-market fill is left off once the regular session shows), the phone
-    pings sent today on the symbol (violet, first labelled PING; the session
-    strip's ping reader) and today's Radar hits on it (blue, first labelled
-    RADAR; the Radar store read-only, none when it is off or missing), each
-    on the bar of its time, so an alert can be judged against what price did
-    next. 1D has no marks. A legend under the picture names fills, pings and
-    Radar. No bars, a failed read, a read past 6 seconds, or both workers
-    still busy with earlier reads says why instead of a blank picture.
+  - **Chart** (`GET /copilot/desk/{id}/chart?timeframe=`, `desk_context.chart`): the symbol's candles as data, drawn
+    in the browser with lightweight-charts. Timeframes **2m** (the default: today's minutes from 04:00 to now, from the
+    same cached chart-feed read as a ping picture, as 2-minute candles on the even minute; pre-market and after-hours
+    candles are shaded), **15m** (regular-session 15-minute bars of today and the two completed sessions before it,
+    those from the chart history: disk, or fetched once and stored) and **1D** (the last 120 days of the chart feed's
+    daily bars). The buttons keep their choice for the tab's session (`desk.chart.timeframe.v1`), across positions
+    and tab switches. On every timeframe: the plan's **entry** and **invalidation** as labelled dashed lines (named in
+    the row above the chart too; a line more than 10% from the last price does not stretch the price scale and says
+    "(off the chart)"; "no plan lines saved" without a plan); the owner's **fills** in the symbol since the first
+    candle shown (amber arrows, up for a buy and down for a sell; at the fill's price for shares, at the underlying's
+    recorded price for an option, else on the candle; a mark with no candle of its own, such as an extended-hours
+    fill on the 15m candles, sits on the nearest one; Webull left out; at most 40); today's **phone pings** sent on
+    the symbol (violet circles, the session strip's ping reader) and **Radar hits** (blue squares, the Radar store
+    read-only, none when it is off); and on 2m and 15m a **time stop** still ahead as a dashed vertical line at its
+    time past the last candle, labelled, with room kept for it on the right. Hovering a mark (within 10 px, so a full
+    day of 2m candles still answers) shows what it was and its New York time; the readout row shows the candle under
+    the crosshair (time in New York, OHLC, pre-market or after hours). Drag or a horizontal swipe pans, the wheel or
+    a pinch zooms, a vertical swipe on a phone still scrolls the page, and **Reset** returns to the whole range. A
+    full 2m day fits a 375 px screen (candles down to half a pixel; zoom in for candles). The chart reads again each
+    minute while bars can still change (`live`: a weekday 04:00 to 20:00 New York, the tab visible); no stream. A read
+    is at most 600 candles and 60 marks and costs what the picture's does: one cached Tradier minute read (15 s
+    cache, shared with ping pictures and Charts) for 2m and 15m, plus the two earlier sessions from disk for 15m; the
+    day's daily history once per New York date and a 60 s tail read for 1D. No bars, a failed read or a read past 6
+    seconds shows **No chart data** with the reason, never an empty box; a once-a-minute re-read that fails keeps the
+    chart already shown. The picture route
+    (`GET /copilot/desk/{id}/picture`, `chart_render`) stays for **Look at my chart** and the phone pings.
   - **Timeline ▾** (`/timeline`): one list, newest first, New York time on the
     right and a dot by kind: the investigation's alerts (armed, hit; a sent
     ping for one rides on its row, a held one shows with why), time stop (set,
@@ -736,14 +745,12 @@ The cockpit's panes in detail:
   The `/history` route (`copilot_review.level_history` at the plan's invalidation) still answers; the desk no longer
   shows it (a draft plan card carries "Your history at this level").
 
-  With no ticker (no position, and Main chat or a conversation about no symbol) the centre charts QQQ today
-  with the day's fills (any symbol, amber, first labelled FILL) and phone pings sent (violet, PING) as dots on the bar
-  of their minute, from the picture route's reserved id (`GET /copilot/desk/market/picture`,
-  `desk_context.market_picture`, fed by the session timeline's own fill and ping readers), read again each minute.
+  With no ticker (no position, and Main chat or a conversation about no symbol) the centre charts QQQ on the same
+  timeframes with the day's fills (any symbol, on their candle) and phone pings sent, from the reserved id
+  (`GET /copilot/desk/market/chart`, fed by the session timeline's own fill and ping readers); no plan lines.
   When Main chat's latest turn names a ticker (its question first, then its answer; one of the owner's desk tickers
   or a market or sector fund such as SMH, `lib/desk.ts` `answerSymbol`), the centre charts that ticker instead unless
-  the owner picked a position. After the session's last regular bar, today's 2m chart (the thread's and the market's)
-  keeps the after-hours minutes and is titled "<symbol> + AFTER HOURS" (`desk_context._today_shown`).
+  the owner picked a position.
 - **This week** (`ThisWeek.tsx`, folded at the foot of the thread list's drawer): the copilot's week ("Copilot: Helped
   7 of 9 rated · 23 answers · first text 4.1 s median · $0.38", `GET /copilot/answer-scorecard?days=7`), the morning
   brief's (`GET /copilot/brief-scorecard?days=7`), then the two proofs as /proof reads them, read-only and
@@ -1121,8 +1128,8 @@ Browser proof: `frontend/e2e/copilot-home.spec.ts` (including a 375 px phone),
 `frontend/e2e/copilot-thread-head.spec.ts` (option and stock, 375 px),
 `frontend/e2e/copilot-answer-format.spec.ts` (the answer format, Sources,
 the cleaned conversation and the 375 px composer) and
-`frontend/e2e/copilot-desk-context.spec.ts` (the centre's chart and timeline, the
-timeframe buttons and legend, unavailable states, 375 px, the market chart and This week).
+`frontend/e2e/copilot-desk-context.spec.ts` (the centre's chart and timeline: the plan's lines, the marks, the time
+stop, the timeframe buttons and their memory, the no-chart-data state, 375 px, the market chart and This week).
 
 ## Check a call
 
