@@ -58,9 +58,14 @@ def call_check_et():
 
 @pytest.mark.parametrize("text,kind", [
     (AAPL, "call"), (QQQ, "call"), (STALE, "call"), ("TSLA 400p fri", "call"), ("$NVDA 150c", "call"),
-    ("check this one: nvda looks ready", "call"),
+    ("check this one: NVDA looks ready", "call"), ("check nvda", "call"),
     ("Why is NVDA moving?", "question"), ("what matters right now", "question"), ("NVDA looks strong today", "question"),
     ("Should I take NBIS 105c?", "maybe"), ("how is my nbis 105c 11/14 doing", "maybe"), ("stop on NBIS is 96", "maybe"),
+    # His own trade, not a stranger's call: never checked at once.
+    ("I bought 5 NVDA 190c today", "maybe"), ("Bought 2 APLD 30c 11/14 @ 1.20, stop 1.00", "maybe"),
+    ("took profit on spy 600p", "maybe"), ("take profits on NVDA at $200 target", "maybe"),
+    # "check" that asks something is a question, not a forced check.
+    ("Check my positions", "question"), ("check on NVDA for me, is it holding?", "question"), ("check the market breadth", "question"),
 ])
 def test_a_call_is_told_from_a_question(text, kind):
     assert call_check.classify(text)[0] == kind
@@ -68,7 +73,15 @@ def test_a_call_is_told_from_a_question(text, kind):
 
 def test_the_check_prefix_forces_a_check_and_is_removed():
     assert call_check.classify("Check: AAPL looks like it wants 320") == ("call", "AAPL looks like it wants 320")
-    assert call_check.classify("check") == ("call", "")
+    assert call_check.classify("check nvda 150c fri") == ("call", "nvda 150c fri")
+    # "check" or "check this" alone: the message it replies to is the call.
+    assert call_check.classify("check") == ("call", "") and call_check.classify("check this", replying=True) == ("call", "")
+
+
+def test_a_reply_is_never_checked_without_the_prefix():
+    assert call_check.classify("adding 2 more at 1.05, stop 0.80", replying=True)[0] == "maybe"
+    assert call_check.classify(QQQ, replying=True)[0] == "maybe"
+    assert call_check.classify(f"check {QQQ}", replying=True)[0] == "call"
 
 
 # ------------------------------------------------------------------ the reading: nothing guessed
@@ -106,6 +119,16 @@ def test_a_side_a_ticker_or_an_expiry_the_message_does_not_state_is_blanked():
     assert call_check.confirm({**guessed, "ticker": "AAPL"}, "apple to 320 by thanksgiving", TODAY)["ticker"] is None
     assert call_check.confirm({**guessed, "expiry": "2026-11-28"}, AAPL, TODAY)["expiry"] is None
     assert call_check.confirm({**guessed, "expiry": "2026-11-13"}, "nbis 105c fri", TODAY)["expiry"] == "2026-11-13"  # Friday
+
+
+def test_a_price_written_with_a_leading_dot_is_kept_and_a_dates_numbers_are_not_prices():
+    read = {"ticker": "SPY", "expiry": None, "strike": 590.0, "side": "call", "entry": 0.5, "stop": 0.3, "target": None}
+    assert call_check.confirm(read, "SPY 590c 0dte @ .50 sl .30", TODAY)["entry"] == 0.5
+    assert call_check.confirm({**read, "entry": 11.0}, "IWM 590c 11/14", TODAY)["entry"] is None
+    assert call_check.confirm({**read, "side": "put"}, "SPY 590 p/l looks good", TODAY)["side"] is None
+    assert call_check.confirm({**read, "expiry": "2026-11-16"}, "SPY 590c money setup", TODAY)["expiry"] is None
+    assert call_check.confirm({**read, "expiry": "2026-11-11"}, "entered SPY 590c today @ .5", TODAY)["expiry"] is None
+    assert call_check.confirm({**read, "expiry": "2026-11-27"}, "spy nov 27th 590c", TODAY)["expiry"] == "2026-11-27"
 
 
 def test_several_calls_check_the_first_and_list_the_rest():
@@ -217,6 +240,14 @@ def test_a_ticker_the_model_made_up_becomes_no_ticker(engine, lab, monkeypatch):
                           "Verdict: Wait — no contract yet\nTile: AAPL now | $307")
     done = check("apple to 320 by thanksgiving", engine)
     assert done["symbol"] is None and done["verdict"] is None and done["card"]["tiles"] == []
+
+
+def test_a_value_the_model_read_but_the_message_does_not_state_leaves_no_card_judged_on_it(engine, lab, monkeypatch):  # noqa: F811
+    scripted(monkeypatch, "Reading: ticker QQQ | expiry 2026-11-11 | strike 660 | side put | entry ? | stop ? | target ?\n"
+                          "Verdict: Pass — QQQ is above the strike\nTile: QQQ 11/11 660P | 0.84 × 0.88")
+    done = check("entry: odte qqq 660", engine)  # no p: the side is not stated
+    assert done["reading"]["side"] is None and done["verdict"] == "Wait" and done["card"]["tiles"] == []
+    assert done["card"]["headline"] == "the message does not state the call or put"
 
 
 def test_the_check_runs_as_its_own_job_with_the_message_quoted(engine, lab, monkeypatch):  # noqa: F811

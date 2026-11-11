@@ -323,8 +323,9 @@ not reached, the market closed) or Draft (the evidence supports drafting the own
 posted entry, cost within the usual premium, a record not losing on trades like it, and a level where it is wrong). \
 Three or four Tile lines: the facts that decide the verdict, one of them the owner's record on trades like it. Leave \
 out the Also line when the message holds one call. When no ticker can be read, write the Reading line with ticker ? \
-and then only "Verdict: Unclear — could not read a ticker", nothing else. When an image is not a trade call (a \
-broker's positions screen, a chart with no call), write only "Not a call"."""
+and then only "Verdict: Unclear — could not read a ticker", nothing else. When an image is not someone's trade call \
+(a broker's positions or orders screen with quantities, average cost or market value; a chart with no call), write \
+only "Not a call"."""
 
 FORMAT = {DESK: DESK_FORMAT, TELEGRAM: TELEGRAM_FORMAT, PREP: PREP_FORMAT, COMPANION: COMPANION_FORMAT, WEEK_REVIEW: WEEK_FORMAT,
           CHECK: CHECK_FORMAT}

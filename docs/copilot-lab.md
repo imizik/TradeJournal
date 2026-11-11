@@ -1120,18 +1120,26 @@ it in the desk's **Check a call** tab (the centre tab strip).
   "0dte"/"odte" is today's expiry; several calls: the first is checked, the
   rest listed. Nothing is guessed: for a text message `call_check.confirm`
   blanks any ticker, number, call/put marker or expiry the message does not
-  state, and with no ticker the card says "Could not read a ticker" and has no
-  buttons. A screenshot is read by the model alone.
+  state (a price like `.50` included), and with no ticker the card says "Could
+  not read a ticker" and has no buttons. When it blanks a value the model had
+  filled, the model's card rested on a guess: it is replaced by Wait, "the
+  message does not state the …", with no tiles. A screenshot is read by the
+  model alone.
 - **Call or question (Telegram).** `call_check.classify` counts call markers:
   a strike with c/p counts two; 0DTE, a month/day, an entry word or `@ price`,
   a stop/target/"hits" word, a `$` price and a `$TICKER` one each. Two or more
-  with no question marker (a closing `?`, a first word such as what/why/should,
-  or "my") is checked at once; two or more with one, or exactly one, is
-  ambiguous: answered as a normal question with **Check as a call** beside
-  Helped and Didn't; none is a question. A message starting with `check` is
-  always checked (`check` alone, as a reply, checks the message replied to). A
-  photo with no caption is checked first and, when the model says it holds no
-  call, answered as the broker-screenshot reconcile as before.
+  with no question marker is checked at once. Question markers: a closing `?`,
+  a first word such as what/why/should, "my", his own trade in his words ("I
+  bought…", "rolling to…", "took profit…", "set stop…"), or a reply to another
+  message (a reply to a ping keeps the ping's context). Two or more with a
+  marker, or exactly one, is ambiguous: answered as a normal question with
+  **Check as a call** on its own row under Helped and Didn't; none is a
+  question. `check` first forces a check unless what follows asks something
+  ("check my positions", "check on NVDA…" stay questions); `check` or `check
+  this` as a reply checks the message replied to. A photo with no caption is
+  checked first and, when the model says it holds no call ("Not a call"),
+  answered as the broker-screenshot reconcile as before: one extra turn for a
+  broker screenshot.
 - **The reply.** The card in chat lines: the verdict line, `Read:` with blanks
   named ("call or put: not stated"), the tiles, Against, Changes if, and the
   other calls. Buttons: **Plan it** (a link, `call_check.plan_href`: the desk's

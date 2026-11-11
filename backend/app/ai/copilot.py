@@ -409,6 +409,10 @@ class FakeAdapter:
         if prompt.startswith("Check this call."):  # the check_call job (engine/call_check.py): read, the facts, the card
             from app.engine import call_check
             reading = call_check.fake_reading(call_check.quoted(prompt), call_check.today())
+            if not call_check.quoted(prompt).strip():  # a screenshot alone: the demo model cannot see it, so no call
+                yield "text", "Not a call"
+                yield "final", Round([{"type": "text", "text": "Not a call"}], "end_turn", _zero_usage(), self.model)
+                return
             if isinstance(last["content"], str) and allow_tools and reading["ticker"]:
                 yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_call_facts",
                                        "input": call_check.tool_input(reading)}], "tool_use", _zero_usage(), self.model)

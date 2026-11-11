@@ -285,8 +285,8 @@ class Replies:
                 await asyncio.to_thread(self._reply, message, HELP)
                 return "help"
             from app.engine import call_check
-            call, said = call_check.classify(text)
-            if call == "call" and not said:  # "check" alone, as a reply to a message: that message is the call
+            call, said = call_check.classify(text, replying=bool(message.get("reply_to_message")))
+            if call == "call" and not said:  # "check" or "check this", as a reply to a message: that message is the call
                 said = str((message.get("reply_to_message") or {}).get("text") or "").strip()
             kind = "check" if call == "call" and said else "ask"
         elif voice:
@@ -420,7 +420,8 @@ class Replies:
         except Exception:  # noqa: BLE001 - the owner hears that it failed, never silence
             log.exception("Telegram question turn failed")
             answer = FAILED
-        await asyncio.to_thread(self._reply, message, answer, self._rate_row() + ((CHECK_AS_CALL,) if offer_check else ()))
+        # Check as a call on its own row, so rating the answer (which rewrites the Helped / Didn't row) keeps it.
+        await asyncio.to_thread(self._reply, message, answer, self._rate_row(), ((CHECK_AS_CALL,),) if offer_check else ())
         await asyncio.to_thread(self._send_plans, message)
 
     async def _check(self, text: str, message: dict, images: list[dict] | None = None) -> dict | None:
@@ -694,13 +695,16 @@ class Replies:
 
     # -------------------------------------------------------------- the chat
 
-    def _reply(self, message: dict, text: str, buttons: tuple[tuple[str, str], ...] = ()) -> None:
-        """A reply to ``message``; ``buttons``: one row of reply buttons under it (an answer's Helped / Didn't)."""
+    def _reply(self, message: dict, text: str, buttons: tuple[tuple[str, str], ...] = (),
+               more: tuple[tuple[tuple[str, str], ...], ...] = ()) -> None:
+        """A reply to ``message``; ``buttons``: one row of reply buttons under it (an answer's Helped / Didn't);
+        ``more``: further rows (Check as a call)."""
         payload = {"chat_id": telegram.chat_id(), "text": text, "reply_parameters": {"message_id": message.get("message_id"),
                                                                                      "allow_sending_without_reply": True},
                    "link_preview_options": {"is_disabled": True}}
-        if buttons:
-            payload["reply_markup"] = {"inline_keyboard": [[{"text": label, "callback_data": data} for label, data in buttons]]}
+        rows = [[{"text": label, "callback_data": data} for label, data in row] for row in (buttons, *more) if row]
+        if rows:
+            payload["reply_markup"] = {"inline_keyboard": rows}
         try:
             self.call("sendMessage", json=payload)
         except telegram.TelegramError as exc:

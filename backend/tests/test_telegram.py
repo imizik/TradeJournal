@@ -1357,13 +1357,14 @@ def test_an_ambiguous_message_is_answered_as_a_question_with_check_as_a_call(cas
 
     run(go())
     answer = bot.named("sendMessage")[-1]
-    row = answer["reply_markup"]["inline_keyboard"][0]
-    assert [b["text"] for b in row] == ["Helped", "Didn't", "Check as a call"] and row[-1]["callback_data"] == "cc:q"
+    rating, row = answer["reply_markup"]["inline_keyboard"]
+    assert [b["text"] for b in rating] == ["Helped", "Didn't"]
+    assert row == [{"text": "Check as a call", "callback_data": "cc:q"}]  # its own row: rating the answer keeps it
     with Session(db_engine) as db:
         assert db.exec(select(CallCheck)).all() == []  # answered as a question, nothing checked
 
     # The tap checks the message the answer replied to (Telegram sends it with the tap).
-    update = tap("cc:q", keyboard=[row], update_id=2)
+    update = tap("cc:q", keyboard=[rating, row], update_id=2)
     update["callback_query"]["message"]["reply_to_message"] = {"message_id": 61, "text": "Should I take NBIS 105c?"}
 
     async def check():
@@ -1371,11 +1372,36 @@ def test_an_ambiguous_message_is_answered_as_a_question_with_check_as_a_call(cas
         await asyncio.gather(*replies._tasks)
 
     run(check())
-    assert bot.named("editMessageReplyMarkup")[-1]["reply_markup"]["inline_keyboard"][0][-1]["text"] == "✓ Checked (card below)"
+    assert bot.named("editMessageReplyMarkup")[-1]["reply_markup"]["inline_keyboard"] == [
+        rating, [{"text": "✓ Checked (card below)", "callback_data": "done:q"}]]
     card = bot.named("sendMessage")[-1]
     assert card["text"].startswith("Verdict: ") and "Read: NBIS · " in card["text"] and card["reply_parameters"]["message_id"] == 61
     with Session(db_engine) as db:
         assert db.exec(select(CallCheck)).one().symbol == "NBIS"
+
+
+def test_a_reply_to_a_ping_that_looks_like_a_call_keeps_the_pings_context(case, monkeypatch):
+    from app.models import CallCheck
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    monkeypatch.setattr(telegram_replies, "save_on_desk", lambda *a, **k: (str(uuid.UUID(int=1)), 1))
+    asked = []
+    replies = telegram_replies.Replies(db_engine, call=Bot())
+
+    async def question_text(text, replied, images=None):
+        asked.append((text, replied["text"]))
+        return "ok"
+    monkeypatch.setattr(replies, "question_text", question_text)
+
+    async def go():
+        ping = {"message_id": 9, "text": "APLD 30C gave back half its gain"}
+        assert await replies.handle(said("adding 2 more at 1.05, stop 0.80", replied=ping)) == "ask"
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    assert asked == [("adding 2 more at 1.05, stop 0.80", "APLD 30C gave back half its gain")]
+    with Session(db_engine) as db:
+        assert db.exec(select(CallCheck)).all() == []
 
 
 def test_check_forces_a_check_and_check_alone_checks_the_message_replied_to(case, monkeypatch):
@@ -1388,7 +1414,7 @@ def test_check_forces_a_check_and_check_alone_checks_the_message_replied_to(case
     async def go():
         assert await replies.handle(said("check AAPL")) == "check"
         await asyncio.gather(*replies._tasks)
-        assert await replies.handle(said("check", update_id=2, replied={"message_id": 9, "text": "i think AAPL $320 11/27 hits"})) == "check"
+        assert await replies.handle(said("check this", update_id=2, replied={"message_id": 9, "text": "i think AAPL $320 11/27 hits"})) == "check"
         await asyncio.gather(*replies._tasks)
 
     run(go())
@@ -1403,7 +1429,7 @@ def test_a_message_with_no_ticker_gets_no_guess_and_no_buttons(case, monkeypatch
     replies = telegram_replies.Replies(db_engine, call=bot)
 
     async def go():
-        assert await replies.handle(said("check this one is going to rip 🚀")) == "check"
+        assert await replies.handle(said("check: 11/14 calls going to rip 🚀")) == "check"
         await asyncio.gather(*replies._tasks)
 
     run(go())
