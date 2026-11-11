@@ -1156,6 +1156,18 @@ def _now() -> float:
     return time.time()
 
 
+@router.get("/desk/feed")
+def desk_feed(db: Session = Depends(get_session)):
+    """The desk's Feed (``app/engine/desk_feed.py``): today's pings, plan events, Radar events and setup cards, headlines
+    on the owner's symbols and a few market-wide ones, this week's calendar and the morning brief's lines, one small row
+    each, ranked and bounded. Each source fails on its own and ``unavailable`` names it. Read-only, owner-only, refused
+    while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import desk_feed
+    return desk_feed.build(db, today._now())
+
+
 @router.get("/desk/radar-setup")
 def radar_setup(event: str, db: Session = Depends(get_session)):
     """A Radar event's setup card as the desk's Radar card shows it (``desk_radar_setups.view``), or ``setup: null``

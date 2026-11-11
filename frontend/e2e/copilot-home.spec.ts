@@ -62,10 +62,10 @@ async function lab(page: Page) {
 }
 
 const list = (page: Page) => page.getByRole("navigation", { name: "Thread list" });
-/** The centre's Today tab: today's pings and Radar with What matters right now? and Review my week. */
+/** The centre's Feed tab: What matters right now? and Review my week sit at its foot. */
 async function today(page: Page) {
-  const centre = page.getByRole("region", { name: "Chart and today" });
-  await centre.getByRole("tab", { name: "Today" }).click();
+  const centre = page.getByRole("region", { name: "Chart and feed" });
+  await centre.getByRole("tab", { name: "Feed" }).click();
   return centre;
 }
 
@@ -123,7 +123,7 @@ test("the list says so when its read fails, and the Briefing and Review my week 
   await expect(threads).toContainText("Threads unavailable: Copilot Lab is off.");
   await expect((await today(page)).getByRole("button", { name: "What matters right now?" })).toBeEnabled();
   await expect(threads.getByRole("button", { name: "Review my week" })).toHaveCount(0); // in ⌘K and the Briefing now
-  await expect(page.getByRole("region", { name: "Chart and today" }).getByRole("button", { name: "Review my week" })).toBeEnabled();
+  await expect(page.getByRole("region", { name: "Chart and feed" }).getByRole("button", { name: "Review my week" })).toBeEnabled();
 });
 
 test("on a wide screen the app's navigation folds into the desk bar's Menu, and keeping the sidebar open is remembered", async ({ page }) => {

@@ -67,14 +67,14 @@ async function lab(page: Page, desk: Desk = {}) {
   });
   await page.goto(`/copilot-lab?investigation=${INV}`);
   await expect(page.getByText("It held the open; the group leads.")).toBeVisible();
-  return { reads, timeframes, pane: page.getByRole("region", { name: "Chart and today" }) };
+  return { reads, timeframes, pane: page.getByRole("region", { name: "Chart and feed" }) };
 }
 
 test("the centre opens on the open thread's chart beside the conversation, and its Timeline reads only when unfolded", async ({ page }) => {
   const { reads, pane } = await lab(page);
   await expect(page.getByRole("region", { name: "Conversation" }).getByText("It held the open; the group leads.")).toBeVisible();
   await expect(pane.getByRole("tab", { name: "Chart" })).toHaveAttribute("aria-selected", "true");
-  await expect(pane.getByRole("tab")).toHaveText(["Chart", "Today", "Check a call"]); // no tab for what does not exist yet
+  await expect(pane.getByRole("tab")).toHaveText(["Chart", "Feed", "Check a call"]); // no tab for what does not exist yet
   await expect(pane.getByTestId("desk-chart")).toContainText("NBIS");
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
   await expect(pane.getByRole("img", { name: /NBIS today: minute bars/ })).toBeVisible();
@@ -133,7 +133,7 @@ test("on a 375 px phone the centre sits under the book and the copilot is a shee
   await expect(pane.getByRole("img", { name: /NBIS today: minute bars/ })).toBeVisible();
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
   await expect(pane.getByRole("list", { name: "Timeline" }).getByRole("listitem")).toHaveCount(4);
-  expect((await pane.getByRole("tab", { name: "Today" }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect((await pane.getByRole("tab", { name: "Feed" }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await page.screenshot({ path: test.info().outputPath("desk-centre-375.png"), fullPage: true });
 });
@@ -150,7 +150,7 @@ test("a symbol opened with no saved conversation charts it by the symbol", async
     return route.fulfill({ json: { ...TIMELINE, count: 1, rows: [{ kind: "fill", at: now - 900, text: "Bought 5 NBIS stock at 94.20", detail: "the open position" }] } });
   });
   await page.goto("/copilot-lab?symbol=NBIS");
-  const pane = page.getByRole("region", { name: "Chart and today" });
+  const pane = page.getByRole("region", { name: "Chart and feed" });
   await expect(pane.getByRole("img", { name: /NBIS today: minute bars/ })).toBeVisible();
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
@@ -199,7 +199,7 @@ test("with no ticker the centre charts the market, and This week sits folded at 
       { day: "2026-11-03", named: 5, moved: 1, unknown: 0, state: "ok" },
     ] } }));
   await page.goto("/copilot-lab?view=briefing");
-  const centre = page.getByRole("region", { name: "Chart and today" });
+  const centre = page.getByRole("region", { name: "Chart and feed" });
   await expect(centre.getByRole("img", { name: /QQQ today: minute bars with your fills/ })).toBeVisible();
   await expect(centre.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=QQQ");
   await expect(centre).toContainText("your fills");

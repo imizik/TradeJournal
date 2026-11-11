@@ -65,6 +65,8 @@ async function lab(page: Page, { configured = true, ...fakes }: Fakes & { config
     id: "33333333-3333-4333-8333-333333333333", source: "copilot", title: "x", symbol: "NBIS", status: "open", conclusion: null, revision: 1,
     message_count: 2, has_findings: false, created_at: "2026-10-24T14:00:00Z", updated_at: "2026-10-24T14:05:00Z", transcript: [], evidence: [], findings: null } }));
   await page.route("**/copilot/investigations/*", (route) => route.fulfill({ json: {} }));
+  await page.route("**/copilot/desk/feed", (route) => route.fulfill({ json: {
+    as_of: "2026-10-23T15:00:00Z", now: 1792767600, day: "2026-10-23", items: [], total: 0, sources: {}, unavailable: [] } }));
   await page.route("**/copilot/research-jobs?*", (route) => route.fulfill({ json: { jobs: [], queue_enabled: false, daily_budget_usd: 2, spent_today_usd: 0 } }));
   await page.route("**/charts/alerts", (route) => route.fulfill({ json: { alerts: [], phone: true } }));
   await page.route("**/copilot/chat", (route) => {
