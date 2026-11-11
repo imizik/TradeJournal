@@ -15,9 +15,30 @@ const record = {
   transcript: [{ role: "user", content: "Is the NBIS reclaim real?" }, { role: "assistant", content: "It held the open; the group leads." }],
   evidence: [], findings: null,
 };
-// A 2x1 PNG: the picture itself is the server's (tests/test_copilot_desk_context.py); here only that it shows.
-const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGMQEpUBIgAByACHeNSWqgAAAABJRU5ErkJggg==", "base64");
 const now = Math.floor(Date.now() / 1000);
+const STEP = { "2m": 120, "15m": 900, "1D": 86400 } as const;
+/** The desk's chart read (tests/test_copilot_desk_context.py builds it): 60 candles ending now, the plan's lines, a fill,
+ * a ping and a Radar hit on candles shown, and a time stop ahead. ``plan`` false: a symbol with no plan. */
+function chartRead(timeframe: keyof typeof STEP, symbol = "NBIS", plan = true) {
+  const step = STEP[timeframe];
+  const last = now - (now % step);
+  const bars = Array.from({ length: 60 }, (_, i) => {
+    const open = 94 + Math.sin(i / 5);
+    return { time: last - (59 - i) * step, open, high: open + 0.4, low: open - 0.4, close: open + (i % 3 === 0 ? -0.2 : 0.2), volume: 1000 + i, extended: timeframe === "2m" && i < 5 };
+  });
+  return {
+    symbol, timeframe, step, as_of: now, live: false, state: "ok", reason: null, bars,
+    levels: plan ? [{ role: "entry", price: 95.9, label: "Entry 95.90" }, { role: "invalidation", price: 92.3, label: "Invalidation 92.30" }] : [],
+    marks: [
+      { kind: "fill", at: bars[20].time + 10, price: 94.4, side: "buy", text: `Bought 2 ${symbol} 11/20/26 100C · ${symbol} at 94.40` },
+      { kind: "ping", at: bars[40].time + 30, price: null, side: null, text: `Give-back ping · ${symbol}` },
+      { kind: "radar", at: bars[50].time, price: null, side: null, text: `Radar · ${symbol} volume burst` },
+    ],
+    time_stop: plan ? { at: last + 10 * step, text: "out by 15:30" } : null,
+  };
+}
+const NO_BARS = { symbol: "NBIS", timeframe: "2m", step: 120, as_of: now, live: false, state: "unavailable", reason: "No NBIS minute bars for today yet.",
+  bars: [], levels: [], marks: [], time_stop: null };
 // Monday October 26, 2026 09:45 and Tuesday 10:31 in New York (EDT, UTC-4).
 const MON_0945 = Date.UTC(2026, 9, 26, 13, 45) / 1000;
 const TUE_1031 = Date.UTC(2026, 9, 27, 14, 31) / 1000;
@@ -45,7 +66,7 @@ const RADAR_PROOF = { state: "ok", reason: null, rule_version: "rv1", sessions: 
     { kind: "gap_reversal", direction: "down", cards: 1, with_contract: 1, planned: 0, paper_closed: 0, paper_green: 0, paper_pnl: 0, unresolved: 0 }],
   verdict: { verdict: "not_enough_data", reason: "Needs 20 rated.", rule: "60% useful and ahead.", rated: 6, timed: 4, useful_share: 0.5, ahead_share: null } };
 
-type Desk = { picture?: "ok" | string; timeline?: object; history?: object };
+type Desk = { chart?: "ok" | object; timeline?: object; history?: object };
 
 async function lab(page: Page, desk: Desk = {}) {
   const reads: string[] = [];
@@ -57,11 +78,10 @@ async function lab(page: Page, desk: Desk = {}) {
   await page.route(`**/copilot/desk/${INV}/*`, (route) => {
     const part = new URL(route.request().url()).pathname.split("/").pop()!;
     reads.push(`${route.request().method()} ${part}`);
-    if (part === "picture") {
-      timeframes.push(new URL(route.request().url()).searchParams.get("timeframe"));
-      const picture = desk.picture ?? "ok";
-      return picture === "ok" ? route.fulfill({ status: 200, contentType: "image/png", body: PNG })
-        : route.fulfill({ status: 404, json: { detail: picture } });
+    if (part === "chart") {
+      const timeframe = new URL(route.request().url()).searchParams.get("timeframe") as keyof typeof STEP;
+      timeframes.push(timeframe);
+      return route.fulfill({ json: !desk.chart || desk.chart === "ok" ? chartRead(timeframe) : desk.chart });
     }
     return route.fulfill({ json: part === "timeline" ? desk.timeline ?? TIMELINE : desk.history ?? HISTORY });
   });
@@ -77,9 +97,9 @@ test("the centre opens on the open thread's chart beside the conversation, and i
   await expect(pane.getByRole("tab")).toHaveText(["Chart", "Feed", "Check a call"]); // no tab for what does not exist yet
   await expect(pane.getByTestId("desk-chart")).toContainText("NBIS");
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
-  await expect(pane.getByRole("img", { name: /NBIS today: minute bars/ })).toBeVisible();
+  await expect(pane.getByRole("img", { name: /NBIS today: 2-minute candles/ })).toBeVisible();
   await page.waitForTimeout(200);
-  expect(reads).toEqual(["GET picture"]); // the timeline waits
+  expect(reads).toEqual(["GET chart"]); // the timeline waits
 
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
   const timeline = pane.getByRole("list", { name: "Timeline" });
@@ -90,37 +110,64 @@ test("the centre opens on the open thread's chart beside the conversation, and i
   // Today's rows by the New York clock, an earlier one by its day.
   await expect(timeline.getByRole("listitem").first().locator("time")).toHaveText(/^\d{2}:\d{2}$/);
   await expect(timeline.getByRole("listitem").last().locator("time")).toHaveText(/^[A-Z][a-z]{2} \d{1,2}$/);
-  expect(reads).toEqual(["GET picture", "GET timeline"]); // reads only, nothing posted
+  expect(reads).toEqual(["GET chart", "GET timeline"]); // reads only, nothing posted
   await pane.screenshot({ path: test.info().outputPath("desk-centre-timeline.png") });
 });
 
-test("the chart's timeframe buttons switch the picture read, and the legend names fills, pings and Radar", async ({ page }) => {
+test("the chart draws the plan's lines, the fills, pings, Radar and the time stop, and its timeframe holds", async ({ page }) => {
   const { reads, timeframes, pane } = await lab(page);
   const group = pane.getByRole("group", { name: "Timeframe" });
+  const canvas = pane.getByTestId("desk-chart-canvas");
   await expect(group.getByRole("button", { name: "2m" })).toHaveAttribute("aria-pressed", "true");
-  await expect(pane.getByRole("img", { name: /NBIS today: minute bars with .*pings and Radar hits/ })).toBeVisible();
+  await expect(pane.getByRole("img", { name: /NBIS today: 2-minute candles with .*pings and Radar hits/ })).toBeVisible();
+  await expect(canvas).toHaveAttribute("data-bars", "60");
+  await expect(canvas).toHaveAttribute("data-marks", "3");
+  await expect(canvas.locator("canvas").first()).toBeVisible(); // the library drew
+  // The lines and the time stop are named above the chart; every mark, with its New York time, in the chart's own list.
+  await expect(pane.getByTestId("desk-chart-lines")).toHaveText(/^Entry 95.90Invalidation 92.30Time stop \d{1,2}:\d{2} [AP]MReset$/);
+  const marks = pane.getByRole("list", { name: "On the chart" }).getByRole("listitem");
+  await expect(marks).toHaveText(["Entry 95.90", "Invalidation 92.30",
+    /^Fill · Bought 2 NBIS 11\/20\/26 100C · NBIS at 94.40 · .*\d{1,2}:\d{2} [AP]M ET$/,
+    /^Ping · Give-back ping · NBIS · .*ET$/, /^Radar · Radar · NBIS volume burst · .*ET$/, /^Time stop .* · out by 15:30$/]);
+  await expect(pane.getByTestId("desk-chart-readout")).toContainText(/ET · O \d+\.\d{2} H .* C /);
   const legend = pane.getByLabel("Legend");
   await expect(legend).toContainText("your fills");
   await expect(legend).toContainText("pings");
   await expect(legend).toContainText("Radar");
+  await pane.screenshot({ path: test.info().outputPath("desk-chart-2m.png") });
+
+  // Hovering the chart moves the readout to the candle under the pointer.
+  const box = (await canvas.boundingBox())!;
+  const before = await pane.getByTestId("desk-chart-readout").textContent();
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height / 2);
+  await expect(pane.getByTestId("desk-chart-readout")).not.toHaveText(before!);
 
   await group.getByRole("button", { name: "15m" }).click();
   await expect(group.getByRole("button", { name: "15m" })).toHaveAttribute("aria-pressed", "true");
-  await expect(pane.getByRole("img", { name: /NBIS recent sessions: 15-minute bars/ })).toBeVisible();
+  await expect(canvas).toHaveAttribute("data-timeframe", "15m");
+  await expect(pane.getByRole("img", { name: /NBIS recent sessions: 15-minute candles/ })).toBeVisible();
   await group.getByRole("button", { name: "1D" }).click();
-  await expect(pane.getByRole("img", { name: "NBIS the last few months: daily bars" })).toBeVisible();
-  await expect(legend).toContainText("marked on 2m and 15m");
+  await expect(canvas).toHaveAttribute("data-timeframe", "1D");
+  await expect(pane.getByRole("img", { name: /NBIS the last few months: daily candles/ })).toBeVisible();
+  await pane.getByRole("button", { name: "Reset" }).click();
   expect(timeframes).toEqual(["2m", "15m", "1D"]);
-  expect(reads).toEqual(["GET picture", "GET picture", "GET picture"]); // reads only
+  expect(reads).toEqual(["GET chart", "GET chart", "GET chart"]); // reads only
+
+  // The choice holds for the tab's session: back on the desk, the chart opens on 1D.
+  await page.reload();
+  await expect(group.getByRole("button", { name: "1D" })).toHaveAttribute("aria-pressed", "true");
+  await expect(canvas).toHaveAttribute("data-timeframe", "1D");
 });
 
 test("the chart and the timeline each say what is unavailable or missing", async ({ page }) => {
   const { pane } = await lab(page, {
-    picture: "No NBIS minute bars for today yet.",
+    chart: NO_BARS,
     timeline: { state: "ok", symbol: "NBIS", rows: [], count: 0, unavailable: ["pings"], recent_days: 7 },
   });
-  await expect(pane).toContainText("Chart unavailable: No NBIS minute bars for today yet.");
-  await expect(pane.getByRole("img")).toHaveCount(0);
+  const empty = pane.getByTestId("desk-chart-empty");
+  await expect(empty).toContainText("No chart data");
+  await expect(empty).toContainText("No NBIS minute bars for today yet. 15m and 1D show earlier sessions.");
+  await expect(pane.getByTestId("desk-chart-canvas")).toHaveAttribute("data-bars", "0");
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
   await expect(pane).toContainText("Nothing has touched this thread in the last 7 days.");
   await expect(pane).toContainText("Could not read: pings.");
@@ -130,7 +177,9 @@ test("on a 375 px phone the centre sits under the book and the copilot is a shee
   await page.setViewportSize({ width: 375, height: 812 });
   const { pane } = await lab(page); // a thread's link opens on the copilot's sheet
   await page.getByRole("button", { name: "Back to the desk" }).click();
-  await expect(pane.getByRole("img", { name: /NBIS today: minute bars/ })).toBeVisible();
+  await expect(pane.getByRole("img", { name: /NBIS today: 2-minute candles/ })).toBeVisible();
+  await expect(pane.getByTestId("desk-chart-canvas")).toHaveAttribute("data-bars", "60");
+  expect((await pane.getByRole("button", { name: "15m" }).boundingBox())!.height).toBeGreaterThanOrEqual(36);
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
   await expect(pane.getByRole("list", { name: "Timeline" }).getByRole("listitem")).toHaveCount(4);
   expect((await pane.getByRole("tab", { name: "Feed" }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
@@ -146,16 +195,18 @@ test("a symbol opened with no saved conversation charts it by the symbol", async
   await page.route(/\/copilot\/desk\/symbol(:|%3A)NBIS\//, (route) => {
     const part = new URL(route.request().url()).pathname.split("/").pop()!;
     reads.push(`${route.request().method()} ${part}`);
-    if (part === "picture") return route.fulfill({ status: 200, contentType: "image/png", body: PNG });
+    if (part === "chart") return route.fulfill({ json: chartRead("2m", "NBIS", false) });
     return route.fulfill({ json: { ...TIMELINE, count: 1, rows: [{ kind: "fill", at: now - 900, text: "Bought 5 NBIS stock at 94.20", detail: "the open position" }] } });
   });
   await page.goto("/copilot-lab?symbol=NBIS");
   const pane = page.getByRole("region", { name: "Chart and feed" });
-  await expect(pane.getByRole("img", { name: /NBIS today: minute bars/ })).toBeVisible();
+  await expect(pane.getByRole("img", { name: /NBIS today: 2-minute candles/ })).toBeVisible();
+  await expect(pane.getByTestId("desk-chart-lines")).toHaveText("no plan lines savedReset"); // a symbol with no plan draws no lines and says so
+  await expect(pane.getByRole("list", { name: "On the chart" }).getByRole("listitem")).toHaveCount(3);
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
   await expect(pane.getByRole("list", { name: "Timeline" }).getByRole("listitem")).toHaveText([/Bought 5 NBIS stock at 94.20.*the open position/]);
-  expect(reads).toEqual(["GET picture", "GET timeline"]); // reads only, nothing posted
+  expect(reads).toEqual(["GET chart", "GET timeline"]); // reads only, nothing posted
 });
 
 test("with no ticker the centre charts the market, and This week sits folded at the foot of the thread list", async ({ page }) => {
@@ -163,7 +214,7 @@ test("with no ticker the centre charts the market, and This week sits folded at 
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route("**/copilot/chat", (route) => route.abort());
-  await page.route("**/copilot/desk/market/picture", (route) => { reads.push("market"); return route.fulfill({ status: 200, contentType: "image/png", body: PNG }); });
+  await page.route("**/copilot/desk/market/chart*", (route) => { reads.push("market"); return route.fulfill({ json: { ...chartRead("2m", "QQQ", false), levels: [] } }); });
   await page.route("**/copilot/desk/session", (route) => route.fulfill({ json: {
     as_of: new Date(now * 1000).toISOString(), now, day: "2026-10-28", phase: "regular", open: now - 3600, close: now + 7200,
     events: [
@@ -200,7 +251,7 @@ test("with no ticker the centre charts the market, and This week sits folded at 
     ] } }));
   await page.goto("/copilot-lab?view=briefing");
   const centre = page.getByRole("region", { name: "Chart and feed" });
-  await expect(centre.getByRole("img", { name: /QQQ today: minute bars with your fills/ })).toBeVisible();
+  await expect(centre.getByRole("img", { name: /QQQ today: 2-minute candles with your fills/ })).toBeVisible();
   await expect(centre.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=QQQ");
   await expect(centre).toContainText("your fills");
   expect(reads).toEqual(["market"]);

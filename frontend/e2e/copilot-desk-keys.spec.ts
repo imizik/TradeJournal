@@ -105,7 +105,7 @@ async function lab(page: Page, { time = NOW, session = SESSION, threads = () => 
   await page.route("**/copilot/research-jobs?*", (route) => route.fulfill({ json: { jobs: [], queue_enabled: false, daily_budget_usd: 2, spent_today_usd: 0 } }));
   await page.route("**/copilot/desk/sparks?*", (route) => route.fulfill({ json: SPARKS }));
   await page.route("**/copilot/desk/feed", (route) => route.fulfill({ json: feed }));
-  await page.route("**/copilot/desk/*/picture*", (route) => route.fulfill({ status: 503, json: { detail: "No chart in this test." } }));
+  await page.route("**/copilot/desk/*/{picture,chart}*", (route) => route.fulfill({ status: 503, json: { detail: "No chart in this test." } }));
   await page.goto(path);
   if (showThreads) await openDeskThreads(page);
   if (showThreads) await expect(page.getByRole("navigation", { name: "Thread list" }).getByTestId("desk-day")).toBeVisible();

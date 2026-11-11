@@ -462,7 +462,7 @@ test("the centre's chart follows the ticker a Main conversation is about", async
     transcript: [{ role: "user", content: `Question ${n}` }, { role: "assistant", content: `CRWV is leading the group, answer ${n}.` }], evidence: [], findings: null });
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [chat(4), chat(3)].map(c => ({ ...c, transcript: undefined })) } }));
   for (const n of [3, 4]) await page.route(`**/copilot/investigations/${chat(n).id}`, (route) => route.fulfill({ json: chat(n) }));
-  await page.route("**/copilot/desk/*/picture*", (route) => route.fulfill({ status: 404, json: { detail: "no bars" } }));
+  await page.route("**/copilot/desk/*/{picture,chart}*", (route) => route.fulfill({ status: 404, json: { detail: "no bars" } }));
   await page.reload();
   await openDeskThreads(page); // a page load: the drawer starts closed
   const chart = page.getByTestId("desk-chart");
