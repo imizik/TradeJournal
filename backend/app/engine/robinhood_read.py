@@ -77,11 +77,22 @@ class RefusedTool(ReadError):
 
 # --------------------------------------------------------------------------- the wire
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect is an error here: following one would carry the sign-in (the Authorization header) to another URL."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def _transport(url: str, body: bytes, headers: dict[str, str]) -> tuple[int, dict[str, str], str]:
-    """One HTTPS POST. Tests replace this with a fake server; nothing else in the app sends to Robinhood."""
+    """One HTTPS POST, never following a redirect. Tests replace this with a fake server; nothing else in the app sends
+    to Robinhood."""
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as reply:  # noqa: S310 - fixed https URLs only
+        with _OPENER.open(req, timeout=TIMEOUT_SECONDS) as reply:  # noqa: S310 - fixed https URLs only
             return reply.status, dict(reply.headers), reply.read(MAX_REPLY_BYTES).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         return exc.code, dict(exc.headers or {}), ""  # an error body is never read: it may echo the request

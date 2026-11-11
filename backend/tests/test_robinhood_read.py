@@ -246,3 +246,40 @@ def test_the_sign_in_never_appears_in_a_test_fixture_or_the_repo():
     pattern = re.compile(r"(access|refresh)_token\"?\s*[:=]\s*\"[A-Za-z0-9_\-\.]{30,}\"")
     for path in _app_files():
         assert not pattern.search(path.read_text(errors="ignore")), path
+
+
+def test_a_redirect_is_never_followed_with_the_sign_in():
+    import http.server
+    import threading
+    seen = []
+
+    class Elsewhere(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            seen.append(self.headers.get("Authorization"))
+            self.send_response(200)
+            self.end_headers()
+        do_POST = do_GET
+
+        def log_message(self, *a):
+            pass
+
+    other = http.server.HTTPServer(("127.0.0.1", 0), Elsewhere)
+
+    class Bounce(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{other.server_port}/steal")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    bounce = http.server.HTTPServer(("127.0.0.1", 0), Bounce)
+    for server in (other, bounce):
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        status, _headers, text = rh._transport(f"http://127.0.0.1:{bounce.server_port}/mcp", b"{}", {"Authorization": "Bearer x"})
+    finally:
+        other.shutdown()
+        bounce.shutdown()
+    assert status == 302 and text == "" and seen == []
