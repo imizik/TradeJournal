@@ -1,7 +1,7 @@
 """The Copilot Lab's Plans board (``engine/copilot_plans.py``): confirmed copilot plans still armed, nearest first,
 the Dashboard's Plans card (``engine/plan_positions.py``): each open position beside the plan it was entered under,
 the Charts dock's loop for one symbol (``GET /copilot/symbol/{symbol}``): both of those and what is new on it, and the
-desk's Context pane for the open thread (``GET /copilot/desk/{investigation_id}/picture|timeline|history``,
+desk's Context pane for the open thread (``GET /copilot/desk/{investigation_id}/picture|chart|timeline|history``,
 ``engine/desk_context.py``). The picture route's reserved id ``market`` is the Briefing's chart: QQQ today with the day's
 fills and phone pings sent, from the Briefing session timeline's own readers (``copilot_desk``). An id of ``symbol:`` and a
 symbol is a thread named by its symbol alone (a position or plan with no saved conversation), on all three.
@@ -166,6 +166,27 @@ def desk_picture(investigation_id: str, timeframe: Literal["2m", "15m", "1D"] = 
     except desk_context.Unavailable as exc:
         raise HTTPException(404, str(exc)) from None
     return Response(png, media_type="image/png", headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/desk/{investigation_id}/chart")
+def desk_chart(investigation_id: str, timeframe: Literal["2m", "15m", "1D"] = "2m", db: Session = Depends(get_session)):
+    """The cockpit centre's interactive chart as data (``desk_context.chart``): the thread's symbol on ``timeframe`` with
+    its plan's levels, the owner's fills, today's pings sent and Radar hits on the symbol, and the time stop still
+    ahead. ``market`` is QQQ with the day's fills and pings. One cached chart-feed read, like the picture. No bars is
+    ``state`` "unavailable" with the reason, never an error page."""
+    from app.routers import copilot_desk
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    now = today._now()
+    day = datetime.fromtimestamp(now, ET).date()
+    pings = today._section(db, "desk chart pings", lambda: copilot_desk._ping_events(db, now))
+    if investigation_id == desk_context.MARKET_ID:
+        fills = today._section(db, "desk chart fills", lambda: copilot_desk._fill_events(db, day))
+        return desk_context.chart(db, None, now, timeframe, fills.get("rows", []) + pings.get("rows", []))
+    inv = _thread(investigation_id, db)
+    radar = today._section(db, "desk chart radar", lambda: copilot_desk._radar_events(day))
+    events = [r for r in pings.get("rows", []) + radar.get("rows", []) if inv.symbol and r.get("symbol") == inv.symbol]
+    return desk_context.chart(db, inv, now, timeframe, events)
 
 
 @router.get("/desk/{investigation_id}/timeline")

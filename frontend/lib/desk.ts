@@ -434,6 +434,24 @@ export async function getDeskPicture(id: string, signal?: AbortSignal, timeframe
   return { url: URL.createObjectURL(await response.blob()) };
 }
 
+/** ``GET /copilot/desk/{id}/chart``: the cockpit centre's chart as data (``id`` a thread, ``symbol:X`` or ``market``).
+ * Times are epoch seconds; ``step`` is a candle's seconds; ``extended`` candles are the pre-market or after hours. A mark
+ * with no ``price`` sits on its candle. ``time_stop`` is the plan's time stop while still ahead. ``live``: bars can still
+ * change, so the desk reads again each minute. ``state`` "unavailable" carries no bars and the reason. */
+export type DeskChartMark = { kind: "fill" | "ping" | "radar"; at: number; price: number | null; side: "buy" | "sell" | null; text: string };
+export type DeskChartData = {
+  symbol: string; timeframe: DeskTimeframe; step: number; as_of: number; live: boolean;
+  state: "ok" | "unavailable"; reason: string | null;
+  bars: { time: number; open: number; high: number; low: number; close: number; volume: number; extended: boolean }[];
+  levels: { role: "entry" | "invalidation"; price: number; label: string }[];
+  marks: DeskChartMark[];
+  time_stop: { at: number; text: string } | null;
+};
+
+export async function getDeskChart(id: string, timeframe: DeskTimeframe, signal?: AbortSignal): Promise<DeskChartData> {
+  return deskRead<DeskChartData>(id, `chart?timeframe=${encodeURIComponent(timeframe)}`, signal);
+}
+
 // --------------------------------------------------------------------------- the Briefing's session timeline
 
 /** One thing that happened today, for the session strip; ``at`` is epoch seconds. */
