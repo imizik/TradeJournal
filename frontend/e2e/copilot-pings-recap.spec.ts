@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// Now's "How the pings did" (docs/copilot-lab.md#the-desk): one collapsed line saying what followed the phone pings since
+// The day report's "How the pings did" (docs/copilot-lab.md#the-desk), the book's lower block after the close: one collapsed line saying what followed the phone pings since
 // the previous trading session, each alert and alerted Radar hit underneath on tap. Nothing to answer; it replaced the
 // Rate yesterday card. Every route is stubbed in the browser; no model runs.
 const ON = {
@@ -8,8 +8,8 @@ const ON = {
   plan_configured: false, tools: [], capabilities: { copilot_alerts: true },
   limits: { max_rounds: 4, max_tool_calls: 8, tool_timeout_s: 10, turn_timeout_s: 120, turn_budget_usd: 0.25 },
 };
-const DAY = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-const now = Math.floor(Date.now() / 1000);
+const DAY = "2026-10-23"; // a Friday
+const now = Math.floor(Date.parse("2026-10-23T21:30:00Z") / 1000); // 17:30 New York: the day report shows
 const SINCE = new Date(Date.parse(`${DAY}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10); // the previous day reads "yesterday"
 const MAIN = "66666666-6666-4666-8666-666666666666";
 const alert = (contract: string, kind_label: string, outcome: Record<string, unknown>, ago: number) => ({
@@ -53,6 +53,7 @@ async function now_(page: Page, pings: unknown = PINGS) {
   await page.route("**/trades/*/phone-alerts/*/feedback", (route) => { writes.push("alert"); return route.abort(); });
   await page.route("**/radar/events/*/feedback", (route) => { writes.push("radar"); return route.abort(); });
   await page.route(`**/day-journal/${DAY}`, (route) => route.fulfill({ json: { day: DAY, entries: [], trade_plans: {} } }));
+  await page.clock.install({ time: new Date(now * 1000) });
   await page.goto("/copilot-lab");
   return writes;
 }
@@ -68,7 +69,7 @@ for (const width of [1440, 375]) {
     await expect(card.getByTestId("pings-alert")).toHaveCount(4);
     await expect(card.getByTestId("pings-alert").first()).toBeHidden(); // collapsed by default
     await expect(page.getByText("Rate yesterday")).toHaveCount(0);
-    await page.getByTestId("now").screenshot({ path: test.info().outputPath(`pings-recap-collapsed-${width}.png`) });
+    await page.getByTestId("day-report").screenshot({ path: test.info().outputPath(`pings-recap-collapsed-${width}.png`) });
 
     await card.locator("summary").click();
     await expect(card.getByTestId("pings-alert").first()).toContainText("Sold for $420 vs $600 at the alert's bid: −$180");

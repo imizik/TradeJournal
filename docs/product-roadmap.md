@@ -63,7 +63,7 @@ saved against the exact alert with a timestamp. Since 2026-11-10 both answers
 are optional: offered only where the item shows (the alert on its position's
 thread, the hit on its Radar card, the Telegram buttons) and never counted as
 waiting on the desk or in the evening ping, after 0 of 37 alerts were answered
-in 30 days; Now's "How the pings did" shows what followed each ping instead
+in 30 days; the desk's day report ("How the pings did") shows what followed each ping instead
 ([the desk](copilot-lab.md#the-desk)). Proof shows response coverage
 and unanswered counts across all recorded sent or delivery-unconfirmed position
 alerts, separately from fill-derived actions and financial results. These reads

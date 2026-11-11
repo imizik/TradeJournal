@@ -90,7 +90,7 @@ test("Main, then one row per ticker, needs-you first; one status line and no met
   await expect(tickers(page).locator("span.bg-primary")).toHaveCount(1);
   // A number sets in the mono face; a word never does.
   await expect(nbis.getByText("+$180.00")).toHaveClass(/tabular-nums/);
-  await expect(page.getByTestId("now")).toBeVisible();
+  await expect(page.getByTestId("desk-book")).toBeVisible();
   expect(reads()).toBe(1);
   await page.screenshot({ path: test.info().outputPath("thread-list-desktop.png") });
 
@@ -108,7 +108,7 @@ test("a ticker opens its conversation in place under a breadcrumb, and Now goes 
   await expect(nbis).toHaveClass(/ring-1/); // the open ticker is marked
   await expect(crumb(page)).toHaveText("NBIS›NBIS plan");
   await list(page).getByRole("region", { name: "Now" }).getByRole("button").click();
-  await expect(page.getByTestId("now")).toBeVisible();
+  await expect(page.getByTestId("desk-book")).toBeVisible();
   await expect(page.getByText("Plan: enter above 95.90, out under 92.30.")).toHaveCount(0);
   expect(chats).toEqual([]);
 });
@@ -123,6 +123,7 @@ test("a ticker with several conversations lists them as subthreads with their da
   ] } }));
   await page.route(`**/copilot/investigations/${older.id}`, (route) => route.fulfill({ json: older }));
   await page.reload();
+  await openDeskThreads(page); // a page load: the drawer starts closed
   await tickers(page).getByRole("button", { name: "NBIS, Held, needs you" }).click();
   const children = list(page).getByRole("list", { name: "NBIS threads" });
   await expect(children.getByRole("link")).toHaveText([/NBIS plan\s*Oct 23/, /Trim into the gap\?\s*Oct 22/]);
@@ -143,10 +144,11 @@ test("a ticker's arrow shows or hides its subthreads without changing the conver
     summary(CRWV, "CRWV", "open", "2026-10-22T18:00:00Z"), { ...summary(APLD, "CRWV", "open", "2026-10-21T18:00:00Z"), title: "CRWV again" },
   ] } }));
   await page.reload();
+  await openDeskThreads(page); // a page load: the drawer starts closed
   const arrow = list(page).getByRole("button", { name: "Show NBIS threads" });
   await expect(arrow).toHaveText("6");
   await arrow.click();
-  await expect(page.getByTestId("now")).toBeVisible(); // looked at, not opened
+  await expect(page.getByTestId("desk-book")).toBeVisible(); // looked at, not opened
   const children = list(page).getByRole("list", { name: "NBIS threads" });
   await expect(children.getByRole("link")).toHaveText([/NBIS plan/, /NBIS talk 1/, /NBIS talk 2/]); // the newest open ones
   await children.getByRole("button", { name: /^Earlier/ }).click();
@@ -158,7 +160,7 @@ test("a ticker's arrow shows or hides its subthreads without changing the conver
   await expect(list(page).getByRole("list", { name: "CRWV threads" })).toBeVisible();
   await list(page).getByRole("button", { name: "Hide NBIS threads" }).click();
   await expect(children).toHaveCount(0);
-  await expect(page.getByTestId("now")).toBeVisible();
+  await expect(page.getByTestId("desk-book")).toBeVisible();
 });
 
 test("Main stays pinned as the list scrolls, with only today's conversations under it and no ratings counted", async ({ page }) => {
@@ -175,6 +177,7 @@ test("Main stays pinned as the list scrolls, with only today's conversations und
       radar: { count: 40, rows: [{ event_id: "e1", symbol: "MU", kind: "vs sector", at: 0, today: true, rating: null },
         { event_id: "e2", symbol: "MU", kind: "vs sector", at: 0, today: false, rating: null }] } } } }));
   await page.reload();
+  await openDeskThreads(page); // a page load: the drawer starts closed
   const main = list(page).getByRole("region", { name: "Now" });
   await expect(main).not.toContainText("to answer");
   const under = list(page).getByRole("list", { name: "Main threads" });
@@ -208,6 +211,7 @@ test("a long conversation opens on its latest question; the ladder is one line a
 
 test("Radar hits sit inside Main: one line, each hit opening its event", async ({ page }) => {
   await lab(page);
+  await page.getByRole("region", { name: "Chart and today" }).getByRole("tab", { name: "Today" }).click();
   const radar = page.getByTestId("briefing-radar-new");
   await expect(radar.locator("summary")).toHaveText("1 new on Radar ▾");
   await radar.locator("summary").click();
@@ -222,7 +226,7 @@ test("a quiet day: nothing open says so, and Plan a trade is one tap away in the
   await expect(tickers(page)).toContainText("Nothing open. Plan a trade to start a ticker.");
   await expect(threads.getByRole("link", { name: "Plan a trade" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New plan" })).toBeVisible();
-  await expect(page.getByTestId("now-positions")).toContainText("No open positions.");
+  await expect(page.getByTestId("desk-book")).toContainText("No open positions.");
 });
 
 test("an unavailable source says so, and the list never claims nothing is open without positions", async ({ page }) => {
@@ -232,11 +236,10 @@ test("an unavailable source says so, and the list never claims nothing is open w
   await expect(threads).toContainText("Unavailable right now: positions, Radar.");
 });
 
-test("the list fits a 375 px phone with thumb-sized rows, and a thread's tab names where you are", async ({ page }) => {
+test("the list fits a 375 px phone with thumb-sized rows, and a thread opens on the copilot sheet under its breadcrumb", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   const { chats } = await lab(page);
   const threads = list(page);
-  await expect(page.getByRole("tab", { name: "Now" })).toBeVisible();
   for (const item of [...await threads.getByRole("link").all(), ...await threads.getByRole("button").all()]) {
     const box = (await item.boundingBox())!;
     expect(box.height).toBeGreaterThanOrEqual(44);
@@ -246,7 +249,7 @@ test("the list fits a 375 px phone with thumb-sized rows, and a thread's tab nam
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await page.screenshot({ path: test.info().outputPath("thread-list-375.png"), fullPage: true });
   await threads.getByRole("button", { name: "NBIS, Held, needs you" }).click();
-  await expect(page.getByRole("tab", { name: "NBIS" })).toHaveAttribute("aria-selected", "true");
+  await expect(threads).toBeHidden(); // the drawer gives way to the copilot's sheet
   await expect(crumb(page)).toBeInViewport();
   // Measured while its tab was hidden, the one-line box still fits its line.
   expect((await page.getByLabel("Message").boundingBox())!.height).toBeGreaterThanOrEqual(40);
@@ -318,6 +321,7 @@ test("a busy day stays calm: one row per ticker, six quiet ones shown, a ticker 
     summary("open-1", "APLD", "open", "2026-10-22T18:00:00Z"),
   ] } }));
   await page.reload();
+  await openDeskThreads(page); // a page load: the drawer starts closed
   const threads = list(page);
   await expect(threads.getByRole("region", { name: "Now" })).toContainText("2 Radar");
   // NBIS and CRWV, then six of MU, AMD, SMCI, ORCL (news), APLD, RNXT, AAPL, TSLA, META (open) and HOOD (closed Wednesday).
@@ -382,6 +386,7 @@ test("the Plans view lists every plan by stage, opens its thread, and is remembe
   expect(chats).toEqual([]);
 
   await page.reload();
+  await openDeskThreads(page); // a page load: the drawer starts closed
   await expect(list(page).getByTestId("desk-plans")).toBeVisible();
   await list(page).getByRole("tab", { name: "All" }).click();
   await expect(list(page).getByRole("region", { name: "Tickers" })).toBeVisible();
@@ -426,11 +431,12 @@ test("the open thread is in the address: Back returns to the one before, a reloa
   await page.goBack();
   await reloaded;
   await expect(page).toHaveURL("/copilot-lab?view=briefing");
-  await expect(page.getByTestId("now")).toBeVisible();
+  await expect(page.getByTestId("desk-book")).toBeVisible();
   await expect(here.getByText("Answer 2")).toBeHidden();
   await page.goForward();
   await expect(here.getByText("Answer 2")).toBeVisible();
   await page.reload();
+  await openDeskThreads(page); // a page load: the drawer starts closed
   await expect(here.getByText("Answer 2")).toBeVisible();
   await expect(page.getByLabel("Message")).toHaveValue(""); // no prefilled question, unlike an alert's link
   // The next day the bare address starts on Main.
@@ -443,28 +449,21 @@ test("the open thread is in the address: Back returns to the one before, a reloa
   await expect(page.getByPlaceholder("Message Main chat…")).toBeEnabled();
 });
 
-test("Context follows the ticker a Main conversation is about; going back to the market holds for that conversation only", async ({ page }) => {
+test("the centre's chart follows the ticker a Main conversation is about", async ({ page }) => {
   await lab(page);
   const chat = (n: number) => ({ ...summary(`77777777-7777-4777-8777-77777777777${n}`, "X", "open", `2026-10-23T1${n}:00:00Z`), symbol: null, title: `Market talk ${n}`,
-    transcript: [{ role: "user", content: `Question ${n}` }, { role: "assistant", content: `NBIS is leading the group, answer ${n}.` }], evidence: [], findings: null });
+    transcript: [{ role: "user", content: `Question ${n}` }, { role: "assistant", content: `CRWV is leading the group, answer ${n}.` }], evidence: [], findings: null });
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [chat(4), chat(3)].map(c => ({ ...c, transcript: undefined })) } }));
   for (const n of [3, 4]) await page.route(`**/copilot/investigations/${chat(n).id}`, (route) => route.fulfill({ json: chat(n) }));
   await page.route("**/copilot/desk/*/picture*", (route) => route.fulfill({ status: 404, json: { detail: "no bars" } }));
   await page.reload();
-  const toggle = page.getByRole("button", { name: "Context pane" });
-  if (await toggle.getAttribute("aria-pressed") !== "true") await toggle.click();
-  const pane = page.getByRole("complementary", { name: "Context" });
-  const under = list(page).getByRole("list", { name: "Main threads" });
-
-  await under.getByRole("link", { name: /Market talk 4/ }).click();
-  await expect(page.getByText("NBIS is leading the group, answer 4.")).toBeVisible();
-  await expect(pane.getByTestId("context-focus")).toContainText("NBIS");
-  await pane.getByRole("button", { name: "Market" }).click();
-  await expect(pane.getByRole("button", { name: "Back to NBIS" })).toBeVisible();
-
-  await under.getByRole("link", { name: /Market talk 3/ }).click();
-  await expect(page.getByText("NBIS is leading the group, answer 3.")).toBeVisible();
-  await expect(pane.getByTestId("context-focus")).toContainText("NBIS"); // another conversation shows its ticker again
+  await openDeskThreads(page); // a page load: the drawer starts closed
+  const chart = page.getByTestId("desk-chart");
+  await expect(chart).toContainText("NBIS"); // the first followed position until a conversation names another ticker
+  await openDeskThreads(page);
+  await list(page).getByRole("list", { name: "Main threads" }).getByRole("link", { name: /Market talk 4/ }).click();
+  await expect(page.getByText("CRWV is leading the group, answer 4.")).toBeVisible();
+  await expect(chart.locator("span").first()).toHaveText("CRWV");
 });
 
 test("a thread planned from Radar is tagged From Radar, from the server's origin or a Plan it thread's title", async ({ page }) => {
@@ -475,6 +474,7 @@ test("a thread planned from Radar is tagged From Radar, from the server's origin
     radarPlan, setupPlan, { ...saved, transcript: undefined, origin: null },
   ] } }));
   await page.reload();
+  await openDeskThreads(page); // a page load: the drawer starts closed
   await tickers(page).getByRole("button", { name: "NBIS, Held, needs you" }).click();
   const children = list(page).getByRole("list", { name: "NBIS threads" });
   await expect(children.getByRole("link")).toHaveText([/^From RadarPlan a trade: Radar: NBIS turned up/, /^From RadarRadar setup: NBIS dip turning up/, /^NBIS plan/]);
@@ -482,7 +482,7 @@ test("a thread planned from Radar is tagged From Radar, from the server's origin
 });
 
 for (const width of [1440, 375]) {
-  test(`a ticker not followed leaves Now and the list for one "not followed" line, and Show again brings it back (${width} px)`, async ({ page }) => {
+  test(`a ticker not followed leaves the book and the list for one "not followed" line, and Show again brings it back (${width} px)`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
     const SLS = "66666666-6666-4666-8666-666666666666";
     const sls = row({ key: `trade:${SLS}`, group: "act", symbol: "SLS", title: "SLS 12/19/26 3C", instrument: "12/19/26 3C",
@@ -499,6 +499,7 @@ for (const width of [1440, 375]) {
       return route.fulfill({ json: { id: "e1", day: "2026-10-23", created_at: "2026-10-23T15:00:00Z", actor: "owner", not_traded: false, ...body } });
     });
     await page.reload();
+  await openDeskThreads(page); // a page load: the drawer starts closed
 
     // The list: SLS is not in its groups and needs nothing; one line holds it.
     await openDeskThreads(page);
@@ -507,21 +508,21 @@ for (const width of [1440, 375]) {
     await expect(fold).toContainText("1 not followed");
     await expect(page.getByTestId("desk-day")).toContainText("1 needs you"); // NBIS only
 
-    // Now: SLS is not among the positions; it waits behind "1 not followed".
-    if (width === 375) await page.getByRole("tab", { name: "Now" }).click();
-    const positions = page.getByTestId("now-positions");
-    await expect(positions).toContainText("Open positions · 1");
-    await expect(positions.getByRole("button", { name: /^SLS/ })).toHaveCount(0);
-    await expect(page.getByTestId("now-waiting")).not.toContainText("SLS");
+    // The book: SLS is not among the positions and not in the strip; it waits behind "1 not followed".
+    await page.getByRole("button", { name: "Close the thread list" }).click(); // the drawer sits over the book
+    const book = page.getByTestId("desk-book");
+    await expect(book.getByRole("heading", { level: 2 })).toHaveText("Your book · 1 followed");
+    await expect(book.getByRole("button", { name: /^SLS/ })).toHaveCount(0);
+    await expect(page.getByTestId("needs-you")).not.toContainText("SLS");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-    await positions.getByRole("button", { name: /1 not followed/ }).click();
-    await positions.getByRole("button", { name: "Show again" }).click();
-    await expect(positions).toContainText("Open positions · 2");
+    await book.getByRole("button", { name: /1 not followed/ }).click();
+    await book.getByRole("button", { name: "Show again" }).click();
+    await expect(book.getByRole("heading", { level: 2 })).toHaveText("Your book · 2 followed");
     expect(entries.map(e => [e.kind, e.symbol, e.text])).toEqual([["follow", "SLS", "Following"]]);
 
     // Hide it again from its row: one tap, saved for every device.
-    await positions.getByRole("button", { name: "Hide SLS: not following" }).click();
-    await expect(positions).toContainText("Open positions · 1");
+    await book.getByRole("button", { name: "Hide SLS: not following" }).click();
+    await expect(book.getByRole("heading", { level: 2 })).toHaveText("Your book · 1 followed");
     expect(entries.map(e => e.text)).toEqual(["Following", "Not following"]);
   });
 }

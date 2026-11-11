@@ -121,6 +121,7 @@ test("drafted cards come back after a reload and a thread switch, a confirmed on
   // A reload brings both back with Confirm; nothing was saved or armed by bringing them back.
   await expect(page).toHaveURL(new RegExp(`thread=${INV}`)); // the address holds the saved thread before it is reloaded
   await page.reload();
+  await openDeskThreads(page); // a page load: the drawer starts closed
   await expect(page.getByText(ANSWER)).toBeVisible();
   await expect(planCard(page).getByRole("button", { name: "Confirm" })).toBeEnabled();
   await expect(planCard(page).getByLabel("Thesis")).toHaveValue(PLAN.thesis);
@@ -136,6 +137,7 @@ test("drafted cards come back after a reload and a thread switch, a confirmed on
 
   // After a reload the watch shows done with no Confirm; the plan still offers Confirm.
   await page.reload();
+  await openDeskThreads(page); // a page load: the drawer starts closed
   await expect(watchCard(page).getByRole("status")).toHaveText("Alert set: NBIS crosses 97.5 (NBIS was 94.35).");
   await expect(watchCard(page).getByRole("button", { name: "Confirm" })).toHaveCount(0);
   await expect(planCard(page).getByRole("button", { name: "Confirm" })).toBeEnabled();
@@ -160,6 +162,7 @@ test("drafted cards come back after a reload and a thread switch, a confirmed on
   const [capture] = server.posts.filter((p) => p.path === "captures").map((p) => p.body);
   expect(capture.client_id).toBe(saved[0].client_id); // the card's kept id, so a retry anywhere replays it
   await page.reload();
+  await openDeskThreads(page); // a page load: the drawer starts closed
   const results = planCard(page).getByRole("list", { name: "Plan results" });
   await expect(results).toContainText("Pre-trade plan: done");
   await expect(results).toContainText("Entry alert: done");
@@ -193,6 +196,7 @@ test("a dismissed card stays dismissed, and a card confirmed in another window i
 
   await expect(page).toHaveURL(new RegExp(`thread=${INV}`)); // the address holds the saved thread before it is reloaded
   await page.reload();
+  await openDeskThreads(page); // a page load: the drawer starts closed
   await expect(page.getByText(ANSWER)).toBeVisible();
   await expect(watchCard(page)).toHaveCount(0);
   await expect(planCard(page).getByRole("list", { name: "Plan results" })).toContainText("Pre-trade plan: done");

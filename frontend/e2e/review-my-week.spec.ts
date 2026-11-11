@@ -18,6 +18,12 @@ const TURN = [
   { type: "done", metrics: { backend: "fake", evidence: "fixture", model: "fake-scripted", first_text_ms: 1, total_ms: 2, rounds: 2,
     tool_calls: [], usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, cost_usd: 0 } },
 ].map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
+/** Review my week in the centre's Today tab. */
+async function reviewMyWeek(page: Page) {
+  const centre = page.getByRole("region", { name: "Chart and today" });
+  await centre.getByRole("tab", { name: "Today" }).click();
+  await centre.getByRole("button", { name: "Review my week" }).click();
+}
 const week = (monday?: string) => `/copilot-lab?${new URLSearchParams({ context: monday ? `Review my week of ${monday}` : "Review my week" })}`;
 
 const statusAnswer = (page: Page) => page.waitForResponse((response) => response.url().includes("/copilot/status"));
@@ -80,7 +86,7 @@ test("the Briefing's Review my week sends one turn and shows the week review too
   const home = page.getByRole("navigation", { name: "Thread list" });
   await expect(home.getByTestId("desk-day")).toBeVisible();
   expect(chats).toHaveLength(0);
-  await page.getByRole("region", { name: "Conversation" }).getByRole("button", { name: "Review my week" }).click();
+  await reviewMyWeek(page);
   await expect(page.getByText("Planned vs unplanned first.")).toBeVisible();
   expect(chats).toHaveLength(1);
   expect(chats[0].messages.at(-1)?.content).toContain("Review my week");
@@ -102,7 +108,7 @@ test("the week review shows your exit lessons, each opening its plan's thread", 
   await page.route("**/copilot/chat", (route) =>
     route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turn }));
   await page.goto("/copilot-lab?view=briefing");
-  await page.getByRole("region", { name: "Conversation" }).getByRole("button", { name: "Review my week" }).click();
+  await reviewMyWeek(page);
   const block = page.getByRole("region", { name: "Your exit lessons this week" });
   await expect(block).toContainText("2 of 3 exits reviewed");
   const rows = block.getByRole("link");
@@ -126,7 +132,7 @@ test("the week review lists your long holds, each asking whether it is still the
   await page.route("**/copilot/chat", (route) =>
     route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turn }));
   await page.goto("/copilot-lab?view=briefing");
-  await page.getByRole("region", { name: "Conversation" }).getByRole("button", { name: "Review my week" }).click();
+  await reviewMyWeek(page);
   const block = page.getByRole("region", { name: "Your long holds" });
   await expect(block).toContainText("2 held, not asked about day to day");
   const rows = block.getByRole("link");

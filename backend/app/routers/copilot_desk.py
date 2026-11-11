@@ -402,9 +402,33 @@ def _position_rows(found: dict, links: dict[str, str], board: dict, decided: dic
         else:
             status = _adopted_status(row, companion, plan) if companion else _position_status(row)
             watch.append(_row(f"trade:{trade_id}", "watch", row["contract"], status, **common))
+        (act if flagged and at is None else watch)[-1]["book"] = _book(row, plan, flagged)
         if companion:
             (act if flagged and at is None else watch)[-1]["adopted"] = True
     return act, watch, covered
+
+
+BOOK_STATES = ("near_stop", "giving_back", "no_plan", "on_plan")  # the cockpit's one tag per row, first match wins
+
+
+def _book(row: dict, plan: dict | None, flagged: dict | None) -> dict:
+    """What the desk's book row shows beside the status line (docs/copilot-lab.md § The desk): the position's unrealized
+    P&L in dollars and percent, its expiry and days held, where the underlying sits between the plan's invalidation and
+    entry (``meter``; null without both lines), the distance to the invalidation, and one state: ``near_stop`` (Act now
+    flags the invalidation hit or near), ``giving_back`` (the give-back alert fired or flags it), ``no_plan`` (no
+    invalidation and no time stop) or ``on_plan``; ``planned`` says whether there is either (an adopted draft is not yet
+    a plan), whatever the state. Facts only; nothing here is advice."""
+    level = (row["plan"] or {}).get("invalidation") or (plan or {}).get("invalidation")
+    entry = (plan or {}).get("entry")
+    track = meter(entry["price"] if entry else None, level["price"] if level else None, (plan or {}).get("last"), "muted")
+    kinds = {r["kind"] for r in (flagged or {}).get("reasons", [])}
+    planned = bool(row["plan"]) and bool(level or (row["plan"] or {}).get("time_stop"))
+    state = ("near_stop" if kinds & {"invalidation_hit", "invalidation_near"}
+             else "giving_back" if "giveback" in kinds or row.get("giveback") == "fired"
+             else "on_plan" if planned else "no_plan")
+    return {"usd": row.get("unrealized_usd"), "pct": row.get("unrealized_pct"), "expiry": (row.get("option") or {}).get("expiry"),
+            "days_held": row.get("days_held"), "track": track, "state": state, "planned": planned,
+            "stop_pct": level.get("distance_pct") if level and level.get("state") == "armed" else None}
 
 
 def _exit_rows(exits: list[dict]) -> list[dict]:
@@ -823,6 +847,7 @@ def desk_session(db: Session = Depends(get_session)):
     indices = today._section(db, "session indices", lambda: _indices(now))
     alerts_due = today._section(db, "session alerts to answer", lambda: _alerts_to_answer(db, now))
     hits_due = today._section(db, "session radar to rate", lambda: _hits_to_rate(day))
+    realized = today._section(db, "session realized", lambda: _realized_today(db, day))
     events = sorted((row for part in (fills, pings, radar, decisions) for row in part.get("rows", [])), key=lambda r: r["at"])
     written = (prep.get("prep") or {})
     return {
@@ -834,13 +859,85 @@ def desk_session(db: Session = Depends(get_session)):
         "prep": {"at": _epoch(written.get("at")), "line": (written.get("lines") or [None])[0], "lines": written.get("lines") or [],
                  "fallback": bool(written.get("fallback")), "path": written.get("path")} if written else None,
         "indices": indices.get("rows", []), "quote_issue": indices.get("issue"),
+        "realized_today": realized.get("usd") if realized["state"] == "ok" else None,
         "to_answer": {name: {"count": part["count"], "rows": part["rows"]} if part["state"] == "ok" else None
                       for name, part in (("alerts", alerts_due), ("radar", hits_due))},
         "sections": {name: part["state"] for name, part in (
             ("hours", regular), ("phase", phase), ("fills", fills), ("pings", pings), ("radar", radar),
             ("decisions", decisions), ("time_stops", stops), ("prep", prep), ("indices", indices),
-            ("alerts_to_answer", alerts_due), ("radar_to_rate", hits_due))},
+            ("alerts_to_answer", alerts_due), ("radar_to_rate", hits_due), ("realized", realized))},
     }
+
+
+def _realized_today(db: Session, day) -> dict:
+    """Realized P&L of the trades closed on ``day`` (New York; ``closed_at`` is a New York wall clock, as the dashboard's
+    today_pnl reads it), Webull left out like the rest of the desk."""
+    from app.ai.copilot_book import _not_webull
+    from app.models import Account, Trade
+    start = datetime(day.year, day.month, day.day)
+    found = db.exec(select(Trade.realized_pnl).join(Account, Account.id == Trade.account_id).where(_not_webull())
+                    .where(Trade.closed_at >= start, Trade.closed_at < start + timedelta(days=1))
+                    .where(col(Trade.realized_pnl).is_not(None))).all()
+    return {"state": "ok", "usd": round(sum(float(v) for v in found), 2)}
+
+
+SPARK_POINTS = 48  # a book row's sparkline: today's minutes, thinned to this many closes
+SPARK_SYMBOLS = 12
+SPARK_BUDGET_SECONDS = 6.0
+SPARK_CACHE_SECONDS = 30  # every open desk reads once a minute: a repeat within this reuses the answer
+_spark_cache: dict[str, tuple[float, dict]] = {}
+
+
+@router.get("/desk/sparks")
+def desk_sparks(symbols: str = ""):
+    """Each named symbol's day so far for the desk's book rows: today's minute closes (the regular session once it has
+    bars, before that the pre-market; the same cached chart-feed read as the desk picture), thinned to ``SPARK_POINTS``,
+    and its change today against the previous close with SPY's beside it. A symbol whose read fails or runs past the
+    budget is left out. Read-only, owner-only, refused while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from concurrent.futures import ThreadPoolExecutor, wait
+    from app.engine import desk_context, ping_images
+    from app.engine.chart_feed import chart_feed
+    names = sorted({s.strip().upper() for s in symbols.split(",") if s.strip().replace(".", "").isalnum()})[:SPARK_SYMBOLS]
+    now = today._now()
+    key = ",".join(names)
+    cached = _spark_cache.get(key)
+    if cached and 0 <= now - cached[0] < SPARK_CACHE_SECONDS:
+        return cached[1]
+
+    def closes(symbol: str) -> list[float]:
+        shown = desk_context._today_shown(ping_images.today_bars, symbol, now)
+        step = max(1, -(-len(shown) // SPARK_POINTS))
+        points = [b["close"] for b in shown[::step]]
+        if shown and (len(shown) - 1) % step:
+            points.append(shown[-1]["close"])
+        return points
+
+    rows: dict[str, dict] = {}
+    if names:
+        pool = ThreadPoolExecutor(max_workers=4)
+        jobs = {pool.submit(closes, name): name for name in names}
+        done, _late = wait(jobs, timeout=SPARK_BUDGET_SECONDS)
+        pool.shutdown(wait=False, cancel_futures=True)
+        for job in done:
+            try:
+                rows[jobs[job]] = {"points": job.result(), "change_pct": None}
+            except Exception:  # noqa: BLE001 -- one symbol's failed read leaves it out
+                log.warning("desk spark failed for %s", jobs[job], exc_info=True)
+    spy = None
+    try:
+        quoted = {r["symbol"]: r.get("change_percentage") for r in chart_feed.quote_rows(sorted(set(rows) | {"SPY"}))[0]}
+        spy = quoted.get("SPY")
+        for name, row in rows.items():
+            row["change_pct"] = quoted.get(name)
+    except Exception:  # noqa: BLE001 -- the changes are extra; the lines stand without them
+        log.warning("desk spark quotes failed", exc_info=True)
+    body = {"as_of": today._iso(now), "rows": rows, "spy_change_pct": spy}
+    if len(_spark_cache) > 64:
+        _spark_cache.clear()
+    _spark_cache[key] = (now, body)
+    return body
 
 
 def waiting(db: Session, now: float) -> dict:

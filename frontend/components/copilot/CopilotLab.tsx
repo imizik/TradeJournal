@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ChartCandlestick, Menu, MessagesSquare, PanelLeft, PanelRight, Plus, Search } from "lucide-react";
+import { ChartCandlestick, Menu, MessageCircle, MessagesSquare, PanelLeft, Plus, Search, X } from "lucide-react";
 import { openNavMenu, useFoldedNav } from "@/components/Nav";
 import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
@@ -11,27 +11,26 @@ import CopilotPanel, { rememberedThread, type HomeActions, type PanelLink } from
 import DecisionBar from "@/components/copilot/DecisionBar";
 import FillLinkBar, { FillsToLink, useFillLinks } from "@/components/copilot/FillLinkBar";
 import RadarDecision from "@/components/copilot/RadarDecision";
-import Inspector from "@/components/copilot/Inspector";
 import { ThreadAlertAnswers, ThreadHitRating } from "@/components/copilot/ProofAnswers";
 import PingsRecap from "@/components/copilot/PingsRecap";
 import { planContext } from "@/components/copilot/PlanATrade";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import ArmChecklist from "@/components/copilot/ArmChecklist";
 import BriefingExtras from "@/components/copilot/BriefingExtras";
-import SessionTape, { DeskStatus, NowPositions, NowWaiting, useDeskSession } from "@/components/copilot/SessionTape";
+import { DeskStatus, useDeskSession } from "@/components/copilot/SessionTape";
+import { Book, CentreChart, DayFacts, DayPnl, NeedsStrip, SinceYouLooked, positionRows, useSparks } from "@/components/copilot/Cockpit";
 import MorningBrief from "@/components/copilot/MorningBrief";
 import PreviousDays from "@/components/copilot/PreviousDays";
 import ThreadRail from "@/components/copilot/ThreadRail";
+import ThisWeek from "@/components/copilot/ThisWeek";
 import { ScalpShortlistNudge } from "@/components/ScalpShortlistPanel";
 import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { WHAT_MATTERS_PROMPT, copilotLabHref, mainChatLabel, type InvestigationSummary } from "@/lib/copilot";
-import { afterClose, answerSymbol, deskSymbolThread, needingCount, nyDay, saveFollow, saveHorizon, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
+import { afterClose, answerSymbol, deskNeeds, deskSymbolThread, needingCount, nyDay, readSeen, saveFollow, saveHorizon, saveSeen, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import styles from "./CopilotLab.module.css";
 
-const CONTEXT_KEY = "desk.context.v1";
-const THREADS_KEY = "desk.threads.v1";
 /** The close pass in progress (its New York day), kept for this tab: a thread with no conversation opens by its link. */
 const CLOSING_KEY = "desk.closing.v1";
 /** "Plan a trade" with nothing known: the owner names the ticker. The thread list's own button makes the same link. */
@@ -39,6 +38,10 @@ const PLAN_HREF = copilotLabHref("", planContext(), { kind: "copilot", ref: null
 const PREP_PROMPT = "Prep the day: what is armed, what news or earnings touch my positions and watches, and what would change a plan before the open?";
 const ARM_PROMPT = "Arm today's plans: for each plan I mean to trade today, check its entry, invalidation and time stop against the pre-market, and propose any alert or time stop still missing for me to confirm.";
 const CLOSE_PROMPT = "Close the day: for each position and plan today, did I follow the plan, and what is the one thing to repeat or change tomorrow?";
+
+/** Below 1180 px the copilot is a sheet (CopilotLab.module.css); below 768 px the thread list covers the screen. */
+const sheetLayout = () => typeof window !== "undefined" && window.matchMedia("(max-width: 1179px)").matches;
+const narrow = () => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
 
 const shortDay = (iso: string) => new Date(iso).toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });
 
@@ -66,24 +69,27 @@ function typing(target: EventTarget | null) {
 }
 
 /**
- * The Copilot desk. It opens on Now (``daily``): the day line, open positions, what waits on the owner, today's pings
- * and Radar, the morning brief or Close the day, then today's conversation (Main chat) and its message box. Threads and
- * Context are side panes; a phone shows one pane at a time behind tabs, Now first.
- * While the lab is off only the conversation shows, saying so. ⌘K (Ctrl+K) or Jump to… opens the palette; while not
- * typing, J / K open the next or previous thread, N starts a plan, [ toggles Threads and ] toggles Context.
+ * The Copilot desk, a cockpit (docs/copilot-lab.md § The desk): the top bar (market phase and clock, SPY / QQQ / VIX,
+ * the day's P&L), the Needs-you strip (the one most urgent item), then three columns: the book of followed positions
+ * with the time of day's block under it (the morning brief, Since you looked, or the day report), the centre (the
+ * selected symbol's Chart, and Today's pings and Radar), and the copilot (today's Main chat or the open thread, its
+ * decision, close pass or checklist on top). Selecting a position drives the centre and the copilot. Below 1180 px the
+ * copilot is a sheet opened by "Ask the copilot" and by any Ask action; a phone stacks the strip, the book and the
+ * centre. The thread list is a drawer. While the lab is off only the conversation shows, saying so. ⌘K (Ctrl+K) or
+ * Jump to… opens the palette; while not typing, J / K open the next or previous thread, N starts a plan, [ toggles the
+ * thread list and Escape closes the drawer or the sheet.
  */
 export default function CopilotLab({ link = null, close = false, daily = false }: { link?: PanelLink | null; close?: boolean; daily?: boolean }) {
   const on = useCopilotOn();
   const router = useRouter();
   const navFolded = useFoldedNav();
   const session = useDeskSession(on);
-  // Now, a deep link (a ping, a Radar row, a chip) and a saved thread all open on the conversation pane, so a phone's
-  // first screen is what the address names.
-  const [tab, setTab] = useState<DeskTab>("thread");
+  // Below 1180 px the copilot is a sheet: a deep link or a saved thread opens on it, Now on the cockpit.
+  const [sheet, setSheet] = useState(!daily);
   const [command, setCommand] = useState<DeskCommand | null>(null);
   const [thread, setThread] = useState<DeskThreadRef | null>(null);
-  // Now: today's Main chat (or the desk's bare address while it opens) with the day above it. An earlier day's Main chat
-  // is that day's conversation only.
+  // Now: today's Main chat (or the desk's bare address while it opens). An earlier day's Main chat is that day's
+  // conversation only.
   const today = session.data?.day ?? nyDay();
   const onNow = thread ? !!thread.mainDay && thread.mainDay === today : daily;
   const [rows, setRows] = useState<DeskThread[]>([]);
@@ -92,35 +98,26 @@ export default function CopilotLab({ link = null, close = false, daily = false }
   const needYouCount = needingCount(rows, nyDay());
   const [saved, setSaved] = useState<InvestigationSummary[]>([]);
   const [palette, setPalette] = useState(false);
-  // Side panes open on request; explicit choices are remembered in this browser.
-  const [contextShown, setContextShown] = useState(false);
   const [threadsShown, setThreadsShown] = useState(false);
-  useEffect(() => {
-    try { setContextShown(window.localStorage.getItem(CONTEXT_KEY) === "shown"); } catch { /* hidden */ } // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
-    try { setThreadsShown(window.localStorage.getItem(THREADS_KEY) === "shown"); } catch { /* hidden */ } // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
-  }, []);
-  const toggleContext = useCallback(() => setContextShown(shown => {
-    try { window.localStorage.setItem(CONTEXT_KEY, shown ? "hidden" : "shown"); } catch { /* this visit only */ }
-    return !shown;
-  }), []);
-  const toggleThreads = useCallback(() => setThreadsShown(shown => {
-    try { window.localStorage.setItem(THREADS_KEY, shown ? "hidden" : "shown"); } catch { /* this visit only */ }
-    return !shown;
-  }), []);
+  const toggleThreads = useCallback(() => setThreadsShown(shown => !shown), []);
+  // The centre: the symbol the owner picked in the book (else the copilot's, else the first followed position), on Chart
+  // or Today.
+  const [picked, setPicked] = useState<string | null>(null);
+  const [pickedKey, setPickedKey] = useState<string | null>(null);
+  const [centreTab, setCentreTab] = useState<"chart" | "today">("chart");
+  const [seen, setSeen] = useState<string[]>([]);
+  useEffect(() => { setSeen(readSeen(nyDay())); }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
   const jumpKey = useJumpKey();
   const desk = useRef<HTMLDivElement>(null);
   const [deciding, setDeciding] = useState(false);
   const sent = useRef(0);
   const actions = useMemo<HomeActions>(() => ({
-    open: id => { setCommand({ kind: "open", id, n: ++sent.current }); setTab("thread"); },
-    ask: text => { setCommand({ kind: "ask", text, n: ++sent.current }); setTab("thread"); },
+    open: id => { setCommand({ kind: "open", id, n: ++sent.current }); setSheet(true); if (narrow()) setThreadsShown(false); },
+    ask: text => { setCommand({ kind: "ask", text, n: ++sent.current }); setSheet(true); },
     // Back to Now from any thread or deep link, without carrying its conversation into the new view.
-    home: () => {
-      setTab("thread");
-      window.location.assign("/copilot-lab");
-    },
+    home: () => { window.location.assign("/copilot-lab"); },
   }), []);
-  const fill = useCallback((text: string) => { setCommand({ kind: "fill", text, n: ++sent.current }); setTab("thread"); }, []);
+  const fill = useCallback((text: string) => { setCommand({ kind: "fill", text, n: ++sent.current }); setSheet(true); }, []);
   // Plan a trade (the desk bar's New plan, N and ⌘K): a new conversation with "Plan a trade: " in the box, unsent. Already there,
   // the same link would not remount the lab, so the page reloads it.
   const planTrade = useCallback(() => {
@@ -141,10 +138,7 @@ export default function CopilotLab({ link = null, close = false, daily = false }
   // the desk reopened by itself takes the bare address's place. Only the address changes, so the lab stays mounted.
   const addressed = useRef<string | null>(null);
   const reopened = useRef<string | null>(null);
-  useEffect(() => {
-    reopened.current = rememberedThread();
-    if (threadInUrl()) setTab("thread"); // eslint-disable-line react-hooks/set-state-in-effect -- the address is read after hydration
-  }, []);
+  useEffect(() => { reopened.current = rememberedThread(); }, []);
   const threadId = thread?.id ?? null;
   const threadMain = !!thread?.mainDay;
   useEffect(() => {
@@ -169,11 +163,12 @@ export default function CopilotLab({ link = null, close = false, daily = false }
 
   // A row opens the way the thread list opens it: an investigation in place, anything else by its link.
   const pick = useCallback((row: DeskThread) => {
+    if (narrow()) setThreadsShown(false); // over the whole screen it gives way; beside the copilot it stays
     if (row.investigationId) actions.open(row.investigationId);
     else if (row.path) router.push(row.path);
   }, [actions, router]);
 
-  // A row on Now opens the way the thread list's ticker does: its own conversation, else the symbol's newest open one,
+  // A row in the book opens the way the thread list's ticker does: its own conversation, else the symbol's newest open one,
   // else its link; a position whose link leaves the desk (its trade page) opens the symbol's desk view instead.
   const openRow = useCallback((row: DeskThread) => {
     const talk = saved.filter(t => t.symbol && t.symbol === row.symbol && t.status !== "closed").sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
@@ -235,7 +230,7 @@ export default function CopilotLab({ link = null, close = false, daily = false }
     const [next] = toReview(rows, nyDay(), reviewed.current);
     setClosing(!!next);
     if (next) review(next);
-    else if (steps.length) { setAnswering(true); setTab("thread"); }
+    else if (steps.length) { setAnswering(true); setSheet(true); }
     else fill(CLOSE_PROMPT);
   }, [rows, review, fill, setClosing, steps.length]);
   // ``?close=1`` (the evening review ping) starts the pass once the list and the session have read, after the close: the
@@ -251,7 +246,7 @@ export default function CopilotLab({ link = null, close = false, daily = false }
       setClosing(true);
       window.location.replace(next.investigationId ? `/copilot-lab?investigation=${next.investigationId}`
         : `/copilot-lab?${new URLSearchParams({ symbol: next.symbol! })}`);
-    } else if (steps.length) { setAnswering(true); setTab("thread"); } // eslint-disable-line react-hooks/set-state-in-effect -- the link starts the pass once
+    } else if (steps.length) { setAnswering(true); setSheet(true); } // eslint-disable-line react-hooks/set-state-in-effect -- the link starts the pass once
   }, [rows, sessionRead, dayPhase, setClosing, steps.length]);
   const onReviewed = useCallback((symbol: string) => {
     reviewed.current.add(symbol);
@@ -282,7 +277,7 @@ export default function CopilotLab({ link = null, close = false, daily = false }
         : "Puts a close-of-day question in the box, unsent" } : null;
   const runPhase = useCallback(() => {
     if (dayPhase !== "pre") closeDay();
-    else { setArming(true); setTab("thread"); }
+    else { setArming(true); setSheet(true); }
   }, [dayPhase, closeDay]);
 
   const commands = useMemo<PaletteCommand[]>(() => [
@@ -325,12 +320,12 @@ export default function CopilotLab({ link = null, close = false, daily = false }
         event.preventDefault();
         planTrade();
       }
-      // The pane hides only where the panes sit side by side; a phone keeps its tabs.
-      else if (event.key === "]" && (desk.current?.clientWidth ?? 0) >= 760) { event.preventDefault(); toggleContext(); }
+      // Escape closes the thread list's drawer, else the copilot's sheet.
+      else if (event.key === "Escape") { setThreadsShown(shown => { if (!shown) setSheet(false); return false; }); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [on, step, planTrade, toggleContext, toggleThreads]);
+  }, [on, step, planTrade, toggleThreads]);
 
   // The open symbol's row in the thread list (a position or a plan): its close question and horizon, as the list shows them.
   const deskRow = useCallback((symbol: string | null | undefined) =>
@@ -371,19 +366,84 @@ export default function CopilotLab({ link = null, close = false, daily = false }
   const linkRow = !thread && link?.symbol ? deskRow(link.symbol) : null;
   const alertRows = session.data?.to_answer?.alerts?.rows; // a position's thread offers its alerts sent today a rating
 
-  // The Context pane shows the day while no symbol is open: the Briefing, a thread about no symbol, or no thread at all
-  // (a deep link naming a symbol waits for its thread instead).
+  // The copilot's ticker: the open thread's, a deep link's, or (Main chat) the one its latest turn is about.
   const day = thread ? !thread.symbol : !link?.symbol;
-  const showNow = on && onNow && !arming && !closeStep;
-  // A deep link naming a symbol shows its Context by the symbol until a conversation is saved, then by that conversation.
-  const linkSymbol = link?.symbol;
-  const context = useMemo(() => thread ?? (linkSymbol ? deskSymbolThread(linkSymbol) : null), [thread, linkSymbol]);
-  // A conversation about no ticker (Main chat) charts the ticker its latest turn is about, when it names one.
   const known = useMemo(() => rows.flatMap(r => r.symbol ? [r.symbol] : []), [rows]);
   const focus = day ? answerSymbol(turnText, known) : null;
+  const talking = thread ? thread.symbol : link?.symbol ?? null;
+  // The centre follows the book's pick, else the copilot's ticker, else the first followed position; none is the market.
+  const followed = useMemo(() => positionRows(rows).filter(r => !r.hidden), [rows]);
+  const centreSymbol = picked ?? talking ?? focus ?? followed[0]?.symbol ?? null;
+  const centreRow = centreSymbol ? followed.find(r => r.symbol === centreSymbol) ?? rows.find(r => r.symbol === centreSymbol && r.key.startsWith("trade:")) ?? null : null;
+  // The chart reads by the conversation when it is about that ticker (its plan's lines), else by the position's plan.
+  const centreThread = useMemo<DeskThreadRef | null>(() => {
+    if (!centreSymbol) return null;
+    if (thread && !thread.mainDay && thread.symbol === centreSymbol) return thread;
+    const id = centreRow?.investigationId;
+    return id ? { id, symbol: centreSymbol, title: centreSymbol, refreshKey: 0 } : null;
+  }, [centreSymbol, thread, centreRow?.investigationId]);
+  const sparks = useSparks(on ? [...(centreSymbol ? [centreSymbol] : []), ...followed.flatMap(r => r.symbol ? [r.symbol] : [])] : []);
+  // A thread opened from anywhere but the book (the drawer, J / K, the palette, a link) takes the centre with it.
+  const lastTalking = useRef(talking);
+  useEffect(() => {
+    if (talking === lastTalking.current) return;
+    lastTalking.current = talking;
+    if (talking && talking !== picked) setPicked(null); // eslint-disable-line react-hooks/set-state-in-effect -- the copilot's ticker moved
+  }, [talking, picked]);
+
+  // Selecting a position: the centre shows it at once; where the copilot sits beside it, the copilot opens it too. On a
+  // sheet layout the copilot waits for Ask, so the chart stays in view.
+  const select = useCallback((row: DeskThread) => {
+    setPicked(row.symbol);
+    setPickedKey(row.key);
+    setCentreTab("chart");
+    if (!sheetLayout()) { if (row.symbol !== talking) openRow(row); }
+    else document.getElementById("desk-centre")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [openRow, talking]);
+  // Ask the copilot (the sheet's button): about the picked position when the copilot is on another ticker.
+  const askCopilot = () => {
+    const row = picked && picked !== talking ? followed.find(r => r.symbol === picked) : undefined;
+    if (row) openRow(row);
+    setSheet(true);
+  };
+
+  // The strip: the one most urgent item and its answers (``deskNeeds``' documented order).
+  const closingNow = dayPhase === "close";
+  const needs = on && rowsRead ? deskNeeds(rows, nyDay(), { closing: closingNow, fills: closingNow ? steps.length : fills.waiting.length }) : [];
+  const openNeed = (row: DeskThread) => { setPicked(row.symbol); openRow(row); setSheet(true); };
+  // The same words as the copilot's own "Why is it moving?" about that ticker, sent in today's conversation.
+  const askWhy = (need: DeskNeed) => actions.ask(`Why is ${need.symbol} moving today?`);
+  const needActions = (need: DeskNeed) => {
+    const row = need.row;
+    switch (need.kind) {
+      case "decision": return [{ label: "Decide", primary: true, run: () => openNeed(row!) }, { label: "Ask why", run: () => askWhy(need) }];
+      case "trigger": return [{ label: "Open the plan", primary: true, run: () => openNeed(row!) }, { label: "Ask why", run: () => askWhy(need) }];
+      case "card": return [{ label: "Open the card", primary: true, run: () => { setPicked(row!.symbol); pick(row!); } }];
+      case "expiring": return [{ label: "Plan it", primary: true, run: () => openNeed(row!) }];
+      case "fill": return [{ label: "Link it", primary: true, run: () => { fills.start(); setSheet(true); } }];
+      case "close": return [{ label: "Close the day", primary: true, run: closeDay }];
+    }
+  };
+
+  // The book's lower block by the time of day: the morning brief and Arm before the open, the day report after the
+  // close, else what changed since the owner last looked.
+  const lower = dayPhase === "pre" ? (
+    <div className="space-y-2">
+      <MorningBrief prep={session.data?.prep} fill={fill} max={3} />
+      {!session.data?.prep?.lines?.length && <p className="rounded-lg border bg-card px-3 py-2.5 text-xs text-muted-foreground">No morning brief yet today.</p>}
+      {phaseAction && <PhaseButton action={phaseAction} run={runPhase} />}
+    </div>
+  ) : dayPhase === "close" ? (
+    <section aria-label="Day report" data-testid="day-report" className="space-y-2">
+      <PingsRecap />
+      {tally.total > 0 && <p className="px-1 text-xs text-muted-foreground">Close the day: <span data-testid="briefing-reviewed" className="tabular-nums">{tally.done} of {tally.total} done</span></p>}
+      {/* While the strip shows Close the day, it is not repeated here. */}
+      {phaseAction && needs.find(n => !seen.includes(n.key))?.kind !== "close" && <PhaseButton action={phaseAction} run={runPhase} />}
+    </section>
+  ) : <SinceYouLooked rows={rows} session={session.data} read={rowsRead} />;
 
   return (
-    <div ref={desk} className={styles.desk} data-on={on} data-tab={tab} data-context={contextShown ? "shown" : "hidden"} data-threads={threadsShown ? "shown" : "hidden"}>
+    <div ref={desk} className={styles.desk} data-on={on} data-sheet={sheet ? "open" : "closed"} data-threads={threadsShown ? "shown" : "hidden"}>
       <header className={styles.bar}>
         {/* A wide screen folds the app's navigation into this button, so the desk has the full width; a phone keeps its tabs. */}
         {navFolded && (
@@ -394,98 +454,104 @@ export default function CopilotLab({ link = null, close = false, daily = false }
         )}
         <h1 className={styles.title}><MessagesSquare size={17} aria-hidden />Desk</h1>
         {on && <DeskStatus data={session.data} />}
+        {on && <DayPnl session={session.data} rows={rows} read={rowsRead} />}
         {on && <ScalpShortlistNudge />}
         {on && (
           <div className={styles.barActions}>
-            {/* The desk's front door; filled in while it is on screen. A phone's first tab is Now, so the bar hides it there. */}
-            <Link href="/copilot-lab" aria-current={onNow ? "page" : undefined} title="The day, your positions, what waits on you and today's conversation"
-              className={cn(styles.daily, "inline-flex h-8 items-center whitespace-nowrap rounded-md border px-2.5 text-xs", onNow ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}>Now</Link>
+            {/* The desk's front door: today's Main chat in the copilot. */}
+            <Link href="/copilot-lab" aria-current={onNow ? "page" : undefined} title="Back to today: Main chat in the copilot"
+              className={cn("inline-flex min-h-11 items-center whitespace-nowrap rounded-md border px-2.5 text-xs sm:min-h-8",
+                onNow ? "bg-secondary font-medium text-foreground max-md:hidden" : "text-muted-foreground hover:text-foreground")}>Now</Link>
             <button type="button" onClick={toggleThreads} aria-pressed={threadsShown}
-              aria-label={`Threads${!phaseAction && needYouCount > 0 ? `, ${needYouCount} need you` : ""}`} title="Show or hide the thread list ( [ )"
-              className={cn(styles.paneToggle, "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground", threadsShown && "bg-secondary")}>
-              <PanelLeft size={15} aria-hidden />
-              {!phaseAction && needYouCount > 0 && <span className="tabular-nums text-primary">{needYouCount}</span>}
+              aria-label={`Threads${needYouCount > 0 ? `, ${needYouCount} need you` : ""}`} title="The thread list and previous days ( [ )"
+              className={cn("inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground sm:min-h-8", threadsShown && "bg-secondary")}>
+              <PanelLeft size={15} aria-hidden /><span className="hidden sm:inline">Threads</span>
+              {needYouCount > 0 && <span className="tabular-nums text-primary">{needYouCount}</span>}
             </button>
             <button type="button" onClick={() => setPalette(true)} aria-label="Jump to a thread or command" aria-haspopup="dialog"
               className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md border bg-card px-2.5 text-xs text-muted-foreground hover:text-foreground sm:min-h-8">
-              {/* A phone keeps the bar on one line: icons only, as the button's label already says. */}
+              {/* A phone keeps the bar short: icons only, as the button's label already says. */}
               <Search size={14} aria-hidden /><span className="hidden sm:inline">Jump to…</span><kbd className={cn(KBD, "hidden md:inline")}>{jumpKey}</kbd>
             </button>
             <button type="button" onClick={planTrade} title="A new plan; you name the symbol. Nothing is sent. ( N )"
               className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">
               <Plus size={14} aria-hidden /><span className="sr-only sm:not-sr-only">New plan</span>
             </button>
-            {/* Now carries the phase action in its own block while it is on screen; anywhere else it sits here, at every width. */}
-            {phaseAction && !(showNow && tab === "thread") && <button type="button" onClick={runPhase} title={phaseAction.hint}
-              className="inline-flex min-h-11 items-center rounded-md border px-2.5 text-xs font-medium text-foreground hover:bg-secondary md:min-h-8">{phaseAction.label}</button>}
-            <button type="button" onClick={toggleContext} aria-pressed={contextShown} aria-label="Context pane" title="Show or hide market context ( ] )"
-              className={cn(styles.contextToggle, "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground", contextShown && "bg-secondary")}>
-              <PanelRight size={15} aria-hidden />
-            </button>
           </div>
         )}
       </header>
-      {on && (
-        <div role="tablist" aria-label="Desk" className={styles.tabs}>
-          {/* Now first; the open thread gets its own tab only while it is not Now. Now from a thread goes back to the front door. */}
-          <button type="button" role="tab" aria-selected={tab === "thread" && onNow} onClick={() => (onNow ? setTab("thread") : actions.home())}>Now</button>
-          <button type="button" role="tab" aria-selected={tab === "threads"} onClick={() => setTab("threads")}>Threads</button>
-          {!onNow && (
-            <button type="button" role="tab" aria-selected={tab === "thread"} onClick={() => setTab("thread")}>
-              {thread?.symbol || link?.symbol || (thread?.mainDay ? "Main chat" : "Thread")}
-            </button>
-          )}
-          <button type="button" role="tab" aria-selected={tab === "context"} onClick={() => setTab("context")}>Context</button>
-        </div>
-      )}
-      <div className={styles.panes}>
+      <div className={styles.cockpit}>
+        {on && needs.length > 0 && (
+          <div className={styles.strip}>
+            <NeedsStrip needs={needs} seen={seen} actions={needActions} onSeen={need => setSeen(saveSeen(nyDay(), need.key))} />
+          </div>
+        )}
         {on && (
           <aside aria-label="Threads" className={styles.rail}>
-            <ThreadRail actions={actions} active={thread?.id ?? null} activeSymbol={thread ? thread.symbol : link?.symbol ?? null} main={onNow}
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Threads</span>
+              <button type="button" onClick={() => setThreadsShown(false)} aria-label="Close the thread list"
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8 sm:min-w-8">
+                <X size={15} aria-hidden />
+              </button>
+            </div>
+            <ThreadRail actions={actions} active={thread?.id ?? null} activeSymbol={talking} main={onNow}
               pick={pick} onRows={readRows} onWalk={setWalk} onSaved={setSaved} refresh={refresh} follow={follow} onFollow={changeFollow} onFollowRead={followRead}
-              phase={fills.waiting.length > 0 && <FillsToLink count={fills.waiting.length} onStart={fills.start} />} />
+              phase={fills.waiting.length > 0 && <FillsToLink count={fills.waiting.length} onStart={() => { setThreadsShown(false); fills.start(); }} />} />
+            {threadsShown && <ThisWeek />}
           </aside>
         )}
+        {on && (
+          <div className={styles.book}>
+            <Book rows={rows} sparks={sparks} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} onSelect={select} onFollow={changeFollow} />
+            {lower}
+            <DayFacts session={session.data} />
+          </div>
+        )}
+        {on && (
+          <section id="desk-centre" aria-label="Chart and today" className={styles.centre}>
+            {/* Chart first; Feed, Check a call and Ticket join this strip when they exist. */}
+            <div role="tablist" aria-label="Centre" className="flex gap-1 border-b px-2 pt-1.5">
+              {([["chart", "Chart"], ["today", "Today"]] as const).map(([id, label]) => (
+                <button key={id} type="button" role="tab" aria-selected={centreTab === id} onClick={() => setCentreTab(id)}
+                  className={cn("-mb-px min-h-11 border-b-2 px-2.5 text-sm sm:min-h-9", centreTab === id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div role="tabpanel" aria-label={centreTab === "chart" ? "Chart" : "Today"} className="p-3">
+              {centreTab === "chart"
+                ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} day={today} />
+                : <BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} onWhatMatters={() => actions.ask(WHAT_MATTERS_PROMPT)}
+                  session={session.data} radar={rows.filter(r => r.key.startsWith("radar:"))} />}
+            </div>
+          </section>
+        )}
         <section aria-label="Conversation" className={styles.thread}>
-          {/* One reading column, centred however wide the pane is: lines stay short enough to read at a glance. */}
-          <div className="mx-auto w-full max-w-[46rem]">
-          {/* Now: the day line, followed open positions, what waits on the owner, how the pings did, today's Radar, the
-              day's phase action and the morning brief, then today's conversation under its heading. Every count opens
-              what it counts; nothing asks for a rating. */}
-          {showNow && (
-            <div data-testid="now">
-              <SessionTape data={session.data} error={session.error} tally={tally} />
-              <NowPositions rows={rows} stops={(session.data?.time_stops ?? []).filter(stop => stop.at > (session.data?.now ?? 0))} open={openRow} read={rowsRead}
-                onFollow={changeFollow} />
-              <NowWaiting rows={rows} day={nyDay()} open={openRow} quiet={!fills.waiting.length}>
-                {fills.waiting.length > 0 && <div className="basis-full"><FillsToLink count={fills.waiting.length} onStart={fills.start} /></div>}
-              </NowWaiting>
-              <PingsRecap />
-              <BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} onWhatMatters={() => actions.ask(WHAT_MATTERS_PROMPT)}
-                session={session.data} radar={rows.filter(r => r.key.startsWith("radar:"))} />
-              {phaseAction && (
-                <div data-testid="now-phase" className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-card px-4 py-3">
-                  <span className="text-xs text-muted-foreground">{phaseAction.hint}</span>
-                  <button type="button" onClick={runPhase} className="inline-flex min-h-11 items-center rounded-md border border-primary/50 px-3 text-xs font-semibold text-primary hover:bg-primary/10 sm:min-h-8">{phaseAction.label}</button>
-                </div>
-              )}
-              <MorningBrief prep={session.data?.prep} fill={fill} />
+          {on && (
+            <div className={styles.sheetBar}>
+              <MessageCircle size={15} aria-hidden className="text-primary" />
+              <span className="text-sm font-semibold">Copilot</span>
+              {talking && <span className="rounded-full bg-muted px-2 py-0.5 text-xs">About {talking}</span>}
+              <button type="button" onClick={() => setSheet(false)} aria-label="Back to the desk"
+                className="ml-auto inline-flex min-h-11 items-center gap-1 rounded-md border px-2.5 text-xs text-muted-foreground hover:text-foreground">
+                <X size={14} aria-hidden />Desk
+              </button>
             </div>
           )}
           {on && thread?.mainDay && (
-            <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
-              <h2 className="text-lg font-semibold">{mainChatLabel({ title: thread.title, main_day: thread.mainDay })}</h2><PreviousDays active={thread.id} open={actions.open} />
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-2 pt-2">
+              <h2 className="text-base font-semibold">{mainChatLabel({ title: thread.title, main_day: thread.mainDay })}</h2><PreviousDays active={thread.id} open={actions.open} />
             </div>
           )}
           {on && !thread?.mainDay && (thread || link) && <Breadcrumb thread={thread} link={link} saved={saved} onMain={actions.home} />}
-          {/* Any other thread has one main element: the header, then the decision when one is asked (the ladder shrinks to a
-              line), else the full plan ladder; the conversation follows. */}
-          {/* A position ping's link names only the symbol when no plan conversation exists: it opens on the decision.
-              A desk Radar row names the hit too: it opens on watching, passing or planning it. */}
+          {/* The decision when one is asked (the ladder shrinks to a line), else the full plan ladder; the conversation
+              follows. A position ping's link names only the symbol when no plan conversation exists: it opens on the
+              decision. A desk Radar row names the hit too: it opens on watching, passing or planning it. */}
           {on && arming && (
             <ArmChecklist onClose={() => setArming(false)} onDropped={() => setRefresh(n => n + 1)}
               ask={() => { setArming(false); fill(ARM_PROMPT); }}
-              change={(plan, text) => { setArming(false); setCommand({ kind: "open", id: plan.investigationId!, text, n: ++sent.current }); setTab("thread"); }} />
+              change={(plan, text) => { setArming(false); setCommand({ kind: "open", id: plan.investigationId!, text, n: ++sent.current }); setSheet(true); }} />
           )}
           {on && !arming && closeStep && (
             <ClosePass key={closeStep.id} done={tally.done} total={tally.total}
@@ -496,7 +562,6 @@ export default function CopilotLab({ link = null, close = false, daily = false }
             <><RadarDecision key={link.radar} eventId={link.radar} symbol={link.symbol} fill={fill} /><ThreadHitRating key={`rate-${link.radar}`} eventId={link.radar} /></>
           ) : !thread && link?.symbol && !link.investigation ? (
             <div className="mb-4 space-y-3">
-              {/* An open position, planned or not, still gets its header and since-entry lines. */}
               {/* Held: the header row carries the symbol and its horizon. Not held: they sit on their own line. */}
               <DeskThreadTop thread={deskSymbolThread(link.symbol)} heldOnly compact={deciding} horizon={linkRow?.horizon ?? null}
                 onHorizon={horizon => changeHorizon(link.symbol, horizon)} following={followingOf(link.symbol)}
@@ -517,11 +582,23 @@ export default function CopilotLab({ link = null, close = false, daily = false }
                 <ThreadAlertAnswers symbol={thread.symbol ?? null} rows={alertRows} /></>} />
           ) : null)}
           <CopilotPanel variant="page" link={link} desk={hooks} daily={daily} />
-          </div>
         </section>
-        {on && <aside aria-label="Context" className={styles.inspector}><Inspector thread={context} day={day} focus={focus} /></aside>}
       </div>
+      {on && <button type="button" onClick={askCopilot} className={cn(styles.ask, "min-h-11 items-center gap-1.5 rounded-full border border-primary/50 bg-card px-4 text-sm font-medium text-foreground shadow-lg hover:bg-secondary")}>
+        <MessageCircle size={15} aria-hidden className="text-primary" />Ask the copilot{picked && picked !== talking ? ` about ${picked}` : ""}
+      </button>}
       {on && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} onConversation={actions.open} />}
     </div>
   );
 }
+
+/** The time of day's one action in the book's lower block: Arm today's plans before the open, Close the day after it. */
+function PhaseButton({ action, run }: { action: { label: string; hint: string }; run(): void }) {
+  return (
+    <div data-testid="now-phase" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-card px-3 py-2.5">
+      <span className="min-w-0 flex-1 text-xs text-muted-foreground">{action.hint}</span>
+      <button type="button" onClick={run} className="inline-flex min-h-11 items-center rounded-md border border-primary/50 px-3 text-xs font-semibold text-primary hover:bg-primary/10 sm:min-h-8">{action.label}</button>
+    </div>
+  );
+}
+

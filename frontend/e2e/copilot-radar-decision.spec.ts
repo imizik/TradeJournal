@@ -40,7 +40,7 @@ test("a Radar hit opens on the desk straight onto watching, passing or planning 
   await expect(card).toContainText("Radar · vs sector");
   await expect(card).toContainText("MU up 4.1% vs Semis by 3.2% over 30 min.");
   await expect(card.getByRole("link", { name: "Open in Radar" })).toHaveAttribute("href", `/radar?event=${ID}`);
-  await expect(page.getByTestId("session-tape")).toHaveCount(0); // not the Briefing
+  await expect(page.getByRole("region", { name: "Conversation" }).getByTestId("desk-book")).toHaveCount(0); // the decision, not the book
   await page.getByRole("region", { name: "Conversation" }).screenshot({ path: test.info().outputPath("radar-decision-desktop.png") });
 
   await card.getByRole("button", { name: "Watching" }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });

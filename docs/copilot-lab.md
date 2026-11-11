@@ -177,13 +177,13 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   rows need a decision, and the plan streak while one is running. The server still sends its rows
   in `DESK_GROUPS` order (Act now, Near a trigger, Waiting for you, New since
   you looked, Watching); the list regroups them by symbol in the browser.
-  - **Now**: the desk's front door (below, § The desk). Pressing it opens Now and sends nothing; the
+  - **Now**: today's Main chat (below, § The desk). Pressing it opens it and sends nothing; the
     open conversation stays saved. Radar hits and Review my
-    week are lines on Now, not rows in the list. The row shows the Radar count ("18 Radar", an amber dot while one
+    week are in the cockpit's Today tab, not rows in the list. The row shows the Radar count ("18 Radar", an amber dot while one
     is unseen in this browser); alert and Radar ratings are optional and never counted here. Open conversations about no ticker (an older
     turn, a week review) are listed under it, title and date: today's, the open one and the latest automatic week
     review, the rest under **Earlier · N**. **What matters right now?** (one turn, the fixed `lib/copilot.ts`
-    `WHAT_MATTERS_PROMPT`) sits on Now beside Review my week, and in ⌘K.
+    `WHAT_MATTERS_PROMPT`) sits in the centre's Today tab beside Review my week, and in ⌘K.
   - **Tickers**: one row per symbol the owner has something on: an open
     position, a plan (armed, near a trigger, or exited with its exit review
     waiting), a plan or alert card waiting on Confirm, a thesis-watch trigger
@@ -521,75 +521,113 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
 
 ## The desk
 
-Open Desk to land on **Now**, the desk's front door on desktop and phone (since 2026-11-10; it replaced the separate
-Main chat and Today's briefing views). Top to bottom, from reads the desk already makes (`GET /copilot/desk/session`,
-`GET /copilot/desk/threads`, `GET /today`):
+Open Desk to land on the **cockpit** (since 2026-11-10, stage 1 of the approved cockpit; it replaced the stacked Now
+screen of #733): one screen that says in a few seconds what is going on and puts the best information one tap away
+(`frontend/components/copilot/CopilotLab.tsx` lays it out, the pieces are in `Cockpit.tsx`, the look in
+`CopilotLab.module.css`). From reads the desk already makes (`GET /copilot/desk/session`, `GET /copilot/desk/threads`)
+plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
 
-- **The day line** (`SessionTape.tsx`): the market phase with SPY, QQQ and VIX (a phone too), the session strip and one
-  quiet line (what is next, at risk now, the practice goal; after the close, how much of Close the day is done).
-- **Open positions** (`NowPositions`): one row per open position the owner follows: symbol, contract, unrealized P&L
-  and the plan's nearest line (distance to invalidation, else the time stop; "No plan yet" without a plan), plus a time
-  stop still ahead today when the line names something else; then armed plans **Near a trigger**. A row opens its
-  thread in one tap: its own conversation, else the ticker's newest open one, else its link (a position whose link
-  would leave the desk opens the symbol's desk view instead). Each row's eye (**Hide**) sets its ticker to **Not
-  following**; see **Not following** below.
-- **Waiting on you** (`NowWaiting`): each followed ticker's decision to make, card to confirm or close question still
-  open (one row each, opening its thread), then **N fills to link** (the fill pass). Ratings of alerts and Radar hits
-  are never asked or counted here. "Nothing waits on you right now." when that is so.
-- **How the pings did** (`PingsRecap.tsx`, from `GET /copilot/desk/pings`), collapsed to one line: what followed the
-  phone pings since the previous trading session (the market calendar's), in counts, for example "Since yesterday: 4
-  alerts · selling at the alert would have been better on 3, worse on 1 · 2 Radar hits · 1 kept going". On tap, each
-  position alert with its alert-scorecard outcome (sold or expired for how much against selling at the alert, still
-  open, or not measured and why) and each Radar stock hit or setup card a ping reached, with the stock's move against
-  SPY the way Radar flagged it an hour on and at the close ("not measured" with why, as while its session is open) and a setup
-  card's paper result. Nothing to answer and no advice. **Last 30 days** unfolds the alert and Radar scorecards below.
-- **Today** (`BriefingExtras.tsx`): **N pings sent ▾** (each ping's time and words; a symbol opens its desk view),
-  **N new on Radar ▾** (each opening the desk on its decision, or Radar for a group event), **Held back · N ▾**, and
-  What matters right now?, Review my week and today's replay. Both buttons ask in today's conversation.
-- **The day's phase**: before the open on a weekday, **Arm today's plans**; after 16:00, **Close the day · N to
-  review**. Then the morning brief.
-- **Today's conversation**: Main chat for the current New York date with its message box at the bottom, so asking is
-  one tap away.
+- **Top bar.** Desk, the market phase with the New York clock of the session read ("Live · 11:48 ET", "Pre-market ·
+  8:52 ET", "Closed 16:00"), SPY / QQQ / VIX's change, **Realized today** (the trades closed today, New York's day,
+  Webull left out: the session read's `realized_today`) and **Open** (every open position's unrealized P&L now,
+  followed or not). Then **Now** (back to today's Main chat; dropped on a phone while already there), **Threads** (the
+  thread list's drawer, with the "needs you" count), Jump to… (⌘K) and New plan. Account chips come with the Robinhood
+  stage; nothing fake stands in.
+- **Needs you** (`NeedsStrip`). One amber card for the single most urgent item, with its own answers, **Seen** (out of
+  the strip for today, in this browser: `localStorage` `desk.seen.v1`; an item that changes, a new status line, a day
+  closer to expiry or another fill, asks again) and **+N more** opening the rest. The order is
+  `lib/desk.ts` `deskNeeds`, followed tickers only: (1) a position alert asking for a decision (Act now; **Decide**
+  opens its thread on the decision bar, **Ask why** sends "Why is NBIS moving today?" in today's conversation); (2) a plan at or near its trigger (the
+  thread list's Near a trigger; **Open the plan**, Ask why) or a card to confirm (**Open the card**); (3) an option
+  expiring within three calendar days with no confirmed invalidation or time stop (an adopted draft counts as none;
+  **Plan it**); (4) before the close, the fills waiting to link
+  (**Link it**); (5) after the close, the close-of-day questions and fills (**Close the day**). Nothing in the strip is
+  a rating ask. When nothing waits, the strip is absent.
+- **Left: the book** (`Book`). One dense row per open position the owner follows: ticker, contract, unrealized P&L in
+  dollars and percent, a sparkline of the underlying today, the bar placing it between the plan's invalidation (left)
+  and entry (the tick) ("no plan lines" without both), the distance to the invalidation, days to expiry and one tag:
+  **Near stop** (Act now names the invalidation hit or near), **Giving back** (the give-back alert fired), **No plan**
+  (no invalidation and no time stop) or **On plan**. These come from each position row's `book`
+  (`copilot_desk._book`). Selecting a row shows it in the centre at once and, where the copilot sits beside it, opens
+  its conversation (its own, else the ticker's newest open one, else its link; a position whose link leaves the desk
+  opens the symbol's desk view). Each row's eye sets its ticker to **Not following**; those sit behind "N not followed
+  ▾" at the bottom, each with Show again. Under the book, the time of day's block (below), then one quiet facts line:
+  **At risk now** (see Exposure) and the practice goal.
+- **Centre.** A tab strip, **Chart** first and **Today** (Feed, Check a call and Ticket join it in later stages; no tab
+  shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
+  position; none is QQQ, the market) as the desk's server-drawn picture with the plan's entry and invalidation lines,
+  the owner's fills and today's pings and Radar hits, on 2m, 15m or 1D, with **Open in Charts →**; then, for a held
+  position, tiles: Open P&L, To your stop, vs SPY today (the stock's change today less SPY's, from the sparks read),
+  Held, Expires; and **Timeline ▾** folded under it. The sparks read takes at most 12 symbols (the centre's first) and
+  answers a repeat within 30 seconds from memory, so several open desks cost one chart-feed read a minute. The picture is the server's, not the `/charts` workspace's
+  interactive chart: that chart is bound to the workspace's live feed, crosshair and command stores and could not be
+  embedded cleanly with the plan lines and markers in this stage. Today: the pings sent today, the Radar events since
+  the last visit, the pings held back, and What matters right now?, Review my week and today's replay
+  (`BriefingExtras.tsx`).
+- **Right: the copilot**, always open from 1180 px: today's Main chat or the open thread (its header, decision bar,
+  close pass or checklist on top), scoped to its ticker, with **Why is it moving?**, **What changed since I looked?**
+  and **What does my plan say?** first above the box (one turn each in that conversation; then at most two of the
+  thread's own next steps). Answers keep the verdict-first format: the verdict set off with a rule, the Thesis ·
+  Timing · Contract read as three tiles, the body, **Against** and **Changes if** labelled; what is sent to or stored
+  from the model is unchanged.
 
-Every count on Now opens the list it counts; nothing on Now asks for a rating. Now opens scrolled to its top.
+**Time of day.** The book's lower block follows the New York clock: before 9:30 on a weekday it is the **Morning
+brief** (`MorningBrief.tsx`, cut to three lines with **Read the whole brief** a tap away; "No morning brief yet today."
+before it is written) and **Arm today's plans**; after 16:00 it is the **day report**: How the pings did (below),
+"Close the day: N of M done" and **Close the day** (left out while the strip shows it); otherwise **Since you looked**:
+what changed since the owner last left the desk in this browser (`localStorage` `desk.looked.v2`, by position, saved
+when the page is hidden or left), four lines at most: the biggest open-P&L moves ("NBIS 11/14/26 105C +$120 → +$355", a
+move under $25 and 10% left out), positions opened or closed since, and the fills, pings and Radar events since. No mode shows more than the
+session mode does.
+
+**How the pings did** (`PingsRecap.tsx`, from `GET /copilot/desk/pings`), in the day report and collapsed to one
+line: what followed the phone pings since the previous trading session (the market calendar's), in counts, for
+example "Since yesterday: 4 alerts · selling at the alert would have been better on 3, worse on 1 · 2 Radar hits · 1
+kept going". On tap, each position alert with its alert-scorecard outcome (sold or expired for how much against
+selling at the alert, still open, or not measured and why) and each Radar stock hit or setup card a ping reached, with
+the stock's move against SPY the way Radar flagged it an hour on and at the close ("not measured" with why, as while
+its session is open) and a setup card's paper result. Nothing to answer and no advice. **Last 30 days** unfolds the
+alert and Radar scorecards below.
+
+**Phone (375 px).** The same pieces stacked: the strip, the book, then the centre. The copilot is a full-screen sheet
+opened by **Ask the copilot** (about the picked position when the copilot is on another ticker) and by any Ask action;
+**Desk** closes it. A deep link or a saved thread opens on the sheet; the bare address opens on the cockpit. One tab
+bar only: the app's. From 768 to 1179 px the book and the centre sit side by side and the copilot is a sheet on the
+right. The thread list is a drawer at every width (over the whole screen on a phone).
 
 **Not following.** A ticker the owner does not follow (an old position no longer watched)
-is hidden in one tap from its Now row (the eye) or its thread header (**Not following**), and back with **Show again**
+is hidden in one tap from its book row (the eye) or its thread header (**Not following**), and back with **Show again**
 in the same places. It is saved as a `follow` day-journal entry ("Not following" or "Following"; the newest wins, on
 every device; `day_journal.not_following`), separate from the horizon, so a long hold stays a long hold for Review my
-week. A hidden ticker's rows carry `hidden` in `GET /copilot/desk/threads`: it leaves Now's positions and the thread
+week. A hidden ticker's rows carry `hidden` in `GET /copilot/desk/threads`: it leaves the book and the thread
 list's groups for one collapsed "N not followed ▾" line at the bottom of each, every row with Show again; it is never
-counted in Waiting on you, "needs you" or the desk bar's count; it asks no close-of-day question and is not in Close
+in the strip, "needs you" or the Threads count; it asks no close-of-day question and is not in Close
 the day or the evening review. Its thread still opens normally. The setting belongs to the ticker, not one position:
 a new position in a hidden ticker starts hidden too, until Show again. Phone alerts, the position companion, the copilot's
-context and the day line's "At risk now" (the money actually at risk) still include it. The desk bar's **Now** button (a phone's
-first tab) comes back to it; `?view=briefing` (the old Briefing address) and the evening review's `?close=1` land on
-it too.
+context, the top bar's Open and "At risk now" (the money actually at risk) still include it. The top bar's **Now**
+comes back to today's Main chat; `?view=briefing` (the old Briefing address) and the evening review's `?close=1` land on
+the cockpit too.
 
 Main chat is the same saved conversation on desktop and phone. Unsent words belong to their browser tab. Returning to a saved link keeps its original
 conversation, including after midnight. The heading names the day ("Main chat · Wed, Nov 4"; a busy day's next
 part adds "(continued)"). The Rate yesterday card that used to open Main chat was removed on 2026-11-10 (the owner
 did not rate from memory at the end of the day; How the pings did shows what followed instead). Its read,
 `GET /copilot/desk/to-rate`, still answers but nothing on the desk calls it.
-Above the conversation, the day's **Morning brief** card
-(`MorningBrief.tsx`, from the desk session read's `prep`: the brief's saved lines with its verdict, headline and
-Changes if line, the time it was written, and "Copilot turn failed: raw facts" when the turn failed), with **Ask about
-it →** putting the brief in this Main chat's message box as context, unsent, so questions about it stay in the day's
-conversation; an earlier day's Main chat shows neither card, and a day with no brief yet shows no brief. **Previous days** opens earlier days that have at least one exchange; a day the Desk was
+The morning brief card's **Ask about it →** puts the brief in today's Main chat's message box as context, unsent, so
+questions about it stay in the day's conversation. **Previous days** (beside the Main chat heading) opens earlier days that have at least one exchange; a day the Desk was
 only opened on is not listed. A busy day's full
 segment stays in history when opening Main starts its next part. Opening, switching or browsing history
 uses no model turn or automatic research job. Concurrent answers append separately, each beside its own question. A proposed trade plan opens in its own ticker thread for review and confirmation so it has a distinct place in Plans and its alerts link back to it. A blank conversation of its own is **New** (`?view=new`). In Main chat a proposed plan's
 button also gives its levels in one line (side, entry, invalidation, time stop). Existing symbol, plan, chart and evening-review links still open their own workflows.
 
 
-The full page is a desk of three panes beside each other
-(`frontend/components/copilot/CopilotLab.tsx`, layout and look in
-`CopilotLab.module.css`):
+The cockpit's panes in detail:
 
-- **Threads**: the thread list (above). It stays in view while a
-  conversation runs; a row or a pinned question opens or asks in the
-  conversation beside it, through the panel's `desk` hand-off.
-- **Conversation**: the page variant of `CopilotPanel.tsx` in `desk` mode. Its
+- **Threads** (the drawer): the thread list (above), opened from the top bar or with `[`, closed with ✕ or Escape. A
+  row or a pinned question opens or asks in the copilot through the panel's `desk` hand-off; beside the copilot the
+  drawer stays open, over a phone's whole screen it gives way. **This week** sits folded at its foot (`ThisWeek.tsx`,
+  below).
+- **Conversation** (the copilot column): the page variant of `CopilotPanel.tsx` in `desk` mode. Its
   message box stays in reach while the conversation scrolls. One quiet line
   names the model (in its picker when the server offers several) and only what is unusual: the simulated model,
   simulated or replay data, the day's API spend once past half the budget, a missing key (read-only live data,
@@ -597,13 +635,11 @@ The full page is a desk of three panes beside each other
   thread's one-line conclusion or lesson, Save, Close thread / Reopen, and
   Mark plan done on a plan's thread; see Plans end below) at its end. There is no Recent row (the thread list does that) and no Symbol box:
   the message box carries a scope chip, "About NBIS ×", where × asks across
-  everything and "add a symbol" scopes it again. Above the box, two to four
-  suggestion chips from the thread's state: **What changed?** (a saved
-  conversation; one turn), **Look at my chart** (sends the Context pane's
-  picture of today with the plan's lines; one turn), **Size it** (a plan card
-  in the thread; fills the box unsent, the owner adds the dollars at risk),
-  **Close with a lesson** (opens the menu on the conclusion), and for a fresh
-  conversation "Is NBIS's group confirming?" and **Plan a trade**. Below
+  everything and "add a symbol" scopes it again. Above the box, the three
+  asks (above), then at most two of the thread's next steps: **Size it** (a plan card
+  in the thread; fills the box unsent, the owner adds the dollars at risk), **More** (the full reasoning; one turn),
+  **Look at my chart** (sends the centre's picture of today with the plan's lines; one turn) and **Close with a
+  lesson** (opens the menu on the conclusion; the … menu always has it). Below
   768 px the box takes the full width; attach and read-aloud wait behind
   **+** (the speaker stays out while it reads, so its Stop is in reach),
   and the mic is the main round button (48 px) beside Send, above the tab
@@ -638,17 +674,14 @@ The full page is a desk of three panes beside each other
   investigation) and `GET /copilot/plans/positions` (the open position in its
   symbol, matched by the plan's invalidation; none for an armed plan not yet
   entered), once a minute; a thread with no plan shows only the header.
-- **Context**: the open thread's symbol, "today" and Open in Charts →, with
-  three small tabs (`components/copilot/Inspector.tsx`, reads in
-  `backend/app/engine/desk_context.py`). A thread that names a symbol with no
-  saved conversation (a position or plan from the thread list, a `?symbol=`
-  link, a Radar hit) reads them by the symbol at once, as `symbol:<SYMBOL>` on
-  the same routes: its plan's lines when it has one (in a position first, else
-  armed), else the fills of its open trade; once a conversation is saved the
-  pane reads by it.
-  Each tab reads only when opened and again when something is confirmed in the
-  conversation; nothing here arms or sends.
-  - **Chart** (first): the server's ping picture of the symbol
+- **Centre** (above): the chart and its folded timeline (`components/copilot/Inspector.tsx`, reads in
+  `backend/app/engine/desk_context.py`). A ticker with no saved conversation (a position or plan from the book or the
+  thread list, a `?symbol=` link, a Radar hit) reads them by the symbol at once, as `symbol:<SYMBOL>` on the same
+  routes: its plan's lines when it has one (in a position first, else armed), else the fills of its open trade; a
+  position whose plan has a conversation, or the open conversation's own ticker, reads by that conversation. The
+  timeline reads only when unfolded, and again when something is confirmed in the conversation; nothing here arms or
+  sends.
+  - **Chart**: the server's ping picture of the symbol
     (`GET /copilot/desk/{id}/picture?timeframe=`, `chart_render`) with
     timeframe buttons **2m** (the default: today's minute bars from the same
     cached chart-feed read as a ping, the regular session once it has bars),
@@ -666,7 +699,7 @@ The full page is a desk of three panes beside each other
     next. 1D has no marks. A legend under the picture names fills, pings and
     Radar. No bars, a failed read, a read past 6 seconds, or both workers
     still busy with earlier reads says why instead of a blank picture.
-  - **Timeline** (`/timeline`): one list, newest first, New York time on the
+  - **Timeline ▾** (`/timeline`): one list, newest first, New York time on the
     right and a dot by kind: the investigation's alerts (armed, hit; a sent
     ping for one rides on its row, a held one shows with why), time stop (set,
     pinged, skipped with the reason; whether time-stop pings are off), revisit
@@ -674,30 +707,20 @@ The full page is a desk of three panes beside each other
     linked to its plan, and for the symbol over 7 days its thesis-watch
     triggers, phone pings (sent or held back) and today's `decision` journal
     entries. A source that cannot be read is named under the list.
-  - **Your history** (`/history`): `copilot_review.level_history` (the engine
-    behind `get_level_history`) at the plan's invalidation, the side from the
-    plan (below for a long), measured from its planned entry: a tile per past
-    trade that crossed that distance while held, won (realized P&L above zero)
-    or not, and one sentence from the counts. No plan invalidation, or no
-    planned entry, says what is missing; the pane never measures from a live
-    quote.
+  The `/history` route (`copilot_review.level_history` at the plan's invalidation) still answers; the desk no longer
+  shows it (a draft plan card carries "Your history at this level").
 
-  While Now (or a thread about no symbol, or no thread) is open the
-  pane shows the day instead. When that conversation's latest turn names a ticker (its question first, then
-  its answer; one of the owner's desk tickers or a market or sector fund such as SMH,
-  `lib/desk.ts` `answerSymbol`), the pane charts that ticker instead (`symbol:` picture, 2m/15m/1D), marked
-  "in this chat", with **Market** back to the day; the day's view then offers **Back to SMH**. That choice holds for that conversation only; another one
-  shows its ticker again. After the
-  session's last regular bar, today's 2m chart (the thread's and the market's) keeps the after-hours minutes
-  and is titled "<symbol> + AFTER HOURS" (`desk_context._today_shown`). The day has its own three tabs: **Chart**, QQQ today
-  with the day's fills (any symbol, amber, first labelled FILL) and phone pings
-  sent (violet, PING) as dots on the bar of their minute, from the picture
-  route's reserved id (`GET /copilot/desk/market/picture`,
-  `desk_context.market_picture`, fed by the session timeline's own fill and
-  ping readers) and read again each minute; **Timeline**, the day across
-  everything newest first from `GET /copilot/desk/session` (time stops still
-  ahead, fills, pings sent, Radar events, decisions, the prep); and **This
-  week**, which opens on the two proofs as /proof reads them, read-only and
+  With no ticker (no position, and Main chat or a conversation about no symbol) the centre charts QQQ today
+  with the day's fills (any symbol, amber, first labelled FILL) and phone pings sent (violet, PING) as dots on the bar
+  of their minute, from the picture route's reserved id (`GET /copilot/desk/market/picture`,
+  `desk_context.market_picture`, fed by the session timeline's own fill and ping readers), read again each minute.
+  When Main chat's latest turn names a ticker (its question first, then its answer; one of the owner's desk tickers
+  or a market or sector fund such as SMH, `lib/desk.ts` `answerSymbol`), the centre charts that ticker instead unless
+  the owner picked a position. After the session's last regular bar, today's 2m chart (the thread's and the market's)
+  keeps the after-hours minutes and is titled "<symbol> + AFTER HOURS" (`desk_context._today_shown`).
+- **This week** (`ThisWeek.tsx`, folded at the foot of the thread list's drawer): the copilot's week ("Copilot: Helped
+  7 of 9 rated · 23 answers · first text 4.1 s median · $0.38", `GET /copilot/answer-scorecard?days=7`), the morning
+  brief's (`GET /copilot/brief-scorecard?days=7`), then the two proofs as /proof reads them, read-only and
   never recomputed: "Alerts: <habit label> · based on 9 of 14 alerts
   answered" (`GET /analytics/exit-habits`, its feedback counts, or its trade
   sample when there are none) and "Radar: <label> · 6 hits rated"
@@ -711,7 +734,8 @@ The full page is a desk of three panes beside each other
   saved late, · a suggested plan waiting to be linked), each titled like
   "NBIS 100C · Tue 10:31 · planned" and opening that trade's page, where its
   linked plan shows; then the counts, the streak and best, and what one more
-  planned entry makes.
+  planned entry makes. The desk's day timeline (the old Context pane's day Timeline tab) is gone: the centre's
+  Today tab lists the day's pings and Radar.
 
 **Link a fill where you are** (`components/copilot/FillLinkBar.tsx`). A row
 whose open trade has a fill waiting for its plan carries `fill_to_link` (that
@@ -728,7 +752,7 @@ reads again and the plan's thread top reads its position (header, ladder).
 **No plan** writes nothing, as the confirm page's "Not this plan" does: the
 fill stays unplanned in the plan streak and This week, and this browser
 remembers the answer (`localStorage` `desk.no-plan.v1`) so the desk stops
-asking. The thread list (under the day line) and Now's Waiting on you count the fills
+asking. The thread list and the Needs-you strip count the fills
 still waiting, one per trade ("2 fills to link"); pressing it opens the first,
 and each Link or No plan opens the next. Proof: `tests/test_copilot_desk.py`,
 `frontend/e2e/copilot-desk-fill-link.spec.ts`.
@@ -739,7 +763,7 @@ lands on the decision bar: on the plan's conversation when there is one, else
 on the symbol alone, where the bar shows without a saved conversation.
 
 **Alert scorecard** (`components/copilot/AlertScorecard.tsx`, under How the
-pings did › Last 30 days on Now; `GET /copilot/desk/scorecard`,
+pings did › Last 30 days in the day report; `GET /copilot/desk/scorecard`,
 `app/engine/alert_scorecard.py`). For each position alert sent to the
 phone in the last 30 days: what was decided after it (the first `decision`
 journal entry for the symbol that New York day, before the position's next
@@ -757,7 +781,7 @@ threshold. Proof: `tests/test_alert_scorecard.py`,
 `frontend/e2e/copilot-scorecard.spec.ts`.
 
 **Radar hits open on a decision** (`components/copilot/RadarDecision.tsx`).
-A stock Radar hit in Now's "N new on Radar" line opens the desk on that hit: what
+A stock Radar hit in the centre's Today tab ("N new on Radar") opens the desk on that hit: what
 Radar saw (its kind, direction, first-seen time and summary, with Open in
 Radar) and one choice. **Watching** or **Pass** logs a `decision` day-journal
 entry for the symbol ("Watching. Radar vs SPY: …", "Passing. …") after the
@@ -898,8 +922,8 @@ ratings are never asked (since 2026-11-10), and a ticker not followed asks
 nothing. With nothing left it puts the day's question in
 the message box, unsent. Nothing is sent to the model, and the answers go
 through the same routes as everywhere else. The button counts all of it
-("Close the day · 3 to review", less what was skipped; on Now too), and Now's day
-line says "N of M done": the close questions (one per symbol) and the fills to
+("Close the day · 3 to review", less what was skipped), or the strip's Close the day, and the day report
+says "Close the day: N of M done": the close questions (one per symbol) and the fills to
 link, a skip not counting as done.
 `/copilot-lab?close=1` (the [evening review ping](#phone-ping-policy)'s link)
 starts the same pass once the list and the session have read, after 16:00
@@ -928,7 +952,7 @@ only way the route disarms one), Cancel changes nothing. The plan's capture,
 its conversation and the journal stay. A Done plan (a `plan_done` entry for
 its symbol at or after its newest part) leaves every group of the thread
 list, and so does an owner conversation about the symbol not touched since;
-closing the conversation puts it in the Context pane's This week record. A
+closing the conversation puts it in the drawer's This week record. A
 plan confirmed after that is a new plan.
 
 **The last lesson comes back to the next plan.** A new plan on a symbol shows
@@ -970,28 +994,14 @@ Read-only, no model call; a failed read leaves the lines out (`setup`
 unavailable). This is the app's half of the October 29, 2026 opening review;
 the Check service's pre-trade check does not see it.
 
-**Today's session (Now's top).** Now opens on the day
-at a glance (`SessionTape.tsx`): "Today",
-the market phase and SPY, QQQ and VIX's change on one line; one strip of the regular
-session in New York time (9:30 to 16:00, or the calendar's early close) with a
-"now" marker, today's fills, phone pings sent, Radar events and logged
-decisions as small ticks coloured by kind (hover for the time and what it was;
-one before the open or after the close sits faded at the edge), and the plan
-time stops still ahead as hollow amber ticks, amber being for what still needs
-you; then one quiet line: **Next:** the nearest time
-stop, else the open (before it) or the close (during the session), and the
-practice goal's line. Before the open the strip waits (no marker) and
-the line leads with whether the pre-market prep is written; after the close it
-shows the whole day; a closed day says so. The desk bar shows the same read
-beside its title: **Live** (green dot) in the regular session, **Pre-market**,
-or **Closed 16:00** (the calendar's close) after it, and on a wide screen SPY,
-QQQ and VIX's change. The phase action is always one tap away, at every width and whether Threads is open or not:
-in Now's own block while Now is on screen, in the desk bar anywhere else (never both):
-**Arm today's plans** before 9:30 on a weekday, and **Close the day** after
-16:00, which walks each thread's close question (see Close of day).
+**The top bar's day** (`DeskStatus` in `SessionTape.tsx`, `DayPnl` in `Cockpit.tsx`): **Live** (green dot) with the
+New York clock in the regular session, **Pre-market** with the clock, **Closed 16:00** (the calendar's close) after it,
+or **Market closed**; SPY, QQQ and VIX's change; Realized today and Open. The phase action sits in the book's lower
+block: **Arm today's plans** before 9:30 on a weekday, and **Close the day** after 16:00 (or in the strip), which walks
+each thread's close question (see Close of day).
 
-**Arm today's plans** opens a checklist in the conversation pane
-(`ArmChecklist.tsx`; on a phone it moves to the Thread tab): each armed plan
+**Arm today's plans** opens a checklist in the copilot column
+(`ArmChecklist.tsx`; below 1180 px it opens the copilot sheet): each armed plan
 from the thread list's Plans read, with its contract, entry, invalidation and
 time stop, flagged (⚑) with any thesis-watch trigger fired today on the
 symbol, earnings first, the symbol's last exit lesson (see Plans end), and
@@ -1007,15 +1017,15 @@ drop counts on that visit, and the plan leaves the list on the next read).
 unsent (check each plan against the pre-market and propose what is missing).
 Opening a thread or Close leaves the checklist. Nothing in it arms, sizes or
 sends an order. On a
-phone Jump to… and New plan show as icons so the bar stays on one line. One
+phone Jump to…, Threads and New plan show as icons. One
 read, `GET /copilot/desk/session` (owner only, refused while the lab is off),
 once a minute while the page is visible, read once by the desk
-(`useDeskSession`) for its bar and Now, composed in `copilot_desk.py` from readers
+(`useDeskSession`) for its top bar, strip and lower block, composed in `copilot_desk.py` from readers
 that already exist: `day_replay.traded` (Webull left out), the notification
 policy's `PhonePing` rows, the Radar store's events for today,
 `decision` day-journal entries, scheduled `PlanTimeStop` rows, `today._prep`
 and one `chart_feed.quote_rows` read of SPY, QQQ and VIX (the feed's index
-mapping). Under `to_answer` it adds the position alerts and Radar hits still
+mapping), and `realized_today` (the trades closed today, New York's day, Webull left out). Under `to_answer` it adds the position alerts and Radar hits still
 waiting on an answer (see Answers for /proof), with the alert, trade and Radar
 event ids those answers save against; no other ids go out. Each source fails on
 its own. No futures quote is read yet.
@@ -1037,44 +1047,31 @@ the day and Close the day only put a question in the message box, unsent.
 The open thread is in the address (`/copilot-lab?thread=<id>`), so Back returns
 to the thread before it and a reload stays on it. The bare address opens Main chat for the current New York date. While not typing in a field: J / K open the next or previous
 conversation as the list shows it (those under Main, then each ticker's
-subthreads when shown, else its newest; folded ones are skipped), N opens Plan a trade (not while the message box holds unsent words), `[` hides or shows Threads, and `]` hides or shows Context
-(both choices are remembered in this browser; the labelled desk-bar buttons do
-the same, and a phone keeps its tabs). No desk key fires in an
+subthreads when shown, else its newest; folded ones are skipped), N opens Plan a trade (not while the message box holds unsent words), `[` opens or closes the thread list's drawer, and Escape closes the drawer, else the copilot's sheet. No desk key fires in an
 input, text area or editable field, ⌘K included, and no other browser shortcut
 is taken. A one-line key hint sits at the foot of the thread list on a wide
 screen. Browser proof: `frontend/e2e/copilot-desk-keys.spec.ts` (palette,
-J/K order, pane choices remembered, keys ignored while typing, the timeline at 1440 and
-375 px).
+J/K order, the drawer, keys ignored while typing, the cockpit by the time of day at 1440 and
+375 px, the strip and Seen).
 
-The panes follow the desk's own width: three from 1100 px, two below that
-(Context under Threads), and below 760 px one at a time behind Threads / Thread /
-Context tabs. A phone lands on Threads unless a deep link or `?thread=` brings a conversation.
-While the lab is off only the conversation shows, saying so. On a wide screen
-(1024 px and up) the desk takes the whole screen, as Charts does
-(`AppMain.fullScreenRoute`), and each pane scrolls on its own. From 768 px the
-app's navigation folds into one **Menu** button at the left of the desk bar
+The layout follows the screen's width (above: three columns from 1180 px, two from 768 px with the copilot as a right
+sheet, stacked below that with a full-screen sheet). While the lab is off only the conversation shows, saying so. On
+a wide screen (1024 px and up) the desk takes the whole screen, as Charts does (`AppMain.fullScreenRoute`), and the
+book, the centre and the copilot each scroll on their own. From 768 px the
+app's navigation folds into one **Menu** button at the left of the top bar
 (`useFoldedNav` / `openNavMenu` in `Nav.tsx`), so the desk gets the full
 width; it opens the labelled menu (every page, sync, the plan streak), whose
 **Keep the sidebar open** shows the full sidebar instead, remembered in this
 browser with the same key as Charts' expanded rail (its Collapse folds it
 back). A phone keeps its tab bar. Every icon in the Charts rail names itself
-on hover or focus (`NavHint`), the sync dot included.
-The desk bar holds Menu, **Now** (filled in while open; a phone drops it, as Now is its first tab, so the bar
-stays on one line), Jump to… (⌘K), New plan (outlined, not the bar's loudest button; with N and the Jump entry, the
-one way to Plan a trade from the desk) and icon-only Threads and Context toggles, named
-for a screen reader and on hover. The conversation is one centred reading column (46rem), its messages
-at most 60ch wide. A new desk opens on Now; both panes stay
-closed until requested, preserving access to saved conversations, outstanding
-work and the chart without putting them in the first view. Threads carries one
-outstanding-work count when no phase action is present; the phase action itself
-shows the close-review count. Both pane choices are remembered in this browser.
-The read-only note sits under the message box.
+on hover or focus (`NavHint`), the sync dot included. New plan is outlined, not the bar's loudest button; with N and
+the Jump entry it is the one way to Plan a trade from the desk. The read-only note sits under the message box.
 
 **The desk is home.** While the lab is on, the desk takes the Today screen's
 place: it is first in the menu and the phone's first tab ("Desk",
 `withDesk` in `frontend/components/Nav.tsx`), `/today` forwards to it, and
 the Labs entry for the same page goes. What Today showed that the desk did
-not now sits on Now (`BriefingExtras.tsx`): the pings held back today
+not now sits in the centre's Today tab (`BriefingExtras.tsx`): the pings held back today
 behind a disclosure, and Watch today. With the lab off, Today is unchanged.
 
 The message box (desk and side panel alike) is one box: on the desk the
@@ -1090,17 +1087,16 @@ borders, amber as the one accent (`frontend/app/globals.css`) and its type
 (Instrument Sans, with IBM Plex Mono for anything set in `tabular-nums`,
 loaded once in `frontend/app/layout.tsx`). `CopilotLab.module.css` restates
 the same tokens inside the desk so it reads the same under either theme.
-`frontend/lib/desk.ts` holds the shapes the desk's pieces share (tabs,
-the conversation hand-off, thread-list rows and groups, logged decisions,
+`frontend/lib/desk.ts` holds the shapes the desk's pieces share (the conversation hand-off, the strip's order
+(`deskNeeds`), Since you looked, thread-list rows and groups, logged decisions,
 the decision bar's wording).
 Browser proof: `frontend/e2e/copilot-home.spec.ts` (including a 375 px phone),
 `frontend/e2e/copilot-thread-list.spec.ts`,
 `frontend/e2e/copilot-thread-head.spec.ts` (option and stock, 375 px),
 `frontend/e2e/copilot-answer-format.spec.ts` (the answer format, Sources,
 the cleaned conversation and the 375 px composer) and
-`frontend/e2e/copilot-desk-context.spec.ts` (each Context tab, the chart's
-timeframe buttons and legend, unavailable states, the 375 px Context tab, Now's
-day).
+`frontend/e2e/copilot-desk-context.spec.ts` (the centre's chart and timeline, the
+timeframe buttons and legend, unavailable states, 375 px, the market chart and This week).
 
 ## How the copilot reasons (system prompt)
 
@@ -1704,7 +1700,7 @@ While the lab is on, **Review my week** sits on the Dashboard header and on a
 Friday's Daily Review (`components/copilot/ReviewMyWeek.tsx`), opening
 `/copilot-lab?context=Review my week` (a Friday's adds `of <its Monday>`) with
 the text in the message box, unsent. On the lab home it sits beside "What
-matters right now?" (on Now and in ⌘K) and sends the turn at once. The system prompt asks the
+matters right now?" (in the centre's Today tab and in ⌘K) and sends the turn at once. The system prompt asks the
 model to call:
 
 - `get_week_review(week_start?)` (read-only, provenance `saved`;
@@ -1895,7 +1891,7 @@ additive table `practice_goal`).
   - `max_trades_per_day`: trading days with at most the cap of trades opened.
 - `GET /copilot/practice` (owner-only) returns the active goal and its score
   for the week holding today (the week just ended, on a weekend), or no score
-  before its first week. The desk shows it in Now's day line and the
+  before its first week. The desk shows it in the facts line under the book and the
   Dashboard's Review my week button carries it as a second line:
   "Practicing: exit at my invalidation · 2 of 3 this week" (or "starts Mon,
   Oct 26"). Nothing shows while no goal is active.
@@ -1914,7 +1910,7 @@ additive table `practice_goal`).
 
 ### Exposure
 
-One deterministic line beside the practice goal in Now's day line,
+One deterministic line beside the practice goal in the desk's facts line under the book,
 and in the 09:00 brief: "At risk now: $6,400 in 3 options · usual day $2,100"
 (`backend/app/engine/exposure.py`, `GET /copilot/exposure`, owner-only, refused
 while the lab is off; no model call). The owner sometimes panics at large
@@ -3223,8 +3219,8 @@ jobs' records (`source` other than `copilot`) and the scripted model are left
 out. Each part fails on its own (`{"state": "unavailable"}`), the rest stands.
 No answer text leaves the database.
 
-The desk shows it in the Context pane (while Now is open), **This week** tab, above the
-two proofs (`frontend/components/copilot/Inspector.tsx`): "Copilot: Helped 7 of
+The desk shows it in **This week**, folded at the foot of the thread list's drawer, above the
+two proofs (`frontend/components/copilot/ThisWeek.tsx`): "Copilot: Helped 7 of
 9 rated · 23 answers · first text 4.1 s median · $0.38", then pushbacks,
 follow-ups and failed turns, or "could not load". Nothing here changes a prompt,
 a model or a budget; it is the number to read before changing one. Tests:

@@ -36,6 +36,7 @@ def ping(db, kind, minute, decision="sent", symbol="NBIS"):
 
 
 def test_a_quiet_day_is_the_session_and_the_indices(desk, quotes):  # noqa: F811
+    assert read(desk)["realized_today"] == 0
     quotes["rows"] += [{"symbol": "SPY", "last": 580.1, "change_percentage": 0.42}, {"symbol": "QQQ", "last": 500.2, "change_percentage": -0.31},
                        {"symbol": "VIX", "last": 16.9, "change_percentage": 3.1}]
     body = read(desk)
@@ -107,6 +108,24 @@ def test_before_the_open_and_a_closed_day(desk, clock, monkeypatch):  # noqa: F8
     monkeypatch.setattr(copilot_desk, "_hours", lambda day: {"status": "closed"})
     body = read(desk)
     assert (body["phase"], body["open"], body["close"]) == ("closed", None, None)
+
+
+def test_realized_today_sums_the_trades_closed_today_in_new_york(desk, engine):  # noqa: F811
+    from app.models import Fill, Trade
+    from app.routers.fills import _rebuild_trades
+    with Session(engine) as db:
+        for n, (day, minute) in enumerate(((21, 5), (20, 5)), start=700):  # one closed today, one yesterday
+            for side, price, hour in (("buy_to_open", 310, 10), ("sell_to_close", 450, 11)):
+                db.add(Fill(id=uuid.UUID(int=n * 10 + hour), account_id=ROTH, ticker="MU", instrument_type="option", side=side,
+                            contracts=1, price=price, executed_at=datetime(2026, 10, day, hour, minute),
+                            raw_email_id=f"gmail:{n}-{hour}", option_type="call", strike=100, expiration=datetime(2026, 10, 23).date()))
+        db.commit()
+        _rebuild_trades(db, "test")
+        db.commit()
+        closed = {t.closed_at.day: float(t.realized_pnl) for t in db.exec(select(Trade).where(Trade.ticker == "MU")).all()}
+    assert set(closed) == {20, 21} and closed[21] != 0
+    body = read(desk)
+    assert body["realized_today"] == round(closed[21], 2) and body["sections"]["realized"] == "ok"
 
 
 def test_one_failing_source_leaves_the_rest(desk, engine, monkeypatch):  # noqa: F811
@@ -199,3 +218,28 @@ def test_assistant_sessions_cannot_reach_it(boundary, monkeypatch):  # noqa: F81
     assert owner.status_code == 200, owner.text
     assert signin(boundary).status_code == 200
     assert boundary.public.get("/copilot/desk/session").status_code == 403
+
+
+def test_sparks_are_todays_closes_thinned_with_the_change_against_spy(desk, quotes, monkeypatch):  # noqa: F811
+    from app.engine import ping_images
+    monkeypatch.setattr(copilot_desk, "_spark_cache", {})
+    minute = lambda m: OPEN + 60 * m  # noqa: E731
+    bars = {"NBIS": [{"time": minute(m), "close": 90.0 + m / 100, "extended": False} for m in range(200)],
+            "MU": [{"time": minute(-30), "close": 1.0, "extended": True}]}  # pre-market only, then the session's none
+
+    def read_bars(symbol):
+        if symbol == "BAD":
+            raise RuntimeError("no feed")
+        return bars.get(symbol, [])
+    monkeypatch.setattr(ping_images, "today_bars", read_bars)
+    quotes["rows"] += [{"symbol": "SPY", "last": 580.0, "change_percentage": 0.4}, {"symbol": "MU", "last": 1.0, "change_percentage": -1.2}]
+    response = desk.get("/copilot/desk/sparks", params={"symbols": "nbis,MU,BAD,../x"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert set(body["rows"]) == {"NBIS", "MU"} and body["spy_change_pct"] == 0.4
+    nbis = body["rows"]["NBIS"]["points"]
+    assert len(nbis) <= copilot_desk.SPARK_POINTS + 1 and nbis[0] == 90.0 and nbis[-1] == 91.99
+    assert body["rows"]["MU"] == {"points": [1.0], "change_pct": -1.2}
+    assert desk.get("/copilot/desk/sparks").json()["rows"] == {}
+    bars["NBIS"] = []  # within 30 seconds the same symbols reuse the answer
+    assert desk.get("/copilot/desk/sparks", params={"symbols": "nbis,MU,BAD,../x"}).json() == body
