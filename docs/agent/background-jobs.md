@@ -179,7 +179,10 @@ API-owned asyncio task: its dedupe state is the `thesis_watch_trigger` rows, so
 a restart never fires a trigger twice ([thesis watch](../copilot-lab.md#thesis-watch)). The shadow book
 (`shadow_book.ShadowBook`, off unless `SHADOW_BOOK_ENABLED=true`) is another: its state is the
 `shadow_book_decision` and `shadow_book_event` rows, and a turn cut off by a restart is recorded as an error, never
-retried ([shadow book](../radar.md#shadow-book-off-by-default)). TradingView already has its own database claim/recovery
+retried ([shadow book](../radar.md#shadow-book-off-by-default)). The desk Feed's chatter reader
+(`chatter.Chatter`, started only when `CHATTER_REDDIT_ENABLED` or `CHATTER_NYT_ENABLED` is set up) is another: it
+reads r/wallstreetbets and NYT every 15 minutes and keeps its state in `backend/data/chatter/*.json`, no table
+([chatter](../copilot-lab.md#chatter)). TradingView already has its own database claim/recovery
 mechanism, separate from `job_run`. Direct request-time review/import endpoints
 also remain request-time operations. The [Ubuntu deployment package](../../deploy/README.md)
 now provides systemd services for the six lanes and the private API/frontend.

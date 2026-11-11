@@ -424,6 +424,20 @@ async def _maybe_start_position_companion(app_: FastAPI):
     return None if companion is None else asyncio.create_task(companion.loop())
 
 
+async def _maybe_start_chatter(app_: FastAPI):
+    """The desk Feed's chatter readers (docs/copilot-lab.md § Chatter): r/wallstreetbets and NYT; each off until set
+    up, and nothing starts (no network call) while both are off."""
+    app_.state.chatter = None
+    from app.engine.chatter import chatter_from_env
+    try:
+        chatter = chatter_from_env(engine)
+    except Exception:
+        logging.getLogger(__name__).exception("Chatter could not start; it stays off")
+        chatter = None
+    app_.state.chatter = chatter
+    return None if chatter is None else asyncio.create_task(chatter.loop())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Alembic owns the schema. The app used to call create_all() here, which
@@ -462,9 +476,12 @@ async def lifespan(_app: FastAPI):
     thesis_watch = await _maybe_start_thesis_watch(_app)
     shadow_book = await _maybe_start_shadow_book(_app)
     companion = await _maybe_start_position_companion(_app)
+    chatter = await _maybe_start_chatter(_app)
     try:
         yield
     finally:
+        if chatter is not None:
+            chatter.cancel()
         if companion is not None:
             companion.cancel()
         if shadow_book is not None:
