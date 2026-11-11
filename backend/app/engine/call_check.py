@@ -30,7 +30,7 @@ import logging
 import math
 import re
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from urllib.parse import urlencode
 
 log = logging.getLogger(__name__)
