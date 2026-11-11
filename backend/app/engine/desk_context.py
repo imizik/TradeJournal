@@ -245,6 +245,28 @@ def _today_shown(read, symbol: str, now: float) -> list[dict]:
     return regular + [b for b in found_bars if b.get("extended") and b["time"] > regular[-1]["time"]]
 
 
+def _candles(bars: list[dict], limit: int = chart_render.CANDLE_LIMIT) -> list[dict]:
+    """Today's minutes as candles of two minutes or more, as many as fit ``limit`` (the renderer draws a line past it):
+    each candle opens at its first minute, closes at its last, with their high, low and volume; extended only when all
+    of its minutes are."""
+    if not bars:
+        return []
+    step = max(2, -(-len(bars) // limit)) * 60
+    first = bars[0]["time"]
+    out: list[dict] = []
+    for bar in bars:
+        slot = first + (bar["time"] - first) // step * step
+        last = out[-1] if out else None
+        if last is None or last["_slot"] != slot:
+            out.append({**bar, "_slot": slot})
+            continue
+        last.update(high=max(last["high"], bar["high"]), low=min(last["low"], bar["low"]), close=bar["close"],
+                    volume=(last.get("volume") or 0) + (bar.get("volume") or 0))
+        if "extended" in last or "extended" in bar:
+            last["extended"] = bool(last.get("extended")) and bool(bar.get("extended"))
+    return [{k: v for k, v in b.items() if k != "_slot"} for b in out][-limit:]
+
+
 def _day_title(symbol: str, shown: list[dict]) -> str:
     """The symbol, saying so when the regular session's bars are followed by after-hours ones."""
     return f"{symbol} + AFTER HOURS" if shown and not shown[0].get("extended") and shown[-1].get("extended") else symbol
@@ -324,11 +346,12 @@ def picture(db: Session, inv: CopilotInvestigation | SymbolThread, now: float, b
 
     def draw() -> bytes | None:
         if timeframe == "2m":
-            shown = _today_shown(read, symbol, now)
+            minutes = _today_shown(read, symbol, now)
+            shown = _candles(minutes)  # the marks still sit on their own minute's price
         elif timeframe == "15m":
-            shown = [b for b in read(symbol) if b["time"] <= now]
+            shown = minutes = [b for b in read(symbol) if b["time"] <= now]
         else:
-            shown = [b for b in read(symbol) if now - DAILY_DAYS * 86400 <= b["time"] <= now]
+            shown = minutes = [b for b in read(symbol) if now - DAILY_DAYS * 86400 <= b["time"] <= now]
         if not shown:
             return None
         note = f"NOW {_price(shown[-1]['close'])}"
@@ -337,7 +360,7 @@ def picture(db: Session, inv: CopilotInvestigation | SymbolThread, now: float, b
             return chart_render.render(Chart(title=title, note=note, bars=tuple(shown)))
         marks, times = _fill_marks(fills, shown[0]["time"])
         return chart_render.render(Chart(title=title, note=note, bars=tuple(shown), levels=ping_images._plan_level_marks(levels),
-                                         marks=marks + tuple(_event_marks(list(events), shown)), times=times))
+                                         marks=marks + tuple(_event_marks(list(events), minutes)), times=times))
 
     return _budgeted(symbol, draw, budget, WHAT[timeframe])
 
@@ -349,10 +372,11 @@ def market_picture(events: list[dict], now: float, bars=None, budget: float = BU
     read = bars or ping_images.today_bars
 
     def draw() -> bytes | None:
-        shown = _today_shown(read, MARKET, now)
+        minutes = _today_shown(read, MARKET, now)
+        shown = _candles(minutes)
         if not shown:
             return None
-        marks = _event_marks([e for e in events if e["kind"] in ("fill", "ping")], shown)
+        marks = _event_marks([e for e in events if e["kind"] in ("fill", "ping")], minutes)
         return chart_render.render(Chart(title=_day_title(MARKET, shown), note=f"NOW {_price(shown[-1]['close'])}", bars=tuple(shown), marks=tuple(marks)))
 
     return _budgeted(MARKET, draw, budget)
