@@ -44,6 +44,8 @@ export function nyWhen(seconds: number, daily = false, now = Date.now() / 1000):
   const sameDay = dayFmt.format(at) === dayFmt.format(now * 1000);
   return `${sameDay ? "" : `${dayFmt.format(at)} `}${clock.format(at)} ET`;
 }
+/** "3:30 PM" today, "Nov 12 3:30 PM" another day. */
+const stopWhen = (seconds: number) => nyWhen(seconds).replace(/ ET$/, "");
 const price = (value: number) => value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 type Bar = DeskChartData["bars"][number];
@@ -56,11 +58,26 @@ function candleOf(bars: Bar[], step: number, at: number): Bar | undefined {
   return bar && at < bar.time + step ? bar : undefined;
 }
 
+/** The candle a mark sits on: the one holding its time, else the nearest one (a thin pre-market minute with no
+ * trade, an extended-hours fill on the regular-session 15m candles, a pre-market fill on a daily candle stamped at the
+ * open, a fill in the minute still forming). A mark before or after the candles shown by more than a step is left off. */
+export function markCandle(bars: Bar[], step: number, at: number): Bar | undefined {
+  if (!bars.length || at < bars[0].time - step || at >= bars[bars.length - 1].time + 2 * step) return undefined;
+  const holding = candleOf(bars, step, at);
+  if (holding) return holding;
+  let low = 0, high = bars.length;
+  while (low < high) { const mid = (low + high) >>> 1; if (bars[mid].time <= at) low = mid + 1; else high = mid; }
+  const before = bars[low - 1], after = bars[low];
+  if (!before) return after;
+  if (!after) return before;
+  return at - (before.time + step) <= after.time - at ? before : after;
+}
+
 /** Each mark on its candle, keyed by the candle's time. A mark off the candles shown is left out. */
 export function marksByCandle(data: DeskChartData): Map<number, DeskChartMark[]> {
   const out = new Map<number, DeskChartMark[]>();
   for (const mark of data.marks) {
-    const bar = candleOf(data.bars, data.step, mark.at);
+    const bar = markCandle(data.bars, data.step, mark.at);
     if (!bar) continue;
     out.set(bar.time, [...(out.get(bar.time) ?? []), mark]);
   }
@@ -75,6 +92,7 @@ function seriesMarkers(byCandle: Map<number, DeskChartMark[]>): SeriesMarker<Tim
       const id = `${mark.kind}:${mark.at}:${i}`;
       if (mark.kind === "fill") {
         const buy = mark.side !== "sell";
+        if (mark.side === null) { out.push({ id, time: at, position: "belowBar", shape: "circle", color: COLOR.fill, size: 0.8 }); return; }
         out.push(mark.price != null
           ? { id, time: at, position: "atPriceMiddle", price: mark.price, shape: buy ? "arrowUp" : "arrowDown", color: COLOR.fill }
           : { id, time: at, position: buy ? "belowBar" : "aboveBar", shape: buy ? "arrowUp" : "arrowDown", color: COLOR.fill });
@@ -121,7 +139,7 @@ class TimeStopLine implements ISeriesPrimitive<Time> {
     const { x, stop } = this;
     if (x === null || !stop) return;
     target.useMediaCoordinateSpace(({ context, mediaSize }) => {
-      const label = `Time stop ${clock.format(stop.at * 1000)}`;
+      const label = `Time stop ${stopWhen(stop.at)}`;
       context.font = "11px ui-sans-serif, system-ui, -apple-system, sans-serif";
       context.fillStyle = COLOR.stop;
       if (x > mediaSize.width) {
@@ -160,6 +178,7 @@ function defaultRange(parts: Parts, data: DeskChartData) {
 }
 
 type Read = { key: string; data: DeskChartData } | { key: string; error: string };
+const good = (read: Read) => "data" in read && read.data.state === "ok" && read.data.bars.length > 0;
 /** What the chart shows now, for the crosshair and the primitives; ``applied`` is the key last painted. */
 type Painted = { shown: DeskChartData | null; byCandle: Map<number, DeskChartMark[]>; applied: string | null };
 
@@ -169,7 +188,7 @@ function paint(current: Parts, read: Read, state: Painted) {
   const next = "data" in read && read.data.state === "ok" && read.data.bars.length ? read.data : null;
   state.shown = next;
   state.byCandle = next ? marksByCandle(next) : new Map();
-  state.applied = read.key;
+  state.applied = next ? read.key : null;  // after an empty read, the next good one opens on the default view
   for (const line of current.lines) current.candles.removePriceLine(line);
   current.lines = [];
   if (!next) {
@@ -264,13 +283,15 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label }: { id: string
 
   useEffect(() => {
     const controller = new AbortController();
+    // A refresh that fails or comes back empty keeps the chart already shown for this symbol and timeframe.
+    const settle = (next: Read) => setRead(prev => !good(next) && prev && prev.key === next.key && good(prev) ? prev : next);
     getDeskChart(id, timeframe, controller.signal)
-      .then(data => { if (!controller.signal.aborted) setRead({ key, data }); })
-      .catch(failure => { if (!controller.signal.aborted) setRead({ key, error: failure instanceof Error ? failure.message : "Unavailable right now." }); });
+      .then(data => { if (!controller.signal.aborted) settle({ key, data }); })
+      .catch(failure => { if (!controller.signal.aborted) settle({ key, error: failure instanceof Error ? failure.message : "Unavailable right now." }); });
     return () => controller.abort();
   }, [id, timeframe, key, refreshKey, tick]);
 
-  const data = read && "data" in read && read.data.state === "ok" && read.data.bars.length ? read.data : null;
+  const data = read && read.key === key && good(read) && "data" in read ? read.data : null;
   const live = !!data?.live;
   useEffect(() => {
     if (!live) return;
@@ -304,7 +325,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label }: { id: string
           <span key={level.role} style={{ color: COLOR[level.role] }}>{level.label}{offScale.has(level.role) ? " (off the chart)" : ""}</span>
         ))}
         {data && !data.levels.length && id !== "market" && <span>no plan lines saved</span>}
-        {data?.time_stop && <span style={{ color: COLOR.stop }}>Time stop {clock.format(data.time_stop.at * 1000)}</span>}
+        {data?.time_stop && <span style={{ color: COLOR.stop }}>Time stop {stopWhen(data.time_stop.at)}</span>}
         <button type="button" onClick={reset} disabled={!data}
           className="ml-auto min-h-9 rounded border border-transparent px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 sm:min-h-0 sm:py-0.5">
           Reset
@@ -348,7 +369,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label }: { id: string
         <ul aria-label="On the chart" className="sr-only" data-testid="desk-chart-marks">
           {data.levels.map(level => <li key={level.role}>{level.label}</li>)}
           {allMarks.map((mark, i) => <li key={i}>{KIND_WORD[mark.kind]} · {mark.text} · {nyWhen(mark.at)}</li>)}
-          {data.time_stop && <li>Time stop {clock.format(data.time_stop.at * 1000)} · {data.time_stop.text}</li>}
+          {data.time_stop && <li>Time stop {stopWhen(data.time_stop.at)} · {data.time_stop.text}</li>}
         </ul>
       )}
     </div>

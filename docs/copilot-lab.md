@@ -718,7 +718,8 @@ The cockpit's panes in detail:
     the row above the chart too; a line more than 10% from the last price does not stretch the price scale and says
     "(off the chart)"; "no plan lines saved" without a plan); the owner's **fills** in the symbol since the first
     candle shown (amber arrows, up for a buy and down for a sell; at the fill's price for shares, at the underlying's
-    recorded price for an option, else on the candle; Webull left out; at most 40); today's **phone pings** sent on
+    recorded price for an option, else on the candle; a mark with no candle of its own, such as an extended-hours
+    fill on the 15m candles, sits on the nearest one; Webull left out; at most 40); today's **phone pings** sent on
     the symbol (violet circles, the session strip's ping reader) and **Radar hits** (blue squares, the Radar store
     read-only, none when it is off); and on 2m and 15m a **time stop** still ahead as a dashed vertical line at its
     time past the last candle, labelled, with room kept for it on the right. Hovering a mark (within 10 px, so a full
@@ -730,7 +731,8 @@ The cockpit's panes in detail:
     is at most 600 candles and 60 marks and costs what the picture's does: one cached Tradier minute read (15 s
     cache, shared with ping pictures and Charts) for 2m and 15m, plus the two earlier sessions from disk for 15m; the
     day's daily history once per New York date and a 60 s tail read for 1D. No bars, a failed read or a read past 6
-    seconds shows **No chart data** with the reason, never an empty box. The picture route
+    seconds shows **No chart data** with the reason, never an empty box; a once-a-minute re-read that fails keeps the
+    chart already shown. The picture route
     (`GET /copilot/desk/{id}/picture`, `chart_render`) stays for **Look at my chart** and the phone pings.
   - **Timeline ▾** (`/timeline`): one list, newest first, New York time on the
     right and a dot by kind: the investigation's alerts (armed, hit; a sent
