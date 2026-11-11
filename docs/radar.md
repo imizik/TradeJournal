@@ -738,6 +738,15 @@ Tests: `backend/tests/test_radar_setup.py`, `test_radar_setup_paper.py`,
 `test_radar_setup_plan.py` (also the desk's read, route and copilot rows), and the wiring in `test_radar_runner.py` and
 `test_radar_alerts.py`.
 
+**Historical test (November 10, 2026).** An offline, protocol-registered lab,
+`backend/scripts/radar_setup_lab.py` ([protocol](../research/radar-setup-lab/protocol.json),
+test `backend/tests/test_radar_setup_lab.py`), scored the dip and reversal rules
+and four other setup types with these cards' exits against random entries at the
+same minute. No setup or filter passed on the held-back sessions: for the dip and
+reversal rules it is no evidence either way, and neither has earned a phone ping on
+that history ([results note](../research/notes/radar-setup-lab-2026-11-10.md)).
+The app reads nothing from it.
+
 ## Movers now
 
 `GET /radar/movers?session=YYYY-MM-DD` (owner-only, read-only) supplies the
