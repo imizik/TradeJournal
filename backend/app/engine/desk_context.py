@@ -19,6 +19,9 @@ conversation reads its symbol's plan (in a position first, else armed) and, with
   behind the copilot's ``get_level_history``), as won / not-won counts for the trades that crossed it while held and one
   sentence built from those counts. No plan, or a plan without an invalidation, says what is missing.
 - ``symbol_thread``: the thread for ``SYMBOL_PREFIX`` + a symbol, so the routes take it where they take an investigation.
+- ``chart``: the cockpit centre's interactive chart as data (the same reads as ``picture``, bounded to ``MAX_BARS``
+  candles and ``MAX_MARKS`` marks): candles (2m today with the pre-market and after-hours flagged), the plan's levels,
+  the owner's fills, today's pings and Radar hits, and the time stop still ahead. The picture stays for the phone pings.
 - ``market_picture``: the Briefing's chart, today's ``MARKET`` (QQQ) minutes with the day's fills and phone pings sent
   as dots, under the picture route's reserved ``MARKET_ID``.
 
@@ -380,6 +383,114 @@ def market_picture(events: list[dict], now: float, bars=None, budget: float = BU
         return chart_render.render(Chart(title=_day_title(MARKET, shown), note=f"NOW {_price(shown[-1]['close'])}", bars=tuple(shown), marks=tuple(marks)))
 
     return _budgeted(MARKET, draw, budget)
+
+
+# ------------------------------------------------------------------ chart (the desk's interactive chart, as data)
+
+
+STEP = {"2m": 120, "15m": 900, "1D": 86400}
+MAX_BARS = 600  # one chart read's bars: a whole 04:00-20:00 day of 2m candles is 480
+MAX_MARKS = 60
+LEVEL_WORD = {"entry": "Entry", "invalidation": "Invalidation"}
+
+
+def _two_minute(minutes: list[dict]) -> list[dict]:
+    """Minute bars as 2-minute candles on the even minute (the session edges, 09:30 and 16:00, are even), extended only
+    when all of its minutes are."""
+    out: list[dict] = []
+    for bar in minutes:
+        slot = int(bar["time"]) - int(bar["time"]) % 120
+        extended = bool(bar.get("extended"))
+        last = out[-1] if out else None
+        if last is None or last["time"] != slot:
+            out.append({"time": slot, "open": bar["open"], "high": bar["high"], "low": bar["low"], "close": bar["close"],
+                        "volume": bar.get("volume") or 0, "extended": extended})
+            continue
+        last.update(high=max(last["high"], bar["high"]), low=min(last["low"], bar["low"]), close=bar["close"],
+                    volume=last["volume"] + (bar.get("volume") or 0), extended=last["extended"] and extended)
+    return out
+
+
+def _plain(bar: dict) -> dict:
+    return {"time": int(bar["time"]), "open": float(bar["open"]), "high": float(bar["high"]), "low": float(bar["low"]),
+            "close": float(bar["close"]), "volume": float(bar.get("volume") or 0), "extended": bool(bar.get("extended"))}
+
+
+def _fill_mark(fill: Fill) -> dict:
+    """A fill at its price: a share fill's own, an option fill's underlying price when the fill recorded it, else none
+    (the chart puts it on its candle)."""
+    from app.engine.chart_journal import contract_label
+    verb = "Bought" if fill.side.startswith("buy") else "Sold"
+    what = contract_label(fill.ticker, fill.instrument_type, fill.option_type, fill.strike, fill.expiration)
+    if fill.instrument_type == "stock":
+        price = float(fill.price)
+        text = f"{verb} {float(fill.contracts):g} {fill.ticker} shares at {_price(price)}"
+    else:
+        price = float(fill.underlying_price_at_fill) if fill.underlying_price_at_fill else None
+        text = f"{verb} {float(fill.contracts):g} {what}" + (f" · {fill.ticker} at {_price(price)}" if price else "")
+    return {"kind": "fill", "at": _epoch_ny(fill.executed_at), "price": price, "side": "buy" if verb == "Bought" else "sell",
+            "text": text}
+
+
+def _live(now: float) -> bool:
+    """Bars can still change: a weekday between 04:00 and 20:00 New York (a holiday reads cached bars once a minute)."""
+    moment = datetime.fromtimestamp(now, ET)
+    return moment.weekday() < 5 and 4 <= moment.hour < 20
+
+
+def _chart_bars(read, symbol: str, timeframe: str, now: float) -> list[dict]:
+    if timeframe == "2m":
+        today = datetime.fromtimestamp(now, ET).date()
+        minutes = [b for b in read(symbol) if b["time"] <= now and datetime.fromtimestamp(b["time"], ET).date() == today]
+        found = _two_minute(minutes)
+    elif timeframe == "15m":
+        found = [b for b in read(symbol) if b["time"] <= now]
+    else:
+        found = [b for b in read(symbol) if now - DAILY_DAYS * 86400 <= b["time"] <= now]
+    return [_plain(b) for b in found[-MAX_BARS:]]
+
+
+def chart(db: Session, inv: CopilotInvestigation | SymbolThread | None, now: float, timeframe: str = "2m",
+          events: list[dict] = (), bars=None, budget: float = BUDGET_SECONDS) -> dict:
+    """The desk's interactive chart as data: the symbol's candles on ``timeframe`` (``2m`` today from the pre-market to
+    now, extended candles flagged; ``15m`` recent sessions; ``1D`` the last ``DAILY_DAYS``), read from the same cached
+    chart feed as the picture; its plan's entry and invalidation as ``levels``; ``marks``: the owner's fills on the
+    symbol since the first candle and ``events`` (today's pings sent and Radar hits, ``kind``/``at``/``text``); the
+    plan's time stop while still ahead. ``inv`` None is the market chart: ``MARKET`` with ``events`` alone (the day's
+    fills on any symbol and pings sent). ``live`` says bars can still change, so the desk reads again each minute.
+    No bars, a failed read or a run past the budget is ``state`` "unavailable" with the reason."""
+    symbol = MARKET if inv is None else inv.symbol
+    base = {"symbol": symbol, "timeframe": timeframe, "step": STEP.get(timeframe), "as_of": int(now), "live": _live(now),
+            "bars": [], "levels": [], "marks": [], "time_stop": None}
+    if not symbol:
+        return {**base, "state": "unavailable", "reason": "This thread has no symbol, so there is no chart."}
+    if timeframe not in TIMEFRAMES:
+        return {**base, "state": "unavailable", "reason": f"No {timeframe} chart; the choices are {', '.join(TIMEFRAMES)}."}
+    read = bars or {"2m": ping_images.today_bars, "15m": fifteen_bars, "1D": daily_bars}[timeframe]
+    try:
+        shown = _budgeted(symbol, lambda: _chart_bars(read, symbol, timeframe, now) or None, budget, WHAT[timeframe])
+    except Unavailable as exc:
+        return {**base, "state": "unavailable", "reason": str(exc)}
+    marks = [{"kind": e["kind"], "at": int(e["at"]), "price": None, "side": None, "text": e.get("text") or e["kind"].title()}
+             for e in events if e.get("at") is not None and e["kind"] in ("fill", "ping", "radar")]
+    levels: list[dict] = []
+    time_stop = None
+    if inv is not None:
+        found = plan(db, str(inv.id)) if inv.id else None
+        for alert in (found["entry"], found["invalidation"]) if found else ():
+            if alert is not None:
+                levels.append({"role": alert.plan_role, "price": float(alert.price),
+                               "label": f"{LEVEL_WORD[alert.plan_role]} {_price(float(alert.price))}"})
+        stop = found["stop"] if found else None
+        due = _epoch_utc(stop.due_at) if stop is not None else None
+        if due is not None and stop.delivery == "scheduled" and due > now:
+            time_stop = {"at": due, "text": stop.text}
+        since = datetime.fromtimestamp(shown[0]["time"], ET).replace(tzinfo=None)
+        fills = db.exec(select(Fill).where(Fill.ticker == symbol, Fill.executed_at >= since, _not_webull())
+                        .order_by(Fill.executed_at.desc()).limit(MAX_FILLS)).all()
+        marks = [_fill_mark(f) for f in reversed(fills)] + marks
+    marks = sorted((m for m in marks if m["at"] is not None and m["at"] >= shown[0]["time"]), key=lambda m: m["at"])[-MAX_MARKS:]
+    return {**base, "state": "ok", "reason": None, "bars": shown, "levels": levels, "marks": marks, "time_stop": time_stop}
 
 
 # ------------------------------------------------------------------ timeline

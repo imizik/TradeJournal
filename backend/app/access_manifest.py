@@ -115,6 +115,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/answer-scorecard',
     'GET /copilot/brief-scorecard',
     'GET /copilot/desk/{investigation_id}/picture',
+    'GET /copilot/desk/{investigation_id}/chart',
     'GET /copilot/desk/{investigation_id}/timeline',
     'GET /copilot/desk/{investigation_id}/history',
     'GET /copilot/practice',

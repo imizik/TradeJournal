@@ -277,6 +277,100 @@ def test_the_timeframes_read_their_own_bars_and_only_the_intraday_ones_carry_mar
     assert lab.get(f"/copilot/desk/{NBIS}/picture?timeframe=1D").json() == {"detail": "No NBIS daily bars yet."}
 
 
+# ------------------------------------------------------------------ chart (the desk's interactive chart, as data)
+
+
+def test_the_chart_is_todays_candles_with_the_plan_lines_fills_pings_radar_and_the_time_stop_ahead(lab, engine, tmp_path, monkeypatch):  # noqa: F811
+    investigation(engine)
+    plan = capture(engine, "NBIS")
+    time_stop(engine, NBIS, "NBIS")  # out by 15:30, still ahead at 14:49
+    alert(engine, NBIS, "NBIS", "entry", 95.9)
+    alert(engine, NBIS, "NBIS", "invalidation", 92.3, minute=2)
+    buy_and_link(engine, plan)  # 2 calls at 10:05, no underlying price recorded
+    with Session(engine) as db:
+        db.add(Fill(account_id=ROTH, ticker="NBIS", instrument_type="stock", side="sell", contracts=5, price=94.5,
+                    executed_at=datetime(2026, 10, 21, 10, 30), raw_email_id="gmail:720"))
+        db.add(Fill(account_id=ROTH, ticker="NBIS", instrument_type="stock", side="buy", contracts=5, price=90.0,
+                    executed_at=datetime(2026, 10, 21, 8, 30), raw_email_id="gmail:721"))  # before the first candle
+        sent(db, "NBIS", 20)
+        sent(db, "APLD", 25)  # another symbol
+        db.commit()
+    radar_hits(tmp_path, monkeypatch, ("NBIS", "2026-10-21T14:30:00.000Z"), ("MU", "2026-10-21T14:31:00.000Z"))
+    late = [{"time": int(NOW) + 60, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0}]  # after now: not shown
+    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: bars() + late)
+    body = lab.get(f"/copilot/desk/{NBIS}/chart").json()
+    assert body["state"] == "ok" and body["symbol"] == "NBIS" and body["timeframe"] == "2m" and body["step"] == 120
+    # The two pre-market minutes are one extended candle; 120 session minutes are 60 two-minute candles.
+    assert len(body["bars"]) == 61 and body["bars"][0]["extended"] is True and body["bars"][1]["extended"] is False
+    assert body["bars"][1] == {"time": int(epoch(T0)), "open": 94.0, "high": 94.06, "low": 93.95, "close": 94.01, "volume": 0.0,
+                               "extended": False}
+    assert body["levels"] == [{"role": "entry", "price": 95.9, "label": "Entry 95.90"},
+                              {"role": "invalidation", "price": 92.3, "label": "Invalidation 92.30"}]
+    assert body["time_stop"] == {"at": int(epoch(T0 + timedelta(minutes=330))), "text": "out by 15:30"}
+    assert [(m["kind"], m["at"], m["price"], m["side"]) for m in body["marks"]] == [
+        ("fill", int(epoch(T0 + timedelta(minutes=5))), None, "buy"),
+        ("ping", int(epoch(T0 + timedelta(minutes=20))), None, None),
+        ("fill", int(epoch(T0 + timedelta(minutes=30))), 94.5, "sell"),
+        ("radar", int(epoch(T0 + timedelta(minutes=30))), None, None),
+    ]
+    assert body["marks"][0]["text"].startswith("Bought 2 NBIS") and body["marks"][2]["text"] == "Sold 5 NBIS shares at 94.50"
+    assert body["marks"][0]["text"] == "Bought 2 NBIS 10/23/26 100C" and body["marks"][1]["text"].endswith("ping · NBIS")
+    assert body["live"] is True
+
+
+def test_the_chart_reads_each_timeframe_and_says_why_when_there_are_no_bars(lab, engine, monkeypatch):  # noqa: F811
+    investigation(engine)  # no plan: no lines, no time stop
+    first = int(epoch(T0 - timedelta(days=1)))
+    fifteen = [{"time": first + 900 * i, "open": 94.0, "high": 94.2, "low": 93.8, "close": 94.0} for i in range(30)]
+    daily = [{"time": int(NOW) - 86400 * i, "open": 90.0, "high": 91.0, "low": 89.0, "close": 90.0} for i in range(200, -1, -1)]
+    monkeypatch.setattr(desk_context, "fifteen_bars", lambda symbol: fifteen)
+    monkeypatch.setattr(desk_context, "daily_bars", lambda symbol: daily)
+    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: [])
+    body = lab.get(f"/copilot/desk/{NBIS}/chart?timeframe=15m").json()
+    assert body["state"] == "ok" and body["step"] == 900 and len(body["bars"]) == 30
+    assert body["levels"] == [] and body["time_stop"] is None and body["marks"] == []
+    body = lab.get(f"/copilot/desk/{NBIS}/chart?timeframe=1D").json()
+    assert body["step"] == 86400 and len(body["bars"]) == desk_context.DAILY_DAYS + 1
+    body = lab.get(f"/copilot/desk/{NBIS}/chart").json()
+    assert body["state"] == "unavailable" and body["bars"] == [] and body["reason"] == "No NBIS minute bars for today yet."
+    assert lab.get(f"/copilot/desk/{NBIS}/chart?timeframe=1h").status_code == 422
+
+    def broken(symbol):
+        raise RuntimeError("Tradier unavailable")
+    monkeypatch.setattr(ping_images, "today_bars", broken)
+    body = lab.get(f"/copilot/desk/{NBIS}/chart").json()
+    assert body["state"] == "unavailable" and body["reason"] == "The NBIS minute bars for today could not be read."
+
+
+def test_the_market_chart_is_qqq_with_the_days_fills_and_pings_and_a_bounded_day(lab, engine, monkeypatch):  # noqa: F811
+    with Session(engine) as db:
+        db.add(Fill(account_id=ROTH, ticker="NBIS", instrument_type="stock", side="buy", contracts=5, price=93.0,
+                    executed_at=datetime(2026, 10, 21, 10, 5), raw_email_id="gmail:730"))
+        sent(db, "NBIS", 20)
+        db.commit()
+    asked = []
+    start = int(epoch(T0)) - 6 * 3600  # 04:00 New York: a whole extended day, minute by minute
+    day = [{"time": start + 60 * i, "open": 480.0, "high": 480.0, "low": 480.0, "close": 480.0, "extended": i < 330}
+           for i in range(16 * 60)]
+    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: asked.append(symbol) or day)
+    body = lab.get("/copilot/desk/market/chart").json()
+    assert asked == ["QQQ"] and body["symbol"] == "QQQ" and body["levels"] == []
+    assert len(body["bars"]) <= desk_context.MAX_BARS and body["bars"][-1]["time"] <= NOW
+    assert [m["kind"] for m in body["marks"]] == ["fill", "ping"] and body["marks"][0]["text"] == "Bought NBIS"
+    monkeypatch.setattr(plan_routes.copilot, "settings", lambda: SimpleNamespace(enabled=False))
+    assert lab.get("/copilot/desk/market/chart").status_code == 503
+
+
+def test_two_minute_candles_sit_on_the_even_minute_and_are_extended_only_when_all_minutes_are():
+    t = 1_760_000_040  # an even minute
+    minutes = [{"time": t + 60 * i, "open": 1.0 + i, "high": 2.0 + i, "low": 0.5 + i, "close": 1.5 + i, "volume": 10,
+                "extended": i == 0} for i in range(3)]
+    assert desk_context._two_minute(minutes) == [
+        {"time": t, "open": 1.0, "high": 3.0, "low": 0.5, "close": 2.5, "volume": 20, "extended": False},
+        {"time": t + 120, "open": 3.0, "high": 4.0, "low": 2.5, "close": 3.5, "volume": 10, "extended": False},
+    ]
+
+
 def test_the_15m_read_joins_the_completed_sessions_before_today(monkeypatch):
     from app.engine.chart_calendar import chart_calendar
     from app.engine.chart_feed import chart_feed as feed
@@ -499,7 +593,7 @@ def test_a_symbol_with_no_plan_shows_its_open_trade_and_says_what_is_missing(lab
 def test_a_symbol_thread_refuses_a_non_symbol_and_the_lab_off(lab, monkeypatch):
     assert lab.get("/copilot/desk/symbol:not a symbol!/timeline").status_code == 400
     monkeypatch.setattr(plan_routes.copilot, "settings", lambda: SimpleNamespace(enabled=False))
-    for part in ("picture", "timeline", "history"):
+    for part in ("picture", "chart", "timeline", "history"):
         assert lab.get(f"/copilot/desk/symbol:NBIS/{part}").status_code == 503
 
 
@@ -511,7 +605,7 @@ def test_an_unknown_thread_and_the_lab_off_are_refused(lab, engine, monkeypatch)
     assert lab.get("/copilot/desk/not-an-id/history").status_code == 404
     investigation(engine)
     monkeypatch.setattr(plan_routes.copilot, "settings", lambda: SimpleNamespace(enabled=False))
-    for part in ("picture", "timeline", "history"):
+    for part in ("picture", "chart", "timeline", "history"):
         assert lab.get(f"/copilot/desk/{NBIS}/{part}").status_code == 503
 
 
@@ -519,7 +613,7 @@ def test_assistant_sessions_cannot_reach_it(boundary):  # noqa: F811
     boundary.patch.setenv("COPILOT_ENABLED", "true")
     assert boundary.owner.get(f"/copilot/desk/{NONE}/timeline").status_code == 404  # reached, no such thread
     assert signin(boundary).status_code == 200
-    for part in ("picture", "timeline", "history"):
+    for part in ("picture", "chart", "timeline", "history"):
         assert boundary.public.get(f"/copilot/desk/{NONE}/{part}").status_code == 403
 
 
