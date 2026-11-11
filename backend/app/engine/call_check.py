@@ -30,7 +30,7 @@ import logging
 import math
 import re
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from urllib.parse import urlencode
 
 log = logging.getLogger(__name__)
@@ -61,12 +61,13 @@ QUESTION_START = re.compile(r"^(?:what|whats|what's|why|how|hows|how's|should|is
                             r"who|will|would|explain|tell|show|give|any|was|were)\b", re.I)
 QUESTION_WORDS = re.compile(r"\b(?:my|should i|do i|how's|hows|how is|what's|whats|why)\b", re.I)
 FORCED = re.compile(r"^\s*check\b[\s:,.\-]*", re.I)
-POINTER = re.compile(r"^(?:this|it|that|these|this one|that one|this call|that call)?[\s?.!]*$", re.I)  # "check this" as a reply
+POINTER = re.compile(r"^(?:(?:this|it|that|these|one|call|out|pls|plz|please|here)\b[\s?.!,]*)*[\s?.!]*$", re.I)  # "check this one out"
+APP_WORDS = re.compile(r"\b(?:positions?|alerts?|levels?|market|news|plans?|book|pnl|p&l|trades?|pings?|radar|watchlist)\b", re.I)
 CHECK_ASKS = re.compile(r"^(?:on|in|out|up|if|whether|the|how|what|why|is|are|for)\b", re.I)  # "check on NVDA…" asks
 TICKERISH = re.compile(r"(?<![A-Za-z0-9])(?:\$[A-Za-z]{1,5}|[A-Z]{2,5})(?![A-Za-z0-9])")
 # His own trade, not a stranger's call: "I bought…", "rolling to…", "took profit…", "set stop at…". Never checked at once.
 OWN = re.compile(r"\b(?:i|i'm|im|we)\s+(?:bought|sold|added|took|rolled|trimmed|closed|got in|got out|am in|am out)\b"
-                 r"|^\s*(?:bought|sold|added|adding|rolling|rolled|closed|trimmed|out at|in at)\b"
+                 r"|^\s*(?:bought|sold|added|adding|rolling|rolled|closed|trimmed|took|out at|in at)\b"
                  r"|\b(?:took|take|taking) profits?\b|\bset (?:my |a |the )?stop\b", re.I)
 
 
@@ -85,7 +86,8 @@ def classify(text: str, replying: bool = False) -> tuple[str, str]:
         if POINTER.match(rest):
             return "call", ""
         asking = rest.endswith("?") or bool(CHECK_ASKS.match(rest)) or bool(QUESTION_WORDS.search(rest))
-        if not asking and (_score(rest) or TICKERISH.search(rest) or len(rest.split()) <= 3):  # "check nvda", not "check my positions"
+        short = len(rest.split()) <= 3 and not APP_WORDS.search(rest)  # "check nvda", not "check positions"
+        if not asking and (_score(rest) or TICKERISH.search(rest) or short):
             return "call", rest
     score = _score(text)
     asked = (text.endswith("?") or bool(QUESTION_START.match(text)) or bool(QUESTION_WORDS.search(text))
@@ -368,17 +370,27 @@ MONTHS = ("jan(?:uary)?", "feb(?:ruary)?", "mar(?:ch)?", "apr(?:il)?", "may", "j
           "sep(?:t|tember)?", "oct(?:ober)?", "nov(?:ember)?", "dec(?:ember)?")
 CALL_MARK = re.compile(r"\d\s?c\b(?!/)|\bcalls?\b|\bc\b(?!/)", re.I)
 PUT_MARK = re.compile(r"\d\s?p\b(?!/)|\bputs?\b|\bp\b(?!/)", re.I)  # not "p/l"
-TODAY_MARK = re.compile(r"\b[o0]\s?dte\b|\bsame[- ]day\b|\bexp\w*\s+today\b|\btoday'?s?\s+exp", re.I)
+TODAY_MARK = re.compile(r"\b[o0]\s?dte\b|\bsame[- ]day\b|\btoday\b", re.I)  # "QQQ 660p today" is a 0DTE call
+NEXT_DAY_MARK = re.compile(r"\b(?:1\s?dte|tmrw|tmr|tomorrow)\b", re.I)
+DASH_DATE = re.compile(r"(?<![\d/.\-])(\d{1,2})-(\d{1,2})(?![\d/\-])")
+# A month/day after a level word ("PT 3/4") is a price pair, not a date: its numbers stay prices.
+DATE_FOR_STRIP = re.compile(r"(?<!\bpt )(?<!\btp )(?<!\bsl )(?<!stop )(?<![\d/.])\d{1,2}/\d{1,2}(?:/\d{2,4})?(?![\d/])", re.I)
 NUMBER = re.compile(r"(?<![\d.])(?:\d+(?:\.\d+)?|\.\d+)")
 
 
 def _expiry_written(expiry: date, text: str, today: date) -> bool:
     if expiry == today and TODAY_MARK.search(text):
         return True
-    for m, d in MONTH_DAY.findall(text):
+    nxt = today + timedelta(days=1)
+    while nxt.weekday() >= 5:
+        nxt += timedelta(days=1)
+    if expiry == nxt and NEXT_DAY_MARK.search(text):
+        return True
+    for m, d in MONTH_DAY.findall(text) + DASH_DATE.findall(text):
         if (int(m), int(d)) == (expiry.month, expiry.day):
             return True
-    if re.search(rf"\b{MONTHS[expiry.month - 1]}\.?\s*0?{expiry.day}(?:st|nd|rd|th)?\b", text, re.I):
+    month = MONTHS[expiry.month - 1]
+    if re.search(rf"\b{month}\.?\s*0?{expiry.day}(?:st|nd|rd|th)?\b|\b0?{expiry.day}(?:st|nd|rd|th)?\s*{month}\b", text, re.I):
         return True
     return (0 <= (expiry - today).days <= 7 and expiry.weekday() < 5
             and bool(re.search(rf"\b{WEEKDAYS[expiry.weekday()]}\b", text, re.I)))
@@ -389,7 +401,7 @@ def confirm(reading: dict, text: str, today: date) -> dict:
     number it does not write, a call or put it does not mark, an expiry it does not state. Only for a text message; a
     screenshot's reading is the model's own."""
     out = dict(reading)
-    numbers = {float(n) for n in NUMBER.findall(MONTH_DAY.sub(" ", text.replace(",", "")))}  # a date's 11 is not a price
+    numbers = {float(n) for n in NUMBER.findall(DATE_FOR_STRIP.sub(" ", text.replace(",", "")))}  # a date's 11 is not a price
     if out.get("ticker") and not re.search(rf"(?<![A-Za-z0-9]){re.escape(out['ticker'])}(?![A-Za-z0-9])", text, re.I):
         out["ticker"] = None
     for key in ("strike", "entry", "stop", "target"):

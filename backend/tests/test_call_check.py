@@ -66,6 +66,7 @@ def call_check_et():
     ("took profit on spy 600p", "maybe"), ("take profits on NVDA at $200 target", "maybe"),
     # "check" that asks something is a question, not a forced check.
     ("Check my positions", "question"), ("check on NVDA for me, is it holding?", "question"), ("check the market breadth", "question"),
+    ("check positions", "question"), ("check spy levels", "question"), ("Took a starter in SPY 590c 0dte @ .50", "maybe"),
 ])
 def test_a_call_is_told_from_a_question(text, kind):
     assert call_check.classify(text)[0] == kind
@@ -76,6 +77,7 @@ def test_the_check_prefix_forces_a_check_and_is_removed():
     assert call_check.classify("check nvda 150c fri") == ("call", "nvda 150c fri")
     # "check" or "check this" alone: the message it replies to is the call.
     assert call_check.classify("check") == ("call", "") and call_check.classify("check this", replying=True) == ("call", "")
+    assert call_check.classify("check this one out", replying=True) == ("call", "")
 
 
 def test_a_reply_is_never_checked_without_the_prefix():
@@ -127,8 +129,21 @@ def test_a_price_written_with_a_leading_dot_is_kept_and_a_dates_numbers_are_not_
     assert call_check.confirm({**read, "entry": 11.0}, "IWM 590c 11/14", TODAY)["entry"] is None
     assert call_check.confirm({**read, "side": "put"}, "SPY 590 p/l looks good", TODAY)["side"] is None
     assert call_check.confirm({**read, "expiry": "2026-11-16"}, "SPY 590c money setup", TODAY)["expiry"] is None
-    assert call_check.confirm({**read, "expiry": "2026-11-11"}, "entered SPY 590c today @ .5", TODAY)["expiry"] is None
     assert call_check.confirm({**read, "expiry": "2026-11-27"}, "spy nov 27th 590c", TODAY)["expiry"] == "2026-11-27"
+
+
+@pytest.mark.parametrize("text,expiry", [
+    ("QQQ 660p today @ .5", "2026-11-11"), ("SPY 590c tmrw @ .5", "2026-11-12"), ("SPY 590c 1dte @ .5", "2026-11-12"),
+    ("NVDA 590c 14 Nov", "2026-11-14"), ("TSLA 590c 11-14 @ .5", "2026-11-14"),
+])
+def test_the_ways_discord_writes_an_expiry_are_kept(text, expiry):
+    read = {"ticker": text.split()[0], "expiry": expiry, "strike": 590.0, "side": None, "entry": None, "stop": None, "target": None}
+    assert call_check.confirm(read, text, TODAY)["expiry"] == expiry
+
+
+def test_a_level_pair_after_pt_stays_a_price_not_a_date():
+    read = {"ticker": "NVDA", "expiry": "2026-11-14", "strike": 190.0, "side": "call", "entry": 2.0, "stop": None, "target": 3.0}
+    assert call_check.confirm(read, "NVDA 190c 11/14 @ 2 PT 3/4", TODAY)["target"] == 3.0
 
 
 def test_several_calls_check_the_first_and_list_the_rest():
