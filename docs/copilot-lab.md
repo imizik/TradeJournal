@@ -574,8 +574,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   yields...), this week's earnings for those symbols (the earnings cache only) and FOMC, CPI and jobs reports today
   through Sunday, and the morning brief's saved lines as Copilot notes. Nothing calls a model. Order: items on his book,
   plans and day first, then the rest, each newest first, then **Coming up**, soonest first; at most 40 rows (8 ahead),
-  with the total. A ticker set to not followed is left out of every source (and if that setting cannot be read, every
-  item with a symbol is). Each source fails on its own and the Feed says which could not be read. Filters: **Mine**
+  with the total. A ticker set to not followed is left out of every source, including a headline, Radar event or
+  brief line that names it among others (if that setting cannot be read, only the macro calendar shows). Each source fails on its own and the Feed says which could not be read. Filters: **Mine**
   (the default: his book, plans and day), **Market**, **Mine + Market**; tapping a symbol shows only its story, with
   **All items** back. Actions: **Ask the copilot** puts the item, quoted, in the box unsent, in the item's plan thread,
   else the symbol's open conversation, else the symbol's desk view (an item with no symbol: today's conversation; a

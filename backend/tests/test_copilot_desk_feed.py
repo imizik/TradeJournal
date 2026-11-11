@@ -127,12 +127,21 @@ def test_hidden_tickers_stay_out_of_every_source(desk, engine, reads):  # noqa: 
         db.add(DayJournalEntry(operation_id="f1", day=WED, kind="follow", symbol="APLD", text="Not following", created_at=T0))
         ping(db, "giveback", 31, symbol="APLD", title="APLD give-back")
         ping(db, "giveback", 32)
+        db.add(PremarketPrep(day=WED, investigation_id=APLD, body="APLD gapped up overnight.\nNBIS 100C expires Friday.",
+                             delivery="sent", detected_at=T0 - timedelta(minutes=90)))
         db.commit()
-    reads["news"][("NBIS",)] = [article("Nebius story", 60, ["NBIS", "APLD"])]
+    reads["news"][("NBIS",)] = [article("Nebius story", 60, ["NBIS", "APLD"], n=0),  # filed under NBIS, but names APLD
+                                article("Nebius alone", 61, ["NBIS"], n=1)]
+    reads["news"][None] = [article("Fed day: APLD, MSFT, AMD slide on yields", 70, ["APLD", "MSFT", "AMD"]),
+                           article("Treasury yields climb as the Fed waits", 71)]
     reads["earnings"]["APLD"] = {"next": {"date": "2026-10-22", "status": "confirmed"}}
     body = read(desk)
     assert reads["news_calls"][0] == ["NBIS"]  # APLD's news is not even asked for
-    assert {i["symbol"] for i in body["items"]} == {"NBIS"}
+    assert {i["symbol"] for i in body["items"]} == {"NBIS", None}
+    assert not [i for i in body["items"] if "APLD" in i["text"] + (i["detail"] or "")]
+    assert sorted(i["text"] for i in body["items"] if i["source"] != "Alert") == [
+        "NBIS 100C expires Friday.", "Nebius alone", "Treasury yields climb as the Fed waits"]
+    assert all("symbols" not in i for i in body["items"])
 
 
 def test_a_failing_source_is_named_and_the_rest_stand(desk, engine, reads, monkeypatch):  # noqa: F811
@@ -148,16 +157,17 @@ def test_a_failing_source_is_named_and_the_rest_stand(desk, engine, reads, monke
     assert [i["source"] for i in body["items"]] == ["Alert", "News"]
 
 
-def test_not_knowing_what_is_hidden_shows_nothing_with_a_symbol(desk, engine, reads, monkeypatch):  # noqa: F811
+def test_not_knowing_what_is_hidden_shows_only_the_macro_calendar(desk, engine, reads, monkeypatch):  # noqa: F811
     from app.engine import day_journal
     monkeypatch.setattr(day_journal, "not_following", lambda db: (_ for _ in ()).throw(RuntimeError("db")))
     with Session(engine) as db:
         ping(db, "giveback", 31)
         db.commit()
     reads["news"][None] = [article("Treasury yields climb", 70)]
+    reads["macro"] = [{"date": "2026-10-23", "time": "08:30", "kind": "jobs", "name": "Jobs report"}]
     body = read(desk)
     assert "hidden" in body["unavailable"]
-    assert [(i["source"], i["symbol"]) for i in body["items"]] == [("News", None)]
+    assert [(i["source"], i["symbol"]) for i in body["items"]] == [("Calendar", None)]  # a headline could name a hidden ticker
 
 
 def test_the_feed_is_bounded(desk, engine, reads, monkeypatch):  # noqa: F811

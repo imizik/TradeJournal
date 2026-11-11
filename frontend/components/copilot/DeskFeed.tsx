@@ -71,7 +71,7 @@ export function useDeskFeed(on: boolean): { data: DeskFeedBody | null; failed: b
   return { data, failed };
 }
 
-/** How many items arrived since the Feed was last opened in this browser (none counted before the first read). */
+/** How many items arrived since the Feed was last opened in this browser; on a first visit, all of today's so far. */
 export function useFeedNew(data: DeskFeedBody | null, open: boolean): { count: number; since: number | null } {
   const [seen, setSeen] = useState<number | null | undefined>(undefined);
   const [since, setSince] = useState<number | null>(null); // what counted as new when the tab opened, for its dots

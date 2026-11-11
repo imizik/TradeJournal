@@ -21,8 +21,9 @@ Sources, each read on its own (``today._section``): one that fails reads ``unava
 - ``brief``: today's morning brief, its saved lines (**Copilot note**).
 
 Rank: items that touch the owner's book or plans (``mine``) first, then the rest, each newest first; then what is still
-ahead (``upcoming``), soonest first. A symbol the owner set to not followed is left out everywhere; if that setting
-cannot be read, every item with a symbol is left out. At most ``MAX_ITEMS`` rows (``MAX_UPCOMING`` of them ahead);
+ahead (``upcoming``), soonest first. A symbol the owner set to not followed is left out everywhere: an item about it,
+a headline or Radar event naming it among others, and any row whose words name it. If that setting cannot be read,
+only the macro calendar shows. At most ``MAX_ITEMS`` rows (``MAX_UPCOMING`` of them ahead);
 ``total`` counts them all. Read-only: no write, no model call. Facts and counts; nothing here tells the owner to trade.
 """
 
@@ -186,13 +187,14 @@ def _radar(day: date) -> dict:
         at = _epoch(event.get("first_seen_at"))
         if at is None:
             continue
-        symbol = (event.get("symbols") or [None])[0]
+        symbols = [x for x in event.get("symbols") or [] if isinstance(x, str)]
+        symbol = symbols[0] if symbols else None
         kind = RADAR_KIND.get(event.get("kind"), str(event.get("kind") or "event").replace("_", " "))
         href = (f"/copilot-lab?{urlencode({'symbol': symbol, 'radar': event['event_id']})}"
                 if symbol and event.get("kind") in DESK_RADAR_KINDS else f"/radar?{urlencode({'event': event['event_id']})}")
         text = _trim(event.get("summary") or f"{symbol or 'Group'} {kind}", 160)
         rows.append(_item("Radar", event["event_id"], at, text, symbol=symbol, detail=kind, href=href,
-                          radar_event_id=event["event_id"]))
+                          radar_event_id=event["event_id"], symbols=symbols))
     rows.sort(key=lambda r: r["at"], reverse=True)
     return {"state": "ok", "rows": rows[:MAX_RADAR]}
 
@@ -243,7 +245,7 @@ def _news_since(day: date) -> datetime:
 
 def _headline_item(row: dict, key: str, symbol: str | None) -> dict:
     item = _item("News", key, int(row["_at"].timestamp()), _trim(row["headline"], 200), symbol=symbol)
-    item.update(publisher=row["publisher"], url=row["url"])
+    item.update(publisher=row["publisher"], url=row["url"], symbols=row["symbols"])  # every symbol it names, for the hidden check
     return item
 
 
@@ -389,8 +391,11 @@ def build(db: Session, now: float) -> dict:
             items.append(item)
     blocked = hidden.get("symbols", set())
     if hidden["state"] != "ok":
-        items = [i for i in items if not i["symbol"]]  # not knowing what is hidden, show nothing that might be
-    items = [i for i in items if i["symbol"] not in blocked]
+        # Not knowing what is hidden, show only what cannot name a ticker: the macro calendar.
+        items = [i for i in items if not i["symbol"] and i["source"] == "Calendar"]
+    named = re.compile(r"\b(?:" + "|".join(re.escape(s) for s in sorted(blocked)) + r")\b") if blocked else None
+    items = [i for i in items if i["symbol"] not in blocked and not set(i.pop("symbols", None) or ()) & blocked
+             and not (named and (named.search(i["text"]) or named.search(i["detail"] or "")))]
     for item in items:
         item.pop("kind", None)
         own = item["source"] in ("Alert", "Plan", "Copilot note")  # always about his book, his plans or his day

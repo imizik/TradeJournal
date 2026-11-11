@@ -785,7 +785,7 @@ for (const width of [1440, 375] as const) {
     await expect(rows).toHaveCount(6);
     // Ask the copilot about the headline: NBIS's own thread, the item quoted in the box, nothing sent.
     await rows.nth(1).getByRole("button", { name: "Ask the copilot" }).click();
-    await expect(conversation(page).getByLabel("Message")).toHaveValue(/^Context: About the Benzinga headline on NBIS \(10:20\), quoted: "Nebius signs a compute deal"\./);
+    await expect(conversation(page).getByLabel("Message")).toHaveValue(/^About the Benzinga headline on NBIS \(10:20\), quoted: "Nebius signs a compute deal"\./);
     expect(chats).toEqual([]);
     if (width < 768) await page.getByRole("button", { name: "Back to the desk" }).click();
     // Plan it on the setup card opens the desk's Radar card, which has the setup's own Plan it.
