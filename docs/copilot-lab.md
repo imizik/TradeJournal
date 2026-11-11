@@ -553,8 +553,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   opens the symbol's desk view). Each row's eye sets its ticker to **Not following**; those sit behind "N not followed
   ▾" at the bottom, each with Show again. Under the book, the time of day's block (below), then one quiet facts line:
   **At risk now** (see Exposure) and the practice goal.
-- **Centre.** A tab strip, **Chart** first and **Feed** (Check a call and Ticket join it in later stages; no tab
-  shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
+- **Centre.** A tab strip, **Chart** first, **Feed** and **Check a call** (§ Check a call; Ticket joins it in a
+  later stage; no tab shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
   position; none is QQQ, the market) as the desk's server-drawn picture with the plan's entry and invalidation lines,
   the owner's fills and today's pings and Radar hits, on 2m, 15m or 1D, with **Open in Charts →**; then, for a held
   position, tiles: Open P&L, To your stop, vs SPY today (the stock's change today less SPY's, from the sparks read),
