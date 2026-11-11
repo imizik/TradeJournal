@@ -4,6 +4,7 @@ scripted model plays the server tool's blocks, nothing reaches Anthropic."""
 import asyncio
 import copy
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -108,6 +109,54 @@ def test_a_paused_search_is_sent_back_to_resume():
     events = turn(adapter)
     assert len(adapter.sent) == 2 and adapter.sent[1][-1]["role"] == "assistant"  # the paused turn, unchanged
     assert not [e for e in events if e["type"] == "error"]
+
+
+def test_tool_results_while_a_searchs_code_step_runs_carry_no_text():
+    """Search runs inside a code-execution step. A round can end with that step still running beside our own tool call;
+    text after the tool results then ends the step and the API refuses the next request (400, seen on Fable 5.2)."""
+    running = {"type": "server_tool_use", "id": "srv_c", "name": "code_execution", "input": {"code": "search()"}}
+    done = {"type": "code_execution_tool_result", "tool_use_id": "srv_c", "content": {"type": "code_execution_result"}}
+    quote = {"type": "tool_use", "id": "t0", "name": "get_quotes", "input": {"symbols": ["SPY"]}}
+    adapter = Rounds(([running, quote], "tool_use"), ([done, {**quote, "id": "t1"}], "tool_use"),
+                     ([{"type": "text", "text": "Answer."}], "end_turn"))
+    events = turn(adapter)
+    assert not [e for e in events if e["type"] == "error"]
+    assert [b["type"] for b in adapter.sent[1][-1]["content"]] == ["tool_result"]
+    assert [b["type"] for b in adapter.sent[2][-1]["content"]] == ["tool_result", "text"]  # step done: the reminder is back
+
+
+def test_later_rounds_name_the_code_container_the_search_ran_in():
+    sent = []
+
+    class Stream:
+        def __init__(self, kwargs):
+            sent.append(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def __aiter__(self):
+            async def none():
+                return
+                yield
+            return none()
+
+        async def get_final_message(self):
+            usage = SimpleNamespace(input_tokens=1, output_tokens=1, cache_read_input_tokens=0, cache_creation_input_tokens=0)
+            return SimpleNamespace(content=[], stop_reason="end_turn", usage=usage, model="claude-fable-5-2",
+                                   container=SimpleNamespace(id="container_1"))
+
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: Stream(kw))))
+    adapter = copilot.AnthropicAdapter(_cfg(backend="anthropic", key_configured=True), client=client)
+
+    async def two_rounds():
+        for _ in range(2):
+            [_ async for _ in adapter.stream_round("s", [{"role": "user", "content": "q"}], [], True)]
+    asyncio.run(two_rounds())
+    assert "container" not in sent[0] and sent[1]["container"] == "container_1"
 
 
 def test_a_failed_search_reads_as_unavailable():
