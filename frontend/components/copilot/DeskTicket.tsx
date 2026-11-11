@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import SetupRecordLines, { premiumLine } from "@/components/copilot/SetupRecordLines";
 import { apiUrl } from "@/lib/api";
@@ -186,7 +186,7 @@ function TicketView({ investigationId, onClose, onPlaced }: { investigationId: s
   const [setup, setSetup] = useState<SetupRecord | null>(null);
   const [reload, setReload] = useState(0);
   const [seeded, setSeeded] = useState("");  // the limit as the quote set it, so an ageing quote can take it back
-  const [seededQty, setSeededQty] = useState("");  // the count the plan's size gave, re-seeded on a re-read until he edits it
+  const seededQty = useRef("");  // the count the plan's size gave, re-seeded on a re-read until he edits it
   // The server judges the quote's age once; an open ticket keeps judging it on this clock.
   const [nowS, setNowS] = useState(() => Date.now() / 1000);
   useEffect(() => { const timer = setInterval(() => setNowS(Date.now() / 1000), 30_000); return () => clearInterval(timer); }, []);
@@ -200,7 +200,7 @@ function TicketView({ investigationId, onClose, onPlaced }: { investigationId: s
       const mid = found.limit !== null ? found.limit.toFixed(2) : "";
       setLimit(mid); setSeeded(mid);
       const count = found.contracts ? String(found.contracts) : "";
-      setQty(was => (!was || was === seededQty ? count : was)); setSeededQty(count);
+      setQty(was => (!was || was === seededQty.current ? count : was)); seededQty.current = count;
     }).catch(e => { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "The ticket could not be read."); });
     return () => controller.abort();
   }, [investigationId, pick, reload]);
