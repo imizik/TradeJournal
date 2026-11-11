@@ -52,8 +52,10 @@ levels and meter are on the underlying, and the status line says so by naming it
 (``app/engine/radar_scorecard.py``) under ``radar``. ``GET /copilot/desk/to-rate`` is what the retired Rate yesterday card read
 (nothing on the desk calls it since 2026-11-10): everything since the previous trading session still waiting on the
 owner's rating.
-``GET /copilot/desk/pings`` is Now's "How the pings did": each alert and alerted Radar hit since the previous trading
-session and what followed it.
+``GET /copilot/desk/pings`` is the day report's "How the pings did": each alert and alerted Radar hit since the previous
+trading session (``day_only``: today's) and what followed it; a ticker he does not follow is left out.
+``GET /copilot/desk/day-report`` is the after-close day report's other parts (``app/engine/day_report.py``): today's
+entries with how many had a plan before the fill, and the calls he checked scored from the price when he checked.
 ``GET /copilot/desk/session`` (at the end) is the Briefing's session timeline: today's regular session and what
 happened in it, from the same kind of existing readers, and the alerts and Radar hits still waiting on an answer.
 """
@@ -1133,7 +1135,7 @@ def _radar_outcomes(db: Session, now: float, first, start: datetime) -> dict:
 
 
 @router.get("/desk/pings")
-def desk_pings(db: Session = Depends(get_session)):
+def desk_pings(day_only: bool = False, db: Session = Depends(get_session)):
     """Now's "How the pings did" card (docs/copilot-lab.md § The desk): what followed each phone ping since the previous
     trading session (``since``), with nothing to answer. ``alerts``: each position alert sent, with the alert
     scorecard's ``outcome`` (sold or expired for how much against selling at the alert, still open, or not measured).
@@ -1144,11 +1146,37 @@ def desk_pings(db: Session = Depends(get_session)):
         raise HTTPException(503, "Copilot Lab is off.")
     now = today._now()
     first, start = _rate_since(now)
+    if day_only:  # the day report: just today's pings
+        first = datetime.fromtimestamp(now, ET).date()
+        start = datetime(first.year, first.month, first.day, tzinfo=ET).astimezone(UTC).replace(tzinfo=None)
     alerts = today._section(db, "pings alert outcomes", lambda: _alert_outcomes(db, now, first, start))
     hits = today._section(db, "pings radar outcomes", lambda: _radar_outcomes(db, now, first, start))
+    from app.engine import day_journal
+    hidden = day_journal.not_following(db)  # a ticker he does not follow stays out of the card
     return {"day": datetime.fromtimestamp(now, ET).date().isoformat(), "since": first.isoformat(),
-            "alerts": {"state": alerts["state"], "rows": alerts.get("rows", [])},
-            "radar": {"state": hits["state"], "reason": hits.get("reason"), "rows": hits.get("rows", [])}}
+            "alerts": {"state": alerts["state"], "rows": [r for r in alerts.get("rows", []) if r["symbol"] not in hidden]},
+            "radar": {"state": hits["state"], "reason": hits.get("reason"), "rows": [r for r in hits.get("rows", []) if r["symbol"] not in hidden]}}
+
+
+@router.get("/desk/day-report")
+def desk_day_report(db: Session = Depends(get_session)):
+    """The cockpit's after-close day report, the parts the other reads do not hold (docs/copilot-lab.md § The desk;
+    ``app/engine/day_report.py``): ``entries``, today's trades opened and how many had a plan saved before the fill;
+    ``checks``, the calls he checked scored from the price when he checked to the close (today's, with the last 30 days'
+    tally). Facts and counts: "not measured" when a stored price is missing, never a provider fetch, nothing to answer.
+    Tickers he does not follow are left out. Each part fails on its own. Read-only, owner-only, refused while the lab is
+    off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import day_report
+    now = today._now()
+    day = datetime.fromtimestamp(now, ET).date()
+    hidden = day_report.not_followed(db)
+    entries = today._section(db, "day report entries", lambda: day_report.entries_today(db, day, hidden))
+    checks = today._section(db, "day report checks", lambda: day_report.checks_report(db, day, now, hidden))
+    return {"day": day.isoformat(), "as_of": today._iso(now),
+            "entries": entries if entries["state"] == "ok" else None, "checks": checks if checks["state"] == "ok" else None,
+            "sections": {"entries": entries["state"], "checks": checks["state"]}}
 
 
 def _now() -> float:

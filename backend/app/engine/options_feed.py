@@ -311,6 +311,15 @@ class OptionsFeed:
         reads = [read for d in wanted if (read := self._chain(symbol, d, today)) is not None]
         return reads, issue if len(reads) < len(wanted) else None
 
+    def cached_contract(self, symbol: str, expiration: date, strike: float, side: str) -> dict | None:
+        """One contract's mid and when its chain was read, from the chain already in memory for today; None when it is
+        not cached or the contract is not in it. Never a provider request."""
+        read = self._chain(symbol, expiration, self._now().date())
+        found = next((c for c in read.value.contracts if c.option_type == side and abs(c.strike - strike) < 1e-6), None) if read else None
+        if found is None or found.bid is None or found.ask is None:
+            return None
+        return {"mid": round((found.bid + found.ask) / 2, 3), "fetched": read.fetched}
+
     def refresh(self, symbol: str, scope: str, limit: int = PER_PASS) -> str | None:
         """Read the expiration list and up to ``limit`` of the scope's stale chains, nearest
         first. Returns why it could not read something, or None."""

@@ -13,7 +13,7 @@ import DecisionBar from "@/components/copilot/DecisionBar";
 import FillLinkBar, { FillsToLink, useFillLinks } from "@/components/copilot/FillLinkBar";
 import RadarDecision from "@/components/copilot/RadarDecision";
 import { ThreadAlertAnswers, ThreadHitRating } from "@/components/copilot/ProofAnswers";
-import PingsRecap from "@/components/copilot/PingsRecap";
+import DayReport from "@/components/copilot/DayReport";
 import { planContext } from "@/components/copilot/PlanATrade";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import ArmChecklist from "@/components/copilot/ArmChecklist";
@@ -465,7 +465,7 @@ export default function CopilotLab({ link = null, close = false, daily = false }
     </div>
   ) : dayPhase === "close" ? (
     <section aria-label="Day report" data-testid="day-report" className="space-y-2">
-      <PingsRecap />
+      <DayReport realized={session.data?.realized_today ?? null} rows={rows} rowsRead={rowsRead} onOpen={openNeed} />
       {tally.total > 0 && <p className="px-1 text-xs text-muted-foreground">Close the day: <span data-testid="briefing-reviewed" className="tabular-nums">{tally.done} of {tally.total} done</span></p>}
       {/* While the strip shows Close the day, it is not repeated here. */}
       {phaseAction && needs.find(n => !seen.includes(n.key))?.kind !== "close" && <PhaseButton action={phaseAction} run={runPhase} />}
