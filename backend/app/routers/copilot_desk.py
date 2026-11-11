@@ -426,7 +426,7 @@ def _book(row: dict, plan: dict | None, flagged: dict | None) -> dict:
     state = ("near_stop" if kinds & {"invalidation_hit", "invalidation_near"}
              else "giving_back" if "giveback" in kinds or row.get("giveback") == "fired"
              else "on_plan" if planned else "no_plan")
-    return {"usd": row["unrealized_usd"], "pct": row["unrealized_pct"], "expiry": (row.get("option") or {}).get("expiry"),
+    return {"usd": row.get("unrealized_usd"), "pct": row.get("unrealized_pct"), "expiry": (row.get("option") or {}).get("expiry"),
             "days_held": row.get("days_held"), "track": track, "state": state, "planned": planned,
             "stop_pct": level.get("distance_pct") if level and level.get("state") == "armed" else None}
 
