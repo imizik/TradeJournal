@@ -46,6 +46,8 @@ async function briefing(page: Page, card: unknown = CARD) {
   await page.route("**/copilot/desk/scorecard", (route) => { reads += 1; return route.fulfill({ json: card }); });
   await page.route("**/copilot/desk/pings", (route) => route.fulfill({ json: { day: "2026-10-28", since: "2026-10-27",
     alerts: { state: "ok", rows: [] }, radar: { state: "off", reason: null, rows: [] } } }));
+  // How the pings did sits in the day report, shown only after the close: pin the clock there, whatever time CI runs.
+  await page.clock.install({ time: new Date("2026-10-28T21:30:00Z") });
   await page.goto("/copilot-lab?view=briefing");
   return { reads: () => reads };
 }
