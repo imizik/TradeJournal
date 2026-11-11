@@ -28,9 +28,9 @@ def fake(monkeypatch):
 
 def make_feed(tmp_path, *, enabled=True, accounts=("roth ira", "mcp"), now=None, file=True):
     path = token_file(tmp_path / "robinhood-token.json") if file else tmp_path / "missing.json"
-    clock = {"t": now or SATURDAY}
+    moment = {"t": now or SATURDAY}
     s = rb.Settings(enabled=enabled, token_file=str(path), accounts=accounts)
-    return rb.Feed(settings_fn=lambda: s, now=lambda: clock["t"]), clock
+    return rb.Feed(settings_fn=lambda: s, now=lambda: moment["t"]), moment
 
 
 def snap(tmp_path):
@@ -106,29 +106,29 @@ def test_positions_page_through_and_stocks_get_quotes(tmp_path, fake):
 
 def test_a_failed_call_leaves_that_part_unknown_and_a_failed_refresh_keeps_the_last_snapshot(tmp_path, fake):
     fake.fail.add("get_equity_positions")
-    feed, clock = make_feed(tmp_path)
+    feed, moment = make_feed(tmp_path)
     feed.refresh()
     view, snapshot = feed.snapshot(kick=False)
     assert view["state"] == "ok" and not snapshot["complete"]  # options read; with stocks unknown "not on Robinhood" cannot be said
     assert [p["symbol"] for p in snapshot["positions"]] == ["NBIS"]
     fake.fail.add("get_accounts")
-    clock["t"] += rb.QUIET_TTL
+    moment["t"] += rb.QUIET_TTL
     feed.refresh()
     view, again = feed.snapshot(kick=False)
     assert view["issue"] == "http" and again is snapshot
-    clock["t"] += rb.STALE_REFRESHES * rb.QUIET_TTL
+    moment["t"] += rb.STALE_REFRESHES * rb.QUIET_TTL
     view, gone = feed.snapshot(kick=False)
     assert view["state"] == "stale" and gone is None  # the book falls back to the journal
 
 
 def test_one_refresh_per_ttl_and_a_forced_one_no_faster_than_the_gap(tmp_path, fake):
-    feed, clock = make_feed(tmp_path)
+    feed, moment = make_feed(tmp_path)
     feed.refresh()
     first = len(fake.calls)
     feed.refresh()
     feed.refresh(force=True)
     assert len(fake.calls) == first
-    clock["t"] += rb.FORCE_GAP_SECONDS
+    moment["t"] += rb.FORCE_GAP_SECONDS
     feed.refresh(force=True)
     assert len(fake.calls) == 2 * first
 
