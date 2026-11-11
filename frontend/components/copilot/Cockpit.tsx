@@ -320,7 +320,8 @@ export function SinceYouLooked({ rows, session, read }: { rows: DeskThread[]; se
   useEffect(() => { setLook(readLook()); }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
   const current = useMemo<DeskLook | null>(() => {
     if (!read) return null;
-    const held = positionRows(rows).filter(r => r.book && r.symbol && !r.hidden);
+    // The journal's positions only: a Robinhood-only row becomes a trade row once its email arrives (not a close).
+    const held = rows.filter(r => r.key.startsWith("trade:") && r.book && r.symbol && !r.hidden);
     return { at: 0, pnl: Object.fromEntries(held.map(r => [r.key, r.book!.usd ?? 0])),
       contracts: Object.fromEntries(held.map(r => [r.key, r.title])) };
   }, [rows, read]);

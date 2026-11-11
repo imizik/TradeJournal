@@ -279,3 +279,58 @@ def test_the_refresh_route_is_parameterless_and_owner_gated(desk, live, monkeypa
     from app.routers import copilot_desk
     monkeypatch.setattr(copilot_desk.copilot, "settings", lambda: SimpleNamespace(enabled=False))
     assert desk.post("/copilot/desk/robinhood/refresh").status_code == 503
+
+
+# --------------------------------------------------------------------------- review follow-ups
+
+def test_no_readable_account_or_an_unknown_positions_shape_is_unavailable_never_empty(tmp_path, fake):
+    fake.accounts = [{"account_number": "", "brokerage_account_type": "ira_roth"}]
+    feed, _ = make_feed(tmp_path)
+    feed.refresh()
+    assert feed.view(kick=False) == {"state": "unavailable"}
+    fake.accounts = [dict(a) for a in FakeRobinhood().accounts]
+    fake.tool_get_equity_positions = lambda args: {"holdings": []}
+    feed, _ = make_feed(tmp_path)
+    feed.refresh()
+    _view, snapshot = feed.snapshot(kick=False)
+    assert snapshot["complete"] is False  # so nothing is called "not on Robinhood"
+
+
+def test_an_alphanumeric_account_number_takes_its_last_four_from_the_digits(tmp_path, fake):
+    for a in fake.accounts:
+        digits = a["account_number"]
+        fake.portfolios["5QR" + digits[-5:]] = fake.portfolios.pop(digits)
+        if digits in fake.options:
+            fake.options["5QR" + digits[-5:]] = fake.options.pop(digits)
+        a["account_number"] = "5QR" + digits[-5:]
+    view, snapshot = snap(tmp_path)
+    assert [a["masked"] for a in view["accounts"]] == ["••8267", "••7884"] and snapshot["positions"][0]["last4"] == "8267"
+
+
+def test_matching_takes_every_same_account_match_before_any_other():
+    key = ("NBIS", "call", 100.0, "2026-10-23")
+    live = [{"symbol": "NBIS", "instrument": "option", "side": "call", "strike": 100.0, "expiry": "2026-10-23", "last4": "8267"}]
+    journal = [{"trade_id": "other", "key": key, "last4": "5555"}, {"trade_id": "roth", "key": key, "last4": "8267"}]
+    matched, missing, extra = rb.match(journal, {"positions": live, "complete": True})
+    assert list(matched) == ["roth"] and missing == {"other"} and extra == []
+
+
+def test_a_short_options_pnl_holds_whatever_the_sign_of_its_average(tmp_path, fake):
+    fake.options["333338267"] = [option_position("opt-nbis", "NBIS", average="-310.0000", kind="short")]
+    _view, snapshot = snap(tmp_path)
+    [p] = snapshot["positions"]
+    assert (p["direction"], p["avg_cost"], p["usd"], p["pct"]) == ("short", 310.0, -220.0, -35.5)
+
+
+def test_a_position_past_the_desks_row_cut_is_in_the_journal_not_new(desk, engine, quotes, live, fake, monkeypatch):  # noqa: F811
+    from app.engine import plan_positions
+    monkeypatch.setattr(plan_positions, "MAX_ROWS", 1)
+    buy(engine, 600, "CRWV")
+    planned_nbis(engine)
+    fake.options["333338267"].append(option_position("opt-crwv", "CRWV"))
+    fake.instruments["opt-crwv"] = instrument("opt-crwv", "CRWV")
+    fake.quotes["opt-crwv"] = option_quote("opt-crwv")
+    live._attempt = 0
+    live.refresh()
+    body = read(desk)
+    assert [r for r in body["threads"] if r["key"].startswith("robinhood:")] == []

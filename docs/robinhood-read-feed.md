@@ -18,7 +18,7 @@ Accounts shown: those named in `ROBINHOOD_ACCOUNTS` (default `Roth IRA,MCP`; a l
 last four digits), plus any other account only while it holds something.
 
 Refresh: about once a minute in market hours (9:25 to 16:15 New York on weekdays), every 15 minutes otherwise, only
-while a desk is open, one read at a time and at most 40 calls each; the **live from Robinhood · as of** line on the book
+when the desk's thread read asks (an open desk, or the evening review's one read of it), one read at a time and at most 40 calls each; the **live from Robinhood · as of** line on the book
 reads again on a tap (no more than once every 15 seconds). If a read fails the last snapshot stays; after three missed
 refreshes it is **stale** and the book shows the journal again.
 
@@ -105,4 +105,7 @@ app picks up the new file.
 
 Built and tested against a fake connection that returns the shapes Isaac's own test observed on 2026-11-11. Not yet
 seen live: the exact shape of `get_equity_quotes` (read defensively), how pagination looks on a long position list,
-and whether Robinhood rotates the renewal token (both cases are handled). The first real sign-in proves them.
+whether `account_number` is all digits (either works; the last four come from `rhs_account_number` when it is), the
+sign of a short option's average price (read either way), and whether Robinhood rotates the renewal token (handled).
+The first real sign-in proves them. A single failed renewal (a network blip on the last day) also ends the sign-in by
+design: sign in again.

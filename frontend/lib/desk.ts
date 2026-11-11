@@ -683,7 +683,7 @@ export function saveLook(look: DeskLook) {
  * position opened or closed since says so; the counts close the list.
  */
 export function sinceLines(look: DeskLook, rows: DeskThread[], events: DeskSessionEvent[], max = 4): string[] {
-  const now = new Map(rows.filter(r => r.book && r.symbol && !r.hidden).map(r => [r.key, r]));
+  const now = new Map(rows.filter(r => r.book && r.symbol && !r.hidden && !r.key.startsWith("robinhood:")).map(r => [r.key, r]));
   const lines: { weight: number; text: string }[] = [];
   for (const [key, row] of now) {
     const usd = row.book!.usd;

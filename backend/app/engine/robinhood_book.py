@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -93,19 +94,27 @@ def _round(value: float | None, places: int = 2) -> float | None:
     return None if value is None else round(value, places)
 
 
+ACCOUNT_NUMBER = re.compile(r"[A-Za-z0-9]{4,32}")
+
+
 def _accounts(data: dict) -> list[dict]:
-    """Each active account: its number (kept on the server for the calls only), last four, type and label."""
+    """Each active account: its number (kept on the server for the calls only), last four (the digits of
+    ``rhs_account_number`` when there are some, as the fill emails give them), type and label. No account read is a
+    failed read, never an empty book."""
     out = []
     for a in _list(data, "accounts", "results"):
-        number = a.get("account_number")
-        if not isinstance(number, str) or not number.strip().isdigit() or a.get("deactivated") or a.get("permanently_deactivated"):
+        number = a.get("account_number").strip() if isinstance(a.get("account_number"), str) else ""
+        if not ACCOUNT_NUMBER.fullmatch(number) or a.get("deactivated") or a.get("permanently_deactivated"):
             continue
-        number = number.strip()
+        digits = a.get("rhs_account_number").strip() if isinstance(a.get("rhs_account_number"), str) else ""
+        last4 = (digits if digits.isdigit() and len(digits) >= 4 else number)[-4:]
         kind = _text(a.get("brokerage_account_type")) or ""
         nickname = _text(a.get("nickname"), 20)
         label = nickname or TYPE_LABELS.get(kind) or (kind.replace("_", " ").title() if kind else "Account")
-        out.append({"number": number, "last4": number[-4:], "label": "".join(ch for ch in label if not ch.isdigit()).strip() or "Account",
+        out.append({"number": number, "last4": last4, "label": "".join(ch for ch in label if not ch.isdigit()).strip() or "Account",
                     "type": kind})
+    if not out:
+        raise rh.ReadError("shape", "no accounts")
     return out
 
 
@@ -119,6 +128,8 @@ def _paged(read, account: str) -> list[dict]:
     rows, cursor, seen = [], None, set()
     for _ in range(MAX_PAGES):
         data = read(account, cursor)
+        if not any(isinstance(data.get(k), list) for k in ("positions", "results")):
+            raise rh.ReadError("shape", "positions reply")  # an unknown shape is unknown, never "holds nothing"
         rows += _list(data, "positions", "results")
         cursor = _next(data)
         if not cursor or cursor in seen:
@@ -139,7 +150,8 @@ def _option_row(account: dict, p: dict, inst: dict | None, quote: dict | None) -
     side = (inst or {}).get("type") if (inst or {}).get("type") in ("call", "put") else None
     direction = "short" if p.get("type") == "short" else "long"
     multiplier = _num(p.get("trade_value_multiplier")) or _num((inst or {}).get("trade_value_multiplier"))
-    avg = _num(p.get("average_price"))  # dollars a contract (the premium x 100)
+    avg = _num(p.get("average_price"))  # dollars a contract (the premium x 100); a short's may come signed
+    avg = abs(avg) if avg is not None else None
     q = quote or {}
     mark_share = _num(q.get("mark_price")) if _num(q.get("mark_price")) is not None else _num(q.get("adjusted_mark_price"))
     mark = mark_share * multiplier if mark_share is not None and multiplier else None
@@ -387,17 +399,18 @@ def match(journal: list[dict], snapshot: dict) -> tuple[dict[str, dict], set[str
     A journal position matches the same contract in its own account first, else the same contract in any account. A
     position is "not on Robinhood" only when every account's positions were read."""
     live = list(snapshot["positions"])
+    keys = [contract_key(p["symbol"], p["instrument"], p["side"], p["strike"], p["expiry"]) for p in live]
     used: set[int] = set()
     matched: dict[str, dict] = {}
-    for row in journal:
-        if row["key"] is None:
-            continue
-        options = [i for i, p in enumerate(live) if i not in used
-                   and contract_key(p["symbol"], p["instrument"], p["side"], p["strike"], p["expiry"]) == row["key"]]
-        pick = next((i for i in options if live[i]["last4"] == row.get("last4")), options[0] if options else None)
-        if pick is not None:
-            used.add(pick)
-            matched[row["trade_id"]] = live[pick]
+    for same_account in (True, False):  # every exact-account match first, then any account
+        for row in journal:
+            if row["key"] is None or row["trade_id"] in matched:
+                continue
+            pick = next((i for i, k in enumerate(keys) if i not in used and k == row["key"]
+                         and (not same_account or live[i]["last4"] == row.get("last4"))), None)
+            if pick is not None:
+                used.add(pick)
+                matched[row["trade_id"]] = live[pick]
     missing = {r["trade_id"] for r in journal if r["trade_id"] not in matched} if snapshot.get("complete") else set()
     return matched, missing, [p for i, p in enumerate(live) if i not in used]
 

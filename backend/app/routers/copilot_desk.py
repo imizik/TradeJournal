@@ -694,6 +694,13 @@ def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict) -> li
                                        (p.get("option") or {}).get("strike"), (p.get("option") or {}).get("expiry"))}
                for p in found["positions"]]
     matched, missing, extra = rb.match(journal, snapshot)
+    # The desk lists at most plan_positions.MAX_ROWS positions: one past that cut is still in the journal, not new.
+    if found.get("count", 0) > len(found["positions"]):
+        from app.ai.copilot_book import _not_webull
+        held = {rb.contract_key(t.ticker, t.instrument_type, t.option_type, t.strike, t.expiration.isoformat() if t.expiration else None)
+                for t in db.exec(select(Trade).join(Account, Account.id == Trade.account_id)
+                                 .where(Trade.status == "open").where(_not_webull())).all()}
+        extra = [p for p in extra if rb.contract_key(p["symbol"], p["instrument"], p["side"], p["strike"], p["expiry"]) not in held]
     by_key = {r["key"]: r for r in rows if r.get("book") is not None}
 
     def facts(live: dict) -> dict:
