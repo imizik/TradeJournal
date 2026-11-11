@@ -74,7 +74,7 @@ test("the centre opens on the open thread's chart beside the conversation, and i
   const { reads, pane } = await lab(page);
   await expect(page.getByRole("region", { name: "Conversation" }).getByText("It held the open; the group leads.")).toBeVisible();
   await expect(pane.getByRole("tab", { name: "Chart" })).toHaveAttribute("aria-selected", "true");
-  await expect(pane.getByRole("tab")).toHaveText(["Chart", "Feed", "Check a call"]); // no tab for what does not exist yet
+  await expect(pane.getByRole("tab")).toHaveText(["Chart", "Feed", "Check a call", "Ticket"]); // no tab for what does not exist yet
   await expect(pane.getByTestId("desk-chart")).toContainText("NBIS");
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
   await expect(pane.getByRole("img", { name: /NBIS today: minute bars/ })).toBeVisible();
@@ -270,4 +270,48 @@ test("this week says so quietly when no morning brief was written", async ({ pag
   await pane.getByTestId("this-week").locator("summary").click();
   await expect(pane).toContainText("No morning brief in the last 7 days.");
   await expect(pane.getByTestId("week-brief")).toHaveCount(0);
+});
+
+// The Ticket copies a saved plan's fields for Robinhood and never sends: the tab reads two GET routes, stubbed here.
+const TICKET = {
+  state: "ok", investigation_id: INV, symbol: "NBIS", direction: "long", thesis: "Reclaims VWAP with the group", option_type: "call",
+  entry: 95.9, invalidation: 92.3, time_stop: "out by 15:30", plan_contract_words: "NBIS 11/13 100C",
+  size: { contracts: 2, risk_usd: null, text: "2 contracts" }, simulated: false, account: "roth",
+  accounts: [{ id: "roth", label: "Roth IRA", last4: "8267", kind: "roth" }, { id: "mcp", label: "MCP", last4: "7884", kind: "mcp" }],
+  contract: { strike: 100, expiry: "2026-11-13", type: "call", label: "NBIS $100 Call 11/13/26", source: "plan", multiplier: 100 },
+  candidates: null, quote: { state: "ok", as_of: now - 30, bid: 3.1, ask: 3.3, mid: 3.2, spread: 0.2, spread_pct: 6.3, multiplier: 100 },
+  underlying: { state: "ok", last: 95, as_of: now - 10 }, expected_move_pct: 6, limit: 3.2, contracts: 2,
+};
+
+test("the Ticket tab lists saved plans, opens one, follows his edits, and the MCP send stays off", async ({ page }) => {
+  const methods: string[] = [];
+  await page.route("**/copilot/tickets", route => { methods.push(route.request().method()); return route.fulfill({ json: { plans: [
+    { investigation_id: INV, symbol: "NBIS", direction: "long", instrument: "calls", thesis: "Reclaims VWAP with the group", confirmed_at: now - 600, entry: 95.9, invalidation: 92.3 }] } }); });
+  await page.route(/\/copilot\/tickets\/[^/]+$/, route => { methods.push(route.request().method()); return route.fulfill({ json: TICKET }); });
+  const { pane } = await lab(page);
+  await pane.getByRole("tab", { name: "Ticket" }).click();
+  await pane.getByRole("list", { name: "Saved plans" }).getByRole("button", { name: /NBIS/ }).click();
+  const ticket = pane.getByTestId("desk-ticket");
+  await expect(ticket).toContainText("NBIS $100 Call 11/13/26");
+  await expect(ticket).toContainText("$640.00 (the premium)");
+  await expect(ticket).toContainText("NBIS 103.20 at expiry");
+  await expect(pane.getByTestId("ticket-quote")).toContainText("Bid 3.10 · Ask 3.30 · Spread $0.20");
+  await pane.getByLabel("Quantity in contracts").fill("3");
+  await pane.getByLabel("Limit price per share").fill("3.25");
+  await expect(ticket).toContainText("$975.00 (the premium)");
+  await expect(ticket).toContainText("You place it yourself in Robinhood");
+  await pane.getByRole("radio", { name: /MCP/ }).click();
+  await expect(pane.getByRole("button", { name: "Send to Robinhood for your approval" })).toBeDisabled();
+  await expect(ticket).toContainText("Robinhood has not given your account the approvals setting");
+  await pane.getByRole("button", { name: "Not now" }).click();
+  await expect(pane.getByRole("list", { name: "Saved plans" })).toBeVisible();
+  expect(new Set(methods)).toEqual(new Set(["GET"]));
+});
+
+test("with no saved plan the Ticket tab says so and offers the plan form", async ({ page }) => {
+  await page.route("**/copilot/tickets", route => route.fulfill({ json: { plans: [] } }));
+  const { pane } = await lab(page);
+  await pane.getByRole("tab", { name: "Ticket" }).click();
+  await expect(pane.getByText("No saved plan is armed and waiting for an entry.")).toBeVisible();
+  await expect(pane.getByRole("button", { name: "Plan a trade" })).toBeVisible();
 });
