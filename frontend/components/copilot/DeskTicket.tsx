@@ -186,6 +186,7 @@ function TicketView({ investigationId, onClose, onPlaced }: { investigationId: s
   const [setup, setSetup] = useState<SetupRecord | null>(null);
   const [reload, setReload] = useState(0);
   const [seeded, setSeeded] = useState("");  // the limit as the quote set it, so an ageing quote can take it back
+  const [seededQty, setSeededQty] = useState("");  // the count the plan's size gave, re-seeded on a re-read until he edits it
   // The server judges the quote's age once; an open ticket keeps judging it on this clock.
   const [nowS, setNowS] = useState(() => Date.now() / 1000);
   useEffect(() => { const timer = setInterval(() => setNowS(Date.now() / 1000), 30_000); return () => clearInterval(timer); }, []);
@@ -198,12 +199,13 @@ function TicketView({ investigationId, onClose, onPlaced }: { investigationId: s
       setAccount(was => was ?? found.account);
       const mid = found.limit !== null ? found.limit.toFixed(2) : "";
       setLimit(mid); setSeeded(mid);
-      setQty(was => was || (found.contracts ? String(found.contracts) : ""));
+      const count = found.contracts ? String(found.contracts) : "";
+      setQty(was => (!was || was === seededQty ? count : was)); setSeededQty(count);
     }).catch(e => { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "The ticket could not be read."); });
     return () => controller.abort();
   }, [investigationId, pick, reload]);
 
-  const ageing = !!ticket?.quote && ticket.quote.state === "ok" && ticket.quote.as_of != null && nowS - ticket.quote.as_of > STALE_S;
+  const ageing = !!ticket?.quote && ticket.quote.state === "ok" && !ticket.quote.simulated && ticket.quote.as_of != null && nowS - ticket.quote.as_of > STALE_S;
   useEffect(() => { if (ageing && seeded) { setLimit(was => (was === seeded ? "" : was)); setSeeded(""); } }, [ageing, seeded]); // eslint-disable-line react-hooks/set-state-in-effect -- the quote aged on the clock
 
   const symbol = ticket?.symbol;
@@ -292,7 +294,7 @@ function TicketView({ investigationId, onClose, onPlaced }: { investigationId: s
   const spot = ticket.underlying?.state === "ok" ? ticket.underlying.last ?? null : null;
   const f = ticketFigures(k.type, k.strike, limitN, qtyN, k.multiplier, spot, ticket.expected_move_pct);
   const premium = premiumLine(setup, f.cost);
-  const aged = q?.state === "ok" && q.as_of != null && nowS - q.as_of > STALE_S;
+  const aged = q?.state === "ok" && !q.simulated && q.as_of != null && nowS - q.as_of > STALE_S;
   const fresh = q?.state === "ok" && !aged;
   const all = copyAllText({ symbol: ticket.symbol, type: k.type, expiry: k.expiry, strike: k.strike, limit: limitN !== null ? limitN.toFixed(2) : "", contracts: qtyN ? String(qtyN) : "" });
   const field = "w-24 rounded border bg-background px-2 py-1.5 text-base tabular-nums sm:text-sm";
