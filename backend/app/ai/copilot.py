@@ -1617,11 +1617,21 @@ WEB_SEARCH_USD = 0.01  # per search, as api_runner prices it
 WEB_TURN_EXTRA_USD = 0.15  # a turn that may search reads pages of results: its cap is the turn budget plus this
 
 
-def turn_cap(cfg: Settings, web: bool) -> float:
+# Plan and review turns read more before they answer (a plan's level history and option candidates, a trade or week review):
+# on Opus 5.5 they measured $0.19-0.21 against the $0.25 an ordinary question gets, so a turn on a review job, or one that
+# has asked for one of these reads, gets the turn budget times this (twice: $0.50 at the default). Other turns keep it.
+DEEP_TURN_FACTOR = 2.0
+DEEP_JOBS = frozenset({copilot_prompt.COMPANION, copilot_prompt.WEEK_REVIEW})
+DEEP_TOOLS = frozenset({"get_trade_review", "get_week_review", "get_level_history", "get_option_candidates"})
+
+
+def turn_cap(cfg: Settings, web: bool, deep: bool = False) -> float:
     """A turn's spend cap. The turn budget is set at Opus's price; a dearer model (Fable) gets the same room in tokens,
-    so its cap scales with its output price. The daily budget is the same for every model."""
+    so its cap scales with its output price. A ``deep`` (plan or review) turn gets ``DEEP_TURN_FACTOR`` times the budget.
+    The daily budget is the same for every model."""
     scale = max(1.0, _price(cfg.model)[1] / PRICES["claude-opus-5-5"][1])
-    return (cfg.turn_budget_usd + (WEB_TURN_EXTRA_USD if web else 0.0)) * scale
+    budget = cfg.turn_budget_usd * (DEEP_TURN_FACTOR if deep else 1.0)
+    return (budget + (WEB_TURN_EXTRA_USD if web else 0.0)) * scale
 
 
 def web_tool() -> list[dict]:
@@ -1728,7 +1738,8 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                     "rounds_ms": [], "prefetch": [name for name, _ in warming]})
     calls = searched = 0
     web = web and cfg.backend == "anthropic" and mode == "live"
-    cap = turn_cap(cfg, web)
+    deep = job in DEEP_JOBS  # a plan or review turn: more room, once it asks for one of DEEP_TOOLS or is on a review job
+    cap = turn_cap(cfg, web, deep)
     web_offered = False
     waiting: dict[str, str] = {}  # web searches whose result has not arrived yet: id -> query
     # Per-turn state for _run_tool: one practice proposal, two images, and only the job's own tools run.
@@ -1791,6 +1802,8 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                     metrics["model"] = final.model
                 messages.append({"role": "assistant", "content": final.content})
                 spent = spent_usd if cfg.backend == "anthropic" else 0.0
+                if not deep and any(b.get("type") == "tool_use" and b.get("name") in DEEP_TOOLS for b in final.content):
+                    deep, cap = True, turn_cap(cfg, web, True)
                 over_budget = spent is not None and spent >= cap
                 stopped = {"type": "error", "code": "budget", "message": f"Stopped: this turn reached its ${cap:.2f} API spend cap."}
                 if final.stop_reason == "refusal":

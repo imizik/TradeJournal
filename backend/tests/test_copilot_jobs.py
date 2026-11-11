@@ -146,3 +146,19 @@ def test_a_jobs_prompt_names_only_the_tools_it_is_offered():
         offered = {t["name"] for t in copilot_prompt.TOOLS[job]}
         assert named <= offered, (job, sorted(named - offered))
     assert "get_week_review" in copilot_prompt.PROMPTS["telegram"]  # a typed "review my week" keeps its rules
+
+
+def test_the_three_book_reads_are_offered_only_where_a_job_needs_them():
+    """#730 dropped get_memories (the owner block carries them); the rest reach beyond the block, so desk and Telegram keep
+    all three, the companion and week review keep get_trades, the brief and the research jobs none."""
+    names = {job: {t["name"] for t in copilot_prompt.TOOLS[job]} for job in JOBS}
+    reads = {"get_positions", "get_trades", "get_owner_context", "get_memories"}
+    assert {job: reads & n for job, n in names.items()} == {
+        "desk": {"get_positions", "get_trades", "get_owner_context"}, "telegram": {"get_positions", "get_trades", "get_owner_context"},
+        "prep": set(), "companion": {"get_trades"}, "week_review": {"get_trades"}}
+    assert len(copilot_tools.TOOLS) == 25
+
+
+@pytest.mark.parametrize("job,deep", [("desk", False), ("telegram", False), ("prep", False), ("companion", True), ("week_review", True)])
+def test_only_the_review_jobs_start_with_the_deeper_turn_cap(job, deep):
+    assert (job in copilot.DEEP_JOBS) is deep

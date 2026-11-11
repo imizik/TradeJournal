@@ -1270,7 +1270,11 @@ memories; another symbol's come with `get_owner_context`), and the others say
 in their description when they reach beyond it: `get_owner_context` for a
 different symbol, `get_trades` for more of a symbol's closed trades than the
 block lists, `get_positions` only when the block shows fewer positions than
-its count or every one is needed (a broker screenshot). The example answer
+its count or every one is needed (a broker screenshot). A review of this trim on 2026-11-11 found nothing more to
+remove: `get_memories` was the 26th tool, so 25 remain, and each of the three
+reads has a path the block lacks (another symbol; trades past the latest four;
+positions past the block's eight). A symbol's memories past the block's eight
+have no read, and the block does not count them. The example answer
 lines ("Verdict: Hold — The thesis has not broken.", a sample Read line, the
 sample compare questions) became descriptions of the form, since earlier
 example answers were copied word for word.
@@ -3021,7 +3025,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `COPILOT_EFFORT` | `medium` | `low`, `medium` or `high`. |
 | `COPILOT_BACKENDS` | `anthropic` | The backends the panel's **Backend** picker offers, comma-separated; `COPILOT_BACKEND` is always offered first. `anthropic` is offered only when the API key is set. A turn sends its pick as `backend` in `POST /copilot/chat`; one not offered is refused (422). Remembered per browser. |
 | `COPILOT_DAILY_BUDGET_USD` | `4` | Estimated API spend (New York day, `anthropic` turns only) at which `POST /copilot/chat` refuses further API turns with a 429 until tomorrow. Every turn is recorded in `copilot_turn` (`app/ai/copilot_spend.py`: backend, model, rounds, tokens, estimated cost; no text), `GET /copilot/status` reports `spend_today_usd`, and the panel shows "API today $x of $y" while the API backend is picked. Turn metrics also reach the server journal at INFO. |
-| `COPILOT_TURN_BUDGET_USD` | `0.25` | Estimated API spend at which a turn stops between rounds (output is also capped at 4,000 tokens per round). A turn that may [search the web](#web-search) gets $0.15 more. The figure is set at Opus's price: a dearer model gets the same room in tokens (`copilot.turn_cap`), so a Fable 5.2 turn stops at $0.50 ($0.80 with search) and a Fable 5.1 turn at $0.62. The daily budget does not scale. |
+| `COPILOT_TURN_BUDGET_USD` | `0.25` | Estimated API spend at which a turn stops between rounds (output is also capped at 4,000 tokens per round). A turn that may [search the web](#web-search) gets $0.15 more. A plan or review turn (a companion or week-review job, or any turn that has asked for `get_trade_review`, `get_week_review`, `get_level_history` or `get_option_candidates`) gets twice the budget, $0.50 by default (`copilot.DEEP_TURN_FACTOR`): on Opus 5.5 they measured $0.19-0.21 against the $0.25 an ordinary question gets, and one that still reaches its cap ends with the same budget error. The figure is set at Opus's price: a dearer model gets the same room in tokens (`copilot.turn_cap`), so a Fable 5.2 turn stops at $0.50 ($1.00 deep, $0.80 with search) and a Fable 5.1 turn at $0.62. The daily budget does not scale. |
 | `COPILOT_FALLBACKS` | on | Sends the server-side refusal fallback (`fallbacks: "default"`). `off` disables it. |
 | `ALERT_POLICY_ENABLED` | `true` | The [phone ping policy](#phone-ping-policy) for the app's own pings. `false` passes every ping through. |
 | `PING_DAILY_CAP` | ignored | Obsolete; there is no shared daily phone-ping ceiling. |
