@@ -110,7 +110,7 @@ async function copilotSheet(page: Page) {
 
 /** The centre's Timeline, under the open thread's chart, unfolded. */
 async function timeline(page: Page) {
-  const centre = page.getByRole("region", { name: "Chart and today" });
+  const centre = page.getByRole("region", { name: "Chart and feed" });
   const fold = centre.getByRole("button", { name: /^Timeline/ });
   if (await fold.getAttribute("aria-expanded") !== "true") await fold.click();
   return centre.getByRole("list", { name: "Timeline" });

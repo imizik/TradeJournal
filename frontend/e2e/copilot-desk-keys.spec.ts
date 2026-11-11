@@ -52,6 +52,32 @@ const SESSION = {
   indices: [{ symbol: "SPY", last: 580.1, change_pct: 0.42 }, { symbol: "QQQ", last: 500.2, change_pct: -0.31 }], quote_issue: null, realized_today: -120,
   sections: { hours: "ok", phase: "ok", fills: "ok", pings: "ok", radar: "ok", decisions: "ok", time_stops: "ok", prep: "ok", indices: "ok" },
 };
+const item = (fields: Record<string, unknown>) => ({
+  has_time: true, symbol: null, detail: null, publisher: null, url: null, href: null, investigation_id: null, radar_event_id: null,
+  setup: null, plan: null, mine: false, upcoming: false, ...fields,
+});
+const FEED = {
+  as_of: "2026-10-23T15:00:00Z", now: epoch("2026-10-23T15:00:00Z"), day: "2026-10-23", total: 6,
+  sources: { pings: "ok", plans: "ok", radar: "ok", "radar setups": "ok", brief: "ok", calendar: "ok", news: "ok", "market news": "unavailable" },
+  unavailable: ["market news"],
+  items: [
+    item({ id: "alert:1", source: "Alert", at: epoch("2026-10-23T14:31:00Z"), symbol: "NBIS", text: "NBIS 100C give-back",
+      detail: "Was +$610, now +$355.", href: "/copilot-lab?symbol=NBIS", plan: "own", mine: true }),
+    item({ id: "news:1", source: "News", at: epoch("2026-10-23T14:20:00Z"), symbol: "NBIS", text: "Nebius signs a compute deal",
+      publisher: "Benzinga", url: "https://news.example/nbis", href: "/copilot-lab?symbol=NBIS", mine: true }),
+    item({ id: "copilot-note:brief", source: "Copilot note", at: epoch("2026-10-23T12:30:00Z"), text: "CPI is out at 8:30; SPY flat pre-market.",
+      detail: "Morning brief", href: `/copilot-lab?investigation=${APLD}`, mine: true }),
+    item({ id: "radar-setup:1", source: "Radar setup", at: epoch("2026-10-23T14:12:00Z"), symbol: "MU", text: "MU dip turning up",
+      href: `/copilot-lab?symbol=MU&radar=${EVENT}`, radar_event_id: EVENT, plan: "setup",
+      setup: { id: "s1", event_id: EVENT, words: "dip turning up", levels_line: "In near 100.00 · out below 98.50 (−1.5%)",
+        contract_line: "Candidate: MU 10/30 100C · $2.10 × $2.20", record: "Your record on this setup: 7 trades, 4 up.", paper_record: null,
+        plan_state: "none", investigation_id: null } }),
+    item({ id: "news:2", source: "News", at: epoch("2026-10-23T13:50:00Z"), text: "Treasury yields climb before the jobs report",
+      publisher: "Reuters", url: "https://news.example/yields" }),
+    item({ id: "plan:stop", source: "Plan", at: epoch("2026-10-23T18:30:00Z"), symbol: "CRWV", text: "Time stop due 14:30",
+      detail: "Your words: out by 14:30", investigation_id: CRWV, plan: "own", mine: true, upcoming: true }),
+  ],
+};
 const SPARKS = { as_of: "2026-10-23T15:00:00Z", rows: { NBIS: { points: [93, 94, 93.6, 93.2], change_pct: 1.6 } }, spy_change_pct: 0.42 };
 const PRACTICE = { goal: { label: "wait for the 15m close", week_start: "2026-10-19" }, this_week: { text: "3 of 5" } };
 const saved = (id: string, symbol: string, answer: string) => ({
@@ -78,6 +104,7 @@ async function lab(page: Page, { time = NOW, session = SESSION, threads = () => 
   await page.route("**/copilot/time-stops?*", (route) => route.fulfill({ json: { time_stops: [], enabled: true } }));
   await page.route("**/copilot/research-jobs?*", (route) => route.fulfill({ json: { jobs: [], queue_enabled: false, daily_budget_usd: 2, spent_today_usd: 0 } }));
   await page.route("**/copilot/desk/sparks?*", (route) => route.fulfill({ json: SPARKS }));
+  await page.route("**/copilot/desk/feed", (route) => route.fulfill({ json: FEED }));
   await page.route("**/copilot/desk/*/picture*", (route) => route.fulfill({ status: 503, json: { detail: "No chart in this test." } }));
   await page.goto(path);
   if (showThreads) await openDeskThreads(page);
@@ -307,12 +334,11 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
     // Mid-session the lower block is Since you looked (a first visit says so); no phase button.
     await expect(page.getByTestId("since-you-looked")).toContainText("First look from this browser");
     await expect(page.getByRole("button", { name: /Close the day|Arm today's plans/ })).toHaveCount(0);
-    // Today's pings and Radar sit behind the centre's Today tab.
-    await page.getByRole("tab", { name: "Today" }).click();
-    const pings = page.getByTestId("now-pings");
-    await pings.locator("summary").click();
-    await expect(pings.locator("summary")).toHaveText("14 pings sent ▾");
-    await expect(pings.getByRole("listitem")).toHaveText([/10:31\s*NBIS\s*Give-back ping · NBIS/, "13 more not listed here."]);
+    // The day's pings, Radar, news and calendar sit behind the centre's Feed tab: a grey count of what is new, mine first.
+    await expect(page.getByTestId("feed-new")).toHaveText("5 new");
+    await page.getByRole("tab", { name: "Feed" }).click();
+    await expect(page.getByTestId("feed-item").first()).toContainText(/Alert\s*10:31\s*NBIS\s*NBIS 100C give-back/);
+    await expect(page.getByTestId("feed-new")).toHaveCount(0); // looked at
     await page.getByRole("tab", { name: "Chart" }).click();
     await page.screenshot({ path: test.info().outputPath(`cockpit-session-${width}.png`), fullPage: width < 768 });
 
@@ -721,3 +747,50 @@ test("the palette finds a saved conversation that is not on the list, by what it
   await page.keyboard.type("zzzz");
   await expect(palette(page).getByText("Nothing matches.")).toBeVisible();
 });
+
+for (const width of [1440, 375] as const) {
+  test(`the Feed: Mine, Market and both; a symbol's story; Ask puts the item in its thread's box; Plan it only on his own items and a setup card, at ${width} px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width < 768 ? 812 : 900 });
+    const { chats } = await lab(page, { showThreads: false });
+    const centre = page.getByRole("region", { name: "Chart and feed" });
+    await centre.getByRole("tab", { name: "Feed" }).click();
+    const feed = centre.getByTestId("desk-feed");
+    const rows = feed.getByTestId("feed-item");
+    // Mine (the default): his alert, a headline on his name, his brief, then what is ahead under Coming up.
+    await expect(rows.getByTestId("feed-source")).toHaveText(["Alert", "News", "Copilot note", "Plan"]);
+    await expect(rows.nth(3)).toContainText(/Coming up\s*Plan\s*14:30\s*CRWV/);
+    await expect(rows.nth(0).getByRole("button", { name: "Plan it" })).toBeVisible();
+    await expect(rows.nth(1).getByRole("button", { name: "Plan it" })).toHaveCount(0); // never on news
+    await expect(rows.nth(1).getByRole("link", { name: /Read at Benzinga/ })).toHaveAttribute("href", "https://news.example/nbis");
+    await expect(rows.nth(1).getByRole("link", { name: /Read at Benzinga/ })).toHaveAttribute("target", "_blank");
+    await expect(rows.nth(0).getByRole("link", { name: "Open in Charts" })).toHaveAttribute("href", "/charts?symbol=NBIS");
+    await expect(feed.getByTestId("feed-unavailable")).toHaveText("Could not read: market news.");
+    await expect(feed.getByText(/\b(buy|sell|hold)\b/i)).toHaveCount(0); // facts, never orders
+    // Market: the Radar setup card with its level, contract and his record, and the market headline.
+    await feed.getByRole("button", { name: "Market", exact: true }).click();
+    await expect(rows.getByTestId("feed-source")).toHaveText(["Radar setup", "News"]);
+    const setup = rows.nth(0).getByTestId("feed-setup");
+    await expect(setup).toContainText("In near 100.00 · out below 98.50");
+    await expect(setup).toContainText("Candidate: MU 10/30 100C");
+    await expect(setup).toContainText("Your record on this setup: 7 trades, 4 up.");
+    await expect(rows.nth(1).getByRole("button", { name: "Plan it" })).toHaveCount(0);
+    await feed.getByRole("button", { name: "Mine + Market" }).click();
+    await expect(rows).toHaveCount(6);
+    if (width >= 768) await page.screenshot({ path: test.info().outputPath(`desk-feed-${width}.png`) });
+    else await page.screenshot({ path: test.info().outputPath(`desk-feed-${width}.png`), fullPage: true });
+    // A symbol: only its story, and a way back.
+    await rows.nth(0).getByRole("button", { name: "NBIS", exact: true }).click();
+    await expect(rows.getByTestId("feed-source")).toHaveText(["Alert", "News"]);
+    await feed.getByRole("button", { name: "All items" }).click();
+    await expect(rows).toHaveCount(6);
+    // Ask the copilot about the headline: NBIS's own thread, the item quoted in the box, nothing sent.
+    await rows.nth(1).getByRole("button", { name: "Ask the copilot" }).click();
+    await expect(conversation(page).getByLabel("Message")).toHaveValue(/^About the Benzinga headline on NBIS \(10:20\), quoted: "Nebius signs a compute deal"\./);
+    expect(chats).toEqual([]);
+    if (width < 768) await page.getByRole("button", { name: "Back to the desk" }).click();
+    // Plan it on the setup card opens the desk's Radar card, which has the setup's own Plan it.
+    await feed.getByRole("button", { name: "Plan it" }).nth(1).click();
+    await expect(page).toHaveURL(`/copilot-lab?symbol=MU&radar=${EVENT}`);
+    expect(chats).toEqual([]);
+  });
+}

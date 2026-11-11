@@ -16,7 +16,7 @@ import PingsRecap from "@/components/copilot/PingsRecap";
 import { planContext } from "@/components/copilot/PlanATrade";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import ArmChecklist from "@/components/copilot/ArmChecklist";
-import BriefingExtras from "@/components/copilot/BriefingExtras";
+import DeskFeed, { feedQuestion, useDeskFeed, useFeedNew, type FeedItem } from "@/components/copilot/DeskFeed";
 import { DeskStatus, useDeskSession } from "@/components/copilot/SessionTape";
 import { Book, CentreChart, DayFacts, DayPnl, NeedsStrip, SinceYouLooked, positionRows, useSparks } from "@/components/copilot/Cockpit";
 import MorningBrief from "@/components/copilot/MorningBrief";
@@ -33,6 +33,7 @@ import styles from "./CopilotLab.module.css";
 
 /** The close pass in progress (its New York day), kept for this tab: a thread with no conversation opens by its link. */
 const CLOSING_KEY = "desk.closing.v1";
+const CENTRE_KEY = "desk.centre.v1";
 /** "Plan a trade" with nothing known: the owner names the ticker. The thread list's own button makes the same link. */
 const PLAN_HREF = copilotLabHref("", planContext(), { kind: "copilot", ref: null });
 const PREP_PROMPT = "Prep the day: what is armed, what news or earnings touch my positions and watches, and what would change a plan before the open?";
@@ -72,7 +73,7 @@ function typing(target: EventTarget | null) {
  * The Copilot desk, a cockpit (docs/copilot-lab.md § The desk): the top bar (market phase and clock, SPY / QQQ / VIX,
  * the day's P&L), the Needs-you strip (the one most urgent item), then three columns: the book of followed positions
  * with the time of day's block under it (the morning brief, Since you looked, or the day report), the centre (the
- * selected symbol's Chart, and Today's pings and Radar), and the copilot (today's Main chat or the open thread, its
+ * selected symbol's Chart, and the Feed of what the app knows today), and the copilot (today's Main chat or the open thread, its
  * decision, close pass or checklist on top). Selecting a position drives the centre and the copilot. Below 1180 px the
  * copilot is a sheet opened by "Ask the copilot" and by any Ask action; a phone stacks the strip, the book and the
  * centre. The thread list is a drawer. While the lab is off only the conversation shows, saying so. ⌘K (Ctrl+K) or
@@ -101,10 +102,15 @@ export default function CopilotLab({ link = null, close = false, daily = false }
   const [threadsShown, setThreadsShown] = useState(false);
   const toggleThreads = useCallback(() => setThreadsShown(shown => !shown), []);
   // The centre: the symbol the owner picked in the book (else the copilot's, else the first followed position), on Chart
-  // or Today.
+  // or the Feed.
   const [picked, setPicked] = useState<string | null>(null);
   const [pickedKey, setPickedKey] = useState<string | null>(null);
-  const [centreTab, setCentreTab] = useState<"chart" | "today">("chart");
+  const [centreTab, setCentreTab] = useState<"chart" | "feed">("chart");
+  // The tab survives a link that reopens the desk (a feed item's Ask or Plan it) for this browser tab.
+  useEffect(() => { try { if (window.sessionStorage.getItem(CENTRE_KEY) === "feed") setCentreTab("feed"); } catch { /* chart */ } }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+  useEffect(() => { try { window.sessionStorage.setItem(CENTRE_KEY, centreTab); } catch { /* this view only */ } }, [centreTab]);
+  const feed = useDeskFeed(on);
+  const feedNew = useFeedNew(feed.data, on && centreTab === "feed");
   const [seen, setSeen] = useState<string[]>([]);
   useEffect(() => { setSeen(readSeen(nyDay())); }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
   const jumpKey = useJumpKey();
@@ -407,6 +413,29 @@ export default function CopilotLab({ link = null, close = false, daily = false }
     setSheet(true);
   };
 
+  // A feed item's Ask: its question in the box, unsent, in the item's own thread (a plan's), else the symbol's open
+  // conversation, else the symbol's desk view; an item with no symbol in today's conversation (or a new one when another
+  // thread is open). A phone opens the sheet.
+  const askFeed = useCallback((item: FeedItem) => {
+    const text = feedQuestion(item, today);
+    const symbol = item.symbol;
+    if (symbol) setPicked(symbol);
+    const talk = item.investigation_id ?? (symbol ? deskRow(symbol)?.investigationId ?? rows.find(r => r.symbol === symbol && r.investigationId)?.investigationId
+      ?? saved.filter(t => t.symbol === symbol && t.status !== "closed").sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]?.id ?? null : null);
+    if (talk) { setCommand({ kind: "open", id: talk, text, n: ++sent.current }); setSheet(true); }
+    else if (symbol) router.push(copilotLabHref(symbol, text));
+    else if (!thread || thread.mainDay === today) fill(text);
+    else router.push(copilotLabHref("", text));
+  }, [today, deskRow, rows, saved, router, thread, fill]);
+  // A feed item's Plan it: a Radar setup card opens on its own Plan it (the desk's Radar card); his own position or plan
+  // opens its plan thread, else the plan form for the symbol. Nothing is saved or sent from the feed.
+  const planFeed = useCallback((item: FeedItem) => {
+    if (item.plan === "setup" && item.href) { router.push(item.href); return; }
+    const id = item.investigation_id ?? (item.symbol ? deskRow(item.symbol)?.investigationId ?? rows.find(r => r.symbol === item.symbol && r.investigationId)?.investigationId : null);
+    if (id) actions.open(id);
+    else if (item.symbol) router.push(copilotLabHref(item.symbol, planContext(), { kind: "copilot", ref: null }));
+  }, [router, deskRow, rows, actions]);
+
   // The strip: the one most urgent item and its answers (``deskNeeds``' documented order).
   const closingNow = dayPhase === "close";
   const needs = on && rowsRead ? deskNeeds(rows, nyDay(), { closing: closingNow, fills: closingNow ? steps.length : fills.waiting.length }) : [];
@@ -509,21 +538,22 @@ export default function CopilotLab({ link = null, close = false, daily = false }
           </div>
         )}
         {on && (
-          <section id="desk-centre" aria-label="Chart and today" className={styles.centre}>
-            {/* Chart first; Feed, Check a call and Ticket join this strip when they exist. */}
+          <section id="desk-centre" aria-label="Chart and feed" className={styles.centre}>
+            {/* Chart first; Check a call and Ticket join this strip when they exist. */}
             <div role="tablist" aria-label="Centre" className="flex gap-1 border-b px-2 pt-1.5">
-              {([["chart", "Chart"], ["today", "Today"]] as const).map(([id, label]) => (
+              {([["chart", "Chart"], ["feed", "Feed"]] as const).map(([id, label]) => (
                 <button key={id} type="button" role="tab" aria-selected={centreTab === id} onClick={() => setCentreTab(id)}
                   className={cn("-mb-px min-h-11 border-b-2 px-2.5 text-sm sm:min-h-9", centreTab === id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
                   {label}
+                  {id === "feed" && feedNew.count > 0 && <span data-testid="feed-new" className="ml-1.5 text-xs tabular-nums text-muted-foreground">{feedNew.count}<span className="sr-only"> new</span></span>}
                 </button>
               ))}
             </div>
-            <div role="tabpanel" aria-label={centreTab === "chart" ? "Chart" : "Today"} className="p-3">
+            <div role="tabpanel" aria-label={centreTab === "chart" ? "Chart" : "Feed"} className="p-3">
               {centreTab === "chart"
                 ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} day={today} />
-                : <BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} onWhatMatters={() => actions.ask(WHAT_MATTERS_PROMPT)}
-                  session={session.data} radar={rows.filter(r => r.key.startsWith("radar:"))} />}
+                : <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed}
+                  onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} onWhatMatters={() => actions.ask(WHAT_MATTERS_PROMPT)} />}
             </div>
           </section>
         )}

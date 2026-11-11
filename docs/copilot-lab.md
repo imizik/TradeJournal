@@ -179,11 +179,11 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   you looked, Watching); the list regroups them by symbol in the browser.
   - **Now**: today's Main chat (below, § The desk). Pressing it opens it and sends nothing; the
     open conversation stays saved. Radar hits and Review my
-    week are in the cockpit's Today tab, not rows in the list. The row shows the Radar count ("18 Radar", an amber dot while one
+    week are in the cockpit's Feed tab, not rows in the list. The row shows the Radar count ("18 Radar", an amber dot while one
     is unseen in this browser); alert and Radar ratings are optional and never counted here. Open conversations about no ticker (an older
     turn, a week review) are listed under it, title and date: today's, the open one and the latest automatic week
     review, the rest under **Earlier · N**. **What matters right now?** (one turn, the fixed `lib/copilot.ts`
-    `WHAT_MATTERS_PROMPT`) sits in the centre's Today tab beside Review my week, and in ⌘K.
+    `WHAT_MATTERS_PROMPT`) sits at the foot of the centre's Feed tab beside Review my week, and in ⌘K.
   - **Tickers**: one row per symbol the owner has something on: an open
     position, a plan (armed, near a trigger, or exited with its exit review
     waiting), a plan or alert card waiting on Confirm, a thesis-watch trigger
@@ -553,7 +553,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   opens the symbol's desk view). Each row's eye sets its ticker to **Not following**; those sit behind "N not followed
   ▾" at the bottom, each with Show again. Under the book, the time of day's block (below), then one quiet facts line:
   **At risk now** (see Exposure) and the practice goal.
-- **Centre.** A tab strip, **Chart** first and **Today** (Feed, Check a call and Ticket join it in later stages; no tab
+- **Centre.** A tab strip, **Chart** first and **Feed** (Check a call and Ticket join it in later stages; no tab
   shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
   position; none is QQQ, the market) as the desk's server-drawn picture with the plan's entry and invalidation lines,
   the owner's fills and today's pings and Radar hits, on 2m, 15m or 1D, with **Open in Charts →**; then, for a held
@@ -561,9 +561,34 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   Held, Expires; and **Timeline ▾** folded under it. The sparks read takes at most 12 symbols (the centre's first) and
   answers a repeat within 30 seconds from memory, so several open desks cost one chart-feed read a minute. The picture is the server's, not the `/charts` workspace's
   interactive chart: that chart is bound to the workspace's live feed, crosshair and command stores and could not be
-  embedded cleanly with the plan lines and markers in this stage. Today: the pings sent today, the Radar events since
-  the last visit, the pings held back, and What matters right now?, Review my week and today's replay
-  (`BriefingExtras.tsx`).
+  embedded cleanly with the plan lines and markers in this stage.
+- **Feed** (`components/copilot/DeskFeed.tsx`, `GET /copilot/desk/feed`, `app/engine/desk_feed.py`): one stream of what
+  the app already knows today, so there is a reason to open the desk that is not a ping. Its tab carries a grey count of
+  the items new since the Feed was last opened in this browser. Each item is one row: its source (**Alert**, **Plan**,
+  **Radar**, **Radar setup**, **News**, **Calendar**, **Copilot note**), its time, its symbol and one or two plain
+  sentences. Sources: the phone pings judged today, sent or held (position alerts; plan pings for an entry or
+  invalidation reached and a time stop; the position companion's updates as Copilot notes), plan time stops still ahead
+  and a plan level that fired without a ping, today's Radar events and setup cards (a card shows its level, contract
+  and his record as the desk's Radar card does, and stands for its event), headlines since the previous close naming a
+  symbol he holds or has a live plan on (catalysts first, two per symbol) and up to three market-wide ones (Fed, CPI,
+  yields...), this week's earnings for those symbols (the earnings cache only) and FOMC, CPI and jobs reports today
+  through Sunday, and the morning brief's saved lines as Copilot notes. Nothing calls a model. Order: items on his book,
+  plans and day first, then the rest, each newest first, then **Coming up**, soonest first; at most 40 rows (8 ahead),
+  with the total. A ticker set to not followed is left out of every source, including a headline, Radar event or
+  brief line that names it among others (if that setting cannot be read, only the macro calendar shows). Each source fails on its own and the Feed says which could not be read. Filters: **Mine**
+  (the default: his book, plans and day), **Market**, **Mine + Market**; tapping a symbol shows only its story, with
+  **All items** back. Actions: **Ask the copilot** puts the item, quoted, in the box unsent, in the item's plan thread,
+  else the symbol's open conversation, else the symbol's desk view (an item with no symbol: today's conversation; a
+  phone opens the sheet); **Open in Charts**; **Read at <publisher> ↗** for a headline (a new tab); **Open** for a
+  Radar event or the brief; and **Plan it** only on a Radar setup card (it opens the desk's Radar card, whose Plan it
+  is the setup's own) and on his own position or plan items, alerts and plan events (its plan thread, else the plan
+  form); never on news, calendar, Radar events or a Copilot note. Headline text is
+  third-party data shown with its publisher and time, never read as an instruction and never given Plan it. Its foot
+  holds What matters right now?, Review my week and today's replay. The route reads the journal for his symbols (no
+  quote read) and makes at most two news-provider reads (one batched for his symbols, one for the broad tape), each
+  cached 120 seconds, plus the earnings cache, which refreshes stale symbols in the background; the screen reads it
+  once a minute. Social chatter (Reddit, NYT) and the Discord intake are later sources: a **Chatter** filter appears
+  only once one exists.
 - **Right: the copilot**, always open from 1180 px: today's Main chat or the open thread (its header, decision bar,
   close pass or checklist on top), scoped to its ticker, with **Why is it moving?**, **What changed since I looked?**
   and **What does my plan say?** first above the box (one turn each in that conversation; then at most two of the
@@ -736,7 +761,7 @@ The cockpit's panes in detail:
   "NBIS 100C · Tue 10:31 · planned" and opening that trade's page, where its
   linked plan shows; then the counts, the streak and best, and what one more
   planned entry makes. The desk's day timeline (the old Context pane's day Timeline tab) is gone: the centre's
-  Today tab lists the day's pings and Radar.
+  Feed lists the day's pings and Radar.
 
 **Link a fill where you are** (`components/copilot/FillLinkBar.tsx`). A row
 whose open trade has a fill waiting for its plan carries `fill_to_link` (that
@@ -782,7 +807,7 @@ threshold. Proof: `tests/test_alert_scorecard.py`,
 `frontend/e2e/copilot-scorecard.spec.ts`.
 
 **Radar hits open on a decision** (`components/copilot/RadarDecision.tsx`).
-A stock Radar hit in the centre's Today tab ("N new on Radar") opens the desk on that hit: what
+A stock Radar hit (its row in the centre's Feed, or its ping) opens the desk on that hit: what
 Radar saw (its kind, direction, first-seen time and summary, with Open in
 Radar) and one choice. **Watching** or **Pass** logs a `decision` day-journal
 entry for the symbol ("Watching. Radar vs SPY: …", "Passing. …") after the
@@ -1072,8 +1097,8 @@ the Jump entry it is the one way to Plan a trade from the desk. The read-only no
 place: it is first in the menu and the phone's first tab ("Desk",
 `withDesk` in `frontend/components/Nav.tsx`), `/today` forwards to it, and
 the Labs entry for the same page goes. What Today showed that the desk did
-not now sits in the centre's Today tab (`BriefingExtras.tsx`): the pings held back today
-behind a disclosure, and Watch today. With the lab off, Today is unchanged.
+not now sits in the centre's Feed: the pings held back today (each saying why), and Watch
+today at its foot. With the lab off, Today is unchanged.
 
 The message box (desk and side panel alike) is one box: on the desk the
 "About <symbol>" chip, then a full-width text area that starts three lines
@@ -1705,7 +1730,7 @@ While the lab is on, **Review my week** sits on the Dashboard header and on a
 Friday's Daily Review (`components/copilot/ReviewMyWeek.tsx`), opening
 `/copilot-lab?context=Review my week` (a Friday's adds `of <its Monday>`) with
 the text in the message box, unsent. On the lab home it sits beside "What
-matters right now?" (in the centre's Today tab and in ⌘K) and sends the turn at once. The system prompt asks the
+matters right now?" (at the foot of the centre's Feed and in ⌘K) and sends the turn at once. The system prompt asks the
 model to call:
 
 - `get_week_review(week_start?)` (read-only, provenance `saved`;
