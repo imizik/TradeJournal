@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ChartCandlestick } from "lucide-react";
+import { openTicket } from "@/components/copilot/DeskTicket";
 import PlanLadder, { daysTo } from "@/components/copilot/PlanLadder";
 import SinceEntry from "@/components/SinceEntry";
 import { getThreadPlan, HORIZONS, type DeskHorizon, type DeskPosition, type DeskThreadPlan, type DeskThreadRef } from "@/lib/desk";
@@ -219,6 +220,9 @@ export default function DeskThreadTop({ thread, draft = false, hero = null, comp
       {held && thread.symbol && !compact && <SinceEntry symbol={thread.symbol} tradeId={held.trade_id} collapsible={!thread.id.startsWith("symbol:")} />}
       {hero}
       {data?.plan && <PlanLadder plan={data.plan} position={data.position} dimmed={draft} compact={compact || !full} onToggle={compact ? undefined : toggleLadder} />}
+      {data?.plan?.position === "waiting" && !draft && !thread.id.startsWith("symbol:") && (
+        <button type="button" onClick={() => openTicket(thread.id)} className="inline-flex min-h-11 items-center rounded-md border px-3 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-8">Open its ticket</button>
+      )}
     </div>
   );
 }
