@@ -684,7 +684,8 @@ The cockpit's panes in detail:
   - **Chart**: the server's ping picture of the symbol
     (`GET /copilot/desk/{id}/picture?timeframe=`, `chart_render`) with
     timeframe buttons **2m** (the default: today's minute bars from the same
-    cached chart-feed read as a ping, the regular session once it has bars),
+    cached chart-feed read as a ping, the regular session once it has bars, drawn as candles of two minutes or more
+    so the whole day fits as candles, `desk_context._candles`; the dots keep their own minute's price),
     **15m** (regular-session 15-minute bars of today and the two completed
     sessions before it, those from the chart history: disk, or fetched once
     and stored) and **1D** (the last 120 days of the chart feed's daily bars).

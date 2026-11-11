@@ -576,7 +576,11 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       const turn = root.current?.querySelector("[data-turn=latest]");
       if (ms === 0 || holdTop.current) (scroller.current ?? window).scrollTo({ top: 0 });
       if (holdTop.current || !turn || !composer.current) return;
-      if (turn.getBoundingClientRect().top + LAND_ROOM > composer.current.getBoundingClientRect().top) turn.scrollIntoView({ block: "start" });
+      if (turn.getBoundingClientRect().top + LAND_ROOM <= composer.current.getBoundingClientRect().top) return;
+      // Its own scroller moves (the desk's copilot column); scrollIntoView would also move every box around it.
+      const box = scroller.current;
+      if (box) box.scrollTo({ top: box.scrollTop + turn.getBoundingClientRect().top - box.getBoundingClientRect().top - 56 });
+      else turn.scrollIntoView({ block: "start" });
     }, ms));
   }
 
