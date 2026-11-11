@@ -291,6 +291,9 @@ class AnthropicAdapter:
             client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"), base_url="https://api.anthropic.com",
                                     max_retries=1, timeout=60.0)
         self.client = client
+        # The code container a web search ran in. One adapter serves one turn; a paused code step resumes only in its
+        # own container, so every later round of the turn names it.
+        self.container: str | None = None
 
     def request(self, system: str, messages: list[dict], tools: list[dict], allow_tools: bool) -> dict:
         kwargs: dict[str, Any] = {
@@ -306,6 +309,8 @@ class AnthropicAdapter:
         }
         if not allow_tools:
             kwargs["tool_choice"] = {"type": "none"}
+        if self.container:
+            kwargs["container"] = self.container
         if self.cfg.fallbacks:
             kwargs["betas"].append("server-side-fallback-2026-07-01")
             kwargs["extra_body"] = {"fallbacks": "default"}
@@ -346,6 +351,8 @@ class AnthropicAdapter:
         usage = {"input_tokens": u.input_tokens or 0, "output_tokens": u.output_tokens or 0,
                  "cache_read_input_tokens": getattr(u, "cache_read_input_tokens", 0) or 0,
                  "cache_creation_input_tokens": getattr(u, "cache_creation_input_tokens", 0) or 0}
+        if getattr(final, "container", None) is not None:
+            self.container = final.container.id
         blocks = [b.model_dump(mode="json", exclude_none=True) for b in final.content]
         # An empty text block is rejected when sent back; it carries nothing.
         blocks = [b for b in blocks if not (b.get("type") == "text" and not b.get("text"))]
@@ -1653,6 +1660,13 @@ def web_row(search_id: str | None, query: str | None, found: Any, now: datetime)
     return event
 
 
+def open_server_calls(content: list[dict]) -> set[str]:
+    """Server tool calls in a response whose result has not arrived: web search runs inside a code-execution step, and
+    a response can end (tool_use or pause_turn) with that step still running."""
+    done = {str(b.get("tool_use_id")) for b in content if str(b.get("type", "")).endswith("_tool_result")}
+    return {str(b.get("id")) for b in content if b.get("type") == "server_tool_use"} - done
+
+
 def web_events(content: list[dict], now: datetime, pending: dict[str, str]) -> tuple[int, list[dict]]:
     """One round's web searches: ``(searches started, rows for results that arrived)``. A result can arrive a round after
     its search, so ``pending`` keeps the queries (by search id) still waiting across the turn's rounds."""
@@ -1818,8 +1832,10 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                     yield event
                     if (proposal := proposal_event(event)) is not None:
                         yield proposal
-                # The shape reminder rides behind the results: the answer is written right after it.
-                messages.append({"role": "user", "content": [*results, {"type": "text", "text": shape}]})
+                # The shape reminder rides behind the results: the answer is written right after it. Not while a web
+                # search's code step is still running: text there ends the paused step and the API refuses with a 400.
+                reminder = [] if open_server_calls(final.content) else [{"type": "text", "text": shape}]
+                messages.append({"role": "user", "content": [*results, *reminder]})
             else:  # every round went to a paused search or a tool call: no round was left for the answer
                 yield {"type": "error", "code": "rounds", "message": "The turn ran out of rounds before it finished an answer."}
     except CopilotError as exc:
