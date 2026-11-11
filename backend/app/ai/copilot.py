@@ -1619,8 +1619,8 @@ WEB_TURN_EXTRA_USD = 0.15  # a turn that may search reads pages of results: its 
 
 # Plan and review turns read more before they answer (a plan's level history and option candidates, a trade or week review):
 # on Opus 5.5 they measured $0.19-0.21 against the $0.25 an ordinary question gets, so a turn on a review job, or one that
-# has asked for one of these reads, gets the turn budget times this (60% more: $0.40 at the default). Other turns keep it.
-DEEP_TURN_FACTOR = 1.6
+# has asked for one of these reads, gets the turn budget times this (twice: $0.50 at the default). Other turns keep it.
+DEEP_TURN_FACTOR = 2.0
 DEEP_JOBS = frozenset({copilot_prompt.COMPANION, copilot_prompt.WEEK_REVIEW})
 DEEP_TOOLS = frozenset({"get_trade_review", "get_week_review", "get_level_history", "get_option_candidates"})
 
