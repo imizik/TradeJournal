@@ -599,8 +599,14 @@ def threads(db: Session, now: float) -> dict:
     """The thread list as ``GET /copilot/desk/threads`` returns it, read at ``now``."""
     day = datetime.fromtimestamp(now, ET).date()
     quotes = today.SharedQuotes()
+    # The positions' marks and the Radar file wait on a provider or a file: they start first, beside the board's quote
+    # read and the journal's sections. The positions read waits for its marks, then reads them from the quotes' cache.
+    marks = _marks_ahead(db)
+    radar_ahead = today._ahead("desk radar", lambda: today._radar(now))
     # The board first: its read covers every armed plan, so the positions' invalidations need no second read.
     board = today._section(db, "desk board", lambda: _board(db, quotes))
+    if marks is not None:
+        marks.get()
     found = today._section(db, "desk positions", lambda: _positions(db, quotes, now, day))
     investigations = today._section(db, "desk investigations", lambda: _investigations(db))
     drafts = today._section(db, "desk drafts", lambda: _drafts(db))
@@ -608,7 +614,7 @@ def threads(db: Session, now: float) -> dict:
     checks = today._section(db, "desk check-ins", lambda: _check_ins(db))
     ended = today._section(db, "desk exits", lambda: _exits(db, now))
     finals = today._section(db, "desk done plans", lambda: _done(db, now))
-    radar = today._section(db, "desk radar", lambda: today._radar(now))
+    radar = radar_ahead.get()
     thesis = today._section(db, "desk thesis", lambda: today._thesis(db, day))
     prep = today._section(db, "desk prep", lambda: today._prep(db, day))
     week = today._section(db, "desk week", lambda: today._week(db, now))
@@ -684,6 +690,40 @@ def threads(db: Session, now: float) -> dict:
             ("positions", found), ("plans", board), ("investigations", investigations), ("drafts", drafts),
             ("decisions", decisions), ("check_ins", checks), ("exits", ended), ("done", finals), ("radar", radar), ("thesis", thesis), ("prep", prep), ("week", week), ("phase", phase))},
     }
+
+
+def warm_at_start() -> None:
+    """At startup, in the background: the one read nearly every desk read needs that a fresh process lacks, the market
+    calendar (its current month lives in memory only, so each start reads it again; the feed's news window also needs
+    the previous session's close). At most the calls the first desk read would make; nothing while the lab is off. Never
+    delays startup or ``/health``: it runs on its own thread, and a failure leaves the reads their usual fallback."""
+    import threading
+    if not copilot.settings().enabled:
+        return
+
+    def run():
+        from app.engine import premarket_prep
+        from app.engine.chart_calendar import chart_calendar
+        try:
+            day = datetime.now(ET).date()
+            chart_calendar.hours(day)
+            premarket_prep._previous_close(chart_calendar, day)
+        except Exception as exc:  # noqa: BLE001 - a cold calendar is read again by the first desk read
+            log.warning("desk warm-up skipped: %s", type(exc).__name__)
+    threading.Thread(target=run, name="desk-warm", daemon=True).start()
+
+
+def _marks_ahead(db: Session):
+    """The open positions' quote reads (``copilot_book.mark_reads``) started on a worker; None when they could not be
+    listed (the positions read then makes them itself, as before)."""
+    from app.ai import copilot_book
+    try:
+        stocks, options = copilot_book.mark_reads(db)
+    except Exception as exc:  # noqa: BLE001 - the positions section reads and reports the journal itself
+        log.warning("desk marks ahead unavailable: %s", type(exc).__name__)
+        db.rollback()
+        return None
+    return today._ahead("desk position marks", lambda: copilot_book.warm_marks(stocks, options)) if stocks or options else None
 
 
 # --------------------------------------------------------------------------- the live book from Robinhood
@@ -908,6 +948,16 @@ def _premarket_change(symbol: str, reference: float | None, moment: datetime) ->
     return copilot_extended.summary(bars, reference, range_=False).get("change_pct")
 
 
+@router.get("/desk/timings")
+def desk_timings(limit: int = 10):
+    """Where the desk's server time goes (``app/engine/request_timing.py``, docs/copilot-lab.md § Where the wait goes):
+    per route, p50/p90/max of the last timings kept since the backend started, p50/p90 of each section, and the newest
+    ``limit`` timings (``first``: the route's first request since the start, the cold one). Section names and
+    milliseconds only. Owner-only; answers while the lab is off, so a slow start can still be read."""
+    from app.engine import request_timing
+    return request_timing.summary(max(0, min(limit, request_timing.KEEP)))
+
+
 @router.post("/desk/robinhood/refresh")
 def desk_robinhood_refresh():
     """Reads Robinhood now (docs/robinhood-read-feed.md): parameterless, at most once every 15 seconds, one read at a
@@ -930,18 +980,21 @@ def desk_session(db: Session = Depends(get_session)):
         raise HTTPException(503, "Copilot Lab is off.")
     now = today._now()
     day = datetime.fromtimestamp(now, ET).date()
+    # The index quotes and the Radar file's reads wait on a provider or a file, not the journal: they start first and
+    # run beside the journal's sections, so the slowest holds none of the rest.
+    indices_ahead = today._ahead("session indices", lambda: _indices(now))
+    radar_ahead = today._ahead("session radar", lambda: _radar_events(day))
+    hits_ahead = today._ahead("session radar to rate", lambda: _hits_to_rate(day))
     regular = today._section(db, "session hours", lambda: _regular(day))
     phase = today._section(db, "session phase", lambda: _phase(now))
     fills = today._section(db, "session fills", lambda: _fill_events(db, day))
     pings = today._section(db, "session pings", lambda: _ping_events(db, now))
-    radar = today._section(db, "session radar", lambda: _radar_events(day))
     decisions = today._section(db, "session decisions", lambda: _decision_events(db, day))
     stops = today._section(db, "session time stops", lambda: _time_stops(db, now))
     prep = today._section(db, "session prep", lambda: today._prep(db, day))
-    indices = today._section(db, "session indices", lambda: _indices(now))
     alerts_due = today._section(db, "session alerts to answer", lambda: _alerts_to_answer(db, now))
-    hits_due = today._section(db, "session radar to rate", lambda: _hits_to_rate(day))
     realized = today._section(db, "session realized", lambda: _realized_today(db, day))
+    indices, radar, hits_due = indices_ahead.get(), radar_ahead.get(), hits_ahead.get()
     from app.engine import day_journal
     try:
         hidden = day_journal.not_following(db)  # a ticker he does not follow is in no event (Since you looked counts these)
@@ -1014,11 +1067,16 @@ def desk_sparks(symbols: str = ""):
             points.append(shown[-1]["close"])
         return points
 
+    from app.engine.request_timing import timed
     rows: dict[str, dict] = {}
+    # The changes' quote read starts beside the minute reads (every named symbol and SPY: one call either way; a symbol
+    # whose line failed is still left out below).
+    quoted_ahead = today._ahead("sparks quotes", lambda: {"state": "ok", "rows": chart_feed.quote_rows(sorted(set(names) | {"SPY"}))[0]})
     if names:
         pool = ThreadPoolExecutor(max_workers=4)
         jobs = {pool.submit(closes, name): name for name in names}
-        done, _late = wait(jobs, timeout=SPARK_BUDGET_SECONDS)
+        with timed("sparks closes"):
+            done, _late = wait(jobs, timeout=SPARK_BUDGET_SECONDS)
         pool.shutdown(wait=False, cancel_futures=True)
         for job in done:
             try:
@@ -1026,13 +1084,12 @@ def desk_sparks(symbols: str = ""):
             except Exception:  # noqa: BLE001 -- one symbol's failed read leaves it out
                 log.warning("desk spark failed for %s", jobs[job], exc_info=True)
     spy = None
-    try:
-        quoted = {r["symbol"]: r.get("change_percentage") for r in chart_feed.quote_rows(sorted(set(rows) | {"SPY"}))[0]}
+    read = quoted_ahead.get()  # its failure is logged by the section; the changes are extra, the lines stand without them
+    if read["state"] == "ok":
+        quoted = {r["symbol"]: r.get("change_percentage") for r in read["rows"]}
         spy = quoted.get("SPY")
         for name, row in rows.items():
             row["change_pct"] = quoted.get(name)
-    except Exception:  # noqa: BLE001 -- the changes are extra; the lines stand without them
-        log.warning("desk spark quotes failed", exc_info=True)
     body = {"as_of": today._iso(now), "rows": rows, "spy_change_pct": spy}
     if len(_spark_cache) > 64:
         _spark_cache.clear()
@@ -1066,14 +1123,17 @@ def desk_scorecard(db: Session = Depends(get_session)):
         raise HTTPException(503, "Copilot Lab is off.")
     from app.engine import alert_scorecard, radar_scorecard
     from app.routers import radar
+    from app.engine.request_timing import timed
     now = today._now()
-    alerts = alert_scorecard.scorecard(db, now)  # first: a failed Radar query below can leave the transaction aborted
+    with timed("scorecard alerts"):
+        alerts = alert_scorecard.scorecard(db, now)  # first: a failed Radar query below can leave the transaction aborted
     store, reason = radar._store(read_only=True)
     if store is None:
         hits = {"state": "off", "reason": reason}
     else:
         try:
-            hits = radar_scorecard.scorecard(store, db, now)
+            with timed("scorecard radar"):
+                hits = radar_scorecard.scorecard(store, db, now)
         except Exception as exc:  # noqa: BLE001 -- a busy or damaged Radar file or odd event must not take the alert card down
             db.rollback()  # Postgres refuses every later statement in an aborted transaction; this route wrote nothing
             log.warning("radar scorecard unreadable: %s", exc)

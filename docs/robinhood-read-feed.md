@@ -18,8 +18,12 @@ Accounts shown: those named in `ROBINHOOD_ACCOUNTS` (default `Roth IRA,MCP`; a l
 last four digits), plus any other account only while it holds something.
 
 Refresh: about once a minute in market hours (9:25 to 16:15 New York on weekdays), every 15 minutes otherwise, only
-when the desk's thread read asks (an open desk, or the evening review's one read of it), one read at a time and at most 40 calls each; the **live from Robinhood · as of** line on the book
-reads again on a tap (no more than once every 15 seconds). If a read fails the last snapshot stays; after three missed
+when the desk's thread read asks (an open desk, or the evening review's one read of it), one read at a time and at most 40 calls each. The read itself never waits for Robinhood: it returns the last snapshot
+with its own as-of and, when that is due, starts the refresh on a background thread; the first read after a start,
+with no snapshot yet, shows the journal's rows and "reading Robinhood…". The calls inside a refresh go one after
+another: the read-only client keeps one session and one call count, not built for calls in parallel, and it is not
+changed here. Only the **live from Robinhood · as of** line's tap waits on a read
+(no more than once every 15 seconds). If a read fails the last snapshot stays; after three missed
 refreshes it is **stale** and the book shows the journal again.
 
 ## What it can never do, and why

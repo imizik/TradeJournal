@@ -102,6 +102,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/desk/session',
     'GET /copilot/desk/sparks',
     'POST /copilot/desk/robinhood/refresh',  # parameterless: nothing from the request reaches Robinhood
+    'GET /copilot/desk/timings',  # section names and milliseconds only
     'GET /copilot/checks',
     'POST /copilot/checks',
     'POST /copilot/checks/{check_id}/pass',

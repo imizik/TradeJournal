@@ -573,6 +573,49 @@ def records(db: Session, pairs: list[tuple], now: float | None = None, *, diff_f
     return [_record(db, trade, row, now, book, reads, diff=diff_for(trade), headlines=headlines_for(trade)) for trade, row in pairs]
 
 
+def _ahead(db: Session, symbol: str, now: float, reads: Reads, headlines: bool):
+    """Starts, on workers, the reads the symbol's context would otherwise make one after another: the open positions'
+    marks (``copilot_book.mark_reads``, the batched calls ``position_rows`` makes, which then reads them from the quotes'
+    cache), the symbol's underlying quote and, with ``headlines``, each of its positions' headline reads. Returns
+    (``reads`` whose matching calls take those results, a failure re-raised as it was and no second call; the marks'
+    read, to wait for before the positions are read). Nothing starts when the symbol has no open position. A symbol
+    held as stock has its quote in the marks' stock batch, so it gets no read of its own."""
+    from app.ai import copilot_book
+    from app.ai.copilot_book import _not_webull
+    from app.engine.chart_math import ET
+    from app.engine.request_timing import timed
+    from app.models import Account, Trade
+    from app.routers import today
+    opened = db.exec(select(Trade.opened_at).join(Account, Account.id == Trade.account_id)
+                     .where(Trade.status == "open", Trade.ticker == symbol).where(_not_webull())).all()
+    if not opened:
+        return reads, None
+    stocks, options = copilot_book.mark_reads(db)
+    marks = today._ahead("context position marks", lambda: copilot_book.warm_marks(stocks, options)) if stocks or options else None
+    now_utc = datetime.fromtimestamp(now, ET).astimezone(UTC)  # the headline line's own clock
+
+    def run(name, fn, *args):
+        def go():
+            with timed(name):
+                return fn(*args)
+        return today._start(go)
+
+    quote = None if symbol in stocks else run("context quote", reads.quotes, [symbol])
+    news = {}
+    if headlines:
+        for since in {_ny(at).astimezone(UTC) for at in opened}:
+            news[since] = run("context headlines", reads.news, symbol, since, now_utc)
+
+    def quotes(symbols):
+        return quote.result() if quote is not None and list(symbols) == [symbol] else reads.quotes(symbols)
+
+    def headlines_since(name, since, moment):
+        started = news.get(since) if name == symbol else None
+        return started.result() if started is not None else reads.news(name, since, moment)
+
+    return Reads(quotes=quotes, group=reads.group, news=headlines_since), marks
+
+
 def for_symbol(symbol: str | None, now: float | None = None, *, session: Session | None = None, limit: int = MAX_POSITIONS,
                diff: str = "symbol", headlines: bool = True, reads: Reads | None = None, live: dict | None = None) -> dict:
     """The open positions' records, ``symbol``'s first. ``diff``: ``symbol`` (the since-entry diff for that symbol's
@@ -585,6 +628,10 @@ def for_symbol(symbol: str | None, now: float | None = None, *, session: Session
     now = time.time() if now is None else now
     symbol = symbol.upper() if symbol else None
     with (Session(engine) if session is None else nullcontext(session)) as db:
+        if symbol and diff == "symbol" and live is None:
+            reads, marks = _ahead(db, symbol, now, reads or Reads(), headlines)
+            if marks is not None:
+                marks.get()
         pairs, total = copilot_book.position_rows(db, limit=limit, first=symbol, now=datetime.fromtimestamp(now, UTC), live=live)
         mine = (lambda t: t.ticker == symbol) if symbol else (lambda _t: False)
         pick = {"all": lambda _t: True, "none": lambda _t: False}.get(diff, mine)

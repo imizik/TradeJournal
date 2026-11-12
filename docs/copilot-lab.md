@@ -1282,6 +1282,18 @@ that nothing in it places or sends anything.
   with a fallback copy where the page has no clipboard API. **I placed it** records nothing (the fill arrives by
   Robinhood's email as today) and returns to the symbol's chart; **Not now** closes the ticket.
 
+**Server time (2026-11-12).** Each desk read (every `GET /copilot/desk/…`, the thread header's
+`GET /charts/journal/positions/{symbol}/context` and `GET /copilot/symbol/{symbol}`) answers with a standard
+`Server-Timing` header: each section's name and milliseconds and the `total`, nothing else
+(`backend/app/engine/request_timing.py`; the browser's network panel shows it under Timing). A read slower than 1.5 s
+logs one `slow desk read` line naming its slowest sections. The owner-only `GET /copilot/desk/timings` gives, per route,
+the p50, p90 and slowest of its last 50 timings since the backend started, each section's p50 and p90 (slowest first),
+and the newest ten (`first`: the route's first request since the start, the cold one); it answers while the lab is off.
+Within a read, the waits on a provider or the Radar file run beside the journal's sections and beside each other
+(§ Where the wait goes); each section still fails on its own, and every figure keeps its own as-of. At startup the
+backend reads the market calendar on its own thread (`copilot_desk.warm_at_start`), the one cache nearly every desk read
+needs that a fresh process lacks; startup and `/health` never wait for it.
+
 ## Chatter
 
 Buzz from r/wallstreetbets and NYT business headlines, behind the desk Feed's own **Chatter** filter
@@ -3727,6 +3739,53 @@ the same check rates as before (the scripted model reads only the owner's
 words). Unproven live: the next answer scorecard's
 `latency.ask.first_text_ms` and tool-call counts on the owner's questions are
 the test.
+
+**The desk's own reads (2026-11-12).** The book "takes a while to load" on the live desk. After #752 took the
+browser's remounts out, what remained was the server: each desk read made its provider calls one after another. The
+book read waited on the plans' underlying quote, then on the positions' option marks; the feed on the symbols'
+headlines, then the market's; a position's context (the thread header) on its option marks, then the underlying
+quote, then its headlines. Measured with every outside call (Tradier quotes, option quotes, minute bars, the market
+calendar, news, Robinhood) made to take 350 ms through the real caches above it, the old and new code on the same
+bench (`backend/tests/test_desk_bench.py`, `DESK_BENCH=1`; five option positions with one plan, Robinhood on with the
+same five and six stocks):
+
+| Read | Before: cold / warm / minute | After: cold / warm / minute |
+|---|---|---|
+| `desk/threads` | 727 / 14 / 722 ms | 400 / 20 / 386 ms |
+| `desk/session` | 358 / 2 / 353 ms | 359 / 8 / 361 ms |
+| `desk/feed` | 708 / 3 / 711 ms | 363 / 11 / 362 ms |
+| `desk/sparks` (five symbols) | 1061 / 1 / 1065 ms | 710 / 2 / 711 ms |
+| scorecard, day report, pings | 1–2 ms each | 2–6 ms each |
+| `positions/{symbol}/context` (opening a position) | 1093 / 21 / 1083 ms | 379 / 11 / 361 ms |
+| **first paint, all seven reads at once** | **1424 / 1073 / 1084 ms** | **1083 / 735 / 729 ms** |
+
+Cold is the first request after a start (empty caches, no Robinhood snapshot); minute is the minute boundary, every
+provider cache expired and the Robinhood snapshot due; both columns measured the same morning (after 04:00 New York,
+when today's minute bars are read). The cold first paint also paid the market calendar, which a fresh process holds
+only in memory: the startup warm-up now reads it. What is left is the sparklines: each symbol's minute bars is its own
+read, and the chart feed lets four go at once (§ above), so twelve symbols are three rounds, and on a cold page they
+take the feed's four places ahead of the other reads. The book's rows do not wait for them (a separate read). What
+changed:
+
+- Robinhood was already never read on a request path: a desk read returns the last snapshot with its own as-of and
+  starts one background refresh when it is due (`docs/robinhood-read-feed.md`). A test now holds that for every desk
+  read, and that the first read after a start returns the journal's rows with "reading Robinhood…" instead of waiting.
+- Waits that read no journal start first on a small worker pool (`today._ahead`): the positions' option and stock
+  marks (`copilot_book.mark_reads` / `warm_marks`, the same batched calls the positions read made, so it then finds
+  them in the quotes' 60-second cache and makes none), the Radar file's reads, the session's index quotes, the feed's
+  two headline reads and the sparklines' quote read. A position's context starts its marks, its underlying quote (none of
+  its own for a symbol held as stock: the marks' stock batch has it) and its headline reads together before reading
+  the journal (`trader_context._ahead`). The journal's sections run beside them as before, each
+  failing on its own; a test holds each overlap and that no provider call is added. Two edges remain: a ticker the
+  provider answers without a price is not cached, so the section asks for it once more; and the sparklines' quote
+  read now names every requested symbol, one whose minute read failed included (still one call).
+- Nothing new is cached: the journal-only sections (exit habits, the alert scorecard, plan boards, the day report)
+  measured 1–25 ms on the bench, so a cache would only risk an old figure. The production timings will say if any of
+  them is slow on the real journal.
+
+Unproven live: the bench's latency is chosen, not measured, and production's journal, Radar file and Tradier are not
+the bench's. `GET /copilot/desk/timings` after a day of use says where the real time goes (each route's p90 and its
+sections'); the Radar file, which a reader may wait on while the recorder writes, is the likeliest remaining wait.
 
 ## Live measurements (2026-10-24)
 

@@ -477,6 +477,8 @@ async def lifespan(_app: FastAPI):
     shadow_book = await _maybe_start_shadow_book(_app)
     companion = await _maybe_start_position_companion(_app)
     chatter = await _maybe_start_chatter(_app)
+    from app.routers.copilot_desk import warm_at_start
+    warm_at_start()  # the desk's market calendar, on its own thread
     try:
         yield
     finally:
@@ -621,6 +623,8 @@ app.include_router(replay_router.router, prefix="/replay", tags=["replay"])
 from app.routers import research_jobs as research_jobs_router  # owner-only research queue; runner off by default
 app.include_router(research_jobs_router.router, prefix="/copilot/research-jobs", tags=["copilot lab"])
 
+from app.engine.request_timing import TimingMiddleware  # noqa: E402
+app.add_middleware(TimingMiddleware)  # the desk reads' Server-Timing; inside the access check, so refused requests are not timed
 # Inspect the finalized route catalog; permission checks precede all handlers.
 app.add_middleware(AccessMiddleware, routes=app.router.routes)
 

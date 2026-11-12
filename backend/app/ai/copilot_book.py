@@ -306,6 +306,33 @@ def _warm_option_quotes(trades: list) -> None:
         get_option_quotes(wanted)
 
 
+def mark_reads(db) -> tuple[list[str], list]:
+    """What ``position_rows`` (without ``live``) asks the quote provider for, as plain values read on the caller's
+    thread: the open stock positions' tickers and the open option positions' quote requests. ``warm_marks`` sends them,
+    on any thread, so a desk read can start them beside its other waits; the rows then read the quotes' own cache, with
+    its as-of, and no second call is made. Every open option is asked for, past ``position_rows``' row limit too: the
+    same one batched call, a longer list. A ticker the provider answers without a price is not cached, so the rows ask
+    for it once more, as a failed read is retried today."""
+    from sqlmodel import select
+    from app.engine.quotes import OptionQuoteRequest
+    from app.models import Account, Trade
+    trades = db.exec(select(Trade).join(Account, Account.id == Trade.account_id).where(Trade.status == "open").where(_not_webull())).all()
+    stocks = sorted({t.ticker for t in trades if t.instrument_type == "stock"})
+    options = [OptionQuoteRequest(ticker=t.ticker, expiration=t.expiration.isoformat(), strike=float(t.strike), option_type=t.option_type or "")
+               for t in trades if t.instrument_type == "option" and t.expiration and t.strike is not None]
+    return stocks, options
+
+
+def warm_marks(stocks: list[str], options: list) -> dict:
+    """Sends ``mark_reads``' reads (two batched provider calls at most), filling the quotes' 60-second cache."""
+    from app.engine.quotes import get_option_quotes, get_stock_quotes
+    if stocks:
+        get_stock_quotes(stocks)
+    if options:
+        get_option_quotes(options)
+    return {"state": "ok"}
+
+
 def position_rows(db, limit: int = MAX_POSITIONS, first: str | None = None, only=None,
                   *, now: datetime | None = None, live: dict | None = None) -> tuple[list[tuple], int]:
     """``([(trade, row), ...], total)``: the row is the model's view (below); the trade lets a caller in this package
