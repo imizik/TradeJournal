@@ -488,6 +488,8 @@ test("Now in the top bar opens today's Main chat in place from a position", asyn
   await page.route(`**/copilot/investigations/${MAIN}`, (route) => route.fulfill({ json: main }));
   await lab(page, { showThreads: false, path: "/copilot-lab?symbol=AMD", threads: () => ({ ...DESK, threads: [...DESK.threads, unplanned("AMD", 40)] }) });
   await expect(page.getByTestId("desk-breadcrumb")).toHaveText("AMD›Decision");
+  // The book's first read has landed before the watch starts (its "Reading positions…" is not a reload).
+  await expect(page.getByTestId("desk-book").getByRole("button", { name: /^AMD / })).toBeVisible();
   const watched = await watchDesk(page);
   await page.getByRole("link", { name: "Now" }).click();
   await expect(page).toHaveURL(`/copilot-lab?thread=${MAIN}`);
