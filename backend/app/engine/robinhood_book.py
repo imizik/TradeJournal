@@ -8,8 +8,8 @@ than ``ttl`` (a minute in market hours, fifteen outside), one refresh at a time 
 reads ``stale`` once it is three refreshes old; the book then falls back to the journal exactly as it is without the
 feed.
 
-Display only. Nothing here writes to the journal (fills, trades, P&L, FIFO), and nothing from Robinhood reaches the
-copilot. An account appears as its label and its number masked to the last four (``••8267``); the full number, the
+Display only. Nothing here writes to the journal (fills, trades, P&L, FIFO). The copilot sees only numbers, tickers and
+fixed words from the cached snapshot, through ``copilot_book.live_book``, and never triggers a read. An account appears as its label and its number masked to the last four (``••8267``); the full number, the
 sign-in, Robinhood's ids and its ``guide`` text never leave the server. A field missing or of an unexpected shape reads
 as unavailable (``None``), never as zero.
 """
@@ -163,7 +163,8 @@ def _option_row(account: dict, p: dict, inst: dict | None, quote: dict | None) -
     return {
         "account": account["label"], "last4": account["last4"], "instrument": "option", "symbol": symbol.upper(),
         "side": side, "strike": _num((inst or {}).get("strike_price")), "expiry": expiry, "direction": direction,
-        "quantity": qty, "avg_cost": _round(avg), "mark": _round(mark), "bid": _num(q.get("bid_price")), "ask": _num(q.get("ask_price")),
+        "quantity": qty, "multiplier": multiplier, "avg_cost": _round(avg), "mark": _round(mark), "bid": _num(q.get("bid_price")),
+        "ask": _num(q.get("ask_price")),
         "day_change_pct": _round(100 * (mark_share - prev) / prev, 1) if mark_share is not None and prev else None,
         "greeks": {k: _num(q.get(k)) for k in ("delta", "gamma", "theta", "vega")} | {"iv": _num(q.get("implied_volatility"))},
         "usd": _round(usd), "pct": _round(pct, 1), "opened_at": _text(p.get("opened_at"), 40),
@@ -190,7 +191,7 @@ def _stock_row(account: dict, p: dict, quote: dict | None) -> dict | None:
     usd = sign * (last - avg) * qty if last is not None and avg is not None else None
     return {
         "account": account["label"], "last4": account["last4"], "instrument": "stock", "symbol": symbol.upper(),
-        "side": None, "strike": None, "expiry": None, "direction": "short" if sign < 0 else "long", "quantity": qty,
+        "side": None, "strike": None, "expiry": None, "direction": "short" if sign < 0 else "long", "quantity": qty, "multiplier": None,
         "avg_cost": _round(avg), "mark": _round(last), "bid": None, "ask": None,
         "day_change_pct": _round(100 * (last - prev) / prev, 1) if last is not None and prev else None, "greeks": None,
         "usd": _round(usd), "pct": _round(100 * sign * (last - avg) / avg, 1) if last is not None and avg else None, "opened_at": None,

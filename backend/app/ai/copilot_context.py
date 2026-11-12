@@ -163,19 +163,33 @@ def _render(record: dict) -> dict:
 
 def _positions(db, symbol: str | None, now_et: datetime, reads=None) -> dict:
     """The open positions through ``trader_context`` (one call a turn): the turn's symbol first, with its since-entry
-    diff and headlines; every position with its thesis object."""
+    diff and headlines; every position with its thesis object. With the Robinhood feed on, its cached snapshot
+    (``copilot_book.live_book``, never a new read): fresh, the positions it shows carry its numbers and the ones only it
+    shows are added with no plan, the turn's symbol first; otherwise one note says the live numbers are unavailable."""
     from app.engine import trader_context
     # A ticker hidden on the desk collapses to one line, unless the turn is about it; the limit grows so it never
-    # pushes a followed position out.
+    # pushes a followed position out. A Robinhood-only position in a hidden ticker is named on that line too.
     hidden, quiet = hidden_positions(db, symbol)
-    found = trader_context.for_symbol(symbol, now_et.timestamp(), session=db, limit=MAX_POSITIONS + len(quiet), reads=reads)
+    live = copilot_book.live_or_unavailable(db, now_et)
+    found = trader_context.for_symbol(symbol, now_et.timestamp(), session=db, limit=MAX_POSITIONS + len(quiet), reads=reads,
+                                      live=live)
     rows = [_render(r) for r in found["positions"] if r["symbol"] not in hidden][:MAX_POSITIONS]
+    fresh = (live or {}).get("new", [])
+    new = [{**{k: v for k, v in r.items() if k != "mark_as_of"}, "plan": {"source": "none"}} for r in fresh if r["symbol"] not in hidden]
+    if new:  # the turn's symbol (the journal's, then new), then the other new ones, then the journal's rest
+        def order(row: dict) -> int:
+            return (0 if row.get("journal") is None else 1) if row["symbol"] == symbol else (2 if row.get("journal") else 3)
+        rows = sorted(rows + new, key=order)[:MAX_POSITIONS]
+    count = found["count"] - len(quiet) + len(new)
+    quiet = sorted(quiet + [r["symbol"] for r in fresh if r["symbol"] in hidden])
     from app.engine.option_rolls import unresolved_rolls
     unresolved = unresolved_rolls(db)
     rolls = [{"symbol": r.ticker, "contracts": float(r.contracts), "net_per_contract_usd": float(r.net_per_contract),
               "at": copilot_book._journal_time(r.executed_at)} for r in unresolved[-MAX_ROLL_NOTES:]]
-    return {"state": "ok", "count": found["count"] - len(quiet), "shown": len(rows), "positions": rows,
+    note = copilot_book.live_note(live)
+    return {"state": "ok", "count": count, "shown": len(rows), "positions": rows,
             **({"not_followed": not_followed_line(quiet)} if quiet else {}),
+            **({"robinhood": note} if note is not None else {}),
             **({"unresolved_rolls": rolls, "unresolved_rolls_total": len(unresolved), "unresolved_rolls_note": "The broker's email names no contracts, so these positions and "
                 "their realized P&L may be wrong until this resolves: the rolled-out contract can still show as held, or as expired worthless."} if rolls else {}),
             "units": found["units"]}
@@ -564,11 +578,17 @@ def _trim_diffs(pack: dict) -> None:
         row["since_entry"]["lines"] = [line for line in row["since_entry"]["lines"] if line["line"].startswith(("mark ", "price "))]
 
 
+LIVE_EXTRAS = ("bid", "ask", "day_change_pct", "gamma", "theta", "vega")  # Robinhood's; mark, P&L, delta and IV stay
+
+
 def _slim_rows(pack: dict) -> None:
-    """Past the first position, the plan's levels only: no decisions, alerts or revision notes."""
+    """Past the first position, the plan's levels only: no decisions, alerts or revision notes, and of Robinhood's
+    numbers only the mark, P&L, quantity, delta and IV."""
     for row in pack.get("positions", {}).get("positions", [])[1:]:
         row.pop("decisions", None)
         row.pop("phone_alerts", None)
+        for key in LIVE_EXTRAS:
+            row.pop(key, None)
         plan = row.get("plan") or {}
         for key in ("wording", "captured_at", "timing", "revisions", "entry"):
             plan.pop(key, None)
@@ -595,7 +615,7 @@ def _shed_steps(pack: dict):
     yield lambda: [pack.get("market", {}).pop(k, None) for k in ("radar_events", "leaders_vs_spy", "laggards_vs_spy", "unavailable")]
     yield lambda: pack.get("positions", {}).update(positions=pack["positions"].get("positions", [])[:3],
                                                    shown=min(3, len(pack["positions"].get("positions", []))))
-    yield lambda: pack.pop("provenance", None)
+    yield lambda: (pack.pop("provenance", None), (pack.get("positions", {}).get("robinhood") or {}).pop("units", None))
 
 
 def shed(pack: dict, most: int = MAX_PACK_CHARS) -> dict:

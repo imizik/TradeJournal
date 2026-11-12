@@ -118,8 +118,13 @@ def test_only_the_client_names_the_endpoint_or_builds_a_tools_call():
     assert sorted(endpoint) == sorted([client, signin])
     assert call == [client]
     assert "tools/call" not in signin.read_text() and "_transport" not in signin.read_text()
-    # The feed is the client's one caller, and the desk's thread read the feed's one caller.
-    assert sorted(users) == ["backend/app/engine/robinhood_book.py", "backend/app/routers/copilot_desk.py"]
+    # The feed is the client's one caller; the desk's thread read and the copilot's book view its only callers. The
+    # copilot's book reads the cached snapshot and the feed's match, never a refresh and never the client.
+    assert sorted(users) == ["backend/app/ai/copilot_book.py", "backend/app/engine/robinhood_book.py", "backend/app/routers/copilot_desk.py"]
+    book = (REPO / "backend" / "app" / "ai" / "copilot_book.py").read_text()
+    assert set(re.findall(r"\brb\.(\w+(?:\.\w+)?)", book)) == {"feed.snapshot", "contract_key", "match"}
+    assert re.findall(r"^\s*(?:from|import) .*robinhood_book.*$", book, re.M) == ["    from app.engine import robinhood_book as rb"]
+    assert book.count("snapshot(") == 1 and "view(" not in book and "snapshot(kick=False)" in book and "robinhood_read" not in book and "refresh(" not in book and "_kick" not in book
 
 
 # --------------------------------------------------------------------------- a read on the wire
