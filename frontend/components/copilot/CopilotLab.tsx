@@ -472,7 +472,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // The Watching list under the book: its names (none held: those are the book's) ride the sparks read.
   const watching = useWatching(on, refresh);
   const held = useMemo(() => new Set(positionRows(rows).flatMap(r => r.symbol ? [r.symbol] : [])), [rows]);
-  const watched = useMemo(() => (watching.data?.symbols ?? []).filter(s => !held.has(s)), [watching.data, held]);
+  // Only once the book has read: before that a held name would show here, then jump to the book.
+  const watched = useMemo(() => rowsRead ? (watching.data?.symbols ?? []).filter(s => !held.has(s)) : [], [rowsRead, watching.data, held]);
   const sparks = useSparks(on ? [...(centreSymbol ? [centreSymbol] : []), ...followed.flatMap(r => r.symbol ? [r.symbol] : [])] : [], on ? watched : []);
   // A thread opened from anywhere but the book (the drawer, J / K, the palette, a link) takes the centre with it.
   const lastTalking = useRef(talking);
@@ -647,7 +648,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           <div className={styles.book}>
             <Book rows={rows} sparks={sparks} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} updating={rowsRead && !rowsFresh} onSelect={select} onFollow={changeFollow}
               live={live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} />
-            <Watching data={watching.data} failed={watching.failed} sparks={sparks} held={held} selected={centreSymbol}
+            <Watching data={rowsRead ? watching.data : null} failed={watching.failed} sparks={sparks} held={held} selected={centreSymbol}
               onSelect={selectWatched} onAsk={askWatched} onPlan={planWatched} onChange={watching.set} />
             {lower}
             <DayFacts session={session.data} />

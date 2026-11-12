@@ -48,8 +48,10 @@ The app's own code is the only guard:
 - The only new route, `POST /copilot/desk/robinhood/refresh`, takes no input. The Watching import's routes
   (`GET`/`POST /copilot/desk/watching/robinhood`) call only the two watchlist reads: one `get_watchlists`, then one
   `get_watchlist_items` per chosen list, at most ten; a list id from the request is used only if a fresh
-  `get_watchlists` read shows it as one of his own (`owner_type` `custom`) stock lists. Curated Robinhood lists and the
-  options watchlist are never read. List names and emoji are shown as data and never reach a model; the copilot is told
+  `get_watchlists` read shows it as one of his own (`owner_type` `custom`) stock lists. Curated Robinhood lists are never read,
+  nor the options watchlist when Robinhood marks it options-only (`allowed_object_types`); if a reply leaves that field
+  out, the options list could be offered, and its items read is then refused by Robinhood and counted as a list that
+  could not be read (still only a read). List names and emoji are shown as data and never reach a model; the copilot is told
   only the watched symbols (§ What the copilot sees).
 - Tests (`backend/tests/test_robinhood_read.py`) fail if a write-looking name is added to the allowlist, if any
   changing or trading tool (each watchlist write by name included) is not refused, or if anything else in the repository names the endpoint or builds a tool call.

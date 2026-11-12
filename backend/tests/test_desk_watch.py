@@ -68,6 +68,14 @@ def test_the_charts_watchlist_is_the_list_and_a_charts_field_is_never_dropped(de
     assert after["revision"] == 2 and after["levels"] == {"NVDA": [{"price": 1}]} and after["intervals"] == ["1m"]
 
 
+def test_a_desk_write_keeps_every_name_charts_keeps(desk, engine):  # noqa: F811
+    saved(engine, {"watchlist": ["SPY", "BRK-B", "BRK/B", "ABCDEFGHIJKLMN", "NVDA"]})
+    assert watching(desk)["symbols"] == ["SPY", "NVDA"]  # the desk shows the names it can quote
+    desk.post("/copilot/desk/watching", json={"symbol": "NBIS"})
+    desk.delete("/copilot/desk/watching/SPY")
+    assert stored(engine)["watchlist"] == ["BRK-B", "BRK/B", "ABCDEFGHIJKLMN", "NVDA", "NBIS"]  # Charts' own names stay
+
+
 def test_never_saved_reads_what_charts_shows():
     assert desk_watch._symbols({}) == desk_watch.CHARTS_DEFAULT
 
@@ -195,7 +203,32 @@ def test_an_expired_sign_in_stops_the_import(desk, engine, fake, feed):  # noqa:
     saved(engine, {"watchlist": []})
     fake.status = 401
     assert desk.get("/copilot/desk/watching/robinhood").json()["state"] == "expired"
+    assert watching(desk)["robinhood"] == "expired"  # the feed's sign-in is marked expired too
     assert stored(engine)["watchlist"] == []
+
+
+def test_a_sign_in_that_expires_mid_import_saves_nothing(desk, engine, fake, feed, monkeypatch):  # noqa: F811
+    saved(engine, {"watchlist": []})
+    answer = fake.tool_get_watchlist_items
+
+    def expire(args):
+        fake.status = 401  # the next call is refused
+        return answer(args)
+    monkeypatch.setattr(fake, "tool_get_watchlist_items", expire)
+    body = desk.post("/copilot/desk/watching/robinhood", json={"lists": ["wl-first", "wl-new"]}).json()
+    assert body["state"] == "expired" and stored(engine)["watchlist"] == []
+    assert watching(desk)["robinhood"] == "expired"
+
+
+def test_an_import_reads_at_most_ten_lists(desk, engine, fake, feed):  # noqa: F811
+    from tests.robinhood_fake import watchlist
+    saved(engine, {"watchlist": []})
+    for i in range(14):
+        row, items = watchlist(f"wl-x{i}", f"List {i}", [("instrument", f"X{i}")])
+        fake.watchlists[row["id"]] = (row, items)
+    body = desk.post("/copilot/desk/watching/robinhood", json={"lists": [f"wl-x{i}" for i in range(14)]}).json()
+    assert body["lists"] == 10 and len(body["added"]) == 10
+    assert [c[0] for c in fake.calls].count("get_watchlist_items") == 10 and len(fake.calls) == 11
 
 
 def test_list_names_are_data_trimmed_and_never_instructions(desk, engine, fake, feed):  # noqa: F811

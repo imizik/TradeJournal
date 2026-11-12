@@ -17,7 +17,7 @@ import { getExposure } from "@/lib/copilot";
 import { DeskChart } from "@/components/copilot/DeskChart";
 import { DeskTimeline } from "@/components/copilot/Inspector";
 import {
-  DESK_MARKET, DESK_TIMEFRAMES, daysTo, deskSymbolThread, getDeskSparks, liveOn, money, readLook, saveLook, signedPct, sinceLines,
+  DESK_MARKET, DESK_TIMEFRAMES, daysTo, deskSymbolThread, getDeskSparks, liveOn, money, nyDay, readLook, saveLook, signedPct, sinceLines,
   type DeskBookState, type DeskLive, type DeskLook, type DeskTimeframe, type DeskNeed, type DeskSession, type DeskSparks, type DeskThread, type DeskThreadRef,
 } from "@/lib/desk";
 import { cn } from "@/lib/utils";
@@ -171,7 +171,9 @@ export function useSparks(symbols: string[], watch: string[] = []): DeskSparks |
       controllers.current.add(controller);
       getDeskSparks(key ? key.split(",") : [], controller.signal, watchKey ? watchKey.split(",") : []).then(next => {
         const prev = shown.current;
-        const merged = prev && prev.as_of.slice(0, 10) === next.as_of.slice(0, 10) ? { ...next, rows: { ...prev.rows, ...next.rows } } : next;
+        if (prev && next.as_of < prev.as_of) return; // a slower, older read never replaces a newer one
+        // Rows of symbols this read did not name stay only within the same New York day: never yesterday's line as today's.
+        const merged = prev && nyDay(new Date(prev.as_of)) === nyDay(new Date(next.as_of)) ? { ...next, rows: { ...prev.rows, ...next.rows } } : next;
         shown.current = merged;
         setData(merged);
       }).catch(() => { /* the lines are extra */ }).finally(() => controllers.current.delete(controller));

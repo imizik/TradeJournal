@@ -82,6 +82,13 @@ def _symbols(data: dict) -> list[str]:
     return list(dict.fromkeys(s for s in raw if isinstance(s, str) and SYMBOL.fullmatch(s)))[:MAX]
 
 
+def _stored(data: dict) -> list:
+    """The stored list exactly as Charts keeps it (Charts accepts more than the desk shows: ``BRK-B``, longer names), so
+    a desk write changes only the name it adds or removes; Charts' starting names when never saved."""
+    raw = data.get("watchlist")
+    return list(raw) if isinstance(raw, list) else list(CHARTS_DEFAULT)
+
+
 def _removed(data: dict) -> list[str]:
     raw = data.get("watchRemoved")
     return [s for s in raw if isinstance(s, str) and SYMBOL.fullmatch(s)] if isinstance(raw, list) else []
@@ -95,12 +102,12 @@ def state(db: Session) -> dict:
 
 
 def _save(db: Session, change: Callable[[dict], object]):
-    """Apply ``change`` to the stored settings document and save it on top of the revision it read, as the Charts route
+    """Apply ``change`` to the stored settings document (its ``watchlist`` as stored, every name kept) and save it on top of the revision it read, as the Charts route
     does (a save on an older revision is refused); a save another device made in between is read again, three times."""
     for _ in range(3):
         db.expire_all()
         row, data = _read(db)
-        data = {**data, "watchlist": _symbols(data)}
+        data = {**data, "watchlist": _stored(data)}
         outcome = change(data)
         text = json.dumps(data, separators=(",", ":"))
         if len(text.encode()) > SETTINGS_BYTES:
@@ -130,7 +137,7 @@ def add(db: Session, symbol: str) -> None:
         data["watchRemoved"] = [s for s in _removed(data) if s != symbol]
         if symbol in listed:
             return
-        if len(listed) >= MAX:
+        if len(set(listed)) >= MAX:
             raise Full(f"The list holds {MAX} names; stop watching one first.")
         listed.append(symbol)
     _save(db, change)
@@ -282,7 +289,7 @@ def import_lists(db: Session, chosen: list[str]) -> dict:
                 data = reader.get_watchlist_items(row["id"])
             except rh.ReadError as exc:
                 if exc.kind in ("expired", "signed_out"):
-                    return {"state": "expired"}
+                    return {"state": exc.kind}
                 log.warning("a Robinhood watchlist could not be read (%s)", exc.kind)
                 failed += 1
                 continue
@@ -304,7 +311,7 @@ def import_lists(db: Session, chosen: list[str]) -> dict:
                     out["already"] += 1
                 elif symbol in removed:
                     out["removed"] += 1
-                elif len(listed) >= MAX:
+                elif len(set(listed)) >= MAX:
                     out["full"] += 1
                 else:
                     listed.append(symbol)

@@ -127,7 +127,7 @@ def test_only_the_client_names_the_endpoint_or_builds_a_tools_call():
                              "backend/app/engine/robinhood_fills.py", "backend/app/routers/copilot_desk.py"]
     watch = (REPO / "backend" / "app" / "engine" / "desk_watch.py").read_text()
     # The desk's watchlist import calls only the two watchlist reads, through the feed's sign-in, and never a write.
-    assert set(re.findall(r"reader\.(\w+)", watch)) == {"get_watchlists", "get_watchlist_items"}
+    assert set(re.findall(r"\.(get_\w+)\(", watch)) == {"get_watchlists", "get_watchlist_items"}
     assert "_call(" not in watch and "_post(" not in watch and "_transport" not in watch
     fills = (REPO / "backend" / "app" / "engine" / "robinhood_fills.py").read_text()
     # The order-history poller calls only the accounts read and the two order-history reads, through the feed's sign-in.

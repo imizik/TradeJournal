@@ -53,14 +53,16 @@ _lock = threading.Lock()
 _lines: dict[str, tuple[float, date, list[float]]] = {}  # symbol -> (valid until, its New York date, thinned closes)
 _changes: dict[str, tuple[float, date, float | None, float | None]] = {}  # (valid until, date, change %, last price)
 _sip_off_until = 0.0
+_sip_watch_off_until = 0.0  # the Watching names' own batched read: its failure never turns the book's off
 
 
 def clear() -> None:
-    global _sip_off_until
+    global _sip_off_until, _sip_watch_off_until
     with _lock:
         _lines.clear()
         _changes.clear()
         _sip_off_until = 0.0
+        _sip_watch_off_until = 0.0
 
 
 # ------------------------------------------------------------------ the session and what a line may be kept for
@@ -165,14 +167,15 @@ def _chart_cache(symbol: str, day: date, hours: dict | None) -> list[dict] | Non
     return _bars(held[0], day, hours)
 
 
-def _sip(symbols: list[str], day: date, now: float, hours: dict | None) -> dict[str, list[dict]]:
+def _sip(symbols: list[str], day: date, now: float, hours: dict | None, watch: bool = False) -> dict[str, list[dict]]:
     """Today's minutes (extended hours) for every symbol in one Alpaca read, SIP like the charts. {} when Alpaca is not
     set up, refuses (403: the account's plan may not allow recent SIP minutes), fails or needs more than ``SIP_PAGES`` pages
-    (a cut-off day is not a line); any of those turns it off for ``SIP_BACKOFF_SECONDS``."""
-    global _sip_off_until
+    (a cut-off day is not a line); any of those turns it off for ``SIP_BACKOFF_SECONDS``. ``watch``: the Watching names'
+    own read, with its own back-off, so a long watchlist that overflows the pages never turns off the book's read."""
+    global _sip_off_until, _sip_watch_off_until
     from app.engine import alpaca
     start = datetime.combine(day, wall_time(4), ET)
-    if not alpaca.alpaca_configured() or time.time() < _sip_off_until or datetime.fromtimestamp(now, ET) <= start:
+    if not alpaca.alpaca_configured() or time.time() < (_sip_watch_off_until if watch else _sip_off_until) or datetime.fromtimestamp(now, ET) <= start:
         return {}
     params = {"symbols": ",".join(symbols), "timeframe": "1Min", "start": start.isoformat(),
               "end": datetime.fromtimestamp(now, UTC).isoformat(), "adjustment": "split", "feed": "sip", "limit": 10000}
@@ -190,8 +193,12 @@ def _sip(symbols: list[str], day: date, now: float, hours: dict | None) -> dict[
         else:
             raise RuntimeError("more minutes than the pages read")
     except Exception as exc:  # noqa: BLE001 -- the symbols fall to the Tradier reads
-        _sip_off_until = time.time() + SIP_BACKOFF_SECONDS
-        log.warning("desk sparks: the batched Alpaca read is off for %d s (%s)", SIP_BACKOFF_SECONDS, exc)
+        if watch:
+            _sip_watch_off_until = time.time() + SIP_BACKOFF_SECONDS
+        else:
+            _sip_off_until = time.time() + SIP_BACKOFF_SECONDS
+        log.warning("desk sparks: the %sbatched Alpaca read is off for %d s (%s)", "Watching names' " if watch else "",
+                    SIP_BACKOFF_SECONDS, exc)
         return {}
     out: dict[str, list[dict]] = {}
     for symbol, found in rows.items():
@@ -237,13 +244,16 @@ def _fill(symbols: list[str], day: date, now: float, valid: float, hours: dict |
     """The lines nothing in hand served: one batched read, then one low-priority read each (never for ``batched_only``,
     the Watching list's names). Stores each line as it lands."""
     from app.engine.chart_feed import LOW_SLOTS, chart_feed
-    todo = list(symbols)
-    if len(todo) >= 2:
-        got = _sip(todo, day, now, hours)
-        for symbol, bars in got.items():
-            _store_line(symbol, bars, now, day, valid)
-        todo = [s for s in todo if s not in got]
-    todo = [s for s in todo if s not in batched_only]
+    todo = [s for s in symbols if s not in batched_only]
+    watched = [s for s in symbols if s in batched_only]
+    # The book's names in their own batch first; the Watching names in a second one that cannot fail the book's.
+    for names, watch in ((todo, False), (watched, True)):
+        if len(names) >= 2 or (watch and names):
+            got = _sip(names, day, now, hours, watch=watch)
+            for symbol, bars in got.items():
+                _store_line(symbol, bars, now, day, valid)
+            if not watch:
+                todo = [s for s in todo if s not in got]
 
     def one(symbol: str) -> None:
         if abandon.is_set():  # the request gave up: do not start a read nobody waits for

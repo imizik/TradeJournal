@@ -397,7 +397,7 @@ def owner_context(symbol: str | None, session=None, now: datetime | None = None,
         pack["watches"] = _section("watches", lambda: _watches(db, symbol, ids))
         watching = _section("watching", lambda: {"state": "ok", "line": _watching(db)})
         if pack["watches"].get("state") == "ok" and watching.get("line"):
-            pack["watches"]["watching"] = watching["line"]  # one line of symbols, no prices: what he follows and does not hold
+            pack["watches"]["watching"] = watching["line"]  # one line of symbols, no prices: the watchlist names he follows
         pack["practice"] = _section("practice", lambda: _practice(db, now_et))
     return shed(pack) if bounded else pack
 
