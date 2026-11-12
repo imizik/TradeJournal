@@ -14,11 +14,11 @@ import { useKeptState } from "@/components/copilot/DeskMemory";
 import { NotFollowed } from "@/components/copilot/SessionTape";
 import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
 import { getExposure } from "@/lib/copilot";
-import { DeskChart } from "@/components/copilot/DeskChart";
+import { DeskChart, ReadingLine, type DeskChartActions } from "@/components/copilot/DeskChart";
 import { DeskTimeline } from "@/components/copilot/Inspector";
 import {
   DESK_MARKET, DESK_TIMEFRAMES, daysTo, deskSymbolThread, getDeskSparks, liveOn, money, readLook, saveLook, signedPct, sinceLines,
-  type DeskBookState, type DeskLive, type DeskLook, type DeskTimeframe, type DeskNeed, type DeskSession, type DeskSparks, type DeskThread, type DeskThreadRef,
+  type DeskBookState, type DeskChartData, type DeskLive, type DeskLook, type DeskTimeframe, type DeskNeed, type DeskSession, type DeskSparks, type DeskThread, type DeskThreadRef,
 } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
@@ -431,24 +431,28 @@ function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
  * stock against SPY today, time held: P&L, the distance to the stop and expiry are the row's) and, folded, what touched
  * the thread. No symbol: QQQ with the owner's fills and pings.
  */
-export function CentreChart({ symbol, thread, row, sparks }: {
-  symbol: string | null; thread: DeskThreadRef | null; row: DeskThread | null; sparks: DeskSparks | null;
+export function CentreChart({ symbol, thread, row, sparks, actions }: {
+  symbol: string | null; thread: DeskThreadRef | null; row: DeskThread | null; sparks: DeskSparks | null; actions?: DeskChartActions;
 }) {
   const ref = useMemo(() => thread ?? (symbol ? deskSymbolThread(symbol) : null), [thread, symbol]);
   const [timeline, setTimeline] = useState(false);
+  const [shown, setShown] = useState<DeskChartData | null>(null);
   const [timeframe, pickTimeframe] = useDeskTimeframe();
   const book = row?.book;
   const change = symbol ? sparks?.rows[symbol]?.change_pct ?? null : null;
   const spy = sparks?.spy_change_pct ?? null;
   const versus = change !== null && spy !== null ? change - spy : null;
   const charts = `/charts?symbol=${encodeURIComponent(symbol ?? "QQQ")}`;
+  const sparksAt = sparks ? Date.parse(sparks.as_of) / 1000 : NaN;
+  const fallback = change !== null && Number.isFinite(sparksAt) ? { pct: change, at: sparksAt } : null;
+  const reading = shown && shown.symbol === (symbol ?? "QQQ") ? shown : null;
   return (
     <div className="space-y-3" data-testid="desk-chart">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="text-base font-semibold text-foreground">{symbol ?? "QQQ"}</span>
-        {change !== null && <span className={cn("text-sm tabular-nums", tone(change))}>{signedPct(change, 2)}</span>}
         <span className="min-w-0 truncate text-xs text-muted-foreground">{row ? (row.instrument && row.instrument !== row.symbol ? row.instrument : row.title) : symbol ? "today" : "market today"}</span>
       </div>
+      <ReadingLine data={reading} fallback={fallback} />
       <div className="flex items-center gap-1">
         <div role="group" aria-label="Timeframe" className="flex gap-1">
           {DESK_TIMEFRAMES.map(item => (
@@ -461,7 +465,7 @@ export function CentreChart({ symbol, thread, row, sparks }: {
         </div>
         <Link href={charts} className="ml-auto inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Open in Charts →</Link>
       </div>
-      <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0}
+      <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0} onRead={setShown} actions={actions}
         label={`${symbol ?? "QQQ"} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />
       <p aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <Key color="#e9a23b" glyph="▲▼">your fills</Key>

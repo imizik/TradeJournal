@@ -513,10 +513,24 @@ export type DeskChartData = {
   symbol: string; timeframe: DeskTimeframe; step: number; as_of: number; live: boolean;
   state: "ok" | "unavailable"; reason: string | null;
   bars: { time: number; open: number; high: number; low: number; close: number; volume: number; extended: boolean }[];
-  levels: { role: "entry" | "invalidation"; price: number; label: string }[];
+  /** One value per candle, null where the study has none (VWAP outside the regular session, an average still warming,
+   * RVol on an earlier session): 2m and 15m carry ``vwap``, ``ema9``, ``ema21``, ``rvol``; 1D ``ema21``, ``sma50``,
+   * ``sma200`` and ``rvol`` (the day's volume over the 30 days before it). */
+  studies: Partial<Record<DeskStudySeries, (number | null)[]>>;
+  /** Intraday: the previous close and today's pre-market high and low, each only when known. */
+  reference: { key: "prev_close" | "pm_high" | "pm_low"; price: number; label: string }[];
+  /** The reading line: the newest price (``daily``: a daily candle's, so its time is a date), the previous session's
+   * close, and the RTH VWAP and RVol as of the newest regular-session minute. */
+  reading: { last: number; at: number; daily: boolean; prev_close: number | null; vwap: number | null; vwap_at: number | null; rvol: number | null } | null;
+  levels: { role: "entry" | "invalidation"; price: number; label: string; id?: string }[];
+  /** The symbol's other armed level alerts; one from a plan is not removable here. */
+  alerts: DeskChartAlert[];
   marks: DeskChartMark[];
   time_stop: { at: number; text: string } | null;
 };
+export type DeskStudySeries = "vwap" | "ema9" | "ema21" | "sma50" | "sma200" | "rvol";
+export type DeskChartAlert = { id: string; price: number; text: string; label: string | null; removable: boolean;
+  condition: "touches" | "crosses" | "closes_beyond"; interval: string | null; session: "regular" | "extended" };
 
 export async function getDeskChart(id: string, timeframe: DeskTimeframe, signal?: AbortSignal): Promise<DeskChartData> {
   return deskRead<DeskChartData>(id, `chart?timeframe=${encodeURIComponent(timeframe)}`, signal);

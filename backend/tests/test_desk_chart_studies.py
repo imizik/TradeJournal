@@ -40,8 +40,13 @@ def fifteen(day: date, raw: list[dict]) -> list[dict]:
     return chart_bars(raw, [], "15m", "regular", {day: None})
 
 
-def install(monkeypatch, stored: bool = True, today: list[dict] | None = None):
-    """The desk's sources as the chart feed and the chart history return them."""
+OFFICIAL_CLOSE = 99.87  # Oct 20's official close, which the closing auction set after its last minute
+
+
+def install(monkeypatch, stored: bool = True, today: list[dict] | None = None, kept: float | None = OFFICIAL_CLOSE):
+    """The desk's sources as the chart feed and the chart history return them; ``kept`` the official previous close
+    the feed's daily series holds in memory (None: no daily chart of the symbol was read today)."""
+    monkeypatch.setattr(desk_context, "kept_close", lambda symbol, before, today: kept if before == TODAY else None)
     raw_today = RAW_TODAY if today is None else today
     minutes = [{**b, "rvol": None if b["extended"] else 1.25} for b in chart_bars(raw_today, [], "1m", "extended", {TODAY: None})]
     monkeypatch.setattr(desk_context, "today_minutes", lambda symbol: minutes)
@@ -115,7 +120,7 @@ def test_two_minute_vwap_is_the_workspace_minute_vwap_and_the_averages_carry_ove
 
 
 def test_without_stored_history_the_averages_start_empty_and_nothing_is_drawn_for_the_previous_close(monkeypatch):
-    install(monkeypatch, stored=False)
+    install(monkeypatch, stored=False, kept=None)
     read = desk_context._desk_read("NBIS", "2m", NOW)
     studies = read["studies"]
     assert studies["ema9"][:8] == [None] * 8 and studies["ema9"][8] is not None  # no flat line from a made-up start
@@ -127,20 +132,30 @@ def test_without_stored_history_the_averages_start_empty_and_nothing_is_drawn_fo
 def test_the_reading_line_and_the_reference_lines(monkeypatch):
     minutes = install(monkeypatch)
     read = desk_context._desk_read("NBIS", "2m", NOW)
-    regular_before = [m for m in chart_bars(RAW[EARLIER[-1]], [], "1m", "extended", {EARLIER[-1]: None}) if not m["extended"]]
     pre = [m for m in RAW_TODAY if datetime.fromtimestamp(m["time"], ET).hour < 9
            or (datetime.fromtimestamp(m["time"], ET).hour == 9 and datetime.fromtimestamp(m["time"], ET).minute < 30)]
     regular = [m for m in minutes if not m["extended"]]
     assert read["reading"] == {
         "last": round(minutes[-1]["close"], 4), "at": minutes[-1]["time"], "daily": False,
-        "prev_close": round(regular_before[-1]["close"], 4), "vwap": round(regular[-1]["vwap"], 4), "vwap_at": regular[-1]["time"],
-        "rvol": 1.25}
+        "prev_close": OFFICIAL_CLOSE, "vwap": round(regular[-1]["vwap"], 4), "vwap_at": regular[-1]["time"], "rvol": 1.25}
     assert read["reference"] == [
-        {"key": "prev_close", "price": round(regular_before[-1]["close"], 4), "label": f"Prev close {regular_before[-1]['close']:,.2f}"},
+        {"key": "prev_close", "price": OFFICIAL_CLOSE, "label": "Prev close 99.87"},
         {"key": "pm_high", "price": round(max(m["high"] for m in pre), 4), "label": f"PM high {max(m['high'] for m in pre):,.2f}"},
         {"key": "pm_low", "price": round(min(m["low"] for m in pre), 4), "label": f"PM low {min(m['low'] for m in pre):,.2f}"}]
-    # 15m reads the previous close from its own earlier candles: the same number.
-    assert desk_context._desk_read("NBIS", "15m", NOW)["reading"]["prev_close"] == read["reading"]["prev_close"]
+    # 15m shows the same official close, never its last 15-minute candle's close (the last trade before the auction).
+    assert desk_context._desk_read("NBIS", "15m", NOW)["reading"]["prev_close"] == OFFICIAL_CLOSE
+
+
+def test_the_previous_close_comes_only_from_a_daily_series_already_held(monkeypatch):
+    from app.engine.chart_daily import ChartDaily, DailyEntry
+    daily = ChartDaily(feed=None)
+    bars = [{"time": int(datetime.combine(day, wall_time(9, 30), ET).timestamp()), "close": 90.0 + i} for i, day in enumerate(EARLIER)]
+    assert daily.kept_close("NBIS", TODAY, TODAY) is None  # nothing read today: no request is made, nothing is shown
+    daily._entries["NBIS"] = DailyEntry(TODAY, "raw", {}, bars, 0)
+    assert daily.kept_close("NBIS", TODAY, TODAY) == 96.0  # Oct 20's close
+    assert daily.kept_close("NBIS", EARLIER[-1], TODAY) == 95.0  # the session before Oct 20
+    daily._entries["NBIS"] = DailyEntry(EARLIER[-1], "raw", {}, bars[:-1], 0)
+    assert daily.kept_close("NBIS", TODAY, TODAY) is None  # yesterday's series is not today's
 
 
 def test_in_the_pre_market_there_is_no_vwap_or_rvol_yet(monkeypatch):

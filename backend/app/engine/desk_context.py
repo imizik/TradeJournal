@@ -498,10 +498,11 @@ def _at_candles(candles: list[dict], step: int, minutes: list[dict], key: str) -
     return out
 
 
-def _regular_close(minutes: list[dict]) -> float | None:
-    """A session's last regular-session close."""
-    regular = [m for m in minutes if not m.get("extended")]
-    return float(regular[-1]["close"]) if regular else None
+def kept_close(symbol: str, before: date, today: date) -> float | None:
+    """The official close of the session before ``before`` from the daily series the chart feed already holds for today
+    (read by any daily chart of the symbol today), never a request; None when it holds none."""
+    from app.engine.chart_feed import chart_feed
+    return chart_feed.daily.kept_close(symbol, before, today)
 
 
 def _minute_of_day(stamp: int) -> int:
@@ -525,17 +526,13 @@ def _desk_read(symbol: str, timeframe: str, now: float) -> dict | None:
     today = datetime.fromtimestamp(now, ET).date()
     on_today = lambda bars: [b for b in bars if b["time"] <= now and datetime.fromtimestamp(b["time"], ET).date() == today]  # noqa: E731
     warm: list[dict] = []
-    prev_close = None
     if timeframe == "2m":
         minutes = on_today(today_minutes(symbol))
         shown = _two_minute(minutes)
         for candle, vwap, rvol in zip(shown, _at_candles(shown, 120, minutes, "vwap"), _at_candles(shown, 120, minutes, "rvol")):
             candle.update(vwap=vwap, rvol=rvol)
-        earlier = stored_sessions(symbol, today, 1) if shown else []
-        for day, hours, raw in earlier:
-            session = chart_bars(raw, [], "1m", "extended", {day: hours})
-            warm = _two_minute(session)
-            prev_close = _regular_close(session)
+        for day, hours, raw in stored_sessions(symbol, today, 1) if shown else []:
+            warm = _two_minute(chart_bars(raw, [], "1m", "extended", {day: hours}))
     else:
         try:
             minutes = on_today(today_minutes(symbol))
@@ -570,8 +567,12 @@ def _desk_read(symbol: str, timeframe: str, now: float) -> dict | None:
     regular = [m for m in minutes if not m.get("extended")]
     last = minutes[-1] if minutes else shown[-1]
     day_of = lambda stamp: datetime.fromtimestamp(stamp, ET).date()  # noqa: E731
-    if timeframe != "2m":  # the close of the session before the newest price's, from the candles shown
+    # The official close of the session before the newest price's: a daily candle's own, else the daily series already
+    # held in memory. A minute's last trade is not the close (the closing auction prints after it), so none is better.
+    if timeframe == "1D":
         prev_close = next((float(b["close"]) for b in reversed(shown) if day_of(b["time"]) < day_of(last["time"])), None)
+    else:
+        prev_close = kept_close(symbol, day_of(last["time"]), today)
     at = last["time"] if minutes else min(last.get("end_time") or last["time"], now)  # a candle's price is its end's
     reading = {"last": float(last["close"]), "at": int(at), "daily": not minutes and timeframe == "1D",
                "prev_close": prev_close,
@@ -603,6 +604,7 @@ def _alerts(db: Session, symbol: str, plan_ids: set[str]) -> list[dict]:
         what = (f"Touches {_price(alert.price)}" if alert.condition == "touches" else f"Crosses {side} {_price(alert.price)}"
                 if alert.condition == "crosses" else f"{alert.interval} close {side} {_price(alert.price)}")
         out.append({"id": str(alert.id), "price": float(alert.price), "text": what, "label": alert.label or None,
+                    "condition": alert.condition, "interval": alert.interval, "session": alert.session,
                     "removable": alert.plan_role is None})
     return out
 
