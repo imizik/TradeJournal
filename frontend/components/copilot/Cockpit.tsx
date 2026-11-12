@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { EyeOff } from "lucide-react";
+import { useKeptState } from "@/components/copilot/DeskMemory";
 import { NotFollowed } from "@/components/copilot/SessionTape";
 import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
 import { getExposure } from "@/lib/copilot";
@@ -151,7 +152,7 @@ export function NeedsStrip({ needs, seen, actions, onSeen }: {
  * minute while the page shows; nothing when the read fails. */
 const SPARKS = 12;
 export function useSparks(symbols: string[]): DeskSparks | null {
-  const [data, setData] = useState<DeskSparks | null>(null);
+  const [data, setData] = useKeptState<DeskSparks | null>("desk.sparks", null); // the last lines, until today's read
   const key = [...new Set(symbols)].slice(0, SPARKS).sort().join(",");
   useEffect(() => {
     if (!key) return;
@@ -164,7 +165,7 @@ export function useSparks(symbols: string[]): DeskSparks | null {
     read();
     const timer = setInterval(() => { if (document.visibilityState === "visible") read(); }, REFRESH_MS);
     return () => { controller.abort(); clearInterval(timer); };
-  }, [key]);
+  }, [key, setData]);
   return data;
 }
 
@@ -212,8 +213,10 @@ const left = (expiry: string | null, day: string) => {
  * Selecting a row (``onSelect``) drives the centre and the copilot; its eye stops following the ticker (``onFollow``),
  * and those sit behind "N not followed" at the bottom.
  */
-export function Book({ rows, sparks, selected, selectedKey = null, day, read, live = null, onRefreshLive, onSelect, onFollow, children }: {
+export function Book({ rows, sparks, selected, selectedKey = null, day, read, updating = false, live = null, onRefreshLive, onSelect, onFollow, children }: {
   rows: DeskThread[]; sparks: DeskSparks | null; selected: string | null; selectedKey?: string | null; day: string; read: boolean;
+  /** The rows are the desk's last read, kept for its remount, with the fresh read on the way: P&L dimmed, "Updating". */
+  updating?: boolean;
   live?: DeskLive | null; onRefreshLive?(): void;
   onSelect(row: DeskThread): void; onFollow(symbol: string, following: boolean): Promise<void>; children?: ReactNode;
 }) {
@@ -241,6 +244,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, li
           Your book{shown.length > 0 && <> · <span className="tabular-nums">{shown.length}</span> followed</>}
         </h2>
         <LiveLine live={live} onRefresh={onRefreshLive} />
+        {updating && <span role="status" data-testid="book-updating" className="text-[11px] text-muted-foreground">Updating…</span>}
       </div>
       {followed.length ? (
         <ul>
@@ -273,7 +277,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, li
                     </span>
                   </span>
                   <Spark points={spark?.points} label={`${row.symbol} today`} />
-                  <span className={cn("text-right text-sm tabular-nums", tone(book?.usd))}>
+                  <span className={cn("text-right text-sm tabular-nums", tone(book?.usd), updating && "opacity-50")}>
                     {book?.usd != null ? money(book.usd) : row.value?.text ?? "—"}
                     {book?.pct != null && <span className="block text-[11px]">{signedPct(book.pct)}</span>}
                   </span>

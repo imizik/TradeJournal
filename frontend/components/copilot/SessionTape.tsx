@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { EyeOff } from "lucide-react";
+import { useKeptState } from "@/components/copilot/DeskMemory";
 import { TONE, numeric } from "@/components/copilot/ThreadRail";
 import { getDeskSession, type DeskSession, type DeskThread } from "@/lib/desk";
 import { cn } from "@/lib/utils";
@@ -15,7 +16,8 @@ export const pct = (value: number) => `${value > 0 ? "+" : value < 0 ? "−" : "
 /** ``GET /copilot/desk/session`` once a minute while the page is visible: the desk reads it once for its top bar, its
  * phase button, the strip and its lower block. */
 export function useDeskSession(on: boolean): { data: DeskSession | null; error: string | null } {
-  const [data, setData] = useState<DeskSession | null>(null);
+  // The last read shows at once on the desk's remount; its clock (the top bar's) says when it was read.
+  const [data, setData] = useKeptState<DeskSession | null>("desk.session", null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!on) return;
@@ -33,7 +35,7 @@ export function useDeskSession(on: boolean): { data: DeskSession | null; error: 
     const shown = () => { if (document.visibilityState === "visible") read(); };
     document.addEventListener("visibilitychange", shown);
     return () => { controller.abort(); clearInterval(timer); document.removeEventListener("visibilitychange", shown); };
-  }, [on]);
+  }, [on, setData]);
   return { data, error };
 }
 

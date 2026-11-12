@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ChartCandlestick, Menu, MessageCircle, MessagesSquare, PanelLeft, Plus, Search, X } from "lucide-react";
 import { openNavMenu, useFoldedNav } from "@/components/Nav";
@@ -30,7 +30,8 @@ import { ScalpShortlistNudge } from "@/components/ScalpShortlistPanel";
 import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { WHAT_MATTERS_PROMPT, copilotLabHref, mainChatLabel, type InvestigationSummary } from "@/lib/copilot";
-import { afterClose, answerSymbol, deskNeeds, refreshRobinhood, type DeskLive, deskSymbolThread, nyDay, readSeen, saveFollow, saveHorizon, saveSeen, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
+import { useKept } from "@/components/copilot/DeskMemory";
+import { afterClose, answerSymbol, deskLinkIn, deskNeeds, refreshRobinhood, type DeskLive, deskSymbolThread, nyDay, readSeen, saveFollow, saveHorizon, saveSeen, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import styles from "./CopilotLab.module.css";
 
@@ -82,10 +83,17 @@ function typing(target: EventTarget | null) {
  * centre. The thread list is a drawer. While the lab is off only the conversation shows, saying so. ⌘K (Ctrl+K) or
  * Jump to… opens the palette; while not typing, J / K open the next or previous thread, N starts a plan, [ toggles the
  * thread list and Escape closes the drawer or the sheet.
+ *
+ * The page remounts the desk for each deep link it loads; a symbol or context link the desk opens itself (a position
+ * picked in the book, a feed item's Ask, Plan a trade) is followed in place (``go``): the address changes with the
+ * History API and the copilot starts that conversation, so the book, the top bar, the strip and the centre stay mounted.
  */
-export default function CopilotLab({ link = null, close = false, daily = false }: { link?: PanelLink | null; close?: boolean; daily?: boolean }) {
+export default function CopilotLab({ link: linkProp = null, close = false, daily: dailyProp = false }: { link?: PanelLink | null; close?: boolean; daily?: boolean }) {
   const on = useCopilotOn();
   const router = useRouter();
+  // The desk link on show: the one the page loaded, then each one followed in place. Followed, it is no longer Now.
+  const [view, setView] = useState<{ link: PanelLink | null; daily: boolean }>({ link: linkProp, daily: dailyProp });
+  const { link, daily } = view;
   const navFolded = useFoldedNav();
   const session = useDeskSession(on);
   // Below 1180 px the copilot is a sheet: a deep link or a saved thread opens on it, Now on the cockpit.
@@ -96,10 +104,15 @@ export default function CopilotLab({ link = null, close = false, daily = false }
   // conversation only.
   const today = session.data?.day ?? nyDay();
   const onNow = thread ? !!thread.mainDay && thread.mainDay === today : daily;
-  const [rows, setRows] = useState<DeskThread[]>([]);
-  const [rowsRead, setRowsRead] = useState(false);
-  const [live, setLive] = useState<DeskLive | null>(null);
-  const readRows = useCallback((next: DeskThread[], feed?: DeskLive) => { setRows(next); setLive(feed ?? null); setRowsRead(true); }, []);
+  // The book's last read shows at once on a remount (the thread list reads it again behind it).
+  const [keptRows, keepRows] = useKept<{ rows: DeskThread[]; live: DeskLive | null }>("desk.rows");
+  const [rows, setRows] = useState<DeskThread[]>(() => keptRows?.rows ?? []);
+  const [rowsRead, setRowsRead] = useState(!!keptRows);
+  const [rowsFresh, setRowsFresh] = useState(false); // read since this mount, not only kept
+  const [live, setLive] = useState<DeskLive | null>(() => keptRows?.live ?? null);
+  const readRows = useCallback((next: DeskThread[], feed?: DeskLive) => {
+    setRows(next); setLive(feed ?? null); setRowsRead(true); setRowsFresh(true); keepRows({ rows: next, live: feed ?? null });
+  }, [keepRows]);
   const [saved, setSaved] = useState<InvestigationSummary[]>([]);
   const [palette, setPalette] = useState(false);
   const [threadsShown, setThreadsShown] = useState(false);
@@ -132,19 +145,63 @@ export default function CopilotLab({ link = null, close = false, daily = false }
   const desk = useRef<HTMLDivElement>(null);
   const [deciding, setDeciding] = useState(false);
   const sent = useRef(0);
+  const [answering, setAnswering] = useState(false); // the close pass's fills to link, in the conversation pane
+  const [arming, setArming] = useState(false); // Arm today's plans' checklist, in the conversation pane
+  // The open thread is in the address (below). Now in place marks ``toNow``: the Main chat it opens replaces the bare
+  // address, as a fresh load's does.
+  const addressed = useRef<string | null>(null);
+  const toNow = useRef(false);
+  // A desk link followed in place: the address changes (a step Back undoes; the same address again replaces itself), the
+  // copilot starts its conversation as a fresh load of it would. Anything else (a Radar hit, an investigation, another
+  // page) is a navigation.
+  const followLink = useCallback((next: PanelLink) => {
+    setView({ link: next, daily: false });
+    setCommand({ kind: "link", link: next, n: ++sent.current });
+    setSheet(true);
+    setArming(false);
+    setAnswering(false);
+  }, []);
+  // Now (the top bar's, the breadcrumb's, Back to the bare address): today's Main chat in place, its address replacing
+  // the bare one as a fresh load's does.
+  const onNowShown = useRef(onNow);
+  useEffect(() => { onNowShown.current = onNow; }, [onNow]);
+  const goNow = useCallback((push: boolean) => {
+    if (onNowShown.current) return; // already on today's Main chat
+    if (push && window.location.search) window.history.pushState(null, "", "/copilot-lab");
+    toNow.current = true;
+    setView({ link: null, daily: true });
+    setCommand({ kind: "now", n: ++sent.current });
+    setSheet(false);
+    setArming(false);
+    setAnswering(false);
+  }, []);
   const actions = useMemo<HomeActions>(() => ({
     open: id => { setCommand({ kind: "open", id, n: ++sent.current }); setSheet(true); if (narrow()) setThreadsShown(false); },
     ask: text => { setCommand({ kind: "ask", text, n: ++sent.current }); setSheet(true); },
     // Back to Now from any thread or deep link, without carrying its conversation into the new view.
-    home: () => { window.location.assign("/copilot-lab"); },
-  }), []);
+    home: () => goNow(true),
+  }), [goNow]);
   const fill = useCallback((text: string) => { setCommand({ kind: "fill", text, n: ++sent.current }); setSheet(true); }, []);
-  // Plan a trade (the desk bar's New plan, N and ⌘K): a new conversation with "Plan a trade: " in the box, unsent. Already there,
-  // the same link would not remount the lab, so the page reloads it.
-  const planTrade = useCallback(() => {
-    if (`${window.location.pathname}${window.location.search}` === PLAN_HREF) window.location.assign(PLAN_HREF);
-    else router.push(PLAN_HREF);
-  }, [router]);
+  const go = useCallback((href: string) => {
+    const next = deskLinkIn(href);
+    if (!next) { router.push(href); return; }
+    const to = new URL(href, window.location.origin);
+    const same = to.pathname === window.location.pathname && to.search === window.location.search;
+    window.history[same ? "replaceState" : "pushState"](null, "", `${to.pathname}${to.search}`);
+    followLink(next);
+  }, [router, followLink]);
+  // Anything else that changes the address to such a link (a link inside the copilot, Next's own Back) is followed too,
+  // and so is the bare address (the nav's Desk) while the desk shows something other than Now.
+  const params = useSearchParams();
+  const shownLink = useRef(link);
+  useEffect(() => { shownLink.current = link; }, [link]);
+  useEffect(() => {
+    const next = deskLinkIn(`/copilot-lab?${params.toString()}`);
+    if (next && JSON.stringify(next) !== JSON.stringify(shownLink.current)) followLink(next); // the address moved
+    else if (!params.size && !toNow.current) goNow(false);
+  }, [params, followLink, goNow]);
+  // Plan a trade (the desk bar's New plan, N and ⌘K): a new conversation with "Plan a trade: " in the box, unsent.
+  const planTrade = useCallback(() => go(PLAN_HREF), [go]);
   const [refresh, setRefresh] = useState(0);
   // Mark plan done in the thread menu: only for a plan row (armed and not entered, or exited), never a held position's.
   const [planSymbol, setPlanSymbol] = useState<string | null>(null);
@@ -157,7 +214,6 @@ export default function CopilotLab({ link = null, close = false, daily = false }
 
   // The open thread is in the address, so Back and a reload come back to it: opening another adds a step, and the thread
   // the desk reopened by itself takes the bare address's place. Only the address changes, so the lab stays mounted.
-  const addressed = useRef<string | null>(null);
   const reopened = useRef<string | null>(null);
   useEffect(() => { reopened.current = rememberedThread(); }, []);
   const threadId = thread?.id ?? null;
@@ -166,28 +222,33 @@ export default function CopilotLab({ link = null, close = false, daily = false }
     if (threadId === addressed.current) return;
     // Only the Main chat Now opened (or the thread the desk reopened) takes the bare address's place; a thread the owner
     // opens from Now adds a step, so Back returns to Now even before (or without) today's Main chat.
-    const quiet = !addressed.current && ((daily && threadMain) || threadId === reopened.current);
+    const quiet = (toNow.current && threadMain) || (!addressed.current && ((daily && threadMain) || threadId === reopened.current));
+    toNow.current = false;
     addressed.current = threadId;
     reopened.current = null;
-    if (threadId === threadInUrl() || (!threadId && !window.location.search)) return;
+    // A desk link followed in place already has its address.
+    if (threadId === threadInUrl() || (!threadId && (!window.location.search || deskLinkIn(`${window.location.pathname}${window.location.search}`)))) return;
     window.history[quiet ? "replaceState" : "pushState"](null, "", threadId ? `/copilot-lab?thread=${threadId}` : "/copilot-lab?view=new");
   }, [threadId, threadMain, daily]);
   useEffect(() => {
     const back = () => {
       const id = threadInUrl();
+      const next = deskLinkIn(`${window.location.pathname}${window.location.search}`);
       if (id) actions.open(id);
-      else window.location.reload(); // a deep link's address: its question comes back with it
+      else if (next) followLink(next); // a desk link: its conversation starts again in place
+      else if (!window.location.search) goNow(false);
+      else window.location.reload(); // another deep link: its question comes back with it
     };
     window.addEventListener("popstate", back);
     return () => window.removeEventListener("popstate", back);
-  }, [actions]);
+  }, [actions, followLink, goNow]);
 
   // A row opens the way the thread list opens it: an investigation in place, anything else by its link.
   const pick = useCallback((row: DeskThread) => {
     if (narrow()) setThreadsShown(false); // over the whole screen it gives way; beside the copilot it stays
     if (row.investigationId) actions.open(row.investigationId);
-    else if (row.path) router.push(row.path);
-  }, [actions, router]);
+    else if (row.path) go(row.path);
+  }, [actions, go]);
 
   // A row in the book opens the way the thread list's ticker does: its own conversation, else the symbol's newest open one,
   // else its link; a position whose link leaves the desk (its trade page) opens the symbol's desk view instead.
@@ -196,8 +257,8 @@ export default function CopilotLab({ link = null, close = false, daily = false }
     if (row.investigationId) actions.open(row.investigationId);
     else if (talk) actions.open(talk.id);
     else if (row.path?.startsWith("/copilot-lab") || !row.symbol) pick(row);
-    else router.push(`/copilot-lab?${new URLSearchParams({ symbol: row.symbol })}`);
-  }, [actions, pick, router, saved]);
+    else go(`/copilot-lab?${new URLSearchParams({ symbol: row.symbol })}`);
+  }, [actions, pick, go, saved]);
 
   // Fills waiting for their plan: one bar at the top of the symbol's thread, and "N fills to link" opening each in turn.
   const fills = useFillLinks(rows, pick, () => setRefresh(n => n + 1));
@@ -233,11 +294,10 @@ export default function CopilotLab({ link = null, close = false, daily = false }
   }, []);
   const review = useCallback((row: DeskThread) => {
     if (row.investigationId) actions.open(row.investigationId);
-    else router.push(`/copilot-lab?${new URLSearchParams({ symbol: row.symbol! })}`); // opens on the symbol's question
-  }, [actions, router]);
+    else go(`/copilot-lab?${new URLSearchParams({ symbol: row.symbol! })}`); // opens on the symbol's question
+  }, [actions, go]);
   const [passed, setPassed] = useState<ReadonlySet<string>>(() => new Set()); // answered or skipped this visit
   const steps = dayPhase === "close" ? closeSteps(fills.waiting, passed) : [];
-  const [answering, setAnswering] = useState(false);
   const pass = useCallback((id: string) => setPassed(prev => new Set(prev).add(id)), []);
   // "N of M done": every followed thread asked today (one per symbol) and, after 16:00, the fills to link. A skip is not done.
   const asked = new Map(rows.filter(r => r.close && r.symbol && !r.hidden).map(r => [r.symbol, !!r.close!.reviewed]));
@@ -282,7 +342,6 @@ export default function CopilotLab({ link = null, close = false, daily = false }
 
   // The desk bar's phase action: before the open on a weekday, Arm today's plans (a checklist of the armed plans in the
   // conversation pane; nothing is armed, sized or sent from it); after 16:00, Close the day.
-  const [arming, setArming] = useState(false);
   // Opening another thread leaves the checklist or the pass; Main chat arriving under Now (a first open, from no thread)
   // does not, so ?close=1's pass or an early Arm survives a Main chat that loads after it started.
   const lastThread = useRef<string | null>(null);
@@ -430,18 +489,18 @@ export default function CopilotLab({ link = null, close = false, daily = false }
     const talk = item.investigation_id ?? (symbol ? deskRow(symbol)?.investigationId ?? rows.find(r => r.symbol === symbol && r.investigationId)?.investigationId
       ?? saved.filter(t => t.symbol === symbol && t.status !== "closed").sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]?.id ?? null : null);
     if (talk) { setCommand({ kind: "open", id: talk, text, n: ++sent.current }); setSheet(true); }
-    else if (symbol) router.push(copilotLabHref(symbol, text));
+    else if (symbol) go(copilotLabHref(symbol, text));
     else if (!thread || thread.mainDay === today) fill(text);
-    else router.push(copilotLabHref("", text));
-  }, [today, deskRow, rows, saved, router, thread, fill]);
+    else go(copilotLabHref("", text));
+  }, [today, deskRow, rows, saved, go, thread, fill]);
   // A feed item's Plan it: a Radar setup card opens on its own Plan it (the desk's Radar card); his own position or plan
   // opens its plan thread, else the plan form for the symbol. Nothing is saved or sent from the feed.
   const planFeed = useCallback((item: FeedItem) => {
-    if (item.plan === "setup" && item.href) { router.push(item.href); return; }
+    if (item.plan === "setup" && item.href) { go(item.href); return; }
     const id = item.investigation_id ?? (item.symbol ? deskRow(item.symbol)?.investigationId ?? rows.find(r => r.symbol === item.symbol && r.investigationId)?.investigationId : null);
     if (id) actions.open(id);
-    else if (item.symbol) router.push(copilotLabHref(item.symbol, planContext(), { kind: "copilot", ref: null }));
-  }, [router, deskRow, rows, actions]);
+    else if (item.symbol) go(copilotLabHref(item.symbol, planContext(), { kind: "copilot", ref: null }));
+  }, [go, deskRow, rows, actions]);
 
   // The strip: the one most urgent item and its answers (``deskNeeds``' documented order).
   const closingNow = dayPhase === "close";
@@ -485,13 +544,14 @@ export default function CopilotLab({ link = null, close = false, daily = false }
         )}
         <h1 className={styles.title}><MessagesSquare size={17} aria-hidden />Desk</h1>
         {on && <DeskStatus data={session.data} />}
-        {on && <DayPnl session={session.data} rows={rows} read={rowsRead} />}
-        {on && <AccountChips live={live} />}
+        {on && <DayPnl session={session.data} rows={rows} read={rowsFresh} />}
+        {on && <AccountChips live={rowsFresh ? live : null} />}
         {on && <ScalpShortlistNudge />}
         {on && (
           <div className={styles.barActions}>
             {/* The desk's front door: today's Main chat in the copilot. */}
             <Link href="/copilot-lab" aria-current={onNow ? "page" : undefined} title="Back to today: Main chat in the copilot"
+              onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); if (!onNow) goNow(true); }}
               className={cn("inline-flex min-h-11 items-center whitespace-nowrap rounded-md border px-2.5 text-xs sm:min-h-8",
                 onNow ? "bg-secondary font-medium text-foreground max-md:hidden" : "text-muted-foreground hover:text-foreground")}>Now</Link>
             {/* No count here: what needs him is the strip's, counted once there. */}
@@ -534,7 +594,7 @@ export default function CopilotLab({ link = null, close = false, daily = false }
         )}
         {on && (
           <div className={styles.book}>
-            <Book rows={rows} sparks={sparks} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} onSelect={select} onFollow={changeFollow}
+            <Book rows={rows} sparks={sparks} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} updating={rowsRead && !rowsFresh} onSelect={select} onFollow={changeFollow}
               live={live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} />
             {lower}
             <DayFacts session={session.data} />

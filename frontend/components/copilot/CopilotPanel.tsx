@@ -877,15 +877,66 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     return () => controller.abort();
   }, [pageSymbol]); // eslint-disable-line react-hooks/exhaustive-deps -- only a change of the page's symbol moves an empty panel
 
-  // The desk's thread list: open a saved investigation or ask across everything, never while a turn runs.
+  /** A desk link followed in place (a position picked in the book): a new conversation on it, exactly as the page's first
+   * read of that link starts one, without remounting the desk. A read still opening another conversation is dropped. */
+  function enter(entry: PanelLink) {
+    stopLanding();
+    pendingOutcomes.current.clear();
+    pendingRatings.current.clear();
+    following.current = panel;
+    setOpeningMain(false);
+    setMenu(false);
+    setMessages([]);
+    setCurrent(null);
+    setConclusion("");
+    setSaveState(null);
+    setSymbol(entry.symbol);
+    activateDraft(keyFor(entry.symbol, null, entry), entry.context ? `Context: ${entry.context}\n\n` : "", entry);
+    remember(null);
+    (scroller.current ?? window).scrollTo({ top: 0 });
+  }
+
+  /** Now in place: today's Main chat, opened as the desk's bare address opens it. The conversation being left goes at
+   * once; should Main chat not open, the box asks as a new conversation, as on a page load. */
+  function openNow() {
+    stopLanding();
+    pendingOutcomes.current.clear();
+    pendingRatings.current.clear();
+    following.current = panel;
+    setMenu(false);
+    setMessages([]);
+    setCurrent(null);
+    setConclusion("");
+    setSaveState(null);
+    setSymbol("");
+    activateDraft(keyFor(""));
+    remember(null);
+    setOpeningMain(true);
+    const request = ++selection.current;
+    openDailyMain().then(saved => { if (request === selection.current) open(saved); }).catch(error => {
+      if (request !== selection.current) return;
+      setOpeningMain(false);
+      setSaveState({ state: "error", message: String(error) });
+    });
+  }
+
+  // The desk's thread list: open a saved investigation or ask across everything, never while a turn runs. A link waits for
+  // the running turn (and the lab's status) instead: the desk already shows its address.
+  const handled = useRef(0);
   useEffect(() => {
     const command = desk?.command;
-    if (!command || busy || status?.enabled !== true) return;
+    if (!command || command.n === handled.current) return;
+    const ready = !busy && status?.enabled === true;
+    if ((command.kind === "link" || command.kind === "now") && !ready) return;
+    handled.current = command.n;
+    if (!ready) return;
     if (command.kind === "open") void resume(command.id, command.text);
     else if (command.kind === "fill") fill(command.text);
     else if (command.kind === "home") startNew("");
+    else if (command.kind === "link") enter(command.link);
+    else if (command.kind === "now") openNow();
     else { setSymbol(""); void send(command.text, ""); }
-  }, [desk?.command]); // eslint-disable-line react-hooks/exhaustive-deps -- each command acts once, when it arrives
+  }, [desk?.command, busy, status?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps -- each command acts once
 
   // The desk's inspector follows the open investigation.
   const onThread = desk?.onThread;

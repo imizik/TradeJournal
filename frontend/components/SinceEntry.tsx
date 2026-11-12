@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useKept } from "@/components/copilot/DeskMemory";
 import { fetchPositionContext, type PositionRecord, type SinceLine } from "@/lib/chartJournal";
 import { cn } from "@/lib/utils";
 
@@ -164,11 +165,13 @@ export function SinceEntryLines({ record, className, collapsible = false }: { re
   );
 }
 
-/** Reads the symbol's records and shows the one for ``tradeId`` (else the first). Nothing while there is no position. */
+/** Reads the symbol's records and shows the one for ``tradeId`` (else the first). Nothing while there is no position. On
+ * the desk the symbol's last read (its "as of" on it) shows at once while the fresh one is on the way. */
 export default function SinceEntry({ symbol, tradeId = null, className, collapsible = false }: {
   symbol: string; tradeId?: string | null; className?: string; collapsible?: boolean;
 }) {
   const [read, setRead] = useState<{ symbol: string; records: PositionRecord[] } | { symbol: string; error: true } | null>(null);
+  const [kept, keep] = useKept<PositionRecord[]>(`desk.since:${symbol}`);
   useEffect(() => {
     let controller = new AbortController();
     const load = () => {
@@ -176,15 +179,16 @@ export default function SinceEntry({ symbol, tradeId = null, className, collapsi
       controller = new AbortController();
       const signal = controller.signal;
       fetchPositionContext(symbol, signal)
-        .then(data => { if (!signal.aborted) setRead({ symbol, records: data.positions }); })
+        .then(data => { if (!signal.aborted) { setRead({ symbol, records: data.positions }); keep(data.positions); } })
         .catch(() => { if (!signal.aborted) setRead({ symbol, error: true }); });
     };
     load();
     const timer = setInterval(() => { if (document.visibilityState === "visible") load(); }, REFRESH_MS);
     return () => { controller.abort(); clearInterval(timer); };
-  }, [symbol]);
-  if (!read || read.symbol !== symbol) return null;
-  if ("error" in read) return <p role="status" className={cn("text-xs text-muted-foreground", className)}>Since-entry context unavailable right now.</p>;
-  const record = read.records.find(r => r.trade_id === tradeId) ?? read.records[0];
+  }, [symbol, keep]);
+  const shown = read?.symbol === symbol ? read : kept ? { symbol, records: kept } : null;
+  if (!shown) return null;
+  if ("error" in shown) return <p role="status" className={cn("text-xs text-muted-foreground", className)}>Since-entry context unavailable right now.</p>;
+  const record = shown.records.find(r => r.trade_id === tradeId) ?? shown.records[0];
   return record ? <SinceEntryLines record={record} className={className} collapsible={collapsible} /> : null;
 }

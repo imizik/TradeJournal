@@ -553,7 +553,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   (no invalidation and no time stop) or **On plan**. These come from each position row's `book`
   (`copilot_desk._book`). Selecting a row shows it in the centre at once and, where the copilot sits beside it, opens
   its conversation (its own, else the ticker's newest open one, else its link; a position whose link leaves the desk
-  opens the symbol's desk view). Each row's eye sets its ticker to **Not following**; those sit behind "N not followed
+  opens the symbol's desk view). The desk never reloads for it: a symbol's desk view opens in place (see *The address*
+  below), so the book, the top bar, the strip and the centre keep their data. Each row's eye sets its ticker to **Not following**; those sit behind "N not followed
   ▾" at the bottom, each with Show again. Under the book, the time of day's block (below), then one quiet facts line:
   **At risk now** (see Exposure) and the practice goal.
 - **Live from Robinhood** ([robinhood-read-feed.md](robinhood-read-feed.md); off unless `ROBINHOOD_READ_ENABLED=true`
@@ -1132,7 +1133,25 @@ unsent "Plan a trade: " link as the desk bar's Plan a trade; Review my week and 
 matters right now? send their one turn exactly as their pinned rows do; Prep
 the day and Close the day only put a question in the message box, unsent.
 The open thread is in the address (`/copilot-lab?thread=<id>`), so Back returns
-to the thread before it and a reload stays on it. The bare address opens Main chat for the current New York date. While not typing in a field: J / K open the next or previous
+to the thread before it and a reload stays on it. The bare address opens Main chat for the current New York date.
+
+*The address* (since 2026-11-12). A page load of a desk link (a phone ping's `?symbol=…&context=…`, `?radar=`,
+`?investigation=`, `?close=1`, `?ticket=`, Plan a trade) mounts the desk on it, as before. A link the desk follows
+itself is handled in place instead: a book row, a strip answer, the close pass, a feed item's Ask or Plan it and Plan
+a trade change the address with the History API (`lib/desk.ts` `deskLinkIn`: only a symbol, its `context`, `origin`
+and drawn `plan`; a link with anything else is a navigation) and the copilot starts that conversation exactly as a page
+load of the link would (the `link` desk command), so nothing else on the desk remounts or reads again. Now (the top bar's
+and the breadcrumb's) opens today's Main chat in place the same way. Back and Forward walk the same steps in place, and
+a reload lands where the address says. While a turn runs, a position picked in the book waits for the answer before
+the copilot moves to it. A Radar hit's link (`?symbol=…&radar=…`) and a feed setup card's Plan it still load the page.
+
+The desk's last good reads (the book's rows and Robinhood line, saved conversations, sparklines, the session read,
+and each thread's header and "Since you entered" facts by symbol) are kept in memory for as long as the owner stays on
+`/copilot-lab` (`components/copilot/DeskMemory.tsx`, held by `app/copilot-lab/layout.tsx`; never in storage, gone when
+he leaves the desk), so a remount or a return to a symbol shows them at once while the fresh read is on its way. Kept
+prices are marked: the book shows **Updating…** with its P&L dimmed and the top bar's Open waits for the fresh read;
+a thread header's price block is dimmed until its read lands; "Since you entered" keeps its own as-of time. Only the
+very first load shows "Reading positions…". While not typing in a field: J / K open the next or previous
 conversation as the list shows it (those under Main, then each ticker's
 subthreads when shown, else its newest; folded ones are skipped), N opens Plan a trade (not while the message box holds unsent words), `[` opens or closes the thread list's drawer, and Escape closes the drawer, else the copilot's sheet. No desk key fires in an
 input, text area or editable field, ⌘K included, and no other browser shortcut
