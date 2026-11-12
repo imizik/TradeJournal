@@ -12,13 +12,14 @@ the page does. Run:
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC
 import os
 import time
 
 import pytest
 
 from app.engine import request_timing
-from tests.desk_latency import OPTIONS, latency, slow_desk  # noqa: F401  (fixture)
+from tests.desk_latency import BOOK, OPTIONS, latency, seed_radar, slow_desk  # noqa: F401  (fixture)
 from tests.test_copilot_plans import engine  # noqa: F401  (fixture)
 from tests.test_today import clock  # noqa: F401  (fixture)
 
@@ -84,3 +85,64 @@ def test_desk_latency_table(slow_desk, monkeypatch):  # noqa: F811
         print(f"- {route}: {ms:.0f} ({', '.join(f'{n} {v:.0f}' for n, v in top)})")
     print(f"\nOutside calls made: {len(bench.providers.calls)} "
           f"({', '.join(f'{k} {bench.providers.calls.count(k)}' for k in sorted(set(bench.providers.calls)))})\n")
+
+
+def _sparks_row(bench, client, path) -> tuple[float, str]:
+    """One sparks request: its wall time and the outside calls it made, by path."""
+    before = len(bench.providers.spans)
+    wall, _top = _time(client, path)
+    made = [p for _kind, p, *_ in bench.providers.spans[before:]]
+    return wall, ", ".join(f"{n} {made.count(n)}" for n in sorted(set(made))) or "none"
+
+
+def test_sparks_eleven_symbols(slow_desk, monkeypatch, tmp_path):  # noqa: F811
+    """The book's sparklines for its eleven symbols: cold, warm and at the minute boundary, with the outside calls each
+    made, once with no Radar recording (pre-market, a symbol outside its universe) and once with the recorder live."""
+    bench = slow_desk
+    monkeypatch.setattr(latency, "seconds", LATENCY)
+    path = f"/copilot/desk/sparks?symbols={','.join(BOOK)}"
+    print(f"\n\nLatency per outside call: {LATENCY * 1000:.0f} ms, {len(BOOK)} symbols\n")
+    print("| Radar | Read | ms | Outside calls |")
+    print("|---|---|---:|---|")
+    from app.engine import alpaca
+    from app.engine.chart_math import ET
+    from datetime import datetime
+
+    def batched(path_, params):  # Alpaca's multi-symbol minutes: one slow call for every symbol asked
+        bench.providers.calls.append("alpaca")
+        start = time.perf_counter()
+        time.sleep(LATENCY)
+        bench.providers._span("alpaca", path_, start)
+        opened = datetime.fromtimestamp(bench.clock["t"], ET).replace(hour=9, minute=30, second=0, microsecond=0).timestamp()
+        stamp = lambda i: datetime.fromtimestamp(opened + 60 * i, ET).astimezone(UTC).isoformat().replace("+00:00", "Z")  # noqa: E731
+        return {"bars": {s: [{"t": stamp(i), "c": 50.0 + i / 10} for i in range(200)] for s in params["symbols"].split(",")}}
+    for label_, radar_on, sip in (("none", False, False), ("none, batched read", False, True), ("recorder live", True, False)):
+        if radar_on:
+            seed_radar(tmp_path / "radar.sqlite", bench.clock["t"], (*BOOK, "SPY"), monkeypatch=monkeypatch)
+        monkeypatch.setattr(alpaca, "alpaca_configured", lambda sip=sip: sip)
+        monkeypatch.setattr(alpaca, "_alpaca_get_fast", batched)
+        for label in ("cold", "warm", "minute boundary"):
+            if label != "warm":
+                bench.expire()
+            wall, calls = _sparks_row(bench, bench.client, path)
+            print(f"| {label_} | {label} | {wall:.0f} | {calls} |")
+    # The first paint with the book's sparklines among its other reads, cold: each read's own wait, so what the sparks
+    # hold up shows (the page does not wait for them to draw the book).
+    paths = FIRST_PAINT[:3] + [path]
+
+    def timed_get(one):
+        start = time.perf_counter()
+        assert bench.client.get(one).status_code == 200
+        return (time.perf_counter() - start) * 1000
+    print("\n| First paint, cold | threads ms | session ms | feed ms | sparks ms |\n|---|---:|---:|---:|---:|")
+    for label_, radar_on in (("recorder live", True), ("no recorder, no batched read", False)):
+        monkeypatch.setattr(alpaca, "alpaca_configured", lambda: False)
+        if radar_on:
+            monkeypatch.setenv("RADAR_ENABLED", "true")
+        else:
+            monkeypatch.delenv("RADAR_ENABLED", raising=False)
+        bench.expire()
+        with ThreadPoolExecutor(len(paths)) as pool:
+            took = list(pool.map(timed_get, paths))
+        print(f"| {label_} | " + " | ".join(f"{ms:.0f}" for ms in took) + " |")
+    print()

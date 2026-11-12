@@ -223,28 +223,3 @@ def test_assistant_sessions_cannot_reach_it(boundary, monkeypatch):  # noqa: F81
     assert owner.status_code == 200, owner.text
     assert signin(boundary).status_code == 200
     assert boundary.public.get("/copilot/desk/session").status_code == 403
-
-
-def test_sparks_are_todays_closes_thinned_with_the_change_against_spy(desk, quotes, monkeypatch):  # noqa: F811
-    from app.engine import ping_images
-    monkeypatch.setattr(copilot_desk, "_spark_cache", {})
-    minute = lambda m: OPEN + 60 * m  # noqa: E731
-    bars = {"NBIS": [{"time": minute(m), "close": 90.0 + m / 100, "extended": False} for m in range(200)],
-            "MU": [{"time": minute(-30), "close": 1.0, "extended": True}]}  # pre-market only, then the session's none
-
-    def read_bars(symbol):
-        if symbol == "BAD":
-            raise RuntimeError("no feed")
-        return bars.get(symbol, [])
-    monkeypatch.setattr(ping_images, "today_bars", read_bars)
-    quotes["rows"] += [{"symbol": "SPY", "last": 580.0, "change_percentage": 0.4}, {"symbol": "MU", "last": 1.0, "change_percentage": -1.2}]
-    response = desk.get("/copilot/desk/sparks", params={"symbols": "nbis,MU,BAD,../x"})
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert set(body["rows"]) == {"NBIS", "MU"} and body["spy_change_pct"] == 0.4
-    nbis = body["rows"]["NBIS"]["points"]
-    assert len(nbis) <= copilot_desk.SPARK_POINTS + 1 and nbis[0] == 90.0 and nbis[-1] == 91.99
-    assert body["rows"]["MU"] == {"points": [1.0], "change_pct": -1.2}
-    assert desk.get("/copilot/desk/sparks").json()["rows"] == {}
-    bars["NBIS"] = []  # within 30 seconds the same symbols reuse the answer
-    assert desk.get("/copilot/desk/sparks", params={"symbols": "nbis,MU,BAD,../x"}).json() == body

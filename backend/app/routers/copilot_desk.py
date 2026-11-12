@@ -1034,67 +1034,17 @@ def _realized_today(db: Session, day) -> dict:
     return {"state": "ok", "usd": round(sum(float(v) for v in found), 2)}
 
 
-SPARK_POINTS = 48  # a book row's sparkline: today's minutes, thinned to this many closes
-SPARK_SYMBOLS = 12
-SPARK_BUDGET_SECONDS = 6.0
-SPARK_CACHE_SECONDS = 30  # every open desk reads once a minute: a repeat within this reuses the answer
-_spark_cache: dict[str, tuple[float, dict]] = {}
-
-
 @router.get("/desk/sparks")
 def desk_sparks(symbols: str = ""):
     """Each named symbol's day so far for the desk's book rows: today's minute closes (the regular session once it has
-    bars, before that the pre-market; the same cached chart-feed read as the desk picture), thinned to ``SPARK_POINTS``,
-    and its change today against the previous close with SPY's beside it. A symbol whose read fails or runs past the
+    bars, before that the pre-market), thinned to 48, and its change today against the previous close with SPY's beside
+    it. Built from what the app already has before it asks a provider (``app/engine/desk_sparks.py``: Radar's recorder,
+    the chart feed's cache, one batched read, then low-priority reads); a symbol whose read fails or runs past the 6 s
     budget is left out. Read-only, owner-only, refused while the lab is off."""
     if not copilot.settings().enabled:
         raise HTTPException(503, "Copilot Lab is off.")
-    from concurrent.futures import ThreadPoolExecutor, wait
-    from app.engine import desk_context, ping_images
-    from app.engine.chart_feed import chart_feed
-    names = sorted({s.strip().upper() for s in symbols.split(",") if s.strip().replace(".", "").isalnum()})[:SPARK_SYMBOLS]
-    now = today._now()
-    key = ",".join(names)
-    cached = _spark_cache.get(key)
-    if cached and 0 <= now - cached[0] < SPARK_CACHE_SECONDS:
-        return cached[1]
-
-    def closes(symbol: str) -> list[float]:
-        shown = desk_context._today_shown(ping_images.today_bars, symbol, now)
-        step = max(1, -(-len(shown) // SPARK_POINTS))
-        points = [b["close"] for b in shown[::step]]
-        if shown and (len(shown) - 1) % step:
-            points.append(shown[-1]["close"])
-        return points
-
-    from app.engine.request_timing import timed
-    rows: dict[str, dict] = {}
-    # The changes' quote read starts beside the minute reads (every named symbol and SPY: one call either way; a symbol
-    # whose line failed is still left out below).
-    quoted_ahead = today._ahead("sparks quotes", lambda: {"state": "ok", "rows": chart_feed.quote_rows(sorted(set(names) | {"SPY"}))[0]})
-    if names:
-        pool = ThreadPoolExecutor(max_workers=4)
-        jobs = {pool.submit(closes, name): name for name in names}
-        with timed("sparks closes"):
-            done, _late = wait(jobs, timeout=SPARK_BUDGET_SECONDS)
-        pool.shutdown(wait=False, cancel_futures=True)
-        for job in done:
-            try:
-                rows[jobs[job]] = {"points": job.result(), "change_pct": None}
-            except Exception:  # noqa: BLE001 -- one symbol's failed read leaves it out
-                log.warning("desk spark failed for %s", jobs[job], exc_info=True)
-    spy = None
-    read = quoted_ahead.get()  # its failure is logged by the section; the changes are extra, the lines stand without them
-    if read["state"] == "ok":
-        quoted = {r["symbol"]: r.get("change_percentage") for r in read["rows"]}
-        spy = quoted.get("SPY")
-        for name, row in rows.items():
-            row["change_pct"] = quoted.get(name)
-    body = {"as_of": today._iso(now), "rows": rows, "spy_change_pct": spy}
-    if len(_spark_cache) > 64:
-        _spark_cache.clear()
-    _spark_cache[key] = (now, body)
-    return body
+    from app.engine import desk_sparks as sparks
+    return sparks.read(symbols, today._now())
 
 
 def waiting(db: Session, now: float) -> dict:

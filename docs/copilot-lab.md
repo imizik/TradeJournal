@@ -3764,8 +3764,8 @@ provider cache expired and the Robinhood snapshot due; both columns measured the
 when today's minute bars are read). The cold first paint also paid the market calendar, which a fresh process holds
 only in memory: the startup warm-up now reads it. What is left is the sparklines: each symbol's minute bars is its own
 read, and the chart feed lets four go at once (§ above), so twelve symbols are three rounds, and on a cold page they
-take the feed's four places ahead of the other reads. The book's rows do not wait for them (a separate read). What
-changed:
+take the feed's four places ahead of the other reads. The book's rows do not wait for them (a separate read); the sparklines paragraph below is what changed
+for them. What changed for the rest:
 
 - Robinhood was already never read on a request path: a desk read returns the last snapshot with its own as-of and
   starts one background refresh when it is due (`docs/robinhood-read-feed.md`). A test now holds that for every desk
@@ -3786,6 +3786,54 @@ changed:
 Unproven live: the bench's latency is chosen, not measured, and production's journal, Radar file and Tradier are not
 the bench's. `GET /copilot/desk/timings` after a day of use says where the real time goes (each route's p90 and its
 sections'); the Radar file, which a reader may wait on while the recorder writes, is the likeliest remaining wait.
+
+**The sparklines (2026-11-12).** With the book's eleven symbols the sparklines were still the slowest desk read
+(`desk/sparks`: 1.1 s at every minute boundary, 1.4 s cold; eleven minute reads plus one quote read) and, fired with the
+other reads, held the chart feed's four places so the rest queued. Each line now comes from the cheapest source that has
+today's minutes (`backend/app/engine/desk_sparks.py`; the route, its shape, its 6 s budget and its owner-only rule are
+unchanged), in this order:
+
+1. **Radar's recorder**, in the regular session: the price it already writes each minute for its 169 symbols (the whole
+   book is in them), read from its file in one query on a 1.5 s deadline, and the previous close it recorded, which is
+   the change's base (the same Tradier quote fields as before). Used only when the recorder has covered the day: at
+   least two passes, the first within five minutes of the open, none more than 15 minutes after another, the newest
+   within three minutes. A recorder that started late, is down or has a hole is not "the day so far", so the line falls to
+   the next source.
+2. **The chart feed's cache**: the minute bars of a chart for that symbol drawn in the last two minutes
+   (`chart_feed.peek_minutes`).
+3. **One batched Alpaca read** for what is left (two or more symbols), on the SIP feed like the charts (IEX bars never
+   reach a chart). Tradier has no multi-symbol minute bars. If Alpaca is not set up, refuses (an account without recent
+   SIP minutes answers 403), fails, or needs more than three pages, it is off for ten minutes and the symbols fall to 4.
+   **Unproven live: whether the production account may read recent SIP minutes.**
+4. **One Tradier minute read per symbol at low priority** (`chart_feed.read(low=True)`, `today_minutes`): at most two
+   at once (half of the four places), and one starts only when no other read is waiting for a place; until then it is
+   not registered as the request in flight, so a chart asking for the same minutes never waits on it. The feed's cap
+   and the 60-a-minute budget are unchanged.
+
+The changes come from the recorder's rows where it covered the symbol and SPY, else from one quote read for just the
+rest. A symbol still unread when the 6 s budget ends is left out; its read carries on and stores the line, so the next
+refresh finds it (reads not yet started are dropped). A line is kept a minute (five after the regular close, while
+after-hours minutes still come in), and once the extended session is over, or on a day with no session, until midnight
+or 04:00 New York, whichever comes first (a line built in the first three minutes after the last window ends is kept
+only five, so the final minutes are read once more); a line also carries its New York date and is never served on another. A read
+that failed and fell back to old cached minutes or quote rows more than two minutes old is no line or change, not an old one. A symbol with no
+bars today has an empty line (the book draws none); one that cannot be read has no row.
+
+Same bench, eleven symbols, 350 ms per outside call (`test_sparks_eleven_symbols`; `DESK_BENCH=1`), `desk/sparks`
+before → after:
+
+| Case | Cold | Warm | Minute boundary | Outside calls per refresh |
+|---|---|---|---|---|
+| Recorder live (regular session) | 1086 → 8 ms | 1 → 1 ms | 1082 → 8 ms | 12 → 0 |
+| No recorder, Alpaca batched read works | 1085 → 382 ms | 2 → 2 ms | 1080 → 378 ms | 12 → 2 (1 quote, 1 Alpaca) |
+| No recorder, no batched read | 1441 → 2147 ms | 2 → 2 ms | 1079 → 2141 ms | 12 → 12 (1 quote, 11 minute reads, two at a time) |
+
+The last row is the price of staying out of the others' way: the sparklines alone take longer (six rounds of two instead of
+three of four) but no longer fill the feed. The browser keeps showing the last lines while a refresh is in flight
+(`DeskMemory`). With the recorder live the sparks no longer wait on the chart feed at all. Unproven live: production's
+Radar file reads (its timings page will show `sparks radar`), whether the SIP read is allowed, and how often the
+fall-through cases occur (pre-market, after-hours, symbols outside Radar's universe). `GET /copilot/desk/timings`
+after a day of use says: `desk/sparks` p50/p90 and its `sparks radar`, `sparks closes` and `sparks quotes` sections.
 
 ## Live measurements (2026-10-24)
 
