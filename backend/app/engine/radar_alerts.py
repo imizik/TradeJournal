@@ -351,7 +351,7 @@ class RadarAlerts:
                               .order_by(RadarAlert.first_seen_at.desc(), RadarAlert.event_id)).all()
             # A stock the owner set to not followed on the desk leaves the digest's lines and count; its event is kept, held.
             from app.engine import day_journal
-            hidden = day_journal.not_following(db)
+            hidden = day_journal.quiet(db)
             for alert in waiting:
                 if alert.kind != "group_move" and alert.subject in hidden:
                     alert.delivery, alert.last_error = "held", f"Not followed on the desk, so {alert.subject} was left out of the digest."

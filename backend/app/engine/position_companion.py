@@ -418,7 +418,7 @@ def save_messages(investigation_id, messages: list[dict], *, status: str | None 
 
 def _hidden(db: Session) -> set[str]:
     from app.engine import day_journal
-    return day_journal.not_following(db)
+    return day_journal.quiet(db)
 
 
 def trade_of(db: Session, row: PositionCompanion) -> Trade | None:
@@ -798,6 +798,8 @@ class Companion:
         live = db.exec(select(PositionCompanion).where(PositionCompanion.state.in_(("adopting", "draft", "armed")),
                                                        PositionCompanion.watched.is_(True))
                        .order_by(PositionCompanion.opened_at.desc(), PositionCompanion.detected_at.desc())).all()
+        hidden = _hidden(db) if live else set()
+        live = [row for row in live if row.ticker not in hidden]  # a hidden one gets no turn, so it takes no slot
         for row in live[max_positions():]:
             row.watched = False
             db.add(row)

@@ -2622,8 +2622,9 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   stock, and the first-pullback ping. The last-day and invalidation alerts, which no
   budget or quiet window ever holds, are held here too, by the owner's decision of
   2026-11-11 ("Yes, silence them"). The ticker is the ping's symbol, else its trade's.
-  Pings with no ticker are never held for it (the brief, the week and evening
-  reviews, Watch your day, research, a Radar group move or digest); the brief, the
+  A research result names its first symbol and is held the same way. Pings with no
+  ticker are never held for it (the brief, the week and evening reviews, Watch your
+  day, a Radar group move or digest); the brief, the
   week review and the Radar digest leave the ticker out of their own text and
   counts instead (§ Pre-market prep, [Radar](radar.md)), and the evening review's
   "pings held today" leaves these holds out. The sender's own row is still
@@ -2632,8 +2633,13 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   as before: the scorecard scores alerts that reached the phone, so a held one is
   not scored, as with any other hold. A held ping spends no budget and opens no
   quiet window. Show again ends it from the next ping on; a ping already held stays
-  held on its retry. Senders that do not ask the policy are not covered: a Charts
-  level alert the owner set by hand (not a plan's), and Jo's senders (Codex).
+  held on its retry, and a ping already judged `sent` whose send is being retried
+  still goes out (a retry keeps its first answer). Senders that do not ask the
+  policy are not covered: a level alert that is not a confirmed copilot plan's
+  entry or invalidation (one the owner set by hand on Charts, or confirmed in the
+  lab without a plan role), the S1 setup scanner's push (`setup_scanner.py`), the
+  Practice paper-trade pings (`paper.py`), and Jo's senders (Codex: stock watch,
+  conditional plans, market-watch wakes).
 - **Budgets:** each kind from interrupt down has its own budget a New York day, so
   one kind spending its pings never takes another's (on October 29, 2026 the old
   shared pool was spent by 09:50 on prep, thesis watch, research and nudges, and
@@ -2789,8 +2795,10 @@ long theses, reviewed weekly. Nothing here places, changes or suggests an order,
   in it is recorded `not_followed` with the reason instead of adopted (no turn, no ping); an adopted one gets no
   update while hidden (each pass moves its `last_update_at` and `last_underlying` on and its `last_error` says why),
   and a close while hidden is quiet, like an adopt-only one (thread closed, no exit note). Show again picks it up
-  from then on: a `not_followed` row is claimed as a new adopt while its entry is still today's, and an adopted
-  one's updates resume, counting only what happens after; nothing from the hidden stretch is back-filled.
+  from then on: a `not_followed` row is claimed as a new adopt while its entry is still today's (one opened on an
+  earlier day is never adopted, and plan nudges leave long options to the companion, so it gets neither; its
+  open-trade alerts resume), and an adopted one's updates resume, counting only what happens after; nothing from
+  the hidden stretch is back-filled. A hidden adopted position takes none of the `COMPANION_MAX_POSITIONS` slots.
 - **Delivery** is at-most-once: a failed send is recorded on the row, never retried. A Confirm needs Telegram (ntfy
   has no reply buttons); without it, plan the position on the desk.
 - **Switch on:** `POSITION_COMPANION_ENABLED=true` in the API's environment (needs `COPILOT_ENABLED=true` and
@@ -2879,7 +2887,8 @@ this as the one morning brief: Jo's 08:45 briefing (`/morning`) still works
 unchanged, and switching Jo's morning task off is the owner's step.
 
 - **Not followed:** a ticker the owner hid on the desk is left out of the pack's
-  positions, plans, time stops, earnings, headlines and pre-market moves, and its
+  positions, plans, time stops, earnings, headlines and pre-market moves, the
+  Radar pre-market scan's lists and the 09:00 movers, and the ping's picture; its
   positions are named once in `positions.not_followed`.
 - **When:** at `PREMARKET_PREP_AT` (default `09:00` New York; `08:30` before
   2026-11-03) on a day the market calendar has a regular session, never a

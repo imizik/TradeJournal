@@ -18,9 +18,9 @@ The policy, in the order it is applied:
   invalidation, plan nudges and link pings, time stops, fill-time pattern
   interrupts, thesis watch, the companion's adopt, updates and exit notes, a
   Radar single or setup card on the stock, and the first-pullback ping. The
-  ticker is the ping's ``symbol``, else its trade's. A ping with no ticker
-  (digests, the brief, the evening and week reviews, a Radar group move,
-  research) is never held by it: the digests leave the ticker out of their own
+  ticker is the ping's ``symbol``, else its trade's (a research result passes
+  its first symbol). A ping with no ticker (digests, the brief, the evening and
+  week reviews, a Radar group move) is never held by it: the digests leave the ticker out of their own
   text instead. Applied even while ``ALERT_POLICY_ENABLED`` is false (it is the
   owner's own choice, not a throttle), it spends no budget and starts no quiet
   window. Show again on the desk ends it from the next ping on.
@@ -283,13 +283,17 @@ def _decide(db: Session, *, sender: str, source_id: str, kind: str, title: str, 
 
 
 def _not_followed(db: Session, row: PhonePing) -> str | None:
-    """The ping's ticker when the owner set it to not followed on the desk; None for a followed one or a ping with none."""
+    """The ping's ticker when the owner set it to not followed on the desk; None for a followed one or a ping with none.
+    A setting that cannot be read changes nothing: the ping is judged as a followed one."""
     from app.engine import day_journal
+    hidden = day_journal.quiet(db)
+    if not hidden:
+        return None
     ticker = (row.symbol or "").strip().upper()
     if not ticker and row.trade_id is not None:
         trade = db.get(Trade, row.trade_id)
         ticker = trade.ticker.upper() if trade is not None and trade.ticker else ""
-    return ticker if ticker and ticker in day_journal.not_following(db) else None
+    return ticker if ticker in hidden else None
 
 
 def _judge(db: Session, row: PhonePing, now: float) -> None:

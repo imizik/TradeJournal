@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 import json
+import logging
 import re
 
 from sqlalchemy.exc import IntegrityError
@@ -20,6 +21,7 @@ HORIZONS = {"Day trade": "day", "Swing": "swing", "Long hold": "long"}
 FOLLOW = {"Not following": False, "Following": True}
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9./-]{0,14}$")
 MAX_TEXT = 10_000
+log = logging.getLogger(__name__)
 
 
 class EntryError(ValueError):
@@ -57,6 +59,18 @@ def not_following(session: Session) -> set[str]:
         if row.text in FOLLOW:
             following[row.symbol] = FOLLOW[row.text]
     return {symbol for symbol, on in following.items() if not on}
+
+
+def quiet(session: Session) -> set[str]:
+    """``not_following`` for the senders that silence a hidden ticker (phone pings, the companion, the copilot's context,
+    the brief, the Radar digest, the week review): a setting that cannot be read hides nothing, so a broken read never
+    silences a ticker or stops the caller."""
+    try:
+        return not_following(session)
+    except Exception:  # noqa: BLE001
+        log.warning("Not-followed tickers could not be read; treating every ticker as followed", exc_info=True)
+        session.rollback()
+        return set()
 
 
 def done(session: Session) -> dict[str, datetime]:

@@ -437,12 +437,7 @@ def build_pack(db: Session, now: float, calendar=None) -> dict:
     now_et = datetime.fromtimestamp(now, ET)
     today = now_et.date()
     from app.engine import day_journal
-    try:  # a ticker hidden on the desk stays out of the brief: one line in positions says it exists
-        hidden = day_journal.not_following(db)
-    except Exception:  # noqa: BLE001 - the brief still goes, with every name
-        db.rollback()
-        log.warning("premarket prep: not-followed tickers unavailable")
-        hidden = set()
+    hidden = day_journal.quiet(db)  # a ticker hidden on the desk stays out of the brief: one line in positions says it exists
     positions = _section("positions", lambda: _positions(db, now_et, hidden))
     held = [p["symbol"] for p in positions.get("positions", [])]
     plans = _section("plans", lambda: _plans(db, hidden))
@@ -469,6 +464,10 @@ def build_pack(db: Session, now: float, calendar=None) -> dict:
         pack["premarket_scan"] = _section("premarket_scan", lambda: read_premarket_scan(today))
     if _archive_on():
         pack["movers"] = _section("movers", lambda: _movers(today, now))
+    for name, lists in (("premarket_scan", ("flagged", "movers")), ("movers", ("gainers", "losers"))):
+        for key in lists:  # the market-wide lists drop a hidden ticker too
+            if isinstance((pack.get(name) or {}).get(key), list):
+                pack[name][key] = [r for r in pack[name][key] if (r.get("symbol") if isinstance(r, dict) else r) not in hidden]
     return pack
 
 
@@ -776,6 +775,10 @@ class PremarketPreps:
         """One picture: the open options by days to expiry, else the first armed plan's chart."""
         today = datetime.fromtimestamp(now, ET).date()
         options, plan = ping_images.premarket_facts(db, today)
+        from app.engine import day_journal
+        hidden = day_journal.quiet(db)
+        options = [o for o in options if o[0].split(" ")[0] not in hidden]
+        plan = None if plan is not None and plan[0] in hidden else plan
         if options:
             return ping_images.positions_strip("Pre-market · days to expiry", options)
         if plan is None:

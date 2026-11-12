@@ -807,7 +807,7 @@ _follows = iter(range(1, 10_000))
 # the companion, thesis watch, Radar singles and setup cards, the first pullback.
 TICKER_KINDS = ("expiry_final", "expiry_first", "expiry_eve", "giveback", "hold_hour", "wrong_way", "time_stop", "entry", "invalidation",
                 "nudge", "link", "no_plan", "interrupt", "companion_adopt", "companion_update", "thesis_watch", "radar_setup",
-                "radar_event", "first_pullback")
+                "radar_event", "first_pullback", "research")
 
 
 def follow(engine, symbol: str, on: bool):
@@ -901,3 +901,23 @@ def test_position_alerts_on_a_ticker_not_followed_are_written_and_held_and_the_s
     assert len(phone) == 2
     with Session(engine) as db:
         assert db.get(PositionAlert, again).delivery == "sent"
+
+
+def test_an_unreadable_follow_setting_hides_nothing(engine, monkeypatch):
+    from app.engine import day_journal
+
+    def broken(db):
+        raise RuntimeError("table missing")
+    monkeypatch.setattr(day_journal, "not_following", broken)
+    with Session(engine) as db:
+        assert decide(db, "giveback", "g1").action == "send"
+        assert policy.decide(db, sender="first_pullback", source_id="d:SPY", kind="first_pullback", title="t", body="b",
+                             now=at("10:00"), symbol="SPY", new_only=True).action == "send"  # fails closed only on its own claim
+
+
+def test_a_research_result_carries_its_ticker_to_the_policy(engine):
+    follow(engine, "SLS", False)
+    with Session(engine) as db:
+        assert research_queue.gate("job-sls", {"title": "Research: SLS – changed", "message": "m", "symbol": "SLS"}, session=db).held
+        assert research_queue.gate("job-nbis", {"title": "Research: NBIS – changed", "message": "m", "symbol": "NBIS"},
+                                   session=db).action == "send"

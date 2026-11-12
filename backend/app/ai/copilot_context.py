@@ -169,7 +169,7 @@ def _positions(db, symbol: str | None, now_et: datetime, reads=None) -> dict:
     from app.models import Trade
     # A ticker hidden on the desk collapses to one line, unless the turn is about it; the limit grows so it never
     # pushes a followed position out.
-    hidden = day_journal.not_following(db) - {symbol}
+    hidden = day_journal.quiet(db) - {symbol}
     extra = len(db.exec(select(Trade.id).where(Trade.status == "open", Trade.ticker.in_(hidden))).all()) if hidden else 0
     found = trader_context.for_symbol(symbol, now_et.timestamp(), session=db, limit=MAX_POSITIONS + extra, reads=reads)
     quiet = [r["symbol"] for r in found["positions"] if r["symbol"] in hidden]

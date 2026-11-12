@@ -280,12 +280,8 @@ class WeekReviews:
                 return
             monday = row.week_start
             review = copilot_review.week_review(monday.isoformat(), session=db)
-            try:
-                from app.engine import day_journal
-                hidden = day_journal.not_following(db)
-            except Exception:  # noqa: BLE001 - the review still runs, naming every ticker
-                db.rollback()
-                hidden = set()
+            from app.engine import day_journal
+            hidden = day_journal.quiet(db)
             if review.get("state") != "ok":
                 row.delivery, row.last_error = "skipped", "No closed trades this week, so no review was run."
                 db.add(row)

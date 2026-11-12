@@ -654,3 +654,14 @@ def test_the_owner_context_collapses_a_ticker_not_followed_unless_the_turn_is_ab
     mine = own["positions"]
     assert [p["symbol"] for p in mine["positions"]] == ["CRWV", "NBIS"] and mine["count"] == 2 and "not_followed" not in mine
     assert mine["positions"][0]["unrealized_usd"] == 112.0
+
+
+def test_the_brief_s_market_wide_lists_drop_a_ticker_not_followed(engine, market, monkeypatch):
+    from app.engine import radar_premarket
+    _not_following(engine, "CRWV")
+    monkeypatch.setattr(radar_premarket, "enabled", lambda: True)
+    monkeypatch.setattr(premarket_prep, "read_premarket_scan", lambda today: {
+        "state": "ok", "flagged": ["CRWV", "AMD"], "movers": [{"symbol": "CRWV", "change_pct": 9.0}, {"symbol": "AMD", "change_pct": 4.0}]})
+    with Session(engine) as db:
+        pack = build_pack(db, at("09:00"), Calendar())
+    assert pack["premarket_scan"]["flagged"] == ["AMD"] and [r["symbol"] for r in pack["premarket_scan"]["movers"]] == ["AMD"]

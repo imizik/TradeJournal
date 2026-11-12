@@ -887,3 +887,18 @@ def test_a_position_closed_while_hidden_closes_quietly_with_no_turn(world, engin
     assert row.state == "closed" and len(world.turns.questions) == 1 and len(phone.sent) == 1
     assert investigation(engine, row)["status"] == "closed"
     assert "not followed" in row.last_error
+
+
+def test_a_hidden_adopted_position_takes_no_watch_slot(world, engine, phone, monkeypatch):
+    monkeypatch.setenv("COMPANION_MAX_POSITIONS", "2")
+    monkeypatch.setenv("PING_BUDGET_NUDGE", "5")  # three adopt pings
+    world.prices["CRWV"] = 130.0
+    fill(engine, "10:00")
+    world.tick("10:03")
+    fill(engine, "10:05", ticker="AMD", strike=250)
+    world.tick("10:08")
+    follow(engine, "AMD", False)
+    fill(engine, "10:20", ticker="CRWV", strike=120)
+    world.tick("10:23")
+    watched = {r.ticker: r.watched for r in companions(engine)}
+    assert watched == {"NBIS": True, "AMD": True, "CRWV": True}  # NBIS keeps its slot: the hidden AMD counts for none
