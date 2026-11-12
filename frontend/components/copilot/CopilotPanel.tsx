@@ -1236,11 +1236,13 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   // An answer that did not finish and is not on its way: cut off live, or saved that way (``fromSaved``), or an older
   // saved reply with no words. Only the answer streaming now shows a progress line.
   const cutOff = (m: LabMessage, i: number) => m.role === "assistant" && !(busy && i === messages.length - 1) && !m.plan_context
-    && (m.error?.code === INTERRUPTED || (!m.content.trim() && !m.proposals?.length && (!m.error || m.error.code === "stopped") && !m.metrics));
+    && (m.error?.code === INTERRUPTED || (!m.content.trim() && !m.proposals?.length && (!m.error || m.error.code === "stopped") && !m.metrics && !m.savedMetrics));
   // Ask again: the latest answer's question, sent again as a new turn.
   const askAgain = (i: number) => {
     const question = messages[i - 1];
-    return !busy && i === messages.length - 1 && question?.role === "user" && question.content.trim() ? question.content : null;
+    // Main chat sends only once the previous exchange is saved (``send``'s guard): until then Retry saving shows instead.
+    const saving = !!current?.main_day && messages.length > current.message_count;
+    return !busy && !saving && i === messages.length - 1 && question?.role === "user" && question.content.trim() ? question.content : null;
   };
   // Beside another page the panel is the owner's, and only while the lab is on: otherwise it is not there at all.
   if (panel && (!owner || !enabled)) return null;

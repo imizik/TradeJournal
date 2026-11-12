@@ -542,29 +542,48 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   followed or not). Then **Now** (back to today's Main chat; dropped on a phone while already there), **Threads** (the
   thread list's drawer; no count on the button, since the strip counts what needs him), Jump to… (⌘K) and Plan a trade (the same words as ⌘K).
   Account chips come with the Robinhood stage; nothing fake stands in.
-- **Needs you** (`NeedsStrip`). One amber card for the single most urgent item, with its own answers, **Seen** (out of
-  the strip for today, in this browser: `localStorage` `desk.strip.seen.v1`, apart from the thread list's
-  `desk.seen.v1`; an item that changes, a new status line, a day
-  closer to expiry or another fill, asks again) and **+N more** opening the rest. The order is
-  `lib/desk.ts` `deskNeeds`, followed tickers only: (1) a position alert asking for a decision (Act now; **Decide**
-  opens its thread on the decision bar, **Ask why** sends "Why is NBIS moving today?" in today's conversation); (2) a plan at or near its trigger (the
-  thread list's Near a trigger; **Open the plan**, Ask why) or a card to confirm (**Open the card**); (3) an option
-  expiring within three calendar days with no confirmed invalidation or time stop (an adopted draft counts as none;
-  a journal position and one only Robinhood shows alike; **Plan it**); (4) before the close, the fills waiting to link
-  (**Link it**); (5) after the close, the close-of-day questions and fills (**Close the day**). Nothing in the strip is
-  a rating ask. A position's P&L and distance to its stop are the book row's, so the strip's line names only what
-  fired. Amber on the desk means this strip and nothing else: tabs, tags, buttons and verdicts elsewhere are neutral.
-  When nothing waits, the strip is absent. It shows on every desk view that shows the book: Now, a saved conversation
-  (`?thread=`, Main chat included) and a position's desk view, after the close as before it.
+- **Needs you** (`NeedsStrip`), **the Needs-you strip**. Only what needs a decision now, in amber; most of the day
+  there is none and the strip is absent. Nothing in it is dismissed and there is no Seen: the strip shows the single
+  top item with its own answers, and **+N more** opens every other item at once, each with its own answers. The rules
+  (`lib/desk.ts` `deskNeeds`), followed tickers only, in this order:
+  1. a position alert that fired today (give-back, wrong way, held an hour; the session read's `to_answer.alerts`
+     rows marked `today`): "NBIS 11/14/26 105C: give-back alert at 10:31 AM", **Open it**, **Ask why** (sends "Why is
+     NBIS moving today?" in today's conversation);
+  2. a confirmed plan's level reached: a position past its invalidation (its book tag Past stop), or an armed plan
+     whose entry or invalidation was hit today ("CRWV plan: entry 99.00 reached at 10:12 AM", **Open the plan**, Ask
+     why); or a card waiting for Confirm or Dismiss (**Open the card**);
+  3. before the close, an option that expires today, with or without a plan (**Open it**);
+  4. before the close, the fills waiting to link to a plan, one item (**Link it**).
+
+  An item clears itself when its condition ends (the alert's day ends, the level is no longer hit, the card is
+  confirmed or dismissed, the option expires at the close, the fill is linked) or when the owner opens that ticker:
+  its book row, the strip's own button, its thread or its desk view. Opening counts as having seen it for the rest of
+  the day in this browser (`localStorage` `desk.opened.v1`, ticker to the time of the latest open); only an alert or
+  a level reached after that open brings it back. Never in the strip: "no plan" on its own, a plan offer ("want a
+  plan for this?"), an expiry later than today, Close the day (one quiet link under the after-close day report, and
+  ⌘K) or anything about ratings. A position's P&L and distance to its stop are the book row's, so an item names only
+  what happened. Amber on the desk means this strip and nothing else: tabs, tags, buttons and verdicts elsewhere are
+  neutral. It shows on every desk view that shows the book: Now, a saved conversation (`?thread=`, Main chat included)
+  and a position's desk view. When a read it depends on fails (the thread list's, its positions section, the session
+  read or its alerts), one quiet grey line says so ("Needs you could not check today's alerts just now; it will read
+  again in a minute.") instead of an empty strip that looks like nothing waits.
+
+  No longer in the strip (each can come back if the owner asks): an option expiring in one to three days with no
+  plan; a plan near (within 1% of) its entry or invalidation; a position within 1% of its stop (the book's Near stop
+  tag); a time stop coming due; Act now's give-back reason from an alert on an earlier day; Close the day and its
+  count; and the Seen button.
 - **Left: the book** (`Book`). One dense row per open position the owner follows: ticker, contract, unrealized P&L in
   dollars and percent, a sparkline of the underlying today, the bar placing it between the plan's invalidation (left)
-  and entry (the tick) (nothing without both: the tag says No plan), the distance to the stop ("4.3% to stop"), days to
-  expiry and one tag (this year's expiry drops the year: "11/14 105C"). **The book's tag** says what is true now, first
-  match wins (`copilot_desk._book_state`): **Past stop** (the plan's invalidation was hit), **Near stop** (within Act
-  now's 1% of it), **Giving back** (still in profit now, and the give-back alert fired with no new high since),
-  **On plan** (an invalidation or time stop stands) or **No plan**. A position under its entry is never Giving back,
-  however recently the alert fired: it says how it stands against its plan, or No plan. While the Robinhood feed is
-  live, "in profit" is Robinhood's P&L. The row's facts wrap onto a second line rather than run under the sparkline or
+  and entry (the tick) (nothing without both: no bar, no plan), the distance to the stop ("4.3% to stop"), days to
+  expiry on every row and at most one tag (this year's expiry drops the year: "11/14 105C"). **The book's tag** says
+  what is true now, and only when it tells him something. The backend's state, first match wins
+  (`copilot_desk._book_state`): **Past stop** (the plan's invalidation was hit), **Near stop** (within Act now's 1% of
+  it), **Giving back** (still in profit now, and the give-back alert fired with no new high since), **On plan** (an
+  invalidation or time stop stands) or no plan. The row shows (`Cockpit.tsx` `bookTag`) Past stop, Near stop or
+  Giving back, else **Expires today** for an option on its last day (in place of its days left), else On plan; a
+  position with no plan shows no tag (its missing bar and the day report's "Open without a plan" line say so). A
+  position under its entry is never Giving back, however recently the alert fired. While the Robinhood feed is live,
+  "in profit" is Robinhood's P&L. The row's facts wrap onto a second line rather than run under the sparkline or
   the P&L, at any width. These come from each position row's `book` (`copilot_desk._book`). Selecting a row shows it in the centre at once and, where the copilot sits beside it, opens
   its conversation (its own, else the ticker's newest open one, else its link; a position whose link leaves the desk
   opens the symbol's desk view). The desk never reloads for it: a symbol's desk view opens in place (see *The address*
@@ -637,15 +656,16 @@ day kept today's replay; otherwise **Since you looked**: what changed since the
 owner last left the desk in this browser (`localStorage` `desk.looked.v2`, by position, saved when the page is hidden
 or left), four lines at most: the biggest open-P&L changes since then ("NBIS 11/14/26 105C −$235": the change, since
 the row has the P&L now; a move under $25 and 10% left out), positions opened or closed since, and the fills, pings
-and Radar events since (a ticker not followed counts in none). **Arm today's plans** and **Close the day** are ⌘K
-commands, not buttons in the block; the strip carries Close the day while anything is left to review. No mode shows
+and Radar events since (a ticker not followed counts in none). **Arm today's plans** is a ⌘K command; **Close the day**
+is ⌘K and, after the close, one quiet link under the day report ("Close the day · 2 to review →"), never the strip. No mode shows
 more than the session mode does.
 
-**Day report** (`DayReport.tsx`), after 16:00 New York on a weekday: one compact card of up to three single lines, each
+**Day report** (`DayReport.tsx`), after 16:00 New York on a weekday: one compact card of up to four single lines, each
 opening its rows on tap, in this order. The app scores everything itself; nothing asks him to rate a ping, a Radar hit
 or a call. Facts and counts only (no line tells him to buy, sell or hold, and none says money was missed); a ticker
-marked **Not following** is left out of every line; realized P&L is the top bar's and an open position without a plan
-is the book's (its No plan tag, and the strip when it expires soon), so the card repeats neither; a line with nothing in
+marked **Not following** is left out of every line; realized P&L is the top bar's, so the card does not repeat it; the
+last line, **Open without a plan**, names the followed options with no invalidation or time stop (each opens on tap),
+the one place the desk names them (the book shows no tag for it and the strip never asks); a line with nothing in
 it is absent, and a day with nothing at all says so in one sentence ("Nothing to report today: …").
 
 1. **Today**: how many entries were opened today and how many of them had a plan saved before the fill
@@ -1017,7 +1037,7 @@ question instead of the bar. Answer opens a one-line input that saves a
 The row's status line says the same in a muted amber, beside the first words
 of the symbol's first `reflection` (or `plan_ask` answer) today: "Reviewed ·
 <first words>" once one is saved, or "Skipped today".
-**Close the day** (the strip's item while anything is left, or the ⌘K
+**Close the day** (the quiet link under the day report, or the ⌘K
 command) is a pass through them: it opens the first unreviewed thread in list
 order on its question (a position with no conversation opens by its symbol,
 `/copilot-lab?symbol=…`, and the pass carries on in this tab), and each answer
@@ -1027,8 +1047,8 @@ moves on, the ✕ ends the pass, and the last one ends it. Alert and Radar
 ratings are never asked (since 2026-11-10), and a ticker not followed asks
 nothing. With nothing left it puts the day's question in
 the message box, unsent. Nothing is sent to the model, and the answers go
-through the same routes as everywhere else. The strip's item counts all of it
-("Close the day: 3 to review", less what was skipped), and the pass itself shows "N of M done": the close questions
+through the same routes as everywhere else. The day report's link counts all of it
+("Close the day · 3 to review", less what was skipped), and the pass itself shows "N of M done": the close questions
 (one per symbol) and the fills to link, a skip not counting as done.
 `/copilot-lab?close=1` (the [evening review ping](#phone-ping-policy)'s link)
 starts the same pass once the list and the session have read, after 16:00
@@ -1102,8 +1122,8 @@ the Check service's pre-trade check does not see it.
 **The top bar's day** (`DeskStatus` in `SessionTape.tsx`, `DayPnl` in `Cockpit.tsx`): **Live** (green dot) with the
 New York clock in the regular session, **Pre-market** with the clock, **Closed 16:00** (the calendar's close) after it,
 or **Market closed**; SPY, QQQ and VIX's change; Realized today and Open. The phase actions are ⌘K commands (Jump to… on
-a phone): **Arm today's plans** before 9:30 on a weekday, and **Close the day** after 16:00 (also the strip's item while
-anything is left), which walks each thread's close question (see Close of day).
+a phone): **Arm today's plans** before 9:30 on a weekday, and **Close the day** after 16:00 (also one quiet link under
+the day report), which walks each thread's close question (see Close of day).
 
 **Arm today's plans** opens a checklist in the copilot column
 (`ArmChecklist.tsx`; below 1180 px it opens the copilot sheet): each armed plan
@@ -1175,7 +1195,8 @@ input, text area or editable field, ⌘K included, and no other browser shortcut
 is taken. A one-line key hint sits at the foot of the thread list on a wide
 screen. Browser proof: `frontend/e2e/copilot-desk-keys.spec.ts` (palette,
 J/K order, the drawer, keys ignored while typing, the cockpit by the time of day at 1440 and
-375 px, the strip and Seen).
+375 px, the strip's items and +N more); `frontend/e2e/copilot-desk-live-fixes.spec.ts` (the strip's rules,
+self-clearing and views, the book's tag and layout, interrupted answers, the chart's subject and edges).
 
 The layout follows the screen's width (above: three columns from 1180 px, two from 768 px with the copilot as a right
 sheet, stacked below that with a full-screen sheet). While the lab is off only the conversation shows, saying so. On

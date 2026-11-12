@@ -455,7 +455,9 @@ const MARKET_FUNDS = ["SPY", "QQQ", "IWM", "DIA", "SMH", "SOXX", "XLK", "XLF", "
 const NOT_TICKERS = new Set(["I", "A", "AM", "PM", "ET", "EST", "EDT", "AH", "CPI", "PPI", "PCE", "FOMC", "FED", "GDP", "NFP", "IV", "HV", "ATM",
   "OTM", "ITM", "DTE", "OI", "EPS", "AI", "USD", "ETF", "ETFS", "EOD", "EOW", "RSI", "MACD", "EMA", "SMA", "VWAP", "ATH", "ATL", "YTD", "IPO",
   "CEO", "CFO", "US", "USA", "UK", "EU", "NYSE", "OK", "PT", "PNL", "TA", "PDT", "TLDR", "NOT", "AND", "THE", "OR", "IF", "NO", "YES", "BUY",
-  "SELL", "HOLD", "WAIT", "PASS", "FOCUS", "DRAFT", "PATTERN", "BROKEN", "UNCLEAR", "NOW", "ASAP", "FYI", "MAX", "MIN", "Q1", "Q2", "Q3", "Q4"]);
+  "SELL", "HOLD", "WAIT", "PASS", "FOCUS", "DRAFT", "PATTERN", "BROKEN", "UNCLEAR", "NOW", "ASAP", "FYI", "MAX", "MIN", "FOMO", "YOLO",
+  "OPEX", "ROI", "TP", "SL", "JOLTS", "ISM", "PMI", "DCA", "IMO", "BTW", "EOM", "MOC", "MOO", "RTH", "LEAPS", "LEAP", "OTC", "SEC", "IRA",
+  "ER", "PE", "EV", "FCF", "YOY", "QOQ", "BE", "OK", "TBD", "NA", "PR", "AH", "PRE", "POST"]);
 const MONTHS = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec";
 /** A ticker followed by a contract: "IREN Dec-18 calls", "IREN 12/18 30C", "IREN $30 calls", "IREN 30C". */
 const CONTRACT = new RegExp(`\\b([A-Z]{1,5})\\s+(?:(?:${MONTHS})[a-z]*\\.?[- ]?\\d{1,2}\\b|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?\\b|\\$?\\d+(?:\\.\\d+)?\\s?(?:[CP]\\b|calls?\\b|puts?\\b))`, "g");
@@ -470,12 +472,13 @@ const CONTRACT = new RegExp(`\\b([A-Z]{1,5})\\s+(?:(?:${MONTHS})[a-z]*\\.?[- ]?\
 export function answerSymbol(text: string | null, known: Iterable<string>): string | null {
   if (!text) return null;
   const tickers = new Set([...known, ...MARKET_FUNDS]);
-  const named = (word: string) => tickers.has(word) || (word.length >= 2 && !NOT_TICKERS.has(word));
-  // 1. The verdict headline ("Verdict: Pass — IREN Dec-18 calls …"): its first ticker.
-  const headline = text.split("\n").map(line => /^\**verdict\**\s*:\s*\**[a-z]+\**\s*(?:—|–|--|-|:|\.)\s*(.+)$/i.exec(line.trim())).find(Boolean)?.[1];
-  for (const [word] of (headline ?? "").replace(/\*\*/g, "").matchAll(/\b[A-Z]{1,5}\b/g)) if (named(word)) return word;
+  // 1. The verdict headline ("Verdict: Pass — IREN Dec-18 calls …"): its first ticker that is a known one or is named
+  //    with a contract there, so a word like OPEX or FOMO in a headline never becomes the chart.
+  const headline = (text.split("\n").map(line => /^\**verdict\**\s*:\s*\**[a-z]+\**\s*(?:—|–|--|-|:|\.)\s*(.+)$/i.exec(line.trim())).find(Boolean)?.[1] ?? "").replace(/\*\*/g, "");
+  const withContract = new Set([...headline.matchAll(CONTRACT)].map(match => match[1]));
+  for (const [word] of headline.matchAll(/\b[A-Z]{1,5}\b/g)) if (tickers.has(word) || (!NOT_TICKERS.has(word) && withContract.has(word))) return word;
   // 2. A ticker named with a contract.
-  const contracts = [...text.matchAll(CONTRACT)].map(match => match[1]).filter(word => !NOT_TICKERS.has(word));
+  const contracts = [...text.matchAll(CONTRACT)].map(match => match[1]).filter(word => tickers.has(word) || !NOT_TICKERS.has(word));
   if (contracts.length) return contracts[0];
   // 3. The most mentioned, ties to the first mentioned (4.).
   const counts = new Map<string, number>();
@@ -663,69 +666,90 @@ export async function getDeskSparks(symbols: string[], signal?: AbortSignal): Pr
 
 // --------------------------------------------------------------------------- the cockpit's Needs-you strip
 
-/** One thing waiting on the owner, for the strip: ``rank`` is its place in the strip's order (``deskNeeds``). */
-export type DeskNeedKind = "decision" | "card" | "trigger" | "expiring" | "fill" | "close";
-export type DeskNeed = { key: string; kind: DeskNeedKind; rank: number; symbol: string | null; title: string; detail: string | null; row: DeskThread | null };
+/** One thing waiting on the owner's decision now, for the strip: ``rank`` is its place in the strip's order
+ * (``deskNeeds``); ``at`` (epoch seconds) is when it started, when known. */
+export type DeskNeedKind = "alert" | "level" | "card" | "expiring" | "fill";
+export type DeskNeed = { key: string; kind: DeskNeedKind; rank: number; symbol: string | null; title: string; detail: string | null;
+  row: DeskThread | null; at: number | null };
 
 /** Days from ``day`` (YYYY-MM-DD) to ``iso`` (YYYY-MM-DD), by the calendar. */
 export const daysTo = (iso: string, day: string) => Math.round((Date.parse(`${iso}T12:00:00Z`) - Date.parse(`${day}T12:00:00Z`)) / 86_400_000);
-/** An option this close to expiry with no plan asks for one in the strip (calendar days: today, tomorrow, the day after). */
-export const EXPIRING_DAYS = 3;
 export const money = (value: number) => `${value > 0 ? "+" : value < 0 ? "−" : ""}$${Math.abs(value).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 export const signedPct = (value: number, digits = 0) => `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(digits)}%`;
 
+/** A position alert's kind in the strip's words; an expiry alert is the strip's expiring item instead. */
+const ALERT_WORDS: Record<string, string> = { giveback: "give-back alert", wrong_way: "wrong-way alert", hold_hour: "held-an-hour alert" };
+const EXPIRY_ALERTS = new Set(["expiry_first", "expiry_final", "expiry_eve"]);
+const nyClock = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
+
 /**
- * What waits on the owner, in the strip's documented order (docs/copilot-lab.md § The desk), followed tickers only:
- * 1. a position alert asking for a decision (Act now);
- * 2. a plan at or near its trigger (the thread list's Near a trigger), or a card to confirm;
- * 3. an option expiring within ``EXPIRING_DAYS`` with no plan;
- * 4. before the close, the fills waiting to link to a plan (one item);
- * 5. after the close, the close-of-day questions and fills to link (one item: Close the day).
- * Within a rank the thread list's order holds. Nothing here is a rating ask. A position's P&L and distance to its stop are
- * the book row's, so the strip does not repeat them.
+ * What needs a decision now, in the strip's documented order (docs/copilot-lab.md § The Needs-you strip), followed
+ * tickers only. Nothing else may appear: never "no plan" on its own, a plan offer, an expiry later than today, Close the
+ * day or a rating.
+ * 1. a position alert that fired today (give-back, wrong way, held an hour; ``alerts``, the session read's);
+ * 2. a confirmed plan's level reached: a position past its invalidation, or an armed plan whose entry or invalidation
+ *    was hit today (``plans``); or a card waiting for Confirm or Dismiss;
+ * 3. before the close, an option that expires today, with or without a plan (after 16:00 it has expired);
+ * 4. before the close, the fills waiting to link to a plan (one item).
+ * Within a rank the thread list's order holds. An item about a ticker the owner opened today (``opened``: symbol to
+ * epoch seconds of the latest open) clears itself: an alert or a level hit before that open, anything else for the day.
  */
-export function deskNeeds(rows: DeskThread[], day: string, { closing, fills }: { closing: boolean; fills: number }): DeskNeed[] {
+export function deskNeeds({ rows, alerts = [], plans = [], day, closing, fills, opened = {} }: {
+  rows: DeskThread[]; alerts?: DeskAlertToAnswer[]; plans?: DeskPlan[]; day: string; closing: boolean; fills: number;
+  opened?: Readonly<Record<string, number>>;
+}): DeskNeed[] {
   const followed = rows.filter(r => r.symbol && !r.hidden && r.group !== "pinned" && !r.key.startsWith("radar:"));
+  const hidden = new Set(rows.filter(r => r.hidden && r.symbol).map(r => r.symbol!));
   const needs: DeskNeed[] = [];
   const seen = new Set<string>();
-  const add = (need: DeskNeed) => { if (!seen.has(need.key)) { seen.add(need.key); needs.push(need); } };
-  for (const row of followed.filter(r => r.group === "act"))
-    add({ key: `decision:${row.key}:${row.status.text}`, kind: "decision", rank: 1, symbol: row.symbol, row, title: `${row.title}: ${row.status.text}`, detail: null });
-  for (const row of followed.filter(r => r.group === "near" || r.group === "draft"))
-    add(row.group === "near"
-      ? { key: `trigger:${row.key}:${row.status.text}`, kind: "trigger", rank: 2, symbol: row.symbol, row, title: `${row.symbol} plan: ${row.status.text}`, detail: row.title !== row.symbol ? row.title : null }
-      : { key: `card:${row.key}:${row.status.text}`, kind: "card", rank: 2, symbol: row.symbol, row, title: `${row.symbol}: a card to confirm`, detail: row.status.text });
+  const cleared = (need: DeskNeed) => {
+    const at = need.symbol ? opened[need.symbol] : undefined;
+    return at !== undefined && (need.at === null || need.at <= at);
+  };
+  const add = (need: DeskNeed) => { if (!seen.has(need.key) && !cleared(need)) { seen.add(need.key); needs.push(need); } };
+  const positionOf = (symbol: string, tradeId?: string) =>
+    followed.find(r => tradeId && r.key === `trade:${tradeId}`) ?? followed.find(r => r.symbol === symbol && r.book) ?? followed.find(r => r.symbol === symbol) ?? null;
+  for (const alert of alerts) {
+    if (!alert.today || EXPIRY_ALERTS.has(alert.kind) || hidden.has(alert.symbol)) continue;
+    const row = positionOf(alert.symbol, alert.trade_id);
+    if (!row) continue; // no longer held, or a ticker not followed
+    add({ key: `alert:${alert.id}`, kind: "alert", rank: 1, symbol: alert.symbol, row, at: alert.at,
+      title: `${alert.contract}: ${ALERT_WORDS[alert.kind] ?? "position alert"} at ${nyClock(alert.at)}`, detail: null });
+  }
+  for (const row of followed.filter(r => r.book?.state === "past_stop"))
+    add({ key: `level:${row.key}`, kind: "level", rank: 2, symbol: row.symbol, row, at: null, title: `${row.title}: past its invalidation`, detail: null });
+  for (const plan of plans.filter(p => p.stage === "armed" && !hidden.has(p.symbol))) {
+    for (const [role, level] of [["entry", plan.entry], ["invalidation", plan.invalidation]] as const) {
+      if (level?.state !== "hit" || !level.hit_at || nyDay(new Date(level.hit_at * 1000)) !== day) continue;
+      const row = followed.find(r => r.investigationId === plan.investigationId) ?? positionOf(plan.symbol);
+      add({ key: `level:plan:${plan.investigationId ?? plan.symbol}:${role}`, kind: "level", rank: 2, symbol: plan.symbol, row, at: level.hit_at,
+        title: `${plan.symbol} plan: ${role} ${level.price.toFixed(2)} reached at ${nyClock(level.hit_at)}`, detail: plan.thesis });
+    }
+  }
+  for (const row of followed.filter(r => r.group === "draft"))
+    add({ key: `card:${row.key}`, kind: "card", rank: 2, symbol: row.symbol, row, at: null, title: `${row.symbol}: a card to confirm or dismiss`, detail: row.status.text });
   for (const row of followed) {
-    const book = row.book;
-    const expiry = book && !(book.planned ?? book.state !== "no_plan") ? book.expiry : null;
-    const left = expiry ? daysTo(expiry, day) : -1;
-    if (left < 0 || left >= EXPIRING_DAYS) continue;
-    add({ key: `expiring:${row.key}:${left}`, kind: "expiring", rank: 3, symbol: row.symbol, row,
-      title: `${row.title} expires ${left === 0 ? "today" : left === 1 ? "tomorrow" : `in ${left} days`} and has no plan.`, detail: null });
+    if (closing || !row.book?.expiry || row.instrument === "stock" || daysTo(row.book.expiry, day) !== 0) continue;
+    add({ key: `expiring:${row.key}`, kind: "expiring", rank: 3, symbol: row.symbol, row, at: null, title: `${row.title} expires today`, detail: null });
   }
   if (!closing && fills > 0)
-    add({ key: `fills:${fills}`, kind: "fill", rank: 4, symbol: null, row: null, title: `${fills} fill${fills === 1 ? "" : "s"} to link to a plan`, detail: null });
-  const review = closing ? toReview(rows, day).length + fills : 0;
-  if (review > 0)
-    add({ key: `close:${review}`, kind: "close", rank: 5, symbol: null, row: null, title: `Close the day: ${review} to review`,
-      detail: "Each close question, then the fills to link, one at a time." });
-  return needs;
+    add({ key: `fills:${fills}`, kind: "fill", rank: 4, symbol: null, row: null, at: null, title: `${fills} fill${fills === 1 ? "" : "s"} to link to a plan`, detail: null });
+  return needs.sort((a, b) => a.rank - b.rank);
 }
 
-/** Strip items marked Seen today, in this browser: they leave the strip; "+N more" still lists them. A key carries what
- * the item says (its status line, days left, a count), so an item that changes asks again. Its own store: the thread
- * list's "new since you looked" is ``desk.seen.v1``, and sharing it let each overwrite the other. */
-const SEEN_KEY = "desk.strip.seen.v1";
-export function readSeen(day: string): string[] {
+/** The tickers the owner opened today (a book row, the strip, a thread or a position's desk view), in this browser:
+ * symbol to epoch seconds of the latest open. An open clears that ticker's strip items (``deskNeeds``). */
+const OPENED_KEY = "desk.opened.v1";
+export function readOpened(day: string): Record<string, number> {
   try {
-    const saved = JSON.parse(window.localStorage.getItem(SEEN_KEY) ?? "null");
-    return saved?.day === day && Array.isArray(saved.keys) ? saved.keys : [];
-  } catch { return []; }
+    const saved = JSON.parse(window.localStorage.getItem(OPENED_KEY) ?? "null");
+    return saved?.day === day && saved.at && typeof saved.at === "object" ? saved.at : {};
+  } catch { return {}; }
 }
-export function saveSeen(day: string, key: string): string[] {
-  const keys = [...readSeen(day).filter(k => k !== key), key];
-  try { window.localStorage.setItem(SEEN_KEY, JSON.stringify({ day, keys })); } catch { /* this visit only */ }
-  return keys;
+export function saveOpened(day: string, symbol: string, at = Math.floor(Date.now() / 1000)): Record<string, number> {
+  const next = { ...readOpened(day), [symbol]: at };
+  try { window.localStorage.setItem(OPENED_KEY, JSON.stringify({ day, at: next })); } catch { /* this visit only */ }
+  return next;
 }
 
 /** What the desk looked like when the owner last left it, for "Since you looked" (this browser only), by position (the

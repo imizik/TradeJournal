@@ -603,11 +603,19 @@ export function toSaved(messages: LabMessage[]): Pick<InvestigationFields, "tran
 
 /** A saved conversation as messages; its cards come back as cards, with any outcome they were left with. */
 export function fromSaved(saved: Investigation): LabMessage[] {
-  // A saved reply with no words and no cards was cut off (or failed) before it finished: it reads back as interrupted,
-  // never as an answer still on its way.
-  const cutOff = (m: Investigation["transcript"][number]) => m.role === "assistant" && !m.content.trim() && !m.proposals?.length && !m.plan_context;
+  // A reply saved as interrupted or stopped reads back that way (its words so far, if any, kept); one with no words, no
+  // cards and no metrics (saved before this rule) was cut off too; one that failed with another error says it did not
+  // finish. None reads back as an answer still on its way.
+  const ended = (m: Investigation["transcript"][number]): LabMessage["error"] | undefined => {
+    if (m.role !== "assistant" || m.plan_context) return undefined;
+    const code = m.metrics?.error;
+    if (code === INTERRUPTED) return { code, message: "This answer was interrupted." };
+    if (code === "stopped") return { code, message: "Stopped." };
+    if (m.content.trim() || m.proposals?.length) return undefined;
+    return code ? { code, message: "This answer did not finish." } : m.metrics ? undefined : { code: INTERRUPTED, message: "This answer was interrupted." };
+  };
   return saved.transcript.map(({ metrics, ...m }, i) => ({ ...m, ...(metrics ? { savedMetrics: metrics } : {}),
-    ...(cutOff(m) ? { error: { code: metrics?.error === "stopped" ? "stopped" : INTERRUPTED, message: metrics?.error === "stopped" ? "Stopped." : "This answer was interrupted." } } : {}),
+    ...(ended({ ...m, metrics }) ? { error: ended({ ...m, metrics }) } : {}),
     tools: saved.evidence.filter(e => e.message === i).map((e, j) => ({
     type: "tool" as const, id: `saved-${i}-${j}`, name: e.tool, status: "ok" as const,
     provenance: { source: "saved reference (re-read to see the data)", kind: e.kind ?? "cached", as_of: e.as_of ?? null },

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import PingsRows, { alertsVerdict, radarVerdict } from "@/components/copilot/PingsRows";
-import { getDayReport, getDeskPings, signedPct, type CheckedCallRow, type CheckTally, type DayReport as Report, type DeskPings } from "@/lib/desk";
+import { getDayReport, getDeskPings, signedPct, type CheckedCallRow, type CheckTally, type DayReport as Report, type DeskPings, type DeskThread } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
 const ET = "America/New_York";
@@ -71,12 +71,13 @@ function CheckRow({ row }: { row: CheckedCallRow }) {
 /**
  * The cockpit's after-close day report (docs/copilot-lab.md § The desk): one card, three single lines that each open
  * their rows on tap, in this order: Today (entries and how many had a plan before the fill), How the pings did (today's
- * position alerts and alerted Radar hits) and Calls checked (scored from the price when he checked to the close, the
- * last 30 days first). Realized P&L is the top bar's and an open position without a plan is the book's (its No plan tag),
- * so neither is repeated here. A line with nothing in it is absent; a day with nothing says so in one sentence. The app
- * scores everything itself and asks for no rating; facts and counts, no advice.
+ * position alerts and alerted Radar hits), Calls checked (scored from the price when he checked to the close, the
+ * last 30 days first) and Open without a plan (the followed options with no invalidation or time stop: the one place the
+ * desk names them; the book shows no tag for it and the strip never asks). Realized P&L is the top bar's. A line with
+ * nothing in it is absent; a day with nothing says so in one sentence. The app scores everything itself and asks for no
+ * rating; facts and counts, no advice. ``rows`` are the desk's rows; ``onOpen`` opens one.
  */
-export default function DayReport() {
+export default function DayReport({ rows = [], rowsRead = true, onOpen }: { rows?: DeskThread[]; rowsRead?: boolean; onOpen?(row: DeskThread): void } = {}) {
   const [report, setReport] = useState<Report | null | undefined>(undefined);
   const [pings, setPings] = useState<DeskPings | null | undefined>(undefined);
   useEffect(() => {
@@ -92,8 +93,12 @@ export default function DayReport() {
   const alerts = pings?.alerts.rows ?? [], hits = pings?.radar.rows ?? [];
   const pingParts = [alertsVerdict(alerts), radarVerdict(hits)].filter(Boolean);
   const calls = report?.checks ? callsLine(report.checks) : null;
-  if (!showToday && !pingParts.length && !calls) {
-    return <p data-testid="day-report-card" className="rounded-lg border bg-card px-3 py-2.5 text-xs text-muted-foreground">Nothing to report today: no entries, pings or checked calls.</p>;
+  const unplanned = rows.filter(r => (r.key.startsWith("trade:") || r.key.startsWith("robinhood:")) && r.symbol && !r.hidden && r.book
+    && r.instrument !== "stock" && !(r.book.planned ?? r.book.state !== "no_plan"));
+  const bySymbol = [...new Set(unplanned.map(r => r.symbol!))];
+  if (!showToday && !pingParts.length && !calls && !bySymbol.length) {
+    if (!rowsRead) return null; // the positions are not read yet: not yet "nothing"
+    return <p data-testid="day-report-card" className="rounded-lg border bg-card px-3 py-2.5 text-xs text-muted-foreground">Nothing to report today: no entries, pings, checked calls or open options without a plan.</p>;
   }
   return (
     <div data-testid="day-report-card" className="divide-y overflow-hidden rounded-lg border bg-card">
@@ -126,6 +131,21 @@ export default function DayReport() {
             Up and down are the contract&apos;s move when both its prices are known, otherwise the stock&apos;s (reversed for a put), from the
             price when you checked to the close; never the price in the post. Nothing here needs an answer.
           </p>
+        </Line>
+      )}
+      {bySymbol.length > 0 && (
+        <Line label="Open without a plan" testId="report-noplan" summary={<span data-testid="noplan-verdict">{bySymbol.join(", ")}</span>}>
+          <ul className="space-y-1.5 text-xs">
+            {unplanned.map(r => (
+              <li key={r.key}>
+                <button type="button" data-testid="report-noplan-row" onClick={() => onOpen?.(r)} disabled={!onOpen}
+                  className="flex min-h-11 w-full flex-wrap items-baseline gap-x-2 text-left sm:min-h-0">
+                  <span className="font-medium text-foreground">{r.title}</span>
+                  {r.value && <span className={cn("tabular-nums", r.value.tone === "gain" ? "text-emerald-300" : r.value.tone === "loss" ? "text-rose-300" : "text-muted-foreground")}>{r.value.text}</span>}
+                </button>
+              </li>
+            ))}
+          </ul>
         </Line>
       )}
     </div>

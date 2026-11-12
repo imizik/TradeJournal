@@ -1,8 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // Fixes from the owner's first evening on the desk with the Robinhood feed on (docs/copilot-lab.md § The desk): the
-// Needs-you strip on every view that shows the book, an answer cut off mid-turn (live and after a reload), the book's
-// tag and its layout, the chart's ticker for a Main chat answer, the day report's type and the chart's edge labels.
+// Needs-you strip's higher bar (decisions only, nothing to dismiss, items that clear themselves) on every view that
+// shows the book, an answer cut off mid-turn (live and after a reload), the book's tag and its layout, the chart's
+// ticker for a Main chat answer, the day report's type and the chart's edge labels.
 // Every lab route is stubbed in the browser (the e2e backend runs with the lab off); nothing reaches Robinhood or a model.
 const ON = {
   enabled: true, backend: "fake", evidence: "live", model: "fake-scripted", effort: "medium", fallbacks: false, key_configured: false,
@@ -36,9 +37,9 @@ const AAPL = row({ key: "robinhood:••1113:AAPL 11/20/26 320P", group: "watch
   book: book({ usd: -164, pct: -89, expiry: "2026-11-20", days_held: null, quantity: 1, mark: 20, account: INDIVIDUAL, live: "new" }) });
 const LIVE = { state: "ok", joined: true, as_of: epoch("2026-11-12T04:50:00Z"), issue: null, accounts: [
   { ...INDIVIDUAL, total_value: 28, cash: 0, buying_power: 0 }, { ...ROTH, total_value: 18898, cash: 0, buying_power: 0 }] };
-const desk = (threads: unknown[]) => ({
+const desk = (threads: unknown[], sections: Record<string, string> = { positions: "ok" }) => ({
   as_of: "2026-11-12T04:50:00Z", quotes_at: null, quote_issue: null, day: { phase: "closed", need_you: 0, streak: null },
-  sections: { positions: "ok" }, plans: [], robinhood: LIVE,
+  sections, plans: [], robinhood: LIVE,
   threads: [row({ key: "briefing", group: "pinned", title: "Briefing", status: { text: "Nothing new.", tone: "muted" } }), ...threads],
 });
 const SESSION = {
@@ -70,13 +71,14 @@ const sse = (events: unknown[]) => events.map(e => `data: ${JSON.stringify(e)}\n
 type Opened = { chats: { messages: { role: string; content: string }[] }[]; saved: { transcript: { role: string; content: string; metrics?: { error?: string } }[] }[]; charts: string[] };
 
 async function open(page: Page, { path = `/copilot-lab?thread=${MAIN}`, threads = [orcl("matched"), AAPL] as unknown[], main = investigation(MAIN, {}) as Record<string, unknown>,
-  chat = null as string | null, chart = null as unknown, time = NOW }: { path?: string; threads?: unknown[]; main?: Record<string, unknown>; chat?: string | null; chart?: unknown; time?: Date } = {}) {
+  chat = null as string | null, chart = null as unknown, time = NOW, session = SESSION as unknown, sections = undefined as Record<string, string> | undefined }:
+  { path?: string; threads?: unknown[]; main?: Record<string, unknown>; chat?: string | null; chart?: unknown; time?: Date; session?: unknown; sections?: Record<string, string> } = {}) {
   const opened: Opened = { chats: [], saved: [], charts: [] };
   let current = main;
   await page.clock.install({ time });
   await page.route("**/copilot/status", route => route.fulfill({ json: ON }));
-  await page.route("**/copilot/desk/threads", route => route.fulfill({ json: desk(threads) }));
-  await page.route("**/copilot/desk/session", route => route.fulfill({ json: SESSION }));
+  await page.route("**/copilot/desk/threads", route => route.fulfill({ json: desk(threads, sections) }));
+  await page.route("**/copilot/desk/session", route => route.fulfill({ json: session }));
   await page.route("**/copilot/desk/day-report", route => route.fulfill({ json: DAY_REPORT }));
   await page.route("**/copilot/desk/pings*", route => route.fulfill({ json: NO_PINGS }));
   await page.route("**/copilot/desk/sparks?*", route => route.fulfill({ json: SPARKS }));
@@ -85,8 +87,8 @@ async function open(page: Page, { path = `/copilot-lab?thread=${MAIN}`, threads 
   await page.route("**/copilot/main-chat", route => route.fulfill({ json: current }));
   await page.route("**/copilot/main-chat/history*", route => route.fulfill({ json: { conversations: [] } }));
   await page.route(`**/copilot/investigations/${MAIN}`, route => route.fulfill({ json: current }));
-  await page.route(`**/copilot/investigations/${OTHER}`, route => route.fulfill({ json: investigation(OTHER, { title: "ORCL plan", symbol: "ORCL", main_day: null,
-    message_count: 2, transcript: [{ role: "user", content: "Plan ORCL" }, { role: "assistant", content: "Verdict: Wait — ORCL needs a base." }] }) }));
+  await page.route(`**/copilot/investigations/${OTHER}`, route => route.fulfill({ json: investigation(OTHER, { title: "AAPL plan", symbol: "AAPL", main_day: null,
+    message_count: 2, transcript: [{ role: "user", content: "Plan AAPL" }, { role: "assistant", content: "Verdict: Wait — AAPL needs a base." }] }) }));
   await page.route(`**/copilot/main-chat/${MAIN}/exchange`, async route => {
     const body = route.request().postDataJSON();
     opened.saved.push(body);
@@ -113,34 +115,59 @@ const conversation = (page: Page) => page.getByRole("region", { name: "Conversat
 
 // ------------------------------------------------------------------------------------------------ 1. the strip
 
+// Friday November 13, 10:00 in New York: ORCL 11/13 expires today, in the session.
+const FRIDAY = new Date("2026-11-13T15:00:00Z");
+const IN_SESSION = { ...SESSION, as_of: "2026-11-13T15:00:00Z", now: epoch("2026-11-13T15:00:00Z"), day: "2026-11-13", phase: "regular",
+  open: epoch("2026-11-13T14:30:00Z"), close: epoch("2026-11-13T21:00:00Z"), realized_today: 0 };
+const giveback = (symbol: string, contract: string, trade: string, at: string) => ({ id: `alert-${symbol}`, trade_id: trade, symbol, contract,
+  kind: "giveback", at: epoch(at), today: true, feedback: null });
+
 for (const live of ["matched", "new"] as const) {
-  test(`an option the feed supplies (${live}), expiring in 2 days with no plan, is in the strip after the close with Main chat open`, async ({ page }) => {
+  test(`an option the feed supplies (${live}) that expires today is in the strip, with Main chat open, and clears when opened`, async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await open(page, { threads: [orcl(live), AAPL] });
+    await open(page, { threads: [orcl(live), AAPL], time: FRIDAY, session: IN_SESSION });
     await expect(conversation(page).getByRole("heading", { name: /Main chat/ })).toBeVisible();
-    await expect(strip(page).getByTestId("needs-you-title")).toHaveText("ORCL 11/13/26 160C expires in 2 days and has no plan.");
-    await expect(strip(page).getByRole("button", { name: "Plan it" })).toBeVisible();
+    await expect(strip(page).getByTestId("needs-you-title")).toHaveText("ORCL 11/13/26 160C expires today");
+    await expect(strip(page).getByRole("button")).toHaveText(["Open it"]);
+    // Opening the position counts as having seen it: the item clears itself, and stays cleared after a reload today.
+    await page.getByTestId("desk-book").getByRole("button", { name: /^ORCL / }).click();
+    await expect(strip(page)).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByTestId("desk-book")).toBeVisible();
+    await expect(strip(page)).toHaveCount(0);
   });
 }
 
-for (const [view, path] of [["Now", "/copilot-lab"], ["a saved conversation", `/copilot-lab?thread=${OTHER}`], ["a position's desk view", "/copilot-lab?symbol=ORCL"]] as const) {
+test("a book of options with no plan, no alert today and none expiring today has no strip, and no No plan tags", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page); // after the close: ORCL two days out, AAPL nine days out, neither planned
+  await expect(page.getByTestId("desk-book").getByRole("button", { name: /^ORCL / })).toBeVisible();
+  await expect(strip(page)).toHaveCount(0);
+  await expect(page.getByText(/has no plan|want a plan/i)).toHaveCount(0);
+  await expect(page.getByTestId("desk-book").getByText("No plan", { exact: true })).toHaveCount(0);
+  // The unplanned options are named once, in the day report; Close the day is its quiet link, not the strip.
+  await expect(page.getByTestId("noplan-verdict")).toHaveText("ORCL, AAPL");
+  await expect(page.getByTestId("close-the-day")).toBeVisible();
+});
+
+for (const [view, path] of [["Now", "/copilot-lab"], ["a saved conversation", `/copilot-lab?thread=${OTHER}`], ["a position's desk view", "/copilot-lab?symbol=AAPL"]] as const) {
   for (const width of [1440, 375]) {
     test(`the strip shows wherever the book shows: ${view} at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 });
-      await open(page, { path });
-      await expect(strip(page).getByTestId("needs-you-title")).toHaveText("ORCL 11/13/26 160C expires in 2 days and has no plan.");
+      // Today's give-back alert on ORCL, a ticker this view has not opened.
+      await open(page, { path, time: FRIDAY, threads: [orcl("matched"), AAPL],
+        session: { ...IN_SESSION, to_answer: { alerts: { count: 1, rows: [giveback("ORCL", "ORCL 11/13/26 160C", ORCL, "2026-11-13T14:45:00Z")] }, radar: null } } });
+      await expect(strip(page).getByTestId("needs-you-title")).toHaveText("ORCL 11/13/26 160C: give-back alert at 9:45 AM");
+      await expect(strip(page).getByRole("button", { name: "Seen" })).toHaveCount(0);
     });
   }
 }
 
-test("the strip's Seen and the thread list's new-since-you-looked keep separate notes in the browser", async ({ page }) => {
+test("when a read the strip depends on fails, it says so in one quiet line instead of showing nothing", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  // The thread list's own note (rows read) is in the browser already; the strip's Seen must neither read nor replace it.
-  await page.addInitScript(() => window.localStorage.setItem("desk.seen.v1", JSON.stringify({ "radar:x": 1 })));
-  await open(page);
-  await strip(page).getByRole("button", { name: "Seen" }).click();
-  await expect(strip(page)).toHaveCount(0);
-  expect(await page.evaluate(() => JSON.parse(window.localStorage.getItem("desk.seen.v1") ?? "{}"))).toMatchObject({ "radar:x": 1 });
+  await open(page, { time: FRIDAY, session: { ...IN_SESSION, sections: { alerts_to_answer: "unavailable" }, to_answer: { alerts: null, radar: null } } });
+  await expect(page.getByTestId("needs-you-unchecked")).toHaveText("Needs you could not check today's alerts just now; it will read again in a minute.");
+  await expect(page.getByTestId("needs-you-unchecked")).not.toHaveClass(/primary/);
 });
 
 // ------------------------------------------------------------------------------------------------ 2. an answer cut off
@@ -184,7 +211,7 @@ for (const saved of ["marked interrupted", "an older empty reply"] as const) {
 for (const width of [1440, 375]) {
   test(`at ${width}px a book row's tag never runs under its sparkline or its P&L`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
-    await open(page, { path: "/copilot-lab" });
+    await open(page, { path: "/copilot-lab", threads: [orcl("new"), AAPL] });
     const rows = page.getByTestId("desk-book").locator("li");
     await expect(rows).toHaveCount(2);
     for (const symbol of ["ORCL", "AAPL"]) {
@@ -202,11 +229,14 @@ test("each tag the book can show reads in the desk's words", async ({ page }) =>
   const tagged = (symbol: string, state: string, usd: number) => row({ key: `trade:${symbol}`, group: "watch", symbol, title: `${symbol} 12/18/26 50C`,
     instrument: "12/18/26 50C", trade_id: symbol, value: null, status: { text: "", tone: "muted" }, path: null,
     book: book({ usd, pct: usd / 10, expiry: "2026-12-18", state, planned: state !== "no_plan" }) });
+  const today = { ...tagged("TOD", "no_plan", -30), book: book({ usd: -30, expiry: "2026-11-11" }) };
   await open(page, { path: "/copilot-lab", threads: [tagged("GRN", "giving_back", 120), tagged("RED", "no_plan", -80), tagged("PLN", "on_plan", -80),
-    tagged("NER", "near_stop", -40), tagged("PST", "past_stop", -200)] });
+    tagged("NER", "near_stop", -40), tagged("PST", "past_stop", -200), today] });
   const tag = (symbol: string) => page.getByTestId("desk-book").getByRole("button", { name: new RegExp(`^${symbol} `) }).getByTestId("book-state");
   await expect(tag("GRN")).toHaveText("Giving back");
-  await expect(tag("RED")).toHaveText("No plan");
+  await expect(tag("RED")).toHaveCount(0); // no plan: no tag, the days left still show
+  await expect(page.getByTestId("desk-book").getByRole("button", { name: /^RED / })).toContainText("37d left");
+  await expect(tag("TOD")).toHaveText("Expires today");
   await expect(tag("PLN")).toHaveText("On plan");
   await expect(tag("NER")).toHaveText("Near stop");
   await expect(tag("PST")).toHaveText("Past stop");

@@ -31,7 +31,7 @@ import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { WHAT_MATTERS_PROMPT, copilotLabHref, mainChatLabel, type InvestigationSummary } from "@/lib/copilot";
 import { useKept } from "@/components/copilot/DeskMemory";
-import { afterClose, answerSymbol, deskLinkIn, deskNeeds, refreshRobinhood, type DeskLive, deskSymbolThread, nyDay, readSeen, saveFollow, saveHorizon, saveSeen, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
+import { afterClose, answerSymbol, deskLinkIn, deskNeeds, refreshRobinhood, type DeskLive, deskSymbolThread, nyDay, readOpened, saveFollow, saveHorizon, saveOpened, threadInUrl, toReview, type DeskCommand, type DeskPlan, type DeskThreads, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import styles from "./CopilotLab.module.css";
 
@@ -110,8 +110,13 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const [rowsRead, setRowsRead] = useState(!!keptRows);
   const [rowsFresh, setRowsFresh] = useState(false); // read since this mount, not only kept
   const [live, setLive] = useState<DeskLive | null>(() => keptRows?.live ?? null);
-  const readRows = useCallback((next: DeskThread[], feed?: DeskLive) => {
+  // The thread list's armed plans (a level reached today is a strip item) and which of its sources read.
+  const [plans, setPlans] = useState<DeskPlan[]>([]);
+  const [sections, setSections] = useState<DeskThreads["sections"] | null>(null);
+  const [rowsFailed, setRowsFailed] = useState<string | null>(null);
+  const readRows = useCallback((next: DeskThread[], feed?: DeskLive, read?: { plans: DeskPlan[]; sections: DeskThreads["sections"] }) => {
     setRows(next); setLive(feed ?? null); setRowsRead(true); setRowsFresh(true); keepRows({ rows: next, live: feed ?? null });
+    if (read) { setPlans(read.plans); setSections(read.sections); }
   }, [keepRows]);
   const [saved, setSaved] = useState<InvestigationSummary[]>([]);
   const [palette, setPalette] = useState(false);
@@ -139,8 +144,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   }, []);
   const feed = useDeskFeed(on);
   const feedNew = useFeedNew(feed.data, on && centreTab === "feed");
-  const [seen, setSeen] = useState<string[]>([]);
-  useEffect(() => { setSeen(readSeen(nyDay())); }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+  // The tickers opened today in this browser: opening one clears its strip items (``deskNeeds``); nothing is dismissed.
+  const [opened, setOpened] = useState<Record<string, number>>({});
+  useEffect(() => { setOpened(readOpened(nyDay())); }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
   const jumpKey = useJumpKey();
   const desk = useRef<HTMLDivElement>(null);
   const [deciding, setDeciding] = useState(false);
@@ -504,31 +510,44 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     else if (item.symbol) go(copilotLabHref(item.symbol, planContext(), { kind: "copilot", ref: null }));
   }, [go, deskRow, rows, actions]);
 
-  // The strip: the one most urgent item and its answers (``deskNeeds``' documented order).
+  // Opening a ticker (picking its book row, a strip item, its thread or its desk view) counts as having seen it today.
+  useEffect(() => {
+    const day = nyDay();
+    for (const symbol of [picked, talking]) if (symbol) setOpened(saveOpened(day, symbol)); // eslint-disable-line react-hooks/set-state-in-effect -- the owner opened it
+  }, [picked, talking]);
+
+  // The strip: what needs a decision now (``deskNeeds``' documented order), each item clearing itself.
   const closingNow = dayPhase === "close";
-  const needs = on && rowsRead ? deskNeeds(rows, nyDay(), { closing: closingNow, fills: closingNow ? steps.length : fills.waiting.length }) : [];
+  const needs = on && rowsRead ? deskNeeds({ rows, alerts: session.data?.to_answer?.alerts?.rows ?? [], plans, day: nyDay(), closing: closingNow,
+    fills: fills.waiting.length, opened }) : [];
+  // What the strip could not check: said in one quiet line instead of an empty strip that looks like "nothing waits".
+  const unchecked = !on ? null : rowsFailed && !rowsFresh ? "positions"
+    : sections?.positions === "unavailable" ? "positions" : session.error ? "today's alerts"
+    : session.data?.sections?.alerts_to_answer === "unavailable" ? "today's alerts" : null;
   const openNeed = (row: DeskThread) => { setPicked(row.symbol); openRow(row); setSheet(true); };
   // The same words as the copilot's own "Why is it moving?" about that ticker, sent in today's conversation.
   const askWhy = (need: DeskNeed) => actions.ask(`Why is ${need.symbol} moving today?`);
+  const openSymbol = (need: DeskNeed) => need.row ? openNeed(need.row) : need.symbol ? (setPicked(need.symbol), go(`/copilot-lab?${new URLSearchParams({ symbol: need.symbol })}`)) : undefined;
   const needActions = (need: DeskNeed) => {
     const row = need.row;
     switch (need.kind) {
-      case "decision": return [{ label: "Decide", primary: true, run: () => openNeed(row!) }, { label: "Ask why", run: () => askWhy(need) }];
-      case "trigger": return [{ label: "Open the plan", primary: true, run: () => openNeed(row!) }, { label: "Ask why", run: () => askWhy(need) }];
+      case "alert": return [{ label: "Open it", primary: true, run: () => openSymbol(need) }, { label: "Ask why", run: () => askWhy(need) }];
+      case "level": return [{ label: "Open the plan", primary: true, run: () => openSymbol(need) }, { label: "Ask why", run: () => askWhy(need) }];
       case "card": return [{ label: "Open the card", primary: true, run: () => { setPicked(row!.symbol); pick(row!); } }];
-      case "expiring": return [{ label: "Plan it", primary: true, run: () => openNeed(row!) }];
+      case "expiring": return [{ label: "Open it", primary: true, run: () => openSymbol(need) }];
       case "fill": return [{ label: "Link it", primary: true, run: () => { fills.start(); setSheet(true); } }];
-      case "close": return [{ label: "Close the day", primary: true, run: closeDay }];
     }
   };
 
   // The book's lower block by the time of day, one block each: the morning brief before the open (nothing until it is
   // written), the day report after the close, else what changed since the owner last looked. Arm today's plans and Close
-  // the day are not repeated here: the strip carries Close the day when something is left to review, and both are in ⌘K.
+  // the day are not repeated here: Close the day is one quiet link under the day report (and in ⌘K), never the strip.
   const lower = dayPhase === "pre" ? <MorningBrief prep={session.data?.prep} fill={fill} max={3} />
     : dayPhase === "close" ? (
       <section aria-label="Day report" data-testid="day-report" className="space-y-1.5">
-        <DayReport />
+        <DayReport rows={rows} rowsRead={rowsRead} onOpen={select} />
+        <button type="button" onClick={closeDay} data-testid="close-the-day"
+          className="inline-flex min-h-11 items-center px-1 text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Close the day{tally.total > tally.done ? ` · ${tally.total - tally.done} to review` : ""} →</button>
         {/* Watch your day's replay of today, only once one was kept: the day's one way back to it from the desk. */}
         <WatchDayLink from={today} className="inline-flex min-h-11 items-center gap-1.5 px-1 text-xs text-muted-foreground hover:text-foreground sm:min-h-0" />
       </section>
@@ -574,9 +593,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         )}
       </header>
       <div className={styles.cockpit}>
-        {on && needs.length > 0 && (
+        {on && (needs.length > 0 || unchecked) && (
           <div className={styles.strip}>
-            <NeedsStrip needs={needs} seen={seen} actions={needActions} onSeen={need => setSeen(saveSeen(nyDay(), need.key))} />
+            {needs.length > 0 && <NeedsStrip needs={needs} actions={needActions} />}
+            {unchecked && <p data-testid="needs-you-unchecked" className="px-1 pt-1 text-xs text-muted-foreground">Needs you could not check {unchecked} just now; it will read again in a minute.</p>}
           </div>
         )}
         {on && (
@@ -589,7 +609,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               </button>
             </div>
             <ThreadRail actions={actions} active={thread?.id ?? null} activeSymbol={talking} main={onNow}
-              pick={pick} onRows={readRows} onWalk={setWalk} onSaved={setSaved} refresh={refresh} follow={follow} onFollow={changeFollow} onFollowRead={followRead}
+              pick={pick} onRows={readRows} onReadFailed={setRowsFailed} onWalk={setWalk} onSaved={setSaved} refresh={refresh} follow={follow} onFollow={changeFollow} onFollowRead={followRead}
               phase={fills.waiting.length > 0 && <FillsToLink count={fills.waiting.length} onStart={() => { setThreadsShown(false); fills.start(); }} />} />
             {threadsShown && <ThisWeek />}
           </aside>
