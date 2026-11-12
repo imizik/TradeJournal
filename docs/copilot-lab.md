@@ -565,7 +565,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   "N stock positions ▾". A quiet line beside the heading says **live from Robinhood · as of HH:MM** (tap: read again,
   `POST /copilot/desk/robinhood/refresh`, no input) or, signed out, expired or stale, says so; then the book is exactly
   the journal's. Off, nothing changes and no line shows. Not followed tickers stay hidden. Display only: nothing is
-  written to the journal and nothing from Robinhood reaches the copilot.
+  written to the journal. The copilot sees the same snapshot's numbers (§ Owner context), never a Robinhood tool.
 - **Centre.** A tab strip, **Chart** first, **Feed**, **Check a call** (§ Check a call) and **Ticket** (see
   [Ticket](#ticket); no tab shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
   position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's
@@ -1575,6 +1575,34 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
     thesis-watch trigger by kind without its headline, and the companion's
     thesis guess (written by a model that had just read headlines) stays on the
     desk, like a research job's conclusion.
+    **Live from Robinhood.** With the [read-only Robinhood feed](robinhood-read-feed.md#what-the-copilot-sees)
+    on, the section reads the feed's cached snapshot (`copilot_book.live_book`:
+    never a new read, so a turn never calls Robinhood) and joins it onto every
+    open journal position with the desk's own match (`robinhood_book.match`:
+    the same contract, its own account first). Off, `positions` is exactly what
+    it was. Fresh, a matched position carries `live: "Robinhood"` and takes
+    Robinhood's quantity, mark, bid and ask (a contract, like the mark), day
+    change, unrealized P&L in dollars and percent, IV and Greeks (delta, gamma,
+    theta, vega, a share); the journal keeps its account label, cost
+    (`avg_entry`; Robinhood's average shows beside it as `avg_cost_robinhood`
+    only when it differs by more than 0.5%), plan, alerts, decisions, hold time
+    and history, and its `since_entry` mark line names Robinhood as its source.
+    A position only Robinhood shows (its fill email has not arrived) is added
+    with its ticker, contract, account label, days to expiry and those numbers,
+    `plan: {"source": "none"}` and the note "on Robinhood, not in the journal
+    yet"; the turn's symbol first (the journal's, then new), then the other new
+    ones, then the journal's rest, at most 8. A position the journal has and
+    Robinhood does not stays as the journal has it. `positions.robinhood` says
+    `state` `ok` with the snapshot's `as_of` (every live figure is as of it),
+    the matched and new counts and the units; signed out, expired, loading,
+    unavailable or stale it says only that the live numbers are unavailable,
+    and the rows are the journal's own. Only numbers, tickers (letters, digits
+    and a dot) and fixed words (call, put, long, short) pass from Robinhood: the
+    account is the journal's label for the account with those last four digits,
+    else "Robinhood account", never Robinhood's own name or any digit of the
+    account number; a row with an odd ticker, side or expiry is dropped. No
+    account totals (value, cash, buying power) enter the pack: nothing shows
+    they help a sizing answer yet.
   - `history` (measured): closed trades in the symbol (count, wins, realized $)
     and the latest four, as `get_trades` shows them.
   - `habits` (measured): the behavior audit's four exit habits through
@@ -1637,9 +1665,11 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
   least decision-relevant parts first (recent trades, today's notes, the
   since-entry lines' sources and the plan revisions, every since-entry line but
   the mark past the symbol's first position, those positions' decisions, alerts
-  and plan notes, investigations, memories, then positions beyond three) and
+  and plan notes and Robinhood's bid, ask, day change, gamma, theta and vega
+  (their mark, P&L, quantity, delta and IV stay), investigations, memories, then positions beyond three) and
   marks itself
-  `trimmed`; positions and habits go last. With the `market` section the
+  `trimmed`; positions and habits go last (`positions.robinhood`'s units go
+  with the provenance; its state and as-of stay). With the `market` section the
   turn's block may hold 1,400 characters more (`MAX_MARKET_CHARS`; the section
   itself runs 500 to 1,100); past the cap it sheds the market's source labels
   and all but one Radar event right after today's notes, and its events,
@@ -1660,8 +1690,13 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
   steers its scripted tool choice.
 - No account number, account id, trade id, fill id or broker id is in it; the
   only ids are saved investigations'.
+- The position tools agree with it: `get_positions` and `get_trade_review`'s
+  `now` take the same snapshot numbers (each row's `live` and `mark_as_of`; the
+  review's `marks_from` names Robinhood, the app's own quote, or why the live
+  numbers are unavailable), and `get_positions` adds the Robinhood-only
+  positions with the same note.
 - Tests: `backend/tests/test_copilot_context.py`, `backend/tests/test_trader_context.py`,
-  `backend/tests/test_copilot_market_pack.py`.
+  `backend/tests/test_copilot_market_pack.py`, `backend/tests/test_copilot_robinhood.py`.
 
 ## Trader context
 
@@ -1698,12 +1733,16 @@ since-entry comparison, the news reader) and writes nothing.
   comparison, so today's regular-session entries only: an overnight hold reads
   unavailable); the option mark vs the average entry; IV now (the provider's)
   vs at the fill (Black-Scholes on the fill premium: different methods, and the
-  line says so); headlines naming the symbol since the entry (the news reader:
+  line says so); for the owner pack with the Robinhood feed fresh, the mark,
+  its P&L and IV now are Robinhood's and those lines' sources say so (§ Owner
+  context); headlines naming the symbol since the entry (the news reader:
   a provider read, so only the symbol a page or turn is about reads it); time
   held vs the time stop, horizon and expiry.
 - **Entry points.** `for_symbol(symbol, now)` (the symbol's positions get the
   diff; the owner pack and `GET /charts/journal/positions/{symbol}/context`),
   `for_day(now)` (every position's diff, the day's decisions and ping counts),
+  `for_symbol(..., live=)` takes `copilot_book.live_book` for the owner pack
+  only (every other reader keeps the app's own quotes),
   `for_trade` (one position), `records` (a book a caller already read).
 - **Phone line.** `phone_line` writes "Since you entered: plan: … · NBIS 98.50
   at 10:53 is 1.5% above the invalidation 97.00 · held 48 min · time stop …"

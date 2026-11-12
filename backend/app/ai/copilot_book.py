@@ -6,16 +6,21 @@ its as-of time, for the tools in ``copilot_tools``:
 - ``chart_context``: the same ``chart_feed.workspace`` the Charts page reads
   (bars, automatic levels and their interactions, VWAP, RVol, the quote row).
 - ``positions``: open trades through ``chart_journal.positions`` (its open lots),
-  marked with the dashboard's quote engine.
+  marked with the dashboard's quote engine; with the Robinhood feed on and fresh,
+  ``live_book`` puts its cached snapshot's numbers on the positions it shows and
+  adds the ones only it shows (docs/robinhood-read-feed.md § What the copilot sees).
 - ``trades``: recent closed trades in one symbol, as the journal stored them.
 - ``memories``: the owner's approved (active) Jo memories through ``jo_briefing.memories``.
 
 Nothing here writes. No account number, account id, trade id, fill id or broker
 id leaves this module: an account appears by its name, with digit runs removed.
+From Robinhood only numbers, tickers and fixed words (call, put, long, short)
+pass; never its account names, numbers (masked or not), ids or text.
 Webull stays out, as the owner chose (dormant).
 """
 from __future__ import annotations
 
+import math
 import re
 import time
 from contextlib import nullcontext
@@ -147,7 +152,120 @@ def chart_context(symbol: str, timeframe: str) -> dict:
     return {**out, "bars_from": "the last completed session, including its after-hours; today has no bars yet"}
 
 
-# --------------------------------------------------------------------------- the book
+# --------------------------------------------------------------------------- the live book from Robinhood
+
+LIVE = "Robinhood"
+TICKER = re.compile(r"[A-Z][A-Z0-9.]{0,9}")
+OTHER_ACCOUNT = "Robinhood account"  # a Robinhood account the journal has no account for: never Robinhood's own name
+LIVE_UNITS = ("live: Robinhood rows take quantity, mark, bid, ask, day change, P&L, IV and Greeks from this snapshot; "
+              "bid and ask a contract like the mark, Greeks a share")
+NEW_NOTE = "on Robinhood, not in the journal yet (its fill has not arrived): no plan, alerts or history"
+UNAVAILABLE_NOTE = "live Robinhood numbers unavailable ({state}); marks are the journal's own quotes"
+
+
+def _finite(value, places: int) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return round(float(value), places)
+
+
+def _live_numbers(p: dict) -> dict:
+    """Numbers only, in the journal's units (mark, bid and ask a contract or a share; Greeks a share; IV in percent).
+    A missing figure stays None (unavailable), never zero."""
+    option = p.get("instrument") == "option"
+    multiplier = (_finite(p.get("multiplier"), 4) or 100.0) if option else 1.0
+    bid, ask = _finite(p.get("bid"), 4), _finite(p.get("ask"), 4)
+    out = {"quantity": _finite(p.get("quantity"), 4), "mark": _finite(p.get("mark"), 2),
+           "bid": None if bid is None else round(bid * multiplier, 2), "ask": None if ask is None else round(ask * multiplier, 2),
+           "day_change_pct": _finite(p.get("day_change_pct"), 1),
+           "unrealized_usd": _finite(p.get("usd"), 2), "unrealized_pct": _finite(p.get("pct"), 1), "avg_cost": _finite(p.get("avg_cost"), 2)}
+    if option:
+        greeks = p.get("greeks") if isinstance(p.get("greeks"), dict) else {}
+        iv = _finite(greeks.get("iv"), 4)
+        out |= {"iv_pct": None if iv is None else round(100 * iv, 1), "delta": _finite(greeks.get("delta"), 3),
+                "gamma": _finite(greeks.get("gamma"), 4), "theta": _finite(greeks.get("theta"), 4), "vega": _finite(greeks.get("vega"), 4)}
+    return out
+
+
+def _new_row(p: dict, accounts: dict[str, str], as_of: str | None, today) -> dict | None:
+    """A position Robinhood shows that the journal does not have yet: a ticker, fixed words and numbers only."""
+    symbol = p.get("symbol") if isinstance(p.get("symbol"), str) and TICKER.fullmatch(p["symbol"]) else None
+    instrument = p.get("instrument") if p.get("instrument") in ("option", "stock") else None
+    direction = p.get("direction") if p.get("direction") in ("long", "short") else None
+    if symbol is None or instrument is None or direction is None:
+        return None
+    numbers = _live_numbers(p)
+    row = {"symbol": symbol, "account": accounts.get(p.get("last4")) or OTHER_ACCOUNT, "instrument": instrument}
+    if instrument == "option":
+        from datetime import date
+        try:
+            expiry = date.fromisoformat(p.get("expiry")) if isinstance(p.get("expiry"), str) else None
+        except ValueError:
+            expiry = None
+        strike = _finite(p.get("strike"), 3)
+        if p.get("side") not in ("call", "put") or strike is None or expiry is None:
+            return None
+        row["option"] = {"side": p["side"], "strike": strike, "expiry": expiry.isoformat()}
+        row["days_to_expiry"] = (expiry - today).days
+    avg = numbers.pop("avg_cost")
+    return {**row, "direction": direction, "quantity": numbers.pop("quantity"), "avg_entry": avg, **numbers,
+            "mark_as_of": as_of, "live": LIVE, "journal": NEW_NOTE}
+
+
+def live_book(db, now: datetime | None = None) -> dict | None:
+    """The desk's cached Robinhood snapshot (docs/robinhood-read-feed.md § What the copilot sees) joined onto every open
+    journal position with the feed's own ``match``: ``None`` while the feed is off; ``{"state"}`` when it is signed
+    out, expired, loading, unavailable or stale; else ``{"state": "ok", "as_of", "matched": {trade_id: numbers},
+    "new": [rows]}``. Never reads Robinhood: only what the desk's last refresh left (``kick=False``)."""
+    from sqlmodel import select
+    from app.engine import robinhood_book as rb
+    from app.engine.chart_math import ET
+    from app.models import Account, Trade
+    view, snapshot = rb.feed.snapshot(kick=False)
+    if view.get("state") == "off":
+        return None
+    if snapshot is None:
+        return {"state": view.get("state") or "unavailable"}
+    held = db.exec(select(Trade, Account.last4).join(Account, Account.id == Trade.account_id)
+                   .where(Trade.status == "open").where(_not_webull())).all()
+    journal = [{"trade_id": str(t.id), "last4": last4,
+                "key": rb.contract_key(t.ticker, t.instrument_type, t.option_type, t.strike,
+                                       t.expiration.isoformat() if t.expiration else None)} for t, last4 in held]
+    matched, _missing, extra = rb.match(journal, snapshot)
+    accounts = {a.last4: _label(a.name) for a in db.exec(select(Account).where(_not_webull())).all()}
+    as_of = _journal_time(datetime.fromtimestamp(snapshot["at"], ET).replace(tzinfo=None)) if _finite(snapshot.get("at"), 0) else None
+    today = (now or datetime.now(UTC)).astimezone(ET).date()
+    return {"state": "ok", "as_of": as_of, "matched": {tid: _live_numbers(p) for tid, p in matched.items()},
+            "new": [row for p in extra if (row := _new_row(p, accounts, as_of, today)) is not None]}
+
+
+def live_note(live: dict | None) -> dict | None:
+    """What a positions section says about the feed: nothing while it is off."""
+    if live is None:
+        return None
+    if live["state"] != "ok":
+        return {"state": live["state"], "note": UNAVAILABLE_NOTE.format(state=live["state"].replace("_", " "))}
+    return {"state": "ok", "source": "measured: Robinhood's snapshot", "as_of": live["as_of"], "matched": len(live["matched"]),
+            "new": len(live["new"]), "units": LIVE_UNITS}
+
+
+def _with_live(row: dict, numbers: dict, as_of: str | None) -> dict:
+    """A journal row with Robinhood's numbers: the journal keeps the contract, cost, account and times."""
+    numbers = dict(numbers)
+    avg = numbers.pop("avg_cost")
+    for key in ("mark_as_of", "iv_pct", "delta", "greeks_as_of"):
+        row.pop(key, None)
+    row.update(quantity=numbers.pop("quantity"), mark=numbers.pop("mark"), mark_as_of=as_of)
+    row |= {k: v for k, v in numbers.items()}
+    if row.get("instrument") == "option":
+        row["greeks_as_of"] = as_of
+    if avg is not None and row.get("avg_entry") and abs(avg - row["avg_entry"]) > 0.005 * row["avg_entry"]:
+        row["avg_cost_robinhood"] = avg
+    row["live"] = LIVE
+    return row
+
+
+# --------------------------------------------------------------------------- the journal's book
 
 def _not_webull():
     from sqlalchemy import or_
@@ -183,13 +301,14 @@ def _warm_option_quotes(trades: list) -> None:
 
 
 def position_rows(db, limit: int = MAX_POSITIONS, first: str | None = None, only=None,
-                  *, now: datetime | None = None) -> tuple[list[tuple], int]:
+                  *, now: datetime | None = None, live: dict | None = None) -> tuple[list[tuple], int]:
     """``([(trade, row), ...], total)``: the row is the model's view (below); the trade lets a caller in this package
     look up what else the journal keeps for it, and never leaves the server. ``total`` counts every open position.
     ``first`` puts that symbol's positions ahead of the alphabetical rest before the ``limit`` cut, so the symbol a
     turn is about is never the one dropped from a large book. ``only`` (a trade) marks that one position alone.
     ``now`` shares a caller's observation clock for elapsed holding time; it does not turn the current quotes
-    into historical observations."""
+    into historical observations. ``live`` (``live_book``, when it is ``ok``) gives the positions Robinhood shows
+    Robinhood's numbers (``_with_live``) instead of the app's own quote read."""
     from sqlmodel import select
     from app.engine import chart_journal
     from app.engine.quotes import get_stock_quotes
@@ -203,18 +322,19 @@ def position_rows(db, limit: int = MAX_POSITIONS, first: str | None = None, only
     if first:
         held.sort(key=lambda p: trades[p["trade_id"]].ticker != first)  # stable: the alphabetical order holds within each part
     quotes = get_stock_quotes(sorted({trades[p["trade_id"]].ticker for p in held if trades[p["trade_id"]].instrument_type == "stock"})) if held else {}
-    _warm_option_quotes([trades[p["trade_id"]] for p in held[:limit]])
+    covered = live["matched"] if live and live.get("state") == "ok" else {}
+    _warm_option_quotes([trades[p["trade_id"]] for p in held[:limit] if p["trade_id"] not in covered])
     from app.engine.chart_math import ET
     now = (now or datetime.now(UTC)).astimezone(UTC)
     pairs = []
     for p in held[:limit]:
         trade = trades[p["trade_id"]]
-        mark, quoted_at, greeks = _mark(trade, quotes)
+        mark, quoted_at, greeks = (None, None, {}) if p["trade_id"] in covered else _mark(trade, quotes)
         cost, quantity = p.get("avg_cost"), p.get("open") or 0
         sign = -1 if p.get("direction") == "short" else 1
         gain = None if mark is None or cost is None else round(sign * (mark - cost) * quantity, 2)
         opened = trade.opened_at.replace(tzinfo=ET) if trade.opened_at.tzinfo is None else trade.opened_at  # New York wall clock
-        pairs.append((trade, {
+        row = {
             "symbol": trade.ticker, "account": _label(p.get("account")), "instrument": trade.instrument_type,
             **({"option": {"side": trade.option_type, "strike": _round(float(trade.strike)), "expiry": trade.expiration.isoformat()}}
                if trade.instrument_type == "option" else {}),
@@ -222,21 +342,42 @@ def position_rows(db, limit: int = MAX_POSITIONS, first: str | None = None, only
             "mark": _round(mark), **({"mark_as_of": quoted_at} if quoted_at else {}), **greeks, "unrealized_usd": gain,
             "unrealized_pct": None if gain is None or not cost else round(100 * sign * (mark - cost) / cost, 1),
             "opened_at": _journal_time(trade.opened_at), "days_held": (now - opened).days,
-        }))
+        }
+        pairs.append((trade, _with_live(row, covered[p["trade_id"]], live["as_of"]) if p["trade_id"] in covered else row))
     return pairs, len(held)
 
 
+def live_or_unavailable(db, now: datetime | None = None) -> dict | None:
+    """``live_book`` for a copilot read: a failure reads as ``unavailable`` (the journal's own marks), never an error."""
+    try:
+        return live_book(db, now)
+    except Exception as exc:  # noqa: BLE001 - the feed is extra: the book still reads without it
+        import logging
+        from sqlalchemy.exc import SQLAlchemyError
+        logging.getLogger(__name__).warning("copilot live book unavailable: %s", type(exc).__name__)
+        if isinstance(exc, SQLAlchemyError):  # a failed read leaves the transaction unusable for the journal's reads
+            db.rollback()
+        return {"state": "unavailable"}
+
+
 def positions(session=None) -> dict:
+    """The ``get_positions`` tool: the journal's open positions; with the Robinhood feed fresh, the ones it shows carry
+    its numbers and the ones only Robinhood shows are added (``live_book``), so it agrees with the owner pack."""
     from sqlmodel import Session
     from app.database import engine
     with (Session(engine) if session is None else nullcontext(session)) as db:
-        pairs, count = position_rows(db)
+        live = live_or_unavailable(db)
+        pairs, count = position_rows(db, live=live)
     rows = [row for _, row in pairs]
+    new = (live or {}).get("new", [])
     now = datetime.now(UTC)
-    return {"state": "ok", "as_of": _iso(now), "count": count, "shown": len(rows), "positions": rows,
-            "units": "Options: avg_entry and mark are dollars per contract (the premium x 100). Stocks: dollars per share. "
-                     "opened_at is New York time.",
-            "excluded": "Webull accounts (dormant)"}
+    out = {"state": "ok", "as_of": _iso(now), "count": count + len(new), "shown": len(rows) + len(new), "positions": rows + new,
+           "units": "Options: avg_entry and mark are dollars per contract (the premium x 100). Stocks: dollars per share. "
+                    "opened_at is New York time.",
+           "excluded": "Webull accounts (dormant)"}
+    if (note := live_note(live)) is not None:
+        out["robinhood"] = note
+    return out
 
 
 def trades(symbol: str, limit: int = 5, session=None, exclude=None) -> dict:

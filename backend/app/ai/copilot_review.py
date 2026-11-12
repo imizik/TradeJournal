@@ -19,7 +19,8 @@ exist. For a closed trade:
 
 For an open position the same ``trade`` (no exit yet), ``plan``, ``alerts`` (what
 followed so far) and ``comparison``, plus ``now``: the current mark and open P&L
-(``copilot_book.position_rows``, the dashboard's quote engine), minutes held,
+(``copilot_book.position_rows``, the dashboard's quote engine; with the Robinhood
+feed fresh, its snapshot's numbers as the owner pack shows them), minutes held,
 days to expiry, the give-back watch's peak and give-back, and the latest alert.
 There is no path or habits section until it closes.
 
@@ -208,7 +209,8 @@ def _habits(db, trade, fills: list[dict]) -> dict:
 def _now(db, trade) -> dict:
     from app.engine import position_alerts
     from app.engine.chart_math import ET
-    pairs, _ = copilot_book.position_rows(db, limit=1, only=trade)
+    live = copilot_book.live_or_unavailable(db)
+    pairs, _ = copilot_book.position_rows(db, limit=1, only=trade, live=live)
     if not pairs:
         return {"state": "unavailable", "reason": "The journal shows nothing open for this position."}
     row = pairs[0][1]
@@ -219,6 +221,11 @@ def _now(db, trade) -> dict:
            "open_pnl_usd": row["unrealized_usd"], "open_pnl_pct": row["unrealized_pct"],
            "minutes_held": max(0, int((now_et - opened).total_seconds() // 60)), "days_held": row["days_held"],
            "quote": None if row["mark"] is not None else "No current quote came back, so the open P&L is unknown."}
+    if row.get("live"):  # the same Robinhood numbers the owner pack shows (copilot_book.live_book)
+        out |= {"marks_from": "Robinhood's snapshot (mark, P&L, quantity, Greeks)", "avg_cost_robinhood": row.get("avg_cost_robinhood"),
+                **{k: row.get(k) for k in ("bid", "ask", "day_change_pct", "iv_pct", "delta", "theta")}}
+    elif live is not None:
+        out["marks_from"] = "the app's own quote (not in Robinhood's snapshot)" if live["state"] == "ok" else copilot_book.live_note(live)["note"]
     if trade.instrument_type == "option" and trade.expiration:
         out["days_to_expiry"] = (trade.expiration - now_et.date()).days
         out["expires_today"] = trade.expiration == now_et.date()

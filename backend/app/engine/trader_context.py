@@ -419,7 +419,9 @@ def _group_line(result: dict) -> dict:
 
 def _mark_line(row: dict) -> dict:
     source = "journal cost; option mid" if row.get("instrument") == "option" else "journal cost; quote"
-    mark, cost = row.get("mark"), row.get("avg_entry")
+    if row.get("live"):  # Robinhood's mark and P&L (copilot_book.live_book), against Robinhood's own average when it differs
+        source = "Robinhood mark and average cost"
+    mark, cost = row.get("mark"), row.get("avg_cost_robinhood") or row.get("avg_entry")
     if mark is None or not cost:
         return _missing("mark", "no live mark" if mark is None else "no entry cost on file", source)
     unit = "a contract" if row.get("instrument") == "option" else "a share"
@@ -432,7 +434,7 @@ def _mark_line(row: dict) -> dict:
 def _iv_line(row: dict, entry: dict) -> dict | None:
     if row.get("instrument") != "option":
         return None
-    source = "fill: Black-Scholes on its premium; now: provider (different methods)"
+    source = f"fill: Black-Scholes on its premium; now: {'Robinhood' if row.get('live') else 'provider'} (different methods)"
     now, then = row.get("iv_pct"), entry.get("iv_pct")
     if now is None and then is None:
         return _missing("iv", "neither IV now nor IV at the fill is on file", source)
@@ -572,9 +574,10 @@ def records(db: Session, pairs: list[tuple], now: float | None = None, *, diff_f
 
 
 def for_symbol(symbol: str | None, now: float | None = None, *, session: Session | None = None, limit: int = MAX_POSITIONS,
-               diff: str = "symbol", headlines: bool = True, reads: Reads | None = None) -> dict:
+               diff: str = "symbol", headlines: bool = True, reads: Reads | None = None, live: dict | None = None) -> dict:
     """The open positions' records, ``symbol``'s first. ``diff``: ``symbol`` (the since-entry diff for that symbol's
-    positions only), ``all`` or ``none``; headlines are read for the symbol's positions when ``headlines``."""
+    positions only), ``all`` or ``none``; headlines are read for the symbol's positions when ``headlines``. ``live``
+    (``copilot_book.live_book``; the copilot's pack only) puts Robinhood's numbers on the positions it shows."""
     import time
     from app.ai import copilot_book
     from app.database import engine
@@ -582,7 +585,7 @@ def for_symbol(symbol: str | None, now: float | None = None, *, session: Session
     now = time.time() if now is None else now
     symbol = symbol.upper() if symbol else None
     with (Session(engine) if session is None else nullcontext(session)) as db:
-        pairs, total = copilot_book.position_rows(db, limit=limit, first=symbol, now=datetime.fromtimestamp(now, UTC))
+        pairs, total = copilot_book.position_rows(db, limit=limit, first=symbol, now=datetime.fromtimestamp(now, UTC), live=live)
         mine = (lambda t: t.ticker == symbol) if symbol else (lambda _t: False)
         pick = {"all": lambda _t: True, "none": lambda _t: False}.get(diff, mine)
         rows = records(db, pairs, now, diff_for=pick, headlines_for=mine if headlines else (lambda _t: False), reads=reads)

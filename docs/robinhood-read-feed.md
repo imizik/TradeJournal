@@ -39,10 +39,33 @@ The app's own code is the only guard:
 - Tests (`backend/tests/test_robinhood_read.py`) fail if a write-looking name is added to the allowlist, if any
   changing or trading tool is not refused, or if anything else in the repository names the endpoint or builds a tool call.
 - Display only: nothing from the feed is written to the journal (fills, trades, P&L, FIFO stay as the emails make them).
-  Account numbers leave the server masked to the last four. Robinhood's `guide` text (its instructions to an AI) and
-  every other string from Robinhood are treated as data: dropped or shown as data, never sent to a model.
+  Account numbers leave the server masked to the last four (to the desk; never to the copilot). Robinhood's `guide`
+  text (its instructions to an AI) and every other string from Robinhood are treated as data: dropped or shown as data,
+  never sent to a model. Only numbers, tickers and fixed words reach the copilot (below).
 
 Adding a tool to the allowlist is a consequential, user-gated change.
+
+## What the copilot sees
+
+The copilot answers from the same numbers the book shows, and nothing else from Robinhood. Exactly what its owner
+context carries is in [Copilot Lab § Owner context](copilot-lab.md#owner-context); in short:
+
+- **Only the cached snapshot.** `backend/app/ai/copilot_book.py` (`live_book`) reads the snapshot the desk's last
+  refresh left (`feed.snapshot(kick=False)`) and joins it with the desk's own `match`. A copilot turn, `get_positions`
+  or a trade review never starts a Robinhood read, and the copilot still has no Robinhood tool. A test fails if
+  `copilot_book` uses anything of the feed but `feed.snapshot`, `match` and `contract_key`.
+- **Fresh:** each journal position Robinhood shows takes its quantity, mark, bid, ask, day change, unrealized P&L in
+  dollars and percent, IV and Greeks, marked `live: "Robinhood"` under one `as_of` (the snapshot's); the journal keeps
+  its plan, alerts, decisions, hold time and history. A position only Robinhood shows is added with no plan and the
+  note that its fill has not reached the journal. A journal position Robinhood does not show stays as the journal has
+  it. `get_positions` and the trade review's current mark say the same and name their source.
+- **Off:** the copilot's context is exactly what it was without the feed. **Signed out, expired, loading, unavailable
+  or stale:** the rows are the journal's own and one line says the live numbers are unavailable and why.
+- **What passes:** numbers, tickers (letters, digits and a dot) and the fixed words call, put, long and short. The
+  account is the journal's own label for the account with those last four digits (else "Robinhood account"); no digit
+  of an account number, masked or not, no Robinhood account name, id or text. A position with an odd ticker, side or
+  expiry is left out. Account totals (value, cash, buying power) are not given to the copilot.
+- Tests: `backend/tests/test_copilot_robinhood.py`.
 
 ## Where the sign-in lives
 
@@ -107,5 +130,7 @@ Built and tested against a fake connection that returns the shapes Isaac's own t
 seen live: the exact shape of `get_equity_quotes` (read defensively), how pagination looks on a long position list,
 whether `account_number` is all digits (either works; the last four come from `rhs_account_number` when it is), the
 sign of a short option's average price (read either way), and whether Robinhood rotates the renewal token (handled).
-The first real sign-in proves them. A single failed renewal (a network blip on the last day) also ends the sign-in by
+The first real sign-in proves them, and with them the copilot's live numbers: that Isaac's journal accounts carry the
+same last four digits as Robinhood's (else a position matches by contract in any account, and an unmatched account
+reads as "Robinhood account"), and that the snapshot's marks agree with what the Robinhood app shows. A single failed renewal (a network blip on the last day) also ends the sign-in by
 design: sign in again.
