@@ -90,6 +90,9 @@ sudo /opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/curren
 - Ten wrong passphrases in 15 minutes pause new sign-ins for 15 minutes. Devices already signed in are not affected.
 - If a page's data stops loading with "Sign in required" after a long time open, reload: it was the 30-day or 7-day
   limit.
+- Sharing a screenshot into the app from another app's share sheet (Android only; iPhone does not offer it) is
+  refused while the lock is on unless the phone sends it as coming from the app itself; attach it in the Copilot
+  Lab instead.
 
 ## Signing out
 
@@ -124,8 +127,12 @@ Only someone with a shell on the server can do these, which is the point.
 
    Deleting `/etc/tradejournal/owner-lock.env` and restarting does the same.
 2. **Forgot the passphrase:** make a new one with `owner_lock_config.py passphrase` (it ends every old session).
-3. **"Too many attempts":** wait 15 minutes. If it keeps happening, something on the tailnet is guessing: check the
-  `sign-in refused ... from` lines above for its address.
+3. **"Too many attempts":** wait 15 minutes. If it keeps happening, something on the tailnet is guessing on purpose
+   and can keep new sign-ins paused (devices already signed in keep working). Find its address in the
+   `sign-in refused ... from` lines above and remove that device from the tailnet in the Tailscale admin console;
+   `mode off` also lets you in but drops the lock.
+4. **Lock seems to do nothing:** `owner_lock_config.py status` shows the setting each running service started with.
+   If the API and the web page disagree (someone restarted only one), restart both.
 
 ## Who calls the app
 

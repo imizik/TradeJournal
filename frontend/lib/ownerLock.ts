@@ -19,7 +19,7 @@ export const CALLER_HEADER = "x-tj-lock-caller";
 export const STATE_HEADER = "x-tj-lock-state";
 
 // Inert files a browser or the home-screen installer needs before anyone signs in.
-const PUBLIC_FILES = new Set(["/favicon.ico", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png", "/manifest.webmanifest", "/deployment.json"]);
+const PUBLIC_FILES = new Set(["/icon-192.png", "/icon-512.png", "/apple-touch-icon.png", "/manifest.webmanifest", "/deployment.json"]);
 const PUBLIC_ROUTES = new Set([SIGN_IN_PATH, "/api/lock/sign-in", "/api/lock/sign-out"]);
 
 function digest(value: string) { return createHash("sha256").update(value).digest(); }

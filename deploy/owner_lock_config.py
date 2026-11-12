@@ -68,6 +68,24 @@ def write(path: Path, values: dict) -> None:
         raise
 
 
+def running_modes() -> dict:
+    """The switch each running service actually started with (they must agree, or the API trusts the web page's requests)."""
+    found = {}
+    for service in SERVICES:
+        pid = subprocess.run(["systemctl", "show", service, "--property=MainPID", "--value"],
+                             capture_output=True, text=True, check=False).stdout.strip()
+        mode = "not running"
+        if pid.isdigit() and pid != "0":
+            try:
+                environ = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+                values = [item.split(b"=", 1)[1].decode() for item in environ if item.startswith(b"TJ_OWNER_LOCK=")]
+                mode = (values[-1].strip().lower() or "off") if values else "off"
+            except OSError:
+                mode = "unknown"
+        found[service] = mode
+    return found
+
+
 def restart(enabled: bool) -> None:
     if enabled:
         subprocess.run(["systemctl", "restart", *SERVICES], check=True)
@@ -97,6 +115,11 @@ def main(argv=None) -> int:
         print(f"Lock: {current}")
         print("Passphrase: " + ("set" if values.get("TJ_OWNER_LOCK_PASSPHRASE_HASH") else "not set"))
         print("Server key for the deploy check: " + ("set" if len(values.get("TJ_OWNER_LOCK_LOCAL_KEY", "")) >= 32 else "not set"))
+        running = running_modes()
+        print("Running now: " + ", ".join(f"{name.removesuffix('.service')}={mode}" for name, mode in running.items()))
+        if len(set(running.values())) > 1:
+            print("Warning: the API and the web page are running with different settings. Restart both: sudo systemctl restart "
+                  + " ".join(SERVICES))
         if path.exists() and path.stat().st_mode & 0o077:
             print(f"Warning: {path} can be read by other users; it should be mode 0600.")
         return 0

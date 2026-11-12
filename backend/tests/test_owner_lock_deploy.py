@@ -23,7 +23,8 @@ def load(name):
 def script(tmp_path, monkeypatch):
     module = load("owner_lock_config")
     restarts = []
-    monkeypatch.setattr(module.subprocess, "run", lambda command, check: restarts.append(command))
+    monkeypatch.setattr(module.subprocess, "run", lambda command, check, **_: restarts.append(command))
+    monkeypatch.setattr(module, "running_modes", lambda: {name: "off" for name in module.SERVICES})
     monkeypatch.setattr(module, "HASHER", PasswordHasher(time_cost=1, memory_cost=8, parallelism=1))
     module.restarts = restarts
     module.run = lambda *args: module.main(["--config-dir", str(tmp_path), *args])
@@ -74,6 +75,13 @@ def test_modes_need_a_passphrase_and_restart_the_app(script, capsys):
     capsys.readouterr()
     assert script.run("status") == 0
     assert capsys.readouterr().out.splitlines()[:3] == ["Lock: off", "Passphrase: set", "Server key for the deploy check: set"]
+
+
+def test_status_warns_when_the_running_services_disagree(script, capsys, monkeypatch):
+    monkeypatch.setattr(script, "running_modes", lambda: {"tradejournal-api.service": "on", "tradejournal-frontend.service": "off"})
+    assert script.run("status") == 0
+    out = capsys.readouterr().out
+    assert "Running now: tradejournal-api=on, tradejournal-frontend=off" in out and "different settings" in out
 
 
 def test_real_config_directory_needs_root(monkeypatch):
