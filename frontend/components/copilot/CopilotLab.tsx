@@ -15,6 +15,7 @@ import FillLinkBar, { FillsToLink, useFillLinks } from "@/components/copilot/Fil
 import RadarDecision from "@/components/copilot/RadarDecision";
 import { ThreadAlertAnswers, ThreadHitRating } from "@/components/copilot/ProofAnswers";
 import DayReport from "@/components/copilot/DayReport";
+import WatchDayLink from "@/components/replay/WatchDayLink";
 import { planContext } from "@/components/copilot/PlanATrade";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import ArmChecklist from "@/components/copilot/ArmChecklist";
@@ -465,8 +466,10 @@ export default function CopilotLab({ link = null, close = false, daily = false }
   // the day are not repeated here: the strip carries Close the day when something is left to review, and both are in ⌘K.
   const lower = dayPhase === "pre" ? <MorningBrief prep={session.data?.prep} fill={fill} max={3} />
     : dayPhase === "close" ? (
-      <section aria-label="Day report" data-testid="day-report">
+      <section aria-label="Day report" data-testid="day-report" className="space-y-1.5">
         <DayReport />
+        {/* Watch your day's replay of today, only once one was kept: the day's one way back to it from the desk. */}
+        <WatchDayLink from={today} className="inline-flex min-h-11 items-center gap-1.5 px-1 text-xs text-muted-foreground hover:text-foreground sm:min-h-0" />
       </section>
     ) : <SinceYouLooked rows={rows} session={session.data} read={rowsRead} />;
 

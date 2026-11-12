@@ -183,7 +183,7 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     is unseen in this browser); alert and Radar ratings are optional and never counted here. Open conversations about no ticker (an older
     turn, a week review) are listed under it, title and date: today's, the open one and the latest automatic week
     review, the rest under **Earlier · N**. **What matters right now?** (one turn, the fixed `lib/copilot.ts`
-    `WHAT_MATTERS_PROMPT`) sits at the foot of the centre's Feed tab beside Review my week, and in ⌘K.
+    `WHAT_MATTERS_PROMPT`) and Review my week are ⌘K commands (Jump to… on a phone).
   - **Tickers**: one row per symbol the owner has something on: an open
     position, a plan (armed, near a trigger, or exited with its exit review
     waiting), a plan or alert card waiting on Confirm, a thesis-watch trigger
@@ -617,7 +617,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
 
 **Time of day.** The book's lower block follows the New York clock, one block each: before 9:30 on a weekday it is the
 **Morning brief** (`MorningBrief.tsx`, cut to three lines with **Read the whole brief** a tap away; nothing before it
-is written); after 16:00 it is the **day report** (below); otherwise **Since you looked**: what changed since the
+is written); after 16:00 it is the **day report** (below), with a quiet **Watch today** link under it once Watch your
+day kept today's replay; otherwise **Since you looked**: what changed since the
 owner last left the desk in this browser (`localStorage` `desk.looked.v2`, by position, saved when the page is hidden
 or left), four lines at most: the biggest open-P&L changes since then ("NBIS 11/14/26 105C −$235": the change, since
 the row has the P&L now; a move under $25 and 10% left out), positions opened or closed since, and the fills, pings
@@ -1153,8 +1154,8 @@ the Jump entry it is the one way to Plan a trade from the desk. The read-only no
 place: it is first in the menu and the phone's first tab ("Desk",
 `withDesk` in `frontend/components/Nav.tsx`), `/today` forwards to it, and
 the Labs entry for the same page goes. What Today showed that the desk did
-not now sits in the centre's Feed: the pings held back today (each saying why), and Watch
-today at its foot. With the lab off, Today is unchanged.
+not now sits in the centre's Feed (the pings held back today, each saying why) and, after the close, Watch
+today under the day report once a replay was kept. With the lab off, Today is unchanged.
 
 The message box (desk and side panel alike) is one box: on the desk the
 "About <symbol>" chip, then a full-width text area that starts three lines
@@ -1227,8 +1228,8 @@ his own trade audit says unplanned entries lost the money and buzz is where thos
 
 - Only behind the **Chatter** filter: never in Mine, Market or Mine + Market, never in a symbol's story, never counted
   as new, never on the home view or the Needs-you strip, never a phone or Telegram ping. The filter appears only while
-  at least one source is on and has rows; when a source is on but cannot be read or has nothing yet, the Feed's foot
-  says so. `chatter.sources` names each source's state: `on`, `not set up` or `unavailable`.
+  at least one source is on and has rows; under it, a source that cannot be read or has nothing yet is named in one
+  line. While no source has rows nothing about chatter shows anywhere. `chatter.sources` names each source's state: `on`, `not set up` or `unavailable`.
 - A chatter row's only actions are **Ask the copilot** (the row, quoted, in the box unsent) and the outbound link,
   which opens Reddit or the NYT in his own browser. No Plan it, no Open in Charts, no countdowns, no hype relayed as a
   headline. Facts and counts; nothing tells him to buy, sell or hold.
@@ -1963,8 +1964,8 @@ The system prompt asks the model to call:
 While the lab is on, **Review my week** sits on the Dashboard header and on a
 Friday's Daily Review (`components/copilot/ReviewMyWeek.tsx`), opening
 `/copilot-lab?context=Review my week` (a Friday's adds `of <its Monday>`) with
-the text in the message box, unsent. On the lab home it sits beside "What
-matters right now?" (at the foot of the centre's Feed and in ⌘K) and sends the turn at once. The system prompt asks the
+the text in the message box, unsent. On the desk it is a ⌘K command beside "What
+matters right now?" and sends the turn at once. The system prompt asks the
 model to call:
 
 - `get_week_review(week_start?)` (read-only, provenance `saved`;

@@ -142,3 +142,15 @@ test("a day with nothing at all says so in one sentence", async ({ page }) => {
     { ...REPORT, entries: { entries: 0, planned: 0, late: 0, pending: 0, rows: [] }, checks: null }, [], 0);
   await expect(page.getByTestId("day-report-card")).toHaveText("Nothing to report today: no entries, pings or checked calls.");
 });
+
+test("Watch today sits under the day report only once today's replay was kept", async ({ page }) => {
+  await page.route("**/api/backend/replay", (route) => route.fulfill({ json: { days: [{ date: DAY, symbols: ["NBIS"] }] } }));
+  await now_(page);
+  const report = page.getByTestId("day-report");
+  await expect(report.getByRole("link", { name: "Watch today" })).toHaveAttribute("href", `/replay/${DAY}`);
+  await page.unroute("**/api/backend/replay");
+  await page.route("**/api/backend/replay", (route) => route.fulfill({ json: { days: [] } }));
+  await page.reload();
+  await expect(report.getByTestId("day-report-card")).toBeVisible();
+  await expect(report.getByRole("link", { name: "Watch today" })).toHaveCount(0);
+});
