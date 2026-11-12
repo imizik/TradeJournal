@@ -1,0 +1,323 @@
+{
+  "protocol_id": "stop-after-green-20261024-v1",
+  "provenance": {
+    "protocol_id": "stop-after-green-20261024-v1",
+    "extract_sha256": "4ada80b1977230773bd0d919cd3ea42f766b8fcc651d5484fee8253de7c33a47",
+    "source_sha": "5ae35afa88dd68da5c86d4660bdfa10c670fcf23",
+    "source_dirty": false,
+    "extract_is_registered": false
+  },
+  "extract_trades": 1531,
+  "analyzed": 1531,
+  "excluded": {},
+  "recorded_pnl_mismatch": 0,
+  "actual_total": 12721.98,
+  "rules": {
+    "stop_above_0": {
+      "all": {
+        "trades": 1531,
+        "affected": 775,
+        "actual_pnl": 12721.98,
+        "counterfactual_pnl": 19287.99,
+        "dollar_diff": 6566.01,
+        "affected_pnl": -6566.01,
+        "premium_removed": 524496.03,
+        "rop_actual": 1.16,
+        "rop_counterfactual": 3.38,
+        "rop_diff": 2.22,
+        "affected_pct_mean": -3.31,
+        "others_pct_mean": 3.63,
+        "pct_gap": -6.94,
+        "flat_cut_diff": -6095.3,
+        "selection_value": 12661.31,
+        "largest_loss": [
+          -4350.0,
+          -2690.0
+        ],
+        "worst_day": [
+          -3607.99,
+          -3607.99
+        ],
+        "dollar_diff_interval": [
+          -8919.98,
+          25219.02
+        ],
+        "selection_value_interval": [
+          -1479.16,
+          27379.24
+        ]
+      },
+      "exploration": {
+        "trades": 1178,
+        "affected": 637,
+        "actual_pnl": 2668.98,
+        "counterfactual_pnl": 7386.99,
+        "dollar_diff": 4718.01,
+        "affected_pnl": -4718.01,
+        "premium_removed": 364769.03,
+        "rop_actual": 0.39,
+        "rop_counterfactual": 2.27,
+        "rop_diff": 1.89,
+        "affected_pct_mean": -2.84,
+        "others_pct_mean": 2.5,
+        "pct_gap": -5.34,
+        "flat_cut_diff": -1411.5,
+        "selection_value": 6129.51,
+        "largest_loss": [
+          -1604.0,
+          -1604.0
+        ],
+        "worst_day": [
+          -2095.0,
+          -2095.0
+        ],
+        "dollar_diff_interval": [
+          -8205.95,
+          16851.04
+        ],
+        "selection_value_interval": [
+          -3669.39,
+          15510.85
+        ]
+      },
+      "check": {
+        "trades": 353,
+        "affected": 138,
+        "actual_pnl": 10053.0,
+        "counterfactual_pnl": 11901.0,
+        "dollar_diff": 1848.0,
+        "affected_pnl": -1848.0,
+        "premium_removed": 159727.0,
+        "rop_actual": 2.48,
+        "rop_counterfactual": 4.85,
+        "rop_diff": 2.37,
+        "affected_pct_mean": -5.49,
+        "others_pct_mean": 6.46,
+        "pct_gap": -11.95,
+        "flat_cut_diff": -3964.94,
+        "selection_value": 5812.94,
+        "largest_loss": [
+          -4350.0,
+          -2690.0
+        ],
+        "worst_day": [
+          -3607.99,
+          -3607.99
+        ],
+        "dollar_diff_interval": [
+          -7993.0,
+          16699.0
+        ],
+        "selection_value_interval": [
+          -3981.93,
+          16882.91
+        ]
+      },
+      "decision": "reject as a demonstrated saving (interval includes 0 or periods disagree)"
+    },
+    "stop_above_250": {
+      "all": {
+        "trades": 1531,
+        "affected": 382,
+        "actual_pnl": 12721.98,
+        "counterfactual_pnl": 16990.95,
+        "dollar_diff": 4268.97,
+        "affected_pnl": -4268.97,
+        "premium_removed": 264734.99,
+        "rop_actual": 1.16,
+        "rop_counterfactual": 2.05,
+        "rop_diff": 0.89,
+        "affected_pct_mean": -3.52,
+        "others_pct_mean": 1.32,
+        "pct_gap": -4.85,
+        "flat_cut_diff": -3076.55,
+        "selection_value": 7345.52,
+        "largest_loss": [
+          -4350.0,
+          -2690.0
+        ],
+        "worst_day": [
+          -3607.99,
+          -3607.99
+        ],
+        "dollar_diff_interval": [
+          -6678.01,
+          18308.98
+        ],
+        "selection_value_interval": [
+          -3155.32,
+          19872.9
+        ]
+      },
+      "exploration": {
+        "trades": 1178,
+        "affected": 305,
+        "actual_pnl": 2668.98,
+        "counterfactual_pnl": 4047.95,
+        "dollar_diff": 1378.97,
+        "affected_pnl": -1378.97,
+        "premium_removed": 156176.99,
+        "rop_actual": 0.39,
+        "rop_counterfactual": 0.76,
+        "rop_diff": 0.37,
+        "affected_pct_mean": -2.85,
+        "others_pct_mean": 0.48,
+        "pct_gap": -3.33,
+        "flat_cut_diff": -604.34,
+        "selection_value": 1983.31,
+        "largest_loss": [
+          -1604.0,
+          -1604.0
+        ],
+        "worst_day": [
+          -2095.0,
+          -2095.0
+        ],
+        "dollar_diff_interval": [
+          -5559.03,
+          8144.97
+        ],
+        "selection_value_interval": [
+          -4027.89,
+          8599.16
+        ]
+      },
+      "check": {
+        "trades": 353,
+        "affected": 77,
+        "actual_pnl": 10053.0,
+        "counterfactual_pnl": 12943.0,
+        "dollar_diff": 2890.0,
+        "affected_pnl": -2890.0,
+        "premium_removed": 108558.0,
+        "rop_actual": 2.48,
+        "rop_counterfactual": 4.37,
+        "rop_diff": 1.88,
+        "affected_pct_mean": -6.19,
+        "others_pct_mean": 4.01,
+        "pct_gap": -10.2,
+        "flat_cut_diff": -2694.76,
+        "selection_value": 5584.76,
+        "largest_loss": [
+          -4350.0,
+          -2690.0
+        ],
+        "worst_day": [
+          -3607.99,
+          -3607.99
+        ],
+        "dollar_diff_interval": [
+          -4629.0,
+          14708.0
+        ],
+        "selection_value_interval": [
+          -1746.69,
+          16505.54
+        ]
+      },
+      "decision": "reject as a demonstrated saving (interval includes 0 or periods disagree)"
+    },
+    "stop_above_500": {
+      "all": {
+        "trades": 1531,
+        "affected": 195,
+        "actual_pnl": 12721.98,
+        "counterfactual_pnl": 16871.96,
+        "dollar_diff": 4149.98,
+        "affected_pnl": -4149.98,
+        "premium_removed": 135057.0,
+        "rop_actual": 1.16,
+        "rop_counterfactual": 1.76,
+        "rop_diff": 0.6,
+        "affected_pct_mean": -4.45,
+        "others_pct_mean": 0.78,
+        "pct_gap": -5.23,
+        "flat_cut_diff": -1569.53,
+        "selection_value": 5719.51,
+        "largest_loss": [
+          -4350.0,
+          -2690.0
+        ],
+        "worst_day": [
+          -3607.99,
+          -3607.99
+        ],
+        "dollar_diff_interval": [
+          -4848.05,
+          16918.99
+        ],
+        "selection_value_interval": [
+          -2961.09,
+          17355.78
+        ]
+      },
+      "exploration": {
+        "trades": 1178,
+        "affected": 152,
+        "actual_pnl": 2668.98,
+        "counterfactual_pnl": 4234.96,
+        "dollar_diff": 1565.98,
+        "affected_pnl": -1565.98,
+        "premium_removed": 76871.0,
+        "rop_actual": 0.39,
+        "rop_counterfactual": 0.69,
+        "rop_diff": 0.3,
+        "affected_pct_mean": -5.09,
+        "others_pct_mean": 0.31,
+        "pct_gap": -5.4,
+        "flat_cut_diff": -297.46,
+        "selection_value": 1863.44,
+        "largest_loss": [
+          -1604.0,
+          -1604.0
+        ],
+        "worst_day": [
+          -2095.0,
+          -2095.0
+        ],
+        "dollar_diff_interval": [
+          -3987.01,
+          7079.98
+        ],
+        "selection_value_interval": [
+          -3263.24,
+          7260.46
+        ]
+      },
+      "check": {
+        "trades": 353,
+        "affected": 43,
+        "actual_pnl": 10053.0,
+        "counterfactual_pnl": 12637.0,
+        "dollar_diff": 2584.0,
+        "affected_pnl": -2584.0,
+        "premium_removed": 58186.0,
+        "rop_actual": 2.48,
+        "rop_counterfactual": 3.64,
+        "rop_diff": 1.16,
+        "affected_pct_mean": -2.2,
+        "others_pct_mean": 2.34,
+        "pct_gap": -4.54,
+        "flat_cut_diff": -1444.36,
+        "selection_value": 4028.36,
+        "largest_loss": [
+          -4350.0,
+          -2690.0
+        ],
+        "worst_day": [
+          -3607.99,
+          -3607.99
+        ],
+        "dollar_diff_interval": [
+          -3016.0,
+          14829.0
+        ],
+        "selection_value_interval": [
+          -1866.25,
+          15417.1
+        ]
+      },
+      "decision": "reject as a demonstrated saving (interval includes 0 or periods disagree)"
+    }
+  }
+}
