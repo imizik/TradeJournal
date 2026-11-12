@@ -101,6 +101,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/desk/threads',
     'GET /copilot/desk/session',
     'GET /copilot/desk/sparks',
+    'POST /copilot/desk/robinhood/refresh',  # parameterless: nothing from the request reaches Robinhood
     'GET /copilot/checks',
     'POST /copilot/checks',
     'POST /copilot/checks/{check_id}/pass',

@@ -642,6 +642,12 @@ def threads(db: Session, now: float) -> dict:
                           instrument="research" if r["source"] == "research_job" else None, investigation_id=r["id"],
                           changed_at=_epoch(r["updated_at"])))
 
+    # The live book from Robinhood (docs/robinhood-read-feed.md): off, signed out or stale, the rows stay the journal's.
+    live = today._section(db, "desk robinhood", lambda: _robinhood())
+    if live.get("snapshot") is not None and found["state"] == "ok":
+        joined = today._section(db, "desk robinhood join", lambda: {"state": "ok", "rows": _live_book(db, found, act + watch, live["snapshot"])})
+        watch += joined.get("rows", [])
+        live["view"]["joined"] = joined["state"] == "ok"
     _horizons(act + near + watch, checks.get("horizons", {}))
     hidden = checks.get("hidden", set())
     for row in act + near + draft + new + watch:
@@ -661,10 +667,68 @@ def threads(db: Session, now: float) -> dict:
         "threads": _pinned(prep, week) + act + near + draft + new + watch,
         "plans": _plan_list(board if board["state"] == "ok" else {}, exited, finals.get("rows", []), checks.get("horizons", {}),
                             lessons.get("map", {})),
+        "robinhood": live.get("view") or {"state": "unavailable"},
         "sections": {name: part["state"] for name, part in (
             ("positions", found), ("plans", board), ("investigations", investigations), ("drafts", drafts),
             ("decisions", decisions), ("check_ins", checks), ("exits", ended), ("done", finals), ("radar", radar), ("thesis", thesis), ("prep", prep), ("week", week), ("phase", phase))},
     }
+
+
+# --------------------------------------------------------------------------- the live book from Robinhood
+
+def _robinhood() -> dict:
+    from app.engine.robinhood_book import feed
+    view, snapshot = feed.snapshot()
+    return {"state": "ok", "view": view, "snapshot": snapshot}
+
+
+def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict) -> list[dict]:
+    """Joins the Robinhood snapshot onto the journal's position rows (in place) and returns a row for each position
+    Robinhood shows that the journal does not have yet. A matched row keeps its plan, meter, state and thread; its P&L,
+    quantity and mark come from Robinhood. Display only: nothing is written."""
+    from app.engine import robinhood_book as rb
+    from app.models import Account, Trade
+    ids = [uuid.UUID(p["trade_id"]) for p in found["positions"]]
+    last4 = {str(t): a for t, a in db.exec(select(Trade.id, Account.last4).join(Account, Account.id == Trade.account_id)
+                                          .where(col(Trade.id).in_(ids))).all()} if ids else {}
+    journal = [{"trade_id": p["trade_id"], "last4": last4.get(p["trade_id"]),
+                "key": rb.contract_key(p["symbol"], p["instrument"], (p.get("option") or {}).get("side"),
+                                       (p.get("option") or {}).get("strike"), (p.get("option") or {}).get("expiry"))}
+               for p in found["positions"]]
+    matched, missing, extra = rb.match(journal, snapshot)
+    # The desk lists at most plan_positions.MAX_ROWS positions: one past that cut is still in the journal, not new.
+    if found.get("count", 0) > len(found["positions"]):
+        from app.ai.copilot_book import _not_webull
+        held = {rb.contract_key(t.ticker, t.instrument_type, t.option_type, t.strike, t.expiration.isoformat() if t.expiration else None)
+                for t in db.exec(select(Trade).join(Account, Account.id == Trade.account_id)
+                                 .where(Trade.status == "open").where(_not_webull())).all()}
+        extra = [p for p in extra if rb.contract_key(p["symbol"], p["instrument"], p["side"], p["strike"], p["expiry"]) not in held]
+    by_key = {r["key"]: r for r in rows if r.get("book") is not None}
+
+    def facts(live: dict) -> dict:
+        return {"usd": live["usd"], "pct": live["pct"], "quantity": live["quantity"], "mark": live["mark"],
+                "account": rb.account_tag(live)}
+
+    for trade_id, live in matched.items():
+        row = by_key.get(f"trade:{trade_id}")
+        if row is not None:
+            row["book"] |= {**facts(live), "live": "matched"}
+            row["value"] = None if live["usd"] is None else _say(_usd(live["usd"]), "gain" if live["usd"] > 0 else "loss" if live["usd"] < 0 else "muted")
+    for trade_id in missing:
+        row = by_key.get(f"trade:{trade_id}")
+        if row is not None:
+            row["book"]["live"] = "not_on_robinhood"
+    new = []
+    for live in extra:
+        contract = rb.label(live)
+        value = None if live["usd"] is None else _say(_usd(live["usd"]), "gain" if live["usd"] > 0 else "loss" if live["usd"] < 0 else "muted")
+        row = _row(f"robinhood:{rb.mask(live['last4'])}:{contract}", "watch", contract, _say("New · not in the journal yet", "info"),
+                   symbol=live["symbol"], instrument=_instrument(contract, live["symbol"], live["instrument"]), value=value,
+                   path=f"/copilot-lab?{urlencode({'symbol': live['symbol']})}")
+        row["book"] = {"usd": live["usd"], "pct": live["pct"], "expiry": live["expiry"], "days_held": None, "track": None,
+                       "state": "no_plan", "planned": False, "stop_pct": None, **facts(live), "live": "new"}
+        new.append(row)
+    return new
 
 
 # --------------------------------------------------------------------------- the Briefing's session timeline
@@ -824,6 +888,16 @@ def _premarket_change(symbol: str, reference: float | None, moment: datetime) ->
     except ChartFeedError:
         return None
     return copilot_extended.summary(bars, reference, range_=False).get("change_pct")
+
+
+@router.post("/desk/robinhood/refresh")
+def desk_robinhood_refresh():
+    """Reads Robinhood now (docs/robinhood-read-feed.md): parameterless, at most once every 15 seconds, one read at a
+    time; returns the feed's state and account chips. Owner-only, refused while the lab is off; nothing is written."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine.robinhood_book import feed
+    return feed.refresh(force=True)
 
 
 @router.get("/desk/session")

@@ -88,7 +88,30 @@ export type DeskBook = {
   track: { last: number; entry: number; tone: DeskTone } | null; state: DeskBookState; stop_pct: number | null;
   /** A confirmed invalidation or time stop (an adopted draft is not yet a plan); absent from an older backend. */
   planned?: boolean;
+  /** Only while the Robinhood feed is live (docs/robinhood-read-feed.md): ``matched`` (P&L, quantity and mark are
+   * Robinhood's), ``new`` (Robinhood shows it, the journal does not yet) or ``not_on_robinhood`` (left as the journal has
+   * it). ``mark`` is a contract's (the premium x 100) or a share's. */
+  live?: "matched" | "new" | "not_on_robinhood";
+  quantity?: number | null;
+  mark?: number | null;
+  account?: { label: string; masked: string };
 };
+
+/** The Robinhood feed's state on the desk (docs/robinhood-read-feed.md). ``ok`` (with ``joined``) drives the book;
+ * anything else leaves the book exactly as the journal has it. Account numbers only ever arrive masked. */
+export type DeskLiveAccount = { label: string; masked: string; total_value: number | null; cash: number | null; buying_power: number | null };
+export type DeskLive = {
+  state: "off" | "signed_out" | "expired" | "loading" | "unavailable" | "stale" | "ok";
+  as_of?: number; issue?: string | null; joined?: boolean; accounts?: DeskLiveAccount[];
+};
+export const liveOn = (live: DeskLive | null | undefined) => live?.state === "ok" && live.joined === true;
+
+/** Reads Robinhood now (at most once every 15 seconds on the server); then re-read the desk. */
+export async function refreshRobinhood(): Promise<DeskLive> {
+  const response = await fetch(apiUrl("/copilot/desk/robinhood/refresh"), { method: "POST", cache: "no-store" });
+  if (!response.ok) throw new Error(`Request failed (${response.status}).`);
+  return await response.json() as DeskLive;
+}
 
 /** How often the desk checks in after the close: a day trade every trading day, a swing on a day something happened to
  * it, a long hold never (Review my week looks at it). Saved as a ``horizon`` day-journal entry, its label the text. */
@@ -140,11 +163,11 @@ export type DeskPlan = {
  * unavailable). */
 export type DeskThreads = {
   asOf: string; quotesAt: number | null; quoteIssue: string | null; day: DeskDay; threads: DeskThread[]; plans: DeskPlan[];
-  sections: Record<string, "ok" | "unavailable" | "off">;
+  sections: Record<string, "ok" | "unavailable" | "off">; robinhood: DeskLive;
 };
 
 type Wire = {
-  as_of: string; quotes_at: number | null; quote_issue: string | null; sections: DeskThreads["sections"];
+  as_of: string; quotes_at: number | null; quote_issue: string | null; sections: DeskThreads["sections"]; robinhood?: DeskLive;
   day: { phase: DeskDay["phase"]; need_you: number; streak: DeskDay["streak"] };
   threads: (Omit<DeskThread, "investigationId" | "tradeId" | "radarEventId" | "changedAt" | "close" | "horizon" | "fillToLink" | "hidden"> &
     { investigation_id: string | null; trade_id: string | null; radar_event_id: string | null; changed_at: number | null;
@@ -175,7 +198,7 @@ export async function getDeskThreads(signal?: AbortSignal): Promise<DeskThreads>
   if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
   const wire = body as Wire;
   return {
-    asOf: wire.as_of, quotesAt: wire.quotes_at, quoteIssue: wire.quote_issue, sections: wire.sections,
+    asOf: wire.as_of, quotesAt: wire.quotes_at, quoteIssue: wire.quote_issue, sections: wire.sections, robinhood: wire.robinhood ?? { state: "off" },
     day: { phase: wire.day.phase, needYou: wire.day.need_you, streak: wire.day.streak },
     threads: wire.threads.map(({ investigation_id, trade_id, radar_event_id, changed_at, close, horizon, fill_to_link, hidden, ...row }) => ({
       ...row, investigationId: investigation_id, tradeId: trade_id, radarEventId: radar_event_id, changedAt: changed_at, close: close ?? null,
@@ -688,7 +711,7 @@ export function saveLook(look: DeskLook) {
  * position opened or closed since says so; the counts close the list.
  */
 export function sinceLines(look: DeskLook, rows: DeskThread[], events: DeskSessionEvent[], max = 4): string[] {
-  const now = new Map(rows.filter(r => r.book && r.symbol && !r.hidden).map(r => [r.key, r]));
+  const now = new Map(rows.filter(r => r.book && r.symbol && !r.hidden && !r.key.startsWith("robinhood:")).map(r => [r.key, r]));
   const lines: { weight: number; text: string }[] = [];
   for (const [key, row] of now) {
     const usd = row.book!.usd;
