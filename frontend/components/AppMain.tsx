@@ -24,8 +24,10 @@ export default function AppMain({ banner, children }: { banner: React.ReactNode;
       </main>
     );
   }
+  // No phone title bar here (Nav), so the top padding clears the status bar and the notch itself when the app runs
+  // full screen from the home screen (env() is 0 in a browser tab and on a desktop).
   return (
-    <main data-shell="charts" className="flex min-w-0 flex-1 flex-col p-2 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-[calc(0.5rem+env(safe-area-inset-bottom))] lg:h-dvh lg:overflow-clip lg:p-0">
+    <main data-shell="charts" className="flex min-w-0 flex-1 flex-col p-2 pb-[calc(4rem+env(safe-area-inset-bottom))] pt-[calc(0.5rem+env(safe-area-inset-top))] md:pb-[calc(0.5rem+env(safe-area-inset-bottom))] lg:h-dvh lg:overflow-clip lg:p-0">
       <div className="shrink-0 empty:hidden lg:px-2 lg:pt-2 [&>*]:!mb-2">{banner}</div>
       {children}
     </main>

@@ -170,8 +170,10 @@
     background: hsl(var(--background));
   }
 
+  /* The message box sits on the sheet's bottom edge, clear of the home indicator. */
   .desk[data-on="true"][data-sheet="open"] .thread [data-composer] {
     bottom: 0;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
   }
 
   .desk[data-on="true"] .sheetBar {
@@ -237,12 +239,34 @@
   }
 }
 
-/* A phone: the desk runs edge to edge inside the page's 8 px padding. */
+/* A phone: the desk runs edge to edge inside the page's 8 px padding. The top bar keeps its buttons on the title's row,
+   then the clock and indices, then the day's P&L and the Accounts button, so the strip and the book come first. */
 @media (max-width: 767px) {
   .desk {
     margin-inline: -8px;
     border-inline: 0;
     border-radius: 0;
+  }
+
+  .bar {
+    gap: 4px 12px;
+    padding: 4px 12px 8px;
+  }
+
+  .bar > * {
+    order: 3;
+  }
+
+  .bar > .title {
+    order: 1;
+  }
+
+  .bar > .barActions {
+    order: 2;
+  }
+
+  .desk[data-on="true"][data-sheet="closed"] .ask {
+    margin-right: 8px;
   }
 
   .cockpit {

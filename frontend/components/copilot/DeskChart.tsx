@@ -345,7 +345,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label }: { id: string
         {data && !data.levels.length && id !== "market" && <span>no plan lines saved</span>}
         {data?.time_stop && <span style={{ color: COLOR.stop }}>Time stop {stopWhen(data.time_stop.at)}</span>}
         <button type="button" onClick={reset} disabled={!data}
-          className="ml-auto min-h-9 rounded border border-transparent px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 sm:min-h-0 sm:py-0.5">
+          className="ml-auto min-h-11 rounded border border-transparent px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 sm:min-h-0 sm:py-0.5">
           Reset
         </button>
       </div>

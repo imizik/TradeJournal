@@ -82,7 +82,7 @@ function PushBack({ line, onPushBack }: { line: string; onPushBack?: (line: stri
   if (!onPushBack) return null;
   return (
     <button type="button" aria-label="Push back on this" title="Push back on this" onClick={() => onPushBack(line)}
-      className="ml-1 inline-flex size-6 items-center justify-center rounded align-middle text-muted-foreground/60 hover:bg-muted hover:text-foreground focus-visible:text-foreground focus-visible:opacity-100 sm:size-5 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:[*:hover>&]:opacity-100">
+      className="relative ml-1 inline-flex size-6 items-center justify-center rounded align-middle after:absolute after:-inset-2.5 after:content-[''] sm:after:hidden text-muted-foreground/60 hover:bg-muted hover:text-foreground focus-visible:text-foreground focus-visible:opacity-100 sm:size-5 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:[*:hover>&]:opacity-100">
       <Reply className="size-3.5" aria-hidden />
     </button>
   );
@@ -490,11 +490,16 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const autoAt = useRef(0); // when the panel last scrolled itself
   const landing = useRef<number[]>([]); // the desk's pending landings on the latest turn
   const stopLanding = useCallback(() => { landing.current.forEach(window.clearTimeout); landing.current = []; }, []);
+  /** What scrolls the conversation now: its own scroller, else the page; null while it is not on screen (the desk's sheet,
+   * closed on a phone), when it must never move the page under the cockpit. Read each time: the sheet opens and closes. */
+  const scrollTarget = useCallback((): HTMLElement | Window | null => {
+    if (!end.current?.getClientRects().length) return null;
+    return scrollParent(end.current) ?? window;
+  }, []);
   useEffect(() => stopLanding, [stopLanding]);
   const holdTop = useRef(false);
   const composer = useRef<HTMLDivElement>(null);
   const [composing, setComposing] = useState(false); // the desk's message box in use: it opens to its full size
-  const scroller = useRef<HTMLElement | null>(null); // a dock or drawer's own scroller; null for the page
   const root = useRef<HTMLDivElement | null>(null);
   const [current, setCurrent] = useState<Current | null>(null);
   const [recent, setRecent] = useState<InvestigationSummary[]>([]);
@@ -574,11 +579,13 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     stopLanding();
     landing.current = [0, 300, 800, 2000].map(ms => window.setTimeout(() => {
       const turn = root.current?.querySelector("[data-turn=latest]");
-      if (ms === 0 || holdTop.current) (scroller.current ?? window).scrollTo({ top: 0 });
+      const target = scrollTarget();
+      if (!target) return; // the closed sheet: the cockpit stays where the owner put it
+      if (ms === 0 || holdTop.current) target.scrollTo({ top: 0 });
       if (holdTop.current || !turn || !composer.current) return;
       if (turn.getBoundingClientRect().top + LAND_ROOM <= composer.current.getBoundingClientRect().top) return;
       // Its own scroller moves (the desk's copilot column); scrollIntoView would also move every box around it.
-      const box = scroller.current;
+      const box = target === window ? null : target as HTMLElement;
       if (box) box.scrollTo({ top: box.scrollTop + turn.getBoundingClientRect().top - box.getBoundingClientRect().top - 56 });
       else turn.scrollIntoView({ block: "start" });
     }, ms));
@@ -809,29 +816,34 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   // Follow a streaming answer only while the reader is at the bottom: scrolled up to read, they stay where they are.
   // Wheel, touch and paging keys stop following at once (a scroll event can arrive after the next chunk already scrolled
   // down); the position re-pins when they come back to the end. Their own send follows again, as does opening a conversation in a side panel.
+  // Listened for on the document, since what scrolls the conversation changes as the desk's sheet opens and closes; each
+  // event counts only from that scroller (or the page), and nothing while the conversation is off screen.
   useEffect(() => {
-    const box = scrollParent(end.current);
-    scroller.current = box;
-    const target: HTMLElement | Window = box ?? window;
-    const read = () => {
+    const mine = (event: Event) => {
+      const target = scrollTarget();
+      return !!target && (target === window || (target as HTMLElement).contains(event.target as Node));
+    };
+    const read = (event: Event) => {
       if (performance.now() - autoAt.current < AUTO_MS) return; // our own scroll, not the reader's
-      const el = box ?? document.scrollingElement;
+      const target = scrollTarget();
+      if (!target || (target !== window ? event.target !== target : event.target !== document)) return;
+      const el = target !== window ? target as HTMLElement : document.scrollingElement;
       if (el) following.current = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_PX;
     };
-    const wheel = (event: WheelEvent) => { stopLanding(); if (event.deltaY < 0) following.current = false; };
-    const touch = () => { stopLanding(); following.current = false; };
+    const wheel = (event: WheelEvent) => { if (!mine(event)) return; stopLanding(); if (event.deltaY < 0) following.current = false; };
+    const touch = (event: Event) => { if (!mine(event)) return; stopLanding(); following.current = false; };
     const key = (event: KeyboardEvent) => { if (["ArrowUp", "PageUp", "Home"].includes(event.key) && !(event.target as HTMLElement)?.closest?.("textarea, input")) { stopLanding(); following.current = false; } };
-    target.addEventListener("scroll", read, { passive: true });
-    target.addEventListener("wheel", wheel as EventListener, { passive: true });
-    target.addEventListener("touchmove", touch, { passive: true });
+    document.addEventListener("scroll", read, { capture: true, passive: true });
+    document.addEventListener("wheel", wheel, { passive: true });
+    document.addEventListener("touchmove", touch, { passive: true });
     window.addEventListener("keydown", key);
     return () => {
-      target.removeEventListener("scroll", read);
-      target.removeEventListener("wheel", wheel as EventListener);
-      target.removeEventListener("touchmove", touch);
+      document.removeEventListener("scroll", read, { capture: true });
+      document.removeEventListener("wheel", wheel);
+      document.removeEventListener("touchmove", touch);
       window.removeEventListener("keydown", key);
     };
-  }, [stopLanding, status?.enabled]); // the conversation renders once the status read says the lab is on
+  }, [stopLanding, scrollTarget, status?.enabled]); // the conversation renders once the status read says the lab is on
   // On the desk the idle message box is one line, in the same row as its tools; a word in it, or a tap, opens it.
   const small = !!desk && !composing && !draft.trim() && !attached.length && !attaching && !tray;
   useEffect(() => {
@@ -853,12 +865,14 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   // To the very end, so the newest line sits above the pinned message box instead of under it.
   const pin = useCallback(() => {
     if (!following.current) return;
+    const target = scrollTarget();
+    if (!target) return; // off screen (the desk's closed sheet): never the page under the cockpit
     autoAt.current = performance.now();
-    const box = scroller.current;
+    const box = target === window ? null : target as HTMLElement;
     if (box) box.scrollTop = box.scrollHeight;
     else if (panel) end.current?.scrollIntoView({ block: "nearest" }); // a panel never scrolls the page around it
     else window.scrollTo({ top: document.documentElement.scrollHeight });
-  }, [panel]);
+  }, [panel, scrollTarget]);
   useEffect(pin, [messages, pin]);
   // What grows after the last chunk (the finished answer's cards, the suggestions, the message box's rows) keeps the end
   // in view too, while following.
@@ -896,7 +910,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     setSymbol(entry.symbol);
     activateDraft(keyFor(entry.symbol, null, entry), entry.context ? `Context: ${entry.context}\n\n` : "", entry);
     remember(null);
-    (scroller.current ?? window).scrollTo({ top: 0 });
+    scrollTarget()?.scrollTo({ top: 0 });
   }
 
   /** Now in place: today's Main chat, opened as the desk's bare address opens it. The conversation being left goes at
@@ -1552,7 +1566,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         </button>
       )}
       {suggestions.length > 0 && (
-        <div role="group" aria-label="Suggestions" className="-mx-1 flex gap-1.5 overflow-x-auto px-1 [scrollbar-width:none]">
+        <div role="group" aria-label="Suggestions" className="-mx-1 flex gap-1.5 overflow-x-auto px-1 [scrollbar-width:none] max-md:pr-8 max-md:[mask-image:linear-gradient(to_right,black_calc(100%-2.5rem),transparent)]">
           {suggestions.map(item => (
             <button key={item.label} type="button" onClick={item.run} disabled={busy} title={item.title}
               className="min-h-11 shrink-0 rounded-full border px-3 text-xs text-muted-foreground hover:border-primary/50 hover:text-foreground disabled:opacity-40 md:min-h-7">
@@ -1573,7 +1587,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
                   About {symbol}
                   <button type="button" onClick={() => changeScope("")} disabled={busy} aria-label="Ask across everything"
                     title={`Ask across everything, not just ${symbol}`}
-                    className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground hover:text-foreground disabled:opacity-40">
+                    className="relative inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground after:absolute after:-inset-2.5 after:content-[''] hover:text-foreground disabled:opacity-40 sm:after:hidden">
                     <X size={12} />
                   </button>
                 </span>
