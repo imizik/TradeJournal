@@ -67,6 +67,7 @@ import uuid
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field as PydField
 from sqlalchemy import or_
 from sqlmodel import Session, col, select
 
@@ -1050,16 +1051,108 @@ def _realized_today(db: Session, day) -> dict:
 
 
 @router.get("/desk/sparks")
-def desk_sparks(symbols: str = ""):
+def desk_sparks(symbols: str = "", watch: str = ""):
     """Each named symbol's day so far for the desk's book rows: today's minute closes (the regular session once it has
     bars, before that the pre-market), thinned to 48, and its change today against the previous close with SPY's beside
     it. Built from what the app already has before it asks a provider (``app/engine/desk_sparks.py``: Radar's recorder,
     the chart feed's cache, one batched read, then low-priority reads); a symbol whose read fails or runs past the 6 s
-    budget is left out. Read-only, owner-only, refused while the lab is off."""
+    budget is left out. ``watch``: the Watching list's symbols, each with its last price and change from the same quote
+    read and a line only from the sources that make no call of its own (the recorder, a chart's cache, the batched read).
+    Read-only, owner-only, refused while the lab is off."""
     if not copilot.settings().enabled:
         raise HTTPException(503, "Copilot Lab is off.")
     from app.engine import desk_sparks as sparks
-    return sparks.read(symbols, today._now())
+    return sparks.read(symbols, today._now(), watch=watch)
+
+
+# --------------------------------------------------------------------------- the Watching list (app/engine/desk_watch.py)
+
+class WatchAdd(BaseModel):
+    symbol: str = PydField(max_length=16)
+
+
+class WatchImport(BaseModel):
+    lists: list[str] = PydField(default_factory=list, max_length=50)
+
+
+def _watching(db: Session, now: float) -> dict:
+    from app.engine import desk_watch
+    try:
+        return desk_watch.view(db, datetime.fromtimestamp(now, ET).date())
+    except Exception as exc:  # noqa: BLE001 - never a list that might show a hidden ticker
+        log.warning("desk watching unavailable: %s", type(exc).__name__)
+        db.rollback()
+        return {"state": "unavailable", "symbols": [], "levels": {}, "setups": {}}
+
+
+@router.get("/desk/watching")
+def desk_watching(db: Session = Depends(get_session)):
+    """The Watching list under the book: the watched symbols he follows, their armed levels and today's Radar setup
+    cards, and the Robinhood connection's state for the import. Database reads only; prices come from the sparks read."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    return _watching(db, today._now())
+
+
+@router.post("/desk/watching")
+def desk_watch_add(body: WatchAdd, db: Session = Depends(get_session)):
+    """Watch a symbol by hand: it must be a ticker the app knows (Radar's universe, his traded tickers, else one quote
+    read that returns a price). Written to the app's watchlist (the Charts one), never to Robinhood."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import desk_watch
+    symbol = body.symbol.strip().upper().lstrip("$")
+    if not desk_watch.SYMBOL.fullmatch(symbol):
+        raise HTTPException(422, f"{symbol[:16] or 'That'} is not a ticker.")
+    found = desk_watch.known(db, symbol)
+    if found is None:
+        raise HTTPException(503, f"Could not check {symbol} just now. Try again in a minute.")
+    if not found:
+        raise HTTPException(422, f"{symbol} is not a symbol the app knows.")
+    try:
+        desk_watch.add(db, symbol)
+    except desk_watch.Full as exc:
+        raise HTTPException(409, str(exc)) from None
+    return _watching(db, today._now())
+
+
+@router.delete("/desk/watching/{symbol}")
+def desk_watch_remove(symbol: str, db: Session = Depends(get_session)):
+    """Stop watching: out of the app's watchlist and remembered, so a later Robinhood sync does not bring it back."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import desk_watch
+    symbol = symbol.strip().upper()
+    if not desk_watch.SYMBOL.fullmatch(symbol):
+        raise HTTPException(422, "Not a ticker.")
+    desk_watch.remove(db, symbol)
+    return _watching(db, today._now())
+
+
+@router.get("/desk/watching/robinhood")
+def desk_watch_lists(db: Session = Depends(get_session)):
+    """His own Robinhood watchlists by name and size, for the import to offer (one read, on his tap). Off, signed out or
+    expired: the state, no call."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import desk_watch
+    return desk_watch.robinhood_lists(db)
+
+
+@router.post("/desk/watching/robinhood")
+def desk_watch_import(body: WatchImport, db: Session = Depends(get_session)):
+    """Bring in the stocks and ETFs of the lists he chose (his own lists only; the rest are refused by a fresh read of his
+    lists). Only reads Robinhood; never writes to his lists. One import at a time."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import desk_watch
+    try:
+        result = desk_watch.import_lists(db, body.lists)
+    except desk_watch.Busy as exc:
+        raise HTTPException(409, str(exc)) from None
+    except desk_watch.Full as exc:
+        raise HTTPException(413, str(exc)) from None
+    return {**result, "watching": _watching(db, today._now())}
 
 
 def waiting(db: Session, now: float) -> dict:

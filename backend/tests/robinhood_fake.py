@@ -87,6 +87,36 @@ def equity_order(order_id, symbol, executions, *, side="buy", state="filled", cr
     return order
 
 
+def watchlist(list_id, name, items, *, owner="custom", emoji="⚡️", allowed=None):
+    """One of ``get_watchlists``' rows (field names and types as observed on 2026-11-12; ``allowed_object_types`` may be
+    absent). ``items`` are ``(object_type, symbol)`` pairs for ``get_watchlist_items``."""
+    row = {"id": list_id, "display_name": name, "owner_type": owner, "item_count": len(items)}
+    if owner == "custom":
+        row["icon_emoji"] = emoji
+    else:
+        row["display_description"] = "A list Robinhood curates."
+    if allowed is not None:
+        row["allowed_object_types"] = allowed
+    return row, [{"object_id": f"obj-{list_id}-{i}", "object_type": kind, "symbol": symbol} for i, (kind, symbol) in enumerate(items)]
+
+
+STOCK_TYPES = ["currency_pair", "futures", "futures_product", "index", "instrument", "tokenized_stock"]
+FIRST_LIST = [("instrument", s) for s in ("NVDA", "RKLB", "AMD", "PLTR", "SOFI", "HOOD", "TSLA", "MSFT", "AAPL", "META", "SMCI", "IONQ")] + [
+    ("currency_pair", "BTC-USD"), ("currency_pair", "ETH-USD"), ("futures", "/ESZ26"), ("index", "SPX")]
+
+
+def watchlists():
+    """His lists as the live connection showed them: custom lists of 1 to 16 names (stocks with crypto, futures and an
+    index among them), the options watchlist the items tool rejects, and curated Robinhood lists he follows."""
+    return [
+        watchlist("wl-first", "My First List", FIRST_LIST, allowed=STOCK_TYPES),
+        watchlist("wl-options", "Options Watchlist", [("option_strategy", "NVDA")], emoji="💡", allowed=["option_strategy"]),
+        watchlist("wl-new", "Newnew", [("instrument", "NBIS"), ("instrument", "CRWV")], emoji="🚀"),
+        watchlist("wl-ipo", "IPO Access", [("instrument", f"IPO{i}") for i in range(49)], owner="robinhood"),
+        watchlist("wl-futures", "Futures", [("futures", f"/F{i}") for i in range(52)], owner="robinhood"),
+    ]
+
+
 class FakeRobinhood:
     """``transport`` stands in for ``robinhood_read._transport``. ``data`` holds what each account has; ``calls`` the
     tools called, in order. ``sse`` answers as an event stream; ``fail`` makes a tool answer HTTP 500; ``page`` splits
@@ -104,6 +134,7 @@ class FakeRobinhood:
         self.option_orders: dict[str, list[dict]] = {}  # account number -> orders, any order (newest first is applied)
         self.equity_orders: dict[str, list[dict]] = {}
         self.order_page: int | None = None
+        self.watchlists = {row["id"]: (row, items) for row, items in watchlists()}
         self.calls: list[tuple[str, dict]] = []
         self.methods: list[str] = []
         self.sessions_seen: list[str | None] = []
@@ -139,6 +170,8 @@ class FakeRobinhood:
         if name in self.fail:
             return 500, {}, ""
         data = getattr(self, "tool_" + name)(args)
+        if data is None:  # the tool answered with an error (``isError``), as the items tool does for the options list
+            return self._answer(message, {"content": [{"type": "text", "text": "unsupported list"}], "isError": True}, {})
         text = json.dumps({"data": data, "guide": GUIDE})
         return self._answer(message, {"content": [{"type": "text", "text": text}], "isError": False}, {})
 
@@ -191,6 +224,18 @@ class FakeRobinhood:
 
     def tool_get_equity_quotes(self, args):
         return {"results": [self.stock_quotes[s] for s in args["symbols"] if s in self.stock_quotes]}
+
+
+    def tool_get_watchlists(self, args):
+        assert args == {}
+        return {"watchlists": [row for row, _items in self.watchlists.values()]}
+
+    def tool_get_watchlist_items(self, args):
+        row, items = self.watchlists[args["list_id"]]
+        if row.get("allowed_object_types") == ["option_strategy"]:
+            return None  # needs get_option_watchlist (not on the allowlist)
+        return {"items": items, "has_futures_contracts": any(i["object_type"] == "futures" for i in items),
+                "display_name": row["display_name"], "owner_type": row["owner_type"]}
 
 
 def token_file(path, *, expires_in=4 * 86400, now=None, mode=0o600):

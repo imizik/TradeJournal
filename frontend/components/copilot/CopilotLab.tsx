@@ -23,6 +23,7 @@ import DeskFeed, { feedQuestion, useDeskFeed, useFeedNew, type FeedItem } from "
 import { DeskStatus, useDeskSession } from "@/components/copilot/SessionTape";
 import { AccountChips, Book, CentreChart, DayFacts, DayPnl, NeedsStrip, SinceYouLooked, positionRows, useSparks } from "@/components/copilot/Cockpit";
 import MorningBrief from "@/components/copilot/MorningBrief";
+import Watching, { useWatching } from "@/components/copilot/Watching";
 import PreviousDays from "@/components/copilot/PreviousDays";
 import ThreadRail from "@/components/copilot/ThreadRail";
 import ThisWeek from "@/components/copilot/ThisWeek";
@@ -468,7 +469,11 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     const id = centreRow?.investigationId;
     return id ? { id, symbol: centreSymbol, title: centreSymbol, refreshKey: 0 } : null;
   }, [centreSymbol, thread, centreRow?.investigationId]);
-  const sparks = useSparks(on ? [...(centreSymbol ? [centreSymbol] : []), ...followed.flatMap(r => r.symbol ? [r.symbol] : [])] : []);
+  // The Watching list under the book: its names (none held: those are the book's) ride the sparks read.
+  const watching = useWatching(on, refresh);
+  const held = useMemo(() => new Set(positionRows(rows).flatMap(r => r.symbol ? [r.symbol] : [])), [rows]);
+  const watched = useMemo(() => (watching.data?.symbols ?? []).filter(s => !held.has(s)), [watching.data, held]);
+  const sparks = useSparks(on ? [...(centreSymbol ? [centreSymbol] : []), ...followed.flatMap(r => r.symbol ? [r.symbol] : [])] : [], on ? watched : []);
   // A thread opened from anywhere but the book (the drawer, J / K, the palette, a link) takes the centre with it.
   const lastTalking = useRef(talking);
   useEffect(() => {
@@ -486,10 +491,28 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     if (!sheetLayout()) { if (row.symbol !== talking) openRow(row); }
     else document.getElementById("desk-centre")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [openRow, talking]);
-  // Ask the copilot (the sheet's button): about the picked position when the copilot is on another ticker.
+  // A watched name (no row of its own) opens the way a position without one does: the symbol's newest open
+  // conversation, else its desk view, in place.
+  const openWatched = useCallback((symbol: string) => {
+    const talk = saved.filter(t => t.symbol === symbol && t.status !== "closed").sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+    if (talk) actions.open(talk.id);
+    else go(`/copilot-lab?${new URLSearchParams({ symbol })}`);
+  }, [saved, actions, go]);
+  // Selecting a watched row: exactly as a position's.
+  const selectWatched = useCallback((symbol: string) => {
+    setPicked(symbol);
+    setPickedKey(null);
+    setCentreTab("chart");
+    if (!sheetLayout()) { if (symbol !== talking) openWatched(symbol); }
+    else document.getElementById("desk-centre")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [openWatched, talking]);
+  const askWatched = useCallback((symbol: string) => { setPicked(symbol); setPickedKey(null); if (symbol !== talking) openWatched(symbol); setSheet(true); }, [openWatched, talking]);
+  const planWatched = useCallback((symbol: string) => go(copilotLabHref(symbol, planContext(), { kind: "copilot", ref: null })), [go]);
+  // Ask the copilot (the sheet's button): about the picked position (or watched name) when the copilot is on another ticker.
   const askCopilot = () => {
     const row = picked && picked !== talking ? followed.find(r => r.symbol === picked) : undefined;
     if (row) openRow(row);
+    else if (picked && picked !== talking && watched.includes(picked)) openWatched(picked);
     setSheet(true);
   };
 
@@ -624,6 +647,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           <div className={styles.book}>
             <Book rows={rows} sparks={sparks} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} updating={rowsRead && !rowsFresh} onSelect={select} onFollow={changeFollow}
               live={live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} />
+            <Watching data={watching.data} failed={watching.failed} sparks={sparks} held={held} selected={centreSymbol}
+              onSelect={selectWatched} onAsk={askWatched} onPlan={planWatched} onChange={watching.set} />
             {lower}
             <DayFacts session={session.data} />
           </div>

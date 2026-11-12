@@ -78,7 +78,7 @@ PROVENANCE = {
     "memories": "owner said: memories they approved (statements, theses, preferences, lessons)",
     "today": "owner said: today's day-journal entries",
     "investigations": "saved: earlier copilot conclusions and research results; re-check before relying on them",
-    "watches": "saved: armed level alerts and research jobs still waiting",
+    "watches": "saved: armed level alerts and research jobs still waiting; watching = the tickers on his watchlist, symbols only",
     "practice": "owner said: the goal they confirmed from a week review; this_week measured",
 }
 MARKET_PROVENANCE = "measured: quotes, the regime and Radar read for this turn, each line with its as_of and source"
@@ -334,6 +334,11 @@ def _investigations(db, symbol: str | None) -> dict:
             "note": "research_job and jo (an external model's research) records show title and status only; read their findings with get_saved_research"}
 
 
+def _watching(db) -> str | None:
+    from app.engine import desk_watch
+    return desk_watch.watched_line(db)
+
+
 def _watches(db, symbol: str | None, investigation_ids: set[str]) -> dict:
     """Armed level alerts and waiting research jobs for the symbol (at most MAX_WATCHES in all). With no symbol, up to
     MAX_WATCHES armed alerts across every symbol, then up to MAX_WAITING_JOBS waiting jobs of any kind."""
@@ -390,6 +395,9 @@ def owner_context(symbol: str | None, session=None, now: datetime | None = None,
         pack["investigations"] = _section("investigations", lambda: _investigations(db, symbol))
         ids = {r["id"] for r in pack["investigations"].get("investigations", [])}
         pack["watches"] = _section("watches", lambda: _watches(db, symbol, ids))
+        watching = _section("watching", lambda: {"state": "ok", "line": _watching(db)})
+        if pack["watches"].get("state") == "ok" and watching.get("line"):
+            pack["watches"]["watching"] = watching["line"]  # one line of symbols, no prices: what he follows and does not hold
         pack["practice"] = _section("practice", lambda: _practice(db, now_et))
     return shed(pack) if bounded else pack
 
@@ -606,6 +614,7 @@ def _slim_market(pack: dict) -> None:
 def _shed_steps(pack: dict):
     yield lambda: pack.get("history", {}).pop("recent", None)
     yield lambda: pack.get("today", {}).pop("entries", None)
+    yield lambda: pack.get("watches", {}).pop("watching", None)
     yield lambda: _slim_market(pack)
     yield lambda: _drop_sources(pack)
     yield lambda: _trim_diffs(pack)
