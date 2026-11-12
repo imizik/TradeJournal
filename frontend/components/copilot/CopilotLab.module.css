@@ -61,7 +61,7 @@
 }
 
 .title svg {
-  color: hsl(var(--primary));
+  color: hsl(var(--muted-foreground));
 }
 
 .barActions {

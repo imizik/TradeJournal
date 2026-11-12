@@ -6,8 +6,8 @@ import { FIELD_LABEL, LEVELS, checkCall, checkedToday, contractWords, fieldText,
 import { cn } from "@/lib/utils";
 
 const FIELDS: (keyof CallReading)[] = ["ticker", "expiry", "strike", "side", "entry", "stop", "target"];
-const TONE: Record<string, string> = {
-  Pass: "bg-muted text-foreground", Wait: "bg-amber-500/15 text-amber-700 dark:text-amber-300", Draft: "bg-primary/15 text-primary" };
+/** One quiet tone for every verdict: on the desk amber means only the strip's one next thing, and Draft is no nudge. */
+const TONE: Record<string, string> = { Pass: "bg-muted text-foreground", Wait: "bg-muted text-foreground", Draft: "bg-muted text-foreground" };
 const BUTTON = "inline-flex min-h-11 items-center justify-center rounded-md px-3 text-sm font-medium sm:min-h-9";
 const hhmm = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" });
 
@@ -71,7 +71,7 @@ function Card({ check, onPassed }: { check: CheckedCall; onPassed(next: CheckedC
         {card.note && <p className="mt-1 text-xs text-muted-foreground">{card.note}</p>}
         {check.symbol && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {href && !check.planned && <Link href={href} data-testid="call-check-plan" className={cn(BUTTON, "bg-primary text-primary-foreground hover:bg-primary/90")}
+            {href && !check.planned && <Link href={href} data-testid="call-check-plan" className={cn(BUTTON, "border hover:bg-muted")}
               title="Opens the plan form with these levels as text you edit. Nothing is placed.">Plan it</Link>}
             {check.planned ? <span className="text-sm text-emerald-700 dark:text-emerald-400">Plan saved from this call.</span>
               : check.outcome === "passed" ? <span className="text-sm text-muted-foreground">Passed{check.outcome_at ? ` at ${hhmm(check.outcome_at)}` : ""}.</span>
@@ -128,31 +128,29 @@ export default function CheckACall() {
         className="w-full resize-y rounded-md border bg-background px-3 py-2 text-base sm:text-sm" />
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <button type="button" onClick={run} disabled={busy || !text.trim()} data-testid="call-check-run"
-          className={cn(BUTTON, "bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50")}>{busy ? "Checking…" : "Check it"}</button>
+          className={cn(BUTTON, "bg-foreground text-background hover:bg-foreground/90 disabled:opacity-50")}>{busy ? "Checking…" : "Check it"}</button>
         {busy && <span className="text-xs text-muted-foreground">The copilot reads it and the prices now; this takes a few seconds.</span>}
         {error && <span role="alert" className="text-sm text-destructive">{error}</span>}
       </div>
       {current && <Card key={current.id} check={current} onPassed={replace} />}
-      <div className="mt-5">
+      {today.length > 0 && <div className="mt-5">
         <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Checked today · {today.length}</p>
-        {today.length === 0 ? <p className="text-sm text-muted-foreground">Nothing checked yet today.</p> : (
-          <ul className="divide-y rounded-md border" data-testid="call-check-today">
-            {today.map(check => (
-              <li key={check.id}>
-                <button type="button" onClick={() => setCurrent(check)} aria-current={current?.id === check.id ? "true" : undefined}
-                  className={cn("flex min-h-11 w-full flex-wrap items-baseline gap-x-2 px-3 py-2 text-left text-sm hover:bg-muted/50", current?.id === check.id && "bg-muted/40")}>
-                  <span className="font-mono text-xs text-muted-foreground">{hhmm(check.checked_at)}</span>
-                  <span className="font-medium">{check.symbol ? contractWords(check) : "No ticker read"}</span>
-                  {check.verdict && <span className={cn("rounded px-1 text-[11px] font-semibold uppercase", TONE[check.verdict])}>{check.verdict}</span>}
-                  {check.underlying_price != null && <span className="font-mono text-xs text-muted-foreground">{check.symbol} {check.underlying_price.toFixed(2)} then</span>}
-                  {outcomeWords(check) && <span className="text-xs text-muted-foreground">· {outcomeWords(check)}</span>}
-                  {check.source === "telegram" && <span className="text-xs text-muted-foreground">· from Telegram</span>}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+        <ul className="divide-y rounded-md border" data-testid="call-check-today">
+          {today.map(check => (
+            <li key={check.id}>
+              <button type="button" onClick={() => setCurrent(check)} aria-current={current?.id === check.id ? "true" : undefined}
+                className={cn("flex min-h-11 w-full flex-wrap items-baseline gap-x-2 px-3 py-2 text-left text-sm hover:bg-muted/50", current?.id === check.id && "bg-muted/40")}>
+                <span className="font-mono text-xs text-muted-foreground">{hhmm(check.checked_at)}</span>
+                <span className="font-medium">{check.symbol ? contractWords(check) : "No ticker read"}</span>
+                {check.verdict && <span className={cn("rounded px-1 text-[11px] font-semibold uppercase", TONE[check.verdict])}>{check.verdict}</span>}
+                {check.underlying_price != null && <span className="font-mono text-xs text-muted-foreground">{check.symbol} {check.underlying_price.toFixed(2)} then</span>}
+                {outcomeWords(check) && <span className="text-xs text-muted-foreground">· {outcomeWords(check)}</span>}
+                {check.source === "telegram" && <span className="text-xs text-muted-foreground">· from Telegram</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>}
       <p className="mt-3 text-xs text-muted-foreground">On your iPhone: long-press the Discord message, tap Share, then Telegram and the TradeJournal bot. The same card comes back in the chat. Every checked call is kept with the price when you checked.</p>
     </div>
   );

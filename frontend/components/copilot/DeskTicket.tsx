@@ -156,7 +156,7 @@ export default function DeskTicket({ plans, failed, open, onOpen, onClose, onPla
         : plans.length === 0 ? (
           <div className="space-y-2 rounded-lg border bg-card p-3">
             <p className="text-sm">No saved plan is armed and waiting for an entry.</p>
-            <button type="button" onClick={onPlan} className="inline-flex min-h-11 items-center rounded-md border border-primary/50 px-3 text-xs font-semibold text-primary hover:bg-primary/10 sm:min-h-8">Plan a trade</button>
+            <button type="button" onClick={onPlan} className="inline-flex min-h-11 items-center rounded-md border px-3 text-xs font-semibold text-foreground hover:bg-secondary sm:min-h-8">Plan a trade</button>
           </div>
         ) : (
           <ul aria-label="Saved plans" className="divide-y rounded-lg border bg-card">

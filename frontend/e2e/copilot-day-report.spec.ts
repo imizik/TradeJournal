@@ -87,19 +87,21 @@ const PINGS_SUMMARY = "4 alerts · selling at the alert would have been better o
   + "2 Radar hits · 1 kept going · 1 not measured · paper: 0 of 1 setup green";
 
 for (const width of [1440, 375]) {
-  test(`the day report is one card of four lines that open their rows on tap, asking nothing (${width} px)`, async ({ page }) => {
+  test(`the day report is one card of three lines that open their rows on tap, asking nothing (${width} px)`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
     const writes = await now_(page);
     const card = page.getByTestId("day-report-card");
     await expect(page.getByTestId("day-report-card")).toHaveCount(1); // one card, not ten
-    await expect(card.locator(":scope > details")).toHaveCount(4);
+    await expect(card.locator(":scope > details")).toHaveCount(3);
     // In this order, each a single line.
     await expect(card.locator(":scope > details > summary")).toHaveText([
-      /^Today · realized \+\$245 · 3 entries, 2 with a plan saved before the fill/,
+      /^Today · 3 entries, 2 with a plan saved before the fill/,
       new RegExp(`^How the pings did · ${PINGS_SUMMARY.replace(/[$.]/g, "\\$&")}`),
-      /^Calls checked, last 30 days: 14 · 5 up since you checked, 7 down, 2 not measured · Today: 4 \(1 up since you checked, 1 down, 2 not measured\)/,
-      /^Open without a plan · AAPL/,
+      /^Calls checked, last 30 days, since you checked: 14 · 5 up, 7 down, 2 not measured · Today: 4 \(1 up, 1 down, 2 not measured\)/,
     ]);
+    // Realized P&L is the top bar's and a position without a plan is the book's: neither is repeated in the card.
+    await expect(page.getByTestId("desk-pnl")).toContainText("Realized today +$245");
+    await expect(card).not.toContainText(/realized|\$245|Open without a plan/i);
     await expect(card.getByTestId("pings-alert").first()).toBeHidden(); // collapsed by default
     await expect(page.getByTestId("pings-recap")).toHaveCount(0); // the pings are folded in, never shown twice
     expect(pingUrls.every(url => url.includes("day_only=true"))).toBe(true); // today's pings only
@@ -118,7 +120,6 @@ for (const width of [1440, 375]) {
     await expect(calls.filter({ hasText: "QQQ" })).toContainText("you passed");
     await expect(calls.filter({ hasText: "QQQ" })).toContainText(/QQQ 660\.00 → 665\.00\s*\+0\.8% at the close/);
     await expect(calls.filter({ hasText: "AMD" })).toContainText("Not measured: no closing price stored yet");
-    await expect(card.getByTestId("report-noplan-row")).toContainText("AAPL 11/20/26 230C");
     await expect(card.getByRole("button", { name: /Useful|Prompted a review|Already|Helped|Rate/ })).toHaveCount(0); // nothing to answer
     await expect(card).not.toContainText(/\b(buy|sell|hold|take) (it|now|this)\b|\bmissed\b|\bleft on the table\b|\bshould\b/i); // counts, not advice
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
@@ -128,16 +129,16 @@ for (const width of [1440, 375]) {
 }
 
 test("a line with nothing in it is absent", async ({ page }) => {
-  await now_(page, { ...PINGS, alerts: { state: "ok", rows: [] }, radar: { state: "off", reason: "off", rows: [] } },
+  await now_(page, PINGS,
     { ...REPORT, entries: { entries: 0, planned: 0, late: 0, pending: 0, rows: [] }, checks: { ...REPORT.checks, window: { days: 30, checked: 0, up: 0, down: 0, flat: 0, not_measured: 0 }, today: { checked: 0, up: 0, down: 0, flat: 0, not_measured: 0 }, rows: [] } },
     []);
-  await expect(page.getByTestId("day-report")).toContainText("Close the day");
-  // Only realized P&L remains of the four lines.
-  await expect(page.getByTestId("day-report-card").locator(":scope > details > summary")).toHaveText([/^Today · realized \+\$245/]);
+  // Only the pings remain of the three lines; no Close the day button of its own (it is in ⌘K, and in the strip when anything is left).
+  await expect(page.getByTestId("day-report-card").locator(":scope > details > summary")).toHaveText([/^How the pings did/]);
+  await expect(page.getByTestId("day-report")).not.toContainText("Close the day");
 });
 
 test("a day with nothing at all says so in one sentence", async ({ page }) => {
   await now_(page, { ...PINGS, alerts: { state: "ok", rows: [] }, radar: { state: "off", reason: "off", rows: [] } },
     { ...REPORT, entries: { entries: 0, planned: 0, late: 0, pending: 0, rows: [] }, checks: null }, [], 0);
-  await expect(page.getByTestId("day-report-card")).toHaveText("Nothing to report today: no entries, pings, checked calls or open positions without a plan.");
+  await expect(page.getByTestId("day-report-card")).toHaveText("Nothing to report today: no entries, pings or checked calls.");
 });

@@ -29,7 +29,7 @@ import { ScalpShortlistNudge } from "@/components/ScalpShortlistPanel";
 import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { WHAT_MATTERS_PROMPT, copilotLabHref, mainChatLabel, type InvestigationSummary } from "@/lib/copilot";
-import { afterClose, answerSymbol, deskNeeds, refreshRobinhood, type DeskLive, deskSymbolThread, needingCount, nyDay, readSeen, saveFollow, saveHorizon, saveSeen, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
+import { afterClose, answerSymbol, deskNeeds, refreshRobinhood, type DeskLive, deskSymbolThread, nyDay, readSeen, saveFollow, saveHorizon, saveSeen, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import styles from "./CopilotLab.module.css";
 
@@ -99,7 +99,6 @@ export default function CopilotLab({ link = null, close = false, daily = false }
   const [rowsRead, setRowsRead] = useState(false);
   const [live, setLive] = useState<DeskLive | null>(null);
   const readRows = useCallback((next: DeskThread[], feed?: DeskLive) => { setRows(next); setLive(feed ?? null); setRowsRead(true); }, []);
-  const needYouCount = needingCount(rows, nyDay());
   const [saved, setSaved] = useState<InvestigationSummary[]>([]);
   const [palette, setPalette] = useState(false);
   const [threadsShown, setThreadsShown] = useState(false);
@@ -239,7 +238,6 @@ export default function CopilotLab({ link = null, close = false, daily = false }
   const steps = dayPhase === "close" ? closeSteps(fills.waiting, passed) : [];
   const [answering, setAnswering] = useState(false);
   const pass = useCallback((id: string) => setPassed(prev => new Set(prev).add(id)), []);
-  const left = toReview(rows, nyDay()).length + steps.length; // the list reads a review back on the refresh it triggers
   // "N of M done": every followed thread asked today (one per symbol) and, after 16:00, the fills to link. A skip is not done.
   const asked = new Map(rows.filter(r => r.close && r.symbol && !r.hidden).map(r => [r.symbol, !!r.close!.reviewed]));
   const fillsHere = dayPhase === "close" ? fills.answeredHere : 0;
@@ -292,20 +290,13 @@ export default function CopilotLab({ link = null, close = false, daily = false }
     lastThread.current = thread?.id ?? null;
     if (was !== null) { setArming(false); setAnswering(false); }
   }, [thread?.id]);
-  const phaseAction = dayPhase === "pre" ? { label: "Arm today's plans", hint: "Each armed plan: still good, change or drop. Nothing is sent." }
-    : dayPhase === "close" ? { label: left ? `Close the day · ${left} to review` : "Close the day",
-      hint: left ? "Each thread's close question, then the fills to link, one at a time"
-        : "Puts a close-of-day question in the box, unsent" } : null;
-  const runPhase = useCallback(() => {
-    if (dayPhase !== "pre") closeDay();
-    else { setArming(true); setSheet(true); }
-  }, [dayPhase, closeDay]);
-
   const commands = useMemo<PaletteCommand[]>(() => [
     { id: "plan", name: "Plan a trade", hint: "A new plan; you name the symbol. Nothing is sent.", key: "N", run: planTrade },
     { id: "week", name: "Review my week", hint: "One turn: planned vs unplanned, follow-through, exits", run: () => actions.ask(WEEK_REVIEW_CONTEXT) },
     { id: "matters", name: "What matters right now?", hint: "One turn across your positions, watches and investigations", run: () => actions.ask(WHAT_MATTERS_PROMPT) },
-    ...(dayPhase === "pre" ? [{ id: "prep", name: "Prep the day", hint: "Puts a prep question in the box, unsent", run: () => fill(PREP_PROMPT) }] : []),
+    ...(dayPhase === "pre" ? [
+      { id: "arm", name: "Arm today's plans", hint: "Each armed plan: still good, change or drop. Nothing is sent.", run: () => { setArming(true); setSheet(true); } },
+      { id: "prep", name: "Prep the day", hint: "Puts a prep question in the box, unsent", run: () => fill(PREP_PROMPT) }] : []),
     ...(dayPhase === "close" ? [{ id: "close", name: "Close the day", hint: "Each close question and fill to link, one at a time. Nothing is sent.", run: closeDay }] : []),
   ], [actions, dayPhase, fill, planTrade, closeDay]);
 
@@ -469,22 +460,15 @@ export default function CopilotLab({ link = null, close = false, daily = false }
     }
   };
 
-  // The book's lower block by the time of day: the morning brief and Arm before the open, the day report after the
-  // close, else what changed since the owner last looked.
-  const lower = dayPhase === "pre" ? (
-    <div className="space-y-2">
-      <MorningBrief prep={session.data?.prep} fill={fill} max={3} />
-      {!session.data?.prep?.lines?.length && <p className="rounded-lg border bg-card px-3 py-2.5 text-xs text-muted-foreground">No morning brief yet today.</p>}
-      {phaseAction && <PhaseButton action={phaseAction} run={runPhase} />}
-    </div>
-  ) : dayPhase === "close" ? (
-    <section aria-label="Day report" data-testid="day-report" className="space-y-2">
-      <DayReport realized={session.data?.realized_today ?? null} rows={rows} rowsRead={rowsRead} onOpen={openNeed} />
-      {tally.total > 0 && <p className="px-1 text-xs text-muted-foreground">Close the day: <span data-testid="briefing-reviewed" className="tabular-nums">{tally.done} of {tally.total} done</span></p>}
-      {/* While the strip shows Close the day, it is not repeated here. */}
-      {phaseAction && needs.find(n => !seen.includes(n.key))?.kind !== "close" && <PhaseButton action={phaseAction} run={runPhase} />}
-    </section>
-  ) : <SinceYouLooked rows={rows} session={session.data} read={rowsRead} />;
+  // The book's lower block by the time of day, one block each: the morning brief before the open (nothing until it is
+  // written), the day report after the close, else what changed since the owner last looked. Arm today's plans and Close
+  // the day are not repeated here: the strip carries Close the day when something is left to review, and both are in ⌘K.
+  const lower = dayPhase === "pre" ? <MorningBrief prep={session.data?.prep} fill={fill} max={3} />
+    : dayPhase === "close" ? (
+      <section aria-label="Day report" data-testid="day-report">
+        <DayReport />
+      </section>
+    ) : <SinceYouLooked rows={rows} session={session.data} read={rowsRead} />;
 
   return (
     <div ref={desk} className={styles.desk} data-on={on} data-sheet={sheet ? "open" : "closed"} data-threads={threadsShown ? "shown" : "hidden"}>
@@ -507,11 +491,10 @@ export default function CopilotLab({ link = null, close = false, daily = false }
             <Link href="/copilot-lab" aria-current={onNow ? "page" : undefined} title="Back to today: Main chat in the copilot"
               className={cn("inline-flex min-h-11 items-center whitespace-nowrap rounded-md border px-2.5 text-xs sm:min-h-8",
                 onNow ? "bg-secondary font-medium text-foreground max-md:hidden" : "text-muted-foreground hover:text-foreground")}>Now</Link>
-            <button type="button" onClick={toggleThreads} aria-pressed={threadsShown}
-              aria-label={`Threads${needYouCount > 0 ? `, ${needYouCount} need you` : ""}`} title="The thread list and previous days ( [ )"
+            {/* No count here: what needs him is the strip's, counted once there. */}
+            <button type="button" onClick={toggleThreads} aria-pressed={threadsShown} aria-label="Threads" title="The thread list and previous days ( [ )"
               className={cn("inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground sm:min-h-8", threadsShown && "bg-secondary")}>
               <PanelLeft size={15} aria-hidden /><span className="hidden sm:inline">Threads</span>
-              {needYouCount > 0 && <span className="tabular-nums text-primary">{needYouCount}</span>}
             </button>
             <button type="button" onClick={() => setPalette(true)} aria-label="Jump to a thread or command" aria-haspopup="dialog"
               className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md border bg-card px-2.5 text-xs text-muted-foreground hover:text-foreground sm:min-h-8">
@@ -548,7 +531,7 @@ export default function CopilotLab({ link = null, close = false, daily = false }
         )}
         {on && (
           <div className={styles.book}>
-            <Book rows={rows} sparks={sparks} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} onSelect={select} onFollow={changeFollow} tickets={tickets.plans}
+            <Book rows={rows} sparks={sparks} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} onSelect={select} onFollow={changeFollow}
               live={live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} />
             {lower}
             <DayFacts session={session.data} />
@@ -560,7 +543,7 @@ export default function CopilotLab({ link = null, close = false, daily = false }
             <div role="tablist" aria-label="Centre" className="flex gap-1 border-b px-2 pt-1.5">
               {([["chart", "Chart"], ["feed", "Feed"], ["check", "Check a call"], ["ticket", "Ticket"]] as const).map(([id, label]) => (
                 <button key={id} type="button" role="tab" aria-selected={centreTab === id} onClick={() => setCentreTab(id)}
-                  className={cn("-mb-px min-h-11 border-b-2 px-2.5 text-sm sm:min-h-9", centreTab === id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+                  className={cn("-mb-px min-h-11 border-b-2 px-2.5 text-sm sm:min-h-9", centreTab === id ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
                   {label}
                   {id === "feed" && feedNew.count > 0 && <span data-testid="feed-new" className="ml-1.5 text-xs tabular-nums text-muted-foreground">{feedNew.count}<span className="sr-only"> new</span></span>}
                 </button>
@@ -571,16 +554,15 @@ export default function CopilotLab({ link = null, close = false, daily = false }
                 : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} onOpen={setTicketFor} onClose={() => setTicketFor(null)}
                 onPlaced={symbol => { setTicketFor(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
                 : centreTab === "chart"
-                ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} day={today} />
-                : <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed}
-                  onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} onWhatMatters={() => actions.ask(WHAT_MATTERS_PROMPT)} />}
+                ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} />
+                : <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed} />}
             </div>
           </section>
         )}
         <section aria-label="Conversation" className={styles.thread}>
           {on && (
             <div className={styles.sheetBar}>
-              <MessageCircle size={15} aria-hidden className="text-primary" />
+              <MessageCircle size={15} aria-hidden className="text-muted-foreground" />
               <span className="text-sm font-semibold">Copilot</span>
               {talking && <span className="rounded-full bg-muted px-2 py-0.5 text-xs">About {talking}</span>}
               <button type="button" onClick={() => setSheet(false)} aria-label="Back to the desk"
@@ -634,21 +616,10 @@ export default function CopilotLab({ link = null, close = false, daily = false }
           <CopilotPanel variant="page" link={link} desk={hooks} daily={daily} />
         </section>
       </div>
-      {on && <button type="button" onClick={askCopilot} className={cn(styles.ask, "min-h-11 items-center gap-1.5 rounded-full border border-primary/50 bg-card px-4 text-sm font-medium text-foreground shadow-lg hover:bg-secondary")}>
-        <MessageCircle size={15} aria-hidden className="text-primary" />Ask the copilot{picked && picked !== talking ? ` about ${picked}` : ""}
+      {on && <button type="button" onClick={askCopilot} className={cn(styles.ask, "min-h-11 items-center gap-1.5 rounded-full border border-foreground/30 bg-card px-4 text-sm font-medium text-foreground shadow-lg hover:bg-secondary")}>
+        <MessageCircle size={15} aria-hidden className="text-muted-foreground" />Ask the copilot{picked && picked !== talking ? ` about ${picked}` : ""}
       </button>}
       {on && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} onConversation={actions.open} />}
     </div>
   );
 }
-
-/** The time of day's one action in the book's lower block: Arm today's plans before the open, Close the day after it. */
-function PhaseButton({ action, run }: { action: { label: string; hint: string }; run(): void }) {
-  return (
-    <div data-testid="now-phase" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-card px-3 py-2.5">
-      <span className="min-w-0 flex-1 text-xs text-muted-foreground">{action.hint}</span>
-      <button type="button" onClick={run} className="inline-flex min-h-11 items-center rounded-md border border-primary/50 px-3 text-xs font-semibold text-primary hover:bg-primary/10 sm:min-h-8">{action.label}</button>
-    </div>
-  );
-}
-

@@ -75,9 +75,8 @@ async function reviewToCard(page: Page) {
   await expect(home.getByTestId("desk-day")).toBeVisible();
   await expect(home).not.toContainText("Practicing:");
   const saved = page.waitForRequest((request) => request.url().endsWith("/copilot/investigations") && request.method() === "POST");
-  const centre = page.getByRole("region", { name: "Chart and feed" });
-  await centre.getByRole("tab", { name: "Feed" }).click();
-  await centre.getByRole("button", { name: "Review my week" }).click();
+  await page.getByRole("button", { name: "Jump to a thread or command" }).click();
+  await page.getByRole("dialog", { name: "Jump to" }).getByRole("option", { name: /^Review my week/ }).click();
   const card = page.getByRole("region", { name: "Proposed practice" });
   await expect(card).toBeVisible();
   await saved;
