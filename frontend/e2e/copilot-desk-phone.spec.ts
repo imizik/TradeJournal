@@ -55,8 +55,10 @@ const TICKET = {
   underlying: { state: "ok", last: 95, as_of: epoch("2026-11-12T16:04:00Z") }, expected_move_pct: 6, limit: 3.2, contracts: 2,
 };
 
-/** ``mainChatAfter``: the Main chat answers this long after it is asked, so the test can tap while it is still opening. */
-async function open(page: Page, { width = 393, height = 852, path = "/copilot-lab", mainChatAfter = 0 } = {}) {
+/** ``mainChatHeld``: the Main chat answers only once the test lets it (the returned ``release``), so a tap can come first. */
+async function open(page: Page, { width = 393, height = 852, path = "/copilot-lab", mainChatHeld = false } = {}) {
+  let release = () => {};
+  const held = mainChatHeld ? new Promise<void>(resolve => { release = resolve; }) : Promise.resolve();
   await page.setViewportSize({ width, height });
   await page.clock.install({ time: NOW });
   await page.route("**/copilot/status", route => route.fulfill({ json: ON }));
@@ -68,7 +70,7 @@ async function open(page: Page, { width = 393, height = 852, path = "/copilot-la
   await page.route("**/copilot/desk/*/{picture,chart}*", route => route.fulfill({ status: 503, json: { detail: "No chart in this test." } }));
   await page.route("**/copilot/investigations?*", route => route.fulfill({ json: { investigations: [] } }));
   await page.route("**/copilot/main-chat", async route => {
-    if (mainChatAfter) await new Promise(resolve => setTimeout(resolve, mainChatAfter));
+    await held;
     await route.fulfill({ json: MAIN_CHAT }).catch(() => { /* the page moved on */ });
   });
   await page.route("**/copilot/main-chat/history*", route => route.fulfill({ json: { conversations: [] } }));
@@ -79,6 +81,7 @@ async function open(page: Page, { width = 393, height = 852, path = "/copilot-la
   await page.route(/\/copilot\/tickets\/[^/]+$/, route => route.fulfill({ json: TICKET }));
   await page.goto(path);
   await expect(page.getByTestId("desk-book")).toBeVisible();
+  return release;
 }
 
 const sideways = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -135,11 +138,13 @@ test("with the software keyboard up the message box stays in view", async ({ pag
 });
 
 test("tapping a position keeps its chart in view while the copilot opens behind the closed sheet", async ({ page }) => {
-  await open(page, { mainChatAfter: 600 });
+  const release = await open(page, { mainChatHeld: true });
   await page.getByTestId("desk-book").getByRole("button", { name: /^SOFI/ }).click();
   // In view near the top (the page's end can stop it a little short of the very top).
   await expect.poll(() => centreTop(page)).toBeLessThan(250);
-  // The Main chat opens in the closed sheet and tries to land for the next two seconds: the page stays on the chart.
+  // Now the Main chat opens in the closed sheet and tries to land for the next two seconds: the page stays on the chart.
+  release();
+  await expect(page.locator("section[aria-label=Conversation] h2", { hasText: "Main chat" })).toBeAttached(); // in the closed sheet
   await page.waitForTimeout(3000);
   expect(await centreTop(page)).toBeLessThan(250);
   expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(400);
