@@ -1,0 +1,200 @@
+{
+  "protocol_id": "long-holds-20261024-v1",
+  "provenance": {
+    "protocol_id": "long-holds-20261024-v1",
+    "extract_sha256": "4ada80b1977230773bd0d919cd3ea42f766b8fcc651d5484fee8253de7c33a47",
+    "source_sha": "5ae35afa88dd68da5c86d4660bdfa10c670fcf23",
+    "source_dirty": false,
+    "extract_is_registered": false
+  },
+  "extract_trades": 1531,
+  "population": 25,
+  "population_actual_total": -6525.0,
+  "analyzed": 25,
+  "excluded": {},
+  "fetched_windows": 25,
+  "recorded_pnl_mismatch": 0,
+  "actual_total": -6525.0,
+  "rules": {
+    "exit_session_1": {
+      "all": {
+        "trades": 25,
+        "touched": 25,
+        "dollar_diff": 5402.46,
+        "dollar_diff_stress": 4846.28,
+        "saved": 22,
+        "cost": 3,
+        "pct_diff_mean": 49.83,
+        "dollar_diff_interval": [
+          2325.65,
+          9671.54
+        ],
+        "pct_diff_interval": [
+          30.14,
+          66.94
+        ],
+        "diff_on_losers": 6098.32,
+        "diff_on_winners": -695.86
+      },
+      "exploration": {
+        "trades": 16,
+        "touched": 16,
+        "dollar_diff": 2216.79,
+        "dollar_diff_stress": 1937.27,
+        "saved": 14,
+        "cost": 2,
+        "pct_diff_mean": 47.71,
+        "dollar_diff_interval": [
+          734.68,
+          3696.76
+        ],
+        "pct_diff_interval": [
+          22.79,
+          71.84
+        ],
+        "diff_on_losers": 2486.59,
+        "diff_on_winners": -269.8
+      },
+      "check": {
+        "trades": 9,
+        "touched": 9,
+        "dollar_diff": 3185.67,
+        "dollar_diff_stress": 2909.01,
+        "saved": 8,
+        "cost": 1,
+        "pct_diff_mean": 53.59,
+        "dollar_diff_interval": [
+          947.16,
+          6235.99
+        ],
+        "pct_diff_interval": [
+          33.0,
+          81.65
+        ],
+        "diff_on_losers": 3611.73,
+        "diff_on_winners": -426.06
+      },
+      "decision": "eligible for prospective testing as a hold limit"
+    },
+    "exit_session_3": {
+      "all": {
+        "trades": 25,
+        "touched": 25,
+        "dollar_diff": 2140.89,
+        "dollar_diff_stress": 1749.77,
+        "saved": 17,
+        "cost": 8,
+        "pct_diff_mean": 18.8,
+        "dollar_diff_interval": [
+          14.16,
+          4238.36
+        ],
+        "pct_diff_interval": [
+          1.15,
+          38.01
+        ],
+        "diff_on_losers": 3290.8,
+        "diff_on_winners": -1149.91
+      },
+      "exploration": {
+        "trades": 16,
+        "touched": 16,
+        "dollar_diff": 939.72,
+        "dollar_diff_stress": 741.26,
+        "saved": 11,
+        "cost": 5,
+        "pct_diff_mean": 22.96,
+        "dollar_diff_interval": [
+          -723.42,
+          2528.14
+        ],
+        "pct_diff_interval": [
+          -5.53,
+          46.92
+        ],
+        "diff_on_losers": 1414.28,
+        "diff_on_winners": -474.56
+      },
+      "check": {
+        "trades": 9,
+        "touched": 9,
+        "dollar_diff": 1201.17,
+        "dollar_diff_stress": 1008.51,
+        "saved": 6,
+        "cost": 3,
+        "pct_diff_mean": 11.4,
+        "dollar_diff_interval": [
+          72.06,
+          2583.55
+        ],
+        "pct_diff_interval": [
+          1.02,
+          38.5
+        ],
+        "diff_on_losers": 1876.52,
+        "diff_on_winners": -675.35
+      },
+      "decision": "eligible for prospective testing as a hold limit"
+    },
+    "exit_session_5": {
+      "all": {
+        "trades": 25,
+        "touched": 25,
+        "dollar_diff": 1590.05,
+        "dollar_diff_stress": 1242.38,
+        "saved": 19,
+        "cost": 6,
+        "pct_diff_mean": 7.11,
+        "dollar_diff_interval": [
+          -93.27,
+          3543.94
+        ],
+        "pct_diff_interval": [
+          -9.82,
+          22.84
+        ],
+        "diff_on_losers": 2824.35,
+        "diff_on_winners": -1234.3
+      },
+      "exploration": {
+        "trades": 16,
+        "touched": 16,
+        "dollar_diff": 923.77,
+        "dollar_diff_stress": 743.28,
+        "saved": 12,
+        "cost": 4,
+        "pct_diff_mean": 9.15,
+        "dollar_diff_interval": [
+          -642.36,
+          2516.15
+        ],
+        "pct_diff_interval": [
+          -15.07,
+          29.2
+        ],
+        "diff_on_losers": 1340.13,
+        "diff_on_winners": -416.36
+      },
+      "check": {
+        "trades": 9,
+        "touched": 9,
+        "dollar_diff": 666.28,
+        "dollar_diff_stress": 499.1,
+        "saved": 7,
+        "cost": 2,
+        "pct_diff_mean": 3.48,
+        "dollar_diff_interval": [
+          -86.22,
+          1813.86
+        ],
+        "pct_diff_interval": [
+          -15.03,
+          26.66
+        ],
+        "diff_on_losers": 1484.22,
+        "diff_on_winners": -817.94
+      },
+      "decision": "reject as a demonstrated saving (interval includes 0 or periods disagree)"
+    }
+  }
+}
