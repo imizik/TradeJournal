@@ -36,6 +36,7 @@ class CachedRead:
 
 
 PROVIDER_SLOTS = 4
+LOW_SLOTS = 2  # of those places, the most that background reads (``read(low=True)``: the desk's sparklines) hold at once
 
 
 class ChartFeed:
@@ -55,8 +56,25 @@ class ChartFeed:
         # At most PROVIDER_SLOTS of the shared connection pool's eight at once (it held one when a lock spanned each call),
         # leaving room for the alert monitors' Tradier quote reads, Alpaca history and FRED.
         self._slots = threading.BoundedSemaphore(PROVIDER_SLOTS)
+        self._low = threading.BoundedSemaphore(LOW_SLOTS)
+        self._queued = 0  # reads waiting for a place now: a ``low`` read does not start while any are
 
-    def read(self, path: str, params: dict, ttl: int, keep: bool = True) -> tuple[dict, float, str | None]:
+    def read(self, path: str, params: dict, ttl: int, keep: bool = True, low: bool = False) -> tuple[dict, float, str | None]:
+        if not low:
+            return self._read(path, params, ttl, keep)
+        # A background read: at most ``LOW_SLOTS`` at once, and it starts only when no other read is waiting for a place.
+        # It waits here, before it registers as the request in flight, so a screen's read of the same thing is never made
+        # to wait for it; once started it is an ordinary read.
+        with measured("tradier_queue"):
+            self._low.acquire()
+        try:
+            while self._queued:
+                time.sleep(0.005)
+            return self._read(path, params, ttl, keep)
+        finally:
+            self._low.release()
+
+    def _read(self, path: str, params: dict, ttl: int, keep: bool) -> tuple[dict, float, str | None]:
         """One budgeted Tradier GET. ``keep=False`` skips the response cache (and its stale fallback):
         for a large answer the caller stores itself, so it is not held twice."""
         if not tradier.tradier_configured():
@@ -93,7 +111,13 @@ class ChartFeed:
         try:
             try:
                 with measured("tradier_queue"):
-                    self._slots.acquire()
+                    with self._lock:
+                        self._queued += 1
+                    try:
+                        self._slots.acquire()
+                    finally:
+                        with self._lock:
+                            self._queued -= 1
                 now = time.time()  # deadlines (cache, backoff, cooldown) count from the call, not from the wait for a slot
                 try:
                     with measured("tradier_provider"):
@@ -149,11 +173,29 @@ class ChartFeed:
             return saved.data, saved.fetched_at, str(error)
         raise error from None
 
+    @staticmethod
+    def _minutes_params(symbol: str, day: date) -> dict:
+        """The request ``workspace`` makes for a day's minutes (extended hours); the same key is the same cached read."""
+        return {"symbol": symbol, "interval": "1min", "session_filter": "all",
+                "start": day.strftime("%Y-%m-%d 04:00"), "end": day.strftime("%Y-%m-%d 20:00")}
+
+    def today_minutes(self, symbol: str, now: float, max_age: float = 120) -> list[dict]:
+        """The New York day's minute bars (extended hours, as ``normalize_bars`` leaves them) for a background caller,
+        the cached read when it is at most 15 s old, else one ``low`` read. Nothing before 04:00 (Tradier refuses a start
+        in the future). Raises ``ChartFeedError`` when it cannot be read, and when all it holds is older than ``max_age``
+        seconds (a failed read hands back its old data marked, which a line drawn as now must not use)."""
+        local = datetime.fromtimestamp(now, ET)
+        if local < datetime.combine(local.date(), wall_time(4), ET):
+            return []
+        data, fetched, issue = self.read("/v1/markets/timesales", self._minutes_params(symbol, local.date()), 15, low=True)
+        if issue and time.time() - fetched > max_age:
+            raise ChartFeedError(issue)
+        return normalize_bars(_rows(data, "series", "data"))
+
     def peek_minutes(self, symbol: str, day: date) -> tuple[list[dict], float] | None:
         """``day``'s minute bars (extended hours) and when they were read, from the response cache alone (the read
         ``workspace`` makes for today), even if stale; None when it holds none. Never a provider request."""
-        params = {"symbol": symbol, "interval": "1min", "session_filter": "all",
-                  "start": day.strftime("%Y-%m-%d 04:00"), "end": day.strftime("%Y-%m-%d 20:00")}
+        params = self._minutes_params(symbol, day)
         with self._lock:
             saved = self._cache.get((tradier.TRADIER_BASE_URL, "/v1/markets/timesales", tuple(sorted(params.items()))))
         if saved is None:

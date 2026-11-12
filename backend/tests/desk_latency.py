@@ -27,6 +27,32 @@ from tests.test_today import buy, planned_nbis
 
 OPTIONS = ("NBIS", "CRWV", "APLD", "IREN", "CIFR")
 STOCKS = ("NVDA", "AMD", "PLTR", "SOFI", "HOOD", "MU")
+BOOK = OPTIONS + STOCKS  # the eleven symbols of the owner's book
+
+
+def seed_radar(path, now: float, symbols, *, monkeypatch=None, since_minute: int = 9 * 60 + 30) -> None:
+    """A Radar file the recorder has been writing since ``since_minute`` New York of ``now``'s day: a pass a minute up to
+    30 seconds before ``now``, each holding every symbol's last (a slow climb) and previous close. Switches Radar on."""
+    from datetime import UTC, datetime, timedelta
+    from app.engine.chart_math import ET
+    from app.engine.radar_store import RadarStore
+    store = RadarStore(path)
+    local = datetime.fromtimestamp(now, ET)
+    stamp = local.replace(hour=since_minute // 60, minute=since_minute % 60, second=5, microsecond=0)
+    n = 0
+    while stamp.timestamp() <= now - 30:
+        at = stamp.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        record = {"session_date": local.date().isoformat(), "started_at": at, "finished_at": at, "universe_version": "radar-universe-v2",
+                  "status": "ok", "symbols_requested": len(symbols), "symbols_returned": len(symbols), "unmatched": [],
+                  "requests_used": 1, "error": None, "skip_reason": None}
+        quotes = [{"symbol": s, "last": 100.0 + n / 100, "prev_close": 99.0, "open": 99.5, "high": 101.0, "low": 99.0, "volume": 1000,
+                   "bid": None, "ask": None, "trade_time_ms": int(stamp.timestamp() * 1000), "retrieved_at": at} for s in symbols]
+        store.append_pass(record, quotes)
+        stamp += timedelta(minutes=1)
+        n += 1
+    if monkeypatch is not None:
+        monkeypatch.setenv("RADAR_ENABLED", "true")
+        monkeypatch.setenv("RADAR_STORE", str(path))
 latency = SimpleNamespace(seconds=0.35)
 
 
@@ -131,9 +157,11 @@ def slow_desk(engine, clock, tmp_path, monkeypatch):
         chart_feed._calls.clear()  # the feed's per-minute call budget: these tests are not its traffic
         chart_feed._failed.clear()
         chart_feed._retry_at = 0.0
-        for cache in (quote_engine._stock_cache, quote_engine._option_chain_cache, quote_engine._option_contract_cache,
-                      copilot_desk._spark_cache):
+        for cache in (quote_engine._stock_cache, quote_engine._option_chain_cache, quote_engine._option_contract_cache):
             cache.clear()
+        from app.engine import desk_sparks
+        desk_sparks.clear()
+        getattr(copilot_desk, "_spark_cache", {}).clear()  # the line cache before the sparklines moved to desk_sparks
         from app.engine import desk_feed, trader_context
         desk_feed._news_cache.clear()
         trader_context._news.clear()

@@ -332,6 +332,18 @@ class RadarStore:
         with self._db() as db:
             return [dict(row) for row in db.execute(sql + " ORDER BY pass_id, symbol", args)]
 
+    def session_series(self, session_date: str, symbols: Iterable[str]) -> dict[str, list[dict]]:
+        """Each symbol's recorded quotes of one session in pass order, as {symbol: [{last, prev_close, retrieved_at}]}:
+        the desk's sparklines read these, one query on the (session, symbol) index."""
+        names = sorted(set(symbols))
+        out: dict[str, list[dict]] = {s: [] for s in names}
+        if names:
+            with self._db() as db:
+                for row in db.execute("SELECT symbol,last,prev_close,retrieved_at FROM quote WHERE session_date=? AND symbol IN "
+                                      f"({','.join('?' * len(names))}) ORDER BY pass_id", [session_date, *names]):
+                    out[row["symbol"]].append(dict(row))
+        return out
+
     def pass_quotes(self, pass_ids: Iterable[int]) -> dict[int, dict[str, dict]]:
         """Quote rows of just these passes, as {pass id: {symbol: row}}."""
         ids = sorted(set(pass_ids))
