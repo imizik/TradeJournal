@@ -74,7 +74,8 @@ def _session(now: float) -> tuple[date, str, dict | None, tuple[int, int] | None
     windows = session_windows(day, hours)
     phase = next((name for name, start, end in windows if start <= minute < end), "closed")
     regular = next((w for w in windows if w[0] == "regular"), None)
-    at = (lambda m: int(datetime.combine(day, wall_time(m // 60, m % 60), ET).timestamp()))
+    def at(m: int) -> int:
+        return int(datetime.combine(day, wall_time(m // 60, m % 60), ET).timestamp())
     return day, phase, hours, (at(regular[1]), at(regular[2])) if regular else None
 
 
@@ -264,7 +265,6 @@ def _quotes(symbols: list[str]) -> dict:
 
 
 def read(symbols: str, now: float) -> dict:
-    from app.engine.chart_feed import chart_feed
     from app.engine.request_timing import timed
     from app.routers import today
     names = sorted({s.strip().upper() for s in symbols.split(",") if s.strip().replace(".", "").isalnum()})[:SYMBOLS]

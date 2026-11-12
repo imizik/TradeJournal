@@ -3,7 +3,7 @@ never takes more than its share of the chart feed. Every value is invented."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 import threading
 import time
 
