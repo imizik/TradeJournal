@@ -609,7 +609,9 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
 - **Centre.** A tab strip, **Chart** first, **Feed**, **Check a call** (§ Check a call) and **Ticket** (see
   [Ticket](#ticket); no tab shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
   position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's
-  fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D, with **Open in Charts →**; then, for a held
+  fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D, with studies (VWAP, EMAs, SMAs,
+  volume), the symbol's alerts and a level menu to act from the chart, a reading line under the symbol and
+  **Open in Charts →**; then, for a held
   position, two tiles the book row does not carry: vs SPY today (the stock's change today less SPY's, from the sparks
   read) and Held (its P&L, distance to the stop and expiry are the row's, beside it); and **Timeline ▾** folded under it. The sparks read takes at most 12 symbols (the centre's first) and
   answers a repeat within 30 seconds from memory, so several open desks cost one chart-feed read a minute. The chart is
@@ -835,6 +837,53 @@ The cockpit's panes in detail:
     seconds shows **No chart data** with the reason, never an empty box; a once-a-minute re-read that fails keeps the
     chart already shown. The picture route
     (`GET /copilot/desk/{id}/picture`, `chart_render`) stays for **Look at my chart** and the phone pings.
+  - **Studies** (2026-11-12) ride in the same read as `studies`, one value or null per candle, computed on the server
+    with the Charts workspace's own math (`chart_math.ema`, the EMA its `indicators` uses for any length, and
+    `chart_math.sma`; the RTH VWAP from minute HLC3 and the RVol of C2.4, both as of each candle's last minute). 2m
+    and 15m: **VWAP** (regular session only, restarting each day), **EMA 9** and **EMA 21**, **volume** in its own
+    pane under the price with the session's RVol, and the **previous close** and today's **pre-market high and low**
+    as faint dotted lines. 1D: **EMA 21**, **SMA 50**, **SMA 200** and volume with the day's volume against the 30
+    days before it. The averages are warmed on the candles before the first one shown, so they are right from it: 2m
+    on the whole session before today, 15m on three regular sessions before its first, both from the chart history
+    on disk only (never fetched for this; read once per process), 1D on the rest of the daily history the read
+    already holds. Without stored sessions an average starts empty and fills in after its length (the workspace's
+    convention), never a flat line from a made-up start; a study with no value (VWAP before the open, RVol before 20
+    sessions are stored, SMA 200 on a young listing) draws nothing. The previous close is the official daily close
+    from the daily series the chart feed already holds for today (any daily chart of the symbol read today), never a
+    minute's last trade and never a new request; without it no line is drawn and the reading line falls back to the
+    book's change today with its own as-of. Studies are thin, faded and outside the price scale's fit, in the
+    workspace's colours (EMA 21 takes its EMA 20's, the SMAs its EMA 50's and 200's); the plan's lines are two
+    pixels and stay the boldest thing after price. A **legend row** under the lines row has one toggle per study,
+    showing its value at the crosshair (else on the last candle); one line that scrolls sideways on a phone, so
+    values changing never move the chart. The choices are kept per timeframe in this browser
+    (`desk.chart.studies.v1`, localStorage), all on at first. `backend/tests/test_desk_chart_studies.py` holds the
+    values against the workspace's for the same candles (VWAP exactly; EMA 9 and 21 within half a cent from the first
+    15m candle shown; EMA 21 and SMA 50/200 against `indicators.py`'s pandas forms). One difference with Charts:
+    the workspace's today panel starts its EMAs at today's first candle, so its EMAs for the first hour or so of
+    today differ from the desk's warmed ones; its completed sessions agree.
+  - **The reading line** under the symbol: the newest price, its change against the previous close, its distance from
+    VWAP and from the plan's invalidation when there is one, and volume against usual for the time of day, with the
+    as-of (and VWAP's and RVol's own time when they are the regular session's and the price is after hours). A part
+    with nothing behind it is left out. The tiles below are unchanged (none repeats a figure the line shows).
+  - **Alerts and the level menu.** The symbol's other armed level alerts come with the read (`alerts`; the plan's own
+    are its entry and invalidation lines) as thin dotted lines and a chip each above the chart; a chip removes a plain
+    alert (`DELETE /charts/alerts/{id}`) with **Undo** (sets it again); a plan's alert shows without a remove. A tap
+    on the price scale, a long-press (half a second, a finger held still) or a right-click on the candles opens a
+    small menu at that price, with a dashed line at it while open: **Alert when price crosses here** (the existing
+    `POST /charts/alerts`, crosses, regular hours, labelled "From the desk", which side from the last price; the
+    confirmation names it and offers **Undo**), **Plan from here…** (entry trigger or invalidation, his choice: the
+    plan form's deep link, the level in its unsent message and, for an invalidation, as the drawn plan the plan card
+    compares with; nothing is saved), and **Ask the copilot about this level** (the copilot on the symbol, its own
+    conversation when it has one, with the level, where price is against it and when in the question's context line,
+    unsent). A short tap or a swipe opens nothing. Dragging a plan's line is not built.
+  - **Cost.** The studies add no provider request: 2m and 15m read today's minutes through the same cached feed read
+    (with C2.4's RVol baseline from disk), the warm-up from disk, the previous close from memory; 1D reads today's
+    minutes beside its daily bars for the reading line (the same 15 s cache), and a failure there still shows the
+    candles. Measured in the UX sandbox against Tradier (after hours, four symbols × three timeframes, each read
+    first after a backend start and again straight after, origin/main and this change alternating, four runs each):
+    2m, the desk's first paint, 103–106 ms before and 104–112 ms after cold, 10 and 12 ms warm (within Tradier's
+    noise); 15m 13 and 18 ms; 1D 313–343 and 298–307 ms cold, 28 and 34 ms warm; the route's recorded p50
+    (`GET /copilot/desk/timings`) 24–26 and 30–31 ms. A 2m read is 63 KB, was 50 KB. Not yet measured during market hours.
   - **Timeline ▾** (`/timeline`): one list, newest first, New York time on the
     right and a dot by kind: the investigation's alerts (armed, hit; a sent
     ping for one rides on its row, a held one shows with why), time stop (set,

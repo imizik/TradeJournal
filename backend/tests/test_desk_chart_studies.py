@@ -47,6 +47,7 @@ def install(monkeypatch, stored: bool = True, today: list[dict] | None = None, k
     """The desk's sources as the chart feed and the chart history return them; ``kept`` the official previous close
     the feed's daily series holds in memory (None: no daily chart of the symbol was read today)."""
     monkeypatch.setattr(desk_context, "kept_close", lambda symbol, before, today: kept if before == TODAY else None)
+    monkeypatch.setattr(desk_context, "_warmed", {})
     raw_today = RAW_TODAY if today is None else today
     minutes = [{**b, "rvol": None if b["extended"] else 1.25} for b in chart_bars(raw_today, [], "1m", "extended", {TODAY: None})]
     monkeypatch.setattr(desk_context, "today_minutes", lambda symbol: minutes)
@@ -127,6 +128,24 @@ def test_without_stored_history_the_averages_start_empty_and_nothing_is_drawn_fo
     assert studies["ema21"][:20] == [None] * 20
     assert read["reading"]["prev_close"] is None
     assert [line["key"] for line in read["reference"]] == ["pm_high", "pm_low"]
+
+
+def test_the_warm_up_candles_are_read_from_disk_once(monkeypatch):
+    install(monkeypatch)
+    asked = []
+    stored = desk_context.stored_sessions
+    monkeypatch.setattr(desk_context, "stored_sessions", lambda *args: asked.append(args) or stored(*args))
+    first = desk_context._desk_read("NBIS", "2m", NOW)
+    assert desk_context._desk_read("NBIS", "2m", NOW) == first and len(asked) == 1
+    desk_context._desk_read("NBIS", "15m", NOW)
+    desk_context._desk_read("NBIS", "15m", NOW)
+    assert len(asked) == 2
+    # Nothing stored yet is not remembered: once the session is on disk, the next read finds it.
+    monkeypatch.setattr(desk_context, "_warmed", {})
+    monkeypatch.setattr(desk_context, "stored_sessions", lambda *args: asked.append(args) or [])
+    assert desk_context._desk_read("NBIS", "2m", NOW)["studies"]["ema21"][0] is None
+    monkeypatch.setattr(desk_context, "stored_sessions", lambda *args: asked.append(args) or stored(*args))
+    assert desk_context._desk_read("NBIS", "2m", NOW)["studies"]["ema21"][0] is not None
 
 
 def test_the_reading_line_and_the_reference_lines(monkeypatch):

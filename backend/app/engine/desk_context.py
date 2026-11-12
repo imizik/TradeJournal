@@ -20,8 +20,10 @@ conversation reads its symbol's plan (in a position first, else armed) and, with
   sentence built from those counts. No plan, or a plan without an invalidation, says what is missing.
 - ``symbol_thread``: the thread for ``SYMBOL_PREFIX`` + a symbol, so the routes take it where they take an investigation.
 - ``chart``: the cockpit centre's interactive chart as data (the same reads as ``picture``, bounded to ``MAX_BARS``
-  candles and ``MAX_MARKS`` marks): candles (2m today with the pre-market and after-hours flagged), the plan's levels,
-  the owner's fills, today's pings and Radar hits, and the time stop still ahead. The picture stays for the phone pings.
+  candles and ``MAX_MARKS`` marks): candles (2m today with the pre-market and after-hours flagged) with their studies
+  (``AVERAGES``, VWAP, RVol) warmed on the candles before them, the reference lines and the reading line, the plan's
+  levels, the symbol's other armed alerts, the owner's fills, today's pings and Radar hits, and the time stop still
+  ahead. The picture stays for the phone pings.
 - ``market_picture``: the Briefing's chart, today's ``MARKET`` (QQQ) minutes with the day's fills and phone pings sent
   as dots, under the picture route's reserved ``MARKET_ID``.
 
@@ -483,6 +485,27 @@ def stored_sessions(symbol: str, before: date, count: int) -> list[tuple[date, d
     return out
 
 
+_warmed: dict[tuple[str, str, date], list[dict]] = {}  # completed sessions' candles never change: kept for the process
+
+
+def _warm(symbol: str, timeframe: str, before: date) -> list[dict]:
+    """The candles before ``before`` that warm a timeframe's averages: on 2m the session before today (pre-market to
+    after hours, as today's are drawn), on 15m ``WARM_SESSIONS`` regular sessions. From disk only; a result is kept
+    once found, so a minute's refresh reads no file."""
+    key = (symbol, timeframe, before)
+    if key in _warmed:
+        return _warmed[key]
+    if timeframe == "2m":
+        found = [b for day, hours, raw in stored_sessions(symbol, before, 1) for b in _two_minute(chart_bars(raw, [], "1m", "extended", {day: hours}))]
+    else:
+        found = [b for day, hours, raw in stored_sessions(symbol, before, WARM_SESSIONS) for b in chart_bars(raw, [], "15m", "regular", {day: hours})]
+    if found:
+        if len(_warmed) >= 64:
+            _warmed.pop(next(iter(_warmed)))
+        _warmed[key] = found
+    return found
+
+
 def _at_candles(candles: list[dict], step: int, minutes: list[dict], key: str) -> list[float | None]:
     """Each candle's ``key`` as of its last minute (the RTH VWAP and RVol are running values), None without one."""
     out: list[float | None] = []
@@ -512,12 +535,9 @@ def _minute_of_day(stamp: int) -> int:
 
 def _usual_volume(bars: list[dict]) -> list[float | None]:
     """Each daily candle's volume over the average of the ``USUAL_DAYS`` before it."""
-    out: list[float | None] = []
-    for i, bar in enumerate(bars):
-        before = [b.get("volume") or 0 for b in bars[max(0, i - USUAL_DAYS):i]]
-        usual = sum(before) / len(before) if len(before) == USUAL_DAYS else 0
-        out.append((bar.get("volume") or 0) / usual if usual > 0 else None)
-    return out
+    volumes = [float(b.get("volume") or 0) for b in bars]
+    usual = chart_math.sma(volumes, USUAL_DAYS)
+    return [None] + [volume / before if before else None for volume, before in zip(volumes[1:], usual)]
 
 
 def _desk_read(symbol: str, timeframe: str, now: float) -> dict | None:
@@ -531,8 +551,7 @@ def _desk_read(symbol: str, timeframe: str, now: float) -> dict | None:
         shown = _two_minute(minutes)
         for candle, vwap, rvol in zip(shown, _at_candles(shown, 120, minutes, "vwap"), _at_candles(shown, 120, minutes, "rvol")):
             candle.update(vwap=vwap, rvol=rvol)
-        for day, hours, raw in stored_sessions(symbol, today, 1) if shown else []:
-            warm = _two_minute(chart_bars(raw, [], "1m", "extended", {day: hours}))
+        warm = _warm(symbol, "2m", today) if shown else []
     else:
         try:
             minutes = on_today(today_minutes(symbol))
@@ -542,9 +561,7 @@ def _desk_read(symbol: str, timeframe: str, now: float) -> dict | None:
         if timeframe == "15m":
             shown = [b for b in fifteen_bars(symbol) if b["time"] <= now]
             if shown:
-                first = datetime.fromtimestamp(shown[0]["time"], ET).date()
-                for day, hours, raw in stored_sessions(symbol, first, WARM_SESSIONS):
-                    warm += chart_bars(raw, [], "15m", "regular", {day: hours})
+                warm = _warm(symbol, "15m", datetime.fromtimestamp(shown[0]["time"], ET).date())
         else:
             history = [dict(b) for b in daily_bars(symbol) if b["time"] <= now]
             for bar, usual in zip(history, _usual_volume(history)):

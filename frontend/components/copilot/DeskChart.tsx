@@ -367,7 +367,8 @@ export function ReadingLine({ data, fallback = null }: { data: DeskChartData | n
   const reading = data?.state === "ok" ? data.reading : null;
   if (!reading) return <p data-testid="desk-reading" className="h-4" />;
   const { last, at, daily } = reading;
-  const later = (time: number | null) => time !== null && !daily && Math.abs(time - at) > 90 ? ` (${nyWhen(time)})` : "";
+  // VWAP and RVol are the regular session's: after the close or before the open their time is not the price's.
+  const sessionAt = reading.vwap_at !== null && !daily && Math.abs(reading.vwap_at - at) > 90 ? reading.vwap_at : null;
   const change = reading.prev_close ? (last / reading.prev_close - 1) * 100 : null;
   const invalidation = data?.levels.find(level => level.role === "invalidation")?.price ?? null;
   const parts: { key: string; text: string; tone?: number; title?: string }[] = [];
@@ -375,22 +376,23 @@ export function ReadingLine({ data, fallback = null }: { data: DeskChartData | n
   else if (fallback) parts.push({ key: "change", text: `${signedPct(fallback.pct, 2)} today (book, ${nyWhen(fallback.at)})`, tone: fallback.pct });
   if (reading.vwap) {
     const away = (last / reading.vwap - 1) * 100;
-    parts.push({ key: "vwap", text: `${signedPct(away, 2)} vs VWAP ${price(reading.vwap)}${later(reading.vwap_at)}` });
+    parts.push({ key: "vwap", text: `${signedPct(away, 2)} vs VWAP ${price(reading.vwap)}` });
   }
   if (invalidation) {
     const away = (last - invalidation) / last * 100;
     parts.push({ key: "invalidation", text: `${Math.abs(away).toFixed(1)}% ${away >= 0 ? "above" : "below"} invalidation ${price(invalidation)}` });
   }
-  if (reading.rvol) parts.push({ key: "rvol", text: `vol ${reading.rvol.toFixed(1)}× usual${later(reading.vwap_at)}` });
+  if (reading.rvol) parts.push({ key: "rvol", text: `vol ${reading.rvol.toFixed(1)}× usual` });
   return (
-    <p data-testid="desk-reading" className="overflow-x-auto whitespace-nowrap text-xs leading-4 tabular-nums text-muted-foreground [scrollbar-width:none]">
+    // One line that scrolls sideways on a phone; two at most beside the book, so a new minute rarely moves the chart.
+    <p data-testid="desk-reading" className="overflow-x-auto whitespace-nowrap text-xs leading-4 tabular-nums text-muted-foreground [scrollbar-width:none] sm:min-h-8 sm:whitespace-normal">
       <span className="text-foreground">{price(last)}</span>
       {parts.map(part => (
         <span key={part.key} data-part={part.key} title={part.title}>
           {" · "}<span className={part.tone === undefined || part.tone === 0 ? undefined : part.tone > 0 ? "text-emerald-300" : "text-rose-300"}>{part.text}</span>
         </span>
       ))}
-      <span> · as of {nyWhen(at, daily)}</span>
+      <span> · as of {nyWhen(at, daily)}{sessionAt !== null ? ` (VWAP${reading.rvol ? ", vol" : ""} ${nyWhen(sessionAt)})` : ""}</span>
     </p>
   );
 }
@@ -730,7 +732,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
             className="absolute z-20 rounded-md border bg-popover/95 p-1 text-xs shadow-lg"
             style={{ left: menu.x, top: menu.y, width: MENU_W }}>
             <p className="flex items-center justify-between px-2 py-1 tabular-nums text-muted-foreground">
-              <span>{data.symbol} <span className="text-foreground">{price(menu.price)}</span>{lastPrice !== null ? ` · ${Math.abs((lastPrice - menu.price) / menu.price * 100).toFixed(1)}% ${lastPrice >= menu.price ? "below" : "above"} last` : ""}</span>
+              <span>{data.symbol} <span className="text-foreground">{price(menu.price)}</span>{lastPrice !== null ? ` · ${signedPct((menu.price / lastPrice - 1) * 100, 1)} from last` : ""}</span>
               <button type="button" aria-label="Close" onClick={() => setMenu(null)} className="min-h-11 min-w-11 rounded text-muted-foreground hover:text-foreground sm:min-h-6 sm:min-w-6">×</button>
             </p>
             {!menu.plan ? <>
