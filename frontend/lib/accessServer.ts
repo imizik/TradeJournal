@@ -3,6 +3,7 @@ import { cache } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { PRIVATE_ACCESS, type AppAccess } from "./accessTypes";
+import { CALLER_HEADER, STATE_HEADER, lockMode } from "./ownerLock";
 
 export function accessConfig() {
   const profile = process.env.TJ_ACCESS_PROFILE ?? "private_legacy";
@@ -27,12 +28,22 @@ export function upstreamHeaders(incoming: Headers) {
     const value = incoming.get(name); if (value) selected.set(name, value);
   }
   if (config.profile !== "private_legacy") selected.set("x-tj-gateway", config.key);
+  else if (lockMode() !== "off") {
+    // The API asks a browser-forwarded request for the owner session. Only the
+    // gate can mark a caller local (after verifying the server's local key).
+    selected.set("x-tj-lock-browser", "1");
+    if (incoming.get(CALLER_HEADER) === "local") selected.set("x-tj-lock-local", process.env.TJ_OWNER_LOCK_LOCAL_KEY ?? "");
+  }
   return selected;
 }
 
 export const currentAccess = cache(async (): Promise<AppAccess | null> => {
   const config = accessConfig();
-  if (config.profile === "private_legacy") return PRIVATE_ACCESS;
+  if (config.profile === "private_legacy") {
+    // The sign-in page renders before any session: no navigation, no Gmail banner.
+    if (lockMode() !== "off" && (await headers()).get(STATE_HEADER) === "sign-in") return null;
+    return PRIVATE_ACCESS;
+  }
   const response = await fetch(`${config.target}/access/me`, { headers: upstreamHeaders(new Headers(await headers())), cache: "no-store", redirect: "manual" });
   if (response.status === 401) return null;
   if (!response.ok) throw new Error("App access could not be verified");
@@ -40,6 +51,11 @@ export const currentAccess = cache(async (): Promise<AppAccess | null> => {
   if (!value.enabled || value.owner !== (config.profile === "owner")) throw new Error("Invalid app session audience");
   return value;
 });
+
+/** Report-only owner lock: this browser is not signed in yet, so pages offer the sign-in. */
+export async function lockSignInNeeded() {
+  return lockMode() === "report" && accessConfig().profile === "private_legacy" && (await headers()).get(STATE_HEADER) === "unsigned";
+}
 
 export async function requireAccess() {
   const value = await currentAccess();

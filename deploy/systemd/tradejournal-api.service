@@ -12,6 +12,8 @@ WorkingDirectory=/opt/tradejournal/current/backend
 EnvironmentFile=/etc/tradejournal/backend.env
 # Level alerts (Charts C5.1) send through the phone-alert topic; optional, as phone alerts are.
 EnvironmentFile=-/etc/tradejournal/alerts.env
+# Owner lock (docs/owner-lock.md); off when absent. Loaded last so its switch wins.
+EnvironmentFile=-/etc/tradejournal/owner-lock.env
 Environment=TJ_PLAN_REVIEW_DIR=/var/lib/tradejournal/plan-reviews
 ExecStart=/opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/deploy/launch.py api
 Restart=on-failure

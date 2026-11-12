@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { accessConfig, upstreamHeaders } from "@/lib/accessServer";
+import { lockMode, ownerLockGate } from "@/lib/ownerLock";
 
 // Only concurrent renewals on the same private entrance and incoming cookie
 // join a bootstrap. Nothing is cached after it settles; every caller still
@@ -25,7 +26,11 @@ export async function proxy(request: NextRequest) {
     const path = request.nextUrl.pathname;
     const clean = new Headers(request.headers);
     for (const name of [...clean.keys()]) if (name !== "x-tj-csrf" && /^(x-tj-|x-middleware-|x-nextjs-)/i.test(name)) clean.delete(name);
-    if (config.profile === "private_legacy") return NextResponse.next({ request: { headers: clean } });
+    if (config.profile === "private_legacy") {
+      const mode = lockMode();
+      if (mode === "off") return NextResponse.next({ request: { headers: clean } });
+      return await ownerLockGate(request, clean, mode, config.target);
+    }
     if (path.startsWith("/_next/static/") || ["/icon-192.png", "/icon-512.png", "/favicon.ico", "/manifest.webmanifest"].includes(path)) return NextResponse.next({ request: { headers: clean } });
     if (config.profile === "assistant" && (path === "/login" || path === "/api/access/challenge" || path === "/api/access/login")) return NextResponse.next({ request: { headers: clean } });
     let cookie: string | null = null;

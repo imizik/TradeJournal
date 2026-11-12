@@ -14,7 +14,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app import access_middleware
 from app.access_manifest import DOMAIN_ROUTES
 from app.database import get_session
-from app.engine import access, decisions
+from app.engine import access, decisions, owner_lock
 from app.main import app
 from app.models import AccessPrincipal, AccessSession, AccessAudit, PracticeRun, PracticeOpportunity, JobRun, DecisionRecord
 from app.routers import charts, quotes, symbol_info
@@ -75,7 +75,7 @@ def signin(b, *, identifier="dot", key=None):
 
 def test_route_inventory_is_exhaustive():
     actual = {f"{method} {r.path}" for r in access_middleware.registered_routes(app.routes) if isinstance(getattr(r, "original_route", r), APIRoute) for method in r.methods}
-    assert actual == DOMAIN_ROUTES | access.AUTH_PATHS
+    assert actual == DOMAIN_ROUTES | access.AUTH_PATHS | owner_lock.LOCK_PATHS
     assert access.MARKET_PATHS | access.JOURNAL_PATHS | access.PRACTICE_PATHS <= DOMAIN_ROUTES
     for allowed in access.SERVICE_PATHS.values():
         assert allowed <= DOMAIN_ROUTES

@@ -569,7 +569,8 @@ def authorize(request, operation, params):
 
 def still_authorized(request):
     if not enabled():
-        return True
+        from app.engine import owner_lock
+        return owner_lock.still_signed_in(request)
     try:
         return identify(request, consume_budget=False).identifier == request.state.access.identifier
     except HTTPException:

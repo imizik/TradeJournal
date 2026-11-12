@@ -27,7 +27,7 @@ from app.engine.chart_indices import is_index
 from app.engine import tradier
 from app.engine.chart_math import ET, INTERVALS, market_day
 from app.engine import symbol_info_tradier
-from app.engine import chart_journal, access
+from app.engine import chart_journal, access, owner_lock
 from app.engine.quotes import OptionQuoteRequest, option_mark
 from app.engine.options_feed import Layer, options_feed
 from app.engine.options_history import attach_open_interest_changes
@@ -160,7 +160,7 @@ async def stream(request: Request, symbol: str = Query("", max_length=15), symbo
         try:
             next_check = stream_clock()
             while True:
-                if access.enabled() and stream_clock() >= next_check:
+                if (access.enabled() or owner_lock.mode() == "on") and stream_clock() >= next_check:
                     from starlette.concurrency import run_in_threadpool
                     if not await run_in_threadpool(access.still_authorized, request):
                         break

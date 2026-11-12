@@ -5,10 +5,11 @@ import { Nav } from "@/components/Nav";
 import GmailStatusBanner from "@/components/GmailStatusBanner";
 import AssistantSession from "@/components/AssistantSession";
 import AccessProvider from "@/components/AccessProvider";
-import { currentAccess } from "@/lib/accessServer";
+import { currentAccess, lockSignInNeeded } from "@/lib/accessServer";
 import { PRIVATE_ACCESS } from "@/lib/accessTypes";
 import { ChartSessionProvider } from "@/lib/chartSession";
 import AppMain from "@/components/AppMain";
+import LockSignInNotice from "@/components/LockSignInNotice";
 
 // Session identity and permissions are evaluated per request in both profiles.
 export const dynamic = "force-dynamic";
@@ -42,12 +43,13 @@ export default async function RootLayout({
 }>) {
   const access = await currentAccess();
   const owner = access?.owner ?? false;
+  const signInNeeded = await lockSignInNeeded();
   return (
     <html lang="en" className="dark">
       <body className={`${sans.variable} ${mono.variable} font-sans antialiased`} suppressHydrationWarning>
         <AccessProvider access={access ?? { ...PRIVATE_ACCESS, owner: false, enabled: true }}><div className="flex min-h-screen flex-col pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:flex-row">
           {access && <Nav owner={owner} journal={owner || !!access.grants.journal_read} />}
-          <ChartSessionProvider><AppMain banner={owner ? <GmailStatusBanner /> : access ? <AssistantSession /> : null}>{children}</AppMain></ChartSessionProvider>
+          <ChartSessionProvider><AppMain banner={owner ? <>{signInNeeded && <LockSignInNotice />}<GmailStatusBanner /></> : access ? <AssistantSession /> : null}>{children}</AppMain></ChartSessionProvider>
         </div></AccessProvider>
       </body>
     </html>
