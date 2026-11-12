@@ -1,0 +1,59 @@
+{
+  "protocol_id": "radar-long-history-20261112-v1",
+  "registered": "2026-11-12",
+  "registered_before": "any number of this study was computed. Already known when it was written: the Radar v2 search and the setup lab on 2026-06-15 to 2026-10-21 (gap reversal led random entries by +0.46 points on the design half and +0.14 on the held-back half, 90% range -0.07 to +0.34; dip turn by +0.06 and +0.11, -0.04 to +0.26), and that the owner's own entries showed no direction edge on the stock (entry-skill-20261112-v1).",
+  "question": "On sessions no Radar study has read, do the two live setup rules (gap reversal radar-reversal-v0, dip turn radar-dip-v0), entered one minute after the flag and scored with the live card's exits on the stock, beat random stocks carded at the same minute and direction, by enough to matter?",
+  "why_it_might_be_true": "A stock that gaps on thin overnight trading and then turns back through its open may be an overreaction that the regular session corrects; the other side would be traders who chased the gap. Published work points the same way for moves without news and the other way for moves with news. That makes it an inefficiency, not a risk premium, so it should be weaker on news days and may fade. Dip turn rests on the same idea for weak names in the first hour.",
+  "period": {
+    "sessions": "every NYSE regular session from 2024-01-02 through 2026-06-12, the last session before the setup lab's design half, except the 13:00 closes 2024-07-03, 2024-11-29, 2024-12-24, 2025-07-03, 2025-11-28 and 2025-12-24. Sessions are the days SPY has a raw SIP daily bar.",
+    "untouched": "no Radar rule, threshold or study read these sessions. The dip rule's numbers were fixed before any trial; the reversal rule's were chosen on 2026-06-15 to 2026-08-31. The Strategy Factory read 18 of these names over the same years with other rules.",
+    "strata": {"2024": "2024-01-02 to 2024-12-31", "2025": "2025-01-02 to 2025-12-31", "2026": "2026-01-02 to 2026-06-12"}
+  },
+  "universe": {
+    "why": "the live 169-name roster was assembled on 2026-10-21, after this period, so it cannot be used without hindsight",
+    "candidates": "US common stocks (Polygon reference tickers, type CS, market stocks, active on that date) listed on any of 2024-01-02, 2024-07-01, 2025-01-02, 2025-07-01, 2026-01-02 or 2026-06-12, so names later delisted are included",
+    "daily_rule": "for each session, a candidate qualifies when it has a raw SIP daily bar on each of the 20 preceding sessions, its latest of those closes is at least $5, and its mean daily VWAP x volume over them is at least $20,000,000 (the whole-market study's rule). The session's roster is the 150 qualifiers with the highest such mean, ties by symbol, plus SPY as the benchmark. Nothing from the session itself or later is read.",
+    "size": "150, about the size of the live roster"
+  },
+  "inputs": "Alpaca SIP bars. Minute bars: regular session, raw, open, close and volume. Daily bars: raw and split-adjusted for the previous close on the session's share basis (radar_historical_replay.daily_inputs), and adjustment 'all' for the dip rule's 20-day test through radar_dip.daily_context, which drops bars on or after the session date. Earnings report dates: Tradier's corporate calendar as the app parses it (symbol_info_events.parse_earnings and report_dates), date only.",
+  "setups": {
+    "dip": "radar_dip.replay, unchanged, over the passes radar_historical_replay.reconstruct builds from the minute bars, each quote carrying the stock's cumulative volume through that bar. Direction up.",
+    "reversal": "radar_reversal.replay, unchanged, over the same passes. Both directions."
+  },
+  "card": "as the setup lab (radar_setup_lab.card): the invalidation level is the lowest (up) or highest (down) minute close from the first minute through the flag minute; for reversal also the session open.",
+  "entry": "PRIMARY: the close of the minute after the flag minute, one minute for a person to see a ping and act. No trade unless the invalidation is still strictly beyond that entry. The lab's own entry at the flag minute's close is reported as a description only.",
+  "exit": "as the setup lab (radar_setup_lab.exit_trade), counted from the entry minute: the first minute close at or through the invalidation, else the first close at or after entry + 60 minutes, else at or after 15:55. Minute closes only.",
+  "result": "result % = direction sign x (exit / entry - 1) x 100 on the stock. No commission, spread or slippage is modelled. Options are not scored.",
+  "baseline": "for each card, 20 draws without replacement from the session's other roster stocks that have a valid card at the same flag minute and direction under the same card, entry and exit rules, from a generator seeded by SHA-256 of study|session|setup|symbol|minute|direction|delay. Edge = the card's result % minus the mean of the draws. A card with no such stock has no edge and is counted.",
+  "tests": 2,
+  "primary_cells": ["dip: every dip card", "reversal: every reversal card, both directions"],
+  "uncertainty": "2,000 resamples of whole sessions (seed 20261112). The setup lab used 90% ranges; with two tests here the range is 95% (Bonferroni).",
+  "expected_precision": "Not computed from this data. The lab's held-back standard errors were 0.12 points (reversal) and 0.10 (dip) on 36 sessions. Scaling by the square root of about 600 sessions gives roughly 0.03 and 0.025, so an edge of 0.10 points should be detected nearly always and one of 0.05 about half the time. The report states the realized ranges.",
+  "decisions": {
+    "holds up": "the 95% range of the mean edge is above 0, the mean edge is at least 0.10 points, the mean edge is above 0 in each of 2024, 2025 and 2026, and the mean edge is still above 0 after dropping the 1% of cards with the largest edge",
+    "retire as a trade idea": "the 95% range's upper end is below 0.10 points",
+    "inconclusive": "anything else",
+    "why_0_10": "about a stock round trip plus a margin, and the size this sample can detect; the lab's held-back point estimates were 0.14 and 0.11",
+    "what_each_allows": "Holds up: the rule is eligible for a forward paper test scored on the option with a matched control. Retire: the rule should not be presented as a trade idea; it may stay as awareness. This study changes no live rule, switch or alert; those are the owner's call."
+  },
+  "registered_split": {
+    "catalyst": "A card is on an earnings session when the stock has a report date (Tradier calendar, one date per fiscal quarter, a confirmed row before an estimate) on the session date or the previous session; the calendar has no time of day, so both sessions around a report are marked. Stocks with no calendar rows are left out of the split and counted.",
+    "prediction": "fixed now: reversal's mean edge is higher on non-earnings sessions than on earnings sessions. Reported as the difference with a 90% session-resampled range. It decides nothing by itself; a difference whose range is above 0 makes 'reversal without a report' the next registered test."
+  },
+  "descriptive_only": [
+    "reversal by direction (up, down)",
+    "each primary cell by year",
+    "the lab's zero-delay entry for every cell",
+    "dip by earnings session",
+    "green share, random green share, stopped share, mean and median result and R, cards per session, the share of sessions with a positive summed edge"
+  ],
+  "limits": [
+    "the stock, not the option: nothing here says a contract would pay after spread and decay",
+    "minute closes only: intrabar stops are missed, equally for the cards and the random baseline",
+    "the roster is the 150 most traded common stocks each day, not the live curated list of optionable names; the live list's ETFs and groups are absent",
+    "ticker changes and listings that began and ended between two listing dates can be missed",
+    "earnings dates have no time of day and are the vendor's history, not a point-in-time record",
+    "one run on history; a pass is a reason for a forward test, not proof"
+  ],
+  "one_run": "one historical run under this id, all cells together. A changed constant is a new protocol id, recorded beside this one"
+}
