@@ -12,6 +12,34 @@ export function apiUrl(path: string): string {
   return `${base}${path}`;
 }
 
+/** How Robinhood's order history pairs with the journal's fills (docs/robinhood-order-fills.md). Accounts masked. */
+export type RobinhoodReconciliationRow = {
+  outcome: "pending" | "matched" | "order_only" | "email_only" | "mismatch";
+  action: "none" | "wrote_fill" | "would_write_fill";
+  mode: string;
+  note: string | null;
+  account: { label: string; masked: string | null };
+  ticker: string;
+  instrument: "option" | "stock";
+  side: "buy" | "sell";
+  option_type: string | null;
+  strike: number | null;
+  expiration: string | null;
+  recurring: boolean;
+  order: { ref: string; contracts: number | null; price: number | null; first_at: string | null; last_at: string | null } | null;
+  journal: { source: string; contracts: number | null; price: number | null; at: string | null; fill_id: string | null } | null;
+  updated_at: string | null;
+};
+
+export type RobinhoodReconciliation = {
+  mode: "off" | "shadow" | "on";
+  feed: "on" | "off";
+  last_pass: { at: number | null; state: string; written?: number; new_executions?: number };
+  days: number;
+  counts: Partial<Record<RobinhoodReconciliationRow["outcome"], number>>;
+  rows: RobinhoodReconciliationRow[];
+};
+
 export type Fill = {
   id: string;
   account_id: string;
@@ -954,6 +982,7 @@ return {
   bulkTradeFills: (ids: string[]) => get<Record<string, Fill[]>>(`/trades/fills/bulk?ids=${ids.join(",")}`),
   fills: () => get<Fill[]>("/fills"),
   fill: (id: string) => get<Fill>(`/fills/${id}`),
+  robinhoodReconciliation: (days = 7) => get<RobinhoodReconciliation>(`/fills/robinhood/reconciliation?days=${days}`),
   stats: (params?: string) => get<Stats>(`/stats${params ? `?${params}` : ""}`),
   analytics: (params?: string) => get<Analytics>(`/stats/analytics${params ? `?${params}` : ""}`),
   createFill: (body: FillWriteInput) => post<{ fill: Fill; trades_rebuilt: number; anomalies: string[] }>("/fills", body),

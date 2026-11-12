@@ -68,7 +68,8 @@ patterns that can create N+1 calls.
   corrupt history on a resync.
 - Stock `price` is per share.
 - `raw_email_id` is the dedupe key for imported fills. Manual fills use
-  `manual:` prefixes, Webull fills use `webull:{event_id}`.
+  `manual:` prefixes, Webull fills use `webull:{event_id}`, fills written from
+  Robinhood's order history use `robinhood:{order_id}` (below).
 - `fill.executed_at` is stored as a timezone-free America/New_York wall
   clock. Normalize aware Gmail and Webull source times to that clock before
   persistence; PostgreSQL otherwise converts them through its server timezone
@@ -205,6 +206,39 @@ is verifiable rather than hopeful.
   contract is unsold, and one unrelated orphan sale of the same
   quantity is indistinguishable from the new leg: the email cannot tell them apart.
   A two-leg email in any other wording is only logged as a parse failure.
+
+## Fills from Robinhood's order history
+
+Off unless `ROBINHOOD_FILLS_ENABLED` is `shadow` or `true` and the read feed is
+on ([operator note](../robinhood-order-fills.md)).
+
+- The email stays the journal's record. An order-history execution is recorded
+  once per Robinhood execution id in `robinhood_execution` and is
+  **provisional**: it never becomes a fill and never reaches FIFO, trades or
+  P&L, except where no email will ever come. Today that is only a filled
+  recurring stock buy (`placed_agent: "recurring"`), written in `true` mode as
+  one fill per order (`raw_email_id` `robinhood:{order_id}`, id
+  `uuid5("robinhood-order:{order_id}")`, the executions' volume-weighted price,
+  the last execution's New York time), and only when no journal fill already
+  pairs with it. Index options (SPXW) are not written until their order shape
+  is observed.
+- Pairing is per order (one email is one order): same account last four,
+  instrument, ticker, buy/sell and option contract; quantity equal to the sum of
+  the executions; price within half a cent a share of the volume-weighted
+  average; the email's minute within five minutes of the executions (a manual
+  fill: the same New York day). A working order is never paired or listed as
+  missing; identical orders pair one to one with the closest unpaired fill, and
+  a pair once made is kept. A fill another order already took is never reused.
+- A disagreement is a `mismatch` with both versions in
+  `robinhood_reconciliation`; it never changes a fill. An email for an order
+  already written is not imported (no second fill): it is recorded on that
+  order's row, and the import treats its id as known. Two-leg orders are left to
+  the roll email.
+- One pass (record, pair, write, rebuild) is one transaction; a failure leaves
+  nothing behind. Off and shadow leave fills, trades and P&L byte-for-byte
+  unchanged. Only an account's last four digits are stored or shown.
+- `POST /fills/resync-all` keeps `robinhood:` fills, like `manual:` ones: no
+  email will re-import them.
 
 ## Enrichment
 

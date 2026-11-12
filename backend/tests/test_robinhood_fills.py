@@ -21,7 +21,7 @@ from app.engine import robinhood_book as rb
 from app.engine import robinhood_fills as rf
 from app.engine import robinhood_read as rh
 from app.engine.chart_math import ET
-from app.engine.email_parser import ParsedFill, ParsedRoll
+from app.engine.email_parser import ParsedFill
 from app.models import Account, Fill, RobinhoodExecution, RobinhoodReconciliation, Trade, TradeFill
 from app.routers import fills as fills_router
 from tests.robinhood_fake import FakeRobinhood, equity_order, execution, option_order, token_file
