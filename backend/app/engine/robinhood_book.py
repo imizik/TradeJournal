@@ -312,6 +312,12 @@ class Feed:
             return "expired", None, s
         return "ready", sign, s
 
+    def signer(self) -> rh.Sign | None:
+        """The feed's sign-in when the feed is on and its file usable, else None (no network I/O). The order-history
+        fills (``robinhood_fills``) read through it, so there is one sign-in and one renewal for both."""
+        gate, sign, _s = self._gate()
+        return sign if gate == "ready" else None
+
     def refresh(self, force: bool = False) -> dict:
         """Read now (one refresh at a time). ``force`` is the desk's refresh button: still no more than one read every
         ``FORCE_GAP_SECONDS``; without it, only once the snapshot is older than ``ttl``."""

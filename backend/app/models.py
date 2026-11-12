@@ -2319,3 +2319,70 @@ class ResearchFinding(SQLModel, table=True):
     digest: str
     disposition: str = "proposed"
     created_at: datetime = Field(default_factory=utc_now_naive)
+
+
+class RobinhoodExecution(SQLModel, table=True):
+    """One execution Robinhood's order history reported (``engine/robinhood_fills.py``, docs/robinhood-order-fills.md).
+    The source fact, recorded once per Robinhood execution id: polling twice, a restart or a re-read of a week of
+    history finds the same id and adds nothing. Not a fill: nothing here reaches FIFO or trades. Only the account's last
+    four digits are kept, never its number. ``price`` follows the journal's convention (an option's dollars per
+    contract, a stock's per share); ``executed_at`` is a New York wall clock like ``fill.executed_at``."""
+
+    __tablename__ = "robinhood_execution"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    execution_id: str = Field(unique=True, index=True)
+    order_id: str = Field(index=True)
+    account_last4: str
+    instrument_type: str  # option | stock
+    ticker: str
+    side: str  # the journal's words: buy | sell | buy_to_open | sell_to_close | sell_to_open | buy_to_close
+    option_type: Optional[str] = None
+    strike: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    expiration: Optional[date] = None
+    contracts: Decimal = Field(sa_column=Column(DECIMAL_18_6, nullable=False))
+    price: Decimal = Field(sa_column=Column(DECIMAL_18_6, nullable=False))
+    executed_at: datetime = Field(index=True)  # naive America/New_York wall clock
+    order_state: str  # Robinhood's order state at the last read (filled, partially_filled, cancelled, ...)
+    placed_agent: Optional[str] = None  # user | recurring | ... as Robinhood reports it
+    legs: int = 1  # the order's leg count; a two-leg order (a roll) is never matched or written here
+    first_seen_at: datetime = Field(default_factory=utc_now_naive)  # UTC
+
+
+class RobinhoodReconciliation(SQLModel, table=True):
+    """The outcome of pairing one Robinhood order with the journal's fills, or one email fill no order explains
+    (``engine/robinhood_fills.py``). ``key`` is ``order:<order id>`` or ``fill:<fill id>``. ``outcome``: pending (seen,
+    its email not yet due), matched, order_only, email_only or mismatch; ``action``: none, wrote_fill (a fill no email
+    will ever bring, written from the order) or would_write_fill (shadow mode's record of the same). Both versions are
+    kept on a mismatch; nothing here changes a fill. ``fill_id`` has no foreign key on purpose: a destructive resync
+    re-imports fills with new ids, and the next pass pairs again."""
+
+    __tablename__ = "robinhood_reconciliation"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    key: str = Field(unique=True, index=True)
+    order_id: Optional[str] = Field(default=None, index=True)
+    fill_id: Optional[uuid.UUID] = Field(default=None, index=True)
+    outcome: str
+    action: str = "none"
+    mode: str  # shadow | on, at the pass that last wrote this row
+    account_last4: str
+    instrument_type: str
+    ticker: str
+    side: str  # buy | sell
+    option_type: Optional[str] = None
+    strike: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    expiration: Optional[date] = None
+    placed_agent: Optional[str] = None
+    rh_contracts: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    rh_price: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    rh_first_at: Optional[datetime] = None  # New York wall clock
+    rh_last_at: Optional[datetime] = None
+    journal_source: Optional[str] = None  # email | manual | roll | robinhood
+    journal_contracts: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    journal_price: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    journal_at: Optional[datetime] = None
+    journal_email_id: Optional[str] = Field(default=None, index=True)  # an email that arrived for an order already written
+    note: Optional[str] = None
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    updated_at: datetime = Field(default_factory=utc_now_naive)

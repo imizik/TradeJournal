@@ -3,7 +3,8 @@
 Robinhood's agent connection (an MCP server over streamable HTTP) has one sign-in scope and no read-only version:
 the same sign-in that reads the owner's accounts can place, cancel and exercise orders. This module is the guard.
 
-- ``READ_TOOLS`` is a hard-coded allowlist of the read tools the desk's feed needs. ``_call`` is the only function that
+- ``READ_TOOLS`` is a hard-coded allowlist of the read tools the desk's feed and the order-history fills
+  (docs/robinhood-order-fills.md) need. ``_call`` is the only function that
   builds a ``tools/call`` and refuses any other name before any network I/O; ``_post`` (every byte sent to Robinhood
   passes through it) refuses again on the bytes themselves: only ``initialize``, ``notifications/initialized`` and a
   ``tools/call`` of an allowlisted name may reach the MCP endpoint, and only a ``refresh_token`` grant the token
@@ -52,6 +53,8 @@ READ_TOOLS = frozenset({
     "get_option_quotes",
     "get_equity_positions",
     "get_equity_quotes",
+    "get_option_orders",
+    "get_equity_orders",
 })
 MCP_METHODS = frozenset({"initialize", "notifications/initialized", "tools/call"})
 
@@ -391,3 +394,12 @@ class Reader:
 
     def get_equity_quotes(self, symbols: list[str]) -> dict:
         return self._call("get_equity_quotes", {"symbols": [str(s) for s in symbols]})
+
+    # Order history (read only: what was filled, never an order action). ``created_at_gte`` is a UTC ISO time.
+    def get_option_orders(self, account_number: str, created_at_gte: str, cursor: str | None = None) -> dict:
+        return self._call("get_option_orders", {"account_number": str(account_number), "created_at_gte": str(created_at_gte),
+                                                **({"cursor": str(cursor)} if cursor else {})})
+
+    def get_equity_orders(self, account_number: str, created_at_gte: str, cursor: str | None = None) -> dict:
+        return self._call("get_equity_orders", {"account_number": str(account_number), "created_at_gte": str(created_at_gte),
+                                                **({"cursor": str(cursor)} if cursor else {})})

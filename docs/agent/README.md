@@ -90,6 +90,7 @@ isolation. They are not new Dots work; each contract states its own open gate.
 | [../copilot-lab.md](../copilot-lab.md) | You are working on the owner-only Claude Copilot Lab (off unless `COPILOT_ENABLED=true`): read-only tools, limits, settings, saved investigations, the manual research job, the background research queue, confirmed plans with their follow-through pings, and the live-API prerequisites |
 | [../owner-lock.md](../owner-lock.md) | You are touching who may use the private app (off unless `TJ_OWNER_LOCK` is `report` or `on`): the owner passphrase sign-in, the caller map and loopback rule, report-only, break-glass and the operator steps |
 | [../robinhood-read-feed.md](../robinhood-read-feed.md) | You are touching the desk's read-only Robinhood feed (off unless `ROBINHOOD_READ_ENABLED=true`): the read-tool allowlist, the sign-in file, the snapshot and its join onto the book, and how the owner signs in, switches it off and revokes it |
+| [../robinhood-order-fills.md](../robinhood-order-fills.md) | You are touching fills from Robinhood's order history (off unless `ROBINHOOD_FILLS_ENABLED` is `shadow` or `true`): provisional executions, pairing with the email fills, recurring buys, the reconciliation and shadow mode |
 | [../charts-roadmap.md](../charts-roadmap.md) | You are working on `/charts`: execution order, dependencies, acceptance gate, provider evidence and the not-building list |
 | [../charts-deep-history.md](../charts-deep-history.md) | You need C0.0's implemented SIP cache, pagination, warmup, budget and test contract |
 

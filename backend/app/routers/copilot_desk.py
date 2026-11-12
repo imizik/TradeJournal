@@ -777,16 +777,31 @@ def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict) -> li
         if row is not None:
             row["book"]["live"] = "not_on_robinhood"
     new = []
+    seen = _seen_on_robinhood(db) if extra else set()
     for live in extra:
         contract = rb.label(live)
         value = None if live["usd"] is None else _say(_usd(live["usd"]), "gain" if live["usd"] > 0 else "loss" if live["usd"] < 0 else "muted")
-        row = _row(f"robinhood:{rb.mask(live['last4'])}:{contract}", "watch", contract, _say("New · not in the journal yet", "info"),
+        pending = (live["last4"], rb.contract_key(live["symbol"], live["instrument"], live["side"], live["strike"], live["expiry"])) in seen
+        note = "New · fill seen on Robinhood, email not in yet" if pending else "New · not in the journal yet"
+        row = _row(f"robinhood:{rb.mask(live['last4'])}:{contract}", "watch", contract, _say(note, "info"),
                    symbol=live["symbol"], instrument=_instrument(contract, live["symbol"], live["instrument"]), value=value,
                    path=f"/copilot-lab?{urlencode({'symbol': live['symbol']})}")
         row["book"] = {"usd": live["usd"], "pct": live["pct"], "expiry": live["expiry"], "days_held": None, "track": None,
                        "state": "no_plan", "planned": False, "stop_pct": None, **facts(live), "live": "new"}
         new.append(row)
     return new
+
+
+def _seen_on_robinhood(db: Session) -> set[tuple]:
+    """Buys Robinhood's order history recorded today whose fill is not in the journal yet (docs/robinhood-order-fills.md);
+    empty while that switch is off."""
+    from app.engine import robinhood_fills
+    try:
+        return robinhood_fills.provisional(db, datetime.now(ET).replace(tzinfo=None))
+    except Exception as exc:  # noqa: BLE001 - the marker falls back to its plain wording
+        log.warning("order-history marker unavailable: %s", type(exc).__name__)
+        db.rollback()
+        return set()
 
 
 # --------------------------------------------------------------------------- the Briefing's session timeline

@@ -238,6 +238,28 @@ def test_robinhood_only_positions_are_new_and_journal_only_ones_not_on_robinhood
     assert apld["path"] == "/copilot-lab?symbol=APLD" and apld["close"] is None and apld["horizon"] is None
 
 
+def test_a_new_position_whose_order_was_seen_says_so_until_its_fill_is_in(desk, engine, quotes, live):  # noqa: F811
+    """docs/robinhood-order-fills.md: the order history saw the buy and its email is not in yet; once the fill is in by
+    either route the row is the journal's own trade and this marker is gone (the join above)."""
+    from datetime import datetime as _dt
+    from decimal import Decimal as _D
+    from app.engine.chart_math import ET as _ET
+    from app.models import RobinhoodReconciliation
+    with Session(engine) as db:
+        db.add(RobinhoodReconciliation(key="order:seen-nbis", order_id="seen-nbis", outcome="pending", mode="shadow",
+                                       account_last4="8267", instrument_type="option", ticker="NBIS", side="buy",
+                                       option_type="call", strike=_D("100"), expiration=_dt(2026, 10, 23).date(),
+                                       rh_last_at=_dt.now(_ET).replace(tzinfo=None)))
+        db.commit()
+    try:
+        [nbis] = [r for r in read(desk)["threads"] if r["key"].startswith("robinhood:••8267:NBIS")]
+        assert nbis["status"] == {"text": "New · fill seen on Robinhood, email not in yet", "tone": "info"}
+    finally:
+        with Session(engine) as db:
+            db.delete(db.exec(select(RobinhoodReconciliation).where(RobinhoodReconciliation.key == "order:seen-nbis")).one())
+            db.commit()
+
+
 def test_a_ticker_not_followed_stays_hidden_on_a_new_row(desk, engine, quotes, live):  # noqa: F811
     from app.models import DayJournalEntry
     from tests.test_copilot_plans import WED

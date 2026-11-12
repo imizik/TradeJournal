@@ -1,11 +1,14 @@
 import { api } from "@/lib/serverApi";
 import type { Account, Fill } from "@/lib/api";
 import { AddManualFill } from "@/components/ManualFillForm";
+import { RobinhoodReconciliation } from "@/components/RobinhoodReconciliation";
 import { cn } from "@/lib/utils";
 import { contractName, sideLabel, wallClockET } from "@/lib/format";
 
 function sourceLabel(fill: Fill) {
-  return fill.raw_email_id.startsWith("manual:") ? "Manual" : "Email";
+  if (fill.raw_email_id.startsWith("manual:")) return "Manual";
+  if (fill.raw_email_id.startsWith("robinhood:")) return "Robinhood";
+  return "Email";
 }
 
 function fmtDateTime(value: string) {
@@ -31,7 +34,12 @@ function detailLabel(fill: Fill) {
 }
 
 export default async function FillsPage() {
-  const [fills, accounts] = await Promise.all([api.fills(), api.accounts()]);
+  const [fills, accounts, reconciliation] = await Promise.all([
+    api.fills(),
+    api.accounts(),
+    api.robinhoodReconciliation().catch(() => null), // the fills page never depends on it
+  ]);
+  const showReconciliation = reconciliation && (reconciliation.mode !== "off" || reconciliation.rows.length > 0);
   const accountMap = Object.fromEntries(accounts.map((account: Account) => [account.id, account]));
 
   return (
@@ -46,6 +54,8 @@ export default async function FillsPage() {
           transferred positions, missing cost basis or older starter lots.
         </p>
       </AddManualFill>
+
+      {showReconciliation ? <RobinhoodReconciliation data={reconciliation} /> : null}
 
       <section className="overflow-hidden rounded-lg border bg-card">
         <div className="border-b px-3.5 py-2.5">
