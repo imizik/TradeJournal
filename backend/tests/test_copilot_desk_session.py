@@ -99,6 +99,11 @@ def test_the_days_events_in_time_order_and_the_time_stops_ahead(desk, engine, tm
                             "fallback": False, "path": f"/copilot-lab?investigation={APLD}"}
     with Session(engine) as db:
         assert len(db.exec(select(PhonePing)).all()) == 2  # read-only: no ping written
+    # A ticker he does not follow is in no event, row or not (Since you looked counts these).
+    with Session(engine) as db:
+        db.add(DayJournalEntry(operation_id="f1", day=WED, kind="follow", symbol="NBIS", text="Not following", created_at=T0))
+        db.commit()
+    assert [e["symbol"] for e in read(desk)["events"]] == ["MU"]
 
 
 def test_before_the_open_and_a_closed_day(desk, clock, monkeypatch):  # noqa: F811

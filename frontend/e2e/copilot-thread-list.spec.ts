@@ -232,7 +232,7 @@ test("a quiet day: nothing open says so, and Plan a trade is one tap away in the
   await expect(threads.getByTestId("desk-day")).toHaveText("Nothing needs you");
   await expect(tickers(page)).toContainText("Nothing open. Plan a trade to start a ticker.");
   await expect(threads.getByRole("link", { name: "Plan a trade" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "New plan" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Plan a trade" })).toBeVisible();
   await expect(page.getByTestId("desk-book")).toContainText("No open positions.");
 });
 
@@ -341,9 +341,9 @@ test("a busy day stays calm: one row per ticker, six quiet ones shown, a ticker 
   await tickers(page).getByRole("button", { name: "Show fewer" }).click();
   await expect(tickers(page).getByRole("button", { name: /^[A-Z]+, / })).toHaveCount(8);
   await expect(threads.getByTestId("desk-keys")).toBeVisible();
-  // Every key hint stays inside the list: the row wraps instead of running "context" off its edge.
+  // Every key hint stays inside the list: the row wraps instead of running the last one off its edge.
   const edge = (await threads.boundingBox())!;
-  const hint = (await threads.getByTestId("desk-keys").getByText("context").boundingBox())!;
+  const hint = (await threads.getByTestId("desk-keys").getByText("threads").boundingBox())!;
   expect(hint.x + hint.width).toBeLessThanOrEqual(edge.x + edge.width);
   await page.screenshot({ path: test.info().outputPath("thread-list-busy.png") });
 });

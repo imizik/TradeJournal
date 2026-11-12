@@ -62,11 +62,10 @@ async function lab(page: Page) {
 }
 
 const list = (page: Page) => page.getByRole("navigation", { name: "Thread list" });
-/** The centre's Feed tab: What matters right now? and Review my week sit at its foot. */
-async function today(page: Page) {
-  const centre = page.getByRole("region", { name: "Chart and feed" });
-  await centre.getByRole("tab", { name: "Feed" }).click();
-  return centre;
+/** Jump to (⌘K): What matters right now? and Review my week are its commands (the copilot keeps its own asks). */
+async function jump(page: Page) {
+  await page.getByRole("button", { name: "Jump to a thread or command" }).click();
+  return page.getByRole("dialog", { name: "Jump to" });
 }
 
 test("the list sends nothing on open, and What matters right now? asks across everything beside it", async ({ page }) => {
@@ -77,7 +76,7 @@ test("the list sends nothing on open, and What matters right now? asks across ev
   expect(chats).toEqual([]); // opening costs nothing
   expect(reads()).toBe(1);
 
-  await (await today(page)).getByRole("button", { name: "What matters right now?" }).click();
+  await (await jump(page)).getByRole("option", { name: /^What matters right now\?/ }).click();
   await expect(page.getByText(ANSWER)).toBeVisible();
   expect(chats).toEqual([{ messages: [{ role: "user", content: PROMPT }], symbol: null, source: "desk" }]);
   await expect(threads).toBeVisible(); // the desk keeps the thread list beside the open conversation
@@ -121,9 +120,10 @@ test("the list says so when its read fails, and the Briefing and Review my week 
   await openDeskThreads(page);
   const threads = list(page);
   await expect(threads).toContainText("Threads unavailable: Copilot Lab is off.");
-  await expect((await today(page)).getByRole("button", { name: "What matters right now?" })).toBeEnabled();
   await expect(threads.getByRole("button", { name: "Review my week" })).toHaveCount(0); // in ⌘K and the Briefing now
-  await expect(page.getByRole("region", { name: "Chart and feed" }).getByRole("button", { name: "Review my week" })).toBeEnabled();
+  const palette = await jump(page);
+  await expect(palette.getByRole("option", { name: /^What matters right now\?/ })).toBeVisible();
+  await expect(palette.getByRole("option", { name: /^Review my week/ })).toBeVisible();
 });
 
 test("on a wide screen the app's navigation folds into the desk bar's Menu, and keeping the sidebar open is remembered", async ({ page }) => {
@@ -289,7 +289,7 @@ test("before the open the book's lower block is the morning brief, cut short wit
   await expect(page.getByRole("link", { name: "Now", exact: true })).toBeHidden();
   const middle = async (box: Promise<{ y: number; height: number } | null>) => { const b = await box; return b ? b.y + b.height / 2 : NaN; };
   const desk = await middle(page.getByRole("heading", { name: "Desk", level: 1 }).boundingBox());
-  for (const button of [page.getByRole("button", { name: "Jump to a thread or command" }), page.getByRole("button", { name: "New plan" })])
+  for (const button of [page.getByRole("button", { name: "Jump to a thread or command" }), page.getByRole("button", { name: "Plan a trade" })])
     expect(Math.abs(await middle(button.boundingBox()) - desk)).toBeLessThan(12);
   await page.screenshot({ path: test.info().outputPath("main-chat-brief-phone.png") });
   await page.setViewportSize({ width: 1280, height: 720 });

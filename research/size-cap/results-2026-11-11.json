@@ -1,0 +1,221 @@
+{
+  "protocol_id": "size-cap-20261024-v1",
+  "provenance": {
+    "protocol_id": "size-cap-20261024-v1",
+    "extract_sha256": "4ada80b1977230773bd0d919cd3ea42f766b8fcc651d5484fee8253de7c33a47",
+    "source_sha": "5ae35afa88dd68da5c86d4660bdfa10c670fcf23",
+    "source_dirty": false,
+    "extract_is_registered": false
+  },
+  "extract_trades": 1531,
+  "analyzed": 1531,
+  "excluded": {},
+  "recorded_pnl_mismatch": 0,
+  "actual_total": 12721.98,
+  "rules": {
+    "cap_1_5x": {
+      "all": {
+        "trades": 1531,
+        "affected": 414,
+        "actual_pnl": 12721.98,
+        "counterfactual_pnl": 11451.88,
+        "dollar_diff": -1270.1,
+        "affected_pnl": 5048.98,
+        "premium_removed": 265399.69,
+        "rop_actual": 1.16,
+        "rop_counterfactual": 1.38,
+        "rop_diff": 0.22,
+        "affected_pct_mean": 0.39,
+        "others_pct_mean": 0.01,
+        "pct_gap": 0.38,
+        "flat_cut_diff": -3084.28,
+        "selection_value": 1814.18,
+        "largest_loss": [
+          -4350.0,
+          -1690.02
+        ],
+        "worst_day": [
+          -3607.99,
+          -1722.85
+        ],
+        "dollar_diff_interval": [
+          -12174.74,
+          12103.48
+        ],
+        "selection_value_interval": [
+          -7522.31,
+          12388.57
+        ]
+      },
+      "exploration": {
+        "trades": 1178,
+        "affected": 302,
+        "actual_pnl": 2668.98,
+        "counterfactual_pnl": -284.4,
+        "dollar_diff": -2953.38,
+        "affected_pnl": 2591.97,
+        "premium_removed": 126162.45,
+        "rop_actual": 0.39,
+        "rop_counterfactual": -0.05,
+        "rop_diff": -0.44,
+        "affected_pct_mean": -0.9,
+        "others_pct_mean": -0.21,
+        "pct_gap": -0.69,
+        "flat_cut_diff": -488.2,
+        "selection_value": -2465.18,
+        "largest_loss": [
+          -1604.0,
+          -1167.75
+        ],
+        "worst_day": [
+          -2095.0,
+          -1722.85
+        ],
+        "dollar_diff_interval": [
+          -9240.17,
+          3081.38
+        ],
+        "selection_value_interval": [
+          -7934.67,
+          2635.8
+        ]
+      },
+      "check": {
+        "trades": 353,
+        "affected": 112,
+        "actual_pnl": 10053.0,
+        "counterfactual_pnl": 11736.28,
+        "dollar_diff": 1683.28,
+        "affected_pnl": 2457.01,
+        "premium_removed": 139237.24,
+        "rop_actual": 2.48,
+        "rop_counterfactual": 4.42,
+        "rop_diff": 1.93,
+        "affected_pct_mean": 3.86,
+        "others_pct_mean": 0.82,
+        "pct_gap": 3.03,
+        "flat_cut_diff": -3456.31,
+        "selection_value": 5139.59,
+        "largest_loss": [
+          -4350.0,
+          -1690.02
+        ],
+        "worst_day": [
+          -3607.99,
+          -1111.29
+        ],
+        "dollar_diff_interval": [
+          -7299.54,
+          13307.74
+        ],
+        "selection_value_interval": [
+          -1705.4,
+          13435.18
+        ]
+      },
+      "decision": "reject as a demonstrated saving (interval includes 0 or periods disagree)"
+    },
+    "cap_2x": {
+      "all": {
+        "trades": 1531,
+        "affected": 245,
+        "actual_pnl": 12721.98,
+        "counterfactual_pnl": 11142.35,
+        "dollar_diff": -1579.63,
+        "affected_pnl": -1761.98,
+        "premium_removed": 178097.91,
+        "rop_actual": 1.16,
+        "rop_counterfactual": 1.22,
+        "rop_diff": 0.05,
+        "affected_pct_mean": -1.24,
+        "others_pct_mean": 0.37,
+        "pct_gap": -1.62,
+        "flat_cut_diff": -2069.72,
+        "selection_value": 490.09,
+        "largest_loss": [
+          -4350.0,
+          -2253.35
+        ],
+        "worst_day": [
+          -3607.99,
+          -2047.26
+        ],
+        "dollar_diff_interval": [
+          -11315.03,
+          8592.66
+        ],
+        "selection_value_interval": [
+          -7156.63,
+          9086.66
+        ]
+      },
+      "exploration": {
+        "trades": 1178,
+        "affected": 164,
+        "actual_pnl": 2668.98,
+        "counterfactual_pnl": -622.82,
+        "dollar_diff": -3291.8,
+        "affected_pnl": 1383.01,
+        "premium_removed": 75310.92,
+        "rop_actual": 0.39,
+        "rop_counterfactual": -0.1,
+        "rop_diff": -0.49,
+        "affected_pct_mean": -1.06,
+        "others_pct_mean": -0.28,
+        "pct_gap": -0.79,
+        "flat_cut_diff": -291.42,
+        "selection_value": -3000.38,
+        "largest_loss": [
+          -1604.0,
+          -1557.0
+        ],
+        "worst_day": [
+          -2095.0,
+          -2047.26
+        ],
+        "dollar_diff_interval": [
+          -8637.59,
+          1235.48
+        ],
+        "selection_value_interval": [
+          -8148.08,
+          1247.34
+        ]
+      },
+      "check": {
+        "trades": 353,
+        "affected": 81,
+        "actual_pnl": 10053.0,
+        "counterfactual_pnl": 11765.17,
+        "dollar_diff": 1712.17,
+        "affected_pnl": -3144.99,
+        "premium_removed": 102786.99,
+        "rop_actual": 2.48,
+        "rop_counterfactual": 3.89,
+        "rop_diff": 1.41,
+        "affected_pct_mean": -1.61,
+        "others_pct_mean": 2.8,
+        "pct_gap": -4.4,
+        "flat_cut_diff": -2551.5,
+        "selection_value": 4263.67,
+        "largest_loss": [
+          -4350.0,
+          -2253.35
+        ],
+        "worst_day": [
+          -3607.99,
+          -1394.46
+        ],
+        "dollar_diff_interval": [
+          -6237.75,
+          11476.73
+        ],
+        "selection_value_interval": [
+          -1744.9,
+          11334.73
+        ]
+      },
+      "decision": "reject as a demonstrated saving (interval includes 0 or periods disagree)"
+    }
+  }
+}

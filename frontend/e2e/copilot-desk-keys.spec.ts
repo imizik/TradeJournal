@@ -114,6 +114,11 @@ async function lab(page: Page, { time = NOW, session = SESSION, threads = () => 
 
 const palette = (page: Page) => page.getByRole("dialog", { name: "Jump to" });
 const conversation = (page: Page) => page.getByRole("region", { name: "Conversation" });
+/** A command from Jump to (⌘K): the time of day's actions (Arm today's plans, Close the day) live there, not on the desk. */
+async function command(page: Page, name: string) {
+  await page.getByRole("button", { name: "Jump to a thread or command" }).click();
+  await palette(page).getByRole("option", { name: new RegExp(`^${name}`) }).click();
+}
 
 test("⌘K opens the palette: type to filter, Enter opens the thread, Escape and a click outside close it", async ({ page }) => {
   const { chats } = await lab(page);
@@ -149,12 +154,9 @@ test("Plan a trade from the palette opens a new plan, unsent; after 16:00 Close 
   const { chats } = await lab(page, { time: new Date("2026-10-23T21:00:00Z"), // 17:00 New York
     session: { ...SESSION, now: epoch("2026-10-23T21:00:00Z"), phase: "post", time_stops: [] } });
   await expect(page.getByTestId("desk-status")).toContainText("Closed 16:00");
-  // The day report's phase button puts the same question in the box, unsent (the drawer closed: it covers the book).
+  // Nothing left to review: the desk shows no Close the day button of its own; the palette's puts the question in the box.
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Close the day" }).click();
-  await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Close the day: /);
-  await page.getByRole("textbox", { name: "Message" }).fill("");
-  await page.getByRole("textbox", { name: "Message" }).blur();
+  await expect(page.getByRole("button", { name: /^Close the day/ })).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type("close");
   await expect(palette(page).getByRole("option")).toHaveText([/^Close the day/]);
@@ -177,7 +179,7 @@ test("Threads stay out of the first view, open on request, and preserve a saved 
   await page.setViewportSize({ width: 1440, height: 900 });
   const { chats } = await lab(page, { showThreads: false });
   const rail = page.getByRole("navigation", { name: "Thread list" });
-  const toggle = page.getByRole("button", { name: "Threads, 1 need you" });
+  const toggle = page.getByRole("button", { name: "Threads", exact: true }); // no count: the strip counts what needs him
   await expect(rail).toBeHidden();
   await toggle.click();
   await expect(rail).toBeVisible();
@@ -313,7 +315,7 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
     // The strip: one item, the decision first; the plan near its trigger waits under "+1 more". No rating asks.
     const strip = page.getByTestId("needs-you");
     await expect(strip.getByTestId("needs-you-title")).toHaveText("NBIS 10/23/26 100C: 1.0% from invalidation 92.30");
-    await expect(strip).toContainText("Open +$180 (+29%) · invalidation 1.0% away");
+    await expect(strip).not.toContainText("+$180"); // the P&L and the stop distance are the book row's, not repeated here
     await expect(strip.getByRole("button")).toHaveText(["Decide", "Ask why", "Seen", "+1 more ▾"]);
     await strip.getByRole("button", { name: "+1 more ▾" }).click();
     await expect(strip.getByRole("list", { name: "More waiting" })).toContainText("CRWV plan: 0.6% to entry 99.00");
@@ -326,10 +328,9 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
     await expect(nbis).toContainText("expires today");
     await expect(nbis.getByTestId("book-state")).toHaveText("Near stop");
     await expect(nbis.getByRole("img", { name: "NBIS today" })).toBeVisible();
+    // The tiles carry only what the row does not: the stock against SPY and time held.
     const tiles = page.getByTestId("desk-tiles");
-    await expect(tiles).toContainText("Open P&L+$180+29%");
-    await expect(tiles).toContainText("To your stop1.0%");
-    await expect(tiles).toContainText("vs SPY today+1.2 pts");
+    await expect(tiles).toHaveText("vs SPY today+1.2 ptsHeldtoday");
     await expect(page.getByTestId("desk-chart")).toContainText("Open in Charts →");
     // Mid-session the lower block is Since you looked (a first visit says so); no phase button.
     await expect(page.getByTestId("since-you-looked")).toContainText("First look from this browser");
@@ -399,7 +400,7 @@ test("a held ticker with no conversation opens its desk view in one tap from the
   await expect(page.getByLabel("Message")).toHaveValue(/^Context: Plan this position/);
 });
 
-test("before the open the book's lower block is the morning brief, cut short, with Arm today's plans; a closed day says so", async ({ page }) => {
+test("before the open the book's lower block is the morning brief alone, cut short; a closed day says so", async ({ page }) => {
   const lines = ["Verdict: Focus — Semis lead pre-market.", "- SPY +0.4% and SMH +1.1% before the open.", "- NBIS 100C expires Friday.",
     "- CRWV sits 0.6% under its entry.", "- APLD reports after the close.", "Changes if: SMH loses its gap."];
   const before = { ...SESSION, now: epoch("2026-10-23T12:45:00Z"), phase: "pre", events: [],
@@ -412,7 +413,7 @@ test("before the open the book's lower block is the morning brief, cut short, wi
   await brief.getByRole("button", { name: "Read the whole brief ▾" }).click();
   await expect(brief.getByRole("listitem")).toHaveCount(4);
   await expect(brief).toContainText("Changes if: SMH loses its gap.");
-  await expect(page.getByRole("button", { name: "Arm today's plans" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Arm today's plans" })).toHaveCount(0); // in Jump to (⌘K), not a second button
   await expect(page.getByTestId("since-you-looked")).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("cockpit-before-open-1280.png") });
   await page.unroute("**/copilot/desk/session");
@@ -421,15 +422,17 @@ test("before the open the book's lower block is the morning brief, cut short, wi
   await expect(page.getByTestId("desk-status")).toContainText("Market closed");
 });
 
-test("phase actions follow the clock while the owner stays on the desk", async ({ page }) => {
+test("the palette's phase commands follow the clock while the owner stays on the desk", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await lab(page, { time: new Date("2026-10-23T13:29:00Z"), showThreads: false });
-  const arm = page.getByRole("button", { name: "Arm today's plans" });
-  await expect(arm).toBeVisible();
+  const open = async () => { await page.getByRole("button", { name: "Jump to a thread or command" }).click(); return palette(page).getByRole("option"); };
+  await expect(await open()).toContainText([/^Arm today's plans/]);
+  await page.keyboard.press("Escape");
   await page.clock.fastForward(61_000);
-  await expect(arm).toBeHidden();
+  await expect(await open()).not.toContainText([/^Arm today's plans/]);
+  await page.keyboard.press("Escape");
   await page.clock.fastForward((6 * 60 + 30) * 60_000);
-  await expect(page.getByRole("button", { name: /Close the day/ })).toBeVisible();
+  await expect(await open()).toContainText([/^Close the day/]);
 });
 
 test("the copilot sits beside the cockpit from 1180 px and is a sheet below it; the message box stays reachable", async ({ page }) => {
@@ -453,25 +456,17 @@ test("the copilot sits beside the cockpit from 1180 px and is a sheet below it; 
   }
 });
 
-test("pre-open action stays available below 760 px and on a phone", async ({ page }) => {
+test("Arm today's plans is one tap from Jump to on a phone", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await lab(page, { time: new Date("2026-10-23T12:00:00Z"), showThreads: false }); // 08:00 New York
-  const arm = page.getByRole("button", { name: "Arm today's plans" });
-  await expect(arm).toBeVisible();
-  await page.setViewportSize({ width: 700, height: 900 });
-  await expect(arm).toBeVisible(); // a narrow desk pane still has its own-width layout
-  await arm.click();
+  await command(page, "Arm today's plans");
   await expect(page.getByRole("region", { name: "Arm today's plans" })).toBeVisible();
 });
 
-test("close-day action stays available below 760 px and on a phone", async ({ page }) => {
+test("Close the day is one tap from Jump to on a phone", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await lab(page, { time: new Date("2026-10-23T21:00:00Z"), session: { ...SESSION, now: epoch("2026-10-23T21:00:00Z"), phase: "post", time_stops: [] }, showThreads: false });
-  const close = page.getByRole("button", { name: "Close the day", exact: true });
-  await expect(close).toBeVisible();
-  await page.setViewportSize({ width: 700, height: 900 });
-  await expect(close).toBeVisible();
-  await close.click();
+  await command(page, "Close the day");
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Close the day: /);
 });
 
@@ -505,8 +500,8 @@ test("before the open Arm today's plans is a checklist: still good logs, drop as
     { id: "a1", symbol: "CRWV", price: 99, source_id: CRWV, plan_role: "entry", state: "active", condition: "crosses" }] } }));
   await page.route("**/charts/alerts/a1", (route) => { removed.push(route.request().method()); return route.fulfill({ json: { alerts: [], phone: true } }); });
 
-  const arm = page.getByRole("button", { name: "Arm today's plans" });
-  await arm.click();
+  const arm = () => command(page, "Arm today's plans");
+  await arm();
   const list = page.getByTestId("arm-checklist");
   await expect(list.getByTestId("arm-progress")).toHaveText("0 of 2 checked"); // the armed plans only
   const apld = list.getByRole("listitem", { name: "APLD" });
@@ -533,7 +528,7 @@ test("before the open Arm today's plans is a checklist: still good logs, drop as
 
   // A reload reads Still good back from today's journal; Change opens the plan's thread with the question unsent.
   await page.reload();
-  await arm.click();
+  await arm();
   await expect(list.getByTestId("arm-progress")).toHaveText("1 of 2 checked");
   await list.getByRole("listitem", { name: "CRWV" }).getByRole("button", { name: "Change" }).click();
   await expect(list).toBeHidden();
@@ -542,7 +537,7 @@ test("before the open Arm today's plans is a checklist: still good logs, drop as
     "Change my CRWV plan before the open: Entry 99.00 · invalidation 103.00. What should change, and why?");
 
   // The old question is one link away.
-  await arm.click();
+  await arm();
   await list.getByRole("button", { name: "Ask the copilot instead" }).click();
   await expect(list).toBeHidden();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Arm today's plans: /);
@@ -568,7 +563,7 @@ test("the evening review ping's link (?close=1) opens the desk on Close the day"
 test("the close link with nothing left to review, or before the close, opens the desk as usual", async ({ page }) => {
   await lab(page, { time: new Date("2026-10-23T20:30:00Z"), path: "/copilot-lab?close=1", // 16:30 New York, no close question
     session: { ...SESSION, now: epoch("2026-10-23T20:30:00Z"), phase: "post", time_stops: [] } });
-  await expect(page.getByRole("button", { name: "Close the day", exact: true })).toBeVisible();
+  await expect(page.getByTestId("day-report")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue("");
   await expect(page).toHaveURL(/\/copilot-lab\?close=1$/);
   await page.clock.setSystemTime(NOW); // 11:00 New York
@@ -584,7 +579,7 @@ test("the close link with only an unanswered alert left asks nothing about it: r
     contract: "NBIS 10/23/26 100C", kind: "giveback", at: at - 3600, today: true, feedback: null }] }, radar: null };
   const { chats } = await lab(page, { time: new Date(at * 1000), path: "/copilot-lab?close=1",
     session: { ...SESSION, now: at, phase: "post", time_stops: [], to_answer } });
-  await expect(page.getByRole("button", { name: "Close the day", exact: true })).toBeVisible();
+  await expect(page.getByTestId("day-report")).toBeVisible();
   await expect(page.getByRole("region", { name: "Close the day" })).toHaveCount(0);
   await expect(page.getByText(/alerts? to answer|Radar hits? to rate/)).toHaveCount(0);
   expect(chats).toEqual([]);
@@ -635,12 +630,11 @@ test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip 
   await expect(rail.getByRole("button", { name: /^NBIS, / })).toContainText("Review: did you follow the plan?");
   await expect(rail.getByRole("button", { name: /^CRWV, / })).toContainText("Added or not, and why?");
   await expect(rail.getByRole("button", { name: /^APLD, / })).toContainText("Reviewed · Entered at 31.00 as planned, sized…");
-  await expect(page.getByTestId("briefing-reviewed")).toHaveText("1 of 4 done");
   await page.screenshot({ path: test.info().outputPath("close-the-day-1440.png") });
 
   const review = page.getByRole("region", { name: "Close of day" });
-  await page.getByRole("button", { name: "Close the thread list" }).click(); // the drawer sits over the book's day report
-  await page.getByRole("button", { name: "Close the day · 3 to review" }).click();
+  await page.getByRole("button", { name: "Close the thread list" }).click();
+  await command(page, "Close the day");
   await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible(); // the first unreviewed thread
   await expect(review).toContainText("Review: did you follow the plan?");
   await review.getByRole("button", { name: "Answer" }).click();
@@ -658,7 +652,7 @@ test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip 
   await review.getByRole("button", { name: "Skip" }).click();
   await expect(review).toHaveCount(0);
   await expect(conversation(page).getByText("CRWV answer: short under 99.00.")).toBeVisible(); // the last one: the pass ends here
-  await expect(page.getByRole("button", { name: "Close the day", exact: true })).toBeVisible();
+  await expect(page.getByTestId("needs-you")).not.toContainText("Close the day");
 
   await page.keyboard.press("j"); // J / K still walk the threads
   await expect(conversation(page).getByText("APLD answer: enter at 31.00.")).toBeVisible();
@@ -707,23 +701,23 @@ test("after the close questions, Close the day asks only the fills to link, neve
   await page.route("**/charts/captures/*/link", (route) => { writes.push("link"); return route.fulfill({ json: {} }); });
   const { chats } = await lab(page, { time: new Date(at * 1000), threads, session: { ...SESSION, now: at, phase: "post", time_stops: [], to_answer } });
   // One close question and one fill to link; today's unanswered alert and Radar hit are not asked or counted.
-  await expect(page.getByTestId("briefing-reviewed")).toHaveText("0 of 2 done");
-  await page.getByRole("button", { name: "Close the thread list" }).click(); // the drawer sits over the book's day report
-  await page.getByRole("button", { name: "Close the day · 2 to review" }).click();
+  await page.getByRole("button", { name: "Close the thread list" }).click();
+  const strip = page.getByTestId("needs-you");
+  await strip.getByRole("button", { name: /more/ }).click();
+  await expect(strip.getByRole("list", { name: "More waiting" })).toContainText("Close the day: 2 to review");
+  await command(page, "Close the day");
   await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible();
   await page.getByRole("region", { name: "Close of day" }).getByRole("button", { name: "Skip" }).click();
 
   const pass = page.getByRole("region", { name: "Close the day" });
   await expect(pass.getByTestId("alert-answer")).toHaveCount(0);
   await expect(pass.getByTestId("close-pass-done")).toHaveText("0 of 2 done");
-  await expect(page.getByRole("button", { name: "Close the day · 1 to review" })).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("close-the-day-fill-1440.png") });
 
   const fill = pass.getByRole("group", { name: "Fill to link" });
   await expect(fill).toContainText("Bought AMD 10/23/26 150C");
   await fill.getByRole("button", { name: "No plan" }).click();
   await expect(pass).toHaveCount(0); // the last one ends the pass
-  await expect(page.getByRole("button", { name: "Close the day", exact: true })).toBeVisible();
   expect(writes).toEqual([]);
   expect(chats).toEqual([]);
 });
@@ -764,7 +758,7 @@ for (const width of [1440, 375] as const) {
     await expect(rows.nth(1).getByRole("link", { name: /Read at Benzinga/ })).toHaveAttribute("href", "https://news.example/nbis");
     await expect(rows.nth(1).getByRole("link", { name: /Read at Benzinga/ })).toHaveAttribute("target", "_blank");
     await expect(rows.nth(0).getByRole("link", { name: "Open in Charts" })).toHaveAttribute("href", "/charts?symbol=NBIS");
-    await expect(feed.getByTestId("feed-unavailable")).toHaveText("Could not read: market news.");
+    await expect(feed).not.toContainText("Could not read"); // a source that failed is left out quietly
     await expect(feed.getByText(/\b(buy|sell|hold)\b/i)).toHaveCount(0); // facts, never orders
     await expect(feed.getByRole("button", { name: "Chatter" })).toHaveCount(0); // no chatter source: no filter
     // Market: the Radar setup card with its level, contract and his record, and the market headline.
@@ -856,11 +850,12 @@ for (const width of [1440, 375] as const) {
   });
 }
 
-test("Chatter that is on but has nothing yet: no filter, and the feed's foot says why", async ({ page }) => {
+test("Chatter that is on but has nothing yet: no filter, and nothing about it outside its filter", async ({ page }) => {
   await lab(page, { showThreads: false, feed: { ...FEED, chatter: { ...CHATTER, sources: { "r/wallstreetbets": "on", NYT: "not set up" }, buzz: [], record: null, items: [] } } });
   const centre = page.getByRole("region", { name: "Chart and feed" });
   await centre.getByRole("tab", { name: "Feed" }).click();
   const feed = centre.getByTestId("desk-feed");
   await expect(feed.getByRole("button", { name: "Chatter" })).toHaveCount(0);
-  await expect(feed.getByTestId("feed-chatter-note")).toHaveText("Chatter: nothing from r/wallstreetbets yet.");
+  await expect(feed.getByTestId("feed-chatter-note")).toHaveCount(0);
+  await expect(feed).not.toContainText(/chatter|wallstreetbets/i);
 });

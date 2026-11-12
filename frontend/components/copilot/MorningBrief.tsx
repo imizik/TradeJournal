@@ -32,10 +32,10 @@ export default function MorningBrief({ prep, fill, max }: { prep: DeskSession["p
   return (
     <section aria-label="Morning brief" data-testid="morning-brief" className={cn("rounded-lg border bg-card", max !== undefined ? "px-3 py-2.5" : "mb-6 px-4 py-3")}>
       <header className="mb-2 flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
-        <Sunrise size={13} aria-hidden className="self-center text-primary" />
+        <Sunrise size={13} aria-hidden className="self-center text-muted-foreground" />
         <h3 className="text-sm font-semibold text-foreground">Morning brief</h3>
         {prep.at !== null && <span className="tabular-nums">{hhmm(prep.at)} ET</span>}
-        {prep.fallback && <span className="text-primary">Copilot turn failed: raw facts</span>}
+        {prep.fallback && <span>facts only, no summary</span>}
         <button type="button" onClick={ask} className="ml-auto text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Ask about it →</button>
       </header>
       {parts && (
@@ -47,10 +47,10 @@ export default function MorningBrief({ prep, fill, max }: { prep: DeskSession["p
       <ul className="list-disc space-y-1 pl-5 text-sm text-foreground/90 marker:text-muted-foreground">
         {(cut ? body.slice(0, max) : body).map((line, i) => <li key={i}>{line}</li>)}
       </ul>
-      {!cut && parts?.against && <p className="mt-2 text-xs text-primary/90">Against: {parts.against}</p>}
+      {!cut && parts?.against && <p className="mt-2 text-xs text-muted-foreground">Against: {parts.against}</p>}
       {!cut && parts?.changesIf && <p className="mt-1 text-xs text-muted-foreground">Changes if: {parts.changesIf}</p>}
-      {cut && (prep.path ? <Link href={prep.path} className="mt-2 inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-primary sm:min-h-0">Read the whole brief →</Link>
-        : <button type="button" onClick={() => setAll(true)} className="mt-2 min-h-11 text-xs text-muted-foreground hover:text-primary sm:min-h-0">Read the whole brief ▾</button>)}
+      {cut && (prep.path ? <Link href={prep.path} className="mt-2 inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Read the whole brief →</Link>
+        : <button type="button" onClick={() => setAll(true)} className="mt-2 min-h-11 text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Read the whole brief ▾</button>)}
     </section>
   );
 }

@@ -93,7 +93,7 @@ function FollowButton({ symbol, following, onFollow }: { symbol: string; followi
     </button>
   ) : (
     <button type="button" onClick={() => onFollow(symbol, true)}
-      className="min-h-11 shrink-0 rounded-md px-2.5 text-xs font-medium text-primary hover:bg-secondary sm:min-h-8">Show again</button>
+      className="min-h-11 shrink-0 rounded-md px-2.5 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-8">Show again</button>
   );
 }
 
