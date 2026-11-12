@@ -28,6 +28,7 @@ from pathlib import Path
 import re
 from statistics import median
 import time
+from urllib.parse import parse_qs, urlsplit
 
 import numpy as np
 
@@ -284,7 +285,9 @@ def polygon_listing(client, key, day):
         found.update(row["ticker"] for row in page.get("results") or [])
         if not page.get("next_url"):
             return sorted(found)
-        url, params = page["next_url"], {}
+        # The cursor alone falls back to 100 rows a page, which a 5-requests-a-minute key cannot afford.
+        cursor, = parse_qs(urlsplit(page["next_url"]).query)["cursor"]
+        params = {"cursor": cursor, "limit": 1000}
 
 
 def load(path):
@@ -306,9 +309,13 @@ def fetch_roster(root, env_file):
     span = (DAILY_START.isoformat(), END.isoformat() + "T23:59:59Z")
     with httpx.Client(timeout=90) as client:
         listing = root / "listings.json.gz"
-        if not listing.exists():
-            replay.write_snapshot(listing, {d: polygon_listing(client, keys["POLYGON_API_KEY"], d) for d in LISTING_DATES})
-        names = sorted({s for v in load(listing).values() for s in v if SYMBOL.fullmatch(s)})
+        lists = load(listing) if listing.exists() else {}
+        for d in LISTING_DATES:
+            if d not in lists:
+                lists[d] = polygon_listing(client, keys["POLYGON_API_KEY"], d)
+                replay.write_snapshot(listing, lists)
+                print(f"listing {d}: {len(lists[d])} common stocks", flush=True)
+        names = sorted({s for v in lists.values() for s in v if SYMBOL.fullmatch(s)})
         days = [b["t"][:10] for b in alpaca_bars(client, headers, ["SPY"], "1Day", *span, "raw")["SPY"]]
         column = {d: i for i, d in enumerate(days)}
         kept, closes, dollars = [], [], []
