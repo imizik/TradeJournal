@@ -797,3 +797,107 @@ def test_setup_card_pings_and_radar_singles_never_spend_each_other_s_budget(engi
         decide(db, "radar_event", "e4", anchor="symbol:FFF", now=at("11:10"))
         assert decide(db, "radar_setup", "s4", anchor="symbol:FFF", now=at("11:11")).action == "send"
         assert decide(db, "radar_event", "e5", anchor="symbol:FFF", now=at("11:12")).held  # merged into the undelivered setup ping
+
+
+# ------------------------------------------------------------------ not followed on the desk
+
+_follows = iter(range(1, 10_000))
+
+# Every kind a sender asks about a ticker: position alerts, plan levels, nudges and link pings, time stops, interrupts,
+# the companion, thesis watch, Radar singles and setup cards, the first pullback.
+TICKER_KINDS = ("expiry_final", "expiry_first", "expiry_eve", "giveback", "hold_hour", "wrong_way", "time_stop", "entry", "invalidation",
+                "nudge", "link", "no_plan", "interrupt", "companion_adopt", "companion_update", "thesis_watch", "radar_setup",
+                "radar_event", "first_pullback")
+
+
+def follow(engine, symbol: str, on: bool):
+    """The desk's Hide / Show again: a ``follow`` day-journal entry, the newest winning."""
+    from app.models import DayJournalEntry
+    i = next(_follows)
+    with Session(engine) as db:
+        db.add(DayJournalEntry(operation_id=f"follow-{i}", day=WED, kind="follow", symbol=symbol, actor="owner",
+                               text="Following" if on else "Not following", created_at=datetime(2026, 10, 21, 12, 0, i)))
+        db.commit()
+
+
+@pytest.mark.parametrize("kind", TICKER_KINDS)
+def test_every_ping_about_a_ticker_not_followed_is_held_and_a_followed_one_is_sent(engine, kind):
+    follow(engine, "SLS", False)
+    with Session(engine) as db:
+        held = policy.decide(db, sender="test", source_id="hidden", kind=kind, title="t", body="b", now=at("10:00"),
+                             anchor="p-sls", symbol="SLS")
+        sent = policy.decide(db, sender="test", source_id="followed", kind=kind, title="t", body="b", now=at("10:00"),
+                             anchor="p-nbis", symbol="NBIS")
+    assert held.action == "hold" and held.reason == "Not sent: you don't follow SLS on the desk (Show again there to hear about it)."
+    assert sent.action == "send"
+    decisions = {r.source_id: r.decision for r in rows(engine)}
+    assert decisions == {"hidden": "not_followed", "followed": "sent"}
+
+
+def test_not_followed_holds_with_the_policy_off_by_trade_spends_nothing_and_show_again_restores(engine, monkeypatch):
+    trade_id, anchor = buy(engine, "09:45", ticker="SLS")
+    follow(engine, "SLS", False)
+    with Session(engine) as db:
+        monkeypatch.setenv("ALERT_POLICY_ENABLED", "false")
+        assert policy.decide(db, sender="t", source_id="off", kind="giveback", title="t", body="b", now=at("10:00"), anchor=anchor,
+                             symbol="SLS").held  # the owner's own choice, not a throttle
+        monkeypatch.delenv("ALERT_POLICY_ENABLED")
+        # No symbol on the ping: its trade's ticker is read.
+        assert policy.decide(db, sender="t", source_id="by-trade", kind="time_stop", title="t", body="b", now=at("10:00"),
+                             anchor=anchor, trade_id=trade_id).held
+        # Held pings spend no budget and open no quiet window.
+        for i in range(3):
+            assert policy.decide(db, sender="t", source_id=f"n{i}", kind="nudge", title="t", body="b", now=at("10:00"),
+                                 anchor=f"p{i}", symbol="SLS").held
+        assert decide(db, "nudge", "followed-1", anchor="p-a").action == "send"
+        assert decide(db, "nudge", "followed-2", anchor="p-b").action == "send"
+        # Pings with no ticker (digests, the brief, the reviews, research) are never held for it.
+        for kind in ("radar_digest", "prep", "evening_review", "research"):  # week_review shares the prep budget
+            assert policy.decide(db, sender="t", source_id=f"none-{kind}", kind=kind, title="t", body="b", now=at("10:00")).action == "send"
+    follow(engine, "SLS", True)
+    with Session(engine) as db:
+        assert policy.decide(db, sender="t", source_id="after", kind="giveback", title="t", body="b", now=at("10:05"), anchor=anchor,
+                             symbol="SLS").action == "send"
+        # A ping judged while hidden stays held on a retry: Show again restores from that moment, it does not resend.
+        assert policy.decide(db, sender="t", source_id="off", kind="giveback", title="t", body="b", now=at("10:06"), anchor=anchor,
+                             symbol="SLS").held
+
+
+def test_held_for_not_followed_counts_as_held_back_but_not_in_the_evening_review(engine):
+    follow(engine, "SLS", False)
+    with Session(engine) as db:
+        policy.decide(db, sender="t", source_id="h", kind="giveback", title="t", body="b", now=at("10:00"), anchor="p", symbol="SLS")
+        assert policy.held_back_today(db, at("12:00")) == {"count": 1, "by_kind": {"give-back": 1}}
+        assert policy.held_text(db, at("16:30")) is None
+
+
+def test_position_alerts_on_a_ticker_not_followed_are_written_and_held_and_the_scorecard_is_unchanged(engine, phone):
+    from app.engine import alert_scorecard
+    clock = Clock(at("10:01"))
+    watcher = PositionAlerts(engine, Calendar(), clock=clock, quotes=lambda symbols: {})
+    give = position_alert(engine, "giveback", when="10:00", source_key="gmail:2")
+    watcher.deliver()
+    with Session(engine) as db:
+        before = alert_scorecard.scorecard(db, at("10:30"))
+    follow(engine, "SNDK", False)
+    hidden = {kind: position_alert(engine, kind, when="10:05", source_key=f"gmail:h-{kind}")
+              for kind in ("expiry_final", "expiry_first", "expiry_eve", "hold_hour", "wrong_way")}
+    clock.now = at("10:06")
+    watcher.deliver()
+    assert len(phone) == 1  # only the give-back sent before the ticker was hidden
+    with Session(engine) as db:
+        for kind, alert_id in hidden.items():
+            row = db.get(PositionAlert, alert_id)
+            assert row.kind == kind and row.delivery == "held" and row.last_error.startswith("Not sent: you don't follow SNDK")
+            assert (row.contracts, row.gain, row.peak_gain) == (2, 20, 124)  # the detection is kept as written
+        assert db.get(PositionAlert, give).delivery == "sent"
+        pings = db.exec(select(PhonePing).where(PhonePing.decision == "not_followed")).all()
+        assert sorted(p.kind for p in pings) == sorted(hidden)
+        assert alert_scorecard.scorecard(db, at("10:30")) == before  # what is scored is what reached the phone, as before
+    follow(engine, "SNDK", True)
+    again = position_alert(engine, "giveback", when="10:20", source_key="gmail:3")
+    clock.now = at("10:21")
+    watcher.deliver()
+    assert len(phone) == 2
+    with Session(engine) as db:
+        assert db.get(PositionAlert, again).delivery == "sent"

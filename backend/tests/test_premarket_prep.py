@@ -610,3 +610,47 @@ def test_the_monitor_runs_the_prep_on_its_loop(engine):
     fake = Fake()
     asyncio.run(LevelAlertMonitor(engine, None, prep=fake).run_once())
     assert fake.calls == ["run", "deliver"]
+
+
+# ------------------------------------------------------------------ not followed on the desk
+
+def _not_following(engine, *symbols):
+    from app.models import DayJournalEntry
+    with Session(engine) as db:
+        for s in symbols:
+            db.add(DayJournalEntry(operation_id=f"hide-{s}", day=MON, kind="follow", symbol=s, text="Not following", actor="owner",
+                                   created_at=datetime(2026, 10, 26, 12, 0)))
+        db.commit()
+
+
+def test_a_ticker_not_followed_leaves_the_brief_for_one_line(engine, market):
+    _not_following(engine, "CRWV", "APLD")
+    with Session(engine) as db:
+        pack = build_pack(db, at("09:00"), Calendar())
+    held = pack["positions"]
+    assert [p["symbol"] for p in held["positions"]] == ["NBIS"] and held["count"] == 1
+    assert held["not_followed"].startswith("1 position not followed: CRWV (hidden on the desk")
+    assert pack["plans"]["plans"] == [] and pack["plans"]["count"] == 0  # APLD's plan
+    assert pack["time_stops"]["today"] == []
+    assert pack["earnings"]["checked"] == ["NBIS", "IREN"]
+    assert market["news"][-1][0] == ["NBIS"] and market["extended"][-1] == ["NBIS"]  # nor their headlines or pre-market moves
+    text = json.dumps({k: v for k, v in pack.items() if k not in ("positions", "premarket")}, default=str)  # the stub answers fixed names
+    assert "CRWV" not in text and "APLD" not in text
+    lines = premarket_prep.fallback_lines(pack)
+    assert not any("CRWV" in line or "APLD" in line for line in lines)
+
+
+def test_the_owner_context_collapses_a_ticker_not_followed_unless_the_turn_is_about_it(engine, market):
+    _not_following(engine, "CRWV")
+    now = datetime.fromtimestamp(at("09:00"), ET)
+    with Session(engine) as db:
+        pack = copilot_context.owner_context(None, session=db, now=now)
+        own = copilot_context.owner_context("CRWV", session=db, now=now)
+    held = pack["positions"]
+    assert [p["symbol"] for p in held["positions"]] == ["NBIS"] and held["count"] == 1
+    assert held["not_followed"].startswith("1 position not followed: CRWV")
+    assert "unrealized_usd" not in held["not_followed"] and "112" not in held["not_followed"]
+    # Asked about by name: in full, as before.
+    mine = own["positions"]
+    assert [p["symbol"] for p in mine["positions"]] == ["CRWV", "NBIS"] and mine["count"] == 2 and "not_followed" not in mine
+    assert mine["positions"][0]["unrealized_usd"] == 112.0

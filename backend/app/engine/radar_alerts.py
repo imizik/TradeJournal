@@ -21,7 +21,9 @@ one line each (``AAA up 5.2% vs SPY · 10:07 AM``), at most ``DIGEST_LINES`` wit
 nothing waiting is written ``skipped`` so its slot is used once. The digest is its own outbox row (kind
 ``digest``, ``event_id`` ``digest-<session>-<HHMM>``); when it is sent, held or dropped, its events take the
 same delivery, so ``/radar/proof`` counts an event a digest reached as alerted. Events after the last
-digest stay in the feed only, and are written ``skipped`` at the next session's first digest.
+digest stay in the feed only, and are written ``skipped`` at the next session's first digest. An event on a stock the
+owner set to not followed on the desk is left out of the digest's lines and count and written ``held`` with the
+reason; a single on it is held by the notification policy (``not_followed``).
 
 Only a new event pings; revisions (extended, faded, reversed) never do. The recorder calls ``record``
 inside regular hours only, right after the pass that wrote the events, then ``deliver`` every pass.
@@ -347,6 +349,14 @@ class RadarAlerts:
             waiting = db.exec(select(RadarAlert).where(RadarAlert.delivery == DIGEST, RadarAlert.session_date == session,
                                                        RadarAlert.detected_at <= _utc(now))
                               .order_by(RadarAlert.first_seen_at.desc(), RadarAlert.event_id)).all()
+            # A stock the owner set to not followed on the desk leaves the digest's lines and count; its event is kept, held.
+            from app.engine import day_journal
+            hidden = day_journal.not_following(db)
+            for alert in waiting:
+                if alert.kind != "group_move" and alert.subject in hidden:
+                    alert.delivery, alert.last_error = "held", f"Not followed on the desk, so {alert.subject} was left out of the digest."
+                    db.add(alert)
+            waiting = [a for a in waiting if a.delivery == DIGEST]
             earlier = [t for t in times if t < due]
             since = _minute_label(earlier[-1]) if earlier else "the open"
             title, body = digest_message([r.body for r in waiting], since)

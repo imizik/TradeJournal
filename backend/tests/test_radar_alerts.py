@@ -763,3 +763,53 @@ def test_with_sides_up_a_down_setup_waits_for_the_digest_and_an_up_setup_still_p
     clock.now = at(95)
     [later] = RadarAlerts(engine, clock=clock).record([_reversal("rg0-bbb-up", "BBB", 95)])
     assert later.delivery == "pending"
+
+
+# ------------------------------------------------------------ not followed on the desk
+
+def _not_following(engine, *symbols):
+    from datetime import datetime
+    from app.models import DayJournalEntry
+    with Session(engine) as db:
+        for s in symbols:
+            db.add(DayJournalEntry(operation_id=f"hide-{s}", day=OPEN.date(), kind="follow", symbol=s, text="Not following",
+                                   actor="owner", created_at=datetime(2026, 1, 1)))
+        db.commit()
+
+
+def test_a_stock_not_followed_leaves_the_digest_and_its_single_is_held(engine, monkeypatch):
+    _not_following(engine, "BBB", "LAD")
+    sent = []
+    sent_to(monkeypatch, sent)
+    clock = Clock(at(10))
+    alerts = RadarAlerts(engine, clock=clock)
+    alerts.record([_event("e1", "AAA", 10, relative=5.2)])
+    clock.now = at(20)
+    alerts.record([_event("e2", "BBB", 20, direction="down", relative=-4.6), _event("e3", "LAD", 20)])  # LAD is strong: a single
+    alerts.deliver()
+    assert sent == []  # LAD's single is held
+    clock.now = at(25)
+    alerts.record([_event("g1", "BBB", 25, kind="group_move", group="Semis")])  # a group is not a ticker: it stays
+    clock.now = at(30) + 5
+    alerts.deliver()
+    [digest] = sent
+    assert digest["title"] == "Radar digest: 2 events since the open"  # the count drops BBB
+    assert digest["body"] == "Semis up 2.3% vs SPY (4 of 5) · 9:55 AM\nAAA up 5.2% vs SPY · 9:40 AM"
+    found = {r.subject: r for r in rows(engine)}
+    assert {s: r.delivery for s, r in found.items()} == {"AAA": "sent", "BBB": "held", "LAD": "held", "Semis": "sent"}
+    assert found["BBB"].last_error == "Not followed on the desk, so BBB was left out of the digest."
+    lad = next(p for p in pings(engine) if p.symbol == "LAD")
+    assert lad.decision == "not_followed" and found["LAD"].last_error == lad.reason
+    assert next(p for p in pings(engine) if p.kind == "radar_digest").decision == "sent"  # the digest itself is never held whole
+
+
+def test_a_digest_with_only_hidden_stocks_is_skipped(engine, monkeypatch):
+    _not_following(engine, "AAA")
+    sent = []
+    sent_to(monkeypatch, sent)
+    clock = Clock(at(10))
+    alerts = RadarAlerts(engine, clock=clock)
+    alerts.record([_event("e1", "AAA", 10, relative=5.2)])
+    clock.now = at(30) + 5
+    alerts.deliver()
+    assert sent == [] and digests(engine)[0].delivery == "skipped" and rows(engine)[0].delivery == "held"

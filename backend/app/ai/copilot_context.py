@@ -10,7 +10,9 @@ already exist, so the model spends no tool rounds rediscovering the owner:
   (plan card, Charts plan sheet, the companion's adopted draft, or ``none``) and
   the owner's decisions since the entry. The turn's symbol comes first, with its
   ``since_entry`` diff (each line with as_of and source; headlines as a count
-  only, since third-party words never enter the owner block).
+  only, since third-party words never enter the owner block). A ticker the owner
+  set to not followed on the desk is left out of the rows and the count and named
+  once in ``not_followed``, unless it is the turn's own symbol.
 - ``history``: the owner's closed trades in the symbol and their total.
 - ``habits``: the four exit habits of the October 21 behavior audit, the latest
   30 trades against the baseline (``exit_habits.scorecard``), cached briefly.
@@ -162,17 +164,32 @@ def _render(record: dict) -> dict:
 def _positions(db, symbol: str | None, now_et: datetime, reads=None) -> dict:
     """The open positions through ``trader_context`` (one call a turn): the turn's symbol first, with its since-entry
     diff and headlines; every position with its thesis object."""
-    from app.engine import trader_context
-    found = trader_context.for_symbol(symbol, now_et.timestamp(), session=db, limit=MAX_POSITIONS, reads=reads)
-    rows = [_render(r) for r in found["positions"]]
+    from app.engine import day_journal, trader_context
+    from sqlmodel import select
+    from app.models import Trade
+    # A ticker hidden on the desk collapses to one line, unless the turn is about it; the limit grows so it never
+    # pushes a followed position out.
+    hidden = day_journal.not_following(db) - {symbol}
+    extra = len(db.exec(select(Trade.id).where(Trade.status == "open", Trade.ticker.in_(hidden))).all()) if hidden else 0
+    found = trader_context.for_symbol(symbol, now_et.timestamp(), session=db, limit=MAX_POSITIONS + extra, reads=reads)
+    quiet = [r["symbol"] for r in found["positions"] if r["symbol"] in hidden]
+    rows = [_render(r) for r in found["positions"] if r["symbol"] not in hidden][:MAX_POSITIONS]
     from app.engine.option_rolls import unresolved_rolls
     unresolved = unresolved_rolls(db)
     rolls = [{"symbol": r.ticker, "contracts": float(r.contracts), "net_per_contract_usd": float(r.net_per_contract),
               "at": copilot_book._journal_time(r.executed_at)} for r in unresolved[-MAX_ROLL_NOTES:]]
-    return {"state": "ok", "count": found["count"], "shown": len(rows), "positions": rows,
+    return {"state": "ok", "count": found["count"] - len(quiet), "shown": len(rows), "positions": rows,
+            **({"not_followed": not_followed_line(quiet)} if quiet else {}),
             **({"unresolved_rolls": rolls, "unresolved_rolls_total": len(unresolved), "unresolved_rolls_note": "The broker's email names no contracts, so these positions and "
                 "their realized P&L may be wrong until this resolves: the rolled-out contract can still show as held, or as expired worthless."} if rolls else {}),
             "units": found["units"]}
+
+
+def not_followed_line(symbols: list[str]) -> str:
+    """'2 positions not followed: SLS, TE (...)', the one line a hidden ticker's positions get in a pack."""
+    names = ", ".join(dict.fromkeys(symbols))
+    return (f"{len(symbols)} position{'' if len(symbols) == 1 else 's'} not followed: {names} (hidden on the desk; "
+            "not counted above, and not raised unless he asks about one by name)")
 
 
 def _history(db, symbol: str) -> dict:

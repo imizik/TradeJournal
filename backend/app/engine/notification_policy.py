@@ -10,6 +10,20 @@ transport. Jo's senders (Codex) are not gated here.
 
 The policy, in the order it is applied:
 
+- **Not followed.** A ping whose subject is a ticker the owner set to not
+  followed on the desk (``day_journal.not_following``: its newest ``follow``
+  entry) is held as ``not_followed``, whatever its kind and rank: every
+  position alert (give-back, one-hour, wrong way, expires today, the 90-minute
+  last-day, the 30-minute final and the day before expiry), a plan's entry and
+  invalidation, plan nudges and link pings, time stops, fill-time pattern
+  interrupts, thesis watch, the companion's adopt, updates and exit notes, a
+  Radar single or setup card on the stock, and the first-pullback ping. The
+  ticker is the ping's ``symbol``, else its trade's. A ping with no ticker
+  (digests, the brief, the evening and week reviews, a Radar group move,
+  research) is never held by it: the digests leave the ticker out of their own
+  text instead. Applied even while ``ALERT_POLICY_ENABLED`` is false (it is the
+  owner's own choice, not a throttle), it spends no budget and starts no quiet
+  window. Show again on the desk ends it from the next ping on.
 - **Retry.** A ping already judged (the same ``sender`` and ``source_id``) gets
   its first answer again: a send that failed and comes back is still a send,
   with any text merged into it meanwhile appended (``Ticket.append``); a held
@@ -52,7 +66,7 @@ The policy, in the order it is applied:
   ``thesis_watch`` > ``research``.
 
 Every decision is one ``PhonePing`` row (``sent``, ``merged``, ``suppressed``,
-``over_cap``), so the owner can see what was held back (the Dashboard Plans
+``over_cap``, ``not_followed``), so the owner can see what was held back (the Dashboard Plans
 card's "held back today" line; each held sender row reads ``held`` with the
 reason). A database problem in the gate never holds a ping: the sender is told
 to send. Known limit: a ``sent`` record whose send kept failing until the sender
@@ -107,7 +121,7 @@ BUDGET_NAMES = {"interrupt": ("pattern interrupts'", "message"), "companion_upda
                 "radar_setup": ("Radar's", "setup ping"), "radar_event": ("Radar's", "single ping"),
                 "radar_digest": ("Radar's", "digest"), "thesis_watch": ("thesis watch's", "ping"), "research": ("research's", "ping")}
 PREOPEN = 9 * 60 + 30  # New York; budgeted pings decided before it also count against PING_PREOPEN_ALLOWANCE
-HELD = ("merged", "suppressed", "over_cap")
+HELD = ("merged", "suppressed", "over_cap", "not_followed")
 RUN_SECONDS = 30
 ENTRY_MINUTES = 30
 EXIT_MINUTES = 15
@@ -252,7 +266,10 @@ def _decide(db: Session, *, sender: str, source_id: str, kind: str, title: str, 
         return Ticket("merge" if held.decision == "merged" else "hold", held.reason or "", "", held.id)
     row = PhonePing(sender=sender, source_id=source_id, kind=kind, rank=rank(kind), symbol=symbol, anchor=anchor, trade_id=trade_id,
                     title=title, body=body, decided_at=_utc(now), decision="sent")
-    if not enabled():
+    if (ticker := _not_followed(db, row)) is not None:
+        row.decision = "not_followed"
+        row.reason = f"Not sent: you don't follow {ticker} on the desk (Show again there to hear about it)."
+    elif not enabled():
         row.reason = "ALERT_POLICY_ENABLED is false, so the ping was passed through."
     else:
         _judge(db, row, now)
@@ -263,6 +280,16 @@ def _decide(db: Session, *, sender: str, source_id: str, kind: str, title: str, 
         return Ticket("send", row.reason or "", "", row.id)
     log.info("Notification policy %s %s from %s: %s", row.decision, kind, sender, row.reason)
     return Ticket("merge" if row.decision == "merged" else "hold", row.reason or "", "", row.id)
+
+
+def _not_followed(db: Session, row: PhonePing) -> str | None:
+    """The ping's ticker when the owner set it to not followed on the desk; None for a followed one or a ping with none."""
+    from app.engine import day_journal
+    ticker = (row.symbol or "").strip().upper()
+    if not ticker and row.trade_id is not None:
+        trade = db.get(Trade, row.trade_id)
+        ticker = trade.ticker.upper() if trade is not None and trade.ticker else ""
+    return ticker if ticker and ticker in day_journal.not_following(db) else None
 
 
 def _judge(db: Session, row: PhonePing, now: float) -> None:
@@ -556,9 +583,11 @@ SHORT = {"radar_setup": "Radar setup", "radar_event": "Radar", "radar_digest": "
 
 
 def held_text(db: Session, now: float) -> str | None:
-    """'12 pings held today (Radar 11, evening 1)' for the evening review, most held first; None when nothing was held."""
+    """'12 pings held today (Radar 11, evening 1)' for the evening review, most held first; None when nothing was held.
+    Pings held because their ticker is not followed are left out: the review does not bring those tickers back."""
     start, end = day_bounds(now)
-    rows = db.exec(select(PhonePing.kind).where(PhonePing.decision.in_(HELD), PhonePing.decided_at >= start,
+    rows = db.exec(select(PhonePing.kind).where(PhonePing.decision.in_(HELD), PhonePing.decision != "not_followed",
+                                                PhonePing.decided_at >= start,
                                                 PhonePing.decided_at < end)).all()
     if not rows:
         return None
@@ -589,4 +618,5 @@ def week_summary(db: Session, start_utc: datetime, end_utc: datetime) -> dict:
             "then": (f"acted_on: an entry trigger or a Radar single ping (setup cards included) followed by an entry fill in the symbol within {ENTRY_MINUTES} min; an "
                      f"invalidation, time stop or open-trade alert followed by the position closed or trimmed within {EXIT_MINUTES} "
                      f"min; a nudge or link ping followed by a plan link within {LINK_MINUTES} min. judged counts pings the fills "
-                     "could answer. held: merged, suppressed by the quiet window, or over its budget or the pre-open allowance.")}
+                     "could answer. held: merged, suppressed by the quiet window, over its budget or the pre-open allowance, or "
+                     "its ticker not followed on the desk.")}

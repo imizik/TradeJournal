@@ -37,6 +37,13 @@ red, held an hour and lost, left to expire). So instead of a nudge to plan, the 
   Ignore), so a closed position never pings "your plan says out". A multi-day hold gets
   no overnight update; it resumes in the next regular session.
 
+**Not followed.** A ticker the owner set to not followed on the desk (``day_journal.not_following``) gets no model
+turn at all (each costs money): a new position in it is recorded ``not_followed`` instead of adopted (no turn, no
+ping), an adopted one gets no update (its ``last_update_at`` and ``last_underlying`` move with each pass, and
+``last_error`` says why, so nothing that happened while hidden is reported later), and its close is quiet like an
+adopt-only one (no exit note). Show again picks it up from the next pass: a ``not_followed`` row is claimed as a new
+adopt while its entry is still today's, and an adopted one's updates resume, counting triggers from then on.
+
 Off unless ``POSITION_COMPANION_ENABLED=true``, and nothing runs while the lab is off (``COPILOT_ENABLED``). Turns use
 the copilot's configured backend, its turn budget and, on the API backend, its daily budget; ``COMPANION_MODEL``
 overrides the model. Every send asks ``notification_policy.decide`` first. A position is adopted once (its anchor is
@@ -80,6 +87,7 @@ DAY_HORIZON_DAYS = 7  # a contract expiring within this many days is drafted as 
 # The position's own pings that call for an update (the policy's kinds).
 POSITION_KINDS = ("giveback", "hold_hour", "wrong_way", "expiry_eve", "expiry_first", "expiry_final", "time_stop", "invalidation")
 ANSWERS = {"closed": "Closed it", "holding": "Holding"}
+NOT_FOLLOWED = "Not followed on the desk: no update or exit note while hidden."
 NO_ORDER = "Nothing here places, changes or suggests an order; say what each choice means and leave the decision to him."
 PLAN_LINE = re.compile(r"^\**(thesis|invalidation|time stop)\**\s*:\s*(.+)$", re.I)
 PRICE = re.compile(r"\$?(\d+(?:\.\d+)?)")
@@ -408,6 +416,11 @@ def save_messages(investigation_id, messages: list[dict], *, status: str | None 
                 raise
 
 
+def _hidden(db: Session) -> set[str]:
+    from app.engine import day_journal
+    return day_journal.not_following(db)
+
+
 def trade_of(db: Session, row: PositionCompanion) -> Trade | None:
     """The trade holding the position now (a rebuild gives it a new id)."""
     return notification_policy._trade_of(db, notification_policy.anchor(row.account_id, row.source_key))
@@ -717,6 +730,7 @@ class Companion:
         out = []
         with Session(self.engine) as db:
             webull = {a.id for a in db.exec(select(Account).where(Account.broker == "webull")).all()}
+            hidden = _hidden(db)
             for position in open_positions(db):
                 trade, opened = position["trade"], position["opened_at"]
                 if trade.account_id in webull or not capture_links.reliable(opened) or opened.date() != today:
@@ -726,26 +740,48 @@ class Companion:
                     continue
                 if not self._long_entry(db, trade.id):
                     continue
-                if db.exec(select(PositionCompanion.id).where(PositionCompanion.account_id == trade.account_id,
-                                                              PositionCompanion.source_key == position["source_key"])).first():
+                existing = db.exec(select(PositionCompanion).where(PositionCompanion.account_id == trade.account_id,
+                                                                   PositionCompanion.source_key == position["source_key"])).first()
+                if existing is not None and existing.state != "not_followed":
                     continue
                 if capture_links.for_trade(db, trade.id):
                     continue  # planned: the plan's own alerts and desk thread have it
+                if trade.ticker in hidden:
+                    if existing is None:  # recorded once, no turn and no ping; Show again claims it below
+                        db.add(PositionCompanion(account_id=trade.account_id, source_key=position["source_key"], trade_id=trade.id,
+                                                 ticker=trade.ticker, contract=position["contract"], option_type=trade.option_type or "call",
+                                                 expiration=trade.expiration, opened_at=opened, detected_at=_utc(now), state="not_followed",
+                                                 watched=False, delivery="held", last_error="Not adopted: not followed on the desk."))
+                        try:
+                            db.commit()
+                        except IntegrityError:
+                            db.rollback()
+                    continue
                 # A fill-time pattern interrupt or other ping just went out: wait, or the policy's quiet window holds the adopt
                 # ping and the position would go unwatched. The turn is spent only once the ping can be sent.
                 if db.exec(select(PhonePing.id).where(
                         PhonePing.anchor == notification_policy.anchor(trade.account_id, position["source_key"]), PhonePing.decision == "sent",
                         PhonePing.decided_at >= _utc(now - notification_policy.quiet_seconds()))).first():
                     continue
-                row = PositionCompanion(account_id=trade.account_id, source_key=position["source_key"], trade_id=trade.id,
-                                        ticker=trade.ticker, contract=position["contract"], option_type=trade.option_type or "call",
-                                        expiration=trade.expiration, opened_at=opened, detected_at=_utc(now))
-                db.add(row)
-                try:
+                if existing is not None:  # followed again: adopted from now, as a new position would be
+                    claimed = db.exec(update(PositionCompanion).where(PositionCompanion.id == existing.id,
+                                                                      PositionCompanion.state == "not_followed")
+                                      .values(state="adopting", watched=True, delivery="pending", detected_at=_utc(now),
+                                              trade_id=trade.id, last_error=None))
                     db.commit()
-                except IntegrityError:
-                    db.rollback()  # another process claimed this position a moment earlier
-                    continue
+                    if claimed.rowcount != 1:
+                        continue
+                    row = existing
+                else:
+                    row = PositionCompanion(account_id=trade.account_id, source_key=position["source_key"], trade_id=trade.id,
+                                            ticker=trade.ticker, contract=position["contract"], option_type=trade.option_type or "call",
+                                            expiration=trade.expiration, opened_at=opened, detected_at=_utc(now))
+                    db.add(row)
+                    try:
+                        db.commit()
+                    except IntegrityError:
+                        db.rollback()  # another process claimed this position a moment earlier
+                        continue
                 out.append(Draft(row.id, trade.id, f"{_count(position['contracts'])} at {_premium(position['avg_cost'])}"))
             self._watch_newest(db)
         return out
@@ -827,7 +863,21 @@ class Companion:
             if not rows:
                 return []
             last = self.underlying(sorted({r.ticker for r in rows}))
+            hidden = _hidden(db)
             for row in rows:
+                if row.ticker in hidden:
+                    # No turn while hidden; the clock and the price move on, so Show again reports nothing from before it.
+                    row.last_update_at = _utc(now)
+                    if isinstance(last.get(row.ticker), (int, float)):
+                        row.last_underlying = last[row.ticker]
+                    row.last_error = NOT_FOLLOWED
+                    db.add(row)
+                    db.commit()
+                    continue
+                if row.last_error == NOT_FOLLOWED:
+                    row.last_error = None
+                    db.add(row)
+                    db.commit()
                 done_today = [u for u in updates_of(row) if u.get("day") == today.isoformat()]
                 if len(done_today) >= max_updates():
                     continue
@@ -972,6 +1022,7 @@ class Companion:
         once no ping for it is inside the quiet window (so the exit note is not held by it)."""
         with Session(self.engine) as db:
             rows = db.exec(select(PositionCompanion).where(PositionCompanion.state.in_(("draft", "armed")))).all()
+            hidden = _hidden(db) if rows else set()
             out = []
             for row in rows:
                 trade = trade_of(db, row)
@@ -979,7 +1030,7 @@ class Companion:
                     continue
                 _disarm(db, row)  # at once: only the note waits, so a closed position never pings "your plan says out"
                 db.commit()
-                if not row.watched or not self._quiet(db, row, now):
+                if not row.watched or row.ticker in hidden or not self._quiet(db, row, now):
                     out.append(row.id)
             return out
 
@@ -1000,6 +1051,12 @@ class Companion:
                 db.commit()
                 if not row.watched:  # adopt-only: closed quietly, no turn
                     _close_thread(db, row, "Closed: adopt-only, so no exit note was written.")
+                    return None
+                if row.ticker in _hidden(db):  # not followed: closed quietly, no turn
+                    row.last_error = "Closed while not followed on the desk, so no exit note was written."
+                    db.add(row)
+                    db.commit()
+                    _close_thread(db, row, "Closed: not followed, so no exit note was written.")
                     return None
                 trade = trade_of(db, row)
                 prior = "armed" if row.alert_id else "draft"

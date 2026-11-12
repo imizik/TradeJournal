@@ -299,3 +299,10 @@ def test_the_monitor_runs_the_review_on_its_loop(engine):
     fake = SimpleNamespace(run=lambda: calls.append("run"), deliver=lambda: calls.append("deliver"))
     asyncio.run(LevelAlertMonitor(engine, None, week_review=fake).run_once())
     assert calls == ["run", "deliver"]
+
+
+def test_the_review_names_tickers_not_followed_once_and_keeps_them_in_the_totals():
+    assert week_review_auto.prompt(MONDAY) == f"Context: Review my week of {MONDAY.isoformat()}"
+    text = week_review_auto.prompt(MONDAY, {"TE", "SLS"})
+    assert text.splitlines()[1] == ("Not followed on the desk: SLS, TE. Their trades stay in the week's totals; "
+                                    "do not discuss them one by one.")
