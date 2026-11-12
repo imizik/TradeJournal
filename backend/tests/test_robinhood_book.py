@@ -334,3 +334,23 @@ def test_a_position_past_the_desks_row_cut_is_in_the_journal_not_new(desk, engin
     live.refresh()
     body = read(desk)
     assert [r for r in body["threads"] if r["key"].startswith("robinhood:")] == []
+
+
+def test_the_book_tag_follows_robinhoods_pnl_a_give_back_under_water_is_not_giving_back(desk, engine, quotes, fake, tmp_path,  # noqa: F811
+                                                                                        monkeypatch, clock):  # noqa: F811
+    from app.engine import plan_positions
+    trade = planned_nbis(engine)
+    alert(engine, NBIS, "NBIS", "entry", 95.9, state="fired", fired=T0 + timedelta(minutes=10))
+    # The give-back alert fired with no new high since; the journal's P&L is a gain (+$180): Giving back.
+    monkeypatch.setattr(plan_positions, "_watch", lambda db, trade: ("fired", None, True))
+    [row] = [r for r in read(desk)["threads"] if r["key"] == f"trade:{trade}"]
+    assert row["book"]["state"] == "giving_back"
+    # Robinhood shows it under its entry (0.40 a share against 3.10): the tag says how it stands against its plan instead.
+    fake.quotes["opt-nbis"] = option_quote("opt-nbis", mark="0.400000")
+    feed, at = make_feed(tmp_path, now=clock["t"])
+    monkeypatch.setattr(rb, "feed", feed)
+    feed.refresh()
+    at["t"] = clock["t"]
+    [row] = [r for r in read(desk)["threads"] if r["key"] == f"trade:{trade}"]
+    assert row["book"]["live"] == "matched" and row["book"]["usd"] < 0
+    assert row["book"]["state"] == "on_plan" and row["book"]["planned"] is True

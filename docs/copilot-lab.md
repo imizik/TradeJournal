@@ -512,6 +512,15 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   (plans, the book and the owner context get none). Both disappear when the
   answer's first text arrives; the Sources line still lists every read.
   Telegram, the eval, the companion and the research job ignore the field.
+- **An answer cut off** (the server restarts, the connection drops, the tab
+  sleeps, or nothing arrives for 150 s, longer than a whole turn) ends in one
+  quiet line, "This answer was interrupted.", with **Ask again** (the same
+  question as a new turn) on the latest answer, never a progress line that
+  stays (`lib/copilot.ts` `streamTurn`: a stream that ends without its `done`
+  or `error` event). It is saved with `metrics.error` `interrupted`, and any
+  saved reply with no words and no cards (older ones included) reads back the
+  same way on every later visit (`fromSaved`). Only the answer streaming now
+  shows a progress line. Proof: `frontend/e2e/copilot-desk-live-fixes.spec.ts`.
 - Prompts and answers are never logged; they are stored only as a saved
   investigation. One metrics line per turn is
   logged: model, first feedback (first progress note, tool call or answer
@@ -534,24 +543,29 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   thread list's drawer; no count on the button, since the strip counts what needs him), Jump to… (⌘K) and Plan a trade (the same words as ⌘K).
   Account chips come with the Robinhood stage; nothing fake stands in.
 - **Needs you** (`NeedsStrip`). One amber card for the single most urgent item, with its own answers, **Seen** (out of
-  the strip for today, in this browser: `localStorage` `desk.seen.v1`; an item that changes, a new status line, a day
+  the strip for today, in this browser: `localStorage` `desk.strip.seen.v1`, apart from the thread list's
+  `desk.seen.v1`; an item that changes, a new status line, a day
   closer to expiry or another fill, asks again) and **+N more** opening the rest. The order is
   `lib/desk.ts` `deskNeeds`, followed tickers only: (1) a position alert asking for a decision (Act now; **Decide**
   opens its thread on the decision bar, **Ask why** sends "Why is NBIS moving today?" in today's conversation); (2) a plan at or near its trigger (the
   thread list's Near a trigger; **Open the plan**, Ask why) or a card to confirm (**Open the card**); (3) an option
   expiring within three calendar days with no confirmed invalidation or time stop (an adopted draft counts as none;
-  **Plan it**); (4) before the close, the fills waiting to link
+  a journal position and one only Robinhood shows alike; **Plan it**); (4) before the close, the fills waiting to link
   (**Link it**); (5) after the close, the close-of-day questions and fills (**Close the day**). Nothing in the strip is
   a rating ask. A position's P&L and distance to its stop are the book row's, so the strip's line names only what
   fired. Amber on the desk means this strip and nothing else: tabs, tags, buttons and verdicts elsewhere are neutral.
-  When nothing waits, the strip is absent.
+  When nothing waits, the strip is absent. It shows on every desk view that shows the book: Now, a saved conversation
+  (`?thread=`, Main chat included) and a position's desk view, after the close as before it.
 - **Left: the book** (`Book`). One dense row per open position the owner follows: ticker, contract, unrealized P&L in
   dollars and percent, a sparkline of the underlying today, the bar placing it between the plan's invalidation (left)
   and entry (the tick) (nothing without both: the tag says No plan), the distance to the stop ("4.3% to stop"), days to
-  expiry and one tag (this year's expiry drops the year: "11/14 105C"):
-  **Near stop** (Act now names the invalidation hit or near), **Giving back** (the give-back alert fired), **No plan**
-  (no invalidation and no time stop) or **On plan**. These come from each position row's `book`
-  (`copilot_desk._book`). Selecting a row shows it in the centre at once and, where the copilot sits beside it, opens
+  expiry and one tag (this year's expiry drops the year: "11/14 105C"). **The book's tag** says what is true now, first
+  match wins (`copilot_desk._book_state`): **Past stop** (the plan's invalidation was hit), **Near stop** (within Act
+  now's 1% of it), **Giving back** (still in profit now, and the give-back alert fired with no new high since),
+  **On plan** (an invalidation or time stop stands) or **No plan**. A position under its entry is never Giving back,
+  however recently the alert fired: it says how it stands against its plan, or No plan. While the Robinhood feed is
+  live, "in profit" is Robinhood's P&L. The row's facts wrap onto a second line rather than run under the sparkline or
+  the P&L, at any width. These come from each position row's `book` (`copilot_desk._book`). Selecting a row shows it in the centre at once and, where the copilot sits beside it, opens
   its conversation (its own, else the ticker's newest open one, else its link; a position whose link leaves the desk
   opens the symbol's desk view). The desk never reloads for it: a symbol's desk view opens in place (see *The address*
   below), so the book, the top bar, the strip and the centre keep their data. Each row's eye sets its ticker to **Not following**; those sit behind "N not followed
@@ -804,9 +818,12 @@ The cockpit's panes in detail:
   With no ticker (no position, and Main chat or a conversation about no symbol) the centre charts QQQ on the same
   timeframes with the day's fills (any symbol, on their candle) and phone pings sent, from the reserved id
   (`GET /copilot/desk/market/chart`, fed by the session timeline's own fill and ping readers); no plan lines.
-  When Main chat's latest turn names a ticker (its question first, then its answer; one of the owner's desk tickers
-  or a market or sector fund such as SMH, `lib/desk.ts` `answerSymbol`), the centre charts that ticker instead unless
-  the owner picked a position.
+  When no book row is selected, the centre charts the ticker Main chat's latest answer is about (`lib/desk.ts`
+  `answerSymbol`): the one in its verdict headline first ("Pass — IREN Dec-18 calls…"), then one named with a
+  contract ("IREN 12/18 30C", "IREN Dec-18 calls"), then the one mentioned most among the owner's desk tickers and the
+  market and sector funds such as SMH, and only then the first of those mentioned. An answer with no clear subject
+  leaves the centre on the market. A selected book row always wins. The chart's default view keeps 30 px clear at
+  both ends, so its first and last time labels draw whole.
 - **This week** (`ThisWeek.tsx`, folded at the foot of the thread list's drawer): the copilot's week ("Copilot: Helped
   7 of 9 rated · 23 answers · first text 4.1 s median · $0.38", `GET /copilot/answer-scorecard?days=7`), the morning
   brief's (`GET /copilot/brief-scorecard?days=7`), then the two proofs as /proof reads them, read-only and

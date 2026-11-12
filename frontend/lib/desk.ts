@@ -87,7 +87,8 @@ export type DeskThread = {
   book?: DeskBook;
 };
 
-export type DeskBookState = "near_stop" | "giving_back" | "no_plan" | "on_plan";
+/** The book row's one tag (``_book_state`` in copilot_desk.py; docs/copilot-lab.md § The book's tag). */
+export type DeskBookState = "past_stop" | "near_stop" | "giving_back" | "no_plan" | "on_plan";
 export type DeskBook = {
   usd: number | null; pct: number | null; expiry: string | null; days_held: number | null;
   track: { last: number; entry: number; tone: DeskTone } | null; state: DeskBookState; stop_pct: number | null;
@@ -450,13 +451,38 @@ export const deskSymbolThread = (symbol: string): DeskThreadRef => ({ id: `symbo
 const MARKET_FUNDS = ["SPY", "QQQ", "IWM", "DIA", "SMH", "SOXX", "XLK", "XLF", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLB", "XLC", "XLRE",
   "KRE", "XBI", "IGV", "ARKK", "TLT", "GLD", "SLV", "USO"];
 
-/** The ticker a conversation about no symbol is about: the first one ``text`` names (the question before the answer)
- * among ``known`` (the owner's tickers) and the market funds, or null. A word in capitals that is no ticker never counts. */
+/** Words in capitals an answer uses that are never its subject. */
+const NOT_TICKERS = new Set(["I", "A", "AM", "PM", "ET", "EST", "EDT", "AH", "CPI", "PPI", "PCE", "FOMC", "FED", "GDP", "NFP", "IV", "HV", "ATM",
+  "OTM", "ITM", "DTE", "OI", "EPS", "AI", "USD", "ETF", "ETFS", "EOD", "EOW", "RSI", "MACD", "EMA", "SMA", "VWAP", "ATH", "ATL", "YTD", "IPO",
+  "CEO", "CFO", "US", "USA", "UK", "EU", "NYSE", "OK", "PT", "PNL", "TA", "PDT", "TLDR", "NOT", "AND", "THE", "OR", "IF", "NO", "YES", "BUY",
+  "SELL", "HOLD", "WAIT", "PASS", "FOCUS", "DRAFT", "PATTERN", "BROKEN", "UNCLEAR", "NOW", "ASAP", "FYI", "MAX", "MIN", "Q1", "Q2", "Q3", "Q4"]);
+const MONTHS = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec";
+/** A ticker followed by a contract: "IREN Dec-18 calls", "IREN 12/18 30C", "IREN $30 calls", "IREN 30C". */
+const CONTRACT = new RegExp(`\\b([A-Z]{1,5})\\s+(?:(?:${MONTHS})[a-z]*\\.?[- ]?\\d{1,2}\\b|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?\\b|\\$?\\d+(?:\\.\\d+)?\\s?(?:[CP]\\b|calls?\\b|puts?\\b))`, "g");
+
+/**
+ * The ticker a conversation about no symbol is about (``text``: the latest question, then its answer), for the centre's
+ * chart: the one in the answer's verdict headline first, then the one named with a contract, then the one mentioned
+ * most (``known``, the owner's tickers, the market funds and any named with a contract), and only then the first of
+ * those mentioned; null when nothing is clearly the subject (the centre then shows the market). A word in capitals
+ * that is no ticker never counts.
+ */
 export function answerSymbol(text: string | null, known: Iterable<string>): string | null {
   if (!text) return null;
   const tickers = new Set([...known, ...MARKET_FUNDS]);
-  for (const [word] of text.matchAll(/\b[A-Z]{1,5}\b/g)) if (tickers.has(word)) return word;
-  return null;
+  const named = (word: string) => tickers.has(word) || (word.length >= 2 && !NOT_TICKERS.has(word));
+  // 1. The verdict headline ("Verdict: Pass — IREN Dec-18 calls …"): its first ticker.
+  const headline = text.split("\n").map(line => /^\**verdict\**\s*:\s*\**[a-z]+\**\s*(?:—|–|--|-|:|\.)\s*(.+)$/i.exec(line.trim())).find(Boolean)?.[1];
+  for (const [word] of (headline ?? "").replace(/\*\*/g, "").matchAll(/\b[A-Z]{1,5}\b/g)) if (named(word)) return word;
+  // 2. A ticker named with a contract.
+  const contracts = [...text.matchAll(CONTRACT)].map(match => match[1]).filter(word => !NOT_TICKERS.has(word));
+  if (contracts.length) return contracts[0];
+  // 3. The most mentioned, ties to the first mentioned (4.).
+  const counts = new Map<string, number>();
+  for (const [word] of text.matchAll(/\b[A-Z]{1,5}\b/g)) if (tickers.has(word)) counts.set(word, (counts.get(word) ?? 0) + 1);
+  let best: string | null = null;
+  for (const [word, n] of counts) if (best === null || n > counts.get(best)!) best = word;
+  return best;
 }
 
 /** The thread chart's timeframes: today's minutes, recent sessions' 15-minute bars, a few months of daily bars. */
@@ -687,8 +713,9 @@ export function deskNeeds(rows: DeskThread[], day: string, { closing, fills }: {
 }
 
 /** Strip items marked Seen today, in this browser: they leave the strip; "+N more" still lists them. A key carries what
- * the item says (its status line, days left, a count), so an item that changes asks again. */
-const SEEN_KEY = "desk.seen.v1";
+ * the item says (its status line, days left, a count), so an item that changes asks again. Its own store: the thread
+ * list's "new since you looked" is ``desk.seen.v1``, and sharing it let each overwrite the other. */
+const SEEN_KEY = "desk.strip.seen.v1";
 export function readSeen(day: string): string[] {
   try {
     const saved = JSON.parse(window.localStorage.getItem(SEEN_KEY) ?? "null");

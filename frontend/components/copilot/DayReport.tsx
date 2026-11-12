@@ -6,7 +6,6 @@ import { getDayReport, getDeskPings, signedPct, type CheckedCallRow, type CheckT
 import { cn } from "@/lib/utils";
 
 const ET = "America/New_York";
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const tone = (value: number) => (value > 0 ? "text-emerald-300" : value < 0 ? "text-rose-300" : "text-muted-foreground");
 const clock = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" });
 const price = (value: number) => value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -100,7 +99,7 @@ export default function DayReport() {
     <div data-testid="day-report-card" className="divide-y overflow-hidden rounded-lg border bg-card">
       {showToday && (
         <Line label="Today" testId="report-today" summary={
-          entries && <span className="tabular-nums">{plural(entries.entries, "entry", "entries")}, {entries.planned} with a plan saved before the fill</span>}>
+          entries && <span data-testid="report-today-line">{/* only the figures in the mono face */}<span className="tabular-nums">{entries.entries}</span> {entries.entries === 1 ? "entry" : "entries"}, <span className="tabular-nums">{entries.planned}</span> with a plan saved before the fill</span>}>
           {entries && entries.rows.length > 0 ? (
             <ul className="space-y-1.5 text-xs">
               {entries.rows.map((e, i) => (

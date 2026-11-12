@@ -185,6 +185,7 @@ const STATE: Record<DeskBookState, { label: string; className: string }> = {
   on_plan: { label: "On plan", className: "text-muted-foreground" },
   giving_back: { label: "Giving back", className: "border-foreground/30 text-foreground" },
   near_stop: { label: "Near stop", className: "border-rose-300/40 text-rose-300" },
+  past_stop: { label: "Past stop", className: "border-rose-300/40 text-rose-300" },
   no_plan: { label: "No plan", className: "border-rose-300/40 text-rose-300" },
 };
 
@@ -261,13 +262,14 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
               <li key={row.key} className={cn("flex items-stretch border-t", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")}>
                 <button type="button" onClick={() => onSelect(row)} aria-pressed={on} aria-label={`${row.symbol} ${full}`}
                   className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_48px_60px] items-center gap-2 py-2 pl-3 text-left hover:bg-secondary">
-                  <span className="min-w-0">
+                  <span className="min-w-0 overflow-hidden">
                     <span className="flex items-baseline gap-1.5">
                       <span className="text-sm font-semibold text-foreground">{row.symbol}</span>
                       <span className="min-w-0 truncate text-xs tabular-nums text-muted-foreground">{contract}{count}</span>
                     </span>
                     {book ? <Track track={book.track} /> : <span className="block truncate text-xs text-muted-foreground">{row.status.text}</span>}
-                    <span className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-muted-foreground">
+                    {/* Wraps rather than spilling: a tag never runs under the sparkline or the P&L, at any width. */}
+                    <span data-testid="book-meta" className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground [&>*]:max-w-full [&>*]:truncate [&>*]:whitespace-nowrap">
                       {mixed && book?.account && <span data-testid="book-account" title={`${book.account.label} ${book.account.masked}`}>{book.account.label}</span>}
                       {book?.stop_pct != null && <span className="tabular-nums">{Math.abs(book.stop_pct).toFixed(1)}% to stop</span>}
                       {book && left(book.expiry, day) && <span className="tabular-nums">{left(book.expiry, day)}</span>}

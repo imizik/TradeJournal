@@ -443,9 +443,11 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const known = useMemo(() => rows.flatMap(r => r.symbol ? [r.symbol] : []), [rows]);
   const focus = day ? answerSymbol(turnText, known) : null;
   const talking = thread ? thread.symbol : link?.symbol ?? null;
-  // The centre follows the book's pick, else the copilot's ticker, else the first followed position; none is the market.
+  // The centre follows the book's pick, else the copilot's ticker (a day conversation's: the ticker its latest answer is
+  // about, ``answerSymbol``; an answer with no clear subject shows the market), else the first followed position; none
+  // is the market.
   const followed = useMemo(() => positionRows(rows).filter(r => !r.hidden), [rows]);
-  const centreSymbol = picked ?? talking ?? focus ?? followed[0]?.symbol ?? null;
+  const centreSymbol = picked ?? talking ?? focus ?? (day && turnText ? null : followed[0]?.symbol ?? null);
   const centreRow = centreSymbol ? followed.find(r => r.symbol === centreSymbol) ?? rows.find(r => r.symbol === centreSymbol && r.key.startsWith("trade:")) ?? null : null;
   // The chart reads by the conversation when it is about that ticker (its plan's lines), else by the position's plan.
   const centreThread = useMemo<DeskThreadRef | null>(() => {

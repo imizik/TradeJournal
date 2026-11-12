@@ -168,13 +168,31 @@ type Parts = {
 };
 type Hover = { bar: Bar; marks: DeskChartMark[]; x: number; width: number };
 
-/** The default view: every candle, plus room on the right for a time stop still ahead. */
-function defaultRange(parts: Parts, data: DeskChartData) {
+/** Pixels kept clear at each end of the default view: more than half a time label ("10:00 AM"), so the first and last
+ * labels on the axis draw whole at any width instead of being cut at the edge. */
+const EDGE_PX = 30;
+/** The thinnest candle by default: a whole 2m day fits a desktop; zoom in for candles. */
+const MIN_BAR_SPACING = 0.5;
+
+/** The default view: every candle, plus room on the right for a time stop still ahead, and ``EDGE_PX`` clear at both
+ * ends. Reports where the first and last candles sit (``data-edges``) for the browser test. */
+function defaultRange(parts: Parts, data: DeskChartData, host: HTMLElement | null) {
   const last = data.bars.length - 1;
   const ahead = data.time_stop && data.timeframe !== "1D" ? Math.ceil((data.time_stop.at - data.bars[last].time) / data.step) : 0;
   const room = ahead > 0 ? Math.min(ahead, STOP_ROOM) + RIGHT_ROOM : RIGHT_ROOM;
   parts.chart.priceScale("right").applyOptions({ autoScale: true });
-  parts.chart.timeScale().setVisibleLogicalRange({ from: -1, to: last + room });
+  const scale = parts.chart.timeScale();
+  const width = scale.width();
+  // Bars that make EDGE_PX at the spacing the whole view will have (a little more than needed, never less). A whole
+  // 2m day on a phone needs candles thinner than the usual minimum to fit between the margins: allow just that.
+  const edge = width > 4 * EDGE_PX ? EDGE_PX * (last + 1 + room) / (width - 2 * EDGE_PX) : 1;
+  if (width > 4 * EDGE_PX)
+    parts.chart.applyOptions({ timeScale: { minBarSpacing: Math.max(0.1, Math.min(MIN_BAR_SPACING, (width - 2 * EDGE_PX) / (last + 1 + room + 2 * edge))) } });
+  scale.setVisibleLogicalRange({ from: -Math.max(1, edge), to: last + Math.max(room, edge) });
+  if (host) requestAnimationFrame(() => { // once the chart has applied the range
+    const first = scale.logicalToCoordinate(0 as Logical), end = scale.logicalToCoordinate(last as Logical);
+    if (first !== null && end !== null) host.dataset.edges = `${Math.round(first)},${Math.round(scale.width() - end)}`;
+  });
 }
 
 type Read = { key: string; data: DeskChartData } | { key: string; error: string };
@@ -183,7 +201,7 @@ const good = (read: Read) => "data" in read && read.data.state === "ok" && read.
 type Painted = { shown: DeskChartData | null; byCandle: Map<number, DeskChartMark[]>; applied: string | null };
 
 /** The read's candles, lines and marks onto the chart; the view resets only for a new symbol or timeframe. */
-function paint(current: Parts, read: Read, state: Painted) {
+function paint(current: Parts, read: Read, state: Painted, host: HTMLElement | null) {
   const fresh = read.key !== state.applied;
   const next = "data" in read && read.data.state === "ok" && read.data.bars.length ? read.data : null;
   state.shown = next;
@@ -208,7 +226,7 @@ function paint(current: Parts, read: Read, state: Painted) {
   current.stop.set(next.timeframe === "1D" ? null : next.time_stop);  // a clock time has no place on daily candles
   // Clock ticks on the intraday candles, dates on the daily ones.
   current.chart.applyOptions({ timeScale: { timeVisible: next.timeframe !== "1D" } });
-  if (fresh) defaultRange(current, next);
+  if (fresh) defaultRange(current, next, host);
 }
 
 /** The chart for ``id`` (a thread, ``symbol:X`` or ``market``) on ``timeframe``. ``refreshKey`` reads it again. */
@@ -232,7 +250,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label }: { id: string
       grid: { vertLines: { color: "#1b1b1e" }, horzLines: { color: "#1b1b1e" } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: "#77777f", labelBackgroundColor: "#3a3a40" }, horzLine: { color: "#77777f", labelBackgroundColor: "#3a3a40" } },
       rightPriceScale: { borderColor: "#27272a", scaleMargins: { top: 0.1, bottom: 0.2 }, entireTextOnly: true },
-      timeScale: { borderColor: "#27272a", secondsVisible: false, rightOffset: RIGHT_ROOM, minBarSpacing: 0.5,  // a whole 2m day fits a phone; zoom in for candles
+      timeScale: { borderColor: "#27272a", secondsVisible: false, rightOffset: RIGHT_ROOM, minBarSpacing: MIN_BAR_SPACING,
         tickMarkFormatter: (time: Time, kind: TickMarkType) => typeof time !== "number" ? null
           : kind <= TickMarkType.DayOfMonth ? tickFormats[kind as keyof typeof tickFormats].format(time * 1000) : clock.format(time * 1000) },
       localization: { timeFormatter: (time: Time) => typeof time === "number" ? nyWhen(time, painted.current.shown?.timeframe === "1D") : "" },
@@ -263,7 +281,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label }: { id: string
     candles.attachPrimitive(stop);
     parts.current = { chart, candles, volume, markers, shade, stop, lines: [] };
     painted.current.applied = null;  // a new chart starts from the default view
-    if (latest.current) paint(parts.current, latest.current, painted.current);
+    if (latest.current) paint(parts.current, latest.current, painted.current, host.current);
     chart.subscribeCrosshairMove((event) => {
       const data = painted.current.shown;
       if (!data || !event.point || typeof event.time !== "number") { setHover(null); return; }
@@ -302,10 +320,10 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label }: { id: string
   // The read onto the chart (and onto a chart built again, e.g. after a hot reload, from the last read).
   useEffect(() => {
     latest.current = read;
-    if (parts.current && read) paint(parts.current, read, painted.current);
+    if (parts.current && read) paint(parts.current, read, painted.current, host.current);
   }, [read]);
 
-  const reset = () => { if (parts.current && painted.current.shown) defaultRange(parts.current, painted.current.shown); };
+  const reset = () => { if (parts.current && painted.current.shown) defaultRange(parts.current, painted.current.shown, host.current); };
   const switching = !!read && read.key !== key;
   const unavailable = read && read.key === key ? ("error" in read ? read.error : read.data.state !== "ok" || !read.data.bars.length ? (read.data.reason ?? "No bars came back.") : null) : null;
   const daily = data?.timeframe === "1D";
