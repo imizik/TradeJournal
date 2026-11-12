@@ -54,6 +54,8 @@ QTY_TOLERANCE = Decimal("0.000001")
 FINAL_STATES = frozenset({"filled", "cancelled", "canceled", "rejected", "failed", "voided", "expired"})
 WRITE_PREFIX = "robinhood:"
 ADVISORY_LOCK = 61834207
+DUPLICATE = "possible duplicate"
+WRITTEN_NOTE = "recurring buy: Robinhood sends no email, so the journal took it from the order history"
 TICKER = re.compile(r"[A-Z][A-Z0-9.]{0,9}")
 OPTION_SIDES = {("buy", "open"): "buy_to_open", ("sell", "close"): "sell_to_close",
                 ("sell", "open"): "sell_to_open", ("buy", "close"): "buy_to_close"}
@@ -517,7 +519,7 @@ def reconcile(session: Session, *, now_et: datetime, current: str, read: Read | 
                 _put(session, rows, key, {**base, "fill_id": fill.id, "journal_source": "robinhood",
                                           "journal_contracts": o.contracts, "journal_price": o.price, "journal_at": o.last_at,
                                           "outcome": "order_only", "action": "wrote_fill",
-                                          "note": "recurring buy: Robinhood sends no email, so the journal took it from the order history"})
+                                          "note": WRITTEN_NOTE})
             else:
                 _put(session, rows, key, {**base, **_journal_values(None), "outcome": "order_only", "action": "would_write_fill",
                                           "note": "recurring buy: Robinhood sends no email; switched on, this fill would be written"})
@@ -548,9 +550,10 @@ def _fill_exists(session: Session, fill_id: uuid.UUID) -> bool:
 def _check_duplicates(session: Session, rows: dict, claimed: set, current: str) -> None:
     """Every fill written from the order history, whatever its age, that the journal also has from another source (an
     email that slipped past the guard, a manual entry or a CSV backfill made later) is listed as a mismatch with both
-    versions: same account, stock, New York day and quantity, a fill no order has taken. Nothing is removed."""
-    written = session.exec(select(RobinhoodReconciliation).where(
-        RobinhoodReconciliation.action == "wrote_fill", RobinhoodReconciliation.outcome != "mismatch")).all()
+    versions: same account, stock, New York day and quantity, a fill no order has taken. A flag whose other fill an
+    order has since matched (another trade of the same quantity) is cleared. Nothing is removed."""
+    written = [r for r in session.exec(select(RobinhoodReconciliation).where(RobinhoodReconciliation.action == "wrote_fill")).all()
+               if r.outcome != "mismatch" or (r.note or "").startswith(DUPLICATE)]
     if not written:
         return
     taken = claimed | {r for r in session.exec(select(RobinhoodReconciliation.fill_id).where(
@@ -566,13 +569,17 @@ def _check_duplicates(session: Session, rows: dict, claimed: set, current: str) 
         other = [j for j in other if j.source not in ("robinhood", "webull") and j.fill.id not in taken
                  and direction(j.fill.side) == row.side and abs(j.contracts - Decimal(str(row.rh_contracts))) <= QTY_TOLERANCE]
         if not other:
+            if row.outcome == "mismatch":  # the flagged fill turned out to be another order's
+                _put(session, rows, row.key, {"outcome": "order_only", "mode": current, "journal_source": "robinhood",
+                                              "journal_contracts": row.rh_contracts, "journal_price": row.rh_price,
+                                              "journal_at": row.rh_last_at, "note": WRITTEN_NOTE})
             continue
         j = min(other, key=lambda j: (abs((j.fill.executed_at - row.rh_last_at).total_seconds()), j.fill.raw_email_id))
         taken.add(j.fill.id)
         claimed.add(j.fill.id)
         _put(session, rows, row.key, {"outcome": "mismatch", "mode": current, "journal_source": j.source,
                                       "journal_contracts": j.contracts, "journal_price": j.price, "journal_at": j.fill.executed_at,
-                                      "note": f"possible duplicate: written from Robinhood, and the journal also has a {j.source} "
+                                      "note": f"{DUPLICATE}: written from Robinhood, and the journal also has a {j.source} "
                                               f"fill for it (fill {j.fill.id}); check and remove one by hand"})
 
 

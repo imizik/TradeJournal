@@ -413,6 +413,20 @@ def test_a_backfill_long_after_a_written_buy_is_still_listed_as_a_possible_dupli
     assert len(desk.fills()) == 2
 
 
+def test_a_duplicate_flag_clears_when_its_fill_turns_out_to_be_another_order(desk):
+    """Recheck S2: a hand buy of exactly the recurring quantity, its email in before its order is read."""
+    desk.stock(recurring_vti())
+    desk.at(9, 36).poll()
+    desk.at(11, 0).emails(email("hand", "VTI", "buy", "0.299212", "318.00", 10, 50))
+    desk.at(11, 1).poll()
+    assert "possible duplicate" in desk.by_order("r1").note
+    desk.stock(equity_order("h", "VTI", [execution("h1", "318.000000", "0.299212", utc(10, 50, 3))]))
+    desk.at(11, 2).poll()
+    r1 = desk.by_order("r1")
+    assert (desk.by_order("h").outcome, r1.outcome, r1.action, r1.journal_source) == ("matched", "order_only", "wrote_fill", "robinhood")
+    assert [f[0] for f in desk.fills()] == ["robinhood:r1", "hand"]
+
+
 def test_a_hand_entry_after_a_written_order_is_listed_as_a_possible_duplicate(desk):
     desk.stock(recurring_vti())
     desk.at(9, 36).poll()
