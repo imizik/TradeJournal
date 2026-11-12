@@ -541,7 +541,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   Webull left out: the session read's `realized_today`) and **Open** (every open position's unrealized P&L now,
   followed or not). Then **Now** (back to today's Main chat; dropped on a phone while already there), **Threads** (the
   thread list's drawer; no count on the button, since the strip counts what needs him), Jump to… (⌘K) and Plan a trade (the same words as ⌘K).
-  Account chips come with the Robinhood stage; nothing fake stands in.
+  Account chips come with the Robinhood stage; nothing fake stands in (on a phone they fold behind one **Accounts**
+  button, § Phone).
 - **Needs you** (`NeedsStrip`), **the Needs-you strip**. Only what needs a decision now, in amber; most of the day
   there is none and the strip is absent. Nothing in it is dismissed and there is no Seen: the strip shows the single
   top item with its own answers, and **+N more** opens every other item at once, each with its own answers. The rules
@@ -701,11 +702,20 @@ and a symbol whose session was never cached reads "not measured": more rows say 
 symbols he checks. The 30-day total counts every check in the window, today's included. Radar's own quotes are not used
 for a closing price.
 
-**Phone (375 px).** The same pieces stacked: the strip, the book, then the centre. The copilot is a full-screen sheet
-opened by **Ask the copilot** (about the picked position when the copilot is on another ticker) and by any Ask action;
-**Desk** closes it. A deep link or a saved thread opens on the sheet; the bare address opens on the cockpit. One tab
-bar only: the app's. From 768 to 1179 px the book and the centre sit side by side and the copilot is a sheet on the
-right. The thread list is a drawer at every width (over the whole screen on a phone).
+**Phone (375 to 440 px).** The same pieces stacked: the strip, the book, then the centre, so the strip and the book's
+first rows are the first screen. The top bar is three short rows: Desk with its buttons (Threads, Jump to…, Plan a
+trade, as icons), the clock and SPY / QQQ / VIX, then Realized today, Open and one **Accounts** button that unfolds the
+account chips (masked). Installed on the home screen it runs full screen: the desk's top clears the notch and the
+status bar, and the sheet's message box clears the home indicator (`env(safe-area-inset-*)`). The copilot is a
+full-screen sheet opened by the round **Ask the copilot** button at the bottom right (its name says "about NBIS" when
+a picked position differs; on a phone it is an icon so it never covers a book row's P&L) and by any Ask action;
+**Desk** closes it. Behind the closed sheet the copilot never scrolls the page: tapping a position keeps its chart in
+view while the copilot opens its conversation. Open, the sheet follows a streaming answer and keeps the message box
+in view above the keyboard. A deep link or a saved thread opens on the sheet; the bare address opens on the cockpit,
+and `?ticket=` scrolls to the Ticket once the book has read. Controls are at least 44 px tall on a phone; the row of
+canned questions fades at its right edge to show it scrolls. One tab bar only: the app's. From 768 to 1179 px the book
+and the centre sit side by side and the copilot is a sheet on the right. The thread list is a drawer at every width
+(over the whole screen on a phone). Browser proof: `frontend/e2e/copilot-desk-phone.spec.ts` (375, 393 and 440 px).
 
 **Not following.** A ticker the owner does not follow (an old position no longer watched)
 is hidden in one tap from its book row (the eye) or its thread header (**Not following**), and back with **Show again**
