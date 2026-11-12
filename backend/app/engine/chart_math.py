@@ -155,6 +155,28 @@ def _merge(groups: dict, stamp: int, end: int, bar: dict, extended: bool, vwap: 
                  close=bar["close"], volume=b["volume"] + bar["volume"], vwap=vwap, vwap_sd=sd)
 
 
+def ema(values: list[float], length: int) -> list[float | None]:
+    """``indicators``' EMA for any length: seeded with the first value, None until ``length`` values have been seen."""
+    out: list[float | None] = []
+    value = None
+    for i, close in enumerate(values):
+        value = close if value is None else value + 2 / (length + 1) * (close - value)
+        out.append(value if i + 1 >= length else None)
+    return out
+
+
+def sma(values: list[float], length: int) -> list[float | None]:
+    """The simple average of the last ``length`` values, None until there are that many."""
+    out: list[float | None] = []
+    total = 0.0
+    for i, close in enumerate(values):
+        total += close
+        if i >= length:
+            total -= values[i - length]
+        out.append(total / length if i + 1 >= length else None)
+    return out
+
+
 def indicators(bars: list[dict]) -> list[dict]:
     """First-close EMA, Wilder RSI(14); missing warmup remains missing."""
     emas: dict[int, float] = {}
