@@ -600,21 +600,52 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
 
 **Time of day.** The book's lower block follows the New York clock: before 9:30 on a weekday it is the **Morning
 brief** (`MorningBrief.tsx`, cut to three lines with **Read the whole brief** a tap away; "No morning brief yet today."
-before it is written) and **Arm today's plans**; after 16:00 it is the **day report**: How the pings did (below),
+before it is written) and **Arm today's plans**; after 16:00 it is the **day report** (below), then
 "Close the day: N of M done" and **Close the day** (left out while the strip shows it); otherwise **Since you looked**:
 what changed since the owner last left the desk in this browser (`localStorage` `desk.looked.v2`, by position, saved
 when the page is hidden or left), four lines at most: the biggest open-P&L moves ("NBIS 11/14/26 105C +$120 → +$355", a
 move under $25 and 10% left out), positions opened or closed since, and the fills, pings and Radar events since. No mode shows more than the
 session mode does.
 
-**How the pings did** (`PingsRecap.tsx`, from `GET /copilot/desk/pings`), in the day report and collapsed to one
-line: what followed the phone pings since the previous trading session (the market calendar's), in counts, for
-example "Since yesterday: 4 alerts · selling at the alert would have been better on 3, worse on 1 · 2 Radar hits · 1
-kept going". On tap, each position alert with its alert-scorecard outcome (sold or expired for how much against
-selling at the alert, still open, or not measured and why) and each Radar stock hit or setup card a ping reached, with
-the stock's move against SPY the way Radar flagged it an hour on and at the close ("not measured" with why, as while
-its session is open) and a setup card's paper result. Nothing to answer and no advice. **Last 30 days** unfolds the
-alert and Radar scorecards below.
+**Day report** (`DayReport.tsx`), after 16:00 New York on a weekday: one compact card of up to four single lines, each
+opening its rows on tap, in this order. The app scores everything itself; nothing asks him to rate a ping, a Radar hit
+or a call. Facts and counts only (no line tells him to buy, sell or hold, and none says money was missed); a ticker
+marked **Not following** is left out of every line but the realized-P&L total, which is the accounts' money as the top
+bar shows it; a line with nothing in it is absent, and a day with nothing at all says so in one sentence ("Nothing to
+report today: …").
+
+1. **Today**: realized P&L, how many entries were opened today and how many of them had a plan saved before the fill
+   (`GET /copilot/desk/day-report`, `entries`, from the plan streak's per-entry state: planned, late, no plan). On tap,
+   each entry with its time and which of those it was.
+2. **How the pings did**, today's only (`GET /copilot/desk/pings?day_only=true`; without the parameter it still reads
+   since the previous trading session): for each position alert, what its contracts fetched against selling at the alert
+   (sold or expired for how much, still open, or not measured and why); for each alerted Radar stock hit or setup card,
+   the stock's move against SPY the way Radar flagged it an hour on and at the close ("not measured" with why, as while
+   its session is open) and a setup card's paper result. On tap, each ping, and **Last 30 days** unfolds the alert and
+   Radar scorecards (the line, and so that button, shows only on a day with a ping). Example line: "4 alerts · selling at the alert would have been better on 2, worse on 1 · 2 Radar
+   hits · 1 kept going".
+3. **Calls checked, last 30 days**: the running total leads ("14 · 5 up since you checked, 7 down, 2 not measured"),
+   then today's. On tap, each call checked today with its verdict, whether he planned it, passed it or did neither, and
+   the move since the moment he checked (below). A passed call is reported the same flat way as a planned one.
+4. **Open without a plan**: the followed open positions with no plan, by ticker; each row opens its thread.
+
+**Checked-call scoring** (`backend/app/engine/day_report.py`, `GET /copilot/desk/day-report`, `checks`). A call is scored from
+the underlying's price **when he checked** (`call_check.underlying_price`), never the price in the Discord post, to the
+underlying's regular-session close that New York day, and when the call named a contract and a quote of it was stored at
+the check, from that quote's mid to the contract's mid at the close. **Up**, **down** or **flat** is the contract's move when
+both its prices are known, otherwise the stock's (reversed for a put); a row prints the stock's and the contract's move
+as numbers. **Not measured** (with why) when a price is missing: no ticker read, no price stored at the check, a check
+from the fake backend, a check made after the close, or no closing price. The session's end is the market calendar's close (13:00 on an
+early-close day), else 16:00, and a row says "reads up", "down" or "flat" so a put's reversal is never silent. Nothing is ever fetched for the card. The closing
+price is the last regular-session minute of the completed session in the chart cache on disk
+(`ping_images.stored_bars`) or, for today after 16:00, of the chart feed's cached minutes if they were read after the
+close (`ChartFeed.peek_minutes`); the contract's close is the options feed's cached chain for that expiry, if it was read
+after the close (`OptionsFeed.cached_contract`, today's chains only). A day's measured score is kept in memory per
+check once final, so a past day is read from disk once; a score that is not measured is asked again each time. So a
+call from an earlier day is measured only from the stock's stored session (a contract's close is not stored anywhere),
+and a symbol whose session was never cached reads "not measured": more rows say so until the chart cache has the
+symbols he checks. The 30-day total counts every check in the window, today's included. Radar's own quotes are not used
+for a closing price.
 
 **Phone (375 px).** The same pieces stacked: the strip, the book, then the centre. The copilot is a full-screen sheet
 opened by **Ask the copilot** (about the picked position when the copilot is on another ticker) and by any Ask action;
@@ -638,7 +669,7 @@ the cockpit too.
 Main chat is the same saved conversation on desktop and phone. Unsent words belong to their browser tab. Returning to a saved link keeps its original
 conversation, including after midnight. The heading names the day ("Main chat · Wed, Nov 4"; a busy day's next
 part adds "(continued)"). The Rate yesterday card that used to open Main chat was removed on 2026-11-10 (the owner
-did not rate from memory at the end of the day; How the pings did shows what followed instead). Its read,
+did not rate from memory at the end of the day; the day report's How the pings did shows what followed instead). Its read,
 `GET /copilot/desk/to-rate`, still answers but nothing on the desk calls it.
 The morning brief card's **Ask about it →** puts the brief in today's Main chat's message box as context, unsent, so
 questions about it stay in the day's conversation. **Previous days** (beside the Main chat heading) opens earlier days that have at least one exchange; a day the Desk was
@@ -1304,9 +1335,8 @@ it in the desk's **Check a call** tab (the centre tab strip).
   underlying's price and the contract's quote at that moment (`quote_json`),
   Pass (`outcome`) and the turn. Planned is read from `TradeCapture` with
   `origin_kind = checked_call` and the check's id. `GET /copilot/checks?day=`
-  is the day's list for the tab and, later, the evening report, which is to
-  score a check from the price when he checked, never from the posted price
-  (the scoring is not built). `POST /copilot/checks` checks a pasted call;
+  is the day's list for the tab; the desk's day report scores each check from
+  the price when he checked, never from the posted price (§ The desk, Checked-call scoring). `POST /copilot/checks` checks a pasted call;
   `POST /copilot/checks/{id}/pass` records Pass.
 
 ## How the copilot reasons (system prompt)

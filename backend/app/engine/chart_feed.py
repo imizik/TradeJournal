@@ -149,6 +149,17 @@ class ChartFeed:
             return saved.data, saved.fetched_at, str(error)
         raise error from None
 
+    def peek_minutes(self, symbol: str, day: date) -> tuple[list[dict], float] | None:
+        """``day``'s minute bars (extended hours) and when they were read, from the response cache alone (the read
+        ``workspace`` makes for today), even if stale; None when it holds none. Never a provider request."""
+        params = {"symbol": symbol, "interval": "1min", "session_filter": "all",
+                  "start": day.strftime("%Y-%m-%d 04:00"), "end": day.strftime("%Y-%m-%d 20:00")}
+        with self._lock:
+            saved = self._cache.get((tradier.TRADIER_BASE_URL, "/v1/markets/timesales", tuple(sorted(params.items()))))
+        if saved is None:
+            return None
+        return normalize_bars(_rows(saved.data, "series", "data")), saved.fetched_at
+
     def workspace(self, symbol: str, intervals: list[str], watchlist: list[str], session: str, calendar=None, quotes: bool = True,
                   stored_session: Callable[[str, date], list[dict] | None] | None = None,
                   volume_profile: Callable[[str, date], chart_rvol.Profile | None] | None = None,

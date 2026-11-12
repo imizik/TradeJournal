@@ -548,11 +548,39 @@ export type DeskPings = {
   radar: { state: "ok" | "off" | "unavailable"; reason: string | null; rows: PingsRadarRow[] };
 };
 
-export async function getDeskPings(signal?: AbortSignal): Promise<DeskPings> {
-  const response = await fetch(apiUrl("/copilot/desk/pings"), { cache: "no-store", signal });
+/** ``dayOnly``: just today's pings (the day report), else everything since the previous trading session. */
+export async function getDeskPings(signal?: AbortSignal, dayOnly = false): Promise<DeskPings> {
+  const response = await fetch(apiUrl(`/copilot/desk/pings${dayOnly ? "?day_only=true" : ""}`), { cache: "no-store", signal });
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
   return body as DeskPings;
+}
+
+// --------------------------------------------------------------------------- the day report
+
+/** One checked call scored from the price when he checked to the close (``engine/day_report.py``). ``way`` is the contract's
+ * move when both its prices are known, else the stock's (reversed for a put); null when not measured. */
+export type CheckedCallRow = {
+  id: string; checked_at: string; day: string; symbol: string | null; label: string; verdict: string | null; side: "call" | "put" | null;
+  decision: "planned" | "passed" | "neither"; state: "measured" | "not_measured"; why: string | null; way: "up" | "down" | "flat" | null;
+  basis?: "stock" | "contract"; contract_note?: string | null;
+  stock?: { at_check: number; close: number; pct: number }; contract?: { at_check: number; close: number; pct: number } | null;
+};
+export type CheckTally = { checked: number; up: number; down: number; flat: number; not_measured: number };
+/** ``GET /copilot/desk/day-report``: today's entries and the checked calls; a part is null when it could not be read. */
+export type DayReport = {
+  day: string; as_of: string;
+  entries: { entries: number; planned: number; late: number; pending: number;
+    rows: { contract: string; state: "planned" | "late" | "unplanned" | "pending"; at: number }[] } | null;
+  checks: { rows: CheckedCallRow[]; today: CheckTally; window: CheckTally & { days: number }; capped: boolean } | null;
+  sections: Record<string, "ok" | "unavailable">;
+};
+
+export async function getDayReport(signal?: AbortSignal): Promise<DayReport> {
+  const response = await fetch(apiUrl("/copilot/desk/day-report"), { cache: "no-store", signal });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  return body as DayReport;
 }
 
 // --------------------------------------------------------------------------- the book's sparklines
