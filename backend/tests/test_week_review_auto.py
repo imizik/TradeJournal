@@ -306,3 +306,16 @@ def test_the_review_names_tickers_not_followed_once_and_keeps_them_in_the_totals
     text = week_review_auto.prompt(MONDAY, {"TE", "SLS"})
     assert text.splitlines()[1] == ("Not followed on the desk: SLS, TE. Their trades stay in the week's totals; "
                                     "do not discuss them one by one.")
+
+
+def test_the_friday_run_tells_the_review_which_tickers_are_not_followed(engine, phone):
+    from datetime import datetime as _dt
+    from app.models import DayJournalEntry
+    with Session(engine) as db:  # noqa: F811
+        db.add(DayJournalEntry(operation_id="hide-sls", day=FRI, kind="follow", symbol="SLS", text="Not following", actor="owner",
+                               created_at=_dt(2026, 10, 23, 12, 0)))
+        db.commit()
+    turn = Turn()
+    reviews(engine, Clock(at("16:45")), turn).run()
+    assert turn.calls == ["Context: Review my week of 2026-10-19\nNot followed on the desk: SLS. Their trades stay in the "
+                          "week's totals; do not discuss them one by one."]

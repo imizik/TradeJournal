@@ -665,3 +665,12 @@ def test_the_brief_s_market_wide_lists_drop_a_ticker_not_followed(engine, market
     with Session(engine) as db:
         pack = build_pack(db, at("09:00"), Calendar())
     assert pack["premarket_scan"]["flagged"] == ["AMD"] and [r["symbol"] for r in pack["premarket_scan"]["movers"]] == ["AMD"]
+
+
+def test_a_hidden_position_cut_from_a_large_book_is_still_named_and_not_counted(engine, market, monkeypatch):
+    _not_following(engine, "NBIS")
+    monkeypatch.setattr(copilot_context, "MAX_POSITIONS", 0)  # the book is "full": NBIS sorts after the cut
+    now = datetime.fromtimestamp(at("09:00"), ET)
+    with Session(engine) as db:
+        held = copilot_context.owner_context(None, session=db, now=now)["positions"]
+    assert held["positions"] == [] and held["count"] == 1 and held["not_followed"].startswith("1 position not followed: NBIS")

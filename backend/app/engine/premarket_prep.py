@@ -131,18 +131,19 @@ def _trading_day(calendar, day: date) -> bool:
 
 # --------------------------------------------------------------------------- the pack
 
-def _positions(db: Session, now_et: datetime, hidden: set[str] = frozenset()) -> dict:
+def _positions(db: Session, now_et: datetime) -> dict:
     """Each open position's record (``trader_context``), cut to what the morning needs; expiring soonest first. The
     thesis in its own words and the since-entry lines (each with its as_of; a missing input reads unavailable)."""
-    from app.ai.copilot_context import _trim
+    from app.ai.copilot_context import _trim, hidden_positions, not_followed_line
     from app.engine import trader_context
-    section = trader_context.for_symbol(None, now_et.timestamp(), session=db, diff="all", headlines=False)
+    hidden, quiet = hidden_positions(db)  # a hidden ticker's positions never take a followed one's place
+    section = trader_context.for_symbol(None, now_et.timestamp(), session=db, diff="all", headlines=False,
+                                        limit=trader_context.MAX_POSITIONS + len(quiet))
     keep = ("symbol", "instrument", "option", "direction", "quantity", "unrealized_usd", "unrealized_pct",
             "days_to_expiry", "expires_today", "giveback", "peak_gain_pct")
-    rows, quiet = [], []
+    rows = []
     for row in section["positions"]:
         if row["symbol"] in hidden:
-            quiet.append(row["symbol"])
             continue
         out = {k: row[k] for k in keep if row.get(k) is not None}
         thesis = row.get("thesis") or {}
@@ -155,10 +156,10 @@ def _positions(db: Session, now_et: datetime, hidden: set[str] = frozenset()) ->
             out["since_entry"] = [f"{line['text']}" + (f" (as of {line['as_of']})" if line.get("as_of") else "")
                                   for line in since["lines"] if line["key"] in ("underlying", "mark", "iv", "held")]
         rows.append(out)
+    rows = rows[:trader_context.MAX_POSITIONS]  # the same eight as before a ticker was hidden, less the hidden
     rows.sort(key=lambda r: (not r.get("expires_today"), r.get("days_to_expiry", 10_000)))
     out = {"state": "ok", "count": section["count"] - len(quiet), "shown": len(rows), "positions": rows}
     if quiet:
-        from app.ai.copilot_context import not_followed_line
         out["not_followed"] = not_followed_line(quiet)
     return out
 
@@ -438,7 +439,7 @@ def build_pack(db: Session, now: float, calendar=None) -> dict:
     today = now_et.date()
     from app.engine import day_journal
     hidden = day_journal.quiet(db)  # a ticker hidden on the desk stays out of the brief: one line in positions says it exists
-    positions = _section("positions", lambda: _positions(db, now_et, hidden))
+    positions = _section("positions", lambda: _positions(db, now_et))
     held = [p["symbol"] for p in positions.get("positions", [])]
     plans = _section("plans", lambda: _plans(db, hidden))
     planned = [p["symbol"] for p in plans.get("plans", [])]

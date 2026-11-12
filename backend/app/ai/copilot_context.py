@@ -164,15 +164,11 @@ def _render(record: dict) -> dict:
 def _positions(db, symbol: str | None, now_et: datetime, reads=None) -> dict:
     """The open positions through ``trader_context`` (one call a turn): the turn's symbol first, with its since-entry
     diff and headlines; every position with its thesis object."""
-    from app.engine import day_journal, trader_context
-    from sqlmodel import select
-    from app.models import Trade
+    from app.engine import trader_context
     # A ticker hidden on the desk collapses to one line, unless the turn is about it; the limit grows so it never
     # pushes a followed position out.
-    hidden = day_journal.quiet(db) - {symbol}
-    extra = len(db.exec(select(Trade.id).where(Trade.status == "open", Trade.ticker.in_(hidden))).all()) if hidden else 0
-    found = trader_context.for_symbol(symbol, now_et.timestamp(), session=db, limit=MAX_POSITIONS + extra, reads=reads)
-    quiet = [r["symbol"] for r in found["positions"] if r["symbol"] in hidden]
+    hidden, quiet = hidden_positions(db, symbol)
+    found = trader_context.for_symbol(symbol, now_et.timestamp(), session=db, limit=MAX_POSITIONS + len(quiet), reads=reads)
     rows = [_render(r) for r in found["positions"] if r["symbol"] not in hidden][:MAX_POSITIONS]
     from app.engine.option_rolls import unresolved_rolls
     unresolved = unresolved_rolls(db)
@@ -183,6 +179,20 @@ def _positions(db, symbol: str | None, now_et: datetime, reads=None) -> dict:
             **({"unresolved_rolls": rolls, "unresolved_rolls_total": len(unresolved), "unresolved_rolls_note": "The broker's email names no contracts, so these positions and "
                 "their realized P&L may be wrong until this resolves: the rolled-out contract can still show as held, or as expired worthless."} if rolls else {}),
             "units": found["units"]}
+
+
+def hidden_positions(db, symbol: str | None = None) -> tuple[set[str], list[str]]:
+    """The tickers set to not followed on the desk (less the turn's own ``symbol``) and one entry per open position in
+    them (the book's own rows: Webull left out), read from the journal so a large book never hides one uncounted."""
+    from sqlmodel import select
+    from app.engine import day_journal
+    from app.models import Account, Trade
+    hidden = day_journal.quiet(db) - {symbol}
+    if not hidden:
+        return hidden, []
+    tickers = db.exec(select(Trade.ticker).join(Account, Account.id == Trade.account_id)
+                      .where(Trade.status == "open", Trade.ticker.in_(hidden)).where(copilot_book._not_webull())).all()
+    return hidden, sorted(tickers)
 
 
 def not_followed_line(symbols: list[str]) -> str:
