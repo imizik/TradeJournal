@@ -686,7 +686,8 @@ const nyClock = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString
  * What needs a decision now, in the strip's documented order (docs/copilot-lab.md § The Needs-you strip), followed
  * tickers only. Nothing else may appear: never "no plan" on its own, a plan offer, an expiry later than today, Close the
  * day or a rating.
- * 1. a position alert that fired today (give-back, wrong way, held an hour; ``alerts``, the session read's);
+ * 1. a position alert that fired today and is not yet answered (give-back, wrong way, held an hour; ``alerts``, the
+ *    session read's; a rating on the phone or the desk counts as the decision);
  * 2. a confirmed plan's level reached: a position past its invalidation, or an armed plan whose entry or invalidation
  *    was hit today (``plans``); or a card waiting for Confirm or Dismiss;
  * 3. before the close, an option that expires today, with or without a plan (after 16:00 it has expired);
@@ -710,7 +711,7 @@ export function deskNeeds({ rows, alerts = [], plans = [], day, closing, fills, 
   const positionOf = (symbol: string, tradeId?: string) =>
     followed.find(r => tradeId && r.key === `trade:${tradeId}`) ?? followed.find(r => r.symbol === symbol && r.book) ?? followed.find(r => r.symbol === symbol) ?? null;
   for (const alert of alerts) {
-    if (!alert.today || EXPIRY_ALERTS.has(alert.kind) || hidden.has(alert.symbol)) continue;
+    if (!alert.today || alert.feedback || EXPIRY_ALERTS.has(alert.kind) || hidden.has(alert.symbol)) continue; // answered: decided
     const row = positionOf(alert.symbol, alert.trade_id);
     if (!row) continue; // no longer held, or a ticker not followed
     add({ key: `alert:${alert.id}`, kind: "alert", rank: 1, symbol: alert.symbol, row, at: alert.at,
@@ -718,7 +719,7 @@ export function deskNeeds({ rows, alerts = [], plans = [], day, closing, fills, 
   }
   for (const row of followed.filter(r => r.book?.state === "past_stop"))
     add({ key: `level:${row.key}`, kind: "level", rank: 2, symbol: row.symbol, row, at: null, title: `${row.title}: past its invalidation`, detail: null });
-  for (const plan of plans.filter(p => p.stage === "armed" && !hidden.has(p.symbol))) {
+  for (const plan of plans.filter(p => p.stage === "armed" && !hidden.has(p.symbol) && followed.some(r => r.symbol === p.symbol))) {
     for (const [role, level] of [["entry", plan.entry], ["invalidation", plan.invalidation]] as const) {
       if (level?.state !== "hit" || !level.hit_at || nyDay(new Date(level.hit_at * 1000)) !== day) continue;
       const row = followed.find(r => r.investigationId === plan.investigationId) ?? positionOf(plan.symbol);

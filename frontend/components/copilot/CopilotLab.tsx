@@ -521,8 +521,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const needs = on && rowsRead ? deskNeeds({ rows, alerts: session.data?.to_answer?.alerts?.rows ?? [], plans, day: nyDay(), closing: closingNow,
     fills: fills.waiting.length, opened }) : [];
   // What the strip could not check: said in one quiet line instead of an empty strip that looks like "nothing waits".
-  const unchecked = !on ? null : rowsFailed && !rowsFresh ? "positions"
-    : sections?.positions === "unavailable" ? "positions" : session.error ? "today's alerts"
+  const unchecked = !on ? null : rowsFailed || sections?.positions === "unavailable" ? "positions"
+    : sections?.plans === "unavailable" ? "plans" : session.error ? "today's alerts"
     : session.data?.sections?.alerts_to_answer === "unavailable" ? "today's alerts" : null;
   const openNeed = (row: DeskThread) => { setPicked(row.symbol); openRow(row); setSheet(true); };
   // The same words as the copilot's own "Why is it moving?" about that ticker, sent in today's conversation.

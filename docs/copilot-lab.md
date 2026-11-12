@@ -546,8 +546,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   there is none and the strip is absent. Nothing in it is dismissed and there is no Seen: the strip shows the single
   top item with its own answers, and **+N more** opens every other item at once, each with its own answers. The rules
   (`lib/desk.ts` `deskNeeds`), followed tickers only, in this order:
-  1. a position alert that fired today (give-back, wrong way, held an hour; the session read's `to_answer.alerts`
-     rows marked `today`): "NBIS 11/14/26 105C: give-back alert at 10:31 AM", **Open it**, **Ask why** (sends "Why is
+  1. a position alert that fired today and is not answered yet (give-back, wrong way, held an hour; the session
+     read's `to_answer.alerts` rows marked `today`; a rating on the phone or the desk counts as the decision): "NBIS 11/14/26 105C: give-back alert at 10:31 AM", **Open it**, **Ask why** (sends "Why is
      NBIS moving today?" in today's conversation);
   2. a confirmed plan's level reached: a position past its invalidation (its book tag Past stop), or an armed plan
      whose entry or invalidation was hit today ("CRWV plan: entry 99.00 reached at 10:12 AM", **Open the plan**, Ask
@@ -564,8 +564,9 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   ⌘K) or anything about ratings. A position's P&L and distance to its stop are the book row's, so an item names only
   what happened. Amber on the desk means this strip and nothing else: tabs, tags, buttons and verdicts elsewhere are
   neutral. It shows on every desk view that shows the book: Now, a saved conversation (`?thread=`, Main chat included)
-  and a position's desk view. When a read it depends on fails (the thread list's, its positions section, the session
-  read or its alerts), one quiet grey line says so ("Needs you could not check today's alerts just now; it will read
+  and a position's desk view. A plan item appears only for a ticker with a followed row. Opening a ticker by a link
+  (a phone ping's, `?symbol=`, `?thread=`) counts as opening it. When a read it depends on fails (the thread list's,
+  its positions or plans section, the session read or its alerts), one quiet grey line says so ("Needs you could not check today's alerts just now; it will read
   again in a minute.") instead of an empty strip that looks like nothing waits.
 
   No longer in the strip (each can come back if the owner asks): an option expiring in one to three days with no

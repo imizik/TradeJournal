@@ -812,7 +812,6 @@ test("after the close questions, Close the day asks only the fills to link, neve
   // One close question and one fill to link; today's unanswered alert and Radar hit are not asked or counted.
   await page.getByRole("button", { name: "Close the thread list" }).click();
   const strip = page.getByTestId("needs-you");
-  await strip.getByRole("button", { name: /more/ }).click();
   await expect(page.getByTestId("close-the-day")).toHaveText("Close the day · 2 to review →"); // the day report's link, not the strip
   await expect(strip.getByText(/Close the day/)).toHaveCount(0);
   await command(page, "Close the day");

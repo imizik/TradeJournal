@@ -163,6 +163,15 @@ for (const [view, path] of [["Now", "/copilot-lab"], ["a saved conversation", `/
   }
 }
 
+test("an alert already answered (rated on the phone or the desk) is decided: it leaves the strip on its own", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const answered = { ...giveback("AAPL", "AAPL 11/20/26 320P", "aapl", "2026-11-13T14:45:00Z"), feedback: { rating: "already_aware", reason: null } };
+  await open(page, { time: FRIDAY, threads: [orcl("matched"), AAPL], session: { ...IN_SESSION, to_answer: { alerts: { count: 0, rows: [answered] }, radar: null } } });
+  await expect(page.getByTestId("desk-book").getByRole("button", { name: /^AAPL / })).toBeVisible();
+  await expect(strip(page).getByText(/AAPL/)).toHaveCount(0);
+  await expect(strip(page).getByTestId("needs-you-title")).toHaveText("ORCL 11/13/26 160C expires today"); // the rest stays
+});
+
 test("when a read the strip depends on fails, it says so in one quiet line instead of showing nothing", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await open(page, { time: FRIDAY, session: { ...IN_SESSION, sections: { alerts_to_answer: "unavailable" }, to_answer: { alerts: null, radar: null } } });
