@@ -378,7 +378,7 @@ test("the strip shows the top decision and +N more lists every other at once, ea
   await expect(page.getByLabel("Seen")).toHaveCount(0);
   // Opening the card's thread clears its item; the rest stay.
   await more.filter({ hasText: "APLD" }).getByRole("button", { name: "Open the card" }).click();
-  await expect(strip.getByRole("button", { name: "+1 more ▾" })).toBeVisible();
+  await expect(strip.getByRole("button", { name: /^\+1 more/ })).toBeVisible(); // the list stays open: "+1 more ▴"
   // A book of positions with no plan, no alert and nothing expiring today: no strip at all.
   await page.unroute("**/copilot/desk/threads");
   await page.unroute("**/copilot/desk/session");
@@ -761,7 +761,7 @@ test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip 
   await review.getByRole("button", { name: "Skip" }).click();
   await expect(review).toHaveCount(0);
   await expect(conversation(page).getByText("CRWV answer: short under 99.00.")).toBeVisible(); // the last one: the pass ends here
-  await expect(page.getByTestId("needs-you")).not.toContainText("Close the day");
+  await expect(page.getByTestId("needs-you").getByText(/Close the day/)).toHaveCount(0); // the strip may be absent
 
   await page.keyboard.press("j"); // J / K still walk the threads
   await expect(conversation(page).getByText("APLD answer: enter at 31.00.")).toBeVisible();
@@ -814,7 +814,7 @@ test("after the close questions, Close the day asks only the fills to link, neve
   const strip = page.getByTestId("needs-you");
   await strip.getByRole("button", { name: /more/ }).click();
   await expect(page.getByTestId("close-the-day")).toHaveText("Close the day · 2 to review →"); // the day report's link, not the strip
-  await expect(strip).not.toContainText("Close the day");
+  await expect(strip.getByText(/Close the day/)).toHaveCount(0);
   await command(page, "Close the day");
   await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible();
   await page.getByRole("region", { name: "Close of day" }).getByRole("button", { name: "Skip" }).click();

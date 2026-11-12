@@ -87,21 +87,22 @@ const PINGS_SUMMARY = "4 alerts · selling at the alert would have been better o
   + "2 Radar hits · 1 kept going · 1 not measured · paper: 0 of 1 setup green";
 
 for (const width of [1440, 375]) {
-  test(`the day report is one card of three lines that open their rows on tap, asking nothing (${width} px)`, async ({ page }) => {
+  test(`the day report is one card of four lines that open their rows on tap, asking nothing (${width} px)`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
     const writes = await now_(page);
     const card = page.getByTestId("day-report-card");
     await expect(page.getByTestId("day-report-card")).toHaveCount(1); // one card, not ten
-    await expect(card.locator(":scope > details")).toHaveCount(3);
+    await expect(card.locator(":scope > details")).toHaveCount(4);
     // In this order, each a single line.
     await expect(card.locator(":scope > details > summary")).toHaveText([
       /^Today · 3 entries, 2 with a plan saved before the fill/,
       new RegExp(`^How the pings did · ${PINGS_SUMMARY.replace(/[$.]/g, "\\$&")}`),
       /^Calls checked, last 30 days, since you checked: 14 · 5 up, 7 down, 2 not measured · Today: 4 \(1 up, 1 down, 2 not measured\)/,
+      /^Open without a plan · AAPL/, // the one place the desk names it: the book shows no tag and the strip never asks
     ]);
-    // Realized P&L is the top bar's and a position without a plan is the book's: neither is repeated in the card.
+    // Realized P&L is the top bar's: not repeated in the card.
     await expect(page.getByTestId("desk-pnl")).toContainText("Realized today +$245");
-    await expect(card).not.toContainText(/realized|\$245|Open without a plan/i);
+    await expect(card).not.toContainText(/realized|\$245/i);
     await expect(card.getByTestId("pings-alert").first()).toBeHidden(); // collapsed by default
     await expect(page.getByTestId("pings-recap")).toHaveCount(0); // the pings are folded in, never shown twice
     expect(pingUrls.every(url => url.includes("day_only=true"))).toBe(true); // today's pings only
@@ -132,15 +133,16 @@ test("a line with nothing in it is absent", async ({ page }) => {
   await now_(page, PINGS,
     { ...REPORT, entries: { entries: 0, planned: 0, late: 0, pending: 0, rows: [] }, checks: { ...REPORT.checks, window: { days: 30, checked: 0, up: 0, down: 0, flat: 0, not_measured: 0 }, today: { checked: 0, up: 0, down: 0, flat: 0, not_measured: 0 }, rows: [] } },
     []);
-  // Only the pings remain of the three lines; no Close the day button of its own (it is in ⌘K, and in the strip when anything is left).
+  // Only the pings remain of the four lines (no open position here). Close the day is one quiet link under the card
+  // (and in ⌘K), never the strip.
   await expect(page.getByTestId("day-report-card").locator(":scope > details > summary")).toHaveText([/^How the pings did/]);
-  await expect(page.getByTestId("day-report")).not.toContainText("Close the day");
+  await expect(page.getByTestId("close-the-day")).toHaveText("Close the day →");
 });
 
 test("a day with nothing at all says so in one sentence", async ({ page }) => {
   await now_(page, { ...PINGS, alerts: { state: "ok", rows: [] }, radar: { state: "off", reason: "off", rows: [] } },
     { ...REPORT, entries: { entries: 0, planned: 0, late: 0, pending: 0, rows: [] }, checks: null }, [], 0);
-  await expect(page.getByTestId("day-report-card")).toHaveText("Nothing to report today: no entries, pings or checked calls.");
+  await expect(page.getByTestId("day-report-card")).toHaveText("Nothing to report today: no entries, pings, checked calls or open options without a plan.");
 });
 
 test("Watch today sits under the day report only once today's replay was kept", async ({ page }) => {
