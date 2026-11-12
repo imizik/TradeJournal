@@ -391,20 +391,22 @@ def build(db: Session, now: float) -> dict:
     hidden = today._section(db, "feed hidden", lambda: _hidden(db))
     mine = (book.get("held", set()) | book.get("plans", set())) - hidden.get("symbols", set())
     symbols = sorted(mine)
+    # The headlines and the Radar file wait on a provider or a file, not the journal: they start here, side by side,
+    # and the journal's sections run beside them.
+    since = today._section(db, "feed news window", lambda: {"state": "ok", "since": _news_since(day)})
+    ahead = {"radar": today._ahead("feed radar", lambda: _radar(day))}
+    if since["state"] == "ok":
+        ahead["news"] = today._ahead("feed news", lambda: _news(symbols, since["since"], moment))
+        ahead["market news"] = today._ahead("feed market news", lambda: _market_news(since["since"], moment))
     pings = today._section(db, "feed pings", lambda: _pings(db, now))
     pinged = {(r["symbol"], r.get("kind")) for r in pings.get("rows", [])}
-    parts = {
-        "pings": pings,
-        "plans": today._section(db, "feed plans", lambda: _plans(db, now, pinged)),
-        "radar": today._section(db, "feed radar", lambda: _radar(day)),
-        "radar setups": today._section(db, "feed radar setups", lambda: _setups(db, day)),
-        "brief": today._section(db, "feed brief", lambda: _brief(db, day, mine)),
-        "calendar": today._section(db, "feed calendar", lambda: _calendar(symbols, day, now)),
-    }
-    since = today._section(db, "feed news window", lambda: {"state": "ok", "since": _news_since(day)})
+    plans = today._section(db, "feed plans", lambda: _plans(db, now, pinged))
+    setups = today._section(db, "feed radar setups", lambda: _setups(db, day))
+    brief = today._section(db, "feed brief", lambda: _brief(db, day, mine))
+    calendar = today._section(db, "feed calendar", lambda: _calendar(symbols, day, now))
+    parts = {"pings": pings, "plans": plans, "radar": ahead["radar"].get(), "radar setups": setups, "brief": brief, "calendar": calendar}
     if since["state"] == "ok":
-        parts["news"] = today._section(db, "feed news", lambda: _news(symbols, since["since"], moment))
-        parts["market news"] = today._section(db, "feed market news", lambda: _market_news(since["since"], moment))
+        parts["news"], parts["market news"] = ahead["news"].get(), ahead["market news"].get()
     else:
         parts["news"] = parts["market news"] = since
     parts["book"], parts["hidden"] = book, hidden

@@ -19,6 +19,7 @@ The only ids out are the ones each row links to: trade ids, Radar event ids and 
 
 from datetime import UTC, date, datetime
 import logging
+import threading
 import time
 import uuid
 from urllib.parse import urlencode
@@ -40,12 +41,47 @@ _now = time.time  # tests pin the clock here
 
 
 def _section(db: Session, name: str, build):
-    try:
-        return build()
-    except Exception as exc:  # one failing source must not take the screen down
-        log.warning("today %s unavailable: %s", name, type(exc).__name__)
-        db.rollback()  # a failed read must not leave the session unusable for the next section
-        return {"state": "unavailable"}
+    """One source, failing on its own; its time is recorded under ``name`` (``request_timing``) on a timed request."""
+    from app.engine.request_timing import timed
+    with timed(name):
+        try:
+            return build()
+        except Exception as exc:  # one failing source must not take the screen down
+            log.warning("today %s unavailable: %s", name, type(exc).__name__)
+            if db is not None:
+                db.rollback()  # a failed read must not leave the session unusable for the next section
+            return {"state": "unavailable"}
+
+
+_AHEAD = None
+_AHEAD_LOCK = threading.Lock()
+
+
+class _Ahead:
+    def __init__(self, future):
+        self._future = future
+
+    def get(self) -> dict:
+        return self._future.result()
+
+
+def _start(fn):
+    """``fn()`` started now on the shared worker pool, the request's timer riding along; its ``Future``. ``fn`` must not
+    touch the request's database session."""
+    import contextvars
+    from concurrent.futures import ThreadPoolExecutor
+    global _AHEAD
+    with _AHEAD_LOCK:
+        if _AHEAD is None:
+            _AHEAD = ThreadPoolExecutor(max_workers=16, thread_name_prefix="desk-ahead")
+    return _AHEAD.submit(contextvars.copy_context().run, fn)
+
+
+def _ahead(name: str, build) -> _Ahead:
+    """A section that waits on a provider or the Radar file and reads no journal, started now on a worker thread so the
+    journal sections run beside it; ``.get()`` waits for it and gives what ``_section`` would (its own failure, its
+    time recorded under ``name``). ``build`` must not touch the request's database session."""
+    return _Ahead(_start(lambda: _section(None, name, build)))
 
 
 def _iso(stamp: float) -> str:
