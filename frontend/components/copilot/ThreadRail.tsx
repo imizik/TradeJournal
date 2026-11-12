@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight, Home } from "lucide-react";
+import { useKeptState } from "@/components/copilot/DeskMemory";
 import { KBD, useJumpKey } from "@/components/copilot/CommandPalette";
 import PlanList from "@/components/copilot/PlanList";
 import type { HomeActions } from "@/components/copilot/CopilotPanel";
@@ -248,7 +249,8 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
 }) {
   const [data, setData] = useState<DeskThreads | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState<InvestigationSummary[]>([]);
+  // The saved conversations' last read, kept for a remount: a book row opens its conversation before the list reads again.
+  const [saved, setSaved] = useKeptState<InvestigationSummary[]>("desk.saved", []);
   const [more, setMore] = useState(false);
   const [opened, setOpened] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
@@ -283,7 +285,7 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
     const shown = () => { if (document.visibilityState === "visible") read(); };
     document.addEventListener("visibilitychange", shown);
     return () => { controller.abort(); clearInterval(timer); document.removeEventListener("visibilitychange", shown); };
-  }, [refresh]);
+  }, [refresh, setSaved]);
   useEffect(() => { onSaved?.(saved); }, [saved, onSaved]);
 
   const unread = (row: DeskThread) => row.group === "new" && row.changedAt !== null && row.changedAt > (seen[row.key] ?? 0);

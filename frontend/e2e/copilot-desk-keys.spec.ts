@@ -393,11 +393,103 @@ test("a held ticker with no conversation opens its desk view in one tap from the
   const rows = page.getByTestId("desk-book").getByRole("button", { name: /^AAPL/ });
   await expect(rows).toHaveCount(2);
   await expect(rows.first()).toContainText("No plan yet");
-  // A production build follows the row's link at once (the 20 s "Rendering" stall seen once was the development server).
+  // The row's link is followed in place: no server render, the address changes and the copilot starts its conversation.
   await rows.first().click();
-  await expect(page).toHaveURL(/\/copilot-lab\?symbol=AAPL&context=Plan/, { timeout: 10_000 });
+  await expect(page).toHaveURL(/\/copilot-lab\?symbol=AAPL&context=Plan/);
   await expect(page.getByTestId("desk-breadcrumb")).toHaveText("AAPL›Decision");
   await expect(page.getByLabel("Message")).toHaveValue(/^Context: Plan this position/);
+});
+
+/** Held positions with no conversation: a book row each, whose link is the symbol's desk view with its plan question. */
+const unplanned = (symbol: string, usd: number) => row({ key: `trade:${symbol}`, group: "watch", symbol, title: `${symbol} 11/20/26 50C`,
+  instrument: "11/20/26 50C", value: { text: `+$${usd}.00`, tone: "gain" }, status: { text: "No plan yet", tone: "muted" }, trade_id: symbol,
+  path: `/copilot-lab?symbol=${symbol}&context=${encodeURIComponent(`Plan this position: ${symbol} without a plan.`)}`,
+  book: { usd, pct: 10, expiry: "2026-11-20", days_held: 2, track: null, state: "no_plan", stop_pct: null } });
+
+/** Watch the desk for the rest of the page's life: was the book ever empty or reading, and did the desk remount? */
+async function watchDesk(page: Page) {
+  await page.evaluate(() => {
+    const w = window as unknown as { deskWatch: { emptied: number; root: Element | null; remounted: boolean } };
+    w.deskWatch = { emptied: 0, root: document.querySelector("[data-sheet]"), remounted: false };
+    const look = () => {
+      const book = document.querySelector("[data-testid=desk-book]");
+      if (!book || !book.querySelector("ul li") || /Reading positions/.test(book.textContent ?? "")) w.deskWatch.emptied++;
+      if (document.querySelector("[data-sheet]") !== w.deskWatch.root) w.deskWatch.remounted = true;
+    };
+    new MutationObserver(look).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  return () => page.evaluate(() => (window as unknown as { deskWatch: { emptied: number; remounted: boolean } }).deskWatch);
+}
+
+test("selecting positions in the book switches the copilot in place: the book never reads again, Back and reload land on the right one", async ({ page }) => {
+  let reads = 0;
+  await lab(page, { showThreads: false, threads: () => { reads++; return { ...DESK, threads: [...DESK.threads, unplanned("AMD", 40), unplanned("TSLA", 60), unplanned("PLTR", 80)] }; } });
+  const book = page.getByTestId("desk-book");
+  await expect(book.getByRole("button", { name: /^PLTR / })).toBeVisible();
+  const watched = await watchDesk(page);
+  const before = reads;
+  for (const symbol of ["AMD", "TSLA", "PLTR"]) {
+    await book.getByRole("button", { name: new RegExp(`^${symbol} `) }).click();
+    await expect(page).toHaveURL(new RegExp(`/copilot-lab\\?symbol=${symbol}&context=Plan`));
+    await expect(page.getByTestId("desk-breadcrumb")).toHaveText(`${symbol}›Decision`);
+    await expect(page.getByLabel("Message")).toHaveValue(`Context: Plan this position: ${symbol} without a plan.\n\n`);
+  }
+  // A saved conversation in between, then back to a position: the copilot follows (it used to stay on the conversation).
+  await book.getByRole("button", { name: /^NBIS / }).click();
+  await expect(page).toHaveURL(`/copilot-lab?thread=${NBIS}`);
+  await expect(conversation(page)).toContainText("NBIS answer: hold above 92.30.");
+  await book.getByRole("button", { name: /^PLTR / }).click();
+  await expect(page.getByTestId("desk-breadcrumb")).toHaveText("PLTR›Decision");
+  await expect(conversation(page)).not.toContainText("NBIS answer");
+  expect(reads, "a click never reads the book again").toBe(before);
+  expect(await watched()).toEqual({ emptied: 0, remounted: false, root: expect.anything() });
+
+  // Back walks the same steps in place: the conversation, then each position.
+  await page.goBack();
+  await expect(page).toHaveURL(`/copilot-lab?thread=${NBIS}`);
+  await expect(conversation(page)).toContainText("NBIS answer: hold above 92.30.");
+  await page.goBack();
+  await expect(page).toHaveURL(/symbol=PLTR&/);
+  await expect(page.getByTestId("desk-breadcrumb")).toHaveText("PLTR›Decision");
+  await page.goBack();
+  await expect(page).toHaveURL(/symbol=TSLA&/);
+  await expect(page.getByTestId("desk-breadcrumb")).toHaveText("TSLA›Decision");
+  await expect(page.getByLabel("Message")).toHaveValue("Context: Plan this position: TSLA without a plan.\n\n");
+  expect(reads).toBe(before);
+  expect(await watched()).toMatchObject({ emptied: 0, remounted: false });
+  // A reload lands on the same position, as a fresh load of its link.
+  await page.reload();
+  await expect(page.getByTestId("desk-breadcrumb")).toHaveText("TSLA›Decision");
+  await expect(page.getByLabel("Message")).toHaveValue("Context: Plan this position: TSLA without a plan.\n\n");
+  await expect(book.getByRole("button", { name: /^TSLA / })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("Now in the top bar opens today's Main chat in place from a position", async ({ page }) => {
+  const MAIN = "66666666-6666-4666-8666-666666666666";
+  const main = { ...saved(MAIN, "", "Main answer: the day so far."), symbol: null, title: "Main chat", main_day: "2026-10-23" };
+  await page.route("**/copilot/main-chat", (route) => route.fulfill({ json: main }));
+  await page.route(`**/copilot/investigations/${MAIN}`, (route) => route.fulfill({ json: main }));
+  await lab(page, { showThreads: false, path: "/copilot-lab?symbol=AMD", threads: () => ({ ...DESK, threads: [...DESK.threads, unplanned("AMD", 40)] }) });
+  await expect(page.getByTestId("desk-breadcrumb")).toHaveText("AMD›Decision");
+  const watched = await watchDesk(page);
+  await page.getByRole("link", { name: "Now" }).click();
+  await expect(page).toHaveURL(`/copilot-lab?thread=${MAIN}`);
+  await expect(conversation(page)).toContainText("Main answer: the day so far.");
+  await expect(page.getByTestId("desk-breadcrumb")).toHaveCount(0);
+  expect(await watched()).toMatchObject({ emptied: 0, remounted: false });
+  // Already on Main chat, Now adds no step.
+  const steps = await page.evaluate(() => history.length);
+  await page.getByRole("link", { name: "Now" }).click();
+  expect(await page.evaluate(() => history.length)).toBe(steps);
+  await expect(page).toHaveURL(`/copilot-lab?thread=${MAIN}`);
+  // A position picked in place, then the app menu's Desk (a plain link to the bare address): back on Main chat.
+  await page.getByTestId("desk-book").getByRole("button", { name: /^AMD / }).click();
+  await expect(page.getByTestId("desk-breadcrumb")).toHaveText("AMD›Decision");
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await page.getByRole("link", { name: "Desk" }).first().click();
+  await expect(page).toHaveURL(`/copilot-lab?thread=${MAIN}`);
+  await expect(conversation(page)).toContainText("Main answer: the day so far.");
+  await expect(page.getByTestId("desk-breadcrumb")).toHaveCount(0);
 });
 
 test("before the open the book's lower block is the morning brief alone, cut short; a closed day says so", async ({ page }) => {

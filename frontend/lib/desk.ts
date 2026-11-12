@@ -4,10 +4,11 @@
  * bar, inspector and palette build against the types below. See docs/copilot-lab.md#the-desk.
  */
 
+import type { PanelLink } from "@/components/copilot/CopilotPanel";
 import type { PlanPosition } from "@/components/dashboard/PlansCard";
 import type { AlertFeedback } from "@/lib/alertFeedback";
 import { api, apiUrl } from "@/lib/api";
-import { UUID_RE, type ExitLesson, type InvestigationSummary, type PlanBoardLevel, type PlanBoardRow, type PlansBoard } from "@/lib/copilot";
+import { UUID_RE, readDeepLink, type ExitLesson, type InvestigationSummary, type PlanBoardLevel, type PlanBoardRow, type PlansBoard } from "@/lib/copilot";
 import type { RadarRating } from "@/lib/radar";
 
 /** The phone's three tabs; on a wide screen every pane shows at once. */
@@ -16,7 +17,11 @@ export type DeskTab = "threads" | "thread" | "context";
 /** What the desk asks the conversation to do: open a saved investigation (with ``text`` in the box, unsent), send one
  * prompt across everything, put a question in the message box unsent (the decision bar's Ask why), or leave the open
  * conversation saved and go back to Main (``home``). */
-export type DeskCommand = { kind: "open"; id: string; n: number; text?: string } | { kind: "ask"; text: string; n: number } | { kind: "fill"; text: string; n: number } | { kind: "home"; n: number };
+export type DeskCommand = { kind: "open"; id: string; n: number; text?: string } | { kind: "ask"; text: string; n: number } | { kind: "fill"; text: string; n: number } | { kind: "home"; n: number }
+  /** A desk link the desk follows in place (``deskLinkIn``): a new conversation on it, as a fresh load of it starts. */
+  | { kind: "link"; link: PanelLink; n: number }
+  /** Now in place: today's Main chat, as the desk's bare address opens it. */
+  | { kind: "now"; n: number };
 
 /** The conversation's open investigation, reported up so the inspector can show its context. */
 export type DeskThreadRef = { id: string; symbol: string | null; title: string; refreshKey: number; mainDay?: string | null };
@@ -334,6 +339,19 @@ export const needingCount = (rows: DeskThread[], day: string | null) =>
   new Set(rows.filter(r => r.symbol && r.group !== "pinned" && !r.key.startsWith("radar:") && needsYou(r, day)).map(r => r.symbol)).size;
 
 /** The conversation the address names (?thread=, or a deep link's ?investigation=), lower case; null when none. */
+/** The parameters a desk link may carry and still be followed in place: a symbol, its context line, its origin and drawn plan. */
+const IN_PLACE = new Set(["symbol", "context", "origin", "plan"]);
+
+/** A desk address (``/copilot-lab?…``) the desk can follow without reloading: a symbol or context link with nothing else
+ * (no investigation, Radar hit, screenshot, close pass, ticket or thread). Null for anything a fresh load must handle. */
+export function deskLinkIn(href: string): PanelLink | null {
+  let url: URL;
+  try { url = new URL(href, "http://desk.invalid"); } catch { return null; }
+  if (url.pathname !== "/copilot-lab" || [...url.searchParams.keys()].some(key => !IN_PLACE.has(key))) return null;
+  const link = readDeepLink(Object.fromEntries(url.searchParams));
+  return link && !link.investigation ? link : null;
+}
+
 export function threadInUrl() {
   const params = new URLSearchParams(window.location.search);
   const id = params.get("thread") ?? params.get("investigation");

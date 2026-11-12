@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ChartCandlestick } from "lucide-react";
+import { useKept } from "@/components/copilot/DeskMemory";
 import { openTicket } from "@/components/copilot/DeskTicket";
 import PlanLadder, { daysTo } from "@/components/copilot/PlanLadder";
 import SinceEntry from "@/components/SinceEntry";
@@ -143,9 +144,11 @@ export function FollowPick({ following, onChange }: { following: boolean; onChan
 }
 
 /** The header alone, for a thread whose plan and position were already read. */
-export function ThreadHead({ thread, data, draft = false, horizon = null, onHorizon, stage = null, adopted = false, following = null, onFollow }: {
+export function ThreadHead({ thread, data, draft = false, horizon = null, onHorizon, stage = null, adopted = false, following = null, onFollow, updating = false }: {
   thread: DeskThreadRef; data: DeskThreadPlan | null; draft?: boolean; horizon?: DeskHorizon | null; onHorizon?(horizon: DeskHorizon): Promise<void>;
   stage?: string | null; adopted?: boolean; following?: boolean | null; onFollow?(following: boolean): Promise<void>;
+  /** ``data`` is the last read kept on the desk, its fresh read on the way: the prices are dimmed and say so. */
+  updating?: boolean;
 }) {
   const chip = chipOf(data, draft, stage, adopted), meta = stage ? "Position closed" : metaOf(data);
   const chartSymbol = thread.symbol ?? data?.plan?.symbol ?? null;
@@ -165,7 +168,11 @@ export function ThreadHead({ thread, data, draft = false, horizon = null, onHori
         </h2>
         {thesis && <p className="max-w-[60ch] truncate text-sm text-muted-foreground" title={thesis}>{thesis}</p>}
       </div>
-      {data && <div className="sm:pt-5"><PriceBlock symbol={symbol} position={data.position} plan={data.plan} /></div>}
+      {data && (
+        <div className={cn("sm:pt-5", updating && "opacity-50")} title={updating ? "Updating: the last read, a fresh one is on its way" : undefined} aria-busy={updating || undefined}>
+          <PriceBlock symbol={symbol} position={data.position} plan={data.plan} />
+        </div>
+      )}
     </header>
   );
 }
@@ -177,7 +184,8 @@ export function ThreadHead({ thread, data, draft = false, horizon = null, onHori
  * each minute while the page is visible. Nothing for a conversation across everything with no plan. An open position,
  * planned or not, also shows its "Since you entered" lines from its one record (``SinceEntry``), folded to one line once
  * the thread has a conversation so the latest answer stays near the top. ``heldOnly``: a symbol opened with no
- * conversation shows the header only while it has an open position, and ``fallback`` otherwise.
+ * conversation shows the header only while it has an open position, and ``fallback`` otherwise. On the desk, the last read
+ * for the thread shows at once (prices dimmed) while its fresh read is on the way.
  */
 export default function DeskThreadTop({ thread, draft = false, hero = null, compact = false, horizon = null, onHorizon, stage = null, adopted = false, heldOnly = false, fallback = null, following = null, onFollow }: {
   thread: DeskThreadRef | null; draft?: boolean; hero?: ReactNode; compact?: boolean; horizon?: DeskHorizon | null;
@@ -195,6 +203,7 @@ export default function DeskThreadTop({ thread, draft = false, hero = null, comp
     return !was;
   });
   const id = thread?.id, symbol = thread?.symbol ?? null, refreshKey = thread?.refreshKey;
+  const [kept, keep] = useKept<DeskThreadPlan>(id ? `desk.plan:${id}` : null);
   useEffect(() => {
     if (!id) return;
     let controller = new AbortController();
@@ -202,21 +211,22 @@ export default function DeskThreadTop({ thread, draft = false, hero = null, comp
       controller.abort();
       controller = new AbortController();
       const signal = controller.signal;
-      getThreadPlan({ id, symbol }, signal).then(data => { if (!signal.aborted) setRead({ id, data }); }).catch(() => undefined);
+      getThreadPlan({ id, symbol }, signal).then(data => { if (!signal.aborted) { setRead({ id, data }); keep(data); } }).catch(() => undefined);
     };
     load();
     const timer = setInterval(() => { if (document.visibilityState === "visible") load(); }, REFRESH_MS);
     return () => { controller.abort(); clearInterval(timer); };
-  }, [id, symbol, refreshKey]);
+  }, [id, symbol, refreshKey, keep]);
 
   if (!thread) return null;
-  const data = read?.id === thread.id ? read.data : null;
+  const fresh = read?.id === thread.id ? read.data : null;
+  const data = fresh ?? kept ?? null;
   if (!thread.symbol && !data?.plan) return null;
   if (heldOnly && !data?.position) return <>{fallback}</>;
   const held = data?.position && thread.symbol ? data.position : null;
   return (
     <div className="mb-4 space-y-4 border-b pb-4">
-      <ThreadHead thread={thread} data={data} draft={draft} horizon={horizon} onHorizon={onHorizon} stage={stage} adopted={adopted} following={following} onFollow={onFollow} />
+      <ThreadHead thread={thread} data={data} draft={draft} horizon={horizon} onHorizon={onHorizon} stage={stage} adopted={adopted} following={following} onFollow={onFollow} updating={!fresh && !!kept} />
       {held && thread.symbol && !compact && <SinceEntry symbol={thread.symbol} tradeId={held.trade_id} collapsible={!thread.id.startsWith("symbol:")} />}
       {hero}
       {data?.plan && <PlanLadder plan={data.plan} position={data.position} dimmed={draft} compact={compact || !full} onToggle={compact ? undefined : toggleLadder} />}
