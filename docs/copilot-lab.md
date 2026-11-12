@@ -3751,17 +3751,21 @@ same five and six stocks):
 
 | Read | Before: cold / warm / minute | After: cold / warm / minute |
 |---|---|---|
-| `desk/threads` | 760 / 21 / 731 ms | 377 / 18 / 377 ms |
-| `desk/session` | 356 / 2 / 355 ms | 358 / 5 / 358 ms |
-| `desk/feed` | 713 / 7 / 714 ms | 359 / 5 / 360 ms |
-| `desk/sparks` | 358 / 2 / 356 ms | 354 / 3 / 355 ms |
-| scorecard, day report, pings | 1–4 ms each | 1–3 ms each |
-| `positions/{symbol}/context` (opening a position) | 1097 / 11 / 1079 ms | 379 / 12 / 369 ms |
-| **first paint, all seven reads at once** | **1106 / 743 / 770 ms** | **419 / 390 / 397 ms** |
+| `desk/threads` | 727 / 14 / 722 ms | 400 / 20 / 386 ms |
+| `desk/session` | 358 / 2 / 353 ms | 359 / 8 / 361 ms |
+| `desk/feed` | 708 / 3 / 711 ms | 363 / 11 / 362 ms |
+| `desk/sparks` (five symbols) | 1061 / 1 / 1065 ms | 710 / 2 / 711 ms |
+| scorecard, day report, pings | 1–2 ms each | 2–6 ms each |
+| `positions/{symbol}/context` (opening a position) | 1093 / 21 / 1083 ms | 379 / 11 / 361 ms |
+| **first paint, all seven reads at once** | **1424 / 1073 / 1084 ms** | **1083 / 735 / 729 ms** |
 
 Cold is the first request after a start (empty caches, no Robinhood snapshot); minute is the minute boundary, every
-provider cache expired and the Robinhood snapshot due. The cold first paint also paid the market calendar, which a
-fresh process holds only in memory: the startup warm-up now reads it. What changed:
+provider cache expired and the Robinhood snapshot due; both columns measured the same morning (after 04:00 New York,
+when today's minute bars are read). The cold first paint also paid the market calendar, which a fresh process holds
+only in memory: the startup warm-up now reads it. What is left is the sparklines: each symbol's minute bars is its own
+read, and the chart feed lets four go at once (§ above), so twelve symbols are three rounds, and on a cold page they
+take the feed's four places ahead of the other reads. The book's rows do not wait for them (a separate read). What
+changed:
 
 - Robinhood was already never read on a request path: a desk read returns the last snapshot with its own as-of and
   starts one background refresh when it is due (`docs/robinhood-read-feed.md`). A test now holds that for every desk
@@ -3769,9 +3773,12 @@ fresh process holds only in memory: the startup warm-up now reads it. What chang
 - Waits that read no journal start first on a small worker pool (`today._ahead`): the positions' option and stock
   marks (`copilot_book.mark_reads` / `warm_marks`, the same batched calls the positions read made, so it then finds
   them in the quotes' 60-second cache and makes none), the Radar file's reads, the session's index quotes, the feed's
-  two headline reads and the sparklines' quote read. A position's context starts its underlying quote and headline
-  reads before reading its marks (`trader_context._ahead`). The journal's sections run beside them as before, each
-  failing on its own; a test holds each overlap and that no provider call is added.
+  two headline reads and the sparklines' quote read. A position's context starts its marks, its underlying quote (none of
+  its own for a symbol held as stock: the marks' stock batch has it) and its headline reads together before reading
+  the journal (`trader_context._ahead`). The journal's sections run beside them as before, each
+  failing on its own; a test holds each overlap and that no provider call is added. Two edges remain: a ticker the
+  provider answers without a price is not cached, so the section asks for it once more; and the sparklines' quote
+  read now names every requested symbol, one whose minute read failed included (still one call).
 - Nothing new is cached: the journal-only sections (exit habits, the alert scorecard, plan boards, the day report)
   measured 1–25 ms on the bench, so a cache would only risk an old figure. The production timings will say if any of
   them is slow on the real journal.
