@@ -569,3 +569,43 @@ def test_a_failing_lesson_read_leaves_the_plans_view(desk, engine, monkeypatch):
     monkeypatch.setattr(copilot_plans, "last_exit_lessons", lambda db, symbols: 1 / 0)
     [row] = read(desk)["plans"]
     assert (row["stage"], row["last_exit"]) == ("armed", None)
+
+
+# --------------------------------------------------------------------------- the book's tag (docs/copilot-lab.md § The book's tag)
+
+def _position(usd, *, plan=None, giveback=None, since_peak=False):
+    return {"unrealized_usd": usd, "unrealized_pct": None if usd is None else usd / 10, "option": {"expiry": "2026-11-20"},
+            "days_held": 3, "plan": plan, "giveback": giveback, "giveback_since_peak": since_peak}
+
+
+ARMED = {"invalidation": {"price": 92.3, "state": "armed", "distance_pct": -4.0}, "time_stop": None}
+
+
+@pytest.mark.parametrize("position, flagged, state", [
+    # A green position that gave back from its peak (the give-back fired, no new high since): Giving back.
+    (_position(120, giveback="fired", since_peak=True), {"reasons": [{"kind": "giveback"}]}, "giving_back"),
+    # The same alert, fired days ago, on a position now under its entry (AAPL at −89%): never Giving back.
+    (_position(-164, giveback="fired", since_peak=True), {"reasons": [{"kind": "giveback"}]}, "no_plan"),
+    (_position(-164, plan=ARMED, giveback="fired", since_peak=True), {"reasons": [{"kind": "giveback"}]}, "on_plan"),
+    # Fired, then a new high since: the alert is old news.
+    (_position(300, giveback="fired", since_peak=False), {"reasons": [{"kind": "giveback"}]}, "no_plan"),
+    # Red, with a plan: how it stands against the plan.
+    (_position(-80, plan=ARMED), {"reasons": [{"kind": "invalidation_near"}]}, "near_stop"),
+    (_position(-200, plan=ARMED), {"reasons": [{"kind": "invalidation_hit"}]}, "past_stop"),
+    (_position(-200, plan=ARMED), None, "on_plan"),
+    # Red, without a plan.
+    (_position(-55), None, "no_plan"),
+    (_position(None, giveback="fired", since_peak=True), None, "no_plan"),  # no P&L read: not known to be in profit
+])
+def test_the_book_tag_says_what_is_true_now(position, flagged, state):
+    assert copilot_desk._book(position, None, flagged)["state"] == state
+
+
+def test_giving_back_needs_no_new_high_since_the_give_back_fired(monkeypatch):
+    from app.engine import plan_positions
+    watch = {"fired": True, "armed": True, "peak_at": 1_000}
+    alerts = [{"kind": "giveback", "detected_at": 2_000, "delivery": "sent"}]
+    monkeypatch.setattr(plan_positions.position_alerts, "for_trade", lambda db, trade: {"watch": watch, "alerts": alerts})
+    assert plan_positions._watch(None, None)[2] is True
+    watch["peak_at"] = 3_000  # a new high after the alert
+    assert plan_positions._watch(None, None)[2] is False

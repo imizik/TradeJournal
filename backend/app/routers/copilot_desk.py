@@ -410,26 +410,38 @@ def _position_rows(found: dict, links: dict[str, str], board: dict, decided: dic
     return act, watch, covered
 
 
-BOOK_STATES = ("near_stop", "giving_back", "no_plan", "on_plan")  # the cockpit's one tag per row, first match wins
+BOOK_STATES = ("past_stop", "near_stop", "giving_back", "on_plan", "no_plan")  # the cockpit's one tag per row
+
+
+def _book_state(kinds: set[str], planned: bool, gave_back: bool, usd: float | None) -> str:
+    """The book row's one tag, true now (docs/copilot-lab.md § The book's tag), first match wins: ``past_stop`` (the
+    plan's invalidation was hit), ``near_stop`` (within Act now's 1% of it), ``giving_back`` (still in profit now, and
+    the give-back alert fired with no new high since), ``on_plan`` (an invalidation or time stop stands) or
+    ``no_plan``. A position under its entry is never Giving back: it says how it stands against its plan, or No plan."""
+    if "invalidation_hit" in kinds:
+        return "past_stop"
+    if "invalidation_near" in kinds:
+        return "near_stop"
+    if gave_back and usd is not None and usd > 0:
+        return "giving_back"
+    return "on_plan" if planned else "no_plan"
 
 
 def _book(row: dict, plan: dict | None, flagged: dict | None) -> dict:
     """What the desk's book row shows beside the status line (docs/copilot-lab.md § The desk): the position's unrealized
     P&L in dollars and percent, its expiry and days held, where the underlying sits between the plan's invalidation and
-    entry (``meter``; null without both lines), the distance to the invalidation, and one state: ``near_stop`` (Act now
-    flags the invalidation hit or near), ``giving_back`` (the give-back alert fired or flags it), ``no_plan`` (no
-    invalidation and no time stop) or ``on_plan``; ``planned`` says whether there is either (an adopted draft is not yet
-    a plan), whatever the state. Facts only; nothing here is advice."""
+    entry (``meter``; null without both lines), the distance to the invalidation, and one state (``_book_state``);
+    ``planned`` says whether an invalidation or time stop stands (an adopted draft is not yet a plan), whatever the
+    state. Facts only; nothing here is advice."""
     level = (row["plan"] or {}).get("invalidation") or (plan or {}).get("invalidation")
     entry = (plan or {}).get("entry")
     track = meter(entry["price"] if entry else None, level["price"] if level else None, (plan or {}).get("last"), "muted")
     kinds = {r["kind"] for r in (flagged or {}).get("reasons", [])}
     planned = bool(row["plan"]) and bool(level or (row["plan"] or {}).get("time_stop"))
-    state = ("near_stop" if kinds & {"invalidation_hit", "invalidation_near"}
-             else "giving_back" if "giveback" in kinds or row.get("giveback") == "fired"
-             else "on_plan" if planned else "no_plan")
+    gave_back = bool(row.get("giveback_since_peak", row.get("giveback") == "fired"))
     return {"usd": row.get("unrealized_usd"), "pct": row.get("unrealized_pct"), "expiry": (row.get("option") or {}).get("expiry"),
-            "days_held": row.get("days_held"), "track": track, "state": state, "planned": planned,
+            "days_held": row.get("days_held"), "track": track,
+            "state": _book_state(kinds, planned, gave_back, row.get("unrealized_usd")), "planned": planned,
             "stop_pct": level.get("distance_pct") if level and level.get("state") == "armed" else None}
 
 
@@ -709,10 +721,16 @@ def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict) -> li
         return {"usd": live["usd"], "pct": live["pct"], "quantity": live["quantity"], "mark": live["mark"],
                 "account": rb.account_tag(live)}
 
+    positions = {p["trade_id"]: p for p in found["positions"]}
     for trade_id, live in matched.items():
         row = by_key.get(f"trade:{trade_id}")
         if row is not None:
             row["book"] |= {**facts(live), "live": "matched"}
+            # Robinhood's P&L decides whether it is still in profit: the tag follows the live numbers too.
+            if row["book"]["state"] not in ("past_stop", "near_stop"):
+                held = positions.get(trade_id, {})
+                gave_back = bool(held.get("giveback_since_peak", held.get("giveback") == "fired"))
+                row["book"]["state"] = _book_state(set(), row["book"]["planned"], gave_back, live["usd"])
             row["value"] = None if live["usd"] is None else _say(_usd(live["usd"]), "gain" if live["usd"] > 0 else "loss" if live["usd"] < 0 else "muted")
     for trade_id in missing:
         row = by_key.get(f"trade:{trade_id}")

@@ -90,18 +90,21 @@ function LiveLine({ live, onRefresh }: { live: DeskLive | null; onRefresh?(): vo
 type StripAction = { label: string; run(): void; primary?: boolean };
 
 /**
- * The Needs-you strip: one card for the most urgent item (``deskNeeds``' order), with its own answers and "+N more"
- * opening the rest. ``actions`` gives each item's buttons; Seen drops the item for today in this browser. Nothing when
- * nothing waits.
+ * The Needs-you strip: one card for the most urgent decision (``deskNeeds``' order) with its own answers, and "+N more"
+ * opening every other item at once, each with its own answers. Nothing here is dismissed: an item clears itself when its
+ * condition ends or the owner opens its ticker. Nothing when nothing needs a decision.
  */
-export function NeedsStrip({ needs, seen, actions, onSeen }: {
-  needs: DeskNeed[]; seen: readonly string[]; actions(need: DeskNeed): StripAction[]; onSeen(need: DeskNeed): void;
-}) {
+export function NeedsStrip({ needs, actions }: { needs: DeskNeed[]; actions(need: DeskNeed): StripAction[] }) {
   const [more, setMore] = useState(false);
-  const first = needs.find(n => !seen.includes(n.key));
+  const [first, ...rest] = needs;
   if (!first) return null;
-  const rest = needs.filter(n => n !== first);
-  const buttons = actions(first);
+  const buttons = (need: DeskNeed, small = false) => actions(need).map(b => (
+    <button key={b.label} type="button" onClick={b.run}
+      className={cn("inline-flex min-h-11 items-center rounded-md border px-3 text-xs sm:min-h-8", small && "sm:min-h-7 px-2",
+        b.primary && !small ? "border-primary bg-primary font-semibold text-primary-foreground hover:bg-primary/90" : "text-muted-foreground hover:bg-secondary hover:text-foreground")}>
+      {b.label}
+    </button>
+  ));
   return (
     <section aria-label="Needs you" data-testid="needs-you" className="rounded-lg border border-primary/45 bg-primary/[0.07] px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -111,15 +114,7 @@ export function NeedsStrip({ needs, seen, actions, onSeen }: {
           {first.detail && <p className="text-xs text-muted-foreground">{first.detail}</p>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {buttons.map(b => (
-            <button key={b.label} type="button" onClick={b.run}
-              className={cn("inline-flex min-h-11 items-center rounded-md border px-3 text-xs sm:min-h-8",
-                b.primary ? "border-primary bg-primary font-semibold text-primary-foreground hover:bg-primary/90" : "text-muted-foreground hover:bg-secondary hover:text-foreground")}>
-              {b.label}
-            </button>
-          ))}
-          <button type="button" onClick={() => onSeen(first)} title="Out of this strip for today, in this browser"
-            className="inline-flex min-h-11 items-center rounded-md border px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Seen</button>
+          {buttons(first)}
           {rest.length > 0 && (
             <button type="button" aria-expanded={more} onClick={() => setMore(open => !open)}
               className="min-h-11 px-1 text-xs text-muted-foreground hover:text-foreground sm:min-h-8">+{rest.length} more {more ? "▴" : "▾"}</button>
@@ -128,18 +123,12 @@ export function NeedsStrip({ needs, seen, actions, onSeen }: {
       </div>
       {more && rest.length > 0 && (
         <ul aria-label="More waiting" className="mt-2 space-y-1 border-t border-primary/20 pt-2">
-          {rest.map(need => {
-            const [open] = actions(need);
-            return (
-              <li key={need.key}>
-                <button type="button" onClick={open?.run} className="flex min-h-11 w-full items-baseline gap-2 rounded px-1 text-left text-xs hover:bg-secondary sm:min-h-8">
-                  <span className="min-w-0 flex-1 truncate text-foreground">{need.title}</span>
-                  {seen.includes(need.key) && <span className="shrink-0 text-muted-foreground">seen</span>}
-                  {open && <span className="shrink-0 text-muted-foreground">{open.label} →</span>}
-                </button>
-              </li>
-            );
-          })}
+          {rest.map(need => (
+            <li key={need.key} data-testid="needs-you-more" className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-xs">
+              <span className="min-w-0 flex-1 basis-48 text-foreground">{need.title}</span>
+              <span className="flex flex-wrap gap-1.5">{buttons(need, true)}</span>
+            </li>
+          ))}
         </ul>
       )}
     </section>
@@ -181,15 +170,27 @@ function Spark({ points, label }: { points: number[] | undefined; label: string 
   );
 }
 
-const STATE: Record<DeskBookState, { label: string; className: string }> = {
+const STATE: Record<Exclude<DeskBookState, "no_plan">, { label: string; className: string }> = {
   on_plan: { label: "On plan", className: "text-muted-foreground" },
   giving_back: { label: "Giving back", className: "border-foreground/30 text-foreground" },
   near_stop: { label: "Near stop", className: "border-rose-300/40 text-rose-300" },
-  no_plan: { label: "No plan", className: "border-rose-300/40 text-rose-300" },
+  past_stop: { label: "Past stop", className: "border-rose-300/40 text-rose-300" },
 };
+const EXPIRES_TODAY = { label: "Expires today", className: "border-foreground/30 text-foreground" };
+
+/** The book row's tag, only when it tells the owner something: Past stop, Near stop and Giving back first, then
+ * Expires today (an option), then On plan. A position with no plan has none: its missing plan bar and the day report's
+ * "Open without a plan" line say so, and on four rows of five the tag said nothing. */
+export function bookTag(row: DeskThread, day: string): { label: string; className: string } | null {
+  const book = row.book;
+  if (!book) return null;
+  if (book.state === "past_stop" || book.state === "near_stop" || book.state === "giving_back") return STATE[book.state];
+  if (book.expiry && row.instrument !== "stock" && daysTo(book.expiry, day) === 0) return EXPIRES_TODAY;
+  return book.state === "on_plan" ? STATE.on_plan : null;
+}
 
 /** Where the underlying sits between the plan's invalidation (left) and entry (the tick), from the row's track; nothing
- * without plan lines (the row's tag already says No plan). */
+ * without plan lines (no bar: no plan). */
 function Track({ track }: { track: NonNullable<DeskThread["book"]>["track"] }) {
   if (!track) return null;
   return (
@@ -251,7 +252,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
           {followed.map(row => {
             const book = row.book;
             const spark = row.symbol ? sparks?.rows[row.symbol] : undefined;
-            const state = book ? STATE[book.state] : null;
+            const state = bookTag(row, day);
             // "11/14 105C": this year's expiries drop the year, so the contract fits beside its line and figures.
             const full = row.instrument && row.instrument !== row.symbol ? row.instrument : row.title;
             const contract = full.replace(/\b(\d{1,2}\/\d{1,2})\/(\d{2})\b/, (date, monthDay: string, year: string) => year === day.slice(2, 4) ? monthDay : date);
@@ -261,16 +262,17 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
               <li key={row.key} className={cn("flex items-stretch border-t", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")}>
                 <button type="button" onClick={() => onSelect(row)} aria-pressed={on} aria-label={`${row.symbol} ${full}`}
                   className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_48px_60px] items-center gap-2 py-2 pl-3 text-left hover:bg-secondary">
-                  <span className="min-w-0">
+                  <span className="min-w-0 overflow-hidden">
                     <span className="flex items-baseline gap-1.5">
                       <span className="text-sm font-semibold text-foreground">{row.symbol}</span>
                       <span className="min-w-0 truncate text-xs tabular-nums text-muted-foreground">{contract}{count}</span>
                     </span>
                     {book ? <Track track={book.track} /> : <span className="block truncate text-xs text-muted-foreground">{row.status.text}</span>}
-                    <span className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-muted-foreground">
+                    {/* Wraps rather than spilling: a tag never runs under the sparkline or the P&L, at any width. */}
+                    <span data-testid="book-meta" className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground [&>*]:max-w-full [&>*]:truncate [&>*]:whitespace-nowrap">
                       {mixed && book?.account && <span data-testid="book-account" title={`${book.account.label} ${book.account.masked}`}>{book.account.label}</span>}
                       {book?.stop_pct != null && <span className="tabular-nums">{Math.abs(book.stop_pct).toFixed(1)}% to stop</span>}
-                      {book && left(book.expiry, day) && <span className="tabular-nums">{left(book.expiry, day)}</span>}
+                      {book && left(book.expiry, day) && state !== EXPIRES_TODAY && <span className="tabular-nums">{left(book.expiry, day)}</span>}
                       {book?.live === "new" ? <span data-testid="book-state" className="rounded border border-sky-300/40 px-1 text-sky-300">New · not in the journal yet</span>
                         : state && <span data-testid="book-state" className={cn("rounded border px-1", state.className)}>{state.label}</span>}
                       {book?.live === "not_on_robinhood" && <span data-testid="book-not-live" className="rounded border px-1">Not on Robinhood</span>}

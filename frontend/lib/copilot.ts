@@ -313,9 +313,13 @@ export function speechText(message: Pick<LabMessage, "content" | "proposals" | "
   return sentences.join(" ").replace(/\s+/g, " ").trim();
 }
 
+/** Longer than the server's whole turn (``turn_timeout_s``, 120 s): a stream silent this long has been cut off. */
+const STREAM_IDLE_MS = 150_000;
+
 export async function streamTurn(history: { role: "user" | "assistant"; content: string }[], symbol: string | null,
   onEvent: (event: CopilotEvent) => void, signal: AbortSignal, model: string | null = null, imageIds: string[] = [],
-  backend: Backend | null = null, carryId: string | null = null, source: TurnSource = "desk", investigationId: string | null = null) {
+  backend: Backend | null = null, carryId: string | null = null, source: TurnSource = "desk", investigationId: string | null = null,
+  idleMs = STREAM_IDLE_MS) {
   const response = await fetch(apiUrl("/copilot/chat"), {
     method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify({ messages: history, symbol, ...(model ? { model } : {}), ...(imageIds.length ? { image_ids: imageIds } : {}),
@@ -335,19 +339,36 @@ export async function streamTurn(history: { role: "user" | "assistant"; content:
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-    let cut = buffer.indexOf("\n\n");
-    while (cut >= 0) {
-      const event = parseFrame(buffer.slice(0, cut));
-      buffer = buffer.slice(cut + 2);
-      if (event) onEvent(event);
-      cut = buffer.indexOf("\n\n");
+  let ended = false; // a done or error event: the turn finished, one way or the other
+  let silent = false;
+  // A connection that stays open with nothing on it (a server gone without closing it) ends as interrupted too.
+  let quiet = setTimeout(() => { silent = true; void reader.cancel().catch(() => undefined); }, idleMs);
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      clearTimeout(quiet);
+      quiet = setTimeout(() => { silent = true; void reader.cancel().catch(() => undefined); }, idleMs);
+      buffer += decoder.decode(value, { stream: !done });
+      let cut = buffer.indexOf("\n\n");
+      while (cut >= 0) {
+        const event = parseFrame(buffer.slice(0, cut));
+        buffer = buffer.slice(cut + 2);
+        if (event) { onEvent(event); if (event.type === "done" || event.type === "error") ended = true; }
+        cut = buffer.indexOf("\n\n");
+      }
+      if (done) break;
     }
-    if (done) break;
+  } catch (failure) {
+    if (signal.aborted) throw failure; // the owner's Stop, or the page closing: the caller says so
+  } finally {
+    clearTimeout(quiet);
   }
+  // Cut off (the server restarted, the connection dropped, the tab slept): never a progress line that stays forever.
+  if (!ended && !signal.aborted) onEvent({ type: "error", code: INTERRUPTED, message: silent ? "This answer was interrupted: nothing arrived for a while." : "This answer was interrupted." });
 }
+
+/** An answer cut off before it finished (``streamTurn``), and how a saved reply with no words reads back (``fromSaved``). */
+export const INTERRUPTED = "interrupted";
 
 export function asOfText(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === "") return "time unknown";
@@ -514,7 +535,7 @@ export function savedMetrics(m: LabMessage): SavedMetrics | undefined {
   const t = m.metrics;
   if (!t && !m.error) return m.savedMetrics;
   const out: SavedMetrics = t ? { first_text_ms: t.first_text_ms ?? undefined, total_ms: t.total_ms, rounds: t.rounds, model: t.model.slice(0, 80),
-    backend: t.backend.slice(0, 40), tools: t.tool_calls.map(c => c.name).slice(0, 50) } : {};
+    backend: t.backend.slice(0, 40), tools: t.tool_calls.map(c => c.name).slice(0, 50) } : { ...m.savedMetrics };
   if (m.error) out.error = m.error.code.slice(0, 80);
   if (m.turnId) out.turn_id = m.turnId;
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined)) as SavedMetrics;
@@ -582,7 +603,20 @@ export function toSaved(messages: LabMessage[]): Pick<InvestigationFields, "tran
 
 /** A saved conversation as messages; its cards come back as cards, with any outcome they were left with. */
 export function fromSaved(saved: Investigation): LabMessage[] {
-  return saved.transcript.map(({ metrics, ...m }, i) => ({ ...m, ...(metrics ? { savedMetrics: metrics } : {}), tools: saved.evidence.filter(e => e.message === i).map((e, j) => ({
+  // A reply saved as interrupted or stopped reads back that way (its words so far, if any, kept); one with no words, no
+  // cards and no metrics (saved before this rule) was cut off too; one that failed with another error says it did not
+  // finish. None reads back as an answer still on its way.
+  const ended = (m: Investigation["transcript"][number]): LabMessage["error"] | undefined => {
+    if (m.role !== "assistant" || m.plan_context) return undefined;
+    const code = m.metrics?.error;
+    if (code === INTERRUPTED) return { code, message: "This answer was interrupted." };
+    if (code === "stopped") return { code, message: "Stopped." };
+    if (m.content.trim() || m.proposals?.length) return undefined;
+    return code ? { code, message: "This answer did not finish." } : m.metrics ? undefined : { code: INTERRUPTED, message: "This answer was interrupted." };
+  };
+  return saved.transcript.map(({ metrics, ...m }, i) => ({ ...m, ...(metrics ? { savedMetrics: metrics } : {}),
+    ...(ended({ ...m, metrics }) ? { error: ended({ ...m, metrics }) } : {}),
+    tools: saved.evidence.filter(e => e.message === i).map((e, j) => ({
     type: "tool" as const, id: `saved-${i}-${j}`, name: e.tool, status: "ok" as const,
     provenance: { source: "saved reference (re-read to see the data)", kind: e.kind ?? "cached", as_of: e.as_of ?? null },
   })) }));

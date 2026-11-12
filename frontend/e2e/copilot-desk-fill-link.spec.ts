@@ -101,8 +101,11 @@ test("2 fills to link opens each in turn: Link calls the link route, No plan wri
   const list = page.getByRole("navigation", { name: "Thread list" });
   // One fill per trade: NBIS's plan and its position are one fill to link.
   await expect(list.getByRole("button", { name: "2 fills to link" })).toBeVisible();
-  await page.getByTestId("needs-you").getByRole("button", { name: /more/ }).click(); // the strip counts them too, after the decision
-  await expect(page.getByRole("list", { name: "More waiting" })).toContainText("2 fills to link to a plan");
+  // The strip counts them too during the session, after anything more urgent.
+  const strip = page.getByTestId("needs-you");
+  const more = strip.getByRole("button", { name: /more/ });
+  if (await more.count()) await more.click();
+  await expect(strip).toContainText("2 fills to link to a plan");
 
   // The first in list order opens by its symbol link (the desk remounts); No plan there opens the next.
   await list.getByRole("button", { name: "2 fills to link" }).click();

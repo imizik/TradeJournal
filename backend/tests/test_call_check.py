@@ -344,8 +344,12 @@ def client(engine, lab, monkeypatch):  # noqa: F811
 def test_the_desk_checks_lists_and_passes(client):
     made = client.post("/copilot/checks", json={"text": QQQ}).json()
     assert made["symbol"] == "QQQ" and made["source"] == "desk"
-    listed = client.get("/copilot/checks", params={"day": "2026-11-11"}).json()
-    assert listed["day"] == "2026-11-11" and [c["id"] for c in listed["checks"]] == [made["id"]]
+    # The day the check was stored on (New York's, by the real clock the save uses), not a fixed date that stops
+    # matching at midnight.
+    from app.engine.chart_math import ET
+    day = datetime.fromisoformat(made["checked_at"].replace("Z", "+00:00")).astimezone(ET).date().isoformat()
+    listed = client.get("/copilot/checks", params={"day": day}).json()
+    assert listed["day"] == day and [c["id"] for c in listed["checks"]] == [made["id"]]
     assert client.post(f"/copilot/checks/{made['id']}/pass").json()["outcome"] == "passed"
     assert client.post(f"/copilot/checks/{uuid.uuid4()}/pass").status_code == 404
     assert client.post("/copilot/checks", json={"text": ""}).status_code == 422

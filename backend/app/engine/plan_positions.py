@@ -75,13 +75,16 @@ def _time_stop(stop: PlanTimeStop | None, now: float) -> dict | None:
     return out
 
 
-def _watch(db: Session, trade) -> tuple[str | None, dict | None]:
-    """The give-back watch state (options only) and the latest open-trade alert sent for this position."""
+def _watch(db: Session, trade) -> tuple[str | None, dict | None, bool]:
+    """The give-back watch state (options only), the latest open-trade alert sent for this position, and whether the
+    give-back fired with no new high since (the desk book's Giving back, which also needs a gain now)."""
     found = position_alerts.for_trade(db, trade)
     watch = found.get("watch")
     giveback = None if watch is None else "fired" if watch.get("fired") else "armed" if watch.get("armed") else "watching"
     sent = [a for a in found.get("alerts", []) if a.get("delivery") in ("sent", "unknown")]
-    return giveback, ({"kind": sent[-1]["kind"], "at": sent[-1]["detected_at"]} if sent else None)
+    fired_at = max((a["detected_at"] for a in found.get("alerts", []) if a.get("kind") == "giveback"), default=None)
+    since_peak = giveback == "fired" and fired_at is not None and (watch.get("peak_at") is None or watch["peak_at"] <= fired_at)
+    return giveback, ({"kind": sent[-1]["kind"], "at": sent[-1]["detected_at"]} if sent else None), since_peak
 
 
 def positions(db: Session, quotes=None) -> dict:
@@ -109,14 +112,14 @@ def positions(db: Session, quotes=None) -> dict:
 
     rows = []
     for trade, row in pairs:
-        giveback, latest = _watch(db, trade)
+        giveback, latest, since_peak = _watch(db, trade)
         out = {
             "trade_id": str(trade.id), "symbol": trade.ticker,
             "contract": contract_label(trade.ticker, trade.instrument_type, trade.option_type, trade.strike, trade.expiration),
             "instrument": trade.instrument_type, "direction": row["direction"], "quantity": row["quantity"],
             "option": row.get("option"), "mark": row["mark"], "avg_entry": row["avg_entry"], "days_held": row["days_held"],
             "unrealized_usd": row["unrealized_usd"], "unrealized_pct": row["unrealized_pct"],
-            "giveback": giveback, "latest_alert": latest,
+            "giveback": giveback, "giveback_since_peak": since_peak, "latest_alert": latest,
             "plan": None, "link_path": None, "plan_path": None,
             "thesis": trader_context.thesis_line(theses[trade.id]), "thesis_source": theses[trade.id]["source"],
         }

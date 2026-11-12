@@ -154,9 +154,11 @@ test("Plan a trade from the palette opens a new plan, unsent; after 16:00 Close 
   const { chats } = await lab(page, { time: new Date("2026-10-23T21:00:00Z"), // 17:00 New York
     session: { ...SESSION, now: epoch("2026-10-23T21:00:00Z"), phase: "post", time_stops: [] } });
   await expect(page.getByTestId("desk-status")).toContainText("Closed 16:00");
-  // Nothing left to review: the desk shows no Close the day button of its own; the palette's puts the question in the box.
+  // Nothing left to review: Close the day is one quiet link under the day report (no count) and never the strip; the
+  // palette's puts the question in the box.
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("button", { name: /^Close the day/ })).toHaveCount(0);
+  await expect(page.getByTestId("close-the-day")).toHaveText("Close the day →");
+  await expect(page.getByTestId("needs-you")).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type("close");
   await expect(palette(page).getByRole("option")).toHaveText([/^Close the day/]);
@@ -312,13 +314,12 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
     await expect(page.getByTestId("desk-status")).toContainText("Live · 11:00 ET");
     await expect(page.getByTestId("desk-indices")).toHaveText("SPY +0.42%QQQ −0.31%");
     await expect(page.getByTestId("desk-pnl")).toHaveText("Realized today −$120Open +$180");
-    // The strip: one item, the decision first; the plan near its trigger waits under "+1 more". No rating asks.
+    // The strip: only what needs a decision now. The option expiring today is one; a stop 1% away and a plan near its
+    // entry are not (the book row and the thread list carry those). Nothing to dismiss, no rating asks.
     const strip = page.getByTestId("needs-you");
-    await expect(strip.getByTestId("needs-you-title")).toHaveText("NBIS 10/23/26 100C: 1.0% from invalidation 92.30");
+    await expect(strip.getByTestId("needs-you-title")).toHaveText("NBIS 10/23/26 100C expires today");
     await expect(strip).not.toContainText("+$180"); // the P&L and the stop distance are the book row's, not repeated here
-    await expect(strip.getByRole("button")).toHaveText(["Decide", "Ask why", "Seen", "+1 more ▾"]);
-    await strip.getByRole("button", { name: "+1 more ▾" }).click();
-    await expect(strip.getByRole("list", { name: "More waiting" })).toContainText("CRWV plan: 0.6% to entry 99.00");
+    await expect(strip.getByRole("button")).toHaveText(["Open it"]);
     await expect(page.getByText(/to rate|Rate yesterday|alerts? to answer/)).toHaveCount(0);
     // The book: the followed position with its tag, expiry and plan track; the centre on it with its tiles.
     const book = page.getByTestId("desk-book");
@@ -343,9 +344,11 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
     await page.getByRole("tab", { name: "Chart" }).click();
     await page.screenshot({ path: test.info().outputPath(`cockpit-session-${width}.png`), fullPage: width < 768 });
 
-    // Selecting the position: beside the copilot it opens the thread at once; on a phone Ask the copilot does.
+    // Selecting the position: beside the copilot it opens the thread at once; on a phone Ask the copilot does. Opening
+    // it clears its strip item: nothing to click away.
     await nbis.click();
     await expect(nbis).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("needs-you")).toHaveCount(0);
     if (width < 768) {
       await expect(conversation(page)).toBeHidden();
       await page.getByRole("button", { name: /^Ask the copilot/ }).click();
@@ -356,26 +359,40 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
   });
 }
 
-test("Seen takes the strip's item out for today and shows the next; nothing waiting leaves no strip", async ({ page }) => {
-  await lab(page, { showThreads: false });
+/** Today's give-back alert on NBIS, as the session read lists it, and a card waiting on APLD. */
+const ALERTED = { ...SESSION, to_answer: { alerts: { count: 1, rows: [{ id: "a1", trade_id: TRADE, symbol: "NBIS", contract: "NBIS 10/23/26 100C",
+  kind: "giveback", at: epoch("2026-10-23T14:31:00Z"), today: true, feedback: null }] }, radar: null } };
+const CARD = row({ key: `draft:${APLD}`, group: "draft", symbol: "APLD", title: "APLD base breakout", status: { text: "Alert at 31.00 to confirm", tone: "info" },
+  investigation_id: APLD });
+
+test("the strip shows the top decision and +N more lists every other at once, each with its answers; nothing is dismissed", async ({ page }) => {
+  await lab(page, { showThreads: false, session: ALERTED, threads: () => ({ ...DESK, threads: [...DESK.threads, CARD] }) });
   const strip = page.getByTestId("needs-you");
-  await strip.getByRole("button", { name: "Seen" }).click();
-  await expect(strip.getByTestId("needs-you-title")).toHaveText("CRWV plan: 0.6% to entry 99.00");
-  await expect(strip.getByRole("button")).toHaveText(["Open the plan", "Ask why", "Seen", "+1 more ▾"]);
-  await page.reload();
-  await expect(strip.getByTestId("needs-you-title")).toHaveText("CRWV plan: 0.6% to entry 99.00");
-  await strip.getByRole("button", { name: "Seen" }).click();
-  await expect(strip).toHaveCount(0);
+  await expect(strip.getByTestId("needs-you-title")).toHaveText("NBIS 10/23/26 100C: give-back alert at 10:31 AM");
+  await expect(strip.getByRole("button")).toHaveText(["Open it", "Ask why", "+2 more ▾"]);
+  await strip.getByRole("button", { name: "+2 more ▾" }).click();
+  const more = strip.getByTestId("needs-you-more");
+  await expect(more).toHaveText([/^APLD: a card to confirm or dismissOpen the card$/, /^NBIS 10\/23\/26 100C expires todayOpen it$/]);
+  // No Seen anywhere: nothing has to be clicked away to see the next.
+  await expect(page.getByRole("button", { name: "Seen" })).toHaveCount(0);
+  await expect(page.getByLabel("Seen")).toHaveCount(0);
+  // Opening the card's thread clears its item; the rest stay.
+  await more.filter({ hasText: "APLD" }).getByRole("button", { name: "Open the card" }).click();
+  await expect(strip.getByRole("button", { name: /^\+1 more/ })).toBeVisible(); // the list stays open: "+1 more ▴"
+  // A book of positions with no plan, no alert and nothing expiring today: no strip at all.
   await page.unroute("**/copilot/desk/threads");
-  await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: { ...DESK, threads: DESK.threads.filter(r => ["pinned", "watch"].includes((r as { group?: string }).group ?? "")) } }));
+  await page.unroute("**/copilot/desk/session");
+  await page.route("**/copilot/desk/session", (route) => route.fulfill({ json: SESSION }));
+  await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: { ...DESK, threads: [DESK.threads[0], unplanned("AMD", 40), unplanned("TSLA", -60)] } }));
   await page.reload();
-  await expect(page.getByTestId("desk-book")).toBeVisible();
+  await expect(page.getByTestId("desk-book").getByRole("button", { name: /^AMD / })).toBeVisible();
   await expect(page.getByTestId("needs-you")).toHaveCount(0);
+  await expect(page.getByTestId("desk-book").getByTestId("book-state")).toHaveCount(0); // and no "No plan" tags either
 });
 
 test("Ask why sends one turn about the strip's item, opening the copilot", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  const { chats } = await lab(page, { showThreads: false });
+  const { chats } = await lab(page, { showThreads: false, session: ALERTED });
   await page.getByTestId("needs-you").getByRole("button", { name: "Ask why" }).click();
   await expect.poll(() => chats.length).toBe(1);
   expect(JSON.stringify(chats[0])).toContain("Why is NBIS moving today?");
@@ -744,7 +761,7 @@ test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip 
   await review.getByRole("button", { name: "Skip" }).click();
   await expect(review).toHaveCount(0);
   await expect(conversation(page).getByText("CRWV answer: short under 99.00.")).toBeVisible(); // the last one: the pass ends here
-  await expect(page.getByTestId("needs-you")).not.toContainText("Close the day");
+  await expect(page.getByTestId("needs-you").getByText(/Close the day/)).toHaveCount(0); // the strip may be absent
 
   await page.keyboard.press("j"); // J / K still walk the threads
   await expect(conversation(page).getByText("APLD answer: enter at 31.00.")).toBeVisible();
@@ -795,8 +812,8 @@ test("after the close questions, Close the day asks only the fills to link, neve
   // One close question and one fill to link; today's unanswered alert and Radar hit are not asked or counted.
   await page.getByRole("button", { name: "Close the thread list" }).click();
   const strip = page.getByTestId("needs-you");
-  await strip.getByRole("button", { name: /more/ }).click();
-  await expect(strip.getByRole("list", { name: "More waiting" })).toContainText("Close the day: 2 to review");
+  await expect(page.getByTestId("close-the-day")).toHaveText("Close the day · 2 to review →"); // the day report's link, not the strip
+  await expect(strip.getByText(/Close the day/)).toHaveCount(0);
   await command(page, "Close the day");
   await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible();
   await page.getByRole("region", { name: "Close of day" }).getByRole("button", { name: "Skip" }).click();

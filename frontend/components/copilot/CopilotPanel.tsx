@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type R
 import {
   AUTO_WEEK_REVIEW_TITLE, answerParts, asOfText, verdictPending, copilotStatus, pickedModel, rememberModel, pickedBackend, rememberBackend, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, saveOutcome, saveRating, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt, IMAGE_PREFILL, MAX_IMAGES, imageUrl, spokenText, uploadImage,
   type Backend, type Compare, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ProposalOutcome, type Rating, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates, type DrawnPlan,
-  appendMainExchange, mainPlanThread, openDailyMain, tradePlanLine, BRIEFING_TITLE, historyAnswer, type TurnSource,
+  appendMainExchange, mainPlanThread, openDailyMain, tradePlanLine, BRIEFING_TITLE, historyAnswer, INTERRUPTED, type TurnSource,
 } from "@/lib/copilot";
 import Link from "next/link";
 import { chartDraftThread, draftKey, readDraft, rememberChartDraft, storeDraft, type CopilotDraft } from "@/lib/copilotDraft";
@@ -789,8 +789,11 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   useEffect(() => () => {
     if (!abort.current) return;
     abort.current.abort();
-    const { messages: said, current: saved, symbol: about } = latest.current;
-    if (!said.length) return;
+    const { messages: kept, current: saved, symbol: about } = latest.current;
+    if (!kept.length) return;
+    // The answer on its way is cut off here: saved as interrupted, so a later visit says so instead of waiting on it.
+    const last = kept[kept.length - 1];
+    const said = last.role === "assistant" && !last.metrics && !last.error ? [...kept.slice(0, -1), { ...last, error: { code: INTERRUPTED, message: "This answer was interrupted." } }] : kept;
     const fields = savedFields(said, saved, about);
     if (saved?.main_day && said.length <= saved.message_count) return;
     void (saved?.main_day ? appendMainExchange(saved.id, savedFields(said.slice(-2), null, "")) : saved ? updateInvestigation(saved.id, saved.revision, fields) : createInvestigation(fields)).catch(() => { /* best effort */ });
@@ -1230,6 +1233,17 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const speak = useSpeakAnswer({ ready: status !== null, turn: answered, message: last?.role === "assistant" ? last : null, busy, listening: voice.listening, disabled: status?.enabled !== true });
 
   const enabled = status?.enabled === true;
+  // An answer that did not finish and is not on its way: cut off live, or saved that way (``fromSaved``), or an older
+  // saved reply with no words. Only the answer streaming now shows a progress line.
+  const cutOff = (m: LabMessage, i: number) => m.role === "assistant" && !(busy && i === messages.length - 1) && !m.plan_context
+    && (m.error?.code === INTERRUPTED || (!m.content.trim() && !m.proposals?.length && (!m.error || m.error.code === "stopped") && !m.metrics && !m.savedMetrics));
+  // Ask again: the latest answer's question, sent again as a new turn.
+  const askAgain = (i: number) => {
+    const question = messages[i - 1];
+    // Main chat sends only once the previous exchange is saved (``send``'s guard): until then Retry saving shows instead.
+    const saving = !!current?.main_day && messages.length > current.message_count;
+    return !busy && !saving && i === messages.length - 1 && question?.role === "user" && question.content.trim() ? question.content : null;
+  };
   // Beside another page the panel is the owner's, and only while the lab is on: otherwise it is not there at all.
   if (panel && (!owner || !enabled)) return null;
   const saving = saveState && (
@@ -1457,7 +1471,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         ) : (
           <div key={i} className={desk ? "max-w-[60ch]" : "max-w-[95%]"}>
             {message.content && !(busy && i === messages.length - 1 && verdictPending(message.content)) ? <Answer text={message.content}
-              onPushBack={busy && i === messages.length - 1 ? undefined : line => fill(pushBackText(line))} /> : !message.error && !message.metrics && (
+              onPushBack={busy && i === messages.length - 1 ? undefined : line => fill(pushBackText(line))} /> : !message.error && !message.metrics && busy && i === messages.length - 1 && (
               <>
                 <p className="text-sm italic text-muted-foreground" aria-label="Progress">{message.progress || waiting(message.tools ?? [])}</p>
                 {/* Until the answer's first text: each read's fact as it lands, built by the server from the result itself. */}
@@ -1466,7 +1480,14 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
                 ))}
               </>
             )}
-            {message.error && <p role="alert" className="mt-1 text-sm text-rose-300">{message.error.message}</p>}
+            {cutOff(message, i) ? (
+              // Cut off before it finished (a restart, a dropped connection, a sleeping tab): a quiet line and the question again.
+              <p data-testid="copilot-interrupted" className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+                {message.error?.code === "stopped" ? "Stopped." : "This answer was interrupted."}
+                {askAgain(i) && <button type="button" disabled={!enabled} onClick={() => void send(askAgain(i)!, symbol, [])}
+                  className="inline-flex min-h-11 items-center rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 sm:min-h-8">Ask again</button>}
+              </p>
+            ) : message.error && <p role="alert" className="mt-1 text-sm text-rose-300">{message.error.message}</p>}
             {(message.tools ?? []).filter(t => t.lessons).slice(-1).map(t => <ExitLessons key={t.id} lessons={t.lessons!} />)}
             {(message.tools ?? []).filter(t => t.long_holds).slice(-1).map(t => <LongHolds key={t.id} holds={t.long_holds!} />)}
             {(!current?.main_day || i < current.message_count) && message.proposals?.map(proposal => proposal.kind === "trade_plan" && current?.main_day ? (
