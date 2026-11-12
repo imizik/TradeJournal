@@ -65,6 +65,8 @@ context carries is in [Copilot Lab § Owner context](copilot-lab.md#owner-contex
   account is the journal's own label for the account with those last four digits (else "Robinhood account"); no digit
   of an account number, masked or not, no Robinhood account name, id or text. A position with an odd ticker, side or
   expiry is left out. Account totals (value, cash, buying power) are not given to the copilot.
+- Like any tool result, a `get_positions` or trade review result read in a conversation is kept with its answer as
+  evidence (the copilot's own records, not the journal), so those numbers and tickers stay there with their as-of.
 - Tests: `backend/tests/test_copilot_robinhood.py`.
 
 ## Where the sign-in lives

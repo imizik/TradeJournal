@@ -41,6 +41,8 @@ def live(tmp_path, fake, monkeypatch):
 
     feed = rb.Feed(settings_fn=settings, now=lambda: clock["t"])
     monkeypatch.setattr(rb, "feed", feed)
+    # A copilot read never starts a background refresh, however old the snapshot: the kick itself fails the test.
+    monkeypatch.setattr(feed, "_kick", lambda: (_ for _ in ()).throw(AssertionError("a copilot read kicked a refresh")))
 
     def read():
         feed.refresh(force=True)
@@ -248,3 +250,60 @@ def test_a_large_live_book_stays_inside_the_cap_and_the_first_row_keeps_its_live
     first = held["positions"][0]
     assert first["symbol"] == "NBIS" and first["live"] == "Robinhood" and first["mark"] == 420.0
     assert all(r.get("mark") is not None for r in held["positions"])  # slimming never drops the mark or P&L
+
+
+# --------------------------------------------------------------------------- stocks, the row cut, journal drift
+
+def test_a_stock_matches_by_symbol_and_takes_robinhoods_price(db, live, fake):
+    fake.stocks["333338267"] = [{"symbol": "CRWV", "quantity": "10.000000", "average_buy_price": "120.000000", "type": "long"}]
+    fake.stock_quotes["CRWV"] = {"quote": {"symbol": "CRWV", "last_trade_price": "131.500000", "previous_close": "125.0"}}
+    live["read"]()
+    stock = next(r for r in _pack(db)["positions"]["positions"] if r["symbol"] == "CRWV")
+    assert stock["live"] == "Robinhood" and (stock["mark"], stock["unrealized_usd"], stock["day_change_pct"]) == (131.5, 115.0, 5.2)
+    assert stock["bid"] is None and "delta" not in stock and "greeks_as_of" not in stock
+
+
+def test_past_the_row_cut_a_journal_position_is_matched_and_new_ones_still_show(db, live, fake):
+    from tests.test_copilot_context import TODAY, fill
+    from app.routers.fills import _rebuild_trades
+    db.add_all([fill(100 + i, f"A{i:02d}", "buy", 1, 10, TODAY.replace(tzinfo=None) - timedelta(days=1)) for i in range(9)])
+    db.commit()
+    _rebuild_trades(db, "test")
+    fake.stocks["333338267"] = [{"symbol": "A08", "quantity": "1.000000", "average_buy_price": "10.000000", "type": "long"}]
+    fake.stock_quotes["A08"] = {"quote": {"symbol": "A08", "last_trade_price": "11.000000", "previous_close": "10.0"}}
+    fake.options["333338267"].append(option_position("opt-mu", "MU", expiry=EXPIRY.isoformat()))
+    fake.instruments["opt-mu"] = instrument("opt-mu", "MU", expiry=EXPIRY.isoformat())
+    fake.quotes["opt-mu"] = option_quote("opt-mu")
+    live["read"]()
+    held = _pack(db, None)["positions"]
+    assert held["robinhood"]["new"] == 1 and held["count"] == 12  # A08 sits past the cut: matched, never "new"
+    assert held["positions"][0]["symbol"] == "MU" and held["shown"] == copilot_context.MAX_POSITIONS
+
+
+def test_an_open_trade_with_no_open_lots_does_not_hide_a_robinhood_position(db, live, fake):
+    from tests.test_copilot_context import TODAY, fill
+    from app.models import Trade
+    from app.routers.fills import _rebuild_trades
+    from sqlmodel import select
+    put = {"option_type": "put", "strike": 100, "expiration": EXPIRY}
+    db.add_all([fill(200, "MU", "buy_to_open", 1, 500, TODAY.replace(tzinfo=None) - timedelta(days=1), **put),
+                fill(201, "MU", "sell_to_close", 1, 550, TODAY.replace(tzinfo=None) - timedelta(hours=20), **put)])
+    db.commit()
+    _rebuild_trades(db, "test")
+    drifted = db.exec(select(Trade).where(Trade.ticker == "MU")).one()
+    drifted.status = "open"  # journal drift: marked open, nothing left open
+    db.commit()
+    fake.options["333338267"].append(option_position("opt-mu", "MU", quantity="1.0000", expiry=EXPIRY.isoformat()))
+    fake.instruments["opt-mu"] = instrument("opt-mu", "MU", side="put", expiry=EXPIRY.isoformat())
+    fake.quotes["opt-mu"] = option_quote("opt-mu")
+    live["read"]()
+    mu = next(r for r in _pack(db, "MU")["positions"]["positions"] if r["symbol"] == "MU")
+    assert mu["journal"] == copilot_book.NEW_NOTE
+
+
+def test_a_missing_robinhood_mark_reads_unavailable_with_no_time_stamped_on_it(db, live, fake):
+    fake.quotes["opt-nbis"] = {"quote": {"instrument_id": "opt-nbis", "mark_price": "n/a"}}
+    live["read"]()
+    call = copilot_book.positions(session=db)["positions"][1]
+    assert call["symbol"] == "NBIS" and call["live"] == "Robinhood" and call["mark"] is None and call["unrealized_usd"] is None
+    assert "mark_as_of" not in call and "greeks_as_of" not in call

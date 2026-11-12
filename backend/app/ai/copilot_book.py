@@ -226,8 +226,13 @@ def live_book(db, now: datetime | None = None) -> dict | None:
         return None
     if snapshot is None:
         return {"state": view.get("state") or "unavailable"}
+    from app.engine import chart_journal
     held = db.exec(select(Trade, Account.last4).join(Account, Account.id == Trade.account_id)
                    .where(Trade.status == "open").where(_not_webull())).all()
+    # Every open position the journal shows (with open lots, as position_rows and the desk read them), not just the
+    # shown rows: a position past a row cut is still the journal's, never "new".
+    lots = {p["trade_id"] for ticker in sorted({t.ticker for t, _ in held}) for p in chart_journal.positions(db, ticker)}
+    held = [(t, last4) for t, last4 in held if str(t.id) in lots]
     journal = [{"trade_id": str(t.id), "last4": last4,
                 "key": rb.contract_key(t.ticker, t.instrument_type, t.option_type, t.strike,
                                        t.expiration.isoformat() if t.expiration else None)} for t, last4 in held]
@@ -255,9 +260,10 @@ def _with_live(row: dict, numbers: dict, as_of: str | None) -> dict:
     avg = numbers.pop("avg_cost")
     for key in ("mark_as_of", "iv_pct", "delta", "greeks_as_of"):
         row.pop(key, None)
-    row.update(quantity=numbers.pop("quantity"), mark=numbers.pop("mark"), mark_as_of=as_of)
-    row |= {k: v for k, v in numbers.items()}
-    if row.get("instrument") == "option":
+    mark = numbers.pop("mark")
+    row.update(quantity=numbers.pop("quantity"), mark=mark, **({"mark_as_of": as_of} if mark is not None else {}))
+    row |= numbers
+    if row.get("instrument") == "option" and (row.get("iv_pct") is not None or row.get("delta") is not None):
         row["greeks_as_of"] = as_of
     if avg is not None and row.get("avg_entry") and abs(avg - row["avg_entry"]) > 0.005 * row["avg_entry"]:
         row["avg_cost_robinhood"] = avg

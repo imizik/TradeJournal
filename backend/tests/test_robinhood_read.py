@@ -123,7 +123,8 @@ def test_only_the_client_names_the_endpoint_or_builds_a_tools_call():
     assert sorted(users) == ["backend/app/ai/copilot_book.py", "backend/app/engine/robinhood_book.py", "backend/app/routers/copilot_desk.py"]
     book = (REPO / "backend" / "app" / "ai" / "copilot_book.py").read_text()
     assert set(re.findall(r"\brb\.(\w+(?:\.\w+)?)", book)) == {"feed.snapshot", "contract_key", "match"}
-    assert "snapshot(kick=False)" in book and "robinhood_read" not in book and "refresh(" not in book and "_kick" not in book
+    assert re.findall(r"^\s*(?:from|import) .*robinhood_book.*$", book, re.M) == ["    from app.engine import robinhood_book as rb"]
+    assert book.count("snapshot(") == 1 and "view(" not in book and "snapshot(kick=False)" in book and "robinhood_read" not in book and "refresh(" not in book and "_kick" not in book
 
 
 # --------------------------------------------------------------------------- a read on the wire
