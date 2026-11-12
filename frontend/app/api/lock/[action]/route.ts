@@ -22,6 +22,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
   const upstream = { "x-tj-lock-browser": "1", ...(token ? { cookie: `${LOCK_COOKIE}=${token}` } : {}) };
   try {
     if (action === "sign-in") {
+      const declared = Number(request.headers.get("content-length") ?? 0);
+      if (!Number.isFinite(declared) || declared > 4096) return Response.json({ detail: "Request too large" }, { status: 413, headers: NO_STORE });
       const raw = await request.text();
       if (raw.length > 4096) return Response.json({ detail: "Request too large" }, { status: 413, headers: NO_STORE });
       let passphrase: unknown;

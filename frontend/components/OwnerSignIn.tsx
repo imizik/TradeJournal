@@ -26,7 +26,6 @@ export default function OwnerSignIn({ signedIn, next, reportOnly }: { signedIn: 
     const result = await post("sign-in", { passphrase }).catch(() => ({ ok: false, detail: "The server could not be reached." }));
     if (result.ok) {
       // Shown in place of a locked page: reload that page. Opened directly: go to `next`.
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
       if (window.location.pathname === "/sign-in") window.location.assign(next); else window.location.reload();
       return;
     }
