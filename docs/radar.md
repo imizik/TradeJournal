@@ -977,7 +977,12 @@ or the live 20-session experiment's scoring.
   `+N more`; the tap opens `/radar`. A digest more than 15 minutes past its time
   is not written; one with nothing waiting is recorded `skipped`. When the
   digest is sent, held or dropped its events take the same delivery, so
-  `/radar/proof` counts an event a digest reached as alerted. Events after the
+  `/radar/proof` counts an event a digest reached as alerted.
+  An event on a stock the owner set to not followed on the copilot desk is
+  left out of the digest's lines and count and recorded `held` with the reason
+  (a group stays in); a single or setup card on that stock is held by the
+  notification policy (`not_followed`). See
+  [the phone ping policy](copilot-lab.md#phone-ping-policy). Events after the
   last digest stay in the feed only.
 - **Single pings, strong events only** (`radar_alerts.strong`, one pure test
   the Shadow book can reuse): a stock at least `RADAR_SINGLE_MIN_RELATIVE_PCT`

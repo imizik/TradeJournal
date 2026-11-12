@@ -67,7 +67,7 @@ PLAN_KINDS = {"entry", "invalidation", "time_stop", "nudge", "no_plan", "link"}
 NOTE_KINDS = {"companion_update", "companion_adopt"}
 SKIP_KINDS = {"prep", "evening_review", "week_review", "day_replay", "research", "radar_setup", "radar_event", "radar_digest"}
 HELD = {"merged": "Held back: merged into an earlier ping", "suppressed": "Held back: quiet window",
-        "over_cap": "Held back: over the day's budget"}
+        "over_cap": "Held back: over the day's budget", "not_followed": "Held back: not followed"}
 RADAR_KIND = {"relative_to_spy": "vs SPY", "relative_to_sector": "vs sector", "group_move": "Group move",
               "dip_turn": "Dip turning up", "gap_reversal": "Gap reversal"}
 DESK_RADAR_KINDS = ("relative_to_spy", "relative_to_sector", "dip_turn", "gap_reversal")

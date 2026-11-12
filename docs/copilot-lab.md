@@ -680,8 +680,12 @@ list's groups for one collapsed "N not followed ▾" line at the bottom of each,
 in the strip, "needs you" or the Threads count; it asks no close-of-day question and is not in Close
 the day or the evening review. Its thread still opens normally. The setting belongs to the ticker, not one position:
 a new position in a hidden ticker starts hidden too, until Show again. It leaves no mark on the market chart and is not
-counted in Since you looked. Phone alerts, the position companion, the copilot's
-context, the top bar's Open and "At risk now" (the money actually at risk) still include it. The top bar's **Now**
+counted in Since you looked. Since 2026-11-11 it is also quiet off the desk:
+its phone pings are held (§ Phone ping policy, **Not followed**), the position companion spends no model turn on it
+(§ Position companion), the copilot's owner context, the morning brief and the week review name it once instead of
+showing it, and the book's collapsed line reads "N not followed · quiet on your phone too ▾". Its held pings show in
+Today's **Held back** list as "Not followed". The top bar's Open and "At risk now" (the money actually at risk) still
+include it. The top bar's **Now**
 comes back to today's Main chat; `?view=briefing` (the old Briefing address) and the evening review's `?close=1` land on
 the cockpit too.
 
@@ -1581,6 +1585,11 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
     thesis-watch trigger by kind without its headline, and the companion's
     thesis guess (written by a model that had just read headlines) stays on the
     desk, like a research job's conclusion.
+    A ticker the owner set to not followed on the desk is left out of the rows
+    and `count` (the limit grows so it never pushes a followed position out) and
+    named once in `not_followed` ("2 positions not followed: SLS, TE (hidden on
+    the desk; ...)"), with no P&L, plan or since-entry detail, unless it is the
+    turn's own symbol: asked about by name, it shows in full.
   - `history` (measured): closed trades in the symbol (count, wins, realized $)
     and the latest four, as `get_trades` shows them.
   - `habits` (measured): the behavior audit's four exit habits through
@@ -2093,6 +2102,9 @@ migration `d2a7e5c9f3b1`), so the owner never has to press the button:
   restart or a second process never runs it twice; a review not started by
   midnight New York waits for the next week. A week with no closed trade
   (the tool reads `none`) is recorded `skipped`: no turn, no ping.
+- **Not followed:** a ticker the owner hid on the desk is named once on a second
+  line of the owner message: its trades stay in the week's totals and the review
+  does not discuss them one by one.
 - **Turn:** one `run_turn` on the configured backend and evidence, its turn
   budget cap included, whose owner message is the Review my week context naming
   the week, as a Friday's Daily Review link sends it:
@@ -2603,6 +2615,37 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   Radar alerts and thesis watch are anchored per symbol (the symbol's open
   position when there is one; a Radar group event to its group); a ping they
   hold is recorded `held` and counts toward neither sender's own caps.
+- **Not followed:** a ping whose ticker the owner set to not followed on the desk
+  (§ The desk, **Not following**) is held, decision `not_followed`, reason "Not sent:
+  you don't follow SLS on the desk (Show again there to hear about it).", before the
+  quiet window and the budgets, whatever its rank, and even with
+  `ALERT_POLICY_ENABLED=false` (it is the owner's choice, not a throttle). That is every
+  kind with a ticker: the open-trade alerts (give-back, held an hour, wrong way at
+  30 minutes, expires today, the 90-minute last-day alert, the 30-minute last-day
+  final, the day-before-expiry alert), a confirmed plan's entry and invalidation,
+  plan nudges and link pings, time stops, pattern interrupts, thesis watch, the
+  companion's adopt, updates and exit notes, a Radar single or setup card on the
+  stock, and the first-pullback ping. The last-day and invalidation alerts, which no
+  budget or quiet window ever holds, are held here too, by the owner's decision of
+  2026-11-11 ("Yes, silence them"). The ticker is the ping's symbol, else its trade's.
+  A research result names its first symbol and is held the same way. Pings with no
+  ticker are never held for it (the brief, the week and evening reviews, Watch your
+  day, a Radar group move or digest); the brief, the
+  week review and the Radar digest leave the ticker out of their own text and
+  counts instead (§ Pre-market prep, [Radar](radar.md)), and the evening review's
+  "pings held today" leaves these holds out. The sender's own row is still
+  written (an open-trade alert keeps its detection; its delivery reads `held` with
+  the reason), so the day report, Proof and the alert scorecard read the same rows
+  as before: the scorecard scores alerts that reached the phone, so a held one is
+  not scored, as with any other hold. A held ping spends no budget and opens no
+  quiet window. Show again ends it from the next ping on; a ping already held stays
+  held on its retry, and a ping already judged `sent` whose send is being retried
+  still goes out (a retry keeps its first answer). Senders that do not ask the
+  policy are not covered: a level alert that is not a confirmed copilot plan's
+  entry or invalidation (one the owner set by hand on Charts, or confirmed in the
+  lab without a plan role), the S1 setup scanner's push (`setup_scanner.py`), the
+  Practice paper-trade pings (`paper.py`), and Jo's senders (Codex: stock watch,
+  conditional plans, market-watch wakes).
 - **Budgets:** each kind from interrupt down has its own budget a New York day, so
   one kind spending its pings never takes another's (on October 29, 2026 the old
   shared pool was spent by 09:50 on prep, thesis watch, research and nudges, and
@@ -2754,6 +2797,14 @@ long theses, reviewed weekly. Nothing here places, changes or suggests an order,
 - **Cost.** Turns use the copilot's configured backend, its per-turn budget and, on the API backend, its daily
   budget; `COMPANION_MODEL` overrides the model. Per position a day: one adopt, at most four updates, one close: six
   turns at most, typically three to four (the hour floor, 15:30 and an alert or two).
+- **Not followed.** A ticker the owner hid on the desk gets no model turn at all (each costs money): a new position
+  in it is recorded `not_followed` with the reason instead of adopted (no turn, no ping); an adopted one gets no
+  update while hidden (each pass moves its `last_update_at` and `last_underlying` on and its `last_error` says why),
+  and a close while hidden is quiet, like an adopt-only one (thread closed, no exit note). Show again picks it up
+  from then on: a `not_followed` row is claimed as a new adopt while its entry is still today's (one opened on an
+  earlier day is never adopted, and plan nudges leave long options to the companion, so it gets neither; its
+  open-trade alerts resume), and an adopted one's updates resume, counting only what happens after; nothing from
+  the hidden stretch is back-filled. A hidden adopted position takes none of the `COMPANION_MAX_POSITIONS` slots.
 - **Delivery** is at-most-once: a failed send is recorded on the row, never retried. A Confirm needs Telegram (ntfy
   has no reply buttons); without it, plan the position on the desk.
 - **Switch on:** `POSITION_COMPANION_ENABLED=true` in the API's environment (needs `COPILOT_ENABLED=true` and
@@ -2841,6 +2892,10 @@ The heading keeps its old name so links stay put. On 2026-10-29 the owner chose
 this as the one morning brief: Jo's 08:45 briefing (`/morning`) still works
 unchanged, and switching Jo's morning task off is the owner's step.
 
+- **Not followed:** a ticker the owner hid on the desk is left out of the pack's
+  positions, plans, time stops, earnings, headlines and pre-market moves, the
+  Radar pre-market scan's lists and the 09:00 movers, and the ping's picture; its
+  positions are named once in `positions.not_followed`.
 - **When:** at `PREMARKET_PREP_AT` (default `09:00` New York; `08:30` before
   2026-11-03) on a day the market calendar has a regular session, never a
   weekend or holiday. 09:00 is after the 08:30 CPI/jobs releases (at 08:30 the
@@ -2862,7 +2917,7 @@ unchanged, and switching Jo's morning task off is the owner's step.
   state and open P&L (the owner context pack's positions section); `at_risk`:
   the [exposure](#exposure) summary and its sentence, which the raw-facts
   fallback appends to its positions line, so the brief states it whether or not
-  the turn succeeds; armed plans
+  the turn succeeds (the book's whole total, tickers not followed included); armed plans
   with their distance to the entry and the invalidation (the Plans board's
   `copilot_plans.board`, one batched quote); earnings from today through Sunday
   for held symbols and symbols with an active thesis memory (one batched

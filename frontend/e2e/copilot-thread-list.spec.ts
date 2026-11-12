@@ -522,6 +522,7 @@ for (const width of [1440, 375]) {
     await expect(book.getByRole("button", { name: /^SLS/ })).toHaveCount(0);
     await expect(page.getByTestId("needs-you")).not.toContainText("SLS");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await expect(book.getByTestId("not-followed")).toContainText("1 not followed · quiet on your phone too");
     await book.getByRole("button", { name: /1 not followed/ }).click();
     await book.getByRole("button", { name: "Show again" }).click();
     await expect(book.getByRole("heading", { level: 2 })).toHaveText("Your book · 2 followed");

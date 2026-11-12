@@ -7,6 +7,8 @@ calendar's regular session; never a weekend or holiday) the day is claimed once
 prepares a second one) and a compact pack is assembled from code that already
 exists:
 
+- (a ticker the owner set to not followed on the desk is left out of every section below, its positions named once
+  in ``positions.not_followed``; ``at_risk`` is the book's total and still includes them)
 - open positions with days to expiry, expires-today, give-back watch state and
   open P&L (the owner context pack's positions section);
 - ``at_risk``: the open long options' premium still paid against the usual day (``exposure.now``, its sentence in
@@ -132,13 +134,17 @@ def _trading_day(calendar, day: date) -> bool:
 def _positions(db: Session, now_et: datetime) -> dict:
     """Each open position's record (``trader_context``), cut to what the morning needs; expiring soonest first. The
     thesis in its own words and the since-entry lines (each with its as_of; a missing input reads unavailable)."""
-    from app.ai.copilot_context import _trim
+    from app.ai.copilot_context import _trim, hidden_positions, not_followed_line
     from app.engine import trader_context
-    section = trader_context.for_symbol(None, now_et.timestamp(), session=db, diff="all", headlines=False)
+    hidden, quiet = hidden_positions(db)  # a hidden ticker's positions never take a followed one's place
+    section = trader_context.for_symbol(None, now_et.timestamp(), session=db, diff="all", headlines=False,
+                                        limit=trader_context.MAX_POSITIONS + len(quiet))
     keep = ("symbol", "instrument", "option", "direction", "quantity", "unrealized_usd", "unrealized_pct",
             "days_to_expiry", "expires_today", "giveback", "peak_gain_pct")
     rows = []
     for row in section["positions"]:
+        if row["symbol"] in hidden:
+            continue
         out = {k: row[k] for k in keep if row.get(k) is not None}
         thesis = row.get("thesis") or {}
         if thesis.get("source") not in (None, "none"):
@@ -150,8 +156,12 @@ def _positions(db: Session, now_et: datetime) -> dict:
             out["since_entry"] = [f"{line['text']}" + (f" (as of {line['as_of']})" if line.get("as_of") else "")
                                   for line in since["lines"] if line["key"] in ("underlying", "mark", "iv", "held")]
         rows.append(out)
+    rows = rows[:trader_context.MAX_POSITIONS]  # the same eight as before a ticker was hidden, less the hidden
     rows.sort(key=lambda r: (not r.get("expires_today"), r.get("days_to_expiry", 10_000)))
-    return {"state": "ok", "count": section["count"], "shown": len(rows), "positions": rows}
+    out = {"state": "ok", "count": section["count"] - len(quiet), "shown": len(rows), "positions": rows}
+    if quiet:
+        out["not_followed"] = not_followed_line(quiet)
+    return out
 
 
 def _at_risk(db: Session, now_et: datetime) -> dict:
@@ -167,10 +177,11 @@ def _level(level: dict | None) -> dict | None:
     return {k: level[k] for k in ("price", "state", "distance_pct") if level.get(k) is not None}
 
 
-def _plans(db: Session) -> dict:
+def _plans(db: Session, hidden: set[str] = frozenset()) -> dict:
     from app.ai.copilot_context import _trim
     from app.engine import copilot_plans
     board = copilot_plans.board(db)
+    board["plans"] = [p for p in board["plans"] if p["symbol"] not in hidden]
     rows = [{k: v for k, v in {
         "symbol": p["symbol"], "direction": p["direction"], "last": p["last"], "thesis": _trim(p["thesis"], 100),
         "entry": _level(p["entry"]), "invalidation": _level(p["invalidation"]), "position": p["position"],
@@ -214,14 +225,15 @@ def _earnings(symbols: list[str], today: date) -> dict:
     return out
 
 
-def _time_stops(db: Session, today: date) -> dict:
+def _time_stops(db: Session, today: date, hidden: set[str] = frozenset()) -> dict:
     start = datetime(today.year, today.month, today.day, tzinfo=ET)
     rows = db.exec(select(PlanTimeStop).where(PlanTimeStop.delivery == "scheduled",
                                               PlanTimeStop.due_at >= _utc(start.timestamp()),
                                               PlanTimeStop.due_at < _utc((start + timedelta(days=1)).timestamp()))
                    .order_by(PlanTimeStop.due_at)).all()
     return {"state": "ok", "today": [{"symbol": r.symbol, "text": r.text,
-                                       "due": datetime.fromtimestamp(_epoch(r.due_at), ET).strftime("%H:%M ET")} for r in rows]}
+                                       "due": datetime.fromtimestamp(_epoch(r.due_at), ET).strftime("%H:%M ET")}
+                                      for r in rows if r.symbol not in hidden]}
 
 
 def _streak(db: Session, now: float) -> dict:
@@ -425,12 +437,14 @@ def build_pack(db: Session, now: float, calendar=None) -> dict:
     from app.ai.copilot_context import _section
     now_et = datetime.fromtimestamp(now, ET)
     today = now_et.date()
+    from app.engine import day_journal
+    hidden = day_journal.quiet(db)  # a ticker hidden on the desk stays out of the brief: one line in positions says it exists
     positions = _section("positions", lambda: _positions(db, now_et))
     held = [p["symbol"] for p in positions.get("positions", [])]
-    plans = _section("plans", lambda: _plans(db))
+    plans = _section("plans", lambda: _plans(db, hidden))
     planned = [p["symbol"] for p in plans.get("plans", [])]
     try:
-        thesis = _thesis_symbols(db)
+        thesis = [s for s in _thesis_symbols(db) if s not in hidden]
     except Exception:  # noqa: BLE001 - earnings for the held symbols still stand
         log.warning("premarket prep: thesis memories unavailable")
         thesis = []
@@ -444,13 +458,17 @@ def build_pack(db: Session, now: float, calendar=None) -> dict:
         "at_risk": _at_risk(db, now_et),
         "plans": plans,
         "earnings": _section("earnings", lambda: _earnings(held + thesis, today)),
-        "time_stops": _section("time_stops", lambda: _time_stops(db, today)),
+        "time_stops": _section("time_stops", lambda: _time_stops(db, today, hidden)),
         "streak": _section("streak", lambda: _streak(db, now)),
     }
     if radar_premarket.enabled():
         pack["premarket_scan"] = _section("premarket_scan", lambda: read_premarket_scan(today))
     if _archive_on():
         pack["movers"] = _section("movers", lambda: _movers(today, now))
+    for name, lists in (("premarket_scan", ("flagged", "movers")), ("movers", ("gainers", "losers"))):
+        for key in lists:  # the market-wide lists drop a hidden ticker too
+            if isinstance((pack.get(name) or {}).get(key), list):
+                pack[name][key] = [r for r in pack[name][key] if (r.get("symbol") if isinstance(r, dict) else r) not in hidden]
     return pack
 
 
@@ -758,6 +776,10 @@ class PremarketPreps:
         """One picture: the open options by days to expiry, else the first armed plan's chart."""
         today = datetime.fromtimestamp(now, ET).date()
         options, plan = ping_images.premarket_facts(db, today)
+        from app.engine import day_journal
+        hidden = day_journal.quiet(db)
+        options = [o for o in options if o[0].split(" ")[0] not in hidden]
+        plan = None if plan is not None and plan[0] in hidden else plan
         if options:
             return ping_images.positions_strip("Pre-market · days to expiry", options)
         if plan is None:

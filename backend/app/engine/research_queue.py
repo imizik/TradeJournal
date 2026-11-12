@@ -526,7 +526,8 @@ def plan_notification(job_id: str, record: dict, cfg: QueueSettings, session: Se
         symbols = current["input"].get("symbols") or ([saved["symbol"]] if saved.get("symbol") else [])
         subject = f"Research: {symbols[0]} – {reason}" if symbols else f"Research – {reason}"
         summary = _clean(assessment.get("summary"))
-        return {"title": subject[:200], "message": (summary[:400] or reason), "path": f"/copilot-lab?investigation={saved['id']}"}
+        return {"title": subject[:200], "message": (summary[:400] or reason), "path": f"/copilot-lab?investigation={saved['id']}",
+                "symbol": symbols[0] if symbols else None}
 
 
 def gate(job_id: str, push: dict, session: Session | None = None):
@@ -535,7 +536,7 @@ def gate(job_id: str, push: dict, session: Session | None = None):
     from app.engine import notification_policy
     with _session(session) as db:
         return notification_policy.decide(db, sender="research", source_id=job_id, kind="research", title=push["title"],
-                                          body=push["message"], now=time.time())
+                                          body=push["message"], now=time.time(), symbol=push.get("symbol"))
 
 
 def mark_delivered(ticket, session: Session | None = None) -> None:
