@@ -128,7 +128,7 @@ def summary(limit: int = SHOWN) -> dict:
             "count": len(kept), "p50_ms": _percentile(totals, 0.5), "p90_ms": _percentile(totals, 0.9),
             "max_ms": max(totals) if totals else None,
             "sections": dict(sorted(sections.items(), key=lambda kv: -(kv[1]["p90"] or 0))),
-            "recent": list(reversed(kept[-limit:])),
+            "recent": list(reversed(kept[-limit:])) if limit > 0 else [],
         }
     return {"since": int(_started), "slow_ms": SLOW_MS, "keep": KEEP, "routes": routes}
 
@@ -167,8 +167,8 @@ class TimingMiddleware:
             if message["type"] == "http.response.start":
                 total = (time.perf_counter() - start) * 1000
                 message = {**message, "headers": [*message.get("headers", []), (b"server-timing", header(timer, total).encode())]}
-                route = template(scope)
                 try:
+                    route = template(scope)
                     finish(f"{scope.get('method', 'GET')} {route}", timer, total, message.get("status", 0))
                 except Exception:  # noqa: BLE001 - timing must never break a response
                     log.debug("request timing not recorded", exc_info=True)

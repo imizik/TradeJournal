@@ -4,13 +4,16 @@ warm-up. Outside calls are faked at the transport and take ``latency.seconds`` e
 
 from __future__ import annotations
 
+from datetime import datetime
 import logging
 import re
 import threading
 import time
 from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
+from sqlmodel import Session
 
 from app.engine import request_timing
 from app.routers import copilot_desk
@@ -74,6 +77,7 @@ def test_the_timings_read_gives_each_route_p50_p90_and_its_sections(desk):
     assert [r["first"] for r in threads["recent"]] == [False, False]  # newest first; only the first since start is cold
     assert threads["recent"][0]["status"] == 200 and "desk board" in threads["recent"][0]["sections"]
     assert set(threads["sections"]["desk board"]) == {"p50", "p90", "n"}
+    assert desk.client.get("/copilot/desk/timings?limit=0").json()["routes"]["GET /copilot/desk/threads"]["recent"] == []
     assert "GET /copilot/desk/session" in body["routes"] and "GET /copilot/desk/timings" not in body["routes"]
     assert body["slow_ms"] == request_timing.SLOW_MS
     _settle(desk.feed)
@@ -83,7 +87,8 @@ def test_a_slow_read_logs_one_line_naming_its_slowest_sections(desk, monkeypatch
     monkeypatch.setattr(request_timing, "SLOW_MS", 100)
     with caplog.at_level(logging.WARNING, logger="app.engine.request_timing"):
         desk.client.get("/copilot/desk/threads")
-        desk.client.get("/copilot/desk/threads")  # served from the caches: fast, no line
+        monkeypatch.setattr(request_timing, "SLOW_MS", 60_000)
+        desk.client.get("/copilot/desk/threads")  # under the threshold: no line
     lines = [r.getMessage() for r in caplog.records if r.name == "app.engine.request_timing"]
     assert len(lines) == 1 and lines[0].startswith("slow desk read GET /copilot/desk/threads ")
     assert "desk board" in lines[0] and "NBIS" not in lines[0]
@@ -117,7 +122,25 @@ def test_opening_a_position_waits_on_its_marks_quote_and_headlines_at_once_with_
     quotes = [s for s in desk.providers.spans if s[0] == "tradier" and s[1] == "/v1/markets/quotes"]
     news = [s for s in desk.providers.spans if s[0] == "news"]
     assert len(quotes) == 2 and len(news) == 1  # the option marks, the underlying, the headlines: once each
+    assert all(s[4].startswith("desk-ahead") for s in quotes + news)  # all three started before the journal reads
     assert _overlap(desk.providers.spans, quotes[0], quotes[1]) and _overlap(desk.providers.spans, quotes[0], news[0])
+
+
+def test_a_stock_position_s_context_asks_for_its_quote_once(desk):
+    from app.routers.fills import _rebuild_trades
+    from app.models import Fill
+    from tests.test_copilot_plans import ROTH
+    with Session(desk.engine) as db:
+        db.add(Fill(id=UUID(int=900), account_id=ROTH, ticker="MU", side="buy_to_open", instrument_type="stock", price=100,
+                    contracts=10, executed_at=datetime(2026, 10, 20, 10, 0), raw_email_id="gmail:900"))
+        db.commit()
+        _rebuild_trades(db, "test")
+        db.commit()
+    desk.providers.spans.clear()
+    body = desk.client.get("/charts/journal/positions/MU/context").json()
+    assert body["positions"] and body["positions"][0]["instrument"] == "stock"
+    asked = [s for s in desk.providers.spans if s[0] == "tradier" and s[1] == "/v1/markets/quotes"]
+    assert len(asked) == 2  # the options' marks and the stock batch (MU's quote in it): MU is not asked for again
 
 
 def test_a_headline_read_that_fails_still_reads_as_unavailable_with_its_reason(desk, monkeypatch):

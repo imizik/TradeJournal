@@ -329,7 +329,9 @@ def test_checked_call_is_a_plan_origin_the_journal_knows():
 def client(engine, lab, monkeypatch):  # noqa: F811
     from app.routers import copilot_checks
     real = call_check.run
-    monkeypatch.setattr(call_check, "run", lambda raw, **k: real(raw, db_engine=engine, **k))
+    from app.engine.chart_math import ET
+    noon = datetime(TODAY.year, TODAY.month, TODAY.day, 12, tzinfo=ET)  # the check is saved on the pinned day, not the real one
+    monkeypatch.setattr(call_check, "run", lambda raw, **k: real(raw, db_engine=engine, **{"now": noon, **k}))
     app = FastAPI()
     app.include_router(copilot_checks.router, prefix="/copilot")
 
