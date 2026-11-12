@@ -87,17 +87,18 @@ function RowButton({ row, line, open }: { row: DeskThread; line?: ReactNode; ope
 function FollowButton({ symbol, following, onFollow }: { symbol: string; following: boolean; onFollow(symbol: string, following: boolean): void }) {
   return following ? (
     <button type="button" onClick={() => onFollow(symbol, false)} aria-label={`Hide ${symbol}: not following`}
-      title="Not following: hide this ticker from the desk, the thread list and every count (Show again undoes it)"
+      title="Not following: hide this ticker from the desk, the thread list and every count, and silence its phone pings (Show again undoes it)"
       className="flex min-h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-secondary hover:text-foreground sm:min-h-10 sm:w-9">
       <EyeOff size={14} aria-hidden />
     </button>
   ) : (
     <button type="button" onClick={() => onFollow(symbol, true)}
-      className="min-h-11 shrink-0 rounded-md px-2.5 text-xs font-medium text-primary hover:bg-secondary sm:min-h-8">Show again</button>
+      className="min-h-11 shrink-0 rounded-md px-2.5 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-8">Show again</button>
   );
 }
 
-/** "3 not followed ▾" at the bottom of the book: each ticker the owner hid, with Show again. Nothing when none. */
+/** "3 not followed · quiet on your phone too ▾" at the bottom of the book: each ticker the owner hid, with Show again.
+ * Their phone pings are held by the backend's notification policy (``not_followed``). Nothing when none. */
 export function NotFollowed({ rows, open, onFollow }: { rows: DeskThread[]; open(row: DeskThread): void; onFollow(symbol: string, following: boolean): void }) {
   const [shown, setShown] = useState(false);
   const first = new Map<string, DeskThread>();
@@ -107,7 +108,7 @@ export function NotFollowed({ rows, open, onFollow }: { rows: DeskThread[]; open
     <div data-testid="not-followed" className="mt-1 border-t pt-1">
       <button type="button" aria-expanded={shown} onClick={() => setShown(was => !was)}
         className="min-h-11 w-full rounded-md px-2.5 text-left text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">
-        <span className="tabular-nums">{first.size}</span> not followed {shown ? "▴" : "▾"}
+        <span className="tabular-nums">{first.size}</span> not followed · quiet on your phone too {shown ? "▴" : "▾"}
       </button>
       {shown && (
         <ul aria-label="Not followed">

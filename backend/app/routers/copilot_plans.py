@@ -21,7 +21,7 @@ from sqlmodel import Session
 
 from app.ai import copilot
 from app.database import get_session
-from app.engine import copilot_plans, desk_context, jo_research, plan_positions, setup_record
+from app.engine import copilot_plans, day_journal, desk_context, jo_research, plan_positions, setup_record
 from app.engine.chart_math import ET
 from app.routers import today
 
@@ -172,7 +172,7 @@ def desk_picture(investigation_id: str, timeframe: Literal["2m", "15m", "1D"] = 
 def desk_chart(investigation_id: str, timeframe: Literal["2m", "15m", "1D"] = "2m", db: Session = Depends(get_session)):
     """The cockpit centre's interactive chart as data (``desk_context.chart``): the thread's symbol on ``timeframe`` with
     its plan's levels, the owner's fills, today's pings sent and Radar hits on the symbol, and the time stop still
-    ahead. ``market`` is QQQ with the day's fills and pings. One cached chart-feed read, like the picture. No bars is
+    ahead. ``market`` is QQQ with the day's fills and pings, less tickers he does not follow. One cached chart-feed read, like the picture. No bars is
     ``state`` "unavailable" with the reason, never an error page."""
     from app.routers import copilot_desk
     if not copilot.settings().enabled:
@@ -182,7 +182,9 @@ def desk_chart(investigation_id: str, timeframe: Literal["2m", "15m", "1D"] = "2
     pings = today._section(db, "desk chart pings", lambda: copilot_desk._ping_events(db, now))
     if investigation_id == desk_context.MARKET_ID:
         fills = today._section(db, "desk chart fills", lambda: copilot_desk._fill_events(db, day))
-        return desk_context.chart(db, None, now, timeframe, fills.get("rows", []) + pings.get("rows", []))
+        hidden = day_journal.not_following(db)  # a ticker he does not follow leaves no mark on the market chart
+        rows = [r for r in fills.get("rows", []) + pings.get("rows", []) if r.get("symbol") not in hidden]
+        return desk_context.chart(db, None, now, timeframe, rows)
     inv = _thread(investigation_id, db)
     radar = today._section(db, "desk chart radar", lambda: copilot_desk._radar_events(day))
     events = [r for r in pings.get("rows", []) + radar.get("rows", []) if inv.symbol and r.get("symbol") == inv.symbol]

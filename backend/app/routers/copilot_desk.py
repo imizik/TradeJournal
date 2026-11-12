@@ -924,7 +924,13 @@ def desk_session(db: Session = Depends(get_session)):
     alerts_due = today._section(db, "session alerts to answer", lambda: _alerts_to_answer(db, now))
     hits_due = today._section(db, "session radar to rate", lambda: _hits_to_rate(day))
     realized = today._section(db, "session realized", lambda: _realized_today(db, day))
-    events = sorted((row for part in (fills, pings, radar, decisions) for row in part.get("rows", [])), key=lambda r: r["at"])
+    from app.engine import day_journal
+    try:
+        hidden = day_journal.not_following(db)  # a ticker he does not follow is in no event (Since you looked counts these)
+    except Exception:  # noqa: BLE001 - the events are counts; an unread setting leaves them as they are
+        hidden = set()
+    events = sorted((row for part in (fills, pings, radar, decisions) for row in part.get("rows", [])
+                     if row.get("symbol") not in hidden), key=lambda r: r["at"])
     written = (prep.get("prep") or {})
     return {
         "as_of": today._iso(now), "now": int(now), "day": day.isoformat(), "phase": phase.get("phase"),

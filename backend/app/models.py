@@ -804,7 +804,8 @@ class PositionCompanion(SQLModel, table=True):
     expiration: date
     opened_at: datetime  # the first entry fill, a New York wall clock
     detected_at: datetime = Field(default_factory=datetime.utcnow)
-    # adopting (the turn is running) | draft | armed (Confirm armed the invalidation) | ignored | closed | failed
+    # adopting (the turn is running) | draft | armed (Confirm armed the invalidation) | ignored | closed | failed |
+    # not_followed (a ticker hidden on the desk: never adopted, no turn; claimed again once it is followed)
     state: str = Field(default="adopting", index=True)
     watched: bool = True  # False: adopt-only, past COMPANION_MAX_POSITIONS (the newest win)
     investigation_id: Optional[uuid.UUID] = None

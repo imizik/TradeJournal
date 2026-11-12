@@ -307,3 +307,16 @@ def test_a_missing_robinhood_mark_reads_unavailable_with_no_time_stamped_on_it(d
     call = copilot_book.positions(session=db)["positions"][1]
     assert call["symbol"] == "NBIS" and call["live"] == "Robinhood" and call["mark"] is None and call["unrealized_usd"] is None
     assert "mark_as_of" not in call and "greeks_as_of" not in call
+
+
+def test_a_robinhood_only_position_in_a_ticker_not_followed_is_named_on_the_one_line(db, live, fake, monkeypatch):
+    from app.engine import day_journal
+    fake.options["333338267"].append(option_position("opt-mu", "MU", expiry=EXPIRY.isoformat()))
+    fake.instruments["opt-mu"] = instrument("opt-mu", "MU", expiry=EXPIRY.isoformat())
+    fake.quotes["opt-mu"] = option_quote("opt-mu")
+    live["read"]()
+    monkeypatch.setattr(day_journal, "quiet", lambda _db: {"MU"})
+    held = _pack(db, "NBIS")["positions"]
+    assert [r["symbol"] for r in held["positions"]] == ["NBIS", "CRWV"] and held["count"] == 2
+    assert held["not_followed"].startswith("1 position not followed: MU")
+    assert any(r["symbol"] == "MU" for r in _pack(db, "MU")["positions"]["positions"])  # asked by name, it shows

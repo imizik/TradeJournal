@@ -827,3 +827,78 @@ def test_an_interrupt_at_the_fill_delays_the_adopt_instead_of_losing_it(world, e
     [row] = companions(engine)
     assert row.delivery == "sent" and row.watched and len(phone.sent) == 1
 
+
+
+# ------------------------------------------------------------------ not followed on the desk
+
+_follows = iter(range(1, 10_000))
+
+
+def follow(engine, symbol: str, on: bool):
+    """The desk's Hide / Show again: a ``follow`` day-journal entry, the newest winning."""
+    from app.models import DayJournalEntry
+    i = next(_follows)
+    with Session(engine) as db:
+        db.add(DayJournalEntry(operation_id=f"follow-{i}", day=WED, kind="follow", symbol=symbol, actor="owner",
+                               text="Following" if on else "Not following", created_at=datetime(2026, 10, 21, 12, 0, i)))
+        db.commit()
+
+
+def test_a_ticker_not_followed_is_recorded_not_adopted_and_picked_up_once_followed(world, engine, phone):
+    follow(engine, "NBIS", False)
+    fill(engine, "10:00")
+    world.tick("10:03")
+    world.tick("10:04")
+    [row] = companions(engine)
+    assert row.state == "not_followed" and not row.watched and row.last_error == "Not adopted: not followed on the desk."
+    assert world.turns.questions == [] and phone.sent == []  # no model call, no ping
+    follow(engine, "NBIS", True)
+    world.tick("10:20")
+    [row] = companions(engine)
+    assert row.state == "draft" and row.watched and len(world.turns.questions) == 1 and len(phone.sent) == 1
+    assert row.detected_at == utc("10:20")
+
+
+def test_an_adopted_position_gets_no_update_or_exit_note_while_hidden_and_no_back_fill_after(world, engine, phone):
+    adopted(world, engine)
+    follow(engine, "NBIS", False)
+    ping(engine, "giveback", when="10:15")
+    world.prices["NBIS"] = 180.0  # +9%: an update trigger
+    world.tick("10:30")
+    world.tick("11:05")  # past the hour floor too
+    [row] = companions(engine)
+    assert len(world.turns.questions) == 1 and len(phone.sent) == 1  # the adopt only
+    assert row.last_error == position_companion.NOT_FOLLOWED and row.last_update_at == utc("11:05") and row.last_underlying == 180.0
+    follow(engine, "NBIS", True)
+    world.tick("11:20")
+    assert len(world.turns.questions) == 1  # the give-back, the move and the floor while hidden are not reported
+    assert companions(engine)[0].last_error is None
+    ping(engine, "giveback", when="11:25")
+    world.tick("11:40")
+    assert len(world.turns.questions) == 2 and "a give-back alert went out" in world.turns.questions[-1]
+
+
+def test_a_position_closed_while_hidden_closes_quietly_with_no_turn(world, engine, phone):
+    row = adopted(world, engine)
+    follow(engine, "NBIS", False)
+    fill(engine, "10:40", side="sell_to_close", price=420)
+    world.tick("10:41")
+    [row] = companions(engine)
+    assert row.state == "closed" and len(world.turns.questions) == 1 and len(phone.sent) == 1
+    assert investigation(engine, row)["status"] == "closed"
+    assert "not followed" in row.last_error
+
+
+def test_a_hidden_adopted_position_takes_no_watch_slot(world, engine, phone, monkeypatch):
+    monkeypatch.setenv("COMPANION_MAX_POSITIONS", "2")
+    monkeypatch.setenv("PING_BUDGET_NUDGE", "5")  # three adopt pings
+    world.prices["CRWV"] = 130.0
+    fill(engine, "10:00")
+    world.tick("10:03")
+    fill(engine, "10:05", ticker="AMD", strike=250)
+    world.tick("10:08")
+    follow(engine, "AMD", False)
+    fill(engine, "10:20", ticker="CRWV", strike=120)
+    world.tick("10:23")
+    watched = {r.ticker: r.watched for r in companions(engine)}
+    assert watched == {"NBIS": True, "AMD": True, "CRWV": True}  # NBIS keeps its slot: the hidden AMD counts for none

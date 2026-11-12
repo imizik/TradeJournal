@@ -99,9 +99,14 @@ def week_title(monday: date) -> str:
     return f"{TITLE} {monday:%b} {monday.day}–{friday:%b} {friday.day}"
 
 
-def prompt(monday: date) -> str:
-    """The owner's own Review my week context for that week, as a Friday's Daily Review link sends it."""
-    return f"Context: Review my week of {monday.isoformat()}"
+def prompt(monday: date, hidden: set[str] | frozenset = frozenset()) -> str:
+    """The owner's own Review my week context for that week, as a Friday's Daily Review link sends it, and one line
+    naming the tickers he set to not followed on the desk: kept in the totals, left out of the review's body."""
+    text = f"Context: Review my week of {monday.isoformat()}"
+    if hidden:
+        text += (f"\nNot followed on the desk: {', '.join(sorted(hidden))}. Their trades stay in the week's totals; "
+                 "do not discuss them one by one.")
+    return text
 
 
 def _money(value: float) -> str:
@@ -275,13 +280,15 @@ class WeekReviews:
                 return
             monday = row.week_start
             review = copilot_review.week_review(monday.isoformat(), session=db)
+            from app.engine import day_journal
+            hidden = day_journal.quiet(db)
             if review.get("state") != "ok":
                 row.delivery, row.last_error = "skipped", "No closed trades this week, so no review was run."
                 db.add(row)
                 db.commit()
                 log.info("Week review skipped for the week of %s: no closed trades", monday)
                 return
-        question = prompt(monday)
+        question = prompt(monday, hidden)
         answer, error, events = self.turn(question, now)
         written = answer_lines(answer) if error is None else []
         if not written:

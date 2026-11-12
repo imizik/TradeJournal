@@ -38,7 +38,7 @@ export type Today = {
 };
 
 const REFRESH_MS = 60_000;
-export const HELD: Record<string, string> = { merged: "Merged", suppressed: "Quiet window", over_cap: "Over the daily cap" };
+export const HELD: Record<string, string> = { merged: "Merged", suppressed: "Quiet window", over_cap: "Over the daily cap", not_followed: "Not followed" };
 export const clock = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }) : "";
 const ok = <T extends { state: string }>(section: T | Unavailable): section is T => section.state !== "unavailable";
 
