@@ -62,6 +62,11 @@ def test_private_owner_cannot_mutate_any_trial_domain_route(boundary):
                 assert response.status_code == 503, (method, path, response.text)
                 assert response.json()["detail"] == "Sample connector is unavailable"
                 continue
+            if route.path.startswith("/lock/"):
+                # The private owner lock never runs beside assistant access: its
+                # routes are outside that mode's inventory and refused as missing.
+                assert response.status_code == 404, (method, path, response.text)
+                continue
             assert response.status_code == 403, (method, path, response.text)
             assert response.json()["detail"] == "Sample trial data is read-only"
     with Session(boundary.engine) as db:
