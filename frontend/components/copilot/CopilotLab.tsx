@@ -59,7 +59,7 @@ function Breadcrumb({ thread, link, saved, onMain }: { thread: DeskThreadRef | n
   return (
     <nav aria-label="You are here" data-testid="desk-breadcrumb" className="z-10 mb-3 flex min-w-0 items-baseline gap-1.5 bg-background py-1 text-xs text-muted-foreground lg:sticky lg:top-0 lg:shadow-[0_-24px_0_0_hsl(var(--background))]">
       {symbol ? <span className="shrink-0 font-semibold text-foreground">{symbol}</span> : (
-        <button type="button" onClick={onMain} className="shrink-0 font-semibold hover:text-foreground hover:underline">Now</button>
+        <button type="button" onClick={onMain} className="relative shrink-0 font-semibold after:absolute after:-inset-x-2 after:-inset-y-3.5 after:content-[''] hover:text-foreground hover:underline sm:after:hidden">Now</button>
       )}
       {leaf && <><span aria-hidden>›</span><span className="min-w-0 truncate text-foreground" title={leaf}>{leaf}</span></>}
       {at && <span className="shrink-0 tabular-nums">· {shortDay(at)}</span>}
@@ -134,11 +134,12 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // (``openTicket``), or from a link (?ticket=) made where the desk was not open.
   const tickets = useTicketPlans(on);
   const [ticketFor, setTicketFor] = useState<string | null>(null);
+  const ticketLinked = useRef(false); // a ?ticket= link on a phone: the Ticket comes into view once the book above it has read
   useEffect(() => {
     const show = (id: string) => { setTicketFor(id); setCentreTab("ticket"); if (sheetLayout()) document.getElementById("desk-centre")?.scrollIntoView({ behavior: "smooth", block: "start" }); };
     const onTicket = (event: Event) => { event.preventDefault(); show((event as CustomEvent<{ investigationId: string }>).detail.investigationId); };
     const linked = new URLSearchParams(window.location.search).get("ticket");
-    if (linked) show(linked);
+    if (linked) { show(linked); ticketLinked.current = true; }
     window.addEventListener(TICKET_EVENT, onTicket);
     return () => window.removeEventListener(TICKET_EVENT, onTicket);
   }, []);
@@ -323,6 +324,11 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // first unreviewed thread by a page load of its link (the pass carries on in this tab), else the fills to link here. With nothing left, or read before the close (a tab kept open stays as it is), the desk just opens.
   const closeLink = useRef(close);
   const sessionRead = !!(session.data || session.error);
+  useEffect(() => {
+    if (!ticketLinked.current || !rowsFresh || !sessionRead) return;
+    ticketLinked.current = false;
+    if (sheetLayout()) document.getElementById("desk-centre")?.scrollIntoView({ block: "start" });
+  }, [rowsFresh, sessionRead]);
   useEffect(() => {
     if (!closeLink.current || !rows.length || !sessionRead) return;
     closeLink.current = false;
@@ -685,7 +691,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 onFollow={following => changeFollow(link.symbol!, following)} fallback={
                 <p className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Link href={`/charts?symbol=${encodeURIComponent(link.symbol)}`} aria-label={`Open ${link.symbol} chart`} title={`Open ${link.symbol} in Charts`}
-                    className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-2 hover:text-primary hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">{link.symbol}<ChartCandlestick size={13} aria-hidden className="text-muted-foreground" /></Link>
+                    className="inline-flex min-h-11 items-center gap-1 font-medium text-foreground underline-offset-2 sm:min-h-0 hover:text-primary hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">{link.symbol}<ChartCandlestick size={13} aria-hidden className="text-muted-foreground" /></Link>
                   {linkRow?.horizon && <HorizonPick horizon={linkRow.horizon} onChange={horizon => changeHorizon(link.symbol, horizon)} />}
                 </p>} />
               {fills.bar(link.symbol)}
@@ -701,8 +707,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           <CopilotPanel variant="page" link={link} desk={hooks} daily={daily} />
         </section>
       </div>
-      {on && <button type="button" onClick={askCopilot} className={cn(styles.ask, "min-h-11 items-center gap-1.5 rounded-full border border-foreground/30 bg-card px-4 text-sm font-medium text-foreground shadow-lg hover:bg-secondary")}>
-        <MessageCircle size={15} aria-hidden className="text-muted-foreground" />Ask the copilot{picked && picked !== talking ? ` about ${picked}` : ""}
+      {/* A phone shows only the round button, so it never sits over a book row's P&L; its name is the same. */}
+      {on && <button type="button" onClick={askCopilot} className={cn(styles.ask, "min-h-11 items-center gap-1.5 rounded-full border border-foreground/30 bg-card px-4 text-sm font-medium text-foreground shadow-lg hover:bg-secondary max-sm:size-12 max-sm:justify-center max-sm:px-0")}>
+        <MessageCircle size={15} aria-hidden className="text-muted-foreground max-sm:size-5 max-sm:text-foreground" /><span className="max-sm:sr-only">Ask the copilot{picked && picked !== talking ? ` about ${picked}` : ""}</span>
       </button>}
       {on && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} onConversation={actions.open} />}
     </div>

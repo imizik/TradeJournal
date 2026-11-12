@@ -50,11 +50,18 @@ export function DayPnl({ session, rows, read }: { session: DeskSession | null; r
 }
 
 /** The top bar's account chips while the Robinhood feed is live (docs/robinhood-read-feed.md): each account's label,
- * number masked to the last four and total value. Nothing otherwise. */
+ * number masked to the last four and total value. Nothing otherwise. A phone folds them behind one Accounts button, so
+ * the strip and the book stay on the first screen. */
 export function AccountChips({ live }: { live: DeskLive | null }) {
+  const [open, setOpen] = useState(false);
   if (!liveOn(live) || !live?.accounts?.length) return null;
   return (
-    <span data-testid="desk-accounts" aria-label="Accounts" className="flex flex-wrap items-center gap-1.5">
+    <>
+    <button type="button" aria-expanded={open} onClick={() => setOpen(shown => !shown)} data-testid="desk-accounts-toggle"
+      className="inline-flex min-h-11 items-center gap-1 whitespace-nowrap rounded-md border px-2.5 text-xs text-foreground sm:hidden">
+      Accounts <span className="tabular-nums text-muted-foreground">{live.accounts.length}</span> {open ? "▴" : "▾"}
+    </button>
+    <span data-testid="desk-accounts" aria-label="Accounts" className={cn("flex flex-wrap items-center gap-1.5", open ? "max-sm:basis-full" : "max-sm:hidden")}>
       {live.accounts.map(a => (
         <span key={a.masked} className="whitespace-nowrap rounded-md border px-2 py-0.5 text-xs text-foreground">
           {a.label} <span className="tabular-nums text-muted-foreground">{a.masked}</span>{" "}
@@ -62,6 +69,7 @@ export function AccountChips({ live }: { live: DeskLive | null }) {
         </span>
       ))}
     </span>
+    </>
   );
 }
 
@@ -81,7 +89,10 @@ function LiveLine({ live, onRefresh }: { live: DeskLive | null; onRefresh?(): vo
   const text = `${words}${on || live.state === "stale" ? at : ""}`;
   return on && onRefresh ? (
     <button type="button" data-testid="book-live" onClick={onRefresh} title="Read Robinhood again"
-      className="ml-auto min-h-11 text-[11px] text-muted-foreground hover:text-foreground sm:min-h-0">{text}</button>
+      className="ml-auto min-h-11 text-[11px] text-muted-foreground hover:text-foreground sm:min-h-0">
+      {/* A phone keeps the heading on one line: "live · as of 10:04 AM" (the words stay for a screen reader). */}
+      {words === LIVE_WORDS.ok ? <>live<span className="max-sm:sr-only"> from Robinhood</span>{at}</> : text}
+    </button>
   ) : <span data-testid="book-live" className="ml-auto text-[11px] text-muted-foreground">{text}</span>;
 }
 
@@ -124,7 +135,7 @@ export function NeedsStrip({ needs, actions }: { needs: DeskNeed[]; actions(need
       {more && rest.length > 0 && (
         <ul aria-label="More waiting" className="mt-2 space-y-1 border-t border-primary/20 pt-2">
           {rest.map(need => (
-            <li key={need.key} data-testid="needs-you-more" className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-xs">
+            <li key={need.key} data-testid="needs-you-more" className="flex flex-wrap items-center gap-x-2 gap-y-1 border-primary/15 px-1 py-1 text-xs max-sm:border-t max-sm:py-2 max-sm:first:border-t-0 max-sm:first:pt-0">
               <span className="min-w-0 flex-1 basis-48 text-foreground">{need.title}</span>
               <span className="flex flex-wrap gap-1.5">{buttons(need, true)}</span>
             </li>
@@ -240,7 +251,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
   };
   return (
     <section aria-label="Your book" data-testid="desk-book" className="rounded-lg border bg-card">
-      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 px-3 pb-1.5 pt-2.5">
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 px-3 pb-1.5 pt-2.5 max-sm:items-center max-sm:py-0">
         <h2 className={cn(LABEL, "shrink-0")}>
           Your book{shown.length > 0 && <> · <span className="tabular-nums">{shown.length}</span> followed</>}
         </h2>
@@ -261,7 +272,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
             return (
               <li key={row.key} className={cn("flex items-stretch border-t", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")}>
                 <button type="button" onClick={() => onSelect(row)} aria-pressed={on} aria-label={`${row.symbol} ${full}`}
-                  className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_48px_60px] items-center gap-2 py-2 pl-3 text-left hover:bg-secondary">
+                  className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_48px_minmax(60px,auto)] items-center gap-2 py-2 pl-3 text-left hover:bg-secondary">
                   <span className="min-w-0 overflow-hidden">
                     <span className="flex items-baseline gap-1.5">
                       <span className="text-sm font-semibold text-foreground">{row.symbol}</span>
@@ -279,7 +290,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                     </span>
                   </span>
                   <Spark points={spark?.points} label={`${row.symbol} today`} />
-                  <span className={cn("text-right text-sm tabular-nums", tone(book?.usd), updating && "opacity-50")}>
+                  <span className={cn("whitespace-nowrap text-right text-sm tabular-nums", tone(book?.usd), updating && "opacity-50")}>
                     {book?.usd != null ? money(book.usd) : row.value?.text ?? "—"}
                     {book?.pct != null && <span className="block text-[11px]">{signedPct(book.pct)}</span>}
                   </span>
@@ -442,13 +453,13 @@ export function CentreChart({ symbol, thread, row, sparks }: {
         <div role="group" aria-label="Timeframe" className="flex gap-1">
           {DESK_TIMEFRAMES.map(item => (
             <button key={item} type="button" aria-pressed={timeframe === item} onClick={() => pickTimeframe(item)}
-              className={cn("min-h-9 rounded border px-2 text-xs tabular-nums sm:min-h-0 sm:py-0.5",
+              className={cn("min-h-11 min-w-11 rounded border px-2 text-xs tabular-nums sm:min-h-0 sm:min-w-0 sm:py-0.5",
                 timeframe === item ? "border-foreground/60 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
               {item}
             </button>
           ))}
         </div>
-        <Link href={charts} className="ml-auto text-xs text-muted-foreground hover:text-foreground">Open in Charts →</Link>
+        <Link href={charts} className="ml-auto inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Open in Charts →</Link>
       </div>
       <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0}
         label={`${symbol ?? "QQQ"} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />

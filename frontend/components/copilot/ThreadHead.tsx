@@ -110,7 +110,7 @@ export function HorizonPick({ horizon, onChange }: { horizon: DeskHorizon; onCha
     <label className="inline-flex items-center gap-1" title="How often the desk checks in after the close: a day trade every day, a swing when something happened, a long hold in Review my week">
       <span className="sr-only">Horizon</span>
       <select value={shown} onChange={event => change(event.target.value as DeskHorizon)} aria-label="Horizon"
-        className="h-5 rounded border-0 bg-secondary px-1 text-[11px] font-medium text-foreground">
+        className="h-8 rounded border-0 bg-secondary px-1.5 text-xs font-medium text-foreground sm:h-5 sm:px-1 sm:text-[11px]">
         {HORIZONS.map(h => <option key={h.id} value={h.id}>{h.label}</option>)}
       </select>
       {failed && <span role="status" className="text-primary">Not saved</span>}
