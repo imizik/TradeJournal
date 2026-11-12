@@ -24,6 +24,7 @@ from app.engine.jobs import (
 from app.engine.email_parser import ParsedRoll
 from app.engine.option_rolls import resolve_rolls
 from app.engine.reconstructor import FillInput, reconstruct
+from app.engine.robinhood_fills import email_already_written, written_email_ids
 from app.engine.job_runtime import submit_job
 from app.environment import require_destructive_confirmation
 from app.models import Account, DailyReviewRecord, FILL_LIGHT, Fill, FillOut, OptionRollOrder, Trade, TradeFill, TradeTag, TradePathMetrics
@@ -183,6 +184,9 @@ def _import_fills_from_gmail(
 
     known_ids: set[str] = {raw_id for raw_id in session.exec(select(Fill.raw_email_id)).all() if raw_id}
     known_ids |= set(session.exec(select(OptionRollOrder.raw_email_id)).all())
+    # An email for an order already written from Robinhood's order history (a recurring buy) is recorded there, never
+    # imported as a second fill (docs/robinhood-order-fills.md). Empty unless that switch has written something.
+    known_ids |= written_email_ids(session)
     log.info("Loaded %d known email IDs", len(known_ids))
 
     try:
@@ -227,6 +231,10 @@ def _import_fills_from_gmail(
                 parsed_fill.account_type,
             )
         account = account_cache[parsed_fill.account_last4]
+
+        if email_already_written(session, parsed_fill, account.last4):
+            known_ids.add(parsed_fill.raw_email_id)
+            continue
 
         session.add(Fill(
             id=uuid.uuid4(),
@@ -628,9 +636,10 @@ def resync_all(
     log.warning("BEGIN /fills/resync-all on %s (%s)", environment.identity, environment.name)
 
     _clear_derived_trade_data(session)
-    session.exec(delete(Fill).where(not_(Fill.raw_email_id.like("manual:%"))))
+    # Manual fills and fills written from Robinhood's order history (recurring buys no email will ever re-import) stay.
+    session.exec(delete(Fill).where(not_(Fill.raw_email_id.like("manual:%")), not_(Fill.raw_email_id.like("robinhood:%"))))
     session.commit()
-    log.warning("Cleared non-manual fills and derived trade data for /fills/resync-all")
+    log.warning("Cleared email fills and derived trade data for /fills/resync-all")
 
     # Safety net: restore any manual fills missing from the DB (e.g. if DB was recreated)
     restore_manual_fills_from_backup(session)
@@ -653,6 +662,13 @@ def resync_all(
         "trades_rebuilt": trades_rebuilt,
         "anomalies": anomalies,
     }
+
+
+@router.get("/robinhood/reconciliation")
+def robinhood_reconciliation(days: int = Query(7, ge=1, le=30), session: Session = Depends(get_session)):
+    """Owner only (docs/robinhood-order-fills.md): how Robinhood's order history pairs with the journal's fills."""
+    from app.engine.robinhood_fills import view
+    return view(session, days)
 
 
 @router.get("/{fill_id}", response_model=FillOut)

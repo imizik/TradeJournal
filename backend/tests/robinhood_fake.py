@@ -47,6 +47,46 @@ def option_quote(option_id, mark="4.200000", prev="3.500000"):
             "close": {"instrument_id": option_id, "price": prev}}
 
 
+def execution(exec_id, price, quantity, timestamp, **extra):
+    return {"id": exec_id, "price": price, "quantity": quantity, "timestamp": timestamp, **extra}
+
+
+def option_order(order_id, symbol, executions, *, side="buy", effect="open", strike="835.0000", kind="call",
+                 expiry="2026-11-13", quantity=None, state="filled", created_at=None, agent="user", legs=None):
+    """An option order as ``get_option_orders`` returns it (field names and types as observed on 2026-11-12)."""
+    qty = quantity or str(sum(float(e["quantity"]) for e in executions))
+    leg = {"id": "leg-" + order_id, "option_id": f"opt-{symbol}-{strike}-{kind}", "side": side, "position_effect": effect,
+           "ratio_quantity": 1, "expiration_date": expiry, "strike_price": strike, "option_type": kind, "executions": executions}
+    return {"id": order_id, "chain_id": "chain-" + symbol, "chain_symbol": symbol, "state": state, "type": "limit",
+            "trigger": "immediate", "direction": "debit" if side == "buy" else "credit", "quantity": qty,
+            "processed_quantity": str(sum(float(e["quantity"]) for e in executions)), "pending_quantity": "0.00000",
+            "canceled_quantity": "0.00000", "price": executions[0]["price"] if executions else "1.00000000",
+            "stop_price": None, "premium": "193.00000000", "processed_premium": "386", "trade_value_multiplier": "100.0000",
+            "time_in_force": "gfd", "market_hours": "equity_options_extended_hours",
+            "opening_strategy": "long_call" if effect == "open" else None, "closing_strategy": "long_call" if effect == "close" else None,
+            "placed_agent": agent, "agent_initiated": False, "created_at": created_at or (executions[0]["timestamp"] if executions else "2026-11-12T14:00:00Z"),
+            "updated_at": created_at or "2026-11-12T17:15:19.380765Z", "last_transaction_at": None, "is_replaceable": False,
+            "legs": legs if legs is not None else [leg]}
+
+
+def equity_order(order_id, symbol, executions, *, side="buy", state="filled", created_at=None, agent="user", dollars=None):
+    """An equity order as ``get_equity_orders`` returns it; a recurring buy has ``placed_agent: "recurring"``, a dollar
+    amount, ``gtc`` and no ``ref_id``."""
+    qty = str(sum(float(e["quantity"]) for e in executions))
+    order = {"id": order_id, "instrument_id": "inst-" + symbol, "symbol": symbol, "side": side, "type": "market", "state": state,
+             "quantity": qty, "cumulative_quantity": qty, "price": None, "stop_price": None,
+             "average_price": executions[0]["price"] if executions else None, "fees": "0.000000",
+             "dollar_based_amount": {"amount": dollars, "currency_code": "USD"} if dollars else None,
+             "time_in_force": "gtc" if agent == "recurring" else "gfd", "market_hours": "regular_hours", "trigger": "immediate",
+             "placed_agent": agent, "agent_initiated": False,
+             "created_at": created_at or (executions[0]["timestamp"] if executions else "2026-11-12T14:00:00Z"),
+             "last_transaction_at": executions[-1]["timestamp"] if executions else None,
+             "executions": [{**e, "fees": "0.000000"} for e in executions]}
+    if agent != "recurring":
+        order["ref_id"] = "ref-" + order_id
+    return order
+
+
 class FakeRobinhood:
     """``transport`` stands in for ``robinhood_read._transport``. ``data`` holds what each account has; ``calls`` the
     tools called, in order. ``sse`` answers as an event stream; ``fail`` makes a tool answer HTTP 500; ``page`` splits
@@ -61,6 +101,9 @@ class FakeRobinhood:
         self.instruments = {"opt-nbis": instrument("opt-nbis", "NBIS")}
         self.quotes = {"opt-nbis": option_quote("opt-nbis")}
         self.stock_quotes: dict[str, dict] = {}
+        self.option_orders: dict[str, list[dict]] = {}  # account number -> orders, any order (newest first is applied)
+        self.equity_orders: dict[str, list[dict]] = {}
+        self.order_page: int | None = None
         self.calls: list[tuple[str, dict]] = []
         self.methods: list[str] = []
         self.sessions_seen: list[str | None] = []
@@ -129,6 +172,22 @@ class FakeRobinhood:
 
     def tool_get_option_quotes(self, args):
         return {"results": [self.quotes[i] for i in args["instrument_ids"] if i in self.quotes]}
+
+    def _orders(self, rows, args):
+        since = args.get("created_at_gte")
+        assert since, "the order history is always read from a start time"
+        rows = sorted((o for o in rows if o["created_at"] >= since), key=lambda o: o["created_at"], reverse=True)
+        if not self.order_page:
+            return {"orders": rows}
+        start = int(args.get("cursor") or 0)
+        more = start + self.order_page < len(rows)
+        return {"orders": rows[start:start + self.order_page], **({"next": str(start + self.order_page)} if more else {})}
+
+    def tool_get_option_orders(self, args):
+        return self._orders(self.option_orders.get(args["account_number"], []), args)
+
+    def tool_get_equity_orders(self, args):
+        return self._orders(self.equity_orders.get(args["account_number"], []), args)
 
     def tool_get_equity_quotes(self, args):
         return {"results": [self.stock_quotes[s] for s in args["symbols"] if s in self.stock_quotes]}

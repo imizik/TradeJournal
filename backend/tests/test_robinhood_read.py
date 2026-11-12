@@ -44,7 +44,8 @@ def sign(tmp_path):
 
 def test_the_allowlist_is_exactly_the_reads_and_holds_no_write():
     assert rh.READ_TOOLS == {"get_accounts", "get_portfolio", "get_option_positions", "get_option_instruments",
-                             "get_option_quotes", "get_equity_positions", "get_equity_quotes"}
+                             "get_option_quotes", "get_equity_positions", "get_equity_quotes",
+                             "get_option_orders", "get_equity_orders"}  # order history: read only (robinhood_fills)
     for name in rh.READ_TOOLS:
         assert name.startswith("get_") and not any(p in name for p in WRITE_PREFIXES), name
 
@@ -83,7 +84,8 @@ def test_the_wire_refuses_a_write_even_past_the_reader(name, monkeypatch):
 def test_no_generic_call_entry_point():
     public = {n for n in vars(rh.Reader) if not n.startswith("_")}
     assert public == {"get_accounts", "get_portfolio", "get_option_positions", "get_equity_positions",
-                      "get_option_instruments", "get_option_quotes", "get_equity_quotes"}
+                      "get_option_instruments", "get_option_quotes", "get_equity_quotes",
+                      "get_option_orders", "get_equity_orders"}
 
 
 SKIP_DIRS = {".git", "node_modules", ".next", ".venv", "venv", "__pycache__", ".pytest_cache", "test-results", "playwright-report"}
@@ -118,9 +120,14 @@ def test_only_the_client_names_the_endpoint_or_builds_a_tools_call():
     assert sorted(endpoint) == sorted([client, signin])
     assert call == [client]
     assert "tools/call" not in signin.read_text() and "_transport" not in signin.read_text()
-    # The feed is the client's one caller; the desk's thread read and the copilot's book view its only callers. The
-    # copilot's book reads the cached snapshot and the feed's match, never a refresh and never the client.
-    assert sorted(users) == ["backend/app/ai/copilot_book.py", "backend/app/engine/robinhood_book.py", "backend/app/routers/copilot_desk.py"]
+    # The feed and the order-history fills are the client's callers; the desk's thread read and the copilot's book view
+    # the feed. The copilot's book reads the cached snapshot and the feed's match, never a refresh and never the client.
+    assert sorted(users) == ["backend/app/ai/copilot_book.py", "backend/app/engine/robinhood_book.py",
+                             "backend/app/engine/robinhood_fills.py", "backend/app/routers/copilot_desk.py"]
+    fills = (REPO / "backend" / "app" / "engine" / "robinhood_fills.py").read_text()
+    # The order-history poller calls only the accounts read and the two order-history reads, through the feed's sign-in.
+    assert set(re.findall(r"reader\.(get_\w+)", fills)) == {"get_accounts", "get_option_orders", "get_equity_orders"}
+    assert "_call(" not in fills and "_post(" not in fills and "_transport" not in fills
     book = (REPO / "backend" / "app" / "ai" / "copilot_book.py").read_text()
     assert set(re.findall(r"\brb\.(\w+(?:\.\w+)?)", book)) == {"feed.snapshot", "contract_key", "match"}
     assert re.findall(r"^\s*(?:from|import) .*robinhood_book.*$", book, re.M) == ["    from app.engine import robinhood_book as rb"]
@@ -128,6 +135,15 @@ def test_only_the_client_names_the_endpoint_or_builds_a_tools_call():
 
 
 # --------------------------------------------------------------------------- a read on the wire
+
+def test_the_order_history_reads_send_only_their_own_read(fake, sign):
+    reader = rh.Reader(sign)
+    assert reader.get_option_orders("333338267", "2026-11-08T00:00:00Z") == {"orders": []}
+    assert reader.get_equity_orders("333338267", "2026-11-08T00:00:00Z", cursor="2") == {"orders": []}
+    assert fake.calls == [("get_option_orders", {"account_number": "333338267", "created_at_gte": "2026-11-08T00:00:00Z"}),
+                          ("get_equity_orders", {"account_number": "333338267", "created_at_gte": "2026-11-08T00:00:00Z",
+                                                 "cursor": "2"})]
+
 
 @pytest.mark.parametrize("sse", [False, True])
 def test_a_read_opens_a_session_sends_its_header_and_drops_the_guide(fake, sign, sse):

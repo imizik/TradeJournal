@@ -439,6 +439,19 @@ async def _maybe_start_chatter(app_: FastAPI):
     return None if chatter is None else asyncio.create_task(chatter.loop())
 
 
+async def _maybe_start_robinhood_fills(app_: FastAPI):
+    """Fills from Robinhood's order history (docs/robinhood-order-fills.md): off unless ROBINHOOD_FILLS_ENABLED is
+    shadow or true; each pass also needs the read feed on, and does nothing (no call) without it."""
+    app_.state.robinhood_fills = None
+    if os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    from app.engine import robinhood_fills
+    if robinhood_fills.mode() == "off":
+        return None
+    app_.state.robinhood_fills = robinhood_fills.poller
+    return asyncio.create_task(robinhood_fills.poller.loop())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Alembic owns the schema. The app used to call create_all() here, which
@@ -478,11 +491,14 @@ async def lifespan(_app: FastAPI):
     shadow_book = await _maybe_start_shadow_book(_app)
     companion = await _maybe_start_position_companion(_app)
     chatter = await _maybe_start_chatter(_app)
+    robinhood_fills = await _maybe_start_robinhood_fills(_app)
     from app.routers.copilot_desk import warm_at_start
     warm_at_start()  # the desk's market calendar, on its own thread
     try:
         yield
     finally:
+        if robinhood_fills is not None:
+            robinhood_fills.cancel()
         if chatter is not None:
             chatter.cancel()
         if companion is not None:

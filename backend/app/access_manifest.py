@@ -176,6 +176,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /fills',
     'GET /fills/enrich/status',
     'GET /fills/{fill_id}',
+    'GET /fills/robinhood/reconciliation',  # owner only: order-history pairing outcomes, accounts masked
     'GET /gmail/health',
     'GET /gmail/watch/status',
     'GET /health',
