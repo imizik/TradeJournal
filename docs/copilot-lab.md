@@ -178,12 +178,12 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   in `DESK_GROUPS` order (Act now, Near a trigger, Waiting for you, New since
   you looked, Watching); the list regroups them by symbol in the browser.
   - **Now**: today's Main chat (below, § The desk). Pressing it opens it and sends nothing; the
-    open conversation stays saved. Radar hits and Review my
-    week are in the cockpit's Feed tab, not rows in the list. The row shows the Radar count ("18 Radar", an amber dot while one
+    open conversation stays saved. Radar hits are in the cockpit's Feed tab and Review my
+    week in ⌘K, not rows in the list. The row shows the Radar count ("18 Radar", an amber dot while one
     is unseen in this browser); alert and Radar ratings are optional and never counted here. Open conversations about no ticker (an older
     turn, a week review) are listed under it, title and date: today's, the open one and the latest automatic week
     review, the rest under **Earlier · N**. **What matters right now?** (one turn, the fixed `lib/copilot.ts`
-    `WHAT_MATTERS_PROMPT`) sits at the foot of the centre's Feed tab beside Review my week, and in ⌘K.
+    `WHAT_MATTERS_PROMPT`) and Review my week are ⌘K commands (Jump to… on a phone).
   - **Tickers**: one row per symbol the owner has something on: an open
     position, a plan (armed, near a trigger, or exited with its exit review
     waiting), a plan or alert card waiting on Confirm, a thesis-watch trigger
@@ -531,8 +531,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   8:52 ET", "Closed 16:00"), SPY / QQQ / VIX's change, **Realized today** (the trades closed today, New York's day,
   Webull left out: the session read's `realized_today`) and **Open** (every open position's unrealized P&L now,
   followed or not). Then **Now** (back to today's Main chat; dropped on a phone while already there), **Threads** (the
-  thread list's drawer, with the "needs you" count), Jump to… (⌘K) and New plan. Account chips come with the Robinhood
-  stage; nothing fake stands in.
+  thread list's drawer; no count on the button, since the strip counts what needs him), Jump to… (⌘K) and Plan a trade (the same words as ⌘K).
+  Account chips come with the Robinhood stage; nothing fake stands in.
 - **Needs you** (`NeedsStrip`). One amber card for the single most urgent item, with its own answers, **Seen** (out of
   the strip for today, in this browser: `localStorage` `desk.seen.v1`; an item that changes, a new status line, a day
   closer to expiry or another fill, asks again) and **+N more** opening the rest. The order is
@@ -542,10 +542,13 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   expiring within three calendar days with no confirmed invalidation or time stop (an adopted draft counts as none;
   **Plan it**); (4) before the close, the fills waiting to link
   (**Link it**); (5) after the close, the close-of-day questions and fills (**Close the day**). Nothing in the strip is
-  a rating ask. When nothing waits, the strip is absent.
+  a rating ask. A position's P&L and distance to its stop are the book row's, so the strip's line names only what
+  fired. Amber on the desk means this strip and nothing else: tabs, tags, buttons and verdicts elsewhere are neutral.
+  When nothing waits, the strip is absent.
 - **Left: the book** (`Book`). One dense row per open position the owner follows: ticker, contract, unrealized P&L in
   dollars and percent, a sparkline of the underlying today, the bar placing it between the plan's invalidation (left)
-  and entry (the tick) ("no plan lines" without both), the distance to the invalidation, days to expiry and one tag:
+  and entry (the tick) (nothing without both: the tag says No plan), the distance to the stop ("4.3% to stop"), days to
+  expiry and one tag (this year's expiry drops the year: "11/14 105C"):
   **Near stop** (Act now names the invalidation hit or near), **Giving back** (the give-back alert fired), **No plan**
   (no invalidation and no time stop) or **On plan**. These come from each position row's `book`
   (`copilot_desk._book`). Selecting a row shows it in the centre at once and, where the copilot sits beside it, opens
@@ -557,7 +560,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   and a usable sign-in file). `GET /copilot/desk/threads` carries `robinhood`: its `state` (`off`, `signed_out`,
   `expired`, `loading`, `unavailable`, `stale` or `ok`), `as_of`, and each shown account's label, masked number, total
   value, cash and buying power. While it is `ok` (and `joined`): the top bar shows one chip per account (label, `••last
-  four`, value); each book row carries its account tag and quantity; a journal position matched by contract (same
+  four`, value); each book row carries its quantity, and its account tag when the book spans more than one account
+  (one account is the chip's, not a word on every row); a journal position matched by contract (same
   account first) takes Robinhood's P&L, quantity and mark (`book.live` `matched`) and keeps its plan, meter, state and
   thread; a position only Robinhood shows (the fill email has not arrived) is a `robinhood:` row tagged **New · not in
   the journal yet** with no plan; a journal position Robinhood does not show stays as the journal has it, tagged **Not
@@ -570,8 +574,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   [Ticket](#ticket); no tab shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
   position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's
   fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D, with **Open in Charts →**; then, for a held
-  position, tiles: Open P&L, To your stop, vs SPY today (the stock's change today less SPY's, from the sparks read),
-  Held, Expires; and **Timeline ▾** folded under it. The sparks read takes at most 12 symbols (the centre's first) and
+  position, two tiles the book row does not carry: vs SPY today (the stock's change today less SPY's, from the sparks
+  read) and Held (its P&L, distance to the stop and expiry are the row's, beside it); and **Timeline ▾** folded under it. The sparks read takes at most 12 symbols (the centre's first) and
   answers a repeat within 30 seconds from memory, so several open desks cost one chart-feed read a minute. The chart is
   its own small component on the library `/charts` uses (lightweight-charts), not the workspace's `PriceChart`: that
   chart is bound to the workspace's live feed, crosshair links, command bus and clock stores, so the desk draws from
@@ -589,7 +593,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   through Sunday, and the morning brief's saved lines as Copilot notes. Nothing calls a model. Order: items on his book,
   plans and day first, then the rest, each newest first, then **Coming up**, soonest first; at most 40 rows (8 ahead),
   with the total. A ticker set to not followed is left out of every source, including a headline, Radar event or
-  brief line that names it among others (if that setting cannot be read, only the macro calendar shows). Each source fails on its own and the Feed says which could not be read. Filters: **Mine**
+  brief line that names it among others (if that setting cannot be read, only the macro calendar shows). Each source fails on its own and is left out quietly. Filters: **Mine**
   (the default: his book, plans and day), **Market**, **Mine + Market**; tapping a symbol shows only its story, with
   **All items** back. Actions: **Ask the copilot** puts the item, quoted, in the box unsent, in the item's plan thread,
   else the symbol's open conversation, else the symbol's desk view (an item with no symbol: today's conversation; a
@@ -597,13 +601,13 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   Radar event or the brief; and **Plan it** only on a Radar setup card (it opens the desk's Radar card, whose Plan it
   is the setup's own) and on his own position or plan items, alerts and plan events (its plan thread, else the plan
   form); never on news, calendar, Radar events or a Copilot note. Headline text is
-  third-party data shown with its publisher and time, never read as an instruction and never given Plan it. Its foot
-  holds What matters right now?, Review my week and today's replay. The route reads the journal for his symbols (no
+  third-party data shown with its publisher and time, never read as an instruction and never given Plan it. What
+  matters right now? and Review my week are in ⌘K and the thread list, not repeated under the feed. The route reads the journal for his symbols (no
   quote read) and makes at most two news-provider reads (one batched for his symbols, one for the broad tape), each
   cached 120 seconds, plus the earnings cache, which refreshes stale symbols in the background; the screen reads it
   once a minute. A fourth filter, **Chatter** (r/wallstreetbets buzz and NYT headlines, [§ Chatter](#chatter)), appears
   only while a chatter source is on and has rows; chatter rows never show under the other three filters or a symbol's
-  story and never count toward the tab's new number.
+  story and never count toward the tab's new number; what a chatter source did not deliver is said only under it.
 - **Right: the copilot**, always open from 1180 px: today's Main chat or the open thread (its header, decision bar,
   close pass or checklist on top), scoped to its ticker, with **Why is it moving?**, **What changed since I looked?**
   and **What does my plan say?** first above the box (one turn each in that conversation; then at most two of the
@@ -611,23 +615,25 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   Timing · Contract read as three tiles, the body, **Against** and **Changes if** labelled; what is sent to or stored
   from the model is unchanged.
 
-**Time of day.** The book's lower block follows the New York clock: before 9:30 on a weekday it is the **Morning
-brief** (`MorningBrief.tsx`, cut to three lines with **Read the whole brief** a tap away; "No morning brief yet today."
-before it is written) and **Arm today's plans**; after 16:00 it is the **day report** (below), then
-"Close the day: N of M done" and **Close the day** (left out while the strip shows it); otherwise **Since you looked**:
-what changed since the owner last left the desk in this browser (`localStorage` `desk.looked.v2`, by position, saved
-when the page is hidden or left), four lines at most: the biggest open-P&L moves ("NBIS 11/14/26 105C +$120 → +$355", a
-move under $25 and 10% left out), positions opened or closed since, and the fills, pings and Radar events since. No mode shows more than the
-session mode does.
+**Time of day.** The book's lower block follows the New York clock, one block each: before 9:30 on a weekday it is the
+**Morning brief** (`MorningBrief.tsx`, cut to three lines with **Read the whole brief** a tap away; nothing before it
+is written); after 16:00 it is the **day report** (below), with a quiet **Watch today** link under it once Watch your
+day kept today's replay; otherwise **Since you looked**: what changed since the
+owner last left the desk in this browser (`localStorage` `desk.looked.v2`, by position, saved when the page is hidden
+or left), four lines at most: the biggest open-P&L changes since then ("NBIS 11/14/26 105C −$235": the change, since
+the row has the P&L now; a move under $25 and 10% left out), positions opened or closed since, and the fills, pings
+and Radar events since (a ticker not followed counts in none). **Arm today's plans** and **Close the day** are ⌘K
+commands, not buttons in the block; the strip carries Close the day while anything is left to review. No mode shows
+more than the session mode does.
 
-**Day report** (`DayReport.tsx`), after 16:00 New York on a weekday: one compact card of up to four single lines, each
+**Day report** (`DayReport.tsx`), after 16:00 New York on a weekday: one compact card of up to three single lines, each
 opening its rows on tap, in this order. The app scores everything itself; nothing asks him to rate a ping, a Radar hit
 or a call. Facts and counts only (no line tells him to buy, sell or hold, and none says money was missed); a ticker
-marked **Not following** is left out of every line but the realized-P&L total, which is the accounts' money as the top
-bar shows it; a line with nothing in it is absent, and a day with nothing at all says so in one sentence ("Nothing to
-report today: …").
+marked **Not following** is left out of every line; realized P&L is the top bar's and an open position without a plan
+is the book's (its No plan tag, and the strip when it expires soon), so the card repeats neither; a line with nothing in
+it is absent, and a day with nothing at all says so in one sentence ("Nothing to report today: …").
 
-1. **Today**: realized P&L, how many entries were opened today and how many of them had a plan saved before the fill
+1. **Today**: how many entries were opened today and how many of them had a plan saved before the fill
    (`GET /copilot/desk/day-report`, `entries`, from the plan streak's per-entry state: planned, late, no plan). On tap,
    each entry with its time and which of those it was.
 2. **How the pings did**, today's only (`GET /copilot/desk/pings?day_only=true`; without the parameter it still reads
@@ -637,10 +643,9 @@ report today: …").
    its session is open) and a setup card's paper result. On tap, each ping, and **Last 30 days** unfolds the alert and
    Radar scorecards (the line, and so that button, shows only on a day with a ping). Example line: "4 alerts · selling at the alert would have been better on 2, worse on 1 · 2 Radar
    hits · 1 kept going".
-3. **Calls checked, last 30 days**: the running total leads ("14 · 5 up since you checked, 7 down, 2 not measured"),
+3. **Calls checked, last 30 days, since you checked**: the running total leads ("14 · 5 up, 7 down, 2 not measured"),
    then today's. On tap, each call checked today with its verdict, whether he planned it, passed it or did neither, and
    the move since the moment he checked (below). A passed call is reported the same flat way as a planned one.
-4. **Open without a plan**: the followed open positions with no plan, by ticker; each row opens its thread.
 
 **Checked-call scoring** (`backend/app/engine/day_report.py`, `GET /copilot/desk/day-report`, `checks`). A call is scored from
 the underlying's price **when he checked** (`call_check.underlying_price`), never the price in the Discord post, to the
@@ -674,7 +679,8 @@ week. A hidden ticker's rows carry `hidden` in `GET /copilot/desk/threads`: it l
 list's groups for one collapsed "N not followed ▾" line at the bottom of each, every row with Show again; it is never
 in the strip, "needs you" or the Threads count; it asks no close-of-day question and is not in Close
 the day or the evening review. Its thread still opens normally. The setting belongs to the ticker, not one position:
-a new position in a hidden ticker starts hidden too, until Show again. Phone alerts, the position companion, the copilot's
+a new position in a hidden ticker starts hidden too, until Show again. It leaves no mark on the market chart and is not
+counted in Since you looked. Phone alerts, the position companion, the copilot's
 context, the top bar's Open and "At risk now" (the money actually at risk) still include it. The top bar's **Now**
 comes back to today's Main chat; `?view=briefing` (the old Briefing address) and the evening review's `?close=1` land on
 the cockpit too.
@@ -989,7 +995,7 @@ question instead of the bar. Answer opens a one-line input that saves a
 The row's status line says the same in a muted amber, beside the first words
 of the symbol's first `reflection` (or `plan_ask` answer) today: "Reviewed ·
 <first words>" once one is saved, or "Skipped today".
-**Close the day** (the phase button, "Close the day · N to review", or the ⌘K
+**Close the day** (the strip's item while anything is left, or the ⌘K
 command) is a pass through them: it opens the first unreviewed thread in list
 order on its question (a position with no conversation opens by its symbol,
 `/copilot-lab?symbol=…`, and the pass carries on in this tab), and each answer
@@ -999,10 +1005,9 @@ moves on, the ✕ ends the pass, and the last one ends it. Alert and Radar
 ratings are never asked (since 2026-11-10), and a ticker not followed asks
 nothing. With nothing left it puts the day's question in
 the message box, unsent. Nothing is sent to the model, and the answers go
-through the same routes as everywhere else. The button counts all of it
-("Close the day · 3 to review", less what was skipped), or the strip's Close the day, and the day report
-says "Close the day: N of M done": the close questions (one per symbol) and the fills to
-link, a skip not counting as done.
+through the same routes as everywhere else. The strip's item counts all of it
+("Close the day: 3 to review", less what was skipped), and the pass itself shows "N of M done": the close questions
+(one per symbol) and the fills to link, a skip not counting as done.
 `/copilot-lab?close=1` (the [evening review ping](#phone-ping-policy)'s link)
 starts the same pass once the list and the session have read, after 16:00
 only: the first unreviewed thread by its link, else the fills; with nothing
@@ -1074,9 +1079,9 @@ the Check service's pre-trade check does not see it.
 
 **The top bar's day** (`DeskStatus` in `SessionTape.tsx`, `DayPnl` in `Cockpit.tsx`): **Live** (green dot) with the
 New York clock in the regular session, **Pre-market** with the clock, **Closed 16:00** (the calendar's close) after it,
-or **Market closed**; SPY, QQQ and VIX's change; Realized today and Open. The phase action sits in the book's lower
-block: **Arm today's plans** before 9:30 on a weekday, and **Close the day** after 16:00 (or in the strip), which walks
-each thread's close question (see Close of day).
+or **Market closed**; SPY, QQQ and VIX's change; Realized today and Open. The phase actions are ⌘K commands (Jump to… on
+a phone): **Arm today's plans** before 9:30 on a weekday, and **Close the day** after 16:00 (also the strip's item while
+anything is left), which walks each thread's close question (see Close of day).
 
 **Arm today's plans** opens a checklist in the copilot column
 (`ArmChecklist.tsx`; below 1180 px it opens the copilot sheet): each armed plan
@@ -1095,7 +1100,7 @@ drop counts on that visit, and the plan leaves the list on the next read).
 unsent (check each plan against the pre-market and propose what is missing).
 Opening a thread or Close leaves the checklist. Nothing in it arms, sizes or
 sends an order. On a
-phone Jump to…, Threads and New plan show as icons. One
+phone Jump to…, Threads and Plan a trade show as icons. One
 read, `GET /copilot/desk/session` (owner only, refused while the lab is off),
 once a minute while the page is visible, read once by the desk
 (`useDeskSession`) for its top bar, strip and lower block, composed in `copilot_desk.py` from readers
@@ -1115,11 +1120,11 @@ order, each with its status line and value), Conversations (from two letters
 typed, every saved conversation whose title, symbol or conclusion holds the
 words, up to the newest 50 matches, from `GET /copilot/investigations?q=`, so a
 closed or old thread stays reachable) and Commands (Plan a trade, Review
-my week, What matters right now?, and the day's phase command: Prep the day
-before 9:30 on a weekday, Close the day after 16:00). Type to filter, arrows
+my week, What matters right now?, and the day's phase commands: Arm today's plans
+and Prep the day before 9:30 on a weekday, Close the day after 16:00). Type to filter, arrows
 and Enter to choose, Escape or a click outside to close. A thread opens through
 the list's own path (in place, or its deep link); Plan a trade opens the same
-unsent "Plan a trade: " link as the desk bar's New plan; Review my week and What
+unsent "Plan a trade: " link as the desk bar's Plan a trade; Review my week and What
 matters right now? send their one turn exactly as their pinned rows do; Prep
 the day and Close the day only put a question in the message box, unsent.
 The open thread is in the address (`/copilot-lab?thread=<id>`), so Back returns
@@ -1142,15 +1147,15 @@ width; it opens the labelled menu (every page, sync, the plan streak), whose
 **Keep the sidebar open** shows the full sidebar instead, remembered in this
 browser with the same key as Charts' expanded rail (its Collapse folds it
 back). A phone keeps its tab bar. Every icon in the Charts rail names itself
-on hover or focus (`NavHint`), the sync dot included. New plan is outlined, not the bar's loudest button; with N and
+on hover or focus (`NavHint`), the sync dot included. Plan a trade is outlined, not the bar's loudest button; with N and
 the Jump entry it is the one way to Plan a trade from the desk. The read-only note sits under the message box.
 
 **The desk is home.** While the lab is on, the desk takes the Today screen's
 place: it is first in the menu and the phone's first tab ("Desk",
 `withDesk` in `frontend/components/Nav.tsx`), `/today` forwards to it, and
 the Labs entry for the same page goes. What Today showed that the desk did
-not now sits in the centre's Feed: the pings held back today (each saying why), and Watch
-today at its foot. With the lab off, Today is unchanged.
+not now sits in the centre's Feed (the pings held back today, each saying why) and, after the close, Watch
+today under the day report once a replay was kept. With the lab off, Today is unchanged.
 
 The message box (desk and side panel alike) is one box: on the desk the
 "About <symbol>" chip, then a full-width text area that starts three lines
@@ -1188,8 +1193,8 @@ that nothing in it places or sends anything.
   Confirm, a Radar setup's Plan it, a checked call's plan), still armed and not yet entered (no fill linked to it and no
   open trade in the symbol opened since the plan, linked or not). Anything else (no capture,
   an open position, a feed item, a chat message) gets 404 or 409. It opens from the Ticket tab's list of those plans,
-  newest first; **Open its ticket** on a confirmed plan card and on the plan thread's header; and the ticket icon on a
-  book row whose ticker has such a plan. With none, the tab says so and offers **Plan a trade**.
+  newest first, and **Open its ticket** on a confirmed plan card and on the plan thread's header (the book's rows carry
+  no ticket icon: a held row is not a new order). With none, the tab says so and offers **Plan a trade**.
 - **Contract:** the capture's own strike and expiry, else the plan's "Contract: …" words when they state one strike,
   one type and one date plainly ("NBIS 11/14 105C", "Nov 14 '26 105C"; a year only as "'26" or four digits, so
   "Nov 21 30 calls" is the 30 strike); a spread, a strike range or anything vaguer is not guessed, and the plan's own
@@ -1223,8 +1228,8 @@ his own trade audit says unplanned entries lost the money and buzz is where thos
 
 - Only behind the **Chatter** filter: never in Mine, Market or Mine + Market, never in a symbol's story, never counted
   as new, never on the home view or the Needs-you strip, never a phone or Telegram ping. The filter appears only while
-  at least one source is on and has rows; when a source is on but cannot be read or has nothing yet, the Feed's foot
-  says so. `chatter.sources` names each source's state: `on`, `not set up` or `unavailable`.
+  at least one source is on and has rows; under it, a source that cannot be read or has nothing yet is named in one
+  line. While no source has rows nothing about chatter shows anywhere. `chatter.sources` names each source's state: `on`, `not set up` or `unavailable`.
 - A chatter row's only actions are **Ask the copilot** (the row, quoted, in the box unsent) and the outbound link,
   which opens Reddit or the NYT in his own browser. No Plan it, no Open in Charts, no countdowns, no hype relayed as a
   headline. Facts and counts; nothing tells him to buy, sell or hold.
@@ -1340,8 +1345,9 @@ it in the desk's **Check a call** tab (the centre tab strip).
   (the existing ping Why?). No rating ask.
 - **The tab.** A paste box, the reading as chips (blank entry, stop and target
   are inputs he can set; they join the Plan it text as "my stop 664"), the
-  card, Plan it and Pass, then **Checked today** (from the desk and Telegram:
-  time, contract, verdict, the underlying's price then, passed or plan saved).
+  card, Plan it and Pass, then **Checked today** once anything was checked (from the desk and Telegram:
+  time, contract, verdict, the underlying's price then, passed or plan saved). The verdict tags and buttons are
+  neutral, not amber: on the desk amber is only the Needs-you strip.
   Only a saved plan counts as planned; its ticket then opens from the saved plan ([Ticket](#ticket)).
 - **The log.** `call_check` table, one row per check: when (UTC and its New
   York day), the source, the raw text, the reading, the verdict and card, the
@@ -1958,8 +1964,8 @@ The system prompt asks the model to call:
 While the lab is on, **Review my week** sits on the Dashboard header and on a
 Friday's Daily Review (`components/copilot/ReviewMyWeek.tsx`), opening
 `/copilot-lab?context=Review my week` (a Friday's adds `of <its Monday>`) with
-the text in the message box, unsent. On the lab home it sits beside "What
-matters right now?" (at the foot of the centre's Feed and in ⌘K) and sends the turn at once. The system prompt asks the
+the text in the message box, unsent. On the desk it is a ⌘K command beside "What
+matters right now?" and sends the turn at once. The system prompt asks the
 model to call:
 
 - `get_week_review(week_start?)` (read-only, provenance `saved`;

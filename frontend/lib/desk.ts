@@ -630,15 +630,6 @@ export const EXPIRING_DAYS = 3;
 export const money = (value: number) => `${value > 0 ? "+" : value < 0 ? "−" : ""}$${Math.abs(value).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 export const signedPct = (value: number, digits = 0) => `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(digits)}%`;
 
-/** A position row's facts in one line: open P&L and the distance to its invalidation. */
-export function bookFacts(row: DeskThread): string | null {
-  const book = row.book;
-  if (!book) return null;
-  const parts = [book.usd !== null ? `Open ${money(book.usd)}${book.pct !== null ? ` (${signedPct(book.pct)})` : ""}` : null,
-    book.stop_pct !== null ? `invalidation ${Math.abs(book.stop_pct).toFixed(1)}% away` : null];
-  return parts.filter(Boolean).join(" · ") || null;
-}
-
 /**
  * What waits on the owner, in the strip's documented order (docs/copilot-lab.md § The desk), followed tickers only:
  * 1. a position alert asking for a decision (Act now);
@@ -646,7 +637,8 @@ export function bookFacts(row: DeskThread): string | null {
  * 3. an option expiring within ``EXPIRING_DAYS`` with no plan;
  * 4. before the close, the fills waiting to link to a plan (one item);
  * 5. after the close, the close-of-day questions and fills to link (one item: Close the day).
- * Within a rank the thread list's order holds. Nothing here is a rating ask.
+ * Within a rank the thread list's order holds. Nothing here is a rating ask. A position's P&L and distance to its stop are
+ * the book row's, so the strip does not repeat them.
  */
 export function deskNeeds(rows: DeskThread[], day: string, { closing, fills }: { closing: boolean; fills: number }): DeskNeed[] {
   const followed = rows.filter(r => r.symbol && !r.hidden && r.group !== "pinned" && !r.key.startsWith("radar:"));
@@ -654,7 +646,7 @@ export function deskNeeds(rows: DeskThread[], day: string, { closing, fills }: {
   const seen = new Set<string>();
   const add = (need: DeskNeed) => { if (!seen.has(need.key)) { seen.add(need.key); needs.push(need); } };
   for (const row of followed.filter(r => r.group === "act"))
-    add({ key: `decision:${row.key}:${row.status.text}`, kind: "decision", rank: 1, symbol: row.symbol, row, title: `${row.title}: ${row.status.text}`, detail: bookFacts(row) });
+    add({ key: `decision:${row.key}:${row.status.text}`, kind: "decision", rank: 1, symbol: row.symbol, row, title: `${row.title}: ${row.status.text}`, detail: null });
   for (const row of followed.filter(r => r.group === "near" || r.group === "draft"))
     add(row.group === "near"
       ? { key: `trigger:${row.key}:${row.status.text}`, kind: "trigger", rank: 2, symbol: row.symbol, row, title: `${row.symbol} plan: ${row.status.text}`, detail: row.title !== row.symbol ? row.title : null }
@@ -665,7 +657,7 @@ export function deskNeeds(rows: DeskThread[], day: string, { closing, fills }: {
     const left = expiry ? daysTo(expiry, day) : -1;
     if (left < 0 || left >= EXPIRING_DAYS) continue;
     add({ key: `expiring:${row.key}:${left}`, kind: "expiring", rank: 3, symbol: row.symbol, row,
-      title: `${row.title} expires ${left === 0 ? "today" : left === 1 ? "tomorrow" : `in ${left} days`} and has no plan.`, detail: bookFacts(row) });
+      title: `${row.title} expires ${left === 0 ? "today" : left === 1 ? "tomorrow" : `in ${left} days`} and has no plan.`, detail: null });
   }
   if (!closing && fills > 0)
     add({ key: `fills:${fills}`, kind: "fill", rank: 4, symbol: null, row: null, title: `${fills} fill${fills === 1 ? "" : "s"} to link to a plan`, detail: null });
@@ -707,8 +699,9 @@ export function saveLook(look: DeskLook) {
 
 /**
  * "Since you looked": at most ``max`` lines, comparing the followed positions now with ``look`` (by symbol) and counting
- * today's fills, pings and Radar events after it. Biggest P&L moves first (a move under $25 and 10% is left out); a
- * position opened or closed since says so; the counts close the list.
+ * today's fills, pings and Radar events after it (a ticker not followed counts in none). Each P&L move is the change
+ * since then (the book row has the P&L now), biggest first (a move under $25 and 10% is left out); a position opened or
+ * closed since says so; the counts close the list.
  */
 export function sinceLines(look: DeskLook, rows: DeskThread[], events: DeskSessionEvent[], max = 4): string[] {
   const now = new Map(rows.filter(r => r.book && r.symbol && !r.hidden && !r.key.startsWith("robinhood:")).map(r => [r.key, r]));
@@ -719,12 +712,13 @@ export function sinceLines(look: DeskLook, rows: DeskThread[], events: DeskSessi
     else if (usd !== null) {
       const was = look.pnl[key];
       const moved = Math.abs(usd - was);
-      if (moved >= 25 && moved >= Math.abs(was) * 0.1) lines.push({ weight: moved, text: `${row.title} ${money(was)} → ${money(usd)}` });
+      if (moved >= 25 && moved >= Math.abs(was) * 0.1) lines.push({ weight: moved, text: `${row.title} ${money(usd - was)}` });
     }
   }
   for (const key of Object.keys(look.pnl)) if (!now.has(key) && !rows.some(r => r.key === key && r.hidden))
     lines.push({ weight: 1e9 - 1, text: `${look.contracts[key] ?? "A position"} closed` });
-  const after = events.filter(e => e.at > look.at);
+  const hidden = new Set(rows.filter(r => r.hidden && r.symbol).map(r => r.symbol));
+  const after = events.filter(e => e.at > look.at && !(e.symbol && hidden.has(e.symbol)));
   const count = (kind: DeskSessionEvent["kind"], one: string, many: string) => {
     const n = after.filter(e => e.kind === kind).length;
     return n ? `${n} ${n === 1 ? one : many}` : null;

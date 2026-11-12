@@ -9,15 +9,14 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { EyeOff, Ticket } from "lucide-react";
-import { openTicket, type TicketPlan } from "@/components/copilot/DeskTicket";
+import { EyeOff } from "lucide-react";
 import { NotFollowed } from "@/components/copilot/SessionTape";
 import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
 import { getExposure } from "@/lib/copilot";
 import { DeskChart } from "@/components/copilot/DeskChart";
 import { DeskTimeline } from "@/components/copilot/Inspector";
 import {
-  DESK_MARKET, DESK_TIMEFRAMES, bookFacts, daysTo, deskSymbolThread, getDeskSparks, liveOn, money, readLook, saveLook, signedPct, sinceLines,
+  DESK_MARKET, DESK_TIMEFRAMES, daysTo, deskSymbolThread, getDeskSparks, liveOn, money, readLook, saveLook, signedPct, sinceLines,
   type DeskBookState, type DeskLive, type DeskLook, type DeskTimeframe, type DeskNeed, type DeskSession, type DeskSparks, type DeskThread, type DeskThreadRef,
 } from "@/lib/desk";
 import { cn } from "@/lib/utils";
@@ -183,14 +182,15 @@ function Spark({ points, label }: { points: number[] | undefined; label: string 
 
 const STATE: Record<DeskBookState, { label: string; className: string }> = {
   on_plan: { label: "On plan", className: "text-muted-foreground" },
-  giving_back: { label: "Giving back", className: "border-primary/40 text-primary" },
+  giving_back: { label: "Giving back", className: "border-foreground/30 text-foreground" },
   near_stop: { label: "Near stop", className: "border-rose-300/40 text-rose-300" },
   no_plan: { label: "No plan", className: "border-rose-300/40 text-rose-300" },
 };
 
-/** Where the underlying sits between the plan's invalidation (left) and entry (the tick), from the row's track. */
+/** Where the underlying sits between the plan's invalidation (left) and entry (the tick), from the row's track; nothing
+ * without plan lines (the row's tag already says No plan). */
 function Track({ track }: { track: NonNullable<DeskThread["book"]>["track"] }) {
-  if (!track) return <p className="mt-1 text-[11px] text-muted-foreground">no plan lines</p>;
+  if (!track) return null;
   return (
     <div role="img" aria-label={`Between invalidation and entry: ${track.last.toFixed(0)} of ${track.entry.toFixed(0)}`} className="relative mb-1 mt-2 h-[3px] rounded bg-secondary">
       <i className="absolute -top-[3px] left-0 h-[9px] w-0.5 bg-muted-foreground/60" />
@@ -212,12 +212,10 @@ const left = (expiry: string | null, day: string) => {
  * Selecting a row (``onSelect``) drives the centre and the copilot; its eye stops following the ticker (``onFollow``),
  * and those sit behind "N not followed" at the bottom.
  */
-export function Book({ rows, sparks, selected, selectedKey = null, day, read, live = null, onRefreshLive, onSelect, onFollow, tickets = null, children }: {
+export function Book({ rows, sparks, selected, selectedKey = null, day, read, live = null, onRefreshLive, onSelect, onFollow, children }: {
   rows: DeskThread[]; sparks: DeskSparks | null; selected: string | null; selectedKey?: string | null; day: string; read: boolean;
   live?: DeskLive | null; onRefreshLive?(): void;
-  onSelect(row: DeskThread): void; onFollow(symbol: string, following: boolean): Promise<void>;
-  /** Saved plans armed and not yet entered: a row whose ticker has one opens its ticket (the newest). */
-  tickets?: TicketPlan[] | null; children?: ReactNode;
+  onSelect(row: DeskThread): void; onFollow(symbol: string, following: boolean): Promise<void>; children?: ReactNode;
 }) {
   const [failed, setFailed] = useState<string | null>(null);
   const [stocksOpen, setStocksOpen] = useState(false);
@@ -228,6 +226,8 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, li
   const folded = isLive ? shown.filter(r => r.instrument === "stock" && !r.book?.planned) : [];
   const followed = isLive ? [...shown.filter(r => r.instrument !== "stock"), ...shown.filter(r => r.instrument === "stock" && r.book?.planned),
     ...(stocksOpen ? folded : [])] : shown;
+  // The account tag only when the book spans accounts: one account is the top bar's chip, not a word on every row.
+  const mixed = new Set(followed.flatMap(r => r.book?.account ? [r.book.account.masked] : [])).size > 1;
   // One row is marked: the one tapped, else the first on the centre's ticker (two contracts can share a ticker).
   const marked = followed.find(r => r.key === selectedKey && r.symbol === selected)?.key ?? followed.find(r => r.symbol === selected)?.key;
   const follow = (symbol: string, following: boolean) => {
@@ -248,12 +248,14 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, li
             const book = row.book;
             const spark = row.symbol ? sparks?.rows[row.symbol] : undefined;
             const state = book ? STATE[book.state] : null;
-            const contract = row.instrument && row.instrument !== row.symbol ? row.instrument : row.title;
+            // "11/14 105C": this year's expiries drop the year, so the contract fits beside its line and figures.
+            const full = row.instrument && row.instrument !== row.symbol ? row.instrument : row.title;
+            const contract = full.replace(/\b(\d{1,2}\/\d{1,2})\/(\d{2})\b/, (date, monthDay: string, year: string) => year === day.slice(2, 4) ? monthDay : date);
             const count = book?.quantity != null ? ` ×${book.quantity.toLocaleString("en-US", { maximumFractionDigits: 4 })}` : "";
             const on = row.key === marked;
             return (
               <li key={row.key} className={cn("flex items-stretch border-t", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")}>
-                <button type="button" onClick={() => onSelect(row)} aria-pressed={on} aria-label={`${row.symbol} ${contract}`}
+                <button type="button" onClick={() => onSelect(row)} aria-pressed={on} aria-label={`${row.symbol} ${full}`}
                   className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_48px_60px] items-center gap-2 py-2 pl-3 text-left hover:bg-secondary">
                   <span className="min-w-0">
                     <span className="flex items-baseline gap-1.5">
@@ -262,7 +264,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, li
                     </span>
                     {book ? <Track track={book.track} /> : <span className="block truncate text-xs text-muted-foreground">{row.status.text}</span>}
                     <span className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-muted-foreground">
-                      {book?.account && <span data-testid="book-account" title={`${book.account.label} ${book.account.masked}`}>{book.account.label}</span>}
+                      {mixed && book?.account && <span data-testid="book-account" title={`${book.account.label} ${book.account.masked}`}>{book.account.label}</span>}
                       {book?.stop_pct != null && <span className="tabular-nums">{Math.abs(book.stop_pct).toFixed(1)}% to stop</span>}
                       {book && left(book.expiry, day) && <span className="tabular-nums">{left(book.expiry, day)}</span>}
                       {book?.live === "new" ? <span data-testid="book-state" className="rounded border border-sky-300/40 px-1 text-sky-300">New · not in the journal yet</span>
@@ -276,16 +278,6 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, li
                     {book?.pct != null && <span className="block text-[11px]">{signedPct(book.pct)}</span>}
                   </span>
                 </button>
-                {(() => {
-                  const plan = tickets?.find(t => t.symbol === row.symbol);
-                  return plan && (
-                    <button type="button" onClick={() => openTicket(plan.investigation_id)} aria-label={`Open the ticket for your saved ${row.symbol} plan`}
-                      title="Open the ticket for your saved plan (copies; never sends)"
-                      className="flex shrink-0 items-center px-1.5 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground">
-                      <Ticket size={13} aria-hidden />
-                    </button>
-                  );
-                })()}
                 {row.symbol && (
                   <button type="button" onClick={() => follow(row.symbol!, false)} aria-label={`Hide ${row.symbol}: not following`}
                     title="Not following: hide this ticker from the desk and every count (Show again undoes it)"
@@ -305,7 +297,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, li
         </button>
       )}
       <div className="px-1.5 pb-1"><NotFollowed rows={held.filter(r => r.hidden)} open={onSelect} onFollow={follow} /></div>
-      {failed && <p role="alert" className="px-3 pb-2 text-xs text-primary">{failed}</p>}
+      {failed && <p role="alert" className="px-3 pb-2 text-xs text-rose-300">{failed}</p>}
       {children}
     </section>
   );
@@ -415,21 +407,15 @@ function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
   return [timeframe, pick];
 }
 
-const expiryWords = (iso: string, day: string) => {
-  const n = daysTo(iso, day);
-  const date = new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
-  return `${date} · ${n <= 0 ? (n === 0 ? "today" : "past") : `${n}d`}`;
-};
-
 /**
  * The centre's Chart: the selected symbol's interactive chart (``DeskChart``: candles with the plan's entry and invalidation
  * lines, the owner's fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D; the timeframe
- * holds across positions) with Open in Charts, then a row of
- * tiles for a held position (open P&L, distance to the invalidation, the stock against SPY today, time held, expiry)
- * and, folded, what touched the thread. No symbol: QQQ with the owner's fills and pings.
+ * holds across positions) with Open in Charts, then two tiles for a held position that its book row does not carry (the
+ * stock against SPY today, time held: P&L, the distance to the stop and expiry are the row's) and, folded, what touched
+ * the thread. No symbol: QQQ with the owner's fills and pings.
  */
-export function CentreChart({ symbol, thread, row, sparks, day }: {
-  symbol: string | null; thread: DeskThreadRef | null; row: DeskThread | null; sparks: DeskSparks | null; day: string;
+export function CentreChart({ symbol, thread, row, sparks }: {
+  symbol: string | null; thread: DeskThreadRef | null; row: DeskThread | null; sparks: DeskSparks | null;
 }) {
   const ref = useMemo(() => thread ?? (symbol ? deskSymbolThread(symbol) : null), [thread, symbol]);
   const [timeline, setTimeline] = useState(false);
@@ -444,19 +430,19 @@ export function CentreChart({ symbol, thread, row, sparks, day }: {
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="text-base font-semibold text-foreground">{symbol ?? "QQQ"}</span>
         {change !== null && <span className={cn("text-sm tabular-nums", tone(change))}>{signedPct(change, 2)}</span>}
-        <span className="min-w-0 truncate text-xs text-muted-foreground">{row ? row.title : symbol ? "today" : "market today"}</span>
+        <span className="min-w-0 truncate text-xs text-muted-foreground">{row ? (row.instrument && row.instrument !== row.symbol ? row.instrument : row.title) : symbol ? "today" : "market today"}</span>
       </div>
       <div className="flex items-center gap-1">
         <div role="group" aria-label="Timeframe" className="flex gap-1">
           {DESK_TIMEFRAMES.map(item => (
             <button key={item} type="button" aria-pressed={timeframe === item} onClick={() => pickTimeframe(item)}
               className={cn("min-h-9 rounded border px-2 text-xs tabular-nums sm:min-h-0 sm:py-0.5",
-                timeframe === item ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+                timeframe === item ? "border-foreground/60 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
               {item}
             </button>
           ))}
         </div>
-        <Link href={charts} className="ml-auto text-xs text-muted-foreground hover:text-primary">Open in Charts →</Link>
+        <Link href={charts} className="ml-auto text-xs text-muted-foreground hover:text-foreground">Open in Charts →</Link>
       </div>
       <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0}
         label={`${symbol ?? "QQQ"} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />
@@ -464,18 +450,14 @@ export function CentreChart({ symbol, thread, row, sparks, day }: {
         <Key color="#e9a23b" glyph="▲▼">your fills</Key>
         <Key color="#a78bfa" glyph="●">pings</Key>
         {ref && <Key color="#60a5fa" glyph="■">Radar</Key>}
-        <span>· hover a mark for what and when</span>
       </p>
-      {book && (
+      {book && (versus !== null || book.days_held != null) && (
         <div data-testid="desk-tiles" className="grid grid-cols-[repeat(auto-fit,minmax(104px,1fr))] gap-1.5">
-          <Tile label="Open P&L" className={tone(book.usd)}>{book.usd != null ? money(book.usd) : "—"}{book.pct != null && <span className="ml-1 text-xs">{signedPct(book.pct)}</span>}</Tile>
-          <Tile label="To your stop">{book.stop_pct != null ? `${Math.abs(book.stop_pct).toFixed(1)}%` : "none saved"}</Tile>
           {versus !== null && <Tile label="vs SPY today" className={tone(versus)}>{`${versus > 0 ? "+" : versus < 0 ? "−" : ""}${Math.abs(versus).toFixed(1)} pts`}</Tile>}
           {book.days_held != null && <Tile label="Held">{book.days_held === 0 ? "today" : `${book.days_held}d`}</Tile>}
-          {book.expiry && <Tile label="Expires">{expiryWords(book.expiry, day)}</Tile>}
         </div>
       )}
-      {row && !book && bookFacts(row) === null && <p className="text-xs text-muted-foreground">{row.status.text}</p>}
+      {row && !book && <p className="text-xs text-muted-foreground">{row.status.text}</p>}
       {ref?.symbol && (
         <div className="border-t pt-2">
           <button type="button" aria-expanded={timeline} onClick={() => setTimeline(open => !open)}

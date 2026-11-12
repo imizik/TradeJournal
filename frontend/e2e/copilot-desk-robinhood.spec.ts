@@ -78,7 +78,7 @@ for (const width of [1440, 375]) {
     await expect(shelf.getByTestId("book-stocks")).toHaveText("1 stock position ▾");
     const nbis = shelf.getByRole("button", { name: /^NBIS/ });
     await expect(nbis).toContainText("Roth IRA");
-    await expect(nbis).toContainText("10/30/26 100C ×2");
+    await expect(nbis).toContainText("10/30 100C ×2"); // this year's expiry drops the year
     await expect(nbis).toContainText("+$220");
     await expect(nbis).toContainText("On plan");
     await expect(shelf.getByRole("button", { name: /^APLD/ })).toContainText("New · not in the journal yet");

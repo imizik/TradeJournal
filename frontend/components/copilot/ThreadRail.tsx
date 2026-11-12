@@ -442,12 +442,12 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
                             setFollowFailed(null);
                             onFollow(ticker.symbol, true).catch(() => setFollowFailed(`${ticker.symbol}: not saved. Try again.`));
                           }}
-                            className="min-h-11 shrink-0 rounded-md px-2 text-xs font-medium text-primary hover:bg-secondary sm:min-h-8">Show again</button>}
+                            className="min-h-11 shrink-0 rounded-md px-2 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-8">Show again</button>}
                         </li>
                       ))}
                     </ul>
                   )}
-                  {followFailed && <p role="alert" className="px-2.5 text-xs text-primary">{followFailed}</p>}
+                  {followFailed && <p role="alert" className="px-2.5 text-xs text-rose-300">{followFailed}</p>}
                 </div>
               )}
             </section>
@@ -461,7 +461,7 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
         <span className="inline-flex items-center gap-1 whitespace-nowrap"><kbd className={KBD}>J</kbd><kbd className={KBD}>K</kbd>move</span>
         <span className="inline-flex items-center gap-1 whitespace-nowrap"><kbd className={KBD}>{jumpKey}</kbd>jump</span>
         <span className="inline-flex items-center gap-1 whitespace-nowrap"><kbd className={KBD}>N</kbd>plan</span>
-        <span className="inline-flex items-center gap-1 whitespace-nowrap"><kbd className={KBD}>]</kbd>context</span>
+        <span className="inline-flex items-center gap-1 whitespace-nowrap"><kbd className={KBD}>[</kbd>threads</span>
       </p>
     </nav>
   );

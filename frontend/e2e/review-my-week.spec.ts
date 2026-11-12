@@ -18,11 +18,10 @@ const TURN = [
   { type: "done", metrics: { backend: "fake", evidence: "fixture", model: "fake-scripted", first_text_ms: 1, total_ms: 2, rounds: 2,
     tool_calls: [], usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, cost_usd: 0 } },
 ].map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
-/** Review my week at the foot of the centre's Feed tab. */
+/** Review my week from Jump to (⌘K). */
 async function reviewMyWeek(page: Page) {
-  const centre = page.getByRole("region", { name: "Chart and feed" });
-  await centre.getByRole("tab", { name: "Feed" }).click();
-  await centre.getByRole("button", { name: "Review my week" }).click();
+  await page.getByRole("button", { name: "Jump to a thread or command" }).click();
+  await page.getByRole("dialog", { name: "Jump to" }).getByRole("option", { name: /^Review my week/ }).click();
 }
 const week = (monday?: string) => `/copilot-lab?${new URLSearchParams({ context: monday ? `Review my week of ${monday}` : "Review my week" })}`;
 

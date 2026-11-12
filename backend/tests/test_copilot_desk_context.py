@@ -357,6 +357,9 @@ def test_the_market_chart_is_qqq_with_the_days_fills_and_pings_and_a_bounded_day
     assert asked == ["QQQ"] and body["symbol"] == "QQQ" and body["levels"] == []
     assert len(body["bars"]) <= desk_context.MAX_BARS and body["bars"][-1]["time"] <= NOW
     assert [m["kind"] for m in body["marks"]] == ["fill", "ping"] and body["marks"][0]["text"] == "Bought NBIS"
+    # A ticker he does not follow leaves no mark on the market chart.
+    monkeypatch.setattr(plan_routes.day_journal, "not_following", lambda db: {"NBIS"})
+    assert lab.get("/copilot/desk/market/chart").json()["marks"] == []
     monkeypatch.setattr(plan_routes.copilot, "settings", lambda: SimpleNamespace(enabled=False))
     assert lab.get("/copilot/desk/market/chart").status_code == 503
 

@@ -61,7 +61,7 @@
 }
 
 .title svg {
-  color: hsl(var(--primary));
+  color: hsl(var(--muted-foreground));
 }
 
 .barActions {
@@ -199,7 +199,7 @@
 
 @media (min-width: 768px) and (max-width: 1179px) {
   .cockpit {
-    grid-template-columns: 300px minmax(0, 1fr);
+    grid-template-columns: 330px minmax(0, 1fr);
     grid-template-areas: "strip strip" "book centre";
     align-items: start;
   }
@@ -219,7 +219,7 @@
 @media (min-width: 1180px) {
   /* The copilot runs the full height beside the strip, the book and the centre. */
   .cockpit {
-    grid-template-columns: 300px minmax(0, 1fr) clamp(380px, 33vw, 480px);
+    grid-template-columns: 330px minmax(0, 1fr) clamp(380px, 33vw, 480px);
     grid-template-areas: "strip strip thread" "book centre thread";
     grid-template-rows: auto minmax(0, 1fr);
     align-items: start;

@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, CalendarCheck, ExternalLink, Sparkles } from "lucide-react";
-import WatchDayLink from "@/components/replay/WatchDayLink";
+import { ArrowLeft, ExternalLink } from "lucide-react";
 import { apiUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -101,13 +100,14 @@ export function useFeedNew(data: DeskFeedBody | null, open: boolean): { count: n
  * ``GET /copilot/desk/feed``. Mine (his book, plans and day), Market, or both; tapping a symbol shows that symbol's story,
  * with a way back. Each row: its source, time, symbol and words, and the same small actions: Ask the copilot, Open in
  * Charts, the headline at its publisher, and Plan it only on a Radar setup card or his own position or plan. Facts
- * only; nothing here is an order. What matters right now?, Review my week and today's replay sit at its foot.
+ * only; nothing here is an order. A source that could not be read is left out quietly. The copilot's own questions
+ * (What matters right now?, Review my week) are in the copilot and ⌘K, not repeated here.
  * **Chatter** (r/wallstreetbets buzz, NYT headlines) is a fourth filter that shows only while a chatter source has rows;
- * its rows never show under the other filters, never count as new, and carry only Ask the copilot and their link.
+ * its rows never show under the other filters, never count as new, and carry only Ask the copilot and their link; what
+ * a chatter source did not deliver is said only under that filter.
  */
-export default function DeskFeed({ data, failed, since, onAsk, onPlan, onWhatMatters, onReviewWeek }: {
-  data: DeskFeedBody | null; failed: boolean; since: number | null;
-  onAsk(item: FeedItem): void; onPlan(item: FeedItem): void; onWhatMatters(): void; onReviewWeek(): void;
+export default function DeskFeed({ data, failed, since, onAsk, onPlan }: {
+  data: DeskFeedBody | null; failed: boolean; since: number | null; onAsk(item: FeedItem): void; onPlan(item: FeedItem): void;
 }) {
   const [picked, setFilter] = useState<Filter>("mine");
   const [symbol, setSymbol] = useState<string | null>(null);
@@ -124,9 +124,8 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, onWhatMat
   }, [data, chatter, filter, symbol]);
   const day = data?.day ?? "";
   const market = (data?.items ?? []).filter(i => !i.mine).length;
-  const unread = data?.unavailable.filter(n => n !== "book") ?? [];
   const filters: readonly (readonly [Filter, string])[] = chatterOn ? [...FILTERS, ["chatter", "Chatter"]] : FILTERS;
-  const chatterNote = chatterWhy(chatter, chatterOn);
+  const chatterNote = chatterWhy(chatter);
 
   return (
     <section aria-label="Feed" data-testid="desk-feed" className="space-y-2">
@@ -164,25 +163,13 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, onWhatMat
       {data && filter !== "chatter" && data.total > data.items.length && !symbol && (
         <p className="px-1 text-xs text-muted-foreground">Showing the first {data.items.length} of {data.total}.</p>
       )}
-      {unread.length > 0 && filter !== "chatter" && <p data-testid="feed-unavailable" className="px-1 text-xs text-muted-foreground">Could not read: {unread.join(", ")}.</p>}
-      {chatterNote && (filter === "chatter" || !chatterOn) && <p data-testid="feed-chatter-note" className="px-1 text-xs text-muted-foreground">{chatterNote}</p>}
-      <div className="flex flex-wrap gap-2 pt-1">
-        <button type="button" onClick={onWhatMatters} className={ACTION}
-          title="One copilot turn across your open positions, armed watches and open questions, in today's conversation">
-          <Sparkles size={13} aria-hidden />What matters right now?
-        </button>
-        <button type="button" onClick={onReviewWeek} className={ACTION}
-          title="One copilot turn reviewing your latest trading week: planned vs unplanned, follow-through, alerts and exits">
-          <CalendarCheck size={13} aria-hidden />Review my week
-        </button>
-        {day && <WatchDayLink from={day} className={ACTION} />}
-      </div>
+      {chatterNote && filter === "chatter" && <p data-testid="feed-chatter-note" className="px-1 text-xs text-muted-foreground">{chatterNote}</p>}
     </section>
   );
 }
 
-/** Why Chatter is missing, or which of its sources is not showing: nothing when no source is set up. */
-function chatterWhy(chatter: DeskChatter | null, shown: boolean): string | null {
+/** Under the Chatter filter, which of its sources is not showing: nothing when every set-up source has rows. */
+function chatterWhy(chatter: DeskChatter | null): string | null {
   if (!chatter) return null;
   const sources = Object.entries(chatter.sources).filter(([, state]) => state !== "not set up");
   const has = new Set(chatter.items.map(i => i.source as string));
@@ -190,7 +177,7 @@ function chatterWhy(chatter: DeskChatter | null, shown: boolean): string | null 
     : !has.has(name) ? [`nothing from ${name} yet`] : []);
   if (!parts.length) return null;
   const said = parts.join("; ");
-  return shown ? `${said[0].toUpperCase()}${said.slice(1)}.` : `Chatter: ${said}.`;
+  return `${said[0].toUpperCase()}${said.slice(1)}.`;
 }
 
 /** The Chatter filter's head: buzz chips (ticker and multiple, outlined when he holds it). His record on entries made
