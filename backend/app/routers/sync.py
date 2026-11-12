@@ -670,7 +670,8 @@ def _run_resync_all(session: Session, job_id: uuid.UUID) -> tuple[int, str]:
         raise RuntimeError("Resync has no recorded database confirmation; submit a new request.")
     require_destructive_confirmation(confirmation, "background resync-all")
     _clear_derived_trade_data(session)
-    session.exec(delete(Fill).where(not_(Fill.raw_email_id.like("manual:%"))))
+    # Manual fills and fills written from Robinhood's order history stay: no email will re-import them.
+    session.exec(delete(Fill).where(not_(Fill.raw_email_id.like("manual:%")), not_(Fill.raw_email_id.like("robinhood:%"))))
     session.commit()
     result = _import_fills_from_gmail(session, start_enrichment=False)
     rebuilt, anomalies = _persist_rebuild(session, anomalies_label="/sync/resync-all")

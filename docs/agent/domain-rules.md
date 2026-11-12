@@ -228,17 +228,24 @@ on ([operator note](../robinhood-order-fills.md)).
   average; the email's minute within five minutes of the executions (a manual
   fill: the same New York day). A working order is never paired or listed as
   missing; identical orders pair one to one with the closest unpaired fill, and
-  a pair once made is kept. A fill another order already took is never reused.
+  a matched pair once made is kept. A fill another order already took is never
+  reused. Exact pairs are made across all orders before any near miss; a near
+  miss becomes a `mismatch` only after the order's 30-minute email grace and is
+  paired again each pass. Every written fill, whatever its age, is checked for
+  a same-day, same-quantity fill from another source (a possible duplicate).
 - A disagreement is a `mismatch` with both versions in
-  `robinhood_reconciliation`; it never changes a fill. An email for an order
-  already written is not imported (no second fill): it is recorded on that
-  order's row, and the import treats its id as known. Two-leg orders are left to
+  `robinhood_reconciliation`; it never changes a fill. An email with the
+  quantity of an order already written (same account, stock, side, within five
+  minutes) is not imported (no second fill): it is recorded on that order's
+  row, and the import treats its id as known. An email of another quantity is
+  another trade and is imported as usual. Two-leg orders are left to
   the roll email.
 - One pass (record, pair, write, rebuild) is one transaction; a failure leaves
   nothing behind. Off and shadow leave fills, trades and P&L byte-for-byte
   unchanged. Only an account's last four digits are stored or shown.
-- `POST /fills/resync-all` keeps `robinhood:` fills, like `manual:` ones: no
-  email will re-import them.
+- Both resyncs (`POST /fills/resync-all` and the background
+  `/sync/resync-all` job) keep `robinhood:` fills, like `manual:` ones: no email
+  will re-import them.
 
 ## Enrichment
 

@@ -54,14 +54,20 @@ How the two are recognised as the same fill (one email is one order; an order ma
   done. Partial-fill emails are skipped by the email import (they report running totals), so the final email pairs
   with the whole order.
 - **Two identical trades seconds apart:** two orders, two emails; each order takes the closest unpaired email, one to
-  one. They are interchangeable, so the journal is the same whichever pairs with which. A pair, once made, is kept.
+  one. They are interchangeable, so the journal is the same whichever pairs with which. A matched pair, once made, is kept.
+- **Exact pairs first:** every order takes its exact match before any order is given a near miss, so one order never
+  takes as a "mismatch" the fill another order matches. A near miss is only called a mismatch once the order has
+  waited out the 30 minutes for its own email, and it is paired again each pass, so an exact email that arrives later
+  replaces it. A recurring buy only counts a fill of its own quantity as a near miss: another quantity is another trade.
 - **A slight difference** within the email's rounding pairs (the journal keeps the email's numbers); a larger one, or
   a different quantity, is a mismatch with both versions; the journal keeps the email's fill.
 
 Which wins: the email, always, for anything that emails. For a recurring buy written from the order history, an email
-that arrives anyway is not imported as a second fill: it is recorded on the order's row (agreeing: noted; differing: a
-mismatch for Isaac to correct by hand). A manual entry added later for an order already written is listed as a
-possible duplicate. Nothing is ever deleted or rewritten by this feature.
+that arrives anyway with the same quantity (within five minutes, same account and stock) is not imported as a second
+fill: it is recorded on the order's row (same price within rounding: noted; another price: a mismatch for Isaac to
+correct by hand). An email of another quantity is another trade (a hand buy minutes after the recurring one) and is
+imported as usual. A manual entry added later for an order already written is listed as a
+possible duplicate, however long afterwards (a CSV backfill months later too). Nothing is ever deleted or rewritten by this feature.
 
 Expirations, assignments, exercises and rolls are untouched: they are not orders (or, for a roll, a two-leg order this
 feature does not pair), so the journal keeps closing expired options and resolving rolls from their email exactly as
@@ -88,7 +94,7 @@ Run `shadow` for a week of normal trading, then open **Fills** and read the **Ro
 
 1. **Matched should be nearly everything.** Every option and stock trade that emailed should be Matched within about
    30 minutes. Each Robinhood only (not a recurring buy) or Email only is a pairing that failed: note which.
-2. **Mismatch should be empty.** Any row shows both versions; it means the email parser and Robinhood disagree, or the
+2. **Mismatch should be empty.** A mismatch stays listed whatever its age. Any row shows both versions; it means the email parser and Robinhood disagree, or the
    pairing rules are wrong for that case.
 3. **Recurring buys** should appear once each as **Would be written (shadow)**, with the right shares and price, and
    none of them should already be a manual fill (if one is, it shows as Matched against it instead).
@@ -100,7 +106,8 @@ Switch to `true` only when 1 to 4 hold. Off and shadow leave fills, trades and P
 ## Switch it off
 
 Set `ROBINHOOD_FILLS_ENABLED=false` (or remove it) and restart the API. Fills already written from the order history
-stay (a resync keeps them, as it keeps manual fills: no email will re-import them); the two tables stay as a record.
+stay (both resyncs, the route and the background job, keep them as they keep manual fills: no email will re-import
+them); the two tables stay as a record.
 
 ## What has not been proven
 

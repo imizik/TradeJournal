@@ -453,43 +453,55 @@ def reconcile(session: Session, *, now_et: datetime, current: str, read: Read | 
     claimed: set[uuid.UUID] = {r.fill_id for r in session.exec(select(RobinhoodReconciliation).where(
         col(RobinhoodReconciliation.fill_id).in_(list(by_id)), col(RobinhoodReconciliation.key).startswith("order:"),
         col(RobinhoodReconciliation.order_id).not_in([o.order_id for o in orders]))).all()} if by_id else set()
-    all_fill_ids = set(by_id)
     written = 0
 
-    # Settled pairs first, so a later order cannot take a fill an earlier pass gave another.
-    settled: dict[str, RobinhoodReconciliation] = {}
+    # A matched pair or a written fill is settled: a later order cannot take its fill. A mismatch is not: it is paired
+    # again each pass, so an exact match that turns up later (a late email) replaces it.
+    open_orders = []
     for o in orders:
         row = rows.get(f"order:{o.order_id}")
-        if row is None or row.fill_id is None:
-            continue
-        if row.outcome in ("matched", "mismatch") or row.action == "wrote_fill":
-            if row.fill_id in all_fill_ids or row.action == "wrote_fill" and _fill_exists(session, row.fill_id):
-                settled[o.order_id] = row
-                claimed.add(row.fill_id)
-    for o in orders:
-        if o.order_id in settled:
-            row = settled[o.order_id]
-            if row.action == "wrote_fill":
-                _check_duplicate(session, rows, o, row, journal, claimed, current)
+        if row is not None and row.fill_id is not None and (
+                row.outcome == "matched" and row.fill_id in by_id
+                or row.action == "wrote_fill" and (row.fill_id in by_id or _fill_exists(session, row.fill_id))):
+            claimed.add(row.fill_id)
             continue
         key = f"order:{o.order_id}"
         base = {**_order_values(o), "mode": current}
         if o.legs > 1:
             _put(session, rows, key, {**base, **_journal_values(None), "outcome": "order_only", "action": "none",
                                       "note": "two-leg order (a roll): the journal takes it from its email; not paired here"})
-            continue
-        if not o.final:
+        elif not o.final:
             _put(session, rows, key, {**base, **_journal_values(None), "outcome": "pending", "action": "none",
                                       "note": f"order still {o.state}: paired once it is done"})
-            continue
-        near = [j for j in journal if j.fill.id not in claimed and j.source != "robinhood" and j.key == o.key
+        else:
+            open_orders.append(o)
+
+    def candidates(o: Order) -> list[JournalFill]:
+        return [j for j in journal if j.fill.id not in claimed and j.source != "robinhood" and j.key == o.key
                 and in_window(o, j.fill.executed_at, j.source)]
-        match = [j for j in near if exact(o, j)]
-        if match:
-            j = _closest(o, match)
-            claimed.add(j.fill.id)
-            _put(session, rows, key, {**base, **_journal_values(j), "outcome": "matched", "action": "none",
-                                      "note": f"paired with the {j.source} fill"})
+
+    # Every exact pair first, across all orders, so an order never takes as a near miss the fill another order matches.
+    unmatched = []
+    for o in open_orders:
+        match = [j for j in candidates(o) if exact(o, j)]
+        if not match:
+            unmatched.append(o)
+            continue
+        j = _closest(o, match)
+        claimed.add(j.fill.id)
+        _put(session, rows, f"order:{o.order_id}", {**_order_values(o), "mode": current, **_journal_values(j),
+                                                    "outcome": "matched", "action": "none", "note": f"paired with the {j.source} fill"})
+
+    for o in unmatched:
+        key = f"order:{o.order_id}"
+        base = {**_order_values(o), "mode": current}
+        near = candidates(o)
+        if o.no_email:
+            # Only the same quantity can be this recurring buy (at another price); another quantity is another trade.
+            near = [j for j in near if abs(j.contracts - o.contracts) <= QTY_TOLERANCE]
+        elif now_et - o.last_at < EMAIL_GRACE:
+            _put(session, rows, key, {**base, **_journal_values(None), "outcome": "pending", "action": "none",
+                                      "note": "seen on Robinhood; its email is not in yet"})
             continue
         if near:
             j = _closest(o, near)
@@ -510,12 +522,10 @@ def reconcile(session: Session, *, now_et: datetime, current: str, read: Read | 
                 _put(session, rows, key, {**base, **_journal_values(None), "outcome": "order_only", "action": "would_write_fill",
                                           "note": "recurring buy: Robinhood sends no email; switched on, this fill would be written"})
             continue
-        if now_et - o.last_at < EMAIL_GRACE:
-            _put(session, rows, key, {**base, **_journal_values(None), "outcome": "pending", "action": "none",
-                                      "note": "seen on Robinhood; its email is not in yet"})
-            continue
         _put(session, rows, key, {**base, **_journal_values(None), "outcome": "order_only", "action": "none",
                                   "note": "no email arrived for this order; the journal does not have it"})
+
+    _check_duplicates(session, rows, claimed, current)
 
     if read is not None:
         _email_only(session, rows, journal, claimed, read, now_et, current)
@@ -535,22 +545,35 @@ def _fill_exists(session: Session, fill_id: uuid.UUID) -> bool:
     return session.exec(select(Fill.id).where(Fill.id == fill_id)).first() is not None
 
 
-def _check_duplicate(session, rows, order: Order, row: RobinhoodReconciliation, journal: list[JournalFill],
-                     claimed: set, current: str) -> None:
-    """A written order that the journal also has from another source (an email that slipped past the guard, a manual
-    entry made after) is listed as a mismatch with both versions. Nothing is removed."""
-    if row.outcome == "mismatch":
+def _check_duplicates(session: Session, rows: dict, claimed: set, current: str) -> None:
+    """Every fill written from the order history, whatever its age, that the journal also has from another source (an
+    email that slipped past the guard, a manual entry or a CSV backfill made later) is listed as a mismatch with both
+    versions: same account, stock, New York day and quantity, a fill no order has taken. Nothing is removed."""
+    written = session.exec(select(RobinhoodReconciliation).where(
+        RobinhoodReconciliation.action == "wrote_fill", RobinhoodReconciliation.outcome != "mismatch")).all()
+    if not written:
         return
-    other = [j for j in journal if j.fill.id not in claimed and j.source != "robinhood" and j.key == order.key
-             and j.fill.executed_at.date() == order.last_at.date() and abs(j.contracts - order.contracts) <= QTY_TOLERANCE]
-    if not other:
-        return
-    j = _closest(order, other)
-    claimed.add(j.fill.id)
-    _put(session, rows, row.key, {"outcome": "mismatch", "mode": current, "journal_source": j.source,
-                                  "journal_contracts": j.contracts, "journal_price": j.price, "journal_at": j.fill.executed_at,
-                                  "note": f"possible duplicate: written from Robinhood, and the journal also has a {j.source} "
-                                          f"fill for it (fill {j.fill.id}); check and remove one by hand"})
+    taken = claimed | {r for r in session.exec(select(RobinhoodReconciliation.fill_id).where(
+        col(RobinhoodReconciliation.key).startswith("order:"), col(RobinhoodReconciliation.fill_id).is_not(None),
+        col(RobinhoodReconciliation.outcome).in_(["matched", "mismatch"]))).all()}
+    for row in written:
+        rows.setdefault(row.key, row)
+        day = row.rh_last_at.replace(hour=0, minute=0, second=0, microsecond=0)
+        found = session.exec(select(Fill, Account.last4).options(*FILL_LIGHT).join(Account, Account.id == Fill.account_id).where(
+            Account.last4 == row.account_last4, Fill.ticker == row.ticker, Fill.instrument_type == row.instrument_type,
+            Fill.executed_at >= day, Fill.executed_at < day + timedelta(days=1))).all()
+        other = [JournalFill(f, last4, source(f.raw_email_id)) for f, last4 in found]
+        other = [j for j in other if j.source not in ("robinhood", "webull") and j.fill.id not in taken
+                 and direction(j.fill.side) == row.side and abs(j.contracts - Decimal(str(row.rh_contracts))) <= QTY_TOLERANCE]
+        if not other:
+            continue
+        j = min(other, key=lambda j: (abs((j.fill.executed_at - row.rh_last_at).total_seconds()), j.fill.raw_email_id))
+        taken.add(j.fill.id)
+        claimed.add(j.fill.id)
+        _put(session, rows, row.key, {"outcome": "mismatch", "mode": current, "journal_source": j.source,
+                                      "journal_contracts": j.contracts, "journal_price": j.price, "journal_at": j.fill.executed_at,
+                                      "note": f"possible duplicate: written from Robinhood, and the journal also has a {j.source} "
+                                              f"fill for it (fill {j.fill.id}); check and remove one by hand"})
 
 
 def _email_only(session, rows, journal: list[JournalFill], claimed: set, read: Read, now_et: datetime, current: str) -> None:
@@ -589,8 +612,9 @@ def written_email_ids(session: Session) -> set[str]:
 
 def email_already_written(session: Session, parsed, last4: str) -> bool:
     """True when ``parsed`` (an email ``ParsedFill``) is for an order already written from the order history: the
-    import then adds no second fill. The email is recorded on that order's row (agreeing: confirmed; disagreeing: a
-    mismatch with both versions, for the owner). False, and nothing recorded, in every other case."""
+    import then adds no second fill. Only an email with the order's exact quantity counts as that order's; it is
+    recorded on the order's row (price within rounding: confirmed; otherwise a mismatch with both versions, for the
+    owner). An email of another quantity is another trade and is imported as usual (False, nothing recorded)."""
     candidates = session.exec(select(RobinhoodReconciliation).where(
         RobinhoodReconciliation.action == "wrote_fill", col(RobinhoodReconciliation.journal_email_id).is_(None),
         RobinhoodReconciliation.account_last4 == last4, RobinhoodReconciliation.ticker == parsed.ticker.upper(),
@@ -610,7 +634,9 @@ def email_already_written(session: Session, parsed, last4: str) -> bool:
         if not in_window(order, executed_at, "email"):
             continue
         qty, price = Decimal(str(parsed.contracts)), Decimal(str(parsed.price))
-        agrees = abs(qty - order.contracts) <= QTY_TOLERANCE and abs(price - order.price) <= order.tolerance
+        if abs(qty - order.contracts) > QTY_TOLERANCE:
+            continue  # a different quantity is a different trade: the email is the record for it
+        agrees = abs(price - order.price) <= order.tolerance
         row.journal_email_id = parsed.raw_email_id
         row.journal_contracts, row.journal_price, row.journal_at = qty, price, executed_at
         if agrees:
@@ -619,8 +645,9 @@ def email_already_written(session: Session, parsed, last4: str) -> bool:
         else:
             row.outcome = "mismatch"
             row.journal_source = "email"
-            row.note = ("written from the order history; its email arrived later and differs. The journal keeps the "
-                        "written fill and adds no second one: check both versions and correct it by hand")
+            row.note = ("written from the order history; its email arrived later with the same quantity at another "
+                        "price. The journal keeps the written fill and adds no second one: check both versions and "
+                        "correct it by hand")
         row.updated_at = datetime.now(UTC).replace(tzinfo=None)
         session.add(row)
         log.info("An email arrived for an order already written from Robinhood's order history (%s)",
@@ -658,10 +685,13 @@ def _at(value: datetime | None) -> str | None:
 
 def view(session: Session, days: int = 7) -> dict:
     """The owner's read of the reconciliation: the mode, the last pass, counts by outcome and the rows, problems first.
-    Accounts appear as the journal's label and ``••last4``; Robinhood's ids appear only as their last six characters."""
+    A row belongs to the window by its trade's time (Robinhood's, else the journal's), New York; a mismatch stays
+    listed whatever its age until someone corrects it. Accounts appear as the journal's label and ``••last4``;
+    Robinhood's ids appear only as their last six characters."""
     days = max(1, min(int(days), 30))
-    since = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
-    rows = session.exec(select(RobinhoodReconciliation).where(RobinhoodReconciliation.updated_at >= since)).all()
+    since = datetime.now(ET).replace(tzinfo=None) - timedelta(days=days)
+    rows = [r for r in session.exec(select(RobinhoodReconciliation)).all()
+            if r.outcome == "mismatch" or (r.rh_last_at or r.journal_at or r.updated_at) >= since]
     names = {a.last4: a.name for a in session.exec(select(Account)).all()}
     rank = {"mismatch": 0, "order_only": 1, "email_only": 2, "pending": 3, "matched": 4}
     counts: dict[str, int] = defaultdict(int)

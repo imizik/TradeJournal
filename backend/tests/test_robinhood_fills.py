@@ -256,6 +256,9 @@ def test_a_small_difference_is_rounding_a_larger_one_is_a_mismatch_listed_with_b
     desk.at(10, 7).emails(email("m1", "MU", "buy_to_open", qty, price, 10, 5, **MU))
     before = desk.fills()
     desk.at(10, 8).poll()
+    if outcome == "mismatch":  # a near miss waits out the email grace: an exact email may still come
+        assert desk.by_order("o1").outcome == "pending"
+        desk.at(10, 40).poll()
     row = desk.by_order("o1")
     assert row.outcome == outcome
     assert (Decimal(str(row.rh_contracts)), Decimal(str(row.rh_price))) == (2, 193)
@@ -324,15 +327,90 @@ def test_an_email_for_a_written_order_never_becomes_a_second_fill(desk):
     assert desk.at(9, 45).emails(email("surprise", "VTI", "buy", "0.299212", "317.50", 9, 35))["saved"] == 0  # known now
 
 
-def test_a_disagreeing_email_for_a_written_order_is_a_mismatch_and_still_one_fill(desk):
+def test_a_same_quantity_email_at_another_price_is_a_mismatch_and_still_one_fill(desk):
     desk.stock(recurring_vti())
     desk.at(9, 36).poll()
-    desk.at(9, 40).emails(email("odd", "VTI", "buy", "0.5", "317.50", 9, 35))
+    desk.at(9, 40).emails(email("odd", "VTI", "buy", "0.299212", "320.00", 9, 35))
     row = desk.by_order("r1")
-    assert (row.outcome, row.journal_email_id, Decimal(str(row.journal_contracts))) == ("mismatch", "odd", Decimal("0.5"))
+    assert (row.outcome, row.journal_email_id, Decimal(str(row.journal_price))) == ("mismatch", "odd", Decimal("320.00"))
     assert [f[0] for f in desk.fills()] == ["robinhood:r1"]
     desk.at(9, 41).poll()  # the next pass keeps it listed
     assert desk.by_order("r1").outcome == "mismatch"
+
+
+def test_an_email_of_another_quantity_near_a_written_order_is_another_trade_and_imported(desk):
+    """A hand buy of the same stock minutes after a recurring buy: its email is the record for it, never swallowed."""
+    desk.stock(recurring_vti())
+    desk.at(9, 36).poll()
+    result = desk.at(9, 40).emails(email("hand", "VTI", "buy", 10, "317.60", 9, 37))
+    assert result["saved"] == 1 and [f[0] for f in desk.fills()] == ["robinhood:r1", "hand"]
+    row = desk.by_order("r1")
+    assert (row.outcome, row.journal_email_id) == ("order_only", None)
+    desk.at(9, 41).poll()
+    assert desk.by_order("r1").outcome == "order_only"  # not a duplicate either: a different quantity
+
+
+def test_a_recurring_buy_never_takes_a_hand_buys_email_of_another_quantity(desk):
+    """Risk review F3: the recurring order must not claim the hand buy's email as a near miss and stay unwritten."""
+    desk.stock(recurring_vti())
+    desk.stock(equity_order("hand", "VTI", [execution("h1", "317.600000", "10.000000", utc(9, 37, 10))]))
+    desk.at(9, 39).emails(email("hand-mail", "VTI", "buy", 10, "317.60", 9, 37))
+    desk.at(9, 40).poll()
+    assert (desk.by_order("hand").outcome, desk.by_order("r1").action) == ("matched", "wrote_fill")
+    assert [f[0] for f in desk.fills()] == ["robinhood:r1", "hand-mail"]
+
+
+def test_a_scale_in_with_a_late_first_email_pairs_each_order_exactly(desk):
+    """Risk review F3: buy 1, then 2, the first email a minute late: no order takes the other's email as a mismatch."""
+    desk.option(mu_buy("a", "1.00000", "1.50000000", 10, 0, ss=10))
+    desk.option(mu_buy("b", "2.00000", "1.60000000", 10, 2, ss=10))
+    desk.at(10, 3).emails(email("m-b", "MU", "buy_to_open", 2, 160, 10, 2, **MU))
+    desk.at(10, 3).poll()
+    assert (desk.by_order("a").outcome, desk.by_order("b").outcome) == ("pending", "matched")
+    desk.at(10, 4).emails(email("m-a", "MU", "buy_to_open", 1, 150, 10, 0, **MU))
+    desk.at(10, 5).poll()
+    desk.at(11, 0).poll()
+    assert (desk.by_order("a").outcome, desk.by_order("b").outcome) == ("matched", "matched")
+    assert desk.by_order("a").journal_price == Decimal(150)
+
+
+def test_a_late_exact_email_replaces_an_earlier_mismatch(desk):
+    desk.option(mu_buy("a", "1.00000", "1.50000000", 10, 0))
+    desk.at(10, 1).emails(email("other", "MU", "buy_to_open", 3, 150, 10, 1, **MU))  # someone else's fill, nearby
+    desk.at(10, 40).poll()
+    assert desk.by_order("a").outcome == "mismatch"
+    desk.at(10, 41).emails(email("m-a", "MU", "buy_to_open", 1, 150, 10, 0, **MU))
+    desk.at(10, 42).poll()
+    row = desk.by_order("a")
+    assert row.outcome == "matched" and row.journal_contracts == 1
+
+
+def test_a_hand_buy_without_its_email_cannot_take_a_backfilled_recurring_buy(desk):
+    """Risk review F4: the backfill pairs with the recurring order exactly, so nothing is written twice."""
+    with Session(desk.engine) as s:
+        s.add(Fill(account_id=uuid.UUID(int=1), ticker="VTI", instrument_type="stock", side="buy", contracts=Decimal("0.299212"),
+                   price=Decimal("317.50"), executed_at=datetime(2026, 11, 12, 0, 0), raw_email_id="manual:csvfix-vti"))
+        s.commit()
+    desk.stock(equity_order("hand", "VTI", [execution("h1", "317.600000", "10.000000", utc(9, 31))]))
+    desk.stock(recurring_vti())
+    desk.at(10, 30).poll()
+    assert (desk.by_order("r1").outcome, desk.by_order("r1").journal_source) == ("matched", "manual")
+    assert (desk.by_order("hand").outcome, desk.by_order("hand").fill_id) == ("order_only", None)
+    assert [f[0] for f in desk.fills()] == ["manual:csvfix-vti"]
+
+
+def test_a_backfill_long_after_a_written_buy_is_still_listed_as_a_possible_duplicate(desk):
+    """Risk review F5: the duplicate check covers every written fill, not only the last week's."""
+    desk.stock(recurring_vti())
+    desk.at(9, 36).poll()
+    with Session(desk.engine) as s:
+        s.add(Fill(account_id=uuid.UUID(int=1), ticker="VTI", instrument_type="stock", side="buy", contracts=Decimal("0.299212"),
+                   price=Decimal("317.5"), executed_at=datetime(2026, 11, 12, 0, 0), raw_email_id="manual:csvfix-vti-late"))
+        s.commit()
+    desk.at(10, 0, day="2026-11-25").poll()
+    row = desk.by_order("r1")
+    assert row.outcome == "mismatch" and "possible duplicate" in row.note and row.journal_source == "manual"
+    assert len(desk.fills()) == 2
 
 
 def test_a_hand_entry_after_a_written_order_is_listed_as_a_possible_duplicate(desk):
@@ -400,6 +478,22 @@ def test_resync_keeps_written_fills_and_does_not_reimport_an_email_already_recor
     assert out["saved"] == 0
     assert [f[0] for f in desk.fills()] == ["robinhood:r1"]
     assert desk.trades() == [("VTI", "open", Decimal("0.299212"), None)]
+
+
+def test_the_background_resync_job_keeps_written_fills_too(desk, monkeypatch):
+    from app.models import JobRun
+    from app.routers import sync
+    desk.stock(recurring_vti())
+    desk.at(9, 36).poll()
+    desk.at(9, 40).emails(email("m-other", "MU", "buy_to_open", 2, 193, 9, 39, **MU))
+    monkeypatch.setattr(gmail_poller, "poll_new_fills", lambda **_kw: [email("m-other", "MU", "buy_to_open", 2, 193, 9, 39, **MU)])
+    with Session(desk.engine) as s:
+        job = JobRun(job_type="resync_all", status="running", params_json=json.dumps({"confirmed_database": "local"}))
+        s.add(job)
+        s.commit()
+        sync._run_resync_all(s, job.id)
+    assert [f[0] for f in desk.fills()] == ["robinhood:r1", "m-other"]
+    assert ("VTI", "open", Decimal("0.299212"), None) in desk.trades()
 
 
 # --------------------------------------------------------------------------- atomic passes, restart, switches
