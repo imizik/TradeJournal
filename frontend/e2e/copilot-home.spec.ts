@@ -289,7 +289,7 @@ test("before the open the book's lower block is the morning brief, cut short wit
   await expect(page.getByRole("link", { name: "Now", exact: true })).toBeHidden();
   const middle = async (box: Promise<{ y: number; height: number } | null>) => { const b = await box; return b ? b.y + b.height / 2 : NaN; };
   const desk = await middle(page.getByRole("heading", { name: "Desk", level: 1 }).boundingBox());
-  for (const button of [page.getByRole("button", { name: "Jump to a thread or command" }), page.getByRole("button", { name: "New plan" })])
+  for (const button of [page.getByRole("button", { name: "Jump to a thread or command" }), page.getByRole("button", { name: "Plan a trade" })])
     expect(Math.abs(await middle(button.boundingBox()) - desk)).toBeLessThan(12);
   await page.screenshot({ path: test.info().outputPath("main-chat-brief-phone.png") });
   await page.setViewportSize({ width: 1280, height: 720 });

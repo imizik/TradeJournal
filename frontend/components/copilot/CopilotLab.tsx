@@ -503,7 +503,7 @@ export default function CopilotLab({ link = null, close = false, daily = false }
             </button>
             <button type="button" onClick={planTrade} title="A new plan; you name the symbol. Nothing is sent. ( N )"
               className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">
-              <Plus size={14} aria-hidden /><span className="sr-only sm:not-sr-only">New plan</span>
+              <Plus size={14} aria-hidden /><span className="sr-only sm:not-sr-only">Plan a trade</span>
             </button>
           </div>
         )}
