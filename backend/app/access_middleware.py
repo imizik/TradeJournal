@@ -1,4 +1,6 @@
 """ASGI authorization covers routes before their handlers and provider reads."""
+import logging
+
 from fastapi import HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
@@ -6,8 +8,10 @@ from starlette.routing import Match
 from sqlmodel import Session
 
 from app.database import engine
-from app.engine import access
+from app.engine import access, owner_lock
 from app.access_manifest import DOMAIN_ROUTES
+
+log = logging.getLogger("owner_lock")
 
 
 def registered_routes(routes):
@@ -47,6 +51,41 @@ class AccessMiddleware:
                 return operation
         raise HTTPException(404, "Not found")
 
+    def lock_operation(self, request):
+        """The route template a request reaches, or None when it is not in the reviewed inventory."""
+        for route in registered_routes(self.routes):
+            match, _ = route.matches(request.scope)
+            if match == Match.FULL:
+                operation = f"{request.method} {route.path}"
+                return operation if operation in DOMAIN_ROUTES | access.AUTH_PATHS | owner_lock.LOCK_PATHS else None
+        return None
+
+    async def owner_lock(self, request, scope, receive, send, current):
+        """Private-installation lock: browsers need the owner session; server processes do not."""
+        if owner_lock.is_local(request):
+            return await self.app(scope, receive, send)
+        operation = await run_in_threadpool(self.lock_operation, request)
+        if operation in owner_lock.OPEN_OPERATIONS:
+            return await self.app(scope, receive, send)
+        signed_in = False
+        if operation is not None:
+            try:
+                signed_in = await run_in_threadpool(owner_lock.signed_in, owner_lock.token_from(request))
+            except Exception:  # noqa: BLE001 - an unreadable session store refuses, never admits
+                log.exception("owner-lock: session check failed")
+        if signed_in:
+            return await self.app(scope, receive, send)
+        reason = "no owner session" if operation else "unclassified route"
+        if current == "report":
+            log.warning("owner-lock report-only: would refuse %s (%s)", operation or f"{request.method} <unclassified>", reason)
+            return await self.app(scope, receive, send)
+        headers = {"Cache-Control": "no-store"}
+        if operation == owner_lock.LIVENESS:
+            return await JSONResponse({"status": "ok"}, headers=headers)(scope, receive, send)
+        if operation is None:
+            return await JSONResponse({"detail": "Not found"}, 404, headers=headers)(scope, receive, send)
+        return await JSONResponse({"detail": "Sign in required"}, 401, headers=headers)(scope, receive, send)
+
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
@@ -56,6 +95,9 @@ class AccessMiddleware:
             # A configured assistant gateway must never operate against it.
             if request.headers.get("x-tj-gateway") or request.url.path.startswith("/access"):
                 return await JSONResponse({"detail": "App authentication is disabled"}, 503)(scope, receive, send)
+            current = owner_lock.mode()
+            if current != "off":
+                return await self.owner_lock(request, scope, receive, send, current)
             return await self.app(scope, receive, send)
         if request.method == "GET" and request.url.path == "/health" and not any(request.headers.get(h) for h in ("x-tj-gateway", "x-tj-service")):
             return await JSONResponse({"status": "ok"}, headers={"Cache-Control": "no-store"})(scope, receive, send)

@@ -28,9 +28,12 @@ installation, grants, ingress and startup require separate owner approval.
 | Legacy TradingView configuration | Existing `/etc/tradejournal/tradingview.env` is preserved but unused |
 | Offsite backup credentials | `/etc/tradejournal/offsite.env` and `restic-password`; root owned, mode 0600 |
 | Phone alert settings | `/etc/tradejournal/alerts.env`; root owned, mode 0600 |
+| Owner lock (sign-in for the private app) | `/etc/tradejournal/owner-lock.env`; root owned, mode 0600; absent or `off` by default ([owner lock](../docs/owner-lock.md)) |
 
-The frontend proxy has the same authority as the unauthenticated private API.
-Keep **both** services behind private access. Restrict the Tailscale access
+The frontend proxy has the same authority as the unauthenticated private API
+unless the optional [owner lock](../docs/owner-lock.md) is on, which then asks
+every browser for the owner passphrase while server processes on loopback keep
+working. Either way, keep **both** services behind private access. Restrict the Tailscale access
 policy to the journal owner's devices/identity. Do not use Funnel, a public
 reverse proxy, public port forwarding, or expose 3000/8080 in the firewall.
 C5.2 retires the public TradingView webhook receiver. The frontend and API
@@ -854,6 +857,18 @@ Do not enable the timer or paid runtime merely because these units are packaged.
 A3 deployment requires separate approval and migration/Ubuntu CI verification.
 Three real sessions with actual morning-plus-review timings are still required
 for [live acceptance](../docs/agent/a3-implementation-contract.md).
+
+## Owner lock (off by default)
+
+The [owner lock](../docs/owner-lock.md) puts one passphrase sign-in in front of
+the private app. It is separate from the assistant authentication below and
+needs no other setting. `deploy/owner_lock_config.py` (run with `sudo` and the
+release's Python) makes the passphrase and switches between `off`, `report`
+and `on`, restarting the API and frontend; both units load
+`/etc/tradejournal/owner-lock.env` last. The deploy health check passes the
+lock with the server's local key from that file. Turning it off again, or
+deleting the file and restarting, is the break-glass. A rollback to a release
+from before the lock removes it.
 
 ## Optional browser authentication (disabled by default)
 

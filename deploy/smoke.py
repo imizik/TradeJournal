@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import http.client
 import http.server
 import json
 import os
@@ -34,6 +35,53 @@ def request(path, method="GET"):
     req = urllib.request.Request(f"http://127.0.0.1:3000/api/backend{path}", method=method)
     with urllib.request.urlopen(req, timeout=10) as response:
         return json.load(response)
+
+
+def raw(method, path, port=3000, body=None, **headers):
+    """One request with no redirect following: (status, headers, body)."""
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
+    try:
+        connection.request(method, path, body=body, headers=headers)
+        response = connection.getresponse()
+        return response.status, response, response.read()
+    finally:
+        connection.close()
+
+
+def assert_owner_lock(release):
+    """The owner lock on real units: browsers need the passphrase; the deploy check and server processes do not."""
+    current = Path("/opt/tradejournal/current")
+    cli = [str(current / "backend/.venv/bin/python"), str(current / "deploy/owner_lock_config.py")]
+    printed = subprocess.run([*cli, "--no-restart", "passphrase"], check=True, capture_output=True, text=True).stdout
+    passphrase = next(line.strip() for line in printed.splitlines() if line.startswith("    ") and line.strip())
+    lock_file = control.CONFIG / "owner-lock.env"
+    assert lock_file.stat().st_mode & 0o777 == 0o600 and passphrase not in lock_file.read_text()
+    subprocess.run([*cli, "mode", "on"], check=True)
+    control.health(release, IDENTITY)  # deployment.json, proxied health and sync summary, with the server key
+    status, _, page = raw("GET", "/trades")
+    assert status == 200 and b"Passphrase" in page and b"TSLA" not in page, status  # the sign-in page, shown in place
+    assert raw("GET", "/api/backend/trades")[0] == 401
+    status, _, body = raw("GET", "/api/backend/health")
+    assert status == 200 and json.loads(body) == {"status": "ok"}, body
+    assert raw("GET", "/trades", port=8080)[0] == 200  # a process on the server, straight to the API
+    assert raw("GET", "/trades", port=8080, **{"X-Forwarded-For": "127.0.0.1"})[0] == 401
+    assert raw("POST", "/api/lock/sign-in", body=json.dumps({"passphrase": "wrong"}), **{"Content-Type": "application/json", "Origin": "http://127.0.0.1:3000"})[0] == 401
+    status, response, _ = raw("POST", "/api/lock/sign-in", body=json.dumps({"passphrase": passphrase}), **{"Content-Type": "application/json", "Origin": "http://127.0.0.1:3000"})
+    cookie = (response.getheader("set-cookie") or "").split(";", 1)[0]
+    assert status == 200 and cookie.startswith("tj_owner_lock="), status
+    assert raw("GET", "/api/backend/trades", Cookie=cookie)[0] == 200
+    assert raw("GET", "/", Cookie=cookie)[0] == 200
+    # A restart keeps the session (the phone's home-screen app stays signed in).
+    subprocess.run(["systemctl", "restart", "tradejournal-api.service", "tradejournal-frontend.service"], check=True)
+    control.health(release, IDENTITY)
+    assert raw("GET", "/api/backend/trades", Cookie=cookie)[0] == 200
+    assert raw("POST", "/api/lock/sign-out-everywhere", Cookie=cookie)[0] == 403  # no Origin: not from the app
+    assert raw("POST", "/api/lock/sign-out-everywhere", Cookie=cookie, Origin="http://127.0.0.1:3000")[0] == 200
+    wait_for(lambda: raw("GET", "/api/backend/trades", Cookie=cookie)[0] == 401, timeout=20)
+    # The break-glass: switch it off and the app is open to the private network again, as before.
+    subprocess.run([*cli, "mode", "off"], check=True)
+    control.health(release, IDENTITY)
+    assert raw("GET", "/api/backend/trades")[0] == 200
 
 
 def wait_for(predicate, timeout=40):
@@ -331,6 +379,7 @@ def main():
         wait_for(lambda: pid() not in {"0", worker_pid})
         job_id = request("/sync/jobs/fill_import_check/run", "POST")["run_id"]
         wait_for(lambda: job_status() == "succeeded")
+        assert_owner_lock(release)
 
         sentinel = control.STATE / "data/deployment-smoke-state.txt"
         sentinel.write_text("persistent\n")
@@ -405,7 +454,7 @@ def main():
         assert subprocess.run(["systemctl", "is-enabled", "--quiet", control.MOOMOO_SERVICE], check=False).returncode != 0
         assert (control.CONFIG / "moomoo-bridge.env").is_file() and (control.CONFIG / "moomoo").is_dir()
         shutil.rmtree(legacy)
-        print("Native deployment smoke passed: install, migration, private proxy, workers, retired ingress cleanup, no 8090 listener, backup, timers, phone alerts, API restart, crash restart, manual moomoo bridge start/stop/status, unattended upgrade, rollback that stays rolled back, legacy rollback unit cleanup, prune, persistent state and full restart")
+        print("Native deployment smoke passed: install, migration, private proxy, workers, retired ingress cleanup, no 8090 listener, backup, timers, phone alerts, API restart, crash restart, owner lock on/off, manual moomoo bridge start/stop/status, unattended upgrade, rollback that stays rolled back, legacy rollback unit cleanup, prune, persistent state and full restart")
     finally:
         subprocess.run(["systemctl", "kill", "--signal=SIGCONT", "tradejournal-worker@sync"], check=False)
         subprocess.run(["journalctl", "--no-pager", "-n", "150", *[f"--unit={unit}" for unit in [*control.SERVICES, "tradejournal-ingress", control.AUTODEPLOY]]], check=False)

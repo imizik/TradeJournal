@@ -31,7 +31,7 @@ reviews Isaac's journal is a coach/inspector, not a blind comparator.
 
 | Question | Decision |
 |---|---|
-| Does Isaac need another login? | No. Retain private, owner-only Tailscale access. |
+| Does Isaac need another login? | No. Retain private, owner-only Tailscale access. (Since 2026-11-12 he can opt into the separate [owner lock](../owner-lock.md), a passphrase sign-in for the private app; it is off by default and does not change this contract's assistant entrance.) |
 | Does the Dot join the tailnet? | No requirement. Its browser reaches a separate authenticated HTTPS entrance. |
 | What authenticates the Dot? | A dedicated assistant ID plus a generated high-entropy app access key, entered through the supported private website sign-in flow. |
 | Does the Dot receive Isaac's account or Gmail credentials? | No. Its app credential has only its own grants. |

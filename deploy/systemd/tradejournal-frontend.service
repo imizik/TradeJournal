@@ -5,6 +5,8 @@ After=network-online.target
 [Service]
 EnvironmentFile=-/etc/tradejournal/access-owner.env
 EnvironmentFile=-/etc/tradejournal/moomoo-frontend.env
+# Owner lock (docs/owner-lock.md); off when absent. The same file as the API's.
+EnvironmentFile=-/etc/tradejournal/owner-lock.env
 Type=simple
 User=tradejournal
 Group=tradejournal

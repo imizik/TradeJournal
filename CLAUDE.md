@@ -105,7 +105,9 @@ schema work. Preserve its backup, migration and market-hours safeguards.
 ## Hard constraints
 
 - Never expose or tunnel the production private API (8080/8000). Its default
-  profile has no auth and production remains private. A separately approved
+  profile has no auth and production remains private. The optional
+  [owner lock](docs/owner-lock.md) asks browsers for the owner passphrase when
+  switched on, but trusts processes on the server and does not make exposure safe. A separately approved
   isolated sample trial may publish only its authenticated assistant frontend;
   see the cloud-browser contract for its data and namespace boundaries.
 - Never weaken the database pin in `backend/tests/conftest.py`. Without it the

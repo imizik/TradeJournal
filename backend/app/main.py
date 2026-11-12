@@ -29,6 +29,7 @@ from app.routers import scalp_shortlist
 from app.routers import advisor_shadow as advisor_shadow_router
 from app.routers import cloud_practice, cloud_choices, research_studio
 from app.routers import access as access_router
+from app.routers import owner_lock as owner_lock_router
 from app.routers import jo_briefing
 from app.routers import conditional_plans as conditional_plans_router
 from app.routers import market_reads as market_reads_router
@@ -547,6 +548,7 @@ app.add_middleware(
 app.include_router(cloud_practice.router, prefix="/cloud-mcp/practice", tags=["sample cloud reads"])
 app.include_router(cloud_choices.router, prefix="/cloud-mcp/practice", tags=["sample cloud choices"])
 app.include_router(access_router.router, prefix="/access", tags=["app access"])
+app.include_router(owner_lock_router.router, prefix="/lock", tags=["owner lock"])
 app.include_router(health.router, tags=["health"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(accounts.router, prefix="/accounts", tags=["accounts"])

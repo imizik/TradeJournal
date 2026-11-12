@@ -223,15 +223,27 @@ def _monitor_headers():
     raise ValueError("Monitor credential is not configured")
 
 
+def _lock_headers():
+    """With the owner lock on, the frontend admits this check by the server's local key."""
+    path = CONFIG / "owner-lock.env"
+    if not path.exists():
+        return {}
+    for line in path.read_text().splitlines():
+        if line.startswith("TJ_OWNER_LOCK_LOCAL_KEY="):
+            value = line.split("=", 1)[1].strip()
+            return {"x-tj-lock-local": value} if len(value) >= 32 else {}
+    return {}
+
+
 def health(release: Path, confirmation: str, timeout: float = 60) -> None:
     deadline = time.monotonic() + timeout
     while True:
         try:
             with urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8080/health", headers=_monitor_headers()), timeout=3) as response:
                 backend = json.load(response)
-            with urllib.request.urlopen("http://127.0.0.1:3000/deployment.json", timeout=3) as response:
+            with urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:3000/deployment.json", headers=_lock_headers()), timeout=3) as response:
                 frontend = json.load(response)
-            with urllib.request.urlopen("http://127.0.0.1:3000/api/backend/health", timeout=3) as response:
+            with urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:3000/api/backend/health", headers=_lock_headers()), timeout=3) as response:
                 proxied = json.load(response)
             if backend["environment"]["identity"] != confirmation or proxied["environment"]["identity"] != confirmation:
                 raise ValueError("Running API targets a different database")
@@ -240,7 +252,7 @@ def health(release: Path, confirmation: str, timeout: float = 60) -> None:
             if backend.get("release") != release.name:
                 raise ValueError("API is serving a different release")
             # Liveness alone does not prove the application can query its DB.
-            with urllib.request.urlopen("http://127.0.0.1:3000/api/backend/sync/summary", timeout=3) as response:
+            with urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:3000/api/backend/sync/summary", headers=_lock_headers()), timeout=3) as response:
                 json.load(response)
             return
         except (OSError, KeyError, ValueError) as exc:
