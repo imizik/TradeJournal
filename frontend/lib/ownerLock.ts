@@ -20,6 +20,7 @@ export const STATE_HEADER = "x-tj-lock-state";
 
 // Inert files a browser or the home-screen installer needs before anyone signs in.
 const PUBLIC_FILES = new Set(["/icon-192.png", "/icon-512.png", "/apple-touch-icon.png", "/manifest.webmanifest", "/deployment.json"]);
+const LOCAL_PATHS = new Set(["/api/backend/health", "/api/backend/sync/summary"]);
 const PUBLIC_ROUTES = new Set([SIGN_IN_PATH, "/api/lock/sign-in", "/api/lock/sign-out"]);
 
 function digest(value: string) { return createHash("sha256").update(value).digest(); }
@@ -112,8 +113,8 @@ export async function ownerLockGate(request: NextRequest, clean: Headers, mode: 
     if (path === SIGN_IN_PATH) clean.set(STATE_HEADER, "sign-in");
     return pass(clean);
   }
-  // The deploy health check on the server itself presents the server's local key.
-  if (localKeyValid(request.headers.get("x-tj-lock-local"))) {
+  // The deploy health check on the server itself presents the server's local key: two reads, nothing else.
+  if (request.method === "GET" && LOCAL_PATHS.has(path) && localKeyValid(request.headers.get("x-tj-lock-local"))) {
     clean.set(CALLER_HEADER, "local");
     return pass(clean);
   }

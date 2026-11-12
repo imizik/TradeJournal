@@ -96,6 +96,9 @@ class AccessMiddleware:
             if request.headers.get("x-tj-gateway") or request.url.path.startswith("/access"):
                 return await JSONResponse({"detail": "App authentication is disabled"}, 503)(scope, receive, send)
             current = owner_lock.mode()
+            if current == "off" and (request.url.path == "/lock" or request.url.path.startswith("/lock/")):
+                # Off, the lock's routes answer exactly like a route that does not exist, before any body checks.
+                return await JSONResponse({"detail": "Not Found"}, 404)(scope, receive, send)
             if current != "off":
                 return await self.owner_lock(request, scope, receive, send, current)
             return await self.app(scope, receive, send)

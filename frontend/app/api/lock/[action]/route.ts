@@ -13,6 +13,22 @@ function cleared(response: Response) {
   return response;
 }
 
+/** The body as text, or null once it passes `limit` bytes (also when it arrives chunked, with no length). */
+async function boundedText(request: Request, limit: number) {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) { await reader.cancel(); return null; }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
 export async function POST(request: Request, { params }: { params: Promise<{ action: string }> }) {
   const { action } = await params;
   if (lockMode() === "off" || !ACTIONS.has(action)) return Response.json({ detail: "Not Found" }, { status: 404, headers: NO_STORE });
@@ -24,8 +40,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
     if (action === "sign-in") {
       const declared = Number(request.headers.get("content-length") ?? 0);
       if (!Number.isFinite(declared) || declared > 4096) return Response.json({ detail: "Request too large" }, { status: 413, headers: NO_STORE });
-      const raw = await request.text();
-      if (raw.length > 4096) return Response.json({ detail: "Request too large" }, { status: 413, headers: NO_STORE });
+      const raw = await boundedText(request, 4096);
+      if (raw === null) return Response.json({ detail: "Request too large" }, { status: 413, headers: NO_STORE });
       let passphrase: unknown;
       try { passphrase = (JSON.parse(raw) as { passphrase?: unknown }).passphrase; } catch { passphrase = undefined; }
       if (typeof passphrase !== "string" || !passphrase || passphrase.length > 256) return Response.json({ detail: "Sign-in failed" }, { status: 401, headers: NO_STORE });

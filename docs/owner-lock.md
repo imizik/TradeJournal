@@ -162,7 +162,8 @@ frontend proxy, which also arrives from loopback, is never "local", and neither 
 at the API. The frontend itself is the only network entrance, and its gate needs the session for every path except
 the sign-in page, its two sign-in/out calls and inert files (icons, the web-app manifest, `deployment.json`). The
 deploy check is the one local caller that goes through the frontend; it shows the server's local key, a random value
-in the root-only `owner-lock.env`, and the frontend passes that on so the API treats it as local too. Every inbound
+in the root-only `owner-lock.env`, and the frontend passes that on so the API treats it as local too. The key works
+only for the two reads that check makes (`GET /api/backend/health` and `/api/backend/sync/summary`), nothing else. Every inbound
 `x-tj-*` header from a browser is removed before any of this runs, so none of it can be claimed from outside.
 
 ## Why this lock
@@ -213,5 +214,8 @@ needs a new dependency and an enrollment step; it can replace the passphrase lat
 ## Known until the real server
 
 These can only be confirmed on the VPS, which is why report-only comes first: that the Mac and iPhone (home-screen
-app, Safari, Telegram's browser) keep the cookie as described; what address Tailscale Serve reports in the
-sign-in log; that no caller missing from the table above shows up in the report.
+app, Safari, Telegram's browser) keep the cookie as described; that **Reconnect Gmail** started from the
+home-screen app comes back signed in (if not, the report shows a would-refuse of `GET /api/backend/auth/gmail/callback`;
+start Reconnect from Safari instead); that Tailscale Serve passes the browser's own host name through (the
+secure-cookie choice and the same-app check rely on it); what address Serve reports in the sign-in log; and that no
+caller missing from the table above shows up in the report.

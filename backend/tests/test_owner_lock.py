@@ -94,8 +94,9 @@ def test_off_by_default_changes_nothing(monkeypatch, tmp_path):
     # The lock's own routes are indistinguishable from a route that does not exist.
     plain = TestClient(app)
     for operation in sorted(owner_lock.LOCK_PATHS):
-        response = send(plain, operation, json={"passphrase": "x"} if "sign-in" in operation else None)
-        assert (response.status_code, response.json()) == (404, {"detail": "Not Found"}), operation
+        for body in ({"passphrase": "x"}, None, {"unexpected": 1}):
+            response = send(plain, operation, json=body)
+            assert (response.status_code, response.json()) == (404, {"detail": "Not Found"}), (operation, body)
 
 
 def test_every_inventoried_route_needs_the_owner_session(lock):
