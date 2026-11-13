@@ -191,6 +191,23 @@ def desk_chart(investigation_id: str, timeframe: Literal["2m", "15m", "1D"] = "2
     return desk_context.chart(db, inv, now, timeframe, events)
 
 
+@router.get("/desk/{investigation_id}/news")
+def desk_chart_news(investigation_id: str, timeframe: Literal["2m", "15m", "1D"] = "2m", db: Session = Depends(get_session)):
+    """The symbol's headlines as markers on the desk chart (``app/engine/desk_news.py``): each at the candle where it was
+    published, grouped when close together, emphasised when a big move sits within a few minutes of it. The Feed's own
+    headline source, one read per symbol kept a few minutes; candles from the chart's caches only (no bar request).
+    Intraday only; ``market``, 1D and a ticker set to Not following get none. Read-only, owner-only."""
+    from app.engine import desk_news
+    if investigation_id == desk_context.MARKET_ID:
+        if not copilot.settings().enabled:
+            raise HTTPException(503, "Copilot Lab is off.")
+        return desk_news.build(None, timeframe, today._now(), set())
+    inv = _thread(investigation_id, db)
+    hidden = today._section(db, "desk news hidden", lambda: {"rows": sorted(day_journal.not_following(db))})
+    blocked = None if hidden.get("state") == "unavailable" else set(hidden.get("rows", []))
+    return desk_news.build(inv.symbol, timeframe, today._now(), blocked)
+
+
 @router.get("/desk/{investigation_id}/timeline")
 def desk_timeline(investigation_id: str, db: Session = Depends(get_session)):
     """What touched the thread, newest first: its plan's alerts, time stop and revisits, its linked fills, and the

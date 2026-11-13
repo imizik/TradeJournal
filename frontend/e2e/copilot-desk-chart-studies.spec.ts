@@ -85,7 +85,7 @@ test("each study has a toggle that shows its value at the crosshair, and the cho
   const canvas = pane.getByTestId("desk-chart-canvas");
   const legend = pane.getByTestId("desk-chart-studies");
   // Intraday defaults: VWAP, EMA 9 and 21, volume and the reference lines, each with its value on the last candle.
-  await expect(legend.getByRole("button")).toHaveText([/^VWAP \d+\.\d{2}$/, /^EMA 9 \d+\.\d{2}$/, /^EMA 21 \d+\.\d{2}$/, /^Vol 1\.6K · 1\.4×$/, "Prev close · PM high/low"]);
+  await expect(legend.getByRole("button")).toHaveText([/^VWAP \d+\.\d{2}$/, /^EMA 9 \d+\.\d{2}$/, /^EMA 21 \d+\.\d{2}$/, /^Vol 1\.6K · 1\.4×$/, "Prev close · PM high/low", "News"]);
   for (const button of await legend.getByRole("button").all()) await expect(button).toHaveAttribute("aria-pressed", "true");
   await expect(canvas).toHaveAttribute("data-studies", "vwap,ema9,ema21");
   await expect(canvas).toHaveAttribute("data-volume", "on");

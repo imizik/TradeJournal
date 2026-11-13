@@ -574,6 +574,22 @@ export async function getDeskChart(id: string, timeframe: DeskTimeframe, signal?
   return deskRead<DeskChartData>(id, `chart?timeframe=${encodeURIComponent(timeframe)}`, signal);
 }
 
+/** The symbol's headlines on the desk chart (``desk_news.build``): one marker per group of headlines on candles a few
+ * minutes apart, at the group's first candle (``time``). ``emphasis``: a headline was published within a few minutes of a
+ * move well beyond the day's typical candle (``move``); a move with no headline has no marker. ``before``: published
+ * before its candle opened (pre-market on the 15m chart, between sessions). ``state`` "hidden" for a ticker set to Not
+ * following, "none" off the intraday charts, "unavailable" when the headline source could not be read. */
+export type DeskNewsItem = { at: number; before: boolean; session: "regular" | "pre-market" | "after hours" | "overnight" | "weekend";
+  headline: string; source: string; url: string };
+export type DeskNewsGroup = { time: number; count: number; items: DeskNewsItem[]; emphasis: boolean;
+  move: { start: number; end: number; pct: number; range_pct: number } | null };
+export type DeskChartNews = { symbol: string | null; timeframe: DeskTimeframe; as_of: number; state: "ok" | "none" | "hidden" | "unavailable";
+  reason: string | null; source?: string; groups: DeskNewsGroup[] };
+
+export async function getDeskChartNews(id: string, timeframe: DeskTimeframe, signal?: AbortSignal): Promise<DeskChartNews> {
+  return deskRead<DeskChartNews>(id, `news?timeframe=${encodeURIComponent(timeframe)}`, signal);
+}
+
 // --------------------------------------------------------------------------- the Briefing's session timeline
 
 /** One thing that happened today, for the session strip; ``at`` is epoch seconds. */

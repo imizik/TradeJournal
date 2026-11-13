@@ -957,6 +957,25 @@ The cockpit's panes in detail:
     2m, the desk's first paint, 103–106 ms before and 104–112 ms after cold, 10 and 12 ms warm (within Tradier's
     noise); 15m 13 and 18 ms; 1D 313–343 and 298–307 ms cold, 28 and 34 ms warm; the route's recorded p50
     (`GET /copilot/desk/timings`) 24–26 and 30–31 ms. A 2m read is 63 KB, was 50 KB. Not yet measured during market hours.
+  - **Headlines on the chart** (2026-11-13; `GET /copilot/desk/{id}/news?timeframe=2m|15m`,
+    `app/engine/desk_news.py`, `components/copilot/ChartNews.tsx`). The selected symbol's headlines sit as small
+    markers along the top of the 2m and 15m charts, at the candle where each was published: a pre-market or after-hours
+    headline on its own extended candle on 2m; one published between candles (the 15m chart's pre-market, a gap between
+    sessions) on the next candle, "(before this candle)"; one since the previous regular close and before the first
+    candle on the first. Headlines on candles under six minutes apart share one marker with their count (markers that
+    overlap at the current zoom merge too). A marker is amber when one of its headlines came within five minutes of a
+    big move: a candle, or the stretch of about five minutes ending at it, at least three times the day's median
+    (regular candles, else the day's extended ones; at least ten candles) and at least 0.3% of price. A move with no
+    headline gets no marker; no reason is ever invented. Hover, focus or tap opens the headlines (newest first) with
+    publisher, New York time, session and a link out, the move above them when there was one; a tap pins it, Esc or ×
+    closes. **Ask** puts the headline (quoted, shortened to fit), its time and the move into the copilot's context line
+    on the symbol, unsent, as the level menu's Ask does. A **News** toggle in the legend row (default on, kept with the
+    studies' choices) hides them and stops the read; none on 1D, the market chart, the Grid's tiles or a ticker he does
+    not follow (and a headline naming one is left out, as in the Feed). Source: the Feed's own (Alpaca's news API,
+    Benzinga's wire), one read per symbol covering seven days, kept 180 seconds and shared by both timeframes; candles
+    from the chart feed's response cache and the stored sessions on disk only, so the route never asks for a bar.
+    Chatter is not used. A refused read is "unavailable" (the toggle's tooltip says so), never "no news".
+    `backend/tests/test_desk_news.py`, `frontend/e2e/copilot-desk-news.spec.ts`.
   - **Timeline ▾** (`/timeline`): one list, newest first, New York time on the
     right and a dot by kind: the investigation's alerts (armed, hit; a sent
     ping for one rides on its row, a held one shows with why), time stop (set,
