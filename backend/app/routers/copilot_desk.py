@@ -1139,6 +1139,20 @@ def _premarket_change(symbol: str, reference: float | None, moment: datetime) ->
     return copilot_extended.summary(bars, reference, range_=False).get("change_pct")
 
 
+@router.get("/desk/minute")
+async def desk_minute(request: Request):
+    """The desk's once-a-minute re-reads in one request (``app/engine/desk_minute.py``): ``read`` names each one (a path
+    with its query, at most ``MAX_READS``, only the desk's own minute reads), each answered as its own route would
+    answer this browser, in order. Read-only, owner-only, refused while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import desk_minute as minute
+    targets = request.query_params.getlist("read")
+    if not targets or len(targets) > minute.MAX_READS:
+        raise HTTPException(400, f"Name 1 to {minute.MAX_READS} reads.")
+    return {"reads": await minute.read_all(request.app, request.scope, targets)}
+
+
 @router.get("/desk/timings")
 def desk_timings(limit: int = 10):
     """Where the desk's server time goes (``app/engine/request_timing.py``, docs/copilot-lab.md § Where the wait goes):

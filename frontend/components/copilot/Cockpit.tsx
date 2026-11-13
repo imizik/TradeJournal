@@ -7,8 +7,9 @@
  * to buy, sell or hold, sizes anything or sends an order.
  */
 
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { EyeOff } from "lucide-react";
 import { useKeptState } from "@/components/copilot/DeskMemory";
 import { NotFollowed } from "@/components/copilot/SessionTape";
@@ -26,12 +27,15 @@ import { staleSince, tickFor, tickedBook, useDeskTicks } from "@/lib/deskTicks";
 import { Flash, PricesAsOf } from "@/components/copilot/Ticks";
 import { OptionStanding, OptionStandingLine } from "@/components/copilot/OptionStanding";
 import { OrderLines, OrdersGroup } from "@/components/copilot/DeskOrders";
-import { DeskTape, TapeToggle, useTapeOpen } from "@/components/copilot/DeskTape";
+import { TapeToggle, useTapeOpen } from "@/components/copilot/TapeToggle";
 import { cn } from "@/lib/utils";
+import { deskBeats, everyDeskMinute, onDeskBeat } from "@/lib/deskMinute";
+
+// The Tape's code (Level 2, the depth session) loads the first time it is opened.
+const DeskTape = dynamic(() => import("@/components/copilot/DeskTape").then(m => m.DeskTape), { ssr: false });
 
 export const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
 const ET = "America/New_York";
-const REFRESH_MS = 60_000;
 export const tone = (value: number | null | undefined) => value == null || value === 0 ? "text-muted-foreground" : value > 0 ? "text-emerald-300" : "text-rose-300";
 const clockOf = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" });
 
@@ -165,8 +169,7 @@ export function useSparks(symbols: string[], watch: string[] = []): DeskSparks |
       }).catch(() => { /* the lines are extra */ }).finally(() => controllers.current.delete(controller));
     };
     read();
-    const timer = setInterval(() => { if (document.visibilityState === "visible") read(); }, REFRESH_MS);
-    return () => clearInterval(timer); // a new set of symbols starts another read; the one in flight still lands
+    return everyDeskMinute(read); // a new set of symbols starts another read; the one in flight still lands
   }, [key, watchKey, setData]);
   return data;
 }
@@ -384,18 +387,20 @@ export function SinceYouLooked({ rows, session, read }: { rows: DeskThread[]; se
   );
 }
 
-/** "At risk now: $6,400 in 3 options · usual day $2,100", re-read with each session read (its ``as_of``); null when the
+/** "At risk now: $6,400 in 3 options · usual day $2,100", read once the session is known, then each minute; null when the
  * read fails or no long option is open. */
 function useExposureLine(asOf: string | undefined): string | null {
   const [line, setLine] = useState<string | null>(null);
+  const beat = useSyncExternalStore(onDeskBeat, deskBeats, () => 0); // the desk's shared minute, inside its one request
+  const known = !!asOf;
   useEffect(() => {
-    if (!asOf) return;
+    if (!known) return;
     const controller = new AbortController();
     getExposure(controller.signal).then(now => setLine(now.line)).catch(() => {
       if (!controller.signal.aborted) setLine(null); /* the line is extra */
     });
     return () => controller.abort();
-  }, [asOf]);
+  }, [known, beat]);
   return line;
 }
 

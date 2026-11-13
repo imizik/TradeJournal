@@ -12,8 +12,8 @@ import {
   getDeskThreads, getSavedConversations, needsYou, nyDay, reviewSkipped, type DeskGroup, type DeskLive, type DeskPlan, type DeskThread, type DeskThreads, type DeskTone,
 } from "@/lib/desk";
 import { cn } from "@/lib/utils";
+import { everyDeskMinute } from "@/lib/deskMinute";
 
-const REFRESH_MS = 60_000;
 const SEEN_KEY = "desk.seen.v1";
 /** All threads or Plans, remembered in this browser. */
 const VIEW_KEY = "desk.rail.v1";
@@ -283,10 +283,8 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
       getSavedConversations(signal).then(setSaved).catch(() => { /* the subthreads are extra */ });
     };
     read();
-    const timer = setInterval(() => { if (document.visibilityState === "visible") read(); }, REFRESH_MS);
-    const shown = () => { if (document.visibilityState === "visible") read(); };
-    document.addEventListener("visibilitychange", shown);
-    return () => { controller.abort(); clearInterval(timer); document.removeEventListener("visibilitychange", shown); };
+    const stop = everyDeskMinute(read); // skipped while hidden; back on the page after a skipped minute, read at once
+    return () => { controller.abort(); stop(); };
   }, [refresh, setSaved]);
   useEffect(() => { onSaved?.(saved); }, [saved, onSaved]);
 

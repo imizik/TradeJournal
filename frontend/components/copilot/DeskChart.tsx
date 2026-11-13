@@ -22,6 +22,7 @@ import { ChartEventMarks, chartEvents, earningsHeader, eventLogical, nyDayOf } f
 import { ChartNewsMarks, newsWhen, useChartNews } from "@/components/copilot/ChartNews";
 import { cn } from "@/lib/utils";
 import { drawableWalls, useDeskWalls, type DeskWalls } from "@/lib/deskWalls";
+import { everyDeskMinute } from "@/lib/deskMinute";
 import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type DeskChartNews, type DeskChartMark, type DeskStudySeries, type DeskTimeframe } from "@/lib/desk";
 
 /*
@@ -54,7 +55,6 @@ import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type 
  */
 
 const ET = "America/New_York";
-const REFRESH_MS = 60_000;
 const COLOR = { fill: "#e9a23b", ping: "#a78bfa", radar: "#60a5fa", entry: "#7db3f0", invalidation: "#fca5a5", target: "#86efac", stop: "#a1a1aa",
   alert: "#f4c66bb0", reference: "#9a9aa3a0", pick: "#e4e4e7", guide: "#5eead4c0" };
 
@@ -758,8 +758,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   const live = !!data?.live;
   useEffect(() => {
     if (!live) return;
-    const timer = setInterval(() => { if (document.visibilityState === "visible") setTick(n => n + 1); }, REFRESH_MS);
-    return () => clearInterval(timer);
+    return everyDeskMinute(() => setTick(n => n + 1)); // the shared minute: the chart's read joins the desk's one request
   }, [live, key]);
   useEffect(() => { onRead?.(data); }, [data, onRead]);
   // A new read is the server's word on the alerts; another symbol or timeframe closes the menu and its message.

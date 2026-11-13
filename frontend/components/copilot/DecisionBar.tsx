@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiUrl, type DayJournalEntry, type DayJournalWrite } from "@/lib/api";
+import { everyDeskMinute } from "@/lib/deskMinute";
 import { afterClose, decisionChoice, deskDecision, reviewSkipped, savePlanDone, skipReview, type DeskActRow, type DeskDecision, type DeskThread } from "@/lib/desk";
 
-const REFRESH_MS = 60_000;
 /** Journal entries are immutable, so Undo is this window before the save is sent. */
 export const UNDO_MS = 5_000;
 const uid = () => typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -68,8 +68,8 @@ export default function DecisionBar({ symbol, close = null, fill, plan, onActive
     const controller = new AbortController();
     const run = () => void read(controller.signal).catch(() => undefined);
     run();
-    const id = setInterval(run, REFRESH_MS);
-    return () => { controller.abort(); clearInterval(id); };
+    const stop = everyDeskMinute(run); // the desk's shared minute: never while the page is hidden
+    return () => { controller.abort(); stop(); };
   }, [read]);
 
   // Leaving the thread inside the Undo window still saves what was chosen (the desk keys this bar by symbol).

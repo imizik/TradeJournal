@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import PlayCheck, { type PlayCheckData } from "@/components/copilot/PlayCheck";
 import SetupRecordLines, { premiumLine } from "@/components/copilot/SetupRecordLines";
-import { apiUrl } from "@/lib/api";
+import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { getSymbolLoop, type SetupRecord } from "@/lib/copilot";
 import type { ClosingTicket } from "@/lib/closingTicket";
 import { cn } from "@/lib/utils";
@@ -21,7 +21,6 @@ import { cn } from "@/lib/utils";
 
 export const TICKET_EVENT = "tradejournal:open-ticket";
 const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
-const READ_MS = 60_000;
 const STALE_S = 15 * 60;  // the server's QUOTE_STALE_S
 
 /** A contract he picked for a ticket (the Chain tab's Put on ticket): it replaces the contract the plan names. */
@@ -61,7 +60,7 @@ type Ticket = {
 };
 
 async function read<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(apiUrl(path), { cache: "no-store", signal });
+  const response = await deskGet(path, signal);
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
   return body as T;
@@ -78,8 +77,8 @@ export function useTicketPlans(on: boolean): { plans: TicketPlan[] | null; faile
       .then(body => { setPlans(body.plans); setFailed(false); })
       .catch(() => { if (!controller.signal.aborted) setFailed(true); });
     load();
-    const timer = setInterval(load, READ_MS);
-    return () => { controller.abort(); clearInterval(timer); };
+    const stop = everyDeskMinute(load); // the shared minute: one request with the desk's other reads, none while hidden
+    return () => { controller.abort(); stop(); };
   }, [on]);
   return { plans, failed };
 }

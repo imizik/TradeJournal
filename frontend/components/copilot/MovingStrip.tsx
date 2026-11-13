@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useKeptState } from "@/components/copilot/DeskMemory";
-import { apiUrl } from "@/lib/api";
+import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { nyDay } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
@@ -23,11 +23,10 @@ export type MovingMover = { symbol: string; change_pct: number; mine: boolean; r
 export type DeskMoving = { state: "ok" | "unavailable"; mode: "live" | "close" | null; session: string | null; as_of: string;
   reason: string | null; groups: MovingGroup[]; movers: MovingMover[] };
 
-const REFRESH_MS = 60_000;
 const COLLAPSED_KEY = "desk.moving.collapsed.v1";
 
 export async function getDeskMoving(signal?: AbortSignal): Promise<DeskMoving> {
-  const response = await fetch(apiUrl("/copilot/desk/moving"), { cache: "no-store", signal });
+  const response = await deskGet("/copilot/desk/moving", signal);
   if (!response.ok) {
     await response.text().catch(() => ""); // read the refusal through, so the request ends (an unread body holds it open)
     throw new Error(`Request failed (${response.status}).`);
@@ -50,8 +49,8 @@ function useMoving(on: boolean): { data: DeskMoving | null; failed: boolean } {
         .catch(error => { if ((error as Error).name !== "AbortError") setFailed(true); });
     };
     read();
-    const timer = setInterval(() => { if (document.visibilityState === "visible") read(); }, REFRESH_MS);
-    return () => { controller.abort(); clearInterval(timer); };
+    const stop = everyDeskMinute(read);
+    return () => { controller.abort(); stop(); };
   }, [on, setData]);
   return { data, failed };
 }

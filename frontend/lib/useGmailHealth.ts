@@ -4,9 +4,9 @@ import { useSyncExternalStore } from "react";
 import { api, GmailHealth } from "@/lib/api";
 
 // One poll shared by every subscriber (the nav line and the banner): once on
-// mount, then the app-wide 30s cadence skipped while the tab is hidden, plus
-// an immediate check when a hidden tab (a phone coming back) becomes visible.
-const POLL_MS = 30000;
+// mount, then once a minute skipped while the tab is hidden, plus an immediate
+// check when a hidden tab (a phone coming back) becomes visible.
+const POLL_MS = 60000;
 
 let health: GmailHealth | null = null;
 type HealthSnapshot = { health: GmailHealth | null; state: "checking" | "ready" | "unavailable"; lastSuccessAt: string | null };
