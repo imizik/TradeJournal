@@ -390,3 +390,61 @@ def test_service_preflight_withholds_credential_parser_errors(monkeypatch):
     with pytest.raises(SystemExit, match="details withheld") as result:
         lab.check_credentials()
     assert "DO-NOT-ECHO" not in str(result.value)
+
+
+TICKS = {"type": "TICKER", "symbol": "US.NVDA", "data": {"data_time_ms": 0, "ticker_list": [
+    {"price": 230.12, "volume": 300, "time_ms": 1710000000123, "sequence": 7, "direction": "BUY", "type": "DO-NOT-ECHO"},
+    {"price": 230.13, "volume": 0, "time_ms": 1710000000124, "sequence": 8},
+    {"price": "230.14", "volume": 5, "time_ms": 1710000000125},
+    {"price": 230.15, "volume": 12.5, "time_ms": "DO-NOT-ECHO", "sequence": -1}]}}
+
+
+def test_trade_prints_are_allowlisted_without_provider_direction():
+    result = d.display_trades(TICKS, 1710000000200, "US.NVDA")
+    assert result == {"event": "trades", "symbol": "US.NVDA", "received_ms": 1710000000200, "trades": [
+        {"price": 230.12, "volume": 300, "time_ms": 1710000000123, "sequence": 7},
+        {"price": 230.15, "volume": 12.5, "time_ms": None, "sequence": None}]}
+    assert "DO-NOT-ECHO" not in json.dumps(result) and "BUY" not in json.dumps(result)
+    other = copy.deepcopy(TICKS)
+    other["symbol"] = "US.AAPL"
+    with pytest.raises(d.DiagnosticError):
+        d.display_trades(other, 1, "US.NVDA")
+
+
+def test_stream_probe_forwards_prints_only_after_authentication():
+    async def scenario():
+        key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
+        socket, events = FakeSocket(), []
+        task = asyncio.create_task(d.stream_probe("fixture", key, 30, lambda *a, **k: socket, events.append, symbol="US.NVDA"))
+        while not any(frame["action"] == "subscribe" and "ticker" in frame for frame in socket.sent):
+            await asyncio.sleep(0)
+        await socket.queue.put(json.dumps(TICKS))
+        while not any(event["event"] == "trades" for event in events):
+            await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        trades = [event for event in events if event["event"] == "trades"]
+        assert len(trades) == 1 and [t["sequence"] for t in trades[0]["trades"]] == [7, None]
+        socket = FakeSocket(auth_fail=True)
+        await socket.queue.put(json.dumps(TICKS))
+        events.clear()
+        await d.stream_probe("fixture", key, 1, lambda *a, **k: socket, events.append, symbol="US.NVDA")
+        assert not any(event["event"] == "trades" for event in events)
+    asyncio.run(scenario())
+
+
+def test_session_flushes_prints_in_one_bounded_line():
+    async def runner(appkey, key, seconds, observer, refresh_seconds, symbol):
+        for i in range(250):
+            observer({"event": "trades", "symbol": symbol, "received_ms": 1000 + i,
+                      "trades": [{"price": 10.0 + i / 100, "volume": 100, "time_ms": 900 + i, "sequence": i}]})
+        observer({"event": "book", "symbol": symbol, "received_ms": 2000, "books": []})
+        return {"closed": True}
+    with TestClient(lab.create_app(token=TOKEN, loader=lambda: ("fixture", None), runner=runner), client=("127.0.0.1", 50000)) as client:
+        result = [json.loads(line) for line in client.post("/session?symbol=NVDA", headers=HEADERS).text.splitlines()]
+    lines = [event for event in result if event["event"] == "trades"]
+    assert len(lines) == 1 and lines[0]["symbol"] == "US.NVDA" and lines[0]["dropped"] == 50
+    assert len(lines[0]["trades"]) == d.MAX_DISPLAY_TRADES and lines[0]["trades"][0]["sequence"] == 50
+    assert lines[0]["trades"][-1] == {"price": 12.49, "volume": 100, "time_ms": 1149, "sequence": 249, "received_ms": 1249}
+    assert result[-1] == {"event": "status", "phase": "closed"}

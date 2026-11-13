@@ -447,6 +447,34 @@ def display_book(message: dict, received_ms: int, offset_ms: float | None, symbo
     return {"event": "book", "symbol": symbol, "received_ms": received_ms, "books": output}
 
 
+# A provider ticker batch shown on the desk's tape; the bridge also bounds what it forwards.
+MAX_DISPLAY_TRADES = 200
+
+
+def display_trades(message: dict, received_ms: int, symbol: str = SYMBOL) -> dict:
+    """Allowlisted trade prints (price, size, source time, sequence) for the lab's tape.
+
+    The provider's direction field is left out: it is not documented as the
+    aggressor side, so the browser never colours a print from it. Malformed
+    prints are dropped, not repaired.
+    """
+    data = message.get("data")
+    if message.get("symbol") != symbol or message.get("type") != "TICKER" or not isinstance(data, dict):
+        raise DiagnosticError("Unexpected lab ticker message.")
+    ticks = rows(data, "ticker_list")
+    trades = []
+    for tick in ticks[-MAX_DISPLAY_TRADES:]:
+        if not isinstance(tick, dict):
+            continue
+        price, volume = number(tick.get("price")), number(tick.get("volume"))
+        if price is None or price <= 0 or volume is None or volume <= 0:
+            continue
+        sequence = number(tick.get("sequence"))
+        trades.append({"price": price, "volume": volume, "time_ms": timestamp(tick.get("time_ms")),
+                       "sequence": sequence if isinstance(sequence, int) and sequence >= 0 else None})
+    return {"event": "trades", "symbol": symbol, "received_ms": received_ms, "trades": trades}
+
+
 async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connector=NoRedirectConnect, observer=None,
                        refresh_seconds: int | None = None, symbol: str = SYMBOL) -> dict:
     # Without refresh the hard cap stays well below the documented ten-minute
@@ -490,6 +518,10 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
             saved["last"] = sample
             if kind == "ORDER_BOOK" and observer is not None and report.get("authentication", {}).get("status") == "success":
                 notify(display_book(message, time.time_ns() // 1_000_000, offset, symbol))
+            if kind == "TICKER" and observer is not None and report.get("authentication", {}).get("status") == "success":
+                prints = display_trades(message, time.time_ns() // 1_000_000, symbol)
+                if prints["trades"]:
+                    notify(prints)
 
     def correlated(message: dict, request_id: str) -> dict | None:
         if message.get("id") == request_id:
