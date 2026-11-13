@@ -233,7 +233,8 @@ function defaultRange(parts: Parts, data: DeskChartData, host: HTMLElement | nul
   });
 }
 
-type Read = { key: string; data: DeskChartData } | { key: string; error: string };
+/** ``at``: when the read was asked for (ms), so a local alert change made after it is not undone by its answer. */
+type Read = { key: string; at?: number; data: DeskChartData } | { key: string; at?: number; error: string };
 const good = (read: Read) => "data" in read && read.data.state === "ok" && read.data.bars.length > 0;
 /** What the chart shows now, for the crosshair and the primitives; ``applied`` is the key last painted. */
 type Painted = { shown: DeskChartData | null; byCandle: Map<number, DeskChartMark[]>; applied: string | null };
@@ -412,7 +413,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   const [choices, setChoices] = useState<Choices>({});
   const [menu, setMenu] = useState<Menu | null>(null);
   const [status, setStatus] = useState<Status>(null);
-  const [listed, setListed] = useState<{ key: string; alerts: DeskChartAlert[] } | null>(null);
+  const [listed, setListed] = useState<{ key: string; at: number; alerts: DeskChartAlert[] } | null>(null);
   const press = useRef<Press | null>(null);
   const menuBox = useRef<HTMLDivElement>(null);
   const key = `${id}|${timeframe}`;
@@ -484,9 +485,10 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     const controller = new AbortController();
     // A refresh that fails or comes back empty keeps the chart already shown for this symbol and timeframe.
     const settle = (next: Read) => setRead(prev => !good(next) && prev && prev.key === next.key && good(prev) ? prev : next);
+    const at = Date.now();
     getDeskChart(id, timeframe, controller.signal)
-      .then(data => { if (!controller.signal.aborted) settle({ key, data }); })
-      .catch(failure => { if (!controller.signal.aborted) settle({ key, error: failure instanceof Error ? failure.message : "Unavailable right now." }); });
+      .then(data => { if (!controller.signal.aborted) settle({ key, at, data }); })
+      .catch(failure => { if (!controller.signal.aborted) settle({ key, at, error: failure instanceof Error ? failure.message : "Unavailable right now." }); });
     return () => controller.abort();
   }, [id, timeframe, key, refreshKey, tick]);
 
@@ -499,7 +501,8 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   }, [live, key]);
   useEffect(() => { onRead?.(data); }, [data, onRead]);
   // A new read is the server's word on the alerts; another symbol or timeframe closes the menu and its message.
-  useEffect(() => { setListed(null); }, [read]); // eslint-disable-line react-hooks/set-state-in-effect -- the read replaces the local list
+  // (A read asked for before the change answers with the alerts as they were: the local list stands until a later one.)
+  useEffect(() => { setListed(prev => prev && read?.at !== undefined && read.at < prev.at ? prev : null); }, [read]); // eslint-disable-line react-hooks/set-state-in-effect -- the read replaces the local list
   useEffect(() => { setMenu(null); setStatus(null); }, [key]); // eslint-disable-line react-hooks/set-state-in-effect -- a new chart starts clean
 
   const alerts = useMemo(() => listed && listed.key === key ? listed.alerts : data?.alerts ?? [], [listed, key, data]);
@@ -542,7 +545,8 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   const clearPress = () => { if (press.current?.timer) window.clearTimeout(press.current.timer); press.current = null; };
   const onPointerDown = (event: ReactPointerEvent) => {
     clearPress();
-    if (event.button !== 0 || (menuBox.current && menuBox.current.contains(event.target as Node))) return;
+    // Only a first finger or the mouse: a second finger is a pinch.
+    if (!event.isPrimary || event.button !== 0 || (menuBox.current && menuBox.current.contains(event.target as Node))) return;
     const spot = at(event.clientX, event.clientY);
     if (!spot) return;
     press.current = { ...spot, clientX: event.clientX, clientY: event.clientY, at: Date.now(),
@@ -569,7 +573,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
 
   const planIds = useMemo(() => new Set((data?.levels ?? []).map(level => level.id).filter((x): x is string => !!x)), [data]);
   const lastPrice = data ? data.reading?.last ?? data.bars[data.bars.length - 1].close : null;
-  const show = (listing: AlertsPayload, symbol: string) => setListed({ key, alerts: chartAlerts(listing, symbol, planIds) });
+  const show = useCallback((listing: AlertsPayload, symbol: string) => setListed({ key, at: Date.now(), alerts: chartAlerts(listing, symbol, planIds) }), [key, planIds]);
   const fail = (failure: unknown) => setStatus({ text: failure instanceof Error ? failure.message : "That did not work. Try again.", tone: "error" });
   const undoCreate = (symbol: string, alertId: string) => {
     setStatus({ text: "Removing the alert…", tone: "ok" });
@@ -600,7 +604,13 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
         setStatus({ text: "Setting it again…", tone: "ok" });
         createAlert({ symbol, price: alert.price, reference, condition: alert.condition, interval: alert.condition === "closes_beyond" ? alert.interval as Interval : null,
           session: alert.session, source_kind: "level", source_id: "desk", label: alert.label ?? DESK_LABEL })
-          .then(again => { show(again, symbol); setStatus({ text: `Alert set again: ${alert.text}.`, tone: "ok" }); }).catch(fail);
+          .then(again => {
+            show(again, symbol);
+            // Which side it waits on is judged again from the price now: say what was armed, not what was removed.
+            const made = again.alerts.filter(a => a.symbol === symbol && a.state === "active" && Math.abs(a.price - alert.price) < 1e-6)
+              .sort((a, b) => b.armed_at - a.armed_at)[0];
+            setStatus({ text: `Alert set again: ${made ? alertText(made, made.price) : alert.text}.`, tone: "ok" });
+          }).catch(fail);
       } });
     }).catch(fail);
   };
@@ -701,11 +711,12 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
       </p>
       <div className="relative" onPointerDownCapture={onPointerDown} onPointerMoveCapture={onPointerMove} onPointerUpCapture={onPointerUp}
         onPointerCancelCapture={clearPress} onContextMenu={(event) => {
-          event.preventDefault();
-          if (menuBox.current?.contains(event.target as Node)) return;
-          clearPress();
+          if (menuBox.current?.contains(event.target as Node)) { event.preventDefault(); return; }
           const spot = at(event.clientX, event.clientY);
-          if (spot) openMenu(spot);
+          if (!spot) return;  // the volume pane and the time axis keep the browser's own menu
+          event.preventDefault();
+          clearPress();
+          openMenu(spot);
         }}>
         <div ref={host} role="img" aria-label={label} data-testid="desk-chart-canvas" data-timeframe={data?.timeframe ?? ""}
           data-bars={data?.bars.length ?? 0} data-marks={allMarks.length} data-studies={drawn.join(",")}

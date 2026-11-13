@@ -225,6 +225,21 @@ test.describe("at 393 px with a finger", () => {
     await page.touchscreen.tap(at.x, at.y);
     await page.waitForTimeout(700);
     await expect(menu).toHaveCount(0);
+    // A vertical swipe that starts on the chart scrolls the page and opens nothing.
+    const before = await page.evaluate(() => window.scrollY);
+    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [at] });
+    for (let step = 1; step <= 8; step++) {
+      await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: at.x, y: at.y - step * 25 }] });
+      await page.waitForTimeout(30);
+    }
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await page.waitForTimeout(700);
+    await expect(menu).toHaveCount(0);
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(before);
+    // A tap on the price scale opens the menu at that price.
+    const scale = (await canvas.boundingBox())!;
+    await page.touchscreen.tap(Math.round(scale.x + scale.width - 20), Math.round(scale.y + scale.height * 0.3));
+    await expect(menu).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
     expect(writes()).toEqual(["POST /api/backend/charts/alerts"]);
   });

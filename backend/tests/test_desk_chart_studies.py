@@ -51,6 +51,7 @@ def install(monkeypatch, stored: bool = True, today: list[dict] | None = None, k
     raw_today = RAW_TODAY if today is None else today
     minutes = [{**b, "rvol": None if b["extended"] else 1.25} for b in chart_bars(raw_today, [], "1m", "extended", {TODAY: None})]
     monkeypatch.setattr(desk_context, "today_minutes", lambda symbol: minutes)
+    monkeypatch.setattr(desk_context, "cached_minutes", lambda symbol, day: [{**m, "rvol": None} for m in minutes])
     # fifteen_bars: the two sessions before today from the history, today's from the feed (RVol on today's candles).
     monkeypatch.setattr(desk_context, "fifteen_bars", lambda symbol: [b for day in EARLIER[-2:] for b in fifteen(day, RAW[day])]
                         + [{**b, "rvol": 1.25} for b in fifteen(TODAY, raw_today)])
@@ -140,6 +141,12 @@ def test_the_warm_up_candles_are_read_from_disk_once(monkeypatch):
     desk_context._desk_read("NBIS", "15m", NOW)
     desk_context._desk_read("NBIS", "15m", NOW)
     assert len(asked) == 2
+    # A 15m warm-up with only some of its sessions on disk is read again until the rest arrive.
+    monkeypatch.setattr(desk_context, "_warmed", {})
+    monkeypatch.setattr(desk_context, "stored_sessions", lambda *args: asked.append(args) or stored(*args)[-1:])
+    desk_context._desk_read("NBIS", "15m", NOW)
+    desk_context._desk_read("NBIS", "15m", NOW)
+    assert len(asked) == 4
     # Nothing stored yet is not remembered: once the session is on disk, the next read finds it.
     monkeypatch.setattr(desk_context, "_warmed", {})
     monkeypatch.setattr(desk_context, "stored_sessions", lambda *args: asked.append(args) or [])
@@ -199,12 +206,21 @@ def test_daily_averages_run_over_the_whole_history_and_volume_is_against_the_thi
     closes = pd.Series([b["close"] for b in daily])
     for name, series in (("ema21", _ema(closes, 21)), ("sma50", _sma(closes, 50)), ("sma200", _sma(closes, 200))):
         assert all(abs(a - b) < 1e-3 for a, b in zip(studies[name], list(series)[first:])), name
-    i = len(daily) - 1
+    i = len(daily) - 2  # yesterday: its whole day against the 30 before it
     usual = sum(b["volume"] for b in daily[i - 30:i]) / 30
-    assert studies["rvol"][-1] == round(daily[-1]["volume"] / usual, 4)
+    assert studies["rvol"][-2] == round(daily[i]["volume"] / usual, 4)
+    assert studies["rvol"][-1] is None  # today's candle before the close holds part of a day: no ratio against whole days
     assert set(studies) == {"ema21", "sma50", "sma200", "vwap", "rvol"} and set(studies["vwap"]) == {None}
-    # The reading line still comes from today's minutes on the daily chart.
+    # The reading line still comes from today's minutes on the daily chart, but only from the feed's cache: the daily
+    # chart makes no minute request of its own.
     assert read["reading"]["at"] == RAW_TODAY[-1]["time"] and read["reading"]["vwap"] is not None
+
+    def no_request(symbol):
+        raise AssertionError("1D asked for today's minutes")
+    monkeypatch.setattr(desk_context, "today_minutes", no_request)
+    monkeypatch.setattr(desk_context, "cached_minutes", lambda symbol, day: [])
+    read = desk_context._desk_read("NBIS", "1D", NOW)
+    assert read["reading"]["daily"] is True and read["reading"]["vwap"] is None and read["bars"]
 
 
 def test_a_failed_minute_read_on_the_daily_chart_still_shows_the_candles(monkeypatch):
@@ -215,7 +231,7 @@ def test_a_failed_minute_read_on_the_daily_chart_still_shows_the_candles(monkeyp
 
     def broken(symbol):
         raise RuntimeError("Tradier unavailable")
-    monkeypatch.setattr(desk_context, "today_minutes", broken)
+    monkeypatch.setattr(desk_context, "cached_minutes", lambda symbol, day: broken(symbol))
     read = desk_context._desk_read("NBIS", "1D", NOW)
     assert read["bars"] and read["reading"]["daily"] is True and read["reading"]["vwap"] is None
     assert read["reading"]["at"] <= NOW and read["reading"]["prev_close"] == 50.0

@@ -843,7 +843,7 @@ The cockpit's panes in detail:
     and 15m: **VWAP** (regular session only, restarting each day), **EMA 9** and **EMA 21**, **volume** in its own
     pane under the price with the session's RVol, and the **previous close** and today's **pre-market high and low**
     as faint dotted lines. 1D: **EMA 21**, **SMA 50**, **SMA 200** and volume with the day's volume against the 30
-    days before it. The averages are warmed on the candles before the first one shown, so they are right from it: 2m
+    days before it (none on today's candle before the close: part of a day against whole days would mislead). The averages are warmed on the candles before the first one shown, so they are right from it: 2m
     on the whole session before today, 15m on three regular sessions before its first, both from the chart history
     on disk only (never fetched for this; read once per process), 1D on the rest of the daily history the read
     already holds. Without stored sessions an average starts empty and fills in after its length (the workspace's
@@ -877,9 +877,10 @@ The cockpit's panes in detail:
     conversation when it has one, with the level, where price is against it and when in the question's context line,
     unsent). A short tap or a swipe opens nothing. Dragging a plan's line is not built.
   - **Cost.** The studies add no provider request: 2m and 15m read today's minutes through the same cached feed read
-    (with C2.4's RVol baseline from disk), the warm-up from disk, the previous close from memory; 1D reads today's
-    minutes beside its daily bars for the reading line (the same 15 s cache), and a failure there still shows the
-    candles. Measured in the UX sandbox against Tradier (after hours, four symbols × three timeframes, each read
+    (with C2.4's RVol baseline from disk), the warm-up from disk (kept in memory once all its sessions are there), the
+    previous close from memory; 1D takes today's minutes for the reading line only from the feed's cache (any age;
+    the 2m or 15m chart, a ping picture or Charts read them), so it makes no request it did not make before, and
+    without them the reading line shows the daily candle's price and date. Measured in the UX sandbox against Tradier (after hours, four symbols × three timeframes, each read
     first after a backend start and again straight after, origin/main and this change alternating, four runs each):
     2m, the desk's first paint, 103–106 ms before and 104–112 ms after cold, 10 and 12 ms warm (within Tradier's
     noise); 15m 13 and 18 ms; 1D 313–343 and 298–307 ms cold, 28 and 34 ms warm; the route's recorded p50

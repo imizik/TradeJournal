@@ -459,10 +459,19 @@ def today_minutes(symbol: str) -> list[dict]:
     return list(((data.get("panels") or {}).get("1m") or {}).get("bars") or [])
 
 
+def cached_minutes(symbol: str, day: date) -> list[dict]:
+    """``day``'s minute bars with their RTH VWAP from the chart feed's response cache alone (any age; the 2m or 15m
+    chart, a ping picture or Charts read them), never a request; none when it holds none. No RVol."""
+    from app.engine.chart_calendar import chart_calendar
+    from app.engine.chart_feed import chart_feed
+    found = chart_feed.peek_minutes(symbol, day)
+    return chart_bars(found[0], [], "1m", "extended", {day: chart_calendar.hours(day)}) if found else []
+
+
 def stored_sessions(symbol: str, before: date, count: int) -> list[tuple[date, dict | None, list[dict]]]:
-    """Up to ``count`` completed sessions before ``before`` that are already on disk (never a provider request), oldest
-    first: each date, its calendar hours and its minutes, split-adjusted like a chart page. Stops at the first missing
-    one, so the sessions are always consecutive."""
+    """Up to ``count`` completed sessions before ``before`` that are already on disk (no bar request; the market
+    calendar's month may be read once to skip holidays), oldest first: each date, its calendar hours and its minutes,
+    split-adjusted like a chart page. Stops at the first missing one, so the sessions are always consecutive."""
     from app.engine.chart_adjust import adjust_minutes
     from app.engine.chart_calendar import chart_calendar
     from app.engine.chart_history import chart_history
@@ -486,23 +495,30 @@ def stored_sessions(symbol: str, before: date, count: int) -> list[tuple[date, d
 
 
 _warmed: dict[tuple[str, str, date], list[dict]] = {}  # completed sessions' candles never change: kept for the process
+_warmed_lock = threading.Lock()
 
 
 def _warm(symbol: str, timeframe: str, before: date) -> list[dict]:
     """The candles before ``before`` that warm a timeframe's averages: on 2m the session before today (pre-market to
     after hours, as today's are drawn), on 15m ``WARM_SESSIONS`` regular sessions. From disk only; a result is kept
-    once found, so a minute's refresh reads no file."""
+    once all its sessions are on disk, so a minute's refresh reads no file (a split recorded later shows after a restart,
+    as the workspace's own caches do)."""
     key = (symbol, timeframe, before)
-    if key in _warmed:
-        return _warmed[key]
+    with _warmed_lock:
+        kept = _warmed.get(key)
+    if kept is not None:
+        return kept
+    count = 1 if timeframe == "2m" else WARM_SESSIONS
+    sessions = stored_sessions(symbol, before, count)
     if timeframe == "2m":
-        found = [b for day, hours, raw in stored_sessions(symbol, before, 1) for b in _two_minute(chart_bars(raw, [], "1m", "extended", {day: hours}))]
+        found = [b for day, hours, raw in sessions for b in _two_minute(chart_bars(raw, [], "1m", "extended", {day: hours}))]
     else:
-        found = [b for day, hours, raw in stored_sessions(symbol, before, WARM_SESSIONS) for b in chart_bars(raw, [], "15m", "regular", {day: hours})]
-    if found:
-        if len(_warmed) >= 64:
-            _warmed.pop(next(iter(_warmed)))
-        _warmed[key] = found
+        found = [b for day, hours, raw in sessions for b in chart_bars(raw, [], "15m", "regular", {day: hours})]
+    if len(sessions) == count:  # a partial warm-up is read again until the rest is stored
+        with _warmed_lock:
+            while len(_warmed) >= 64:
+                _warmed.pop(next(iter(_warmed)))
+            _warmed[key] = found
     return found
 
 
@@ -554,7 +570,9 @@ def _desk_read(symbol: str, timeframe: str, now: float) -> dict | None:
         warm = _warm(symbol, "2m", today) if shown else []
     else:
         try:
-            minutes = on_today(today_minutes(symbol))
+            # 15m's own read makes this same request (a cache hit); 1D takes only what the cache already holds, so the
+            # daily chart makes no request it did not make before.
+            minutes = on_today(today_minutes(symbol) if timeframe == "15m" else cached_minutes(symbol, today))
         except Exception:  # noqa: BLE001 - the reading line is a bonus on these timeframes; the candles still show
             log.warning("Desk chart minutes for %s failed", symbol, exc_info=True)
             minutes = []
@@ -564,8 +582,10 @@ def _desk_read(symbol: str, timeframe: str, now: float) -> dict | None:
                 warm = _warm(symbol, "15m", datetime.fromtimestamp(shown[0]["time"], ET).date())
         else:
             history = [dict(b) for b in daily_bars(symbol) if b["time"] <= now]
+            closed = datetime.fromtimestamp(now, ET).hour >= 16
             for bar, usual in zip(history, _usual_volume(history)):
-                bar["rvol"] = usual
+                # Today's candle before the close holds part of a day's volume: against whole days it would mislead.
+                bar["rvol"] = None if datetime.fromtimestamp(bar["time"], ET).date() == today and not closed else usual
             cut = next((i for i, b in enumerate(history) if b["time"] >= now - DAILY_DAYS * 86400), len(history))
             warm, shown = history[:cut], history[cut:]
     if not shown:
