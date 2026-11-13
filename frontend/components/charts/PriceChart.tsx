@@ -14,8 +14,10 @@ import { groupFills, MarkLayer } from "@/lib/chartMarks";
 import type { FillGroup } from "@/lib/chartMarks";
 import { chartCommitted, useInitialPanelTiming } from "@/lib/chartPerformance";
 import { useClock, useLivePanel } from "@/lib/chartStore";
-import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
-import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle } from "@/lib/drawings";
+import { DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, Timeline, TOUCH_SLOP } from "@/lib/drawings";
+import type { Anchor, Drawing, DrawingKind, DrawingPatch, Tool, ToolStyle } from "@/lib/drawings";
+import { drawingGestures } from "@/lib/drawingGestures";
+import type { DrawingGestures } from "@/lib/drawingGestures";
 import { AutoLevelLayer, chartLabel, isOption, isRange, shownZones } from "@/lib/autoLevels";
 import { AlertLayer } from "@/lib/alerts";
 import { SessionShade } from "@/lib/sessionShade";
@@ -219,7 +221,7 @@ function CandleValues({ id, symbol, main, pending, bars, hover, interval, indica
 type Bundle = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram">;
   shade: SessionShade; fat: VolumeCandles; rsi?: ISeriesApi<"Line">;
-  lines: Record<Overlay, ISeriesApi<"Line">>; bands: Record<VwapBand, ISeriesApi<"Line">>; marks: MarkLayer; layer: DrawingLayer; auto: AutoLevelLayer; bells: AlertLayer;
+  lines: Record<Overlay, ISeriesApi<"Line">>; bands: Record<VwapBand, ISeriesApi<"Line">>; marks: MarkLayer; layer: DrawingLayer; gestures: DrawingGestures; auto: AutoLevelLayer; bells: AlertLayer;
   /** The symbol and interval now drawn; a new one opens on its latest candles. */
   frame: string;
 };
@@ -367,8 +369,7 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
   const [newsOpen, setNewsOpen] = useState<{ mark: NewsCluster; x: number; y: number; width: number; height: number; pinned: boolean } | null>(null);
   // A jump waiting for older candles retries when they arrive (set by the chart's effect below).
   const retryJump = useRef<() => void>(() => {});
-  // A two-point tool's first click, kept until the second; `second` re-renders the hint.
-  const placing = useRef<{ kind: DrawingKind; first: Anchor } | null>(null);
+  // A two-point tool's first point is down (the drawing gestures keep it); `second` re-renders the hint.
   const [second, setSecond] = useState(false);
   const initial = useRef(true);
   // After Reset or Latest, candles that arrive keep the latest in view until the user moves the chart:
@@ -452,7 +453,9 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
     candles.attachPrimitive(autoLayer);
     const bells = new AlertLayer();
     candles.attachPrimitive(bells);
-    bundle.current = { chart, candles, volume, shade, fat, lines, bands, marks, layer, auto: autoLayer, bells, frame: "" };
+    const gestures = drawingGestures({ element, chart, candles, layer, timeline, actions: () => actions.current, onSecond: setSecond });
+    const { local, onPlot, priceAt, modifier } = gestures;
+    bundle.current = { chart, candles, volume, shade, fat, lines, bands, marks, layer, gestures, auto: autoLayer, bells, frame: "" };
     const layers = (window as typeof window & { __tjDrawings?: LayerRegistry }).__tjDrawings;
     layers?.set(id, layer);
     (window as typeof window & { __tjMarks?: Map<string, MarkLayer> }).__tjMarks?.set(id, marks);
@@ -465,14 +468,6 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
     // A kept card gives way once its zone is no longer drawn (another symbol, a level that moved).
     const hoverCard = (zone: string | null, y: number) => setCard((open) => (open?.pinned && autoLayer.shown().includes(open.id)) || (open?.id ?? null) === zone ? open : zone ? opened(zone, y, false) : null);
     const tapCard = (zone: string | null, y: number) => setCard(zone ? opened(zone, y, true) : null);
-    // The magnet is on, or Cmd/Ctrl is held for this click or move.
-    const magnetOn = (held: boolean) => actions.current.magnet || held;
-    const modifier = (event?: { metaKey: boolean; ctrlKey: boolean }) => !!(event?.metaKey || event?.ctrlKey);
-    const ghost = (kind: Tool, points: Anchor[]) => {
-      const style = actions.current.toolStyle;
-      layer.setPreview(kind === "level" ? levelShape({ id: "placing", price: points[0].price, label: "" })
-        : { id: "placing", kind, points, label: kind === "note" ? "Note" : "", color: style?.color ?? "#9cc2ff", width: style?.width ?? 1 });
-    };
     let syncing = false;
     let ownsPointer = false;
     const releasePointer = () => { ownsPointer = false; };
@@ -513,130 +508,10 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
       // An armed tool previews what a click would place, where the magnet would put it.
       const kind = actions.current.tool;
       if (!kind || !main) return;
-      const point = event.point && (event.paneIndex ?? 0) === 0 ? layer.anchorAt(event.point.x, event.point.y, magnetOn(modifier(event.sourceEvent))) : null;
-      if (placing.current) { if (point) ghost(placing.current.kind, [placing.current.first, point]); }
-      else if (point && kind !== "trend" && kind !== "zone") ghost(kind, [point]);
-      else layer.setPreview(null);
+      gestures.hover(event.point && (event.paneIndex ?? 0) === 0 ? event.point : null, modifier(event.sourceEvent));
     });
-    // Levels and drawings drag in front of the chart: a press on one never
-    // reaches the library, so the chart does not pan under it. A mouse drags
-    // any item; a finger drags only the selected one, so panning across a
-    // drawing never moves it. A tap selects (the click handler below). A press
-    // on a selected drawing's handle moves that anchor; anywhere else on it
-    // moves the whole drawing by whole bars, and with the magnet the anchor
-    // nearest the press (`anchor`) snaps. `offset` keeps a level where it
-    // was grabbed, so it moves by the drag instead of jumping to the pointer.
-    type Drag = { id: string; handle: number | null; anchor: number; touch: number | null; from: { x: number; y: number }; base: Shown; offset: number; result: Shown | null; moved: boolean };
-    let drag: Drag | null = null;
+    // Levels and drawings are placed and dragged by `gestures` (lib/drawingGestures.ts). A tap selects (the click handler below).
     let lastTouch = -Infinity;
-    const local = (clientX: number, clientY: number) => { const box = element.getBoundingClientRect(); return { x: clientX - box.left, y: clientY - box.top }; };
-    const onPlot = (x: number, y: number) => x >= 0 && x <= chart.timeScale().width() && y >= 0 && y <= chart.panes()[0].getHeight();
-    const inPane = (y: number) => Math.max(0, Math.min(chart.panes()[0].getHeight(), y));
-    const priceAt = (y: number) => {
-      const value = candles.coordinateToPrice(inPane(y));
-      return value === null || roundPrice(value) <= 0 ? null : roundPrice(value);
-    };
-    const grab = (x: number, y: number, touch: number | null) => {
-      const now = actions.current;
-      if (now.tool || now.pending || !onPlot(x, y)) return false;
-      const hit = touch === null ? layer.hit(x, y, MOUSE_SLOP) : now.selected ? layer.hit(x, y, TOUCH_SLOP, now.selected) : null;
-      const base = hit && layer.item(hit.id);
-      // A locked item selects (the click handler) but never drags: the press pans the chart.
-      if (!hit || !base || base.locked || !(base.kind === "level" ? now.onMove : now.onEditDrawing)) return false;
-      const at = base.kind === "level" ? layer.y(hit.id) : y;
-      if (at === null) return false;
-      const near = (layer.anchors(hit.id) ?? []).reduce<{ index: number; distance: number }>((best, point, index) => {
-        const distance = point ? Math.hypot(point.x - x, point.y - y) : Infinity;
-        return distance < best.distance ? { index, distance } : best;
-      }, { index: 0, distance: Infinity });
-      drag = { id: hit.id, handle: hit.handle, anchor: near.index, touch, from: { x, y }, base, offset: at - y, result: null, moved: false };
-      if (touch === null) now.onSelect?.(hit.id);
-      window.addEventListener("keydown", onEscape, true);
-      return true;
-    };
-    const follow = (x: number, y: number, held: boolean) => {
-      if (!drag) return;
-      if (!drag.moved && Math.hypot(x - drag.from.x, y - drag.from.y) < DRAG_START) return;
-      drag.moved = true;
-      const { base } = drag;
-      const magnet = magnetOn(held);
-      let points: Anchor[] | null = null;
-      if (base.kind === "level") {
-        const value = magnet ? layer.anchorAt(x, inPane(y + drag.offset), true)?.price ?? priceAt(y + drag.offset) : priceAt(y + drag.offset);
-        points = value === null ? null : [{ time: 0, price: value }];
-      } else if (drag.handle !== null) {
-        const to = layer.anchorAt(x, inPane(y), magnet);
-        points = to && moveHandle(base.points, base.kind, drag.handle, to);
-      } else {
-        const [from, to] = [layer.logicalAt(drag.from.x), layer.logicalAt(x)];
-        const [was, now] = [candles.coordinateToPrice(drag.from.y), candles.coordinateToPrice(inPane(y))];
-        if (from !== null && to !== null && was !== null && now !== null) {
-          const bars = Math.round(to - from);
-          const grabbed = base.points[drag.anchor];
-          const at = timeline.toLogical(grabbed.time);
-          // The magnet lands the grabbed anchor on its new bar's nearest open, high, low or close; the rest move with it.
-          const snapped = magnet && at !== null ? layer.snapPrice(at + bars, grabbed.price + now - was) : null;
-          points = shiftPoints(base.points, timeline, bars, snapped === null ? now - was : snapped - grabbed.price);
-          if (points && snapped !== null) points[drag.anchor] = { ...points[drag.anchor], price: snapped };
-        }
-      }
-      // A position with no valid (positive) price keeps the last one.
-      if (!points) return;
-      drag.result = { ...base, points };
-      layer.setPreview(drag.result);
-    };
-    const finish = (commit: boolean) => {
-      const done = drag;
-      drag = null;
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-      window.removeEventListener("keydown", onEscape, true);
-      if (!done?.moved) return;
-      // A drag that never reached a valid price saves nothing.
-      if (!commit || !done.result) { layer.setPreview(null); return; }
-      // The preview holds the new position until the saved item comes back as a prop.
-      if (done.base.kind === "level") actions.current.onMove?.(done.id, done.result.points[0].price);
-      else actions.current.onEditDrawing?.(done.id, { points: done.result.points });
-      window.setTimeout(() => { if (!drag) layer.setPreview(null); }, 1000);
-    };
-    const onEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && drag) { event.preventDefault(); event.stopPropagation(); finish(false); } };
-    // An armed tool reads its own clicks and taps. The library holds back a
-    // second click that follows the first within its double-click time, which
-    // would lose a quick second point of a trend line or zone. A press that
-    // moves is a pan, not a placement.
-    let press: { x: number; y: number; touch: number | null; held: boolean } | null = null;
-    const place = (x: number, y: number, held: boolean) => {
-      const now = actions.current;
-      const kind = now.tool;
-      if (!kind) return;
-      // Placed at the middle of the nearest bar, or with the magnet at its nearest open, high, low or close.
-      const point = layer.anchorAt(x, y, magnetOn(held));
-      if (kind === "level") { const value = point?.price ?? priceAt(y); if (value !== null) now.onDraw(value); return; }
-      if (!point) return;
-      if (POINTS[kind] === 1) { now.onPlace?.(kind, [point]); return; }
-      const first = placing.current?.kind === kind ? placing.current.first : null;
-      if (!first) { placing.current = { kind, first: point }; setSecond(true); ghost(kind, [point, point]); return; }
-      if (first.time === point.time && first.price === point.price) return; // a second click on the first point
-      placing.current = null;
-      setSecond(false);
-      layer.setPreview(null);
-      now.onPlace?.(kind, [first, point]);
-    };
-    const pressTool = (x: number, y: number, touch: number | null, held: boolean) => {
-      if (!actions.current.tool || actions.current.pending || !onPlot(x, y)) return false;
-      press = { x, y, touch, held };
-      return true;
-    };
-    const release = (x: number, y: number, slop: number) => {
-      const done = press;
-      press = null;
-      if (done && Math.hypot(x - done.x, y - done.y) < slop) place(done.x, done.y, done.held);
-    };
-    const onPlaceUp = (event: MouseEvent) => {
-      window.removeEventListener("mouseup", onPlaceUp);
-      const at = local(event.clientX, event.clientY);
-      if (event.button === 0) release(at.x, at.y, DRAG_START);
-    };
     // The chart menu (C1.3): the item under the pointer, or the chart with the
     // price there (the magnet applies, as it does to a placed level). A press
     // on a price or time scale, or the RSI pane, has no price.
@@ -666,7 +541,7 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
       const done = hold;
       dropHold();
       if (!done) return;
-      finish(false); // a selected item pressed for its menu does not drag
+      gestures.cancel(); // a selected item pressed for its menu does not drag
       tapsOffUntil = Infinity;
       openMenu(done.x, done.y, true);
     };
@@ -678,48 +553,27 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
     const onContextMenu = (event: MouseEvent) => {
       event.preventDefault(); // never the browser's menu over the chart
       if (performance.now() - lastTouch < 1000) { fireHold(); return; }
-      if (!drag) openMenu(event.clientX, event.clientY, false);
+      if (!gestures.dragging()) openMenu(event.clientX, event.clientY, false);
     };
-    const onMouseMove = (event: MouseEvent) => { const at = local(event.clientX, event.clientY); follow(at.x, at.y, modifier(event)); };
-    const onMouseUp = () => finish(true);
-    const onMouseDown = (event: MouseEvent) => {
-      if (event.button !== 0 || drag) return;
-      const at = local(event.clientX, event.clientY);
-      if (pressTool(at.x, at.y, null, modifier(event))) { window.addEventListener("mouseup", onPlaceUp); return; }
-      if (!grab(at.x, at.y, null)) return;
-      event.stopPropagation();
-      event.preventDefault();
-      window.addEventListener("mousemove", onMouseMove);
-      window.addEventListener("mouseup", onMouseUp);
-    };
+    const onMouseDown = (event: MouseEvent) => gestures.mouseDown(event);
     const onTouchStart = (event: TouchEvent) => {
       lastTouch = performance.now();
       tapsOffUntil = 0;
-      if (drag || event.touches.length !== 1) { dropHold(); if (drag) finish(false); return; }
+      if (gestures.dragging() || event.touches.length !== 1) { dropHold(); gestures.cancel(); return; }
       const touch = event.touches[0];
       startHold(touch);
-      const at = local(touch.clientX, touch.clientY);
-      if (pressTool(at.x, at.y, touch.identifier, false)) return;
-      if (grab(at.x, at.y, touch.identifier)) event.stopPropagation();
+      if (gestures.touchStart(touch)) event.stopPropagation();
     };
-    const ours = (event: TouchEvent) => drag?.touch != null && [...event.changedTouches].find((touch) => touch.identifier === drag!.touch);
     const onTouchMove = (event: TouchEvent) => {
       const held = hold && [...event.changedTouches].find((touch) => touch.identifier === hold!.touch);
       if (held && Math.hypot(held.clientX - hold!.x, held.clientY - hold!.y) > HOLD_SLOP) dropHold();
-      const touch = ours(event);
-      if (!touch) return;
-      event.preventDefault(); // the page must not scroll under a dragged item
-      event.stopPropagation();
-      const at = local(touch.clientX, touch.clientY);
-      follow(at.x, at.y, false);
+      gestures.touchMove(event); // the page must not scroll under a dragged item
     };
     const onTouchEnd = (event: TouchEvent) => {
       lastTouch = performance.now();
       dropHold();
       if (tapsOffUntil === Infinity) tapsOffUntil = performance.now() + 500;
-      const tapped = press?.touch != null && [...event.changedTouches].find((touch) => touch.identifier === press!.touch);
-      if (tapped) { const at = local(tapped.clientX, tapped.clientY); if (event.type === "touchend") release(at.x, at.y, 10); else press = null; }
-      if (ours(event)) { event.stopPropagation(); finish(event.type === "touchend"); }
+      gestures.touchEnd(event);
     };
     element.addEventListener("mousedown", onMouseDown, true);
     element.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
@@ -901,9 +755,9 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
       for (const type of ["pointerup", "mouseup", "touchend", "dblclick", "wheel"]) window.removeEventListener(type, afterScale, true);
       scaleWatch.disconnect(); stopScale(); stopScaleJump(); autoScale.current = () => {};
       stopLink(); stopRange(); stopCommands(); stopJumps(); stopSnapshot(); retryJump.current = () => {}; chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); window.clearTimeout(rangeTimer.current); registry?.delete(id); (window as typeof window & { __tjMarks?: Map<string, MarkLayer> }).__tjMarks?.delete(id); layers?.delete(id); autoLayers?.delete(id);
-      finish(false); dropHold();
+      gestures.detach(); dropHold(); setSecond(false);
       element.removeEventListener("pointerleave", releasePointer);
-      window.removeEventListener("mouseup", onPlaceUp); element.removeEventListener("contextmenu", onContextMenu, true);
+      element.removeEventListener("contextmenu", onContextMenu, true);
       element.removeEventListener("mousedown", onMouseDown, true); element.removeEventListener("touchstart", onTouchStart, true); element.removeEventListener("touchmove", onTouchMove, true);
       element.removeEventListener("touchend", onTouchEnd, true); element.removeEventListener("touchcancel", onTouchEnd, true);
       for (const type of ["mousedown", "touchstart", "wheel"]) element.removeEventListener(type, unpin, true);
@@ -1142,10 +996,7 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
   // Arming, switching or dropping a tool forgets a half-placed drawing.
   useEffect(() => {
     bundle.current?.layer.setInteractive(!tool);
-    if (!placing.current && !tool) return;
-    placing.current = null;
-    setSecond(false);
-    bundle.current?.layer.setPreview(null);
+    bundle.current?.gestures.forget(tool);
   }, [tool]);
 
   useEffect(() => {

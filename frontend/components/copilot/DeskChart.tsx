@@ -8,7 +8,13 @@ import {
 } from "lightweight-charts";
 import { SessionShade } from "@/lib/sessionShade";
 import type { ChartBar, Interval } from "@/lib/charts";
-import { alertText, createAlert, removeAlert, type AlertsPayload } from "@/lib/alerts";
+import { alertText, createAlert, rearmAlert, removeAlert, type AlertsPayload } from "@/lib/alerts";
+import { DrawingLayer, MOUSE_SLOP, Timeline, TOUCH_SLOP, type Drawing } from "@/lib/drawings";
+import { drawingGestures, type DrawingGestures, type GestureActions } from "@/lib/drawingGestures";
+import { drawnPlan, pairLevels, planMessage, planSource } from "@/lib/drawPlan";
+import type { PriceLevel } from "@/lib/charts";
+import { DrawBar, PencilButton, itemName, useDeskDrawings, useDrawKeys, type DeskTool } from "@/components/copilot/DeskDraw";
+import { AlertList, AlertsButton } from "@/components/copilot/DeskAlerts";
 import { CONTEXT_MAX, copilotLabHref, type DrawnPlan } from "@/lib/copilot";
 import { Flash } from "@/components/copilot/Ticks";
 import { heldReading } from "@/lib/deskTicks";
@@ -30,7 +36,13 @@ import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type 
  * per timeframe in this browser. The symbol's other armed alerts are thin dotted lines with a chip to remove one (and
  * undo). A tap on the price scale, a long-press or a right-click on the candles opens the level menu: an alert when
  * price crosses there, a plan from there (the copilot's plan form, prefilled, nothing saved), or a question to the
- * copilot about it. Drawing and the rest live in Charts.
+ * copilot about it.
+ *
+ * His Charts levels and drawings show too (the shared chart settings, drawn with Charts' drawing layer). The pencil in
+ * the header opens a small draw bar (``DeskDraw``): a horizontal line, a trend line or a zone, select to move or delete,
+ * undo; on a phone the line and Delete. A right-click or long-press on a drawn line opens the level menu at the line's
+ * price (a trend line's where it is at the last candle): an alert there, a plan from it, a question, or delete it. The
+ * bell in the header opens the symbol's armed alerts, to move or remove one (``DeskAlerts``).
  */
 
 const ET = "America/New_York";
@@ -210,6 +222,7 @@ class TimeStopLine implements ISeriesPrimitive<Time> {
 type Parts = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram"> | null; markers: ISeriesMarkersPluginApi<Time>;
   shade: SessionShade; stop: TimeStopLine; lines: IPriceLine[]; studies: Record<LineKey, ISeriesApi<"Line">>;
+  layer: DrawingLayer; timeline: Timeline; gestures: DrawingGestures;
 };
 type Hover = { bar: Bar; marks: DeskChartMark[]; x: number; width: number };
 
@@ -247,7 +260,7 @@ function defaultRange(parts: Parts, data: DeskChartData, host: HTMLElement | nul
 type Read = { key: string; at?: number; data: DeskChartData } | { key: string; at?: number; error: string };
 const good = (read: Read) => "data" in read && read.data.state === "ok" && read.data.bars.length > 0;
 /** What the chart shows now, for the crosshair and the primitives; ``applied`` is the key last painted. */
-type Painted = { shown: DeskChartData | null; byCandle: Map<number, DeskChartMark[]>; applied: string | null };
+type Painted = { shown: DeskChartData | null; byCandle: Map<number, DeskChartMark[]>; applied: string | null; timeline: ChartBar[] };
 
 /** One study's points: a gap where it has no value, and none drawn across a session's end (VWAP starts again each day). */
 function studyPoints(bars: Bar[], values: (number | null)[] | undefined, key: LineKey): (LineData<Time> | WhitespaceData<Time>)[] {
@@ -286,6 +299,8 @@ function paint(current: Parts, read: Read, state: Painted, host: HTMLElement | n
   const next = "data" in read && read.data.state === "ok" && read.data.bars.length ? read.data : null;
   state.shown = next;
   state.byCandle = next ? marksByCandle(next) : new Map();
+  // The drawings' time axis: each candle from its start to the next step (Charts' ``Timeline``).
+  state.timeline = next ? next.bars.map(b => ({ ...b, end_time: b.time + next.step }) as unknown as ChartBar) : [];
   state.applied = next ? read.key : null;  // after an empty read, the next good one opens on the default view
   for (const line of current.lines) current.candles.removePriceLine(line);
   current.lines = [];
@@ -328,9 +343,10 @@ function paint(current: Parts, read: Read, state: Painted, host: HTMLElement | n
  * a question's context line for the copilot, scoped to the symbol (its own conversation when it has one). */
 export type DeskChartActions = { go(href: string): void; ask(symbol: string, text: string): void };
 
-type Menu = { price: number; x: number; y: number; plan: boolean };
+/** ``item``: the drawn line the menu was opened on, if any (its price is the line's). */
+type Menu = { price: number; x: number; y: number; plan: boolean; item?: { id: string; name: string; at: string } };
 type Status = { text: string; tone: "ok" | "error"; undo?: () => void } | null;
-type Press = { x: number; y: number; price: number; axis: boolean; clientX: number; clientY: number; at: number; timer: number | null };
+type Press = { x: number; y: number; price: number; axis: boolean; touch: boolean; clientX: number; clientY: number; at: number; timer: number | null };
 
 const cents = (value: number) => Math.round(value * 100) / 100;
 const MENU_W = 240;
@@ -425,6 +441,22 @@ const newsTitle = (news: DeskChartNews): string =>
   news.state !== "ok" ? news.reason ?? "Hide News"
     : news.complete_from ? `Hide News. Only the newest headlines were read: any before ${newsWhen(news.complete_from, news.as_of)} are not marked.` : "Hide News";
 
+/** Where a drawn line is, for the level menu: a level's or ray's price, a zone's edge nearest the last price (as Charts'
+ * "Plan this" reads it), a trend line's value at the last candle (null when it is vertical). */
+export function linePrice(item: PriceLevel | Drawing, timeline: Timeline, last: number | null): { price: number; at: string } | null {
+  if (!("kind" in item)) return { price: item.price, at: "" };
+  if (item.kind === "ray" || item.kind === "note") return { price: item.points[0].price, at: "" };
+  if (item.kind === "zone") {
+    const source = planSource(item, last);
+    return source ? { price: source.price, at: `${source.edge} edge` } : null;
+  }
+  const [a, b] = item.points;
+  const [la, lb] = [timeline.toLogical(a.time), timeline.toLogical(b.time)];
+  if (la === null || lb === null || la === lb || !timeline.count) return null;
+  const value = a.price + (timeline.count - 1 - la) / (lb - la) * (b.price - a.price);
+  return value > 0 ? { price: cents(value), at: "at the last candle" } : null;
+}
+
 /** The chart for ``id`` (a thread, ``symbol:X`` or ``market``) on ``timeframe``. ``refreshKey`` reads it again. ``onRead``
  * hears each read shown (the reading line); ``actions`` lets the level menu's Plan and Ask reach the desk. */
 export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, actions, live: now = null }: {
@@ -434,7 +466,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
 }) {
   const host = useRef<HTMLDivElement>(null);
   const parts = useRef<Parts | null>(null);
-  const painted = useRef<Painted>({ shown: null, byCandle: new Map(), applied: null });
+  const painted = useRef<Painted>({ shown: null, byCandle: new Map(), applied: null, timeline: [] });
   const latest = useRef<Read | null>(null);
   const [read, setRead] = useState<Read | null>(null);
   const [tick, setTick] = useState(0);
@@ -447,6 +479,22 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   const press = useRef<Press | null>(null);
   const menuBox = useRef<HTMLDivElement>(null);
   const key = `${id}|${timeframe}`;
+  // Drawing: off until the pencil; the armed tool, the selected line, a two-point tool's first point down.
+  const [drawOn, setDrawOn] = useState(false);
+  const [tool, setTool] = useState<DeskTool | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [second, setSecond] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [narrow, setNarrow] = useState(false);
+  const drawActions = useRef<GestureActions>({ tool: null, pending: true, selected: null, magnet: false });
+  const touched = useRef(false);  // the last press was a finger: a wider band selects a line
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 767px)");
+    const apply = () => setNarrow(query.matches);
+    apply();
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, []);
   useEffect(() => { setChoices(readChoices()); }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
 
   // One chart for the component's life; a new symbol or timeframe swaps the data in place, so switching never blanks.
@@ -491,11 +539,39 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     candles.attachPrimitive(shade);
     const stop = new TimeStopLine(() => painted.current.shown?.bars ?? [], () => painted.current.shown?.step ?? 60);
     candles.attachPrimitive(stop);
-    parts.current = { chart, candles, volume: null, markers, shade, stop, lines: [], studies };
+    // His Charts levels and drawings, on Charts' drawing layer and gestures.
+    const timeline = new Timeline(() => painted.current.timeline, () => painted.current.shown?.step ?? 60);
+    const layer = new DrawingLayer(timeline);
+    candles.attachPrimitive(layer);
+    layer.setInteractive(false);
+    const probes = (window as typeof window & { __tjDrawings?: Map<string, DrawingLayer> }).__tjDrawings;  // browser tests find lines by it
+    probes?.set("desk", layer);
+    const gestures = drawingGestures({ element, chart, candles, layer, timeline, actions: () => drawActions.current, onSecond: setSecond });
+    const onMouseDown = (event: MouseEvent) => gestures.mouseDown(event);
+    const onTouchStart = (event: TouchEvent) => {
+      if (gestures.dragging() || event.touches.length !== 1) { gestures.cancel(); return; }
+      if (gestures.touchStart(event.touches[0])) event.stopPropagation();
+    };
+    const onTouchMove = (event: TouchEvent) => { gestures.touchMove(event); };
+    const onTouchEnd = (event: TouchEvent) => gestures.touchEnd(event);
+    element.addEventListener("mousedown", onMouseDown, true);
+    element.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
+    element.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
+    element.addEventListener("touchend", onTouchEnd, true);
+    element.addEventListener("touchcancel", onTouchEnd, true);
+    // While drawing, a click or tap on a line selects it; anywhere else drops the selection.
+    chart.subscribeClick((event) => {
+      const now = drawActions.current;
+      if (now.pending || now.tool) return;
+      const hit = event.point && (event.paneIndex ?? 0) === 0 ? layer.hit(event.point.x, event.point.y, touched.current ? TOUCH_SLOP : MOUSE_SLOP) : null;
+      now.onSelect?.(hit?.id ?? null);
+    });
+    parts.current = { chart, candles, volume: null, markers, shade, stop, lines: [], studies, layer, timeline, gestures };
     setChartApi(chart);
     painted.current.applied = null;  // a new chart starts from the default view
     if (latest.current) paint(parts.current, latest.current, painted.current, host.current, () => true, [], null);
     chart.subscribeCrosshairMove((event) => {
+      if (drawActions.current.tool) gestures.hover(event.point && (event.paneIndex ?? 0) === 0 ? event.point : null, false);
       const data = painted.current.shown;
       if (!data || !event.point || typeof event.time !== "number") { setHover(null); return; }
       const bar = candleOf(data.bars, data.step, event.time);
@@ -509,7 +585,16 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
       }
       setHover({ bar, marks: near ? painted.current.byCandle.get(near.time) ?? [] : [], x: event.point.x, width: element.clientWidth });
     });
-    return () => { parts.current = null; setChartApi(null); chart.remove(); };
+    return () => {
+      gestures.detach();
+      element.removeEventListener("mousedown", onMouseDown, true);
+      element.removeEventListener("touchstart", onTouchStart, true);
+      element.removeEventListener("touchmove", onTouchMove, true);
+      element.removeEventListener("touchend", onTouchEnd, true);
+      element.removeEventListener("touchcancel", onTouchEnd, true);
+      probes?.delete("desk");
+      parts.current = null; setChartApi(null); chart.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -534,7 +619,46 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   // A new read is the server's word on the alerts; another symbol or timeframe closes the menu and its message.
   // (A read asked for before the change answers with the alerts as they were: the local list stands until a later one.)
   useEffect(() => { setListed(prev => prev && read?.at !== undefined && read.at < prev.at ? prev : null); }, [read]); // eslint-disable-line react-hooks/set-state-in-effect -- the read replaces the local list
-  useEffect(() => { setMenu(null); setStatus(null); }, [key]); // eslint-disable-line react-hooks/set-state-in-effect -- a new chart starts clean
+  useEffect(() => { setMenu(null); setStatus(null); setSelected(null); setTool(null); }, [key]); // eslint-disable-line react-hooks/set-state-in-effect -- a new chart starts clean
+
+  // His drawings for this symbol (the shared chart settings), the gestures' view of them, and the layer's.
+  const draw = useDeskDrawings(data?.symbol ?? null);
+  const drawRef = useRef(draw);
+  const editing = drawOn && draw.usable && !!data;
+  useEffect(() => {
+    drawRef.current = draw;
+    const made = (id: string | null) => { setTool(null); setStatus(null); if (id) setSelected(id); };
+    drawActions.current = {
+      tool: editing ? tool : null, pending: !editing, selected, magnet: draw.magnet,
+      toolStyle: tool && tool !== "level" ? draw.toolStyles[tool] : undefined,
+      onSelect: setSelected,
+      onMove: (lineId, value) => { setStatus(null); draw.moveLevel(lineId, value); },
+      onEditDrawing: (lineId, patch) => { setStatus(null); draw.editDrawing(lineId, patch); },
+      onDraw: (value) => made(draw.addLevel(value)),
+      onPlace: (kind, points) => made(draw.place(kind, points)),
+    };
+  }, [draw, editing, tool, selected]);
+  useEffect(() => { parts.current?.layer.set(draw.shapes, editing ? selected : null, true); }, [draw.shapes, selected, editing, chartApi]);
+  useEffect(() => {
+    const current = parts.current;
+    if (!current) return;
+    current.layer.setInteractive(editing && !tool);
+    current.gestures.forget(editing ? tool : null);
+  }, [tool, editing, chartApi]);
+  useEffect(() => { if (narrow && tool && tool !== "level") setTool(null); }, [narrow, tool]); // eslint-disable-line react-hooks/set-state-in-effect -- a phone draws lines only
+  const deleteLine = (lineId: string) => {
+    const name = draw.remove(lineId);
+    setSelected(null);
+    setMenu(null);
+    if (name) setStatus({ text: `Deleted ${name.startsWith("Level ") ? "the line" : name.toLowerCase()}.`, tone: "ok", undo: () => { drawRef.current.undo(); setStatus(null); } });
+  };
+  const stopDrawing = () => { setDrawOn(false); setTool(null); setSelected(null); };
+  useDrawKeys(editing && !menu, {
+    remove: () => { if (selected) deleteLine(selected); },
+    undo: () => { setStatus(null); draw.undo(); },
+    redo: () => { setStatus(null); draw.redo(); },
+    escape: () => { if (tool) setTool(null); else if (selected) setSelected(null); else stopDrawing(); },
+  });
 
   const alerts = useMemo(() => listed && listed.key === key ? listed.alerts : data?.alerts ?? [], [listed, key, data]);
   const shownKey = STUDIES[timeframe].map(k => isOn(choices, timeframe, k) ? 1 : 0).join("");
@@ -569,7 +693,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   });
 
   // ---- the level menu: a tap on the price scale, a long-press or a right-click on the candles
-  const at = useCallback((clientX: number, clientY: number): Omit<Press, "clientX" | "clientY" | "at" | "timer"> | null => {
+  const at = useCallback((clientX: number, clientY: number, touch = false): Omit<Press, "clientX" | "clientY" | "at" | "timer"> | null => {
     const current = parts.current, element = host.current;
     if (!current || !element || !painted.current.shown) return null;
     const box = element.getBoundingClientRect();
@@ -578,14 +702,21 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     if (y < 0 || y > main || x < 0) return null;
     const value = current.candles.coordinateToPrice(y);
     if (value === null || !Number.isFinite(value) || value <= 0) return null;
-    return { x, y, price: cents(value), axis: x > current.chart.timeScale().width() };
+    return { x, y, price: cents(value), axis: x > current.chart.timeScale().width(), touch };
   }, []);
-  const openMenu = useCallback((spot: { x: number; y: number; price: number; axis: boolean }) => {
+  const openMenu = useCallback((spot: { x: number; y: number; price: number; axis: boolean; touch: boolean }) => {
+    // On a drawn line, the menu is the line's, at its price.
+    const current = parts.current, shown = painted.current.shown;
+    const hit = current && !spot.axis ? current.layer.hit(spot.x, spot.y, spot.touch ? TOUCH_SLOP : MOUSE_SLOP) : null;
+    const line = hit ? drawRef.current.find(hit.id) : null;
+    const last = shown ? shown.reading?.last ?? shown.bars[shown.bars.length - 1]?.close ?? null : null;
+    const where = line && current ? linePrice(line, current.timeline, last) : null;
+    const item = line && where ? { id: line.id, name: itemName(line), at: where.at } : undefined;
     const width = host.current?.clientWidth ?? 360;
     const pane = parts.current?.chart.timeScale().width() ?? width;
     const x = spot.axis ? pane - MENU_W - 6 : spot.x > width / 2 ? spot.x - MENU_W - 12 : spot.x + 12;
     const height = host.current?.clientHeight ?? 320;
-    setMenu({ price: spot.price, x: Math.max(4, Math.min(width - MENU_W - 4, x)), y: Math.max(4, Math.min(spot.y - 20, height - 190)), plan: false });
+    setMenu({ price: item ? where!.price : spot.price, x: Math.max(4, Math.min(width - MENU_W - 4, x)), y: Math.max(4, Math.min(spot.y - 20, height - 220)), plan: false, item });
     setStatus(null);
   }, []);
   const clearPress = () => { if (press.current?.timer) window.clearTimeout(press.current.timer); press.current = null; };
@@ -593,8 +724,10 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     clearPress();
     // Only a first finger or the mouse: a second finger is a pinch.
     if (!event.isPrimary || event.button !== 0 || (menuBox.current && menuBox.current.contains(event.target as Node))) return;
+    touched.current = event.pointerType === "touch";
+    if (drawActions.current.tool) return;  // an armed tool places with this press
     if ((event.target as HTMLElement).closest?.('[data-testid="desk-chart-event"], [data-desk-news]')) return;  // an event chip or a headline: its own tooltip
-    const spot = at(event.clientX, event.clientY);
+    const spot = at(event.clientX, event.clientY, event.pointerType === "touch");
     if (!spot) return;
     press.current = { ...spot, clientX: event.clientX, clientY: event.clientY, at: Date.now(),
       timer: spot.axis ? null : window.setTimeout(() => { press.current = null; openMenu(spot); }, LONG_PRESS_MS) };
@@ -626,15 +759,19 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     setStatus({ text: "Removing the alert…", tone: "ok" });
     removeAlert(alertId).then(listing => { show(listing, symbol); setStatus({ text: "Alert removed.", tone: "ok" }); }).catch(fail);
   };
-  const alertHere = (level: number) => {
+  const alertHere = (level: number, item?: Menu["item"]) => {
     if (!data || lastPrice === null) return;
     const symbol = data.symbol;
+    // From a drawn line: tied to it as Charts ties one (a level's own kind, any drawing's as a drawing), so Charts' menu on that line lists it.
+    const line = item ? draw.find(item.id) : null;
+    const source = line ? { source_kind: "kind" in line ? "drawing" as const : "level" as const, source_id: line.id,
+      label: "kind" in line ? `${item!.name}${item!.at ? ` (${item!.at})` : ""}` : line.label } : { source_kind: "level" as const, source_id: "desk", label: DESK_LABEL };
     setMenu(null);
     setStatus({ text: "Setting the alert…", tone: "ok" });
-    createAlert({ symbol, price: level, reference: lastPrice, condition: "crosses", interval: null, session: "regular", source_kind: "level", source_id: "desk", label: DESK_LABEL })
+    createAlert({ symbol, price: level, reference: lastPrice, condition: "crosses", interval: null, session: "regular", ...source })
       .then(listing => {
         show(listing, symbol);
-        const made = listing.alerts.filter(a => a.symbol === symbol && a.state === "active" && a.source_id === "desk" && Math.abs(a.price - level) < 1e-6)
+        const made = listing.alerts.filter(a => a.symbol === symbol && a.state === "active" && a.source_id === source.source_id && Math.abs(a.price - level) < 1e-6)
           .sort((a, b) => b.armed_at - a.armed_at)[0];
         const what = made ? alertText(made, made.price).toLowerCase() : `crosses ${level.toFixed(2)}`;
         setStatus({ text: `Alert set: ${symbol} ${what}, regular hours.${listing.phone ? "" : " Phone alerts are not set up on this server."}`, tone: "ok",
@@ -661,9 +798,27 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
       } });
     }).catch(fail);
   };
+  const moveOne = (alert: DeskChartAlert, to: number) => {
+    if (!data || lastPrice === null) return;
+    const symbol = data.symbol, reference = lastPrice, from = alert.price;
+    setStatus({ text: "Moving the alert…", tone: "ok" });
+    rearmAlert(alert.id, to, reference).then(listing => {
+      show(listing, symbol);
+      const moved = listing.alerts.find(a => a.id === alert.id);
+      setStatus({ text: `Alert moved: ${moved ? alertText(moved, moved.price) : to.toFixed(2)}.`, tone: "ok", undo: () => {
+        setStatus({ text: "Moving it back…", tone: "ok" });
+        rearmAlert(alert.id, from, reference).then(again => { show(again, symbol); setStatus({ text: `Alert back at ${from.toFixed(2)}.`, tone: "ok" }); }).catch(fail);
+      } });
+    }).catch(fail);
+  };
   const planHere = (level: number, role: "entry" | "invalidation") => {
     if (!data) return;
+    const line = menu?.item ? draw.find(menu.item.id) : null;
     setMenu(null);
+    // A drawn level, ray or zone as the invalidation: Charts' "Plan this" message and drawn plan (``lib/drawPlan.ts``).
+    const source = line && role === "invalidation" ? planSource(line, lastPrice) : null;
+    const pair = source ? pairLevels({ ...source, price: level }, null, lastPrice) : null;
+    if (pair) { actions?.go(copilotLabHref(data.symbol, planMessage(data.symbol, data.timeframe, lastPrice, pair), { kind: "chart", ref: null }, drawnPlan(pair))); return; }
     actions?.go(planFromHere(data.symbol, data.timeframe, lastPrice, level, role));
   };
   const askHere = (level: number) => {
@@ -709,27 +864,20 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
         {data && !data.levels.length && id !== "market" && <span>no plan lines saved</span>}
         {data?.time_stop && <span style={{ color: COLOR.stop }}>Time stop {stopWhen(data.time_stop.at)}</span>}
         {data && earningsHeader(data.events, data.as_of) && <span data-testid="desk-chart-earnings" className="text-sky-200">{earningsHeader(data.events, data.as_of)}</span>}
-        <button type="button" onClick={reset} disabled={!data}
-          className="ml-auto min-h-11 rounded border border-transparent px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 sm:min-h-0 sm:py-0.5">
-          Reset
-        </button>
+        <span className="ml-auto flex items-center gap-1">
+          {data && <AlertsButton count={alerts.length} open={alertsOpen} onToggle={() => setAlertsOpen(open => !open)} />}
+          <PencilButton on={drawOn} disabled={!data || !draw.usable} count={draw.shapes.length} onToggle={() => drawOn ? stopDrawing() : setDrawOn(true)} />
+          <button type="button" onClick={reset} disabled={!data}
+            className="min-h-11 rounded border border-transparent px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 sm:min-h-0 sm:py-0.5">
+            Reset
+          </button>
+        </span>
       </div>
-      {data && alerts.length > 0 && (
-        <div data-testid="desk-chart-alerts" aria-label="Alerts on this symbol" className="flex flex-wrap items-center gap-1 text-xs tabular-nums">
-          {alerts.map(alert => alert.removable ? (
-            <button key={alert.id} type="button" onClick={() => removeOne(alert)} aria-label={`Remove alert: ${alert.text}`}
-              title={`${alert.text}${alert.label ? ` · ${alert.label}` : ""}. Remove it (you can undo).`}
-              className="inline-flex min-h-11 items-center gap-1 rounded border border-amber-300/30 px-1.5 text-amber-200/90 hover:border-amber-300/60 sm:min-h-0 sm:py-0.5">
-              <span aria-hidden>🔔</span>{alert.text}<span aria-hidden className="text-muted-foreground">×</span>
-            </button>
-          ) : (
-            <span key={alert.id} title={`${alert.label ?? "A plan's alert"}: remove it from its plan.`}
-              className="inline-flex items-center gap-1 rounded border border-transparent px-1.5 text-amber-200/70 sm:py-0.5">
-              <span aria-hidden>🔔</span>{alert.text}
-            </span>
-          ))}
-        </div>
-      )}
+      {editing && <DrawBar narrow={narrow} tool={tool} selected={selected} canUndo={draw.canUndo} undoName={draw.undoName} second={second}
+        onTool={(next) => { setTool(current => current === next ? null : next); setSelected(null); draw.setError(""); }}
+        onDelete={() => { if (selected) deleteLine(selected); }} onUndo={() => { setStatus(null); draw.undo(); }} />}
+      {draw.error && <p role="alert" className="text-xs text-rose-300">{draw.error}</p>}
+      {data && alertsOpen && <AlertList alerts={alerts} last={lastPrice} onMove={moveOne} onRemove={removeOne} />}
       {status && (
         <p role="status" data-testid="desk-chart-status" className={`flex flex-wrap items-center gap-x-2 text-xs ${status.tone === "error" ? "text-rose-300" : "text-foreground"}`}>
           <span>{status.text}</span>
@@ -762,7 +910,8 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
         onPointerCancelCapture={clearPress} onContextMenu={(event) => {
           if (menuBox.current?.contains(event.target as Node)) { event.preventDefault(); return; }
           if ((event.target as HTMLElement).closest?.("[data-desk-news]")) return;  // a headline keeps the browser's menu (copy link)
-          const spot = at(event.clientX, event.clientY);
+          if (drawActions.current.tool) { event.preventDefault(); return; }  // an armed tool: no menu
+          const spot = at(event.clientX, event.clientY, touched.current);
           if (!spot) return;  // the volume pane and the time axis keep the browser's own menu
           event.preventDefault();
           clearPress();
@@ -772,9 +921,10 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           data-bars={data?.bars.length ?? 0} data-marks={allMarks.length} data-studies={drawn.join(",")}
           data-volume={data && STUDIES[data.timeframe].includes("volume") && isOn(choices, data.timeframe, "volume") ? "on" : "off"}
           data-reference={data && isOn(choices, data.timeframe, "levels") && STUDIES[data.timeframe].includes("levels") ? (data.reference ?? []).length : 0}
-          data-alerts={alerts.length} data-news={!isOn(choices, timeframe, "news") ? "off" : news?.state === "ok" ? news.groups.length : news?.state ?? "loading"}
+          data-alerts={alerts.length} data-drawings={draw.shapes.length} data-selected={editing && selected ? selected : undefined} data-tool={editing && tool ? tool : undefined}
+          data-news={!isOn(choices, timeframe, "news") ? "off" : news?.state === "ok" ? news.groups.length : news?.state ?? "loading"}
           style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
-          className="h-[320px] w-full overflow-hidden rounded border sm:h-[420px]" />
+          className={cn("h-[320px] w-full overflow-hidden rounded border sm:h-[420px]", editing && tool && "cursor-crosshair")} />
         {!unavailable && !switching && <ChartEventMarks chart={chartApi} data={data} />}
         {!unavailable && !switching && data && <ChartNewsMarks chart={chartApi} news={news} symbol={data.symbol} timeframe={data.timeframe}
           onAsk={actions ? (text) => actions.ask(data.symbol, text) : undefined} />}
@@ -796,16 +946,18 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
             className="absolute z-20 rounded-md border bg-popover/95 p-1 text-xs shadow-lg"
             style={{ left: menu.x, top: menu.y, width: MENU_W }}>
             <p className="flex items-center justify-between px-2 py-1 tabular-nums text-muted-foreground">
-              <span>{data.symbol} <span className="text-foreground">{price(menu.price)}</span>{lastPrice !== null ? ` · ${signedPct((menu.price / lastPrice - 1) * 100, 1)} from last` : ""}</span>
+              <span>{menu.item ? <span data-testid="desk-level-menu-line" className="text-foreground">{menu.item.name}{menu.item.at ? ` (${menu.item.at})` : ""} · </span> : `${data.symbol} `}<span className="text-foreground">{price(menu.price)}</span>{lastPrice !== null ? ` · ${signedPct((menu.price / lastPrice - 1) * 100, 1)} from last` : ""}</span>
               <button type="button" aria-label="Close" onClick={() => setMenu(null)} className="min-h-11 min-w-11 rounded text-muted-foreground hover:text-foreground sm:min-h-6 sm:min-w-6">×</button>
             </p>
             {!menu.plan ? <>
-              <button type="button" role="menuitem" onClick={() => alertHere(menu.price)}
+              <button type="button" role="menuitem" onClick={() => alertHere(menu.price, menu.item)}
                 className="block min-h-11 w-full rounded px-2 text-left hover:bg-secondary sm:min-h-8">Alert when price crosses here</button>
               {actions && <button type="button" role="menuitem" onClick={() => setMenu({ ...menu, plan: true })}
                 className="block min-h-11 w-full rounded px-2 text-left hover:bg-secondary sm:min-h-8">Plan from here…</button>}
               {actions && <button type="button" role="menuitem" onClick={() => askHere(menu.price)}
                 className="block min-h-11 w-full rounded px-2 text-left hover:bg-secondary sm:min-h-8">Ask the copilot about this level</button>}
+              {menu.item && <button type="button" role="menuitem" onClick={() => deleteLine(menu.item!.id)}
+                className="block min-h-11 w-full rounded px-2 text-left text-rose-300 hover:bg-secondary sm:min-h-8">Delete this {menu.item.name.startsWith("Level ") ? "line" : menu.item.name.toLowerCase()}</button>}
             </> : <>
               <p className="px-2 pb-1 text-muted-foreground">Plan from {price(menu.price)} as the… (nothing is saved)</p>
               <button type="button" role="menuitem" onClick={() => planHere(menu.price, "entry")}

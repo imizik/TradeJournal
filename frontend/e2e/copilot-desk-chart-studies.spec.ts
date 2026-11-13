@@ -1,7 +1,7 @@
 import { expect, test, type Page, type Request } from "@playwright/test";
 
 // The cockpit chart's studies and level menu (docs/copilot-lab.md § The desk): the legend's toggles and their memory per
-// timeframe, the reading line, the symbol's alerts as lines with a remove chip, and the level menu's three actions. The
+// timeframe, the reading line, the symbol's alerts as lines and in the header's list with Remove, and the level menu's three actions. The
 // lab's routes and the alert routes are stubbed in the browser: nothing reaches the e2e backend's alerts, and no model runs.
 const ON = {
   enabled: true, backend: "fake", evidence: "fixture", model: "fake-scripted", effort: "medium", fallbacks: false, key_configured: false,
@@ -126,11 +126,14 @@ test("each study has a toggle that shows its value at the crosshair, and the cho
   expect(writes()).toEqual([]); // toggling saves nothing anywhere but this browser
 });
 
-test("the level menu sets an alert that can be undone, and an existing alert's chip removes it with an undo", async ({ page }) => {
+test("the level menu sets an alert that can be undone, and the header's alert list removes one with an undo", async ({ page }) => {
   const { pane, writes, posted } = await desk(page);
   const canvas = pane.getByTestId("desk-chart-canvas");
   await expect(canvas).toHaveAttribute("data-alerts", "1");
-  await expect(pane.getByTestId("desk-chart-alerts")).toHaveText(/Crosses above 97\.50/);
+  // The list stays shut until the bell is pressed.
+  await expect(pane.getByTestId("desk-chart-alerts")).toHaveCount(0);
+  await pane.getByRole("button", { name: "Alerts on this symbol: 1" }).click();
+  await expect(pane.getByTestId("desk-chart-alerts")).toContainText(/Crosses above 97\.50/);
 
   // A right-click on the candles opens the menu at that price.
   const box = (await canvas.boundingBox())!;
@@ -154,9 +157,10 @@ test("the level menu sets an alert that can be undone, and an existing alert's c
   await expect(canvas).toHaveAttribute("data-alerts", "0");
   expect(writes()).toEqual(["POST /api/backend/charts/alerts", "DELETE /api/backend/charts/alerts/made-1"]);
 
-  // An existing alert: its chip removes it, and Undo sets it again.
+  // An existing alert: the list removes it, and Undo sets it again.
   await page.reload();
   await expect(canvas).toHaveAttribute("data-alerts", "1");
+  await pane.getByRole("button", { name: "Alerts on this symbol: 1" }).click();
   await pane.getByRole("button", { name: "Remove alert: Crosses above 97.50" }).click();
   await expect(status).toContainText("Alert removed: Crosses above 97.50.");
   await expect(canvas).toHaveAttribute("data-alerts", "0");

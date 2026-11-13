@@ -124,8 +124,15 @@ class Conflict extends Error {
 
 async function fetchSettings(): Promise<ServerCopy> {
   const response = await fetch(apiUrl("/charts/settings"), { cache: "no-store", signal: AbortSignal.timeout(5000) });
-  if (!response.ok) throw new Error("Chart settings are unavailable.");
+  // A refused read is read to its end too, so the connection is free again.
+  if (!response.ok) { await response.text().catch(() => ""); throw new Error("Chart settings are unavailable."); }
   return response.json();
+}
+
+/** The server's chart settings as the workspace would read them, for a page that only shows the levels and drawings
+ * (the desk's Grid); null when they cannot be read. Nothing is saved. */
+export async function readChartSettings(): Promise<SharedSettings | null> {
+  try { const server = await fetchSettings(); return server.data ? fromServer(server.data) : shared(DEFAULT_SETTINGS); } catch { return null; }
 }
 
 async function saveSettings(baseRevision: number, data: SharedSettings): Promise<ServerCopy> {

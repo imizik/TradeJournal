@@ -7,7 +7,9 @@
  *
  * Each tile: the ticker, its last price and day change (the desk's shared ticker), today's 1-minute or 5-minute candles
  * after the last half hour of the previous session (grey), today's VWAP and his plan and alert levels as thin lines, and
- * the earnings tag when there is one. No studies menu, no zoom: a click opens the name on the full Chart tab in place.
+ * the earnings tag when there is one, and his Charts levels and drawings, thin (read from the shared chart settings when the
+ * Grid opens and when the browser tab shows again; drawn and edited on the Chart tab or in Charts). No studies menu, no
+ * zoom: a click opens the name on the full Chart tab in place.
  *
  * One batched bars read for every tile (``GET /copilot/desk/grid``) when the names change, then at most once a minute
  * while the Grid shows, the session is on and the browser tab is visible; between reads the shared ticker moves each
@@ -29,6 +31,10 @@ import {
   type GridBar, type GridLayout, type GridLevel, type GridRead, type GridTile,
 } from "@/lib/deskGrid";
 import { tickFor, useDeskTicks } from "@/lib/deskTicks";
+import type { ChartBar } from "@/lib/charts";
+import { readChartSettings, type SharedSettings } from "@/lib/chartSync";
+import { DrawingLayer, Timeline, type Shown } from "@/lib/drawings";
+import { deskShapes } from "@/components/copilot/DeskDraw";
 import { cn } from "@/lib/utils";
 
 const REFRESH_MS = 60_000;
@@ -117,6 +123,18 @@ export default function DeskGrid({ held, watched, hidden, sparks, earnings, sele
     return () => { controller.abort(); window.clearTimeout(timer); };
   }, [ready, key]); // eslint-disable-line react-hooks/exhaustive-deps -- the key names the symbols and the timeframe
 
+  // His Charts levels and drawings: read when the Grid opens and when the browser tab shows again. Nothing is saved.
+  const [drawn, setDrawn] = useState<SharedSettings | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () => { if (document.visibilityState === "visible") void readChartSettings().then(found => { if (alive && found) setDrawn(found); }); };
+    load();
+    document.addEventListener("visibilitychange", load);
+    return () => { alive = false; document.removeEventListener("visibilitychange", load); };
+  }, []);
+  const shapes = useMemo(() => new Map(symbols.map(symbol => [symbol,
+    drawn ? deskShapes(drawn.levels[symbol] ?? [], drawn.drawings[symbol] ?? [], drawn.hiddenGroups, true) : NO_SHAPES])), [symbols, drawn]);
+
   const ticks = useDeskTicks(symbols);
   const data = read && read.timeframe === layout.timeframe ? read : null;
   const day = earnings?.today ?? data?.day ?? "";
@@ -157,7 +175,7 @@ export default function DeskGrid({ held, watched, hidden, sparks, earnings, sele
             ) : symbol ? (
               <Tile symbol={symbol} tile={data?.rows[symbol]} step={data?.step ?? 60} live={!!data?.live} asOf={data?.as_of ?? null}
                 tick={tickFor(ticks, symbol)} spark={sparks?.rows[symbol] ?? null} tag={earnings?.rows[symbol]} day={day}
-                pinned={layout.pins[slot] === symbol} heightClass={HEIGHT[layout.size]}
+                pinned={layout.pins[slot] === symbol} heightClass={HEIGHT[layout.size]} shapes={shapes.get(symbol) ?? NO_SHAPES}
                 onOpen={() => onOpen(symbol)} onPin={() => change(pinTo(layout, slot, layout.pins[slot] === symbol ? null : symbol))}
                 onReplace={() => setEditing(slot)} />
             ) : (
@@ -172,7 +190,7 @@ export default function DeskGrid({ held, watched, hidden, sparks, earnings, sele
       <p className="text-xs text-muted-foreground">
         Grey candles: the last half hour of the previous session. Lines: <span style={{ color: "#f5e6a1" }}>VWAP</span>, your
         {" "}<span style={{ color: LEVEL_COLOR.entry }}>entry</span>, <span style={{ color: LEVEL_COLOR.invalidation }}>invalidation</span> and
-        {" "}<span style={{ color: LEVEL_COLOR.alert }}>alerts</span>. Click a chart to open it.
+        {" "}<span style={{ color: LEVEL_COLOR.alert }}>alerts</span>, and your Charts drawings. Click a chart to open it.
       </p>
     </div>
   );
@@ -200,9 +218,11 @@ function PinForm({ slot, onPin, onCancel, heightClass }: { slot: number; onPin(n
   );
 }
 
-const Tile = memo(function Tile({ symbol, tile, step, live, asOf, tick, spark, tag, day, pinned, heightClass, onOpen, onPin, onReplace }: {
+const Tile = memo(function Tile({ symbol, tile, step, live, asOf, tick, spark, tag, day, pinned, heightClass, shapes, onOpen, onPin, onReplace }: {
   symbol: string; tile: GridTile | undefined; step: number; live: boolean; asOf: number | null; tick: (Live & { change_pct: number | null }) | null;
   spark: DeskSparks["rows"][string] | null; tag: DeskEvents["rows"][string] | undefined; day: string; pinned: boolean; heightClass: string;
+  /** His levels and drawings for this symbol, thin. */
+  shapes: Shown[];
   onOpen(): void; onPin(): void; onReplace(): void;
 }) {
   const ticked = tick && !tick.stale ? tick : null;
@@ -233,7 +253,7 @@ const Tile = memo(function Tile({ symbol, tile, step, live, asOf, tick, spark, t
       </div>
       <button type="button" onClick={onOpen} aria-label={`Open ${symbol} on the chart`} className={cn("relative block w-full cursor-pointer", heightClass)}>
         {bars && old && tile!.read_at != null && <span data-testid="grid-stale" className="absolute left-1.5 top-1 z-10 rounded bg-background/80 px-1 text-[10px] text-muted-foreground">bars {clock.format(tile!.read_at * 1000)}</span>}
-        {bars ? <div className={cn("absolute inset-0", old && "opacity-50")}><TileChart bars={bars} levels={tile!.levels} step={step} live={live && !old} tick={ticked} /></div>
+        {bars ? <div className={cn("absolute inset-0", old && "opacity-50")}><TileChart bars={bars} levels={tile!.levels} step={step} live={live && !old} tick={ticked} shapes={shapes} /></div>
           : <span className="flex h-full items-center justify-center text-xs text-muted-foreground">
               {tile?.state === "unavailable" ? "No bars for this session" : "Loading bars…"}
             </span>}
@@ -242,7 +262,8 @@ const Tile = memo(function Tile({ symbol, tile, step, live, asOf, tick, spark, t
   );
 });
 
-type Parts = { chart: IChartApi; candles: ISeriesApi<"Candlestick">; vwap: ISeriesApi<"Line">; lines: IPriceLine[] };
+type Parts = { chart: IChartApi; candles: ISeriesApi<"Candlestick">; vwap: ISeriesApi<"Line">; lines: IPriceLine[]; drawings: DrawingLayer };
+const NO_SHAPES: Shown[] = [];
 
 const candle = (b: GridBar) => ({
   time: b.time as UTCTimestamp, open: b.open, high: b.high, low: b.low, close: b.close,
@@ -251,12 +272,15 @@ const candle = (b: GridBar) => ({
 
 /** One tile's chart: candles, VWAP and the levels, no axis of time, no crosshair, no zoom or pan (a click opens the
  * full chart). The ticker moves the last candle, and starts the next once its time comes. */
-function TileChart({ bars, levels, step, live, tick }: { bars: GridBar[]; levels: GridLevel[]; step: number; live: boolean; tick: Live }) {
+function TileChart({ bars, levels, step, live, tick, shapes }: { bars: GridBar[]; levels: GridLevel[]; step: number; live: boolean; tick: Live; shapes: Shown[] }) {
   const host = useRef<HTMLDivElement>(null);
   const parts = useRef<Parts | null>(null);
   const shownBars = useRef(bars);
   const shownLevels = useRef(levels);
   const forming = useRef<GridBar | null>(null);
+  // The drawings' time axis: each candle from its start to the next step (Charts' ``Timeline``).
+  const axis = useRef<ChartBar[]>([]);
+  const stepRef = useRef(step);
 
   useEffect(() => {
     const element = host.current;
@@ -286,7 +310,11 @@ function TileChart({ bars, levels, step, live, tick }: { bars: GridBar[]; levels
     const vwap = chart.addSeries(LineSeries, {
       color: "#f5e6a1aa", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: () => null,
     });
-    parts.current = { chart, candles, vwap, lines: [] };
+    // His drawings: Charts' drawing layer, quiet (no price tags or arrows for lines out of view) and never interactive.
+    const drawings = new DrawingLayer(new Timeline(() => axis.current, () => stepRef.current), true);
+    drawings.setInteractive(false);
+    candles.attachPrimitive(drawings);
+    parts.current = { chart, candles, vwap, lines: [], drawings };
     const fit = () => chart.timeScale().fitContent();
     chart.timeScale().subscribeSizeChange(fit);
     return () => { chart.timeScale().unsubscribeSizeChange(fit); parts.current = null; chart.remove(); };
@@ -297,6 +325,8 @@ function TileChart({ bars, levels, step, live, tick }: { bars: GridBar[]; levels
     if (!current) return;
     shownBars.current = bars;
     shownLevels.current = levels;
+    stepRef.current = step;
+    axis.current = bars.map(b => ({ ...b, end_time: b.time + step }) as unknown as ChartBar);
     forming.current = null;
     current.candles.setData(bars.map(candle));
     current.vwap.setData(bars.map(b => b.vwap == null ? { time: b.time as UTCTimestamp } : { time: b.time as UTCTimestamp, value: b.vwap }));
@@ -307,7 +337,9 @@ function TileChart({ bars, levels, step, live, tick }: { bars: GridBar[]; levels
       axisLabelVisible: false, title: "",
     }));
     current.chart.timeScale().fitContent();
-  }, [bars, levels]);
+  }, [bars, levels, step]);
+
+  useEffect(() => { parts.current?.drawings.set(shapes, null, false); }, [shapes]);
 
   useEffect(() => {
     const current = parts.current;
@@ -323,5 +355,5 @@ function TileChart({ bars, levels, step, live, tick }: { bars: GridBar[]; levels
     if (next.time !== lastBar.time) current.chart.timeScale().fitContent();
   }, [tick, live, bars, step]);
 
-  return <div ref={host} aria-hidden className="absolute inset-0" data-testid="grid-chart" data-bars={bars.length} />;
+  return <div ref={host} aria-hidden className="absolute inset-0" data-testid="grid-chart" data-bars={bars.length} data-drawings={shapes.length} />;
 }
