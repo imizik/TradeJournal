@@ -23,6 +23,7 @@ from tests.test_today import clock  # noqa: F401  (fixture)
 
 PART = re.compile(r"^[A-Za-z0-9_.-]+;dur=\d+\.\d$")
 DESK_GETS = ["/copilot/desk/threads", "/copilot/desk/session", "/copilot/desk/feed", "/copilot/desk/sparks?symbols=NBIS,CRWV",
+             "/copilot/desk/ticks?symbols=NBIS,CRWV",
              "/copilot/desk/scorecard", "/copilot/desk/day-report", "/copilot/desk/pings", "/copilot/desk/pings?day_only=true",
              "/copilot/desk/to-rate", "/copilot/desk/timings", "/charts/journal/positions/NBIS/context"]
 

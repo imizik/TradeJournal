@@ -10,6 +10,8 @@ import { SessionShade } from "@/lib/sessionShade";
 import type { ChartBar, Interval } from "@/lib/charts";
 import { alertText, createAlert, removeAlert, type AlertsPayload } from "@/lib/alerts";
 import { CONTEXT_MAX, copilotLabHref, type DrawnPlan } from "@/lib/copilot";
+import { Flash } from "@/components/copilot/Ticks";
+import { cn } from "@/lib/utils";
 import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type DeskChartMark, type DeskStudySeries, type DeskTimeframe } from "@/lib/desk";
 
 /*
@@ -364,8 +366,14 @@ export function askAboutLevel(symbol: string, timeframe: DeskTimeframe, level: n
  * VWAP and from the plan's invalidation, and volume against usual for the time of day, with their as-of. A part with
  * nothing behind it is left out. ``fallback`` is the book's change today when the read has no previous close.
  */
-export function ReadingLine({ data, fallback = null }: { data: DeskChartData | null; fallback?: { pct: number; at: number } | null }) {
-  const reading = data?.state === "ok" ? data.reading : null;
+export function ReadingLine({ data, fallback = null, live = null }: {
+  data: DeskChartData | null; fallback?: { pct: number; at: number } | null;
+  /** The desk's live price (``lib/deskTicks.ts``): newer than the chart's last minute, it is the reading's price and time. */
+  live?: { last: number; at: number; stale: boolean } | null;
+}) {
+  const read = data?.state === "ok" ? data.reading : null;
+  const ticked = !!(read && live && !read.daily && live.at > read.at);
+  const reading = read && ticked ? { ...read, last: live!.last, at: live!.at } : read;
   if (!reading) return <p data-testid="desk-reading" className="h-4" />;
   const { last, at, daily } = reading;
   // VWAP and RVol are the regular session's: after the close or before the open their time is not the price's.
@@ -387,7 +395,7 @@ export function ReadingLine({ data, fallback = null }: { data: DeskChartData | n
   return (
     // One line that scrolls sideways on a phone; two at most beside the book, so a new minute rarely moves the chart.
     <p data-testid="desk-reading" className="overflow-x-auto whitespace-nowrap text-xs leading-4 tabular-nums text-muted-foreground [scrollbar-width:none] sm:min-h-8 sm:whitespace-normal">
-      <span className="text-foreground">{price(last)}</span>
+      <span data-testid="desk-reading-last" className={cn("text-foreground", ticked && live!.stale && "opacity-50")}><Flash value={last}>{price(last)}</Flash></span>
       {parts.map(part => (
         <span key={part.key} data-part={part.key} title={part.title}>
           {" · "}<span className={part.tone === undefined || part.tone === 0 ? undefined : part.tone > 0 ? "text-emerald-300" : "text-rose-300"}>{part.text}</span>
@@ -400,8 +408,10 @@ export function ReadingLine({ data, fallback = null }: { data: DeskChartData | n
 
 /** The chart for ``id`` (a thread, ``symbol:X`` or ``market``) on ``timeframe``. ``refreshKey`` reads it again. ``onRead``
  * hears each read shown (the reading line); ``actions`` lets the level menu's Plan and Ask reach the desk. */
-export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, actions }: {
+export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, actions, live: now = null }: {
   id: string; timeframe: DeskTimeframe; refreshKey?: number; label: string; onRead?(data: DeskChartData | null): void; actions?: DeskChartActions;
+  /** The desk's live price: it moves the last candle (and the price line) between the minute reads. */
+  live?: { last: number; at: number; stale: boolean } | null;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const parts = useRef<Parts | null>(null);
@@ -515,6 +525,19 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     const tf = read && "data" in read ? read.data.timeframe : timeframe;
     if (parts.current && read) paint(parts.current, read, painted.current, host.current, k => isOn(choices, tf, k), alerts, pick);
   }, [read, choices, alerts, pick, shownKey, timeframe]);
+
+  // The live price onto the candle still forming: its close, and its high or low when it goes past them. A price after
+  // that candle waits for the next read (a new candle needs its volume and studies); a stale one is left off.
+  const forming = useRef<{ key: string; time: number; high: number; low: number } | null>(null);
+  useEffect(() => {
+    const current = parts.current, shown = read && read.key === key && "data" in read ? read.data : null;
+    if (!current || !shown || !now || now.stale || shown.timeframe === "1D" || !shown.bars.length) return;
+    const bar = shown.bars[shown.bars.length - 1];
+    if (now.at < bar.time || now.at >= bar.time + shown.step) return;
+    const held = forming.current && forming.current.key === key && forming.current.time === bar.time ? forming.current : { key, time: bar.time, high: bar.high, low: bar.low };
+    forming.current = { ...held, high: Math.max(held.high, bar.high, now.last), low: Math.min(held.low, bar.low, now.last) };
+    current.candles.update({ time: bar.time as UTCTimestamp, open: bar.open, high: forming.current.high, low: forming.current.low, close: now.last });
+  }, [now, read, key, choices, alerts, pick]);
 
   const toggle = (study: StudyKey) => setChoices(prev => {
     const next = { ...prev, [timeframe]: { ...prev[timeframe], [study]: !isOn(prev, timeframe, study) } };

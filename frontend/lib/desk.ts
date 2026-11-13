@@ -101,6 +101,10 @@ export type DeskBook = {
   quantity?: number | null;
   mark?: number | null;
   account?: { label: string; masked: string };
+  /** What the live prices need to move the P&L in place (``_tick`` in copilot_desk.py; ``tickedBook`` in deskTicks.ts):
+   * the symbol to quote (an option's OCC symbol), 100 for a contract or 1 for a share, the cost and quantity in those
+   * units, and the side. Absent or null when the P&L is not derived from a price the desk can quote. */
+  tick?: { quote: string; scale: number; cost: number; quantity: number; sign: 1 | -1 } | null;
 };
 
 /** The Robinhood feed's state on the desk (docs/robinhood-read-feed.md). ``ok`` (with ``joined``) drives the book;
