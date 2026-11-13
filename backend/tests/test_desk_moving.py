@@ -57,7 +57,8 @@ def rig(desk, quotes, clock, engine, monkeypatch, tmp_path):  # noqa: F811
     desk_moving.clear()
     monkeypatch.setattr(chart_calendar, "hours", lambda day: HOURS)
     monkeypatch.setattr(desk_moving, "_held", lambda db: ["CRWV", "NBIS", "APLD"])
-    monkeypatch.setattr(symbol_events, "chart_earnings", lambda wanted, watchlist, today: {})
+    monkeypatch.setattr(symbol_events, "_earnings", lambda symbol, today, reports, issue: {"next": None, "reports": []})
+    monkeypatch.setattr(symbol_events, "chart_earnings", lambda *a: pytest.fail("the strip must not start an earnings refresh"))
     quotes["rows"] = [{"symbol": "APLD", "change_percentage": 7.25, "last": 30.0},
                       {"symbol": "ANET", "change_percentage": -2.0, "last": 1.0},
                       {"symbol": "CRDO", "change_percentage": -3.0, "last": 1.0},
@@ -176,6 +177,7 @@ def test_an_unreadable_follow_setting_shows_no_movers(rig):
     body = moving(rig)
     assert body["movers"] == [] and "watching" not in [g["key"] for g in body["groups"]]
     assert body["groups"][0]["key"] == "SPY"  # the market tiles still stand
+    assert all(g["members"] == [] for g in body["groups"])  # no list that might hold a hidden name
 
 
 def test_reasons_only_when_the_app_already_knows_one(rig):
@@ -186,9 +188,9 @@ def test_reasons_only_when_the_app_already_knows_one(rig):
         db.add(RadarSetup(event_id="ev-nbis", session_date="2026-10-21", rule_version="v", kind="dip_turn", symbol="NBIS",
                           direction="up", entry=1.0, invalidation=0.5))
         db.commit()
-    rig["patch"].setattr(symbol_events, "chart_earnings", lambda wanted, watchlist, today: {
-        "MU": {"next": None, "reports": [{"date": "2026-10-20", "label": "Q3"}]},  # after yesterday's close
-        "PLTR": {"next": None, "reports": [{"date": "2026-10-01", "label": "Q3"}]}})  # weeks ago: no reason
+    cached = {"MU": {"next": None, "reports": [{"date": "2026-10-20", "label": "Q3"}]},  # after yesterday's close
+              "PLTR": {"next": None, "reports": [{"date": "2026-10-01", "label": "Q3"}]}}  # weeks ago: no reason
+    rig["patch"].setattr(symbol_events, "_earnings", lambda symbol, today, reports, issue: cached.get(symbol, {"next": None, "reports": []}))
     reasons = {m["symbol"]: m["reason"] for m in moving(rig)["movers"]}
     assert reasons["MU"] == "Earnings" and reasons["NBIS"] == "Dip turn" and reasons["AMD"] == "Radar"
     assert reasons["PLTR"] is None and reasons["TSLA"] is None and reasons["CRWV"] is None
@@ -249,6 +251,14 @@ def test_the_read_reports_where_its_time_goes():
     assert any("/copilot/desk/moving".startswith(p) for p in request_timing.PREFIXES)  # Server-Timing and /desk/timings
 
 
-def test_his_positions_come_from_the_journal(engine):  # noqa: F811
+def test_his_positions_add_robinhoods_last_snapshot_without_asking_robinhood(engine, monkeypatch):  # noqa: F811
+    from app.engine import robinhood_book
+    asked = []
+
+    def snapshot(kick=True):
+        asked.append(kick)
+        return {"state": "ok"}, {"positions": [{"symbol": "hood"}, {"symbol": None}]}
+    monkeypatch.setattr(robinhood_book.feed, "snapshot", snapshot)
     with Session(engine) as db:
-        assert isinstance(desk_moving._held(db), list)
+        held = desk_moving._held(db)
+    assert "HOOD" in held and asked == [False]  # the feed's last snapshot only: no refresh is kicked

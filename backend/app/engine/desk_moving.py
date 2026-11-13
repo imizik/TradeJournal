@@ -52,7 +52,7 @@ SECTOR_NAMES = {"XLK": "Tech", "SMH": "Semis", "XLC": "Comms", "XLY": "Discretio
 MINE = 6  # his own movers shown
 BROAD = 8  # the recorder's movers shown after his
 MEMBERS = 30  # a group's popover list
-QUOTE_MAX = 120  # symbols in the one batched read
+QUOTE_MAX = 250  # symbols in the one batched read: the ETFs, his held and watched names and every research company fit
 REASON = {"dip_turn": "Dip turn", "gap_reversal": "Gap reversal", "group_move": "Group move",
           "relative_to_spy": "Radar", "relative_to_sector": "Radar"}
 
@@ -230,14 +230,15 @@ def _previous_weekday(day: date) -> date:
 
 
 def _earnings(symbols: list[str], session: date) -> set[str]:
-    """Symbols that reported on ``session`` or the weekday before it (after that close), from the earnings cache."""
+    """Symbols that report on ``session`` or reported the weekday before it (after that close), from the earnings cache
+    only: a symbol with no cached calendar has no reason, and nothing here starts a refresh (``chart_earnings`` would)."""
     from app.engine.chart_indices import is_index
     from app.engine.symbol_info_tradier import symbol_events
     wanted = [s for s in symbols if not is_index(s)]
     if not wanted:
         return set()
     try:
-        blocks = symbol_events.chart_earnings(wanted, [], session)
+        blocks = {s: symbol_events._earnings(s, session, None, None) for s in wanted}
     except Exception:  # noqa: BLE001 -- no earnings reason this time
         log.warning("desk moving: the earnings cache could not be read", exc_info=True)
         return set()
@@ -317,13 +318,15 @@ def build(db: Session, now: float) -> dict:
             _changes.clear()
     pct = {**{k: v for k, v in quoted.items() if v is not None}, **from_radar}
     session = recorded.get("session") or (day.isoformat() if quoted else None)
+    # A follow setting that cannot be read lists no members (a hidden name could be among them) and no movers.
     shown_hidden = hidden if hidden is not None else set()
+    listed = hidden is not None
 
     groups = [_group(s, s, "index", [], pct.get(s), pct, shown_hidden, symbol=s) for s in INDEX if pct.get(s) is not None]
     sectors = defaultdict(list)
     for stock, sector in (recorded.get("sectors") or {}).items():
         sectors[sector].append(stock)
-    sector_tiles = [_group(s, SECTOR_NAMES[s], "sector", sorted(sectors.get(s, []), key=_down(pct)),
+    sector_tiles = [_group(s, SECTOR_NAMES[s], "sector", sorted(sectors.get(s, []), key=_down(pct)) if listed else [],
                            pct.get(s), pct, shown_hidden, symbol=s) for s in SECTORS if pct.get(s) is not None]
     groups += sorted(sector_tiles, key=lambda g: -g["change_pct"])
     if hidden is not None:
@@ -333,8 +336,9 @@ def build(db: Session, now: float) -> dict:
                                  change, pct, hidden))
     own = []
     for name, members in research:
+        members = [m for m in members if m not in shown_hidden]  # a hidden name does not move his group either
         if (change := _median(members, pct)) is not None:
-            own.append(_group(f"research:{name}", name, "research", sorted(members, key=_down(pct)),
+            own.append(_group(f"research:{name}", name, "research", sorted(members, key=_down(pct)) if listed else [],
                               change, pct, shown_hidden))
     groups += sorted(own, key=lambda g: -g["change_pct"])
 

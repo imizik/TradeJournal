@@ -101,12 +101,21 @@ export function MovingStrip({ on, selected, onSelect }: { on: boolean; selected:
   const close = useCallback(() => setOpen(null), []);
   useEffect(() => {
     if (!open) return;
-    const away = (event: Event) => { if (!popover.current?.contains(event.target as Node)) close(); };
+    // Its own tile is not "away": the tile's click toggles it shut.
+    const inside = (target: EventTarget | null) => target instanceof Node && (!!popover.current?.contains(target)
+      || !!(target instanceof Element && target.closest(`[data-moving-key="${CSS.escape(open.key)}"]`)));
+    const away = (event: Event) => { if (!inside(event.target)) close(); };
     const key = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    // It is placed where its tile was: any scroll but its own list's moves the tile away from it.
+    const scrolled = (event: Event) => { if (!popover.current?.contains(event.target as Node)) close(); };
     document.addEventListener("pointerdown", away, true);
     document.addEventListener("keydown", key);
     window.addEventListener("resize", close);
-    return () => { document.removeEventListener("pointerdown", away, true); document.removeEventListener("keydown", key); window.removeEventListener("resize", close); };
+    window.addEventListener("scroll", scrolled, true);
+    return () => {
+      document.removeEventListener("pointerdown", away, true); document.removeEventListener("keydown", key);
+      window.removeEventListener("resize", close); window.removeEventListener("scroll", scrolled, true);
+    };
   }, [open, close]);
   if (!on) return null;
   const pick = (symbol: string) => { setOpen(null); onSelect(symbol); };
@@ -128,14 +137,14 @@ export function MovingStrip({ on, selected, onSelect }: { on: boolean; selected:
       {!collapsed && (unavailable ? (
         <p data-testid="desk-moving-unavailable" className="truncate text-xs text-muted-foreground">{data?.reason ?? "Market moves are unavailable right now."}</p>
       ) : data && (
-        <div data-testid="desk-moving-row" onScroll={close}
+        <div data-testid="desk-moving-row"
           className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {label && <span data-testid="desk-moving-close" className="shrink-0 text-xs text-muted-foreground">{label}</span>}
           {data.groups.map(group => {
             const members = group.members.length > 0;
             const text = <><span className="text-foreground/90">{group.label}</span><span className={cn("tabular-nums", numberTone(group.change_pct))}>{pctText(group.change_pct)}</span></>;
             return members ? (
-              <button key={group.key} type="button" data-testid="desk-moving-group" aria-haspopup="dialog" aria-expanded={open?.key === group.key}
+              <button key={group.key} type="button" data-testid="desk-moving-group" data-moving-key={group.key} aria-haspopup="dialog" aria-expanded={open?.key === group.key}
                 title={group.symbol ? `${group.symbol}: ${group.label}` : group.label}
                 onClick={event => openGroup(group, event.currentTarget)}
                 className={cn(TILE, heat(group.change_pct), open?.key === group.key && "ring-1 ring-foreground/40")}>
