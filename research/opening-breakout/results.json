@@ -1,0 +1,174 @@
+{
+  "protocol_id": "opening-breakout-20261113-v1",
+  "sessions": 714,
+  "both_sides": {
+    "trades": 11239,
+    "mean_r": 0.0731,
+    "total_r": 821.66,
+    "win_rate": 0.131,
+    "mean_win_r": 9.14,
+    "mean_loss_r": -1.292,
+    "sessions": 714,
+    "sessions_positive": 0.408,
+    "interval": [
+      -0.037,
+      0.1835
+    ],
+    "periods": {
+      "exploration": 0.0395,
+      "check": 0.1096
+    },
+    "mean_r_costs_tripled": -0.4784,
+    "decision": "no evidence either way"
+  },
+  "long_side": {
+    "trades": 5757,
+    "mean_r": 0.0734,
+    "total_r": 422.67,
+    "win_rate": 0.133,
+    "mean_win_r": 9.005,
+    "mean_loss_r": -1.295,
+    "sessions": 714,
+    "sessions_positive": 0.35,
+    "interval": [
+      -0.0796,
+      0.2384
+    ],
+    "periods": {
+      "exploration": 0.045,
+      "check": 0.104
+    },
+    "mean_r_costs_tripled": -0.4878,
+    "decision": "no evidence either way"
+  },
+  "descriptive": {
+    "selected": 14280,
+    "triggered_share": 0.787,
+    "short_side": {
+      "trades": 5482,
+      "mean_r": 0.0728,
+      "total_r": 398.99,
+      "win_rate": 0.129,
+      "mean_win_r": 9.287,
+      "mean_loss_r": -1.289,
+      "sessions": 713,
+      "sessions_positive": 0.393
+    },
+    "by_year": {
+      "2024": {
+        "trades": 3894,
+        "mean_r": -0.0236,
+        "total_r": -91.95,
+        "win_rate": 0.12,
+        "mean_win_r": 9.457,
+        "mean_loss_r": -1.322,
+        "sessions": 249,
+        "sessions_positive": 0.353
+      },
+      "2025": {
+        "trades": 3855,
+        "mean_r": 0.1378,
+        "total_r": 531.17,
+        "win_rate": 0.13,
+        "mean_win_r": 9.655,
+        "mean_loss_r": -1.287,
+        "sessions": 247,
+        "sessions_positive": 0.417
+      },
+      "2026": {
+        "trades": 3490,
+        "mean_r": 0.1096,
+        "total_r": 382.43,
+        "win_rate": 0.143,
+        "mean_win_r": 8.327,
+        "mean_loss_r": -1.265,
+        "sessions": 218,
+        "sessions_positive": 0.459
+      }
+    },
+    "rank_1_5": {
+      "trades": 2757,
+      "mean_r": 0.2412,
+      "total_r": 664.94,
+      "win_rate": 0.111,
+      "mean_win_r": 12.435,
+      "mean_loss_r": -1.287,
+      "sessions": 714,
+      "sessions_positive": 0.275
+    },
+    "rank_6_10": {
+      "trades": 2823,
+      "mean_r": 0.041,
+      "total_r": 115.64,
+      "win_rate": 0.127,
+      "mean_win_r": 9.203,
+      "mean_loss_r": -1.29,
+      "sessions": 713,
+      "sessions_positive": 0.316
+    },
+    "rank_11_20": {
+      "trades": 5659,
+      "mean_r": 0.0073,
+      "total_r": 41.07,
+      "win_rate": 0.142,
+      "mean_win_r": 7.858,
+      "mean_loss_r": -1.297,
+      "sessions": 714,
+      "sessions_positive": 0.382
+    },
+    "top_10": {
+      "trades": 5580,
+      "mean_r": 0.1399,
+      "total_r": 780.59,
+      "win_rate": 0.119,
+      "mean_win_r": 10.695,
+      "mean_loss_r": -1.288,
+      "sessions": 714,
+      "sessions_positive": 0.377
+    },
+    "costs_zero": {
+      "trades": 11239,
+      "mean_r": 0.3489,
+      "total_r": 3920.82,
+      "win_rate": 0.133,
+      "mean_win_r": 9.275,
+      "mean_loss_r": -1.019,
+      "sessions": 714,
+      "sessions_positive": 0.504
+    },
+    "costs_tripled": {
+      "trades": 11239,
+      "mean_r": -0.4784,
+      "total_r": -5376.68,
+      "win_rate": 0.126,
+      "mean_win_r": 8.914,
+      "mean_loss_r": -1.838,
+      "sessions": 714,
+      "sessions_positive": 0.254
+    },
+    "without_best_1pct_sessions": {
+      "trades": 11133,
+      "mean_r": 0.0109,
+      "total_r": 121.13,
+      "win_rate": 0.13,
+      "mean_win_r": 8.744,
+      "mean_loss_r": -1.293,
+      "sessions": 707,
+      "sessions_positive": 0.402
+    },
+    "exits": {
+      "stop": 9689,
+      "close": 1550
+    },
+    "fill_bar_worst_case": {
+      "trades": 11239,
+      "mean_r": -0.6342,
+      "total_r": -7128.25,
+      "win_rate": 0.077,
+      "mean_win_r": 7.133,
+      "mean_loss_r": -1.281,
+      "sessions": 714,
+      "sessions_positive": 0.165
+    }
+  }
+}
