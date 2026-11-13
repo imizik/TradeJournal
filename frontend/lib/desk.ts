@@ -535,6 +535,17 @@ export type DeskChartData = {
   alerts: DeskChartAlert[];
   marks: DeskChartMark[];
   time_stop: { at: number; text: string } | null;
+  events?: DeskChartEvents;
+};
+/** The chart's known events (``desk_events.chart``): the symbol's next and most recent earnings (dates only: the calendar
+ * publishes no time of day), the implied move into the next one when its option chain is already cached, and on SPY, QQQ
+ * and IWM the macro days (FOMC, CPI, jobs) from the first candle to three weeks ahead. Absent from an older backend. */
+export type DeskChartEvents = {
+  earnings: { next: { date: string; status: string | null; label: string | null;
+    implied: { expiration: string; move: number | null; percent: number | null } | null } | null;
+    last: { date: string; label: string | null } | null } | null;
+  macro: { date: string; time: string; kind: "fomc" | "cpi" | "jobs"; name: string }[];
+  note: string | null;
 };
 export type DeskStudySeries = "vwap" | "ema9" | "ema21" | "sma50" | "sma200" | "rvol";
 export type DeskChartAlert = { id: string; price: number; text: string; label: string | null; removable: boolean;
@@ -686,6 +697,22 @@ export async function getDeskSparks(symbols: string[], signal?: AbortSignal, wat
   const response = await fetch(apiUrl(`/copilot/desk/sparks?${query}`), { cache: "no-store", signal });
   if (!response.ok) throw new Error(`Request failed (${response.status}).`);
   return await response.json() as DeskSparks;
+}
+
+// --------------------------------------------------------------------------- earnings on the book and Watching rows
+
+/** One symbol's earnings tag (``desk_events.tag``): ``grey`` within ``window`` trading days, ``amber`` when a held option
+ * expires on or after the report (``through``: those expiries). A symbol with no known date has no row. */
+export type DeskEarningsTag = { symbol: string; date: string; status: string | null; trading_days: number; label: string;
+  tone: "grey" | "amber"; through: string[] };
+/** ``GET /copilot/desk/events``: ``loading`` says a calendar is still on its way, so read again shortly. */
+export type DeskEvents = { state: "ok" | "unavailable"; today: string; window?: number; note?: string; rows: Record<string, DeskEarningsTag>; loading: boolean };
+
+export async function getDeskEvents(symbols: string[], held: { symbol: string; expiry: string }[], signal?: AbortSignal): Promise<DeskEvents> {
+  const query = new URLSearchParams({ symbols: symbols.join(","), held: held.map(h => `${h.symbol}:${h.expiry}`).join(",") });
+  const response = await fetch(apiUrl(`/copilot/desk/events?${query}`), { cache: "no-store", signal });
+  if (!response.ok) throw new Error(`Request failed (${response.status}).`);
+  return await response.json() as DeskEvents;
 }
 
 // --------------------------------------------------------------------------- the Watching list

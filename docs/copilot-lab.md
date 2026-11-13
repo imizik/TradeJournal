@@ -658,6 +658,23 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   `POST /copilot/desk/robinhood/refresh`, no input) or, signed out, expired or stale, says so; then the book is exactly
   the journal's. Off, nothing changes and no line shows. Not followed tickers stay hidden. Display only: nothing is
   written to the journal. The copilot sees the same snapshot's numbers (§ Owner context), never a Robinhood tool.
+- **Earnings and macro days** (`app/engine/desk_events.py`; `components/copilot/EarningsTag.tsx`, `ChartEvents.tsx`).
+  Book and Watching rows carry a short tag, **ER Thu** (**ER 11/24** a week or more out, **?** when the date is only
+  estimated): grey when the next report is within 7 trading days (weekends and the macro calendar's `market_closed`
+  days skipped), amber when a held option on the ticker expires on or after the report date, however far off (the
+  report is inside the contract's life; the calendar has dates only, so a same-day expiry counts). No tag otherwise, and
+  none for a fund, a ticker with no upcoming date (nothing is projected from earlier quarters) or one he does not follow.
+  One read for both lists, `GET /copilot/desk/events?symbols=…&held=SYMBOL:YYYY-MM-DD,…`, from the app's one earnings
+  source (Tradier's corporate calendar through the symbol-info cache, `chart_earnings`: 12 hours on disk, stale ones
+  refreshed in one batched background read, so `loading` makes the desk read again shortly); the desk reads it again
+  every half hour. The chart read carries `events`: the next and last earnings as chips on the date axis (one past the
+  right edge pins there with →; on 1D a report within ten sessions is kept in view), the next one also in the line above
+  the chart ("Earnings Thu · ±5.2% implied"), and on hover the date, whether it is confirmed, "Time of day not
+  published" and, when the option chain is already in memory today, the at-the-money straddle of the first expiry after
+  the report (`options_implied`; never a read of its own). SPY, QQQ and IWM (the market chart is QQQ) show the macro
+  calendar's FOMC, CPI and jobs days, faint; no other chart does. The Chain tab marks **ER** on each expiry that lives
+  through the next report (on or after its date), with one line naming the report; its read carries `earnings` and each
+  expiry's `earnings` flag, from the same cache (`desk_events.next_report`).
 - **Centre.** A tab strip, **Chart** first, **Chain** (see [Chain](#chain)), **Feed**, **Check a call** (§ Check a
   call) and **Ticket** (see [Ticket](#ticket); no tab shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
   position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's

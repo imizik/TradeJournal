@@ -6,10 +6,11 @@ import { MoreHorizontal, Plus } from "lucide-react";
 import { useKeptState } from "@/components/copilot/DeskMemory";
 import { LABEL, Spark, tone } from "@/components/copilot/Cockpit";
 import { getWatchLists, getWatching, importWatchLists, signedPct, stopWatching, watchSymbol,
-  type DeskSparks, type DeskWatching, type WatchLists } from "@/lib/desk";
+  type DeskEvents, type DeskSparks, type DeskWatching, type WatchLists } from "@/lib/desk";
 import { staleSince, tickFor, useDeskTicks, type DeskTicks } from "@/lib/deskTicks";
 import { Flash, PricesAsOf } from "@/components/copilot/Ticks";
 import { cn } from "@/lib/utils";
+import { EarningsTag } from "@/components/copilot/EarningsTag";
 
 /** Rows shown before "N more". */
 const SHOWN = 8;
@@ -146,8 +147,10 @@ function Import({ first, onDone, onClose }: { first: boolean; onDone(line: strin
  * centre's chart and the copilot, as a book row does; its menu offers Ask the copilot, Plan a trade, Open in Charts and
  * Stop watching. Facts only, no amber: nothing here suggests a trade.
  */
-export default function Watching({ data, failed, sparks, held, selected, onSelect, onAsk, onPlan, onChange }: {
+export default function Watching({ data, failed, sparks, held, selected, earnings = null, onSelect, onAsk, onPlan, onChange }: {
   data: DeskWatching | null; failed: boolean; sparks: DeskSparks | null; held: ReadonlySet<string>; selected: string | null;
+  /** Earnings tags (``useDeskEvents``), by symbol. */
+  earnings?: DeskEvents | null;
   onSelect(symbol: string): void; onAsk(symbol: string): void; onPlan(symbol: string): void; onChange(next: DeskWatching): void;
 }) {
   const [phoneOpen, setPhoneOpen] = useState(false);
@@ -233,14 +236,16 @@ export default function Watching({ data, failed, sparks, held, selected, onSelec
             <ul>
               {shown.map(row => {
                 const on = row.symbol === selected;
+                const report = earnings?.rows[row.symbol];
                 return (
                   <li key={row.symbol} data-testid="watch-row" className={cn("relative flex items-stretch border-t", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")}>
                     <button type="button" onClick={() => onSelect(row.symbol)} aria-pressed={on} aria-label={`${row.symbol}, watching`}
                       className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_48px_minmax(60px,auto)] items-center gap-2 py-1.5 pl-3 text-left hover:bg-secondary">
                       <span className="min-w-0 overflow-hidden">
                         <span className="block text-sm font-semibold text-foreground">{row.symbol}</span>
-                        {(row.level || row.setup !== undefined) && (
+                        {(row.level || row.setup !== undefined || report) && (
                           <span data-testid="watch-meta" className="flex flex-wrap gap-x-1.5 text-[11px] text-muted-foreground [&>*]:whitespace-nowrap">
+                            {report && earnings && <EarningsTag tag={report} day={earnings.today} />}
                             {row.level && <span className="tabular-nums">{row.level.label} {price(row.level.price)} · {Math.abs(row.level.pct).toFixed(1)}% away</span>}
                             {row.setup !== undefined && <span data-testid="watch-setup" className="rounded border px-1">Setup{row.setup ? ` ${clock(row.setup)}` : ""}</span>}
                           </span>
