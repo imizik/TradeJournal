@@ -448,17 +448,17 @@ def fake_answer(prompt: str) -> str:
     """The scripted model's read, from the facts in its message, so the demo copies the figures exactly. Labelled
     simulated."""
     lines = prompt.splitlines()
-    realised = next((l for l in lines if l.startswith("Realised today")), "Realised today: unknown.")
-    opened = next((l for l in lines if l.startswith("Open P&L now")), "")
-    trades = [l for l in lines if l.startswith("- ") and "realised " in l]
-    plans = {l[2:].split(",")[0]: l for l in lines if l.startswith("- ") and ("plan saved" in l or "no plan" in l)}
-    with_plan = sum("plan saved before" in l for l in plans.values())
+    realised = next((ln for ln in lines if ln.startswith("Realised today")), "Realised today: unknown.")
+    opened = next((ln for ln in lines if ln.startswith("Open P&L now")), "")
+    trades = [ln for ln in lines if ln.startswith("- ") and "realised " in ln]
+    plans = {ln[2:].split(",")[0]: ln for ln in lines if ln.startswith("- ") and ("plan saved" in ln or "no plan" in ln)}
+    with_plan = sum("plan saved before" in ln for ln in plans.values())
     total = re.search(r"total ([+\-]?\$[\d,]+\.\d\d)", realised)
 
     def realised_of(line: str) -> float:
         found = re.search(r"realised ([+\-]?)\$([\d,]+\.\d\d)", line)
         return (-1 if found and found.group(1) == "-" else 1) * float(found.group(2).replace(",", "")) if found else 0.0
-    biggest = max(trades, key=lambda l: abs(realised_of(l)), default=None)
+    biggest = max(trades, key=lambda ln: abs(realised_of(ln)), default=None)
     out = [f"P&L: realised {total.group(1) if total else 'none'} today" + (f"; {opened.split(': ', 1)[1].rstrip('.')}" if opened and ": " in opened else "") + "."]
     out.append(f"Plans: {with_plan} of {len(plans)} trades had a plan saved before the entry.")
     if biggest:
