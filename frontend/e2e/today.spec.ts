@@ -135,6 +135,33 @@ test("while the lab is on the desk is home: Today forwards to it, and Desk leads
   await expect(menu.getByRole("link", { name: "Desk", exact: true })).toHaveAttribute("href", "/copilot-lab");
   await expect(menu.getByRole("link", { name: "Today", exact: true })).toHaveCount(0);
   await expect(menu.getByRole("link", { name: "Copilot", exact: true })).toHaveCount(0); // one entry for one page
+  // The Dashboard leaves the tab bar for More → Journal, at its own address.
+  await expect(tabs.getByRole("link")).toHaveText(["Desk", "Charts", /Plan/, "Trades"]);
+  await menu.getByRole("button", { name: "Journal", exact: true }).click();
+  await expect(menu.getByRole("link", { name: "Dashboard", exact: true })).toHaveAttribute("href", "/dashboard");
+  await menu.getByRole("link", { name: "Dashboard", exact: true }).click();
+  await expect(page).toHaveURL((url) => url.pathname === "/dashboard");
+  await expect(page.getByTestId("owner-dashboard")).toBeVisible();
+  await expect(tabs.getByRole("link", { name: "Desk" })).toHaveAttribute("href", "/copilot-lab");
+});
+
+test("while the lab is on the sidebar leads with Desk, then Charts; the Dashboard heads Journal at /dashboard", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
+  await page.goto("/dashboard");
+  const sidebar = page.getByRole("navigation").filter({ has: page.getByRole("button", { name: "Journal", exact: true }) });
+  await expect(sidebar.getByRole("link", { name: "Desk", exact: true })).toBeVisible();
+  const primary = sidebar.getByRole("list").first().getByRole("link");
+  await expect(primary).toHaveText(["Desk", "Charts"]);
+  await expect(sidebar.getByRole("link", { name: "Today", exact: true })).toHaveCount(0);
+  // On the Dashboard its group opens by itself, with the Dashboard marked current.
+  await expect(sidebar.getByRole("button", { name: "Journal", exact: true })).toHaveAttribute("aria-expanded", "true");
+  await expect(sidebar.getByRole("link", { name: "Dashboard", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(sidebar.getByRole("link", { name: "Dashboard", exact: true })).toHaveAttribute("href", "/dashboard");
+  await expect(page.getByTestId("owner-dashboard")).toBeVisible();
+  // Its filters stay on /dashboard rather than going home to the desk.
+  await page.getByRole("group", { name: "Type" }).getByRole("link", { name: "Options" }).click();
+  await expect(page).toHaveURL((url) => url.pathname === "/dashboard" && url.searchParams.get("type") === "option");
 });
 
 test("an empty day collapses every section to its count; a failed section says so and the rest stand", async ({ page }) => {

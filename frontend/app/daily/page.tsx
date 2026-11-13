@@ -43,7 +43,7 @@ export default async function DailyReviewPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <a href="/" className="text-sm text-muted-foreground hover:text-foreground">
+          <a href={access.owner ? "/dashboard" : "/"} className="text-sm text-muted-foreground hover:text-foreground">
             Back to Dashboard
           </a>
           <div className="mt-2 flex flex-wrap items-baseline gap-x-2">

@@ -22,7 +22,7 @@ import { DashboardCard, SummaryFigure, dashboardLink, pnlTone } from "./Dashboar
 
 type Params = { account?: string; type?: string; decision?: string; practice_run?: string };
 
-/** Only the root route's owner branch mounts this command center. Data and
+/** Only the Dashboard route's owner branch mounts this command center. Data and
  * actions remain owned by the existing journal and Practice implementations. */
 type OwnerProps = {
   trades: Trade[]; accounts: Account[]; stats: Stats; rows: OpenPositionRow[];
@@ -30,6 +30,8 @@ type OwnerProps = {
   quotedCount: number; grossValue: number | null; netValue: number | null;
   largest: { trade: Trade; marketValue: number | null } | null;
   decisions: DecisionRecord[]; params: Params; quoteError: boolean;
+  /** Where the filters link: `/`, or `/dashboard` while the owner's `/` is the desk. */
+  base?: "/" | "/dashboard";
 };
 
 export function OwnerDashboardShell({ today, journal, attention }: { today: string; journal: ReactNode; attention: ReactNode }) {
@@ -61,7 +63,7 @@ export function OwnerAttention({ accounts, rows, quotes, quoteError, today, deci
 }
 
 export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, today,
-  unrealized, quotedCount, grossValue, netValue, largest, params, quoteError }: OwnerProps) {
+  unrealized, quotedCount, grossValue, netValue, largest, params, quoteError, base = "/" }: OwnerProps) {
   const accountMap = Object.fromEntries(accounts.map((a) => [a.id, a]));
   const accountOptions = Array.from(new Map(accounts.map((a) => [a.type, a])).values());
   const todayClosed = closedInPeriod(trades, today, today);
@@ -87,7 +89,7 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
     if (value === "all") search.delete(name); else search.set(name, value);
     if (params.decision) search.set("decision", params.decision);
     if (params.practice_run) search.set("practice_run", params.practice_run);
-    return `/${search.size ? `?${search}` : ""}`;
+    return `${base}${search.size ? `?${search}` : ""}`;
   }
 
   return <div className="min-w-0 space-y-4">

@@ -128,7 +128,7 @@ export default function ScalpShortlistPanel({ history = false }: { history?: boo
   return <section className={`min-w-0 rounded-lg border bg-card ${canDecide ? "border-primary/30" : ""}`} aria-label="9:40 scalp shortlist" data-testid="scalp-shortlist">
     <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5">
       <div><h2 className="text-[13.5px] font-semibold tracking-tight">9:40 scalp shortlist</h2><p className="mt-0.5 text-xs text-muted-foreground">20-session paper study{sessionIndex >= 0 ? ` · Morning ${sessionIndex + 1} of 20` : ""}</p></div>
-      {history && <Link href="/" className="inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Dashboard →</Link>}
+      {history && <Link href="/dashboard" className="inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Dashboard →</Link>}
     </div>
     <div className="space-y-3 p-4">
       {error && <p role="alert" className="text-sm text-amber-300">{error}</p>}

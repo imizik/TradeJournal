@@ -270,7 +270,7 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
         <div>
           <nav aria-label="Daily Review navigation" className="-ml-2 flex flex-wrap items-center text-sm text-muted-foreground">
             {[
-              { href: "/", label: "Back to Dashboard" },
+              { href: access.owner ? "/dashboard" : "/", label: "Back to Dashboard" }, // the owner's `/` may be the desk
               { href: "/daily", label: "Review Calendar" },
               ...(selectedDay ? [{ href: `/daily/${shiftWeekday(selectedDay, -1)}`, label: "← Previous day" }] : []),
               // No next day from today: a future day has nothing to review.

@@ -530,6 +530,12 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
 
 ## The desk
 
+The desk is the owner's home while the lab is on (2026-11-12): opening the app at `/` (the installed phone app's start
+URL too) lands here, Desk leads the sidebar and the phone's tab bar, and Today and the Dashboard leave the bar. Today
+already forwards here; the Dashboard stays one tap away at `/dashboard` under More → Journal for the journal tables,
+all-time and weekly closed P&L and performance. Assistant and sample viewers, and the owner while the lab is off, keep
+the Dashboard at `/` as before.
+
 Open Desk to land on the **cockpit** (since 2026-11-10, stage 1 of the approved cockpit; it replaced the stacked Now
 screen of #733): one screen that says in a few seconds what is going on and puts the best information one tap away
 (`frontend/components/copilot/CopilotLab.tsx` lays it out, the pieces are in `Cockpit.tsx`, the look in

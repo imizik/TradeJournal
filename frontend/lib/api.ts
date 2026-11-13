@@ -967,6 +967,11 @@ async function buildApiError(path: string, res: Response): Promise<Error> {
 }
 
 return {
+  /** Whether the owner's Copilot Lab is on (its desk is then the owner's home). */
+  /** Time-boxed so a stalled backend never holds the owner's home page; a failed or slow read counts as off. */
+  copilotOn: () => fetcher(apiUrl("/copilot/status"), { cache: "no-store", signal: AbortSignal.timeout(2500) })
+    .then(res => res.ok ? res.json() as Promise<{ enabled?: boolean }> : null)
+    .then(status => status?.enabled === true, () => false),
   practiceRuns: () => get<{ runs: { id: string; day: string }[] }>("/practice/runs"),
   decisions: () => get<{ decisions: DecisionRecord[] }>("/decisions"),
   decision: (id: string) => get<DecisionRecord>(`/decisions/${encodeURIComponent(id)}`),

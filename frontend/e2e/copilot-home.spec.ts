@@ -132,12 +132,14 @@ test("on a wide screen the app's navigation folds into the desk bar's Menu, and 
   const desk = page.getByRole("heading", { name: "Desk", level: 1 });
   await expect(desk).toBeVisible();
   // No icon rail and no sidebar: the desk starts at the left edge.
-  await expect(page.getByRole("link", { name: "Dashboard", exact: true })).toBeHidden();
+  await expect(page.getByRole("link", { name: "Charts", exact: true })).toBeHidden();
   expect((await page.getByRole("navigation", { name: "Thread list" }).boundingBox())!.x).toBeLessThan(40);
   const menu = page.getByRole("button", { name: "Open menu" }).first();
   await menu.click();
   const dialog = page.getByRole("dialog", { name: "Menu" });
-  for (const name of ["Desk", "Dashboard", "Charts"]) await expect(dialog.getByRole("link", { name, exact: true })).toBeVisible();
+  // The desk is home: Desk and Charts on top; the Dashboard waits under Journal.
+  for (const name of ["Desk", "Charts"]) await expect(dialog.getByRole("link", { name, exact: true })).toBeVisible();
+  await expect(dialog.getByRole("link", { name: "Dashboard", exact: true })).toHaveCount(0);
   for (const name of ["Journal", "Market", "Practice", "Research"]) await expect(dialog.getByRole("button", { name, exact: true })).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("desk-menu-1440.png") });
   await page.keyboard.press("Escape");
@@ -146,7 +148,7 @@ test("on a wide screen the app's navigation folds into the desk bar's Menu, and 
   await menu.click();
   await dialog.getByRole("button", { name: "Keep the sidebar open" }).click();
   await expect(page.getByRole("button", { name: "Collapse navigation" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Dashboard", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Charts", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open menu" })).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole("button", { name: "Collapse navigation" })).toBeVisible();
