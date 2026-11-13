@@ -207,7 +207,8 @@ export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, un
   const lineAfter = price != null ? lineIndex(shown.rows, price) : null;
   const span = 1 + cols.length * sides.length;
   const marks = new Map(unusual.filter(u => u.symbol === symbol && u.expiration === shown.expiration).map(u => [`${u.side}:${u.strike}`, u]));
-  const wallsHere = walls.data && walls.data.symbol === symbol && walls.data.expiration === shown.expiration ? walls.data : null;
+  // This expiry's walls; an answer with no expiry (nothing to read, or a ticker not followed) speaks for any.
+  const wallsHere = walls.data && walls.data.symbol === symbol && (walls.data.expiration === shown.expiration || !walls.data.expiration) ? walls.data : null;
   const strikeWalls = wallStrikes(wallsHere && wallsHere.state === "ready" && !walls.failed ? wallsHere : null);
 
   return (
@@ -320,14 +321,14 @@ function WallsRead({ walls, failed }: { walls: DeskWalls | null; failed: string 
   if (walls.state === "loading") return <p data-testid="chain-walls" data-state="loading" className="text-[11px] text-muted-foreground">Walls: {walls.message ?? "reading the chain…"}</p>;
   const current = walls.state === "ready" && !failed;
   const has = walls.levels.length > 0 || !!walls.expected_move;
-  const when = walls.fetched_at ? `as of ${clock(walls.fetched_at)} ET` : "time unknown";
+  const when = walls.fetched_at ? `as of ${clock(walls.fetched_at)} ET, not current` : "not read";
   const why = failed ?? walls.message;
   return (
     <p data-testid="chain-walls" data-state={current ? "ready" : "stale"} title={walls.assumption ?? undefined}
       className={cn("text-xs tabular-nums", current ? "text-foreground/90" : "text-muted-foreground")}>
       {has ? wallsLine(walls) : "Walls unavailable"}
       <span className="text-[11px] text-muted-foreground">
-        {current ? " · dealer side assumed" : ` · ${when}, not current${why ? `: ${why}` : ""}`}
+        {current ? " · dealer side assumed" : ` · ${when}${why ? `: ${why}` : ""}`}
         {walls.simulated ? " · simulated" : ""}
       </span>
     </p>

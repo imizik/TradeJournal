@@ -62,7 +62,7 @@ function chain(expiration = NEAREST) {
 async function desk(page: Page) {
   const reads: string[] = [];
   const posted: Request[] = [];
-  const reply = { state: "ready" as "ready" | "stale" };
+  const reply = { state: "ready" as "ready" | "stale" | "none" };
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route("**/copilot/chat", (route) => route.abort());
@@ -75,6 +75,8 @@ async function desk(page: Page) {
     reads.push(url.search);
     const expiration = url.searchParams.get("expiration");
     // A later expiry answers stale: the Chain line greys and marks nothing.
+    // "none": a ticker not followed (or with nothing to read) answers with no expiry and no levels.
+    if (reply.state === "none") return route.fulfill({ json: { symbol: "NBIS", state: "none", levels: [], expected_move: null, message: null, refresh_seconds: 60 } });
     return route.fulfill({ json: expiration ? walls("stale", expiration) : walls(reply.state) });
   });
   await page.route(/\/copilot\/chain\?/, (route) => route.fulfill({ json: chain(new URL(route.request().url()).searchParams.get("expiration") ?? NEAREST) }));
@@ -188,4 +190,14 @@ test("the Chain tab reads the walls in one line, marks the wall strikes, shares 
   await expect(line).toContainText(/^Walls 93\.5 \/ 95 · .* · as of \d{1,2}:\d{2} [AP]M ET, not current: The option chain could not be read again just now\.$/);
   await expect(tab.getByTestId("chain-wall")).toHaveCount(0);
   expect(reads).toEqual(["?symbol=NBIS", "?symbol=NBIS&expiration=2026-11-20"]);
+});
+
+test("a ticker with nothing to read (or not followed) shows no walls line on the Chain tab, not a loading one", async ({ page }) => {
+  const { pane, reply } = await desk(page);
+  reply.state = "none";
+  await pane.getByRole("tab", { name: "Chain" }).click();
+  const tab = pane.getByTestId("desk-chain");
+  await expect(tab.getByRole("table")).toBeVisible();
+  await expect.poll(async () => (await tab.getByTestId("chain-walls").count())).toBe(0);
+  await expect(tab.getByTestId("chain-wall")).toHaveCount(0);
 });

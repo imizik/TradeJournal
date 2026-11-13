@@ -48,9 +48,10 @@ def test_the_ladder_becomes_four_named_lines_a_band_and_the_assumption():
 
 
 def test_no_flip_off_spy_qqq_spx_and_no_band_without_a_priced_straddle():
-    found = desk_walls.summary(ladder(flip=None, expected_move={"state": "too_wide", "reason": "wide"}), now=NOW, live_session=True)
+    found = desk_walls.summary(ladder(symbol="NBIS", flip=None, expected_move={"state": "too_wide", "reason": "wide"}), now=NOW, live_session=True)
     assert [level["kind"] for level in found["levels"]] == ["put_wall", "call_wall", "max_pain"]
     assert found["expected_move"] is None and "SPY, QQQ and SPX" in found["flip_note"]
+    assert desk_walls.summary(ladder(flip=None), now=NOW, live_session=True)["flip_note"] == "No gamma flip without a current price."
 
 
 def test_a_read_three_minutes_old_in_the_session_is_stale_but_not_after_the_close():

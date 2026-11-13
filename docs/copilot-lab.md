@@ -1691,6 +1691,8 @@ shared quote. Never Robinhood, nothing written; a ticker set to Not following an
   a stale, loading, unavailable or failing read, and the Chain line greys with its time.
 - **Cadence:** once a minute while the page is visible, as the ladder; the chart and the Chain tab share one request a
   minute for the same ticker and expiry. Fixture mode reads the simulated NBIS chain (walls 90 / 100); replay none.
+  The Chain tab and walls fixtures shift call open interest up and put open interest down so the walls differ; the
+  Unusual and Ticket fixtures keep the unshifted chain, so a sandbox contract's open interest can differ between them.
 
 ### Unusual options
 

@@ -18,6 +18,8 @@ from __future__ import annotations
 from datetime import date, datetime
 import time
 
+from app.engine.options_positioning import FLIP_SYMBOLS
+
 REFRESH_SECONDS = 60  # as the Charts ladder: once a minute while the desk is visible
 STALE_S = 180  # in the session, a read older than this is not shown on the chart
 
@@ -61,7 +63,8 @@ def summary(ladder: dict, *, now: float, live_session: bool, simulated: bool = F
                 "high": round(spot + move["move"], 2), "expiration": move.get("expiration"), "hint": EXPECTED_HINT}
     flip_note = None
     if flip is None:
-        flip_note = "The gamma flip is modelled on SPY, QQQ and SPX only."
+        flip_note = ("No gamma flip without a current price." if ladder.get("symbol") in FLIP_SYMBOLS
+                     else "The gamma flip is modelled on SPY, QQQ and SPX only.")
     elif flip.get("price") is None:
         flip_note = flip.get("note")
     fetched = ladder.get("fetched_at")
