@@ -442,7 +442,8 @@ const newsTitle = (news: DeskChartNews): string =>
     : news.complete_from ? `Hide News. Only the newest headlines were read: any before ${newsWhen(news.complete_from, news.as_of)} are not marked.` : "Hide News";
 
 /** Where a drawn line is, for the level menu: a level's or ray's price, a zone's edge nearest the last price (as Charts'
- * "Plan this" reads it), a trend line's value at the last candle (null when it is vertical). */
+ * "Plan this" reads it), a trend line's value at the last candle (null when it is vertical or an anchor is off the
+ * candles shown: the menu then works at the price pressed). */
 export function linePrice(item: PriceLevel | Drawing, timeline: Timeline, last: number | null): { price: number; at: string } | null {
   if (!("kind" in item)) return { price: item.price, at: "" };
   if (item.kind === "ray" || item.kind === "note") return { price: item.points[0].price, at: "" };
@@ -451,8 +452,12 @@ export function linePrice(item: PriceLevel | Drawing, timeline: Timeline, last: 
     return source ? { price: source.price, at: `${source.edge} edge` } : null;
   }
   const [a, b] = item.points;
+  // Only between the candles shown: before the first one the axis counts clock time as candles (nights, weekends),
+  // so a line drawn on an earlier day would read a price Charts never draws.
+  const first = timeline.bar(0), last_bar = timeline.bar(timeline.count - 1);
+  if (!first || !last_bar || [a.time, b.time].some(t => t < first.time || t > last_bar.end_time)) return null;
   const [la, lb] = [timeline.toLogical(a.time), timeline.toLogical(b.time)];
-  if (la === null || lb === null || la === lb || !timeline.count) return null;
+  if (la === null || lb === null || la === lb) return null;
   const value = a.price + (timeline.count - 1 - la) / (lb - la) * (b.price - a.price);
   return value > 0 ? { price: cents(value), at: "at the last candle" } : null;
 }
@@ -711,12 +716,12 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     const line = hit ? drawRef.current.find(hit.id) : null;
     const last = shown ? shown.reading?.last ?? shown.bars[shown.bars.length - 1]?.close ?? null : null;
     const where = line && current ? linePrice(line, current.timeline, last) : null;
-    const item = line && where ? { id: line.id, name: itemName(line), at: where.at } : undefined;
+    const item = line ? { id: line.id, name: itemName(line), at: where ? where.at : "where you pressed" } : undefined;
     const width = host.current?.clientWidth ?? 360;
     const pane = parts.current?.chart.timeScale().width() ?? width;
     const x = spot.axis ? pane - MENU_W - 6 : spot.x > width / 2 ? spot.x - MENU_W - 12 : spot.x + 12;
     const height = host.current?.clientHeight ?? 320;
-    setMenu({ price: item ? where!.price : spot.price, x: Math.max(4, Math.min(width - MENU_W - 4, x)), y: Math.max(4, Math.min(spot.y - 20, height - 220)), plan: false, item });
+    setMenu({ price: where ? where.price : spot.price, x: Math.max(4, Math.min(width - MENU_W - 4, x)), y: Math.max(4, Math.min(spot.y - 20, height - 220)), plan: false, item });
     setStatus(null);
   }, []);
   const clearPress = () => { if (press.current?.timer) window.clearTimeout(press.current.timer); press.current = null; };
@@ -730,7 +735,8 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     const spot = at(event.clientX, event.clientY, event.pointerType === "touch");
     if (!spot) return;
     press.current = { ...spot, clientX: event.clientX, clientY: event.clientY, at: Date.now(),
-      timer: spot.axis ? null : window.setTimeout(() => { press.current = null; openMenu(spot); }, LONG_PRESS_MS) };
+      // A line held still for its menu does not drag on under it (as in Charts): the grab is dropped, unsaved.
+      timer: spot.axis ? null : window.setTimeout(() => { press.current = null; parts.current?.gestures.cancel(); openMenu(spot); }, LONG_PRESS_MS) };
   };
   const onPointerMove = (event: ReactPointerEvent) => {
     const held = press.current;
@@ -915,6 +921,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           if (!spot) return;  // the volume pane and the time axis keep the browser's own menu
           event.preventDefault();
           clearPress();
+          parts.current?.gestures.cancel();
           openMenu(spot);
         }}>
         <div ref={host} role="img" aria-label={label} data-testid="desk-chart-canvas" data-timeframe={data?.timeframe ?? ""}

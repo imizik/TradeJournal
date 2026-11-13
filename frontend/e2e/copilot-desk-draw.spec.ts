@@ -243,6 +243,49 @@ test("a drawn line's menu sets an alert on it, plans from it and deletes it; the
   expect(posted.at(-1)!.method()).toBe("DELETE");
 });
 
+test("a line held for its menu stops dragging; an earlier day's trend line works at the pressed price; Charts keeps its own symbol here", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  // Charts was last on MRVL in this browser: the desk's saves must not move it.
+  await page.addInitScript(() => { if (!window.localStorage.getItem("tradejournal.charts.v1")) window.localStorage.setItem("tradejournal.charts.v1", JSON.stringify({ symbol: "MRVL", recent: ["MRVL", "AMD"] })); });
+  const { pane, store } = await desk(page, context);
+  const canvas = pane.getByTestId("desk-chart-canvas");
+  const menu = pane.getByTestId("desk-level-menu");
+  await pane.getByRole("button", { name: "Draw on the chart" }).click();
+
+  // Press his level, hold for the menu, then move: the menu opens at its price and the line stays put.
+  let box = (await canvas.boundingBox())!;
+  const y = (await probe(page).y("charts-level"))!;
+  await page.mouse.move(box.x + 200, box.y + y);
+  await page.mouse.down();
+  await page.waitForTimeout(700);
+  await expect(menu).toHaveAttribute("aria-label", "At 94.80");
+  for (let step = 1; step <= 6; step++) await page.mouse.move(box.x + 200, box.y + y + step * 6);
+  await page.mouse.up();
+  await page.waitForTimeout(500);
+  expect(saved(store).levels[0].price).toBe(94.8);
+  await page.keyboard.press("Escape");
+
+  // A line drawn yesterday and extended into today: no "at the last candle" price is made up for it.
+  const yesterday = barTime(0) - 86400;
+  store.revision += 1;
+  store.data = { ...store.data, drawings: { NBIS: [{ id: "old-trend", kind: "trend", points: [{ time: yesterday, price: 94.0 }, { time: yesterday + 18000, price: 94.1 }],
+    color: "#67d5eb", width: 2, drawn_on: "2026-11-12", extendLeft: false, extendRight: true }] } };
+  await page.reload();
+  await expect(canvas).toHaveAttribute("data-drawings", "2");
+  const [a, b] = (await probe(page).anchors("old-trend"))!;
+  box = (await canvas.boundingBox())!;
+  const x = box.width * 0.4;
+  await page.mouse.click(box.x + x, box.y + a!.y + (x - a!.x) / (b!.x - a!.x) * (b!.y - a!.y), { button: "right" });
+  await expect(menu.getByTestId("desk-level-menu-line")).toHaveText("Trend line (where you pressed) · ");
+  await expect(menu.getByRole("menuitem", { name: "Delete this trend line" })).toBeVisible();
+
+  // A desk edit saved Charts' settings (above, on load or now): this browser's Charts symbol and recent list are as Charts left them.
+  await menu.getByRole("menuitem", { name: "Delete this trend line" }).click();
+  await expect.poll(() => saved(store).drawings.length).toBe(0);
+  const local = await page.evaluate(() => JSON.parse(window.localStorage.getItem("tradejournal.charts.v1") ?? "{}"));
+  expect(local).toMatchObject({ symbol: "MRVL", recent: ["MRVL", "AMD"] });
+});
+
 test.describe("at 393 px with a finger", () => {
   test.use({ viewport: { width: 393, height: 852 }, hasTouch: true, isMobile: true });
 

@@ -50,7 +50,7 @@ export function itemName(item: PriceLevel | Drawing): string {
  * undo step (Charts' ``applyEdit``), saved through the same sync as the workspace's.
  */
 export function useDeskDrawings(symbol: string | null) {
-  const { settings, setSettings, ready } = useChartSettings();
+  const { settings, setSettings, ready } = useChartSettings(undefined, { borrowed: true });
   const usable = !!symbol && validSymbol(symbol) && !isMacroSymbol(symbol);
   const levels = (usable && settings.levels[symbol!]) || NO_LEVELS;
   const drawings = (usable && settings.drawings[symbol!]) || NO_DRAWINGS;

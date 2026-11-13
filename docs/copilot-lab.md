@@ -999,7 +999,10 @@ The cockpit's panes in detail:
     added; its alert is tied to the line as Charts ties one (`source_kind` level or drawing, `source_id` the line's),
     so Charts' menu on that line lists it, and **Plan from here… → Invalidation** on a level, ray or zone sends
     Charts' "Plan this" message (`lib/drawPlan.ts`). A trend line's alert is a horizontal one at that price: it does
-    not follow the slope. Known gap: the desk's read carries no split record, so a drawing made before a split draws
+    not follow the slope. A trend line with an anchor off the candles shown (drawn on an earlier day) gets no line
+    price: its menu works at the price pressed, since before the first candle the desk's axis counts clock time as
+    candles and would make one up. A line held for its menu stops dragging (unsaved), as in Charts. The desk keeps the
+    symbol and recent list this browser stored for Charts (`useChartSettings(…, { borrowed: true })`). Known gap: the desk's read carries no split record, so a drawing made before a split draws
     at its saved prices here (Charts moves it).
   - **Cost.** The studies add no provider request: 2m and 15m read today's minutes through the same cached feed read
     (with C2.4's RVol baseline from disk), the warm-up from disk (kept in memory once all its sessions are there), the
