@@ -208,6 +208,8 @@ def test_a_matched_position_takes_robinhoods_pnl_and_keeps_its_plan(desk, engine
     [row] = [r for r in body["threads"] if r["key"] == f"trade:{trade}"]
     assert row["book"]["live"] == "matched" and row["book"]["account"] == {"label": "Roth IRA", "masked": "••8267"}
     assert (row["book"]["usd"], row["book"]["pct"], row["book"]["quantity"], row["book"]["mark"]) == (220.0, 35.5, 2.0, 420.0)
+    # Live prices move it from Robinhood's own numbers: the cost that gives +$220 at its 420 mark, not the journal's.
+    assert row["book"]["tick"] == {"quote": "NBIS261023C00100000", "scale": 100, "cost": 310.0, "quantity": 2.0, "sign": 1}
     assert row["value"] == {"text": "+$220.00", "tone": "gain"}
     assert row["investigation_id"] == NBIS and row["book"]["state"] == "on_plan" and row["book"]["track"] is not None
     assert body["robinhood"]["state"] == "ok" and body["robinhood"]["joined"] is True

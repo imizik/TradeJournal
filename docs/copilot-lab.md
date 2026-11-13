@@ -1349,6 +1349,34 @@ the cleaned conversation and the 375 px composer) and
 `frontend/e2e/copilot-desk-context.spec.ts` (the centre's chart and timeline: the plan's lines, the marks, the time
 stop, the timeframe buttons and their memory, the no-chart-data state, 375 px, the market chart and This week).
 
+### Live prices
+
+In the regular session the desk's prices move every few seconds instead of once a minute: the book's P&L (and its
+sparkline's newest point), the top bar's Open total, the Watching rows' price and change, and the chart's reading line
+and forming candle. Nothing else on the desk is read again for it, and no row is rebuilt.
+
+- **One read for the whole desk.** `GET /copilot/desk/ticks?symbols=…` (`backend/app/engine/desk_ticks.py`) takes the
+  book's underlyings, the held contracts (OCC symbols), the Watching names and the chart's symbol, and answers each one's
+  last price, change today and the time it was read. Every symbol any open desk asked for in the last 30 s goes into one
+  batched Tradier quote call through the chart feed (its single-flight, its four places, low priority), kept 4 s, so
+  several tabs and the phone share it. The ticks stop asking once the chart feed has made 45 of its 60 calls in the last
+  minute, so a chart or the copilot never runs short because of them. Robinhood is never read here.
+- **Regular session only.** Outside it the read asks no provider and answers `closed` with the next open today; the desk
+  waits for it (at most half an hour between checks) instead of polling.
+- **P&L by the positions' own formula.** Each book row carries `book.tick` (`_tick` in `copilot_desk.py`): the symbol
+  to quote, 100 a contract or 1 a share, the cost, quantity and side. A contract's price is its bid/ask midpoint, else its
+  last trade, as the book's marks are. A Robinhood-matched row ticks from Robinhood's own quantity and the cost that gives
+  its P&L at its mark, so the first tick does not jump to the journal's cost.
+- **The shared ticker** (`frontend/lib/deskTicks.ts`, `useDeskTicks`) polls while any piece is mounted and the tab is
+  visible, every 5 s; a failed or refused read backs off (5, 10, 20, 40, 60 s), a slow one waits three times its time,
+  and it stops when the desk unmounts. A changed number tints green or red for 0.6 s (`components/copilot/Ticks.tsx`).
+- **Honest when it stops.** A price whose last good read is older than 20 s in the session is greyed, and the book's and
+  Watching's heading say `prices 10:04:31`. A symbol with no price shows what the desk already had, never a zero.
+
+Cost: one tab in the session adds at most 12 Tradier calls a minute (one every 5 s), however many tabs are open; the
+minute reads above are unchanged. Proof: `backend/tests/test_desk_ticks.py` and `frontend/e2e/copilot-desk-ticks.spec.ts`
+(rows change in place without a remount, the grey and its time, the back-off, no polling when closed, 390 px).
+
 ### Ticket
 
 **The Ticket copies; it never sends.** It fills in what the owner types into the Robinhood app by hand. No order is

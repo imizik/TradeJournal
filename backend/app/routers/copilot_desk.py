@@ -443,7 +443,37 @@ def _book(row: dict, plan: dict | None, flagged: dict | None) -> dict:
     return {"usd": row.get("unrealized_usd"), "pct": row.get("unrealized_pct"), "expiry": (row.get("option") or {}).get("expiry"),
             "days_held": row.get("days_held"), "track": track,
             "state": _book_state(kinds, planned, gave_back, row.get("unrealized_usd")), "planned": planned,
-            "stop_pct": level.get("distance_pct") if level and level.get("state") == "armed" else None}
+            "stop_pct": level.get("distance_pct") if level and level.get("state") == "armed" else None,
+            "tick": _tick(row)}
+
+
+def _tick(row: dict) -> dict | None:
+    """What the desk's live prices need to move this row's P&L in place, by the positions' own formula
+    (``copilot_book.position_rows``): the symbol to quote (an option's OCC symbol), the units the cost is in (100 a
+    contract), the cost, the quantity and the side. None when the P&L is not derived from a price the desk can quote."""
+    from app.engine.occ import occ_symbol
+    cost, quantity = row.get("avg_entry"), row.get("quantity")
+    if not cost or not quantity:
+        return None
+    if row.get("instrument") == "option":
+        option = row.get("option") or {}
+        try:
+            quote = occ_symbol(row["symbol"], datetime.fromisoformat(option["expiry"]).date(), option.get("side") or "", float(option["strike"]))
+        except (KeyError, TypeError, ValueError):
+            return None
+        scale = 100
+    elif row.get("instrument") == "stock":
+        quote, scale = row["symbol"], 1
+    else:
+        return None
+    if not quote:
+        return None
+    sign = -1 if row.get("direction") == "short" else 1
+    # The journal's avg_entry is rounded to the cent; the cost that gives the row's own P&L at its own mark is not, so
+    # the first tick at an unchanged price shows the same number.
+    usd, mark = row.get("unrealized_usd"), row.get("mark")
+    exact = round(mark - usd / (sign * quantity), 6) if usd is not None and mark else None
+    return {"quote": quote, "scale": scale, "cost": exact if exact and exact > 0 else cost, "quantity": quantity, "sign": sign}
 
 
 def _exit_rows(exits: list[dict]) -> list[dict]:
@@ -767,6 +797,7 @@ def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict) -> li
         row = by_key.get(f"trade:{trade_id}")
         if row is not None:
             row["book"] |= {**facts(live), "live": "matched"}
+            row["book"]["tick"] = _live_tick(row["book"].get("tick"), live)
             # Robinhood's P&L decides whether it is still in profit: the tag follows the live numbers too.
             if row["book"]["state"] not in ("past_stop", "near_stop"):
                 held = positions.get(trade_id, {})
@@ -791,6 +822,15 @@ def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict) -> li
                        "state": "no_plan", "planned": False, "stop_pct": None, **facts(live), "live": "new"}
         new.append(row)
     return new
+
+
+def _live_tick(tick: dict | None, live: dict) -> dict | None:
+    """A Robinhood-matched row ticks from Robinhood's own numbers: its quantity, and the cost that gives its P&L at its
+    mark (so the first tick does not jump to the journal's cost). None when Robinhood's numbers cannot give one."""
+    usd, mark, quantity = live.get("usd"), live.get("mark"), live.get("quantity")
+    if tick is None or usd is None or not mark or not quantity:
+        return None
+    return {**tick, "cost": round(mark - usd / (tick["sign"] * quantity), 4), "quantity": quantity}
 
 
 def _seen_on_robinhood(db: Session) -> set[tuple]:
@@ -1077,6 +1117,18 @@ def desk_moving(db: Session = Depends(get_session)):
         raise HTTPException(503, "Copilot Lab is off.")
     from app.engine import desk_moving
     return desk_moving.build(db, today._now())
+
+
+@router.get("/desk/ticks")
+def desk_ticks(symbols: str = ""):
+    """Live prices for the desk (``app/engine/desk_ticks.py``): each named underlying's last price and change today and a
+    held contract's mark (OCC symbols), from one batched quote read kept a few seconds and shared by every open desk.
+    Regular session only: outside it no provider is asked and the answer is ``closed`` with the next open today. Read-only,
+    owner-only, refused while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import desk_ticks
+    return desk_ticks.read(symbols, today._now())
 
 
 # --------------------------------------------------------------------------- the Watching list (app/engine/desk_watch.py)

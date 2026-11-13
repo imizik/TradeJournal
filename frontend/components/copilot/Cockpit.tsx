@@ -20,6 +20,8 @@ import {
   DESK_MARKET, DESK_TIMEFRAMES, daysTo, deskSymbolThread, getDeskSparks, liveOn, money, nyDay, readLook, saveLook, signedPct, sinceLines,
   type DeskBookState, type DeskChartData, type DeskLive, type DeskLook, type DeskTimeframe, type DeskNeed, type DeskSession, type DeskSparks, type DeskThread, type DeskThreadRef,
 } from "@/lib/desk";
+import { staleSince, tickFor, tickedBook, useDeskTicks } from "@/lib/deskTicks";
+import { Flash, PricesAsOf } from "@/components/copilot/Ticks";
 import { cn } from "@/lib/utils";
 
 export const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
@@ -37,14 +39,17 @@ export const positionRows = (rows: DeskThread[]) => rows.filter(r => r.key.start
 /** "Realized today +$120 · Open +$355": the trades closed today (the session read) and every open position's
  * unrealized P&L now (the thread list's read, followed or not: it is the account's money). Nothing until read. */
 export function DayPnl({ session, rows, read }: { session: DeskSession | null; rows: DeskThread[]; read: boolean }) {
-  const open = positionRows(rows).flatMap(r => r.book?.usd != null ? [r.book.usd] : []);
+  const ticks = useDeskTicks(positionRows(rows).map(r => r.book?.tick?.quote));
+  const ticked = positionRows(rows).map(r => tickedBook(r.book, ticks));
+  const open = ticked.flatMap(p => p.usd != null ? [p.usd] : []);
+  const stale = ticked.some(p => p.stale); // a price in it is no longer live: greyed, as its book row is
   const total = open.reduce((a, b) => a + b, 0);
   const realized = session?.realized_today ?? null;
   if (realized === null && !(read && open.length)) return null;
   return (
     <span data-testid="desk-pnl" className="flex items-baseline gap-3 whitespace-nowrap text-xs">
       {realized !== null && <span><span className="text-muted-foreground">Realized today </span><span className={cn("tabular-nums", tone(realized))}>{money(realized)}</span></span>}
-      {read && open.length > 0 && <span><span className="text-muted-foreground">Open </span><span className={cn("tabular-nums", tone(total))}>{money(total)}</span></span>}
+      {read && open.length > 0 && <span><span className="text-muted-foreground">Open </span><span data-testid="desk-pnl-open" className={cn("tabular-nums", tone(total), stale && "opacity-50")}>{money(total)}</span></span>}
     </span>
   );
 }
@@ -261,6 +266,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
   const mixed = new Set(followed.flatMap(r => r.book?.account ? [r.book.account.masked] : [])).size > 1;
   // One row is marked: the one tapped, else the first on the centre's ticker (two contracts can share a ticker).
   const marked = followed.find(r => r.key === selectedKey && r.symbol === selected)?.key ?? followed.find(r => r.symbol === selected)?.key;
+  const ticks = useDeskTicks(followed.flatMap(r => [r.book?.tick?.quote, r.symbol]));
   const follow = (symbol: string, following: boolean) => {
     setFailed(null);
     onFollow(symbol, following).catch(() => setFailed(`${symbol}: not saved. Try again.`));
@@ -272,6 +278,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
           Your book{shown.length > 0 && <> · <span className="tabular-nums">{shown.length}</span> followed</>}
         </h2>
         <LiveLine live={live} onRefresh={onRefreshLive} />
+        <PricesAsOf at={staleSince(ticks, followed.map(r => r.book?.tick?.quote))} />
         {updating && <span role="status" data-testid="book-updating" className="text-[11px] text-muted-foreground">Updating…</span>}
       </div>
       {followed.length ? (
@@ -285,6 +292,10 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
             const contract = full.replace(/\b(\d{1,2}\/\d{1,2})\/(\d{2})\b/, (date, monthDay: string, year: string) => year === day.slice(2, 4) ? monthDay : date);
             const count = book?.quantity != null ? ` ×${book.quantity.toLocaleString("en-US", { maximumFractionDigits: 4 })}` : "";
             const on = row.key === marked;
+            const pnl = tickedBook(book, ticks);
+            const under = tickFor(ticks, row.symbol);
+            // The line's newest point follows the live price, so the row moves between the minute reads.
+            const points = spark?.points.length && under && !under.stale ? [...spark.points.slice(0, -1), under.last] : spark?.points;
             return (
               <li key={row.key} className={cn("flex items-stretch border-t", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")}>
                 <button type="button" onClick={() => onSelect(row)} aria-pressed={on} aria-label={`${row.symbol} ${full}`}
@@ -305,10 +316,10 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                       {book?.live === "not_on_robinhood" && <span data-testid="book-not-live" className="rounded border px-1">Not on Robinhood</span>}
                     </span>
                   </span>
-                  <Spark points={spark?.points} label={`${row.symbol} today`} />
-                  <span className={cn("whitespace-nowrap text-right text-sm tabular-nums", tone(book?.usd), updating && "opacity-50")}>
-                    {book?.usd != null ? money(book.usd) : row.value?.text ?? "—"}
-                    {book?.pct != null && <span className="block text-[11px]">{signedPct(book.pct)}</span>}
+                  <Spark points={points} label={`${row.symbol} today`} />
+                  <span data-testid="book-pnl" className={cn("whitespace-nowrap text-right text-sm tabular-nums", tone(pnl.usd), (updating || pnl.stale) && "opacity-50")}>
+                    <Flash value={pnl.usd}>{pnl.usd != null ? money(pnl.usd) : row.value?.text ?? "—"}</Flash>
+                    {pnl.pct != null && <span className="block text-[11px]">{signedPct(pnl.pct)}</span>}
                   </span>
                 </button>
                 {row.symbol && (
@@ -462,13 +473,14 @@ export function CentreChart({ symbol, thread, row, sparks, actions }: {
   const sparksAt = sparks ? Date.parse(sparks.as_of) / 1000 : NaN;
   const fallback = change !== null && Number.isFinite(sparksAt) ? { pct: change, at: sparksAt } : null;
   const reading = shown && shown.symbol === (symbol ?? "QQQ") ? shown : null;
+  const live = tickFor(useDeskTicks([symbol ?? "QQQ"]), symbol ?? "QQQ");
   return (
     <div className="space-y-3" data-testid="desk-chart">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="text-base font-semibold text-foreground">{symbol ?? "QQQ"}</span>
         <span className="min-w-0 truncate text-xs text-muted-foreground">{row ? (row.instrument && row.instrument !== row.symbol ? row.instrument : row.title) : symbol ? "today" : "market today"}</span>
       </div>
-      <ReadingLine data={reading} fallback={fallback} />
+      <ReadingLine data={reading} fallback={fallback} live={live} />
       <div className="flex items-center gap-1">
         <div role="group" aria-label="Timeframe" className="flex gap-1">
           {DESK_TIMEFRAMES.map(item => (
@@ -481,7 +493,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions }: {
         </div>
         <Link href={charts} className="ml-auto inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Open in Charts →</Link>
       </div>
-      <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0} onRead={setShown} actions={actions}
+      <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0} onRead={setShown} actions={actions} live={live}
         label={`${symbol ?? "QQQ"} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />
       <p aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <Key color="#e9a23b" glyph="▲▼">your fills</Key>

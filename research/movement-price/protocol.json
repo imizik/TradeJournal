@@ -1,0 +1,64 @@
+{
+  "protocol_id": "movement-price-20261113-v1",
+  "registered": "2026-11-13",
+  "registered_before": "any outcome of this comparison was computed. Already known when it was written: the trades' total P&L (+$12,722 on $1.09M of premium, 95% day-resampled range -$8,654 to +$34,700); entry-skill-20261112-v1 and entry-horizon-20261112-v1 (no direction edge on the stock); instrument-20261113-v1 (options $11.9k behind an equal-delta stock replay, 95% -$26.5k to +$3.0k, no evidence either way; same-session trades about even; holds past the entry session -$15.1k against the stock, about -7% of their premium; 8 or more days to expiry worst). No implied volatility, priced movement or realized movement of these trades has been computed or read.",
+  "question": "Did the owner's options price in more movement than the stock then made while he held them?",
+  "why_it_matters": "An option buyer gains when the stock moves more than the option's price assumed and loses when it moves less. The instrument study found the options lost to the same exposure in stock on overnight holds but could not say why. This splits each trade's option P&L into direction, movement against its price, and the change in implied volatility with the spread. If movement cost money, the contracts were dear for what the stock did, which is a reason about contract choice, not stock picking.",
+  "population": {
+    "trades": "every trade in the extract: closed or expired long option trades opened 2025-07-10 to 2026-10-19",
+    "inputs": {
+      "extract": "written 2026-11-11 by `python -m scripts.exit_counterfactual_study extract`, sha256 4ada80b1977230773bd0d919cd3ea42f766b8fcc651d5484fee8253de7c33a47",
+      "fill_join": "each fill's underlying_price_at_fill, written 2026-11-13 for instrument-20261113-v1, sha256 ecea7c6511f111300d58aff6ec7f99d56f9e700c0de1bcef261bbf4f378a55e3",
+      "daily_closes": "raw daily closes written 2026-11-12 for entry-horizon-20261112-v1, sha256 e102bc240d96a843c349e7ff3622c366079a368be64fbfc7611482e9f13a2a4c",
+      "minute_bars": "Alpaca SIP one-minute bars of each underlying (SPY for SPXW) for the 21 sessions before the first entry day",
+      "earnings": "report dates from Tradier's corporate calendar for every traded symbol except SPXW, fetched once for this run; the file's hash and the symbols with no report dates are recorded"
+    },
+    "excluded_and_counted": [
+      "a fill side other than buy_to_open or sell_to_close, or fills that do not allocate first-in-first-out",
+      "an entry or exit fill without an underlying price",
+      "an expired trade whose underlying has no raw daily close on the expiration date",
+      "a hold that spans a share split of the underlying (the instrument study's list)",
+      "fewer than 10 usable sessions of minute bars among the 20 before the first entry day",
+      "an entry price that no Black-Scholes volatility reproduces (below intrinsic value)",
+      "an entry with no trading time left before the expiry close"
+    ]
+  },
+  "method": {
+    "lots": "the instrument study's accounting: each buy_to_open fill opens a lot; each sell_to_close fill closes lots first in first out; a remainder expires at 0 with the stock at the raw close on the expiration date. Each piece is an entry lot closed, in part, by one exit",
+    "priced_variance": "the entry fill's price, the fill's underlying price, the strike, a 3.72% rate and the time to the expiry close (16:00, 13:00 on early-close days) give, by Black-Scholes without dividends, the total standard deviation to expiry s0. Only s0 squared, the variance priced in until expiry, is used, so the calendar convention of the journal's stored implied volatility does not matter",
+    "variance_clock": "the priced variance is spread over time by each stock's own typical day, estimated from its minute bars over the 20 sessions before the first entry day: the average squared overnight log return (first regular bar's open against the previous session's last close) and the average squared log return of each 5-minute bucket of the regular session, each as a share of their sum. A session is usable when it and the session before have bars and its last bar is at or after 15:55. A hold's share f is its clock units divided by the units from entry to the expiry close; one overnight share is counted per session open crossed, weekends and holidays included",
+    "pieces": {
+      "direction": "Black-Scholes delta at entry (at s0) x stock change x 100 x contracts",
+      "movement": "(model value at exit with the stock at its exit price and remaining standard deviation s0 x sqrt(1 - f), minus model value at entry) x 100 x contracts, minus direction. Negative when the stock moved less than the price of the time held assumed",
+      "iv_and_spread": "actual option P&L minus direction minus movement: the change in implied volatility between entry and exit fills, the bid-ask spread paid, and model error. The pieces add up to the actual P&L exactly"
+    },
+    "per_trade": "the sum over the trade's pieces; the trade's day is its first entry day"
+  },
+  "primary_population": "scored trades with no earnings report date from the first entry day through the expiration date. A known report inside the window puts a lump of priced variance on one night that the typical-day clock cannot place, so those trades are reported only descriptively",
+  "measure": "total movement dollars over the primary population",
+  "tests": 1,
+  "uncertainty": "2,000 bootstrap resamples by New York trading day of first entry (seed 20261113); 95% two-sided percentile interval on the total",
+  "periods": {"exploration": "opened 2025-07-10 to 2026-03-31", "check": "opened 2026-04-01 to 2026-10-19", "independence": "neither period is untouched; every result is exploratory"},
+  "decisions": {
+    "paid for more movement than he got": "the 95% interval of total movement is below 0",
+    "got more movement than he paid for": "the 95% interval is above 0 and total movement is above 0 in each period",
+    "no evidence either way": "anything else",
+    "expected": "published work finds that option buyers pay on average for more movement than follows, so the first outcome is the likely one. Its size against premium, and where it concentrates, is the useful part",
+    "what_each_allows": "Paid for more: on these trades the price of movement, not direction, is a cost; contract choice (days to expiry, holding through nights, or stock) is the first thing to change in any paper test. Got more: the trades picked stocks that moved more than their options assumed, which is worth a forward test with recorded bid and ask. No evidence: the movement price neither sank nor saved the results"
+  },
+  "descriptive_only": [
+    "for the primary population: total direction, movement, iv_and_spread and option P&L; movement per dollar of premium; the movement ratio (contract-weighted sum of squared log stock moves over the sum of priced variance for the time held); the share of contracts whose squared move exceeded its priced variance",
+    "the same split by same session versus held past the entry session, by days to expiration at first entry (0-1, 2-7, 8 or more), by side and by period",
+    "movement and iv_and_spread under a calendar clock instead (f = the share of calendar time to expiry that was held), to show how much the split depends on the clock",
+    "the trades with an earnings report in the window, and every scored trade together"
+  ],
+  "limits": [
+    "a fill's underlying price is the minute bar's close at or before the fill, not the exact print, and the entry price includes the spread paid, which raises the priced variance",
+    "the split between movement and iv_and_spread depends on the variance clock; a 20-session profile is noisy, and an earnings gap inside it raises the overnight share",
+    "a symbol whose calendar returned no report dates is treated as having none; the list of such symbols is reported so a gap is visible",
+    "Black-Scholes without dividends or skew; the model is a ruler for splitting the P&L, not a claim about fair value",
+    "seen data, and dollars are dominated by position size"
+  ],
+  "results": "The repository is public. Aggregates and per-trade rows are written outside it and reported to the owner directly; they are not committed.",
+  "one_run": "one historical run under this id. A changed constant is a new protocol id, recorded beside this one"
+}
