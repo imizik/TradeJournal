@@ -251,7 +251,7 @@ function OptionWhatIf({ model: m, symbol, breakEven, levels, earnings }: {
       <WhatIfCurve curve={curve} lo={range.lo} hi={range.hi} now={m.price} chosen={price} breakEven={breakEven} levels={levels}
         pnl={m.cost !== null} onPick={value => setChosen(clampPrice(value))} />
       {crushed && <p data-testid="what-if-crush" className="text-[11px] text-amber-200">
-        After the {shortDay(earnings!)} report, IV assumed to fall from {(m.iv * 100).toFixed(0)}% to {(iv * 100).toFixed(0)}% ({Math.round((1 - EARNINGS_IV_KEPT) * 100)}% lower): a plain assumption, not a forecast. The report&apos;s time of day is not published.
+        After the {shortDay(earnings!)} report, IV assumed to fall from {(m.iv * 100).toFixed(0)}% to {(iv * 100).toFixed(0)}% ({Math.round((1 - EARNINGS_IV_KEPT) * 100)}% lower): a plain assumption, not a forecast. The report&apos;s time of day is not published{earnings === m.day ? "; it is today, and if it is already out, today's IV has already dropped and this counts the drop twice" : ""}.
       </p>}
       <p data-testid="what-if-basis" className="text-[11px] text-muted-foreground">
         <span title={CAVEAT} className="cursor-help underline decoration-dotted underline-offset-2">Estimate</span>{" "}
@@ -285,7 +285,7 @@ function WhatIfCurve({ curve, lo, hi, now, chosen, breakEven, levels, pnl, onPic
   };
   const marks = [
     { at: now, color: "hsl(var(--foreground))", label: `now ${priceText(now)}`, dash: undefined },
-    breakEven !== null ? { at: breakEven, color: "#e9a23b", label: `break-even ${priceText(breakEven)}`, dash: undefined } : null,
+    breakEven !== null ? { at: breakEven, color: "#e9a23b", label: `break-even at expiry ${priceText(breakEven)}`, dash: undefined } : null,
     levels.entry ? { at: levels.entry, color: "#7dd3fc", label: `entry ${priceText(levels.entry)}`, dash: "3 2" } : null,
     levels.stop ? { at: levels.stop, color: "#fda4af", label: `stop ${priceText(levels.stop)}`, dash: "3 2" } : null,
     levels.target ? { at: levels.target, color: "#6ee7b7", label: `target ${priceText(levels.target)}`, dash: "3 2" } : null,

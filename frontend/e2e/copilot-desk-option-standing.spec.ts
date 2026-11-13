@@ -158,7 +158,7 @@ test("What if…: folded by default and remembered; presets, sliders and the est
   await expect(panel.getByTestId("what-if-curve")).toBeVisible();
   await expect(panel).toContainText("entry 252.00");
   await expect(panel).toContainText("stop 240.00");
-  await expect(panel).toContainText("break-even 256.20");
+  await expect(panel).toContainText("break-even at expiry 256.20");
   await expect(panel.getByTestId("what-if-target")).toBeDisabled();
   await expect(panel.getByTestId("what-if-target")).toHaveAttribute("title", "Your plan saves an entry and a stop, no target");
 
@@ -172,6 +172,12 @@ test("What if…: folded by default and remembered; presets, sliders and the est
   await expect(panel.getByTestId("what-if-day")).toHaveText("Thu, Nov 19 · 1d before expiry");
   await expect(panel).toContainText("247.00 (0.0% from now)");
   await expect(panel.getByTestId("what-if-crush")).toHaveText(/^After the Wed, Nov 18 report, IV assumed to fall from \d+% to \d+% \(30% lower\): a plain assumption, not a forecast/);
+  // The flat stock after the report, with IV cut, is still a loss on this call (time and IV both gone).
+  await expect(panel.getByTestId("what-if-result")).toHaveText(/P&L −\$/);
+  // Back before the report: the cut no longer applies.
+  await panel.getByTestId("what-if-date").fill("2");
+  await expect(panel.getByTestId("what-if-day")).toHaveText("Sun, Nov 15 · 5d before expiry");
+  await expect(panel.getByTestId("what-if-crush")).toHaveCount(0);
 
   // The date slider to expiry: intrinsic value only; at 262.50 that is 12.50 x 200 = $2,500, P&L +$1,260 (+101.6%).
   await panel.getByTestId("what-if-date").fill("7");
@@ -195,6 +201,14 @@ test("What if…: folded by default and remembered; presets, sliders and the est
 
 test("What if… needs an IV: a plain grey line instead, and nothing for one leg of a spread", async ({ page }) => {
   await open(page, { orcl: 247, orclMark: 4.1 });
+  // The same ORCL call with no IV in its Greeks: one grey line, no toggle.
+  const noIv = structuredClone(THREADS) as { threads: { book: { option: { greeks: { iv: number | null } } } }[] };
+  noIv.threads[0].book.option.greeks.iv = null;
+  await page.route("**/copilot/desk/threads", route => route.fulfill({ json: noIv }));
+  await page.reload();
+  await book(page).getByRole("button", { name: "ORCL 11/20/26 250C" }).click();
+  await expect(page.getByTestId("desk-chart").getByTestId("what-if-off")).toHaveText("What if… unavailable: no IV for this contract");
+  await expect(page.getByTestId("desk-chart").getByTestId("what-if-toggle")).toHaveCount(0);
   await book(page).getByRole("button", { name: "NBIS 11/20/26 100C" }).click();
   await expect(page.getByTestId("desk-chart").getByTestId("what-if-toggle")).toHaveCount(0);
   await expect(page.getByTestId("desk-chart").getByTestId("what-if-off")).toHaveCount(0);
