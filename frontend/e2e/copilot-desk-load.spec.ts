@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 // What an open desk asks the server while it sits idle (docs/copilot-lab.md § What an open desk asks): in the session, live
 // prices every few seconds and the minute's re-reads as ONE request; nothing at all while the page is hidden; one catch-up
@@ -45,26 +45,22 @@ const READS: Record<string, unknown> = {
   "/copilot/exposure": { line: null },
 };
 
-type Seen = { at: number; path: string };
+// Requests by phase, from the browser's own request events (when each was sent, not when its stub ran).
+type Tally = { phase: string; seen: { phase: string; path: string }[] };
 
-async function open(page: Page, seen: Seen[]) {
+async function open(page: Page, tally: Tally) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.clock.install({ time: NOW });
-  const record = async (route: Route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname.replace(/^\/api\/backend/, "");
-    seen.push({ at: await page.evaluate(() => Date.now()).catch(() => 0), path });
-    return path;
-  };
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/backend/")) tally.seen.push({ phase: tally.phase, path: url.pathname.replace(/^\/api\/backend/, "") });
+  });
   // Anything not named below: a plain refusal, read through like any other.
-  await page.route("**/api/backend/**", async route => { await record(route); return route.fulfill({ status: 404, json: { detail: "Not in this test." } }); });
+  await page.route("**/api/backend/**", route => route.fulfill({ status: 404, json: { detail: "Not in this test." } }));
   await page.route("**/copilot/status", route => route.fulfill({ json: ON }));
-  for (const [path, body] of Object.entries(READS)) {
-    await page.route(url => url.pathname.endsWith(path), async route => { await record(route); return route.fulfill({ json: body }); });
-  }
-  await page.route("**/copilot/desk/*/chart*", async route => { await record(route); return route.fulfill({ status: 503, json: { detail: "No chart in this test." } }); });
-  await page.route("**/copilot/desk/minute?*", async route => {
-    await record(route);
+  for (const [path, body] of Object.entries(READS)) await page.route(url => url.pathname.endsWith(path), route => route.fulfill({ json: body }));
+  await page.route("**/copilot/desk/*/chart*", route => route.fulfill({ status: 503, json: { detail: "No chart in this test." } }));
+  await page.route("**/copilot/desk/minute?*", route => {
     const reads = new URL(route.request().url()).searchParams.getAll("read").map(target => {
       const body = READS[target.split("?")[0]];
       return body ? { status: 200, body } : { status: 404, body: { detail: "Not in this test." } };
@@ -72,7 +68,6 @@ async function open(page: Page, seen: Seen[]) {
     return route.fulfill({ json: { reads } });
   });
   await page.route("**/copilot/desk/ticks?*", async route => {
-    await record(route);
     const at = Math.floor(await page.evaluate(() => Date.now() / 1000));
     return route.fulfill({ json: { state: "ok", as_of: "", poll_seconds: 5, closes_at: epoch("2026-11-13T21:00:00Z"), rows: {
       [CALL]: { last: 1.0, change_pct: null, prev_close: null, at }, ORCL: { last: 247, change_pct: -1.0, prev_close: 249.5, at },
@@ -82,22 +77,34 @@ async function open(page: Page, seen: Seen[]) {
   await expect(page.getByTestId("desk-book")).toBeVisible();
 }
 
-const count = (seen: Seen[], from: number) => {
+/** Let what is already under way (answers, the reads they set off) finish inside the current phase. */
+async function settle(page: Page) {
+  await page.clock.runFor(1_000);
+  await page.waitForTimeout(1_000);
+}
+const count = (tally: Tally, phase: string) => {
   const by: Record<string, number> = {};
-  for (const s of seen) if (s.at >= from) by[s.path] = (by[s.path] ?? 0) + 1;
+  for (const s of tally.seen) if (s.phase === phase) by[s.path] = (by[s.path] ?? 0) + 1;
   return by;
 };
 const total = (by: Record<string, number>) => Object.values(by).reduce((a, b) => a + b, 0);
+const showing = (page: Page, on: boolean) => page.evaluate(visible => {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visible ? "visible" : "hidden" });
+  Object.defineProperty(document, "hidden", { configurable: true, get: () => !visible });
+  document.dispatchEvent(new Event("visibilitychange"));
+}, on);
 
 test("an idle desk in the session asks about 20 times a minute: live prices, and the minute's reads as one request", async ({ page }) => {
-  const seen: Seen[] = [];
-  await open(page, seen);
+  const tally: Tally = { phase: "load", seen: [] };
+  await open(page, tally);
   await page.clock.runFor(30_000); // the cold load is not the idle rate
-  const from = await page.evaluate(() => Date.now());
+  await settle(page);
+  tally.phase = "idle";
   await page.clock.runFor(3 * 60_000);
-  const by = count(seen, from);
-  const perMinute = total(by) / 3;
-  expect(perMinute, JSON.stringify(by)).toBeLessThanOrEqual(20);
+  await page.waitForTimeout(1_000);
+  tally.phase = "after";
+  const by = count(tally, "idle");
+  expect(total(by) / 3, JSON.stringify(by)).toBeLessThanOrEqual(20);
   expect(by["/copilot/desk/ticks"] ?? 0).toBeLessThanOrEqual(3 * 12); // every 5 s, one read for every piece
   expect(by["/copilot/desk/minute"] ?? 0).toBeLessThanOrEqual(3); // once a minute, for every minute read together
   expect(by["/copilot/desk/minute"] ?? 0).toBeGreaterThanOrEqual(2);
@@ -108,26 +115,20 @@ test("an idle desk in the session asks about 20 times a minute: live prices, and
 });
 
 test("a hidden desk asks nothing; showing it again catches up in one request", async ({ page }) => {
-  const seen: Seen[] = [];
-  await open(page, seen);
+  const tally: Tally = { phase: "load", seen: [] };
+  await open(page, tally);
   await page.clock.runFor(30_000);
-  await page.evaluate(() => {
-    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
-    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
-    document.dispatchEvent(new Event("visibilitychange"));
-  });
-  const hidden = await page.evaluate(() => Date.now());
+  await settle(page);
+  tally.phase = "hidden";
+  await showing(page, false);
   await page.clock.runFor(3 * 60_000);
-  expect(count(seen, hidden)).toEqual({});
-  const back = await page.evaluate(() => {
-    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
-    Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
-    document.dispatchEvent(new Event("visibilitychange"));
-    return Date.now();
-  });
+  await page.waitForTimeout(1_000);
+  expect(count(tally, "hidden")).toEqual({});
+  tally.phase = "back";
+  await showing(page, true);
   await page.clock.runFor(2_000);
-  await expect.poll(() => count(seen, back)["/copilot/desk/minute"] ?? 0).toBe(1);
-  const by = count(seen, back);
+  await expect.poll(() => count(tally, "back")["/copilot/desk/minute"] ?? 0).toBe(1);
+  const by = count(tally, "back");
   for (const path of Object.keys(READS)) expect(by[path] ?? 0, path).toBe(0);
   // The book still reads the stubbed position after the catch-up (each read got its own answer back).
   await expect(page.getByTestId("desk-book").getByTestId("book-pnl")).toHaveText("−$120−55%");
