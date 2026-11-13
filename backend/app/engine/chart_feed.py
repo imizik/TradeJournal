@@ -323,12 +323,21 @@ class ChartFeed:
             data["rvol"] = rvol
         return data
 
-    def quote_rows(self, symbols: list[str]) -> tuple[list[dict], float | None, str | None]:
+    def calls_last_minute(self) -> int:
+        """Provider calls the feed made in the last minute, against its 60-call budget (never a call itself)."""
+        with self._lock:
+            cutoff = time.time() - 60
+            return sum(1 for t in self._calls if t > cutoff)
+
+    def quote_rows(self, symbols: list[str], ttl: int = 15, keep: bool = True,
+                   low: bool = False) -> tuple[list[dict], float | None, str | None]:
+        """One batched quote read. ``keep=False`` (the desk's ticks, which keep their own few seconds) skips the shared
+        15-second cache and its stale fallback, so a failure raises instead of handing back old prices."""
         from app.engine.chart_indices import index_quote, provider_symbol
 
         quote_data, stamp, issue = self.read("/v1/markets/quotes", {
             "symbols": ",".join(sorted({provider_symbol(s) for s in symbols})),
-        }, 15)
+        }, ttl, keep=keep, low=low)
         rows = []
         for q in _rows(quote_data, "quotes", "quote"):
             rows.append(index_quote({
@@ -343,6 +352,7 @@ class ChartFeed:
                 "day_high": _number(q.get("high")), "day_low": _number(q.get("low")),
                 "week_52_high": _number(q.get("week_52_high")), "week_52_low": _number(q.get("week_52_low")),
                 "trade_time": _number(q.get("trade_date"), divisor=1000),
+                "bid": _number(q.get("bid")), "ask": _number(q.get("ask")),
             }))
         return rows, stamp, issue
 

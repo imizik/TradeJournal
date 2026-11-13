@@ -7,6 +7,8 @@ import { useKeptState } from "@/components/copilot/DeskMemory";
 import { LABEL, Spark, tone } from "@/components/copilot/Cockpit";
 import { getWatchLists, getWatching, importWatchLists, signedPct, stopWatching, watchSymbol,
   type DeskSparks, type DeskWatching, type WatchLists } from "@/lib/desk";
+import { staleSince, tickFor, useDeskTicks, type DeskTicks } from "@/lib/deskTicks";
+import { Flash, PricesAsOf } from "@/components/copilot/Ticks";
 import { cn } from "@/lib/utils";
 
 /** Rows shown before "N more". */
@@ -37,7 +39,7 @@ export function useWatching(on: boolean, refresh: number): { data: DeskWatching 
   return { data, failed, set: setData };
 }
 
-type Row = { symbol: string; last: number | null; change: number | null; points: number[] | undefined;
+type Row = { symbol: string; last: number | null; change: number | null; points: number[] | undefined; stale: boolean;
   level: { price: number; label: string; pct: number } | null; setup: number | null | undefined; near: boolean };
 
 const clock = (epoch: number) => new Date(epoch * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
@@ -46,10 +48,14 @@ const price = (value: number) => value.toLocaleString("en-US", { minimumFraction
 /** Each watched name's facts: its price and change from the sparks read, the nearest armed level with the distance to
  * it, and today's Radar setup card. Near (a level within ``NEAR_PCT`` or a setup today) first, then today's biggest
  * moves; a name with no price yet last. */
-export function watchRows(symbols: string[], data: DeskWatching | null, sparks: DeskSparks | null): Row[] {
+export function watchRows(symbols: string[], data: DeskWatching | null, sparks: DeskSparks | null, ticks: DeskTicks | null = null): Row[] {
   const rows = symbols.map(symbol => {
     const spark = sparks?.rows[symbol];
-    const last = spark?.last ?? (spark?.points.length ? spark.points[spark.points.length - 1] : null);
+    // The live price (in the session) when there is one; else the minute read's.
+    const tick = ticks ? tickFor(ticks, symbol) : null;
+    const last = tick?.last ?? spark?.last ?? (spark?.points.length ? spark.points[spark.points.length - 1] : null);
+    const change = tick?.change_pct ?? spark?.change_pct ?? null;
+    const points = spark?.points.length && tick && !tick.stale ? [...spark.points.slice(0, -1), tick.last] : spark?.points;
     let level: Row["level"] = null;
     if (last) {
       for (const one of data?.levels[symbol] ?? []) {
@@ -58,7 +64,7 @@ export function watchRows(symbols: string[], data: DeskWatching | null, sparks: 
       }
     }
     const setup = data?.setups[symbol] ? data.setups[symbol].at : undefined;
-    return { symbol, last, change: spark?.change_pct ?? null, points: spark?.points, level, setup,
+    return { symbol, last, change, points, stale: !!tick?.stale, level, setup,
       near: (level != null && Math.abs(level.pct) <= NEAR_PCT) || setup !== undefined };
   });
   return rows.sort((a, b) => Number(b.near) - Number(a.near) || Number(b.last != null) - Number(a.last != null)
@@ -163,7 +169,8 @@ export default function Watching({ data, failed, sparks, held, selected, onSelec
   }, [menu]);
 
   const symbols = (data?.symbols ?? []).filter(s => !held.has(s)); // a name he holds is the book's row only
-  const rows = watchRows(symbols, data, sparks);
+  const ticks = useDeskTicks(symbols);
+  const rows = watchRows(symbols, data, sparks, ticks);
   const shown = all ? rows : rows.slice(0, SHOWN);
   const add = (event: FormEvent) => {
     event.preventDefault();
@@ -194,6 +201,7 @@ export default function Watching({ data, failed, sparks, held, selected, onSelec
           Watching · <span className="tabular-nums">{symbols.length}</span> {phoneOpen ? "▴" : "▾"}
         </button>
         <h2 className={cn(LABEL, "hidden sm:block")}>Watching{symbols.length > 0 && <> · <span className="tabular-nums">{symbols.length}</span></>}</h2>
+        <PricesAsOf at={staleSince(ticks, symbols)} />
         <span className={cn("ml-auto flex items-center gap-1", !phoneOpen && "max-sm:hidden")}>
           <button type="button" onClick={() => { setImporting(open => !open); setAdding(false); }} aria-expanded={importing}
             className="inline-flex min-h-11 items-center px-1 text-[11px] text-muted-foreground hover:text-foreground sm:min-h-6">
@@ -239,8 +247,8 @@ export default function Watching({ data, failed, sparks, held, selected, onSelec
                         )}
                       </span>
                       <Spark points={row.points} label={`${row.symbol} today`} />
-                      <span className="whitespace-nowrap text-right text-sm tabular-nums">
-                        {row.last != null ? price(row.last) : "—"}
+                      <span data-testid="watch-price" className={cn("whitespace-nowrap text-right text-sm tabular-nums", row.stale && "opacity-50")}>
+                        <Flash value={row.last}>{row.last != null ? price(row.last) : "—"}</Flash>
                         <span className={cn("block text-[11px]", tone(row.change))}>{row.change != null ? signedPct(row.change, 2) : "—"}</span>
                       </span>
                     </button>

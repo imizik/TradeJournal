@@ -120,6 +120,8 @@ def test_every_position_row_carries_its_book_line(desk, engine, quotes):  # noqa
     assert row["meter"] is None and book["track"] == {"last": 37.8, "entry": 80.0, "tone": "muted"}
     assert (book["usd"], book["pct"], book["expiry"], book["state"], book["planned"]) == (180.0, 29.0, "2026-10-23", "on_plan", True)
     assert round(abs(book["stop_pct"]), 1) == 1.8 and isinstance(book["days_held"], int)
+    # What the live prices need to move the P&L in place: the contract's OCC symbol and the positions' own formula's terms.
+    assert book["tick"] == {"quote": "NBIS261023C00100000", "scale": 100, "cost": 310.0, "quantity": 2.0, "sign": 1}
     quotes["rows"][0]["last"] = 93.2  # 0.97% from 92.30: Act now names it near the invalidation
     [row] = [r for r in read(desk)["threads"] if r["key"] == f"trade:{trade}"]
     assert row["group"] == "act" and row["book"]["state"] == "near_stop" and row["book"]["track"]["last"] == 20.0
