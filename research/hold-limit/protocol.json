@@ -1,0 +1,46 @@
+{
+  "protocol_id": "hold-limit-20261112-v1",
+  "registered": "2026-11-12",
+  "registered_before": "any outcome of these rules on trades held 10 days or less was computed. Already known when it was written: long-holds-20261024-v1, run 2026-11-11 on the 25 trades held longer than 10 days (exit at the close of session 1: +$5,402, session 3: +$2,141, session 5: +$1,590); the October 21 audit's totals for trades held overnight or longer (343 trades, -$4,514); the exit study; and entry-skill-20261112-v1 (no direction edge on the stock 30 minutes after entry).",
+  "question": "A hold limit closes every position still open at the close of session N. The long-holds study measured it only on trades that turned out to be long holds, which cannot be known on day 1. On the trades it never measured, those still open at that close but closed within 10 days, would the limit have kept more money than the actual exits?",
+  "population": {
+    "trades": "every trade in the extract: closed or expired long option trades opened 2025-07-10 to 2026-10-19. A rule touches a trade only when the close of session N comes before the trade's actual final exit (or its expiry close), so trades closed in their first session are never touched and contribute 0",
+    "primary": "trades whose window (closed_at date minus opened_at date, plus 1) is 10 calendar days or less: the part no study has measured",
+    "with_long_holds": "the same rules over every trade, long holds included. Reported as the combined figure a real limit would have produced; part of it was already known, so it decides nothing",
+    "extract": "the file written on 2026-11-11 by `python -m scripts.exit_counterfactual_study extract`; bytes sha256 4ada80b1977230773bd0d919cd3ea42f766b8fcc651d5484fee8253de7c33a47. A run on any other file reports extract_is_registered false and must say so",
+    "excluded_and_counted": ["a fill side other than buy_to_open or sell_to_close", "fills that do not allocate first-in-first-out", "incomplete contract (no expiration, type or strike) on a trade held past its first session", "no Alpaca option daily bars covering a trade held past its first session: the actual exit stands and the trade stays in the resampling"]
+  },
+  "sessions": "as long-holds-20261024-v1: New York weekdays except NYSE holidays; the session of the first entry is session 1",
+  "position_accounting": "as long-holds-20261024-v1: actual fills applied in time order, first in first out; at the exit every contract still open is sold and later fills are dropped; return on premium divides by the premium of the entries made before the exit",
+  "execution": "as long-holds-20261024-v1: the Alpaca daily option trade bar's close for the exit session, less 3% of price (minimum $0.01 a share) as an assumed half spread, with 9% as the stress; when session N has no bar, the first of the next two sessions that has one, otherwise the actual exit stands",
+  "rules": {"exit_session_1": "close of session 1 (no overnight hold)", "exit_session_3": "close of session 3", "exit_session_5": "close of session 5"},
+  "tests": 3,
+  "outcomes": {
+    "primary": "total dollar difference, counterfactual minus actual, over the primary population (untouched trades contribute 0)",
+    "both_sides": "the dollar difference on eventual losers (losses saved) and on eventual winners (recoveries given up), reported separately for every rule",
+    "secondary": ["mean difference in return on premium (percentage points) over the trades a rule touched", "the count of trades the rule helped and hurt"],
+    "uncertainty": "2,000 bootstrap resamples by New York trading day of first entry (seed 20261024, as the earlier personal studies), every trading day in the resampling whether or not it has a touched trade; Bonferroni across the 3 rules: 98.33% two-sided intervals"
+  },
+  "periods": {
+    "exploration": "opened 2025-07-10 to 2026-03-31",
+    "check": "opened 2026-04-01 to 2026-10-19",
+    "independence": "neither period is untouched: the audit and the earlier studies read these trades, and the audit already showed overnight holds doing worse. Every result is exploratory; agreement between the periods is consistency, not confirmation"
+  },
+  "decisions": {
+    "applied_to": "the primary population, with long-holds-20261024-v1's criteria unchanged (personal_trading_studies.decide_long)",
+    "eligible for prospective testing as a hold limit": "the primary 98.33% interval is above 0, still above 0 at the stress cost, and in each period at least 5 touched trades with a dollar difference above 0 and a return-on-premium difference above 0",
+    "reject as a demonstrated saving": "the interval includes 0, or the periods disagree, or the stress cost turns it negative",
+    "reject: exiting by that session would have cost money": "the interval is below 0",
+    "what_each_means": "Eligible: a limit of N sessions on every trade is worth a forward test under its own protocol. Rejected: the long-holds saving does not extend to ordinary overnight trades, so the only limit this history supports is a long one (about 10 days), which that study did not test as a rule. Nothing here changes an alert or a setting"
+  },
+  "limits": [
+    "a daily bar's close is the last trade print, which may be well before 16:00 on a thin contract, and not a bid/ask midpoint; the 3% and 9% haircuts are assumptions",
+    "no re-entry: after a rule exit the trade is over, though the owner might have bought back in",
+    "dollars are dominated by position size; the return-on-premium difference is the size-neutral check",
+    "the owner chose which trades to hold overnight; a rule that removed that choice might also have changed which trades were taken",
+    "exit rules reshape outcomes: a saving on losers that is matched by recoveries given up is no saving, which is why both sides are reported"
+  ],
+  "results": "The repository is public. Aggregates and the per-trade file are written outside it and reported to the owner directly; they are not committed.",
+  "prospective": "not registered here; a forward test needs its own protocol id after this run",
+  "one_run": "one historical run under this id. A changed constant is a new protocol id, recorded beside this one"
+}
