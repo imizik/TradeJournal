@@ -54,7 +54,8 @@ export function heldContract(row: DeskThread | null | undefined, rows: readonly 
   if (!row || row.hidden || !row.symbol || !book || !tick || !option || tick.scale !== 100 || !OCC.test(tick.quote) || !(tick.cost > 0) || !(tick.quantity > 0)) return null;
   const legs = rows.filter(r => r !== row && r.key !== row.key && r.symbol === row.symbol && r.book?.option);
   if (legs.some(r => r.book?.option?.direction !== option.direction)) return null;
-  return { occ: tick.quote, symbol: row.symbol, label: row.instrument && row.instrument !== row.symbol ? row.instrument : row.title,
+  const what = row.instrument && row.instrument !== row.symbol ? row.instrument : row.title;
+  return { occ: tick.quote, symbol: row.symbol, label: what.startsWith(`${row.symbol} `) ? what : `${row.symbol} ${what}`,
     cost: tick.cost, quantity: tick.quantity, sign: tick.sign, scale: tick.scale, orders: book.orders ?? NO_ORDERS };
 }
 
@@ -287,9 +288,9 @@ export function ContractChart({ held, data }: { held: HeldContract; data: DeskCo
 
   return (
     <div className="space-y-1.5" data-testid="desk-contract">
-      <p className="h-4 truncate text-xs leading-4 tabular-nums text-muted-foreground" data-testid="desk-contract-readout">
+      <p className="min-h-4 text-xs leading-4 tabular-nums text-muted-foreground sm:h-4 sm:truncate" data-testid="desk-contract-readout">
         {latest && <>
-          {held.label} · {latest.kind === "trade" ? "last trade" : "mark"} <span className="text-foreground">{premium(latest.price)}</span> {nyWhen(latest.time)}
+          <span className="sr-only">{held.label} · </span>{latest.kind === "trade" ? "Last trade" : "Mark"} <span className="text-foreground">{premium(latest.price)}</span> {nyWhen(latest.time)}
           {pnlNow !== null && <> · <span className={pnlNow > 0 ? "text-emerald-300" : pnlNow < 0 ? "text-rose-300" : undefined}>{usd(pnlNow)}</span> on {size}</>}
           {earlier && <> · {earlier}, the last session with trades</>}
         </>}

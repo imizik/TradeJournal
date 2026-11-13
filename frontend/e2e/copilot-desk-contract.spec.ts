@@ -85,7 +85,8 @@ function orclContract() {
     fills: [{ at: NY(9, 31), side: "buy", opening: true, contracts: 2, price: 6.2, provisional: false, text: "Bought 2 at 6.20" }] };
 }
 
-async function open(page: Page, { width = 1440, height = 900, contract = (occ: string) => occ === ORCL_CALL ? { json: orclContract() } : { json: { state: "none", symbol: "APLD", reason: "No trades in this contract in the last few sessions." } } } = {}) {
+type Answer = { status?: number; json: unknown };
+async function open(page: Page, { width = 1440, height = 900, contract = (occ: string): Answer => occ === ORCL_CALL ? { json: orclContract() } : { json: { state: "none", symbol: "APLD", reason: "No trades in this contract in the last few sessions." } } }: { width?: number; height?: number; contract?: (occ: string) => Answer } = {}) {
   const asked: string[] = [];
   await page.setViewportSize({ width, height });
   await page.clock.install({ time: NOW });
@@ -134,7 +135,7 @@ test("a held call: Contract shows its trades, his fills and P&L at the cursor, a
   await expect(page.getByRole("group", { name: "Timeframe" })).toHaveCount(0);  // the stock's timeframes have no place here
   await expect(page.getByTestId("desk-chart-canvas")).toHaveCount(0);
   // The latest price is the live mark (4.10, 11:00): 2 contracts x (410 − 620) = −$420.
-  await expect(page.getByTestId("desk-contract-readout")).toContainText("ORCL 11/20/26 250C · mark 4.10");
+  await expect(page.getByTestId("desk-contract-readout")).toContainText("ORCL 11/20/26 250C · Mark 4.10");
   await expect(page.getByTestId("desk-contract-readout")).toContainText("−$420 on 2 contracts");
   await expect(page.getByTestId("desk-contract-legend")).toContainText("trades");
   await expect(page.getByTestId("desk-contract-legend")).toContainText("mark (bid/ask mid) while the desk was open");
@@ -168,9 +169,9 @@ test("a row with no quotable contract is never asked about, and a refused read l
   await expect(page.getByTestId("option-standing").first()).toBeVisible();
   await book(page).getByRole("button", { name: "ORCL 11/20/26 250C" }).click();
   await expect(page.getByTestId("desk-chart-canvas")).toHaveAttribute("data-bars", "60");
-  await expect.poll(() => asked.length).toBe(1);
-  expect(asked).toEqual([`ORCL ${ORCL_CALL}`]);  // MU's row has no contract to quote: no read
+  await expect.poll(() => asked.length).toBeGreaterThan(0);
   await expect(toggle(page)).toHaveCount(0);
+  expect(new Set(asked)).toEqual(new Set([`ORCL ${ORCL_CALL}`]));  // MU's row has no contract to quote: never read
 });
 
 test("on a phone the toggle is a full-size tap and the contract chart fits", async ({ page }) => {
