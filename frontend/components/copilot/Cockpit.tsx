@@ -16,7 +16,7 @@ import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
 import { getExposure } from "@/lib/copilot";
 import { DeskChart, ReadingLine, type DeskChartActions } from "@/components/copilot/DeskChart";
 import { DeskTimeline } from "@/components/copilot/Inspector";
-import { EarningsTag } from "@/components/copilot/EarningsTag";
+import { EarningsTag, PositionEarnings } from "@/components/copilot/EarningsTag";
 import {
   DESK_MARKET, DESK_TIMEFRAMES, daysTo, deskSymbolThread, getDeskSparks, liveOn, money, nyDay, readLook, saveLook, signedPct, sinceLines,
   type DeskBookState, type DeskChartData, type DeskEvents, type DeskLive, type DeskLook, type DeskTimeframe, type DeskNeed, type DeskSession, type DeskSparks, type DeskThread, type DeskThreadRef,
@@ -472,10 +472,12 @@ function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
  * stock against SPY today, time held: P&L, the distance to the stop and expiry are the row's) and, folded, what touched
  * the thread. No symbol: QQQ with the owner's fills and pings.
  */
-export function CentreChart({ symbol, thread, row, sparks, actions, rows = [] }: {
+export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], earnings = null }: {
   symbol: string | null; thread: DeskThreadRef | null; row: DeskThread | null; sparks: DeskSparks | null; actions?: DeskChartActions;
   /** The desk's rows, so a held option's standing can tell a lone long option from one leg of a structure. */
   rows?: DeskThread[];
+  /** Earnings tags (``useDeskEvents``): a held option's header says when a report falls inside its life. */
+  earnings?: DeskEvents | null;
 }) {
   const ref = useMemo(() => thread ?? (symbol ? deskSymbolThread(symbol) : null), [thread, symbol]);
   const [timeline, setTimeline] = useState(false);
@@ -499,6 +501,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [] }:
       <ReadingLine data={reading} fallback={fallback} live={live} />
       {row?.book?.option && <OptionStanding row={row} rows={rows}
         fallback={reading?.state === "ok" && reading.reading ? { last: reading.reading.last, at: reading.reading.at } : sparkPrice(sparks, symbol)} />}
+      <PositionEarnings row={row} earnings={earnings} />
       <div className="flex items-center gap-1">
         <div role="group" aria-label="Timeframe" className="flex gap-1">
           {DESK_TIMEFRAMES.map(item => (

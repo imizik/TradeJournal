@@ -692,7 +692,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} pick={ticketPick} onOpen={id => { setTicketFor(id); setTicketPick(null); }} onClose={() => { setTicketFor(null); setTicketPick(null); }}
                 onPlaced={symbol => { setTicketFor(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
                 : centreTab === "chart"
-                ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} />
+                ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events} />
                 : <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed} />}
             </div>
           </section>

@@ -97,6 +97,9 @@ test("book and Watching rows: amber when the report is inside a held contract, g
   const last = asked.at(-1)!;
   expect(last.searchParams.get("symbols")!.split(",").sort()).toEqual(["AMD", "NVDA", "ORCL"]);
   expect(last.searchParams.get("held")).toBe("ORCL:2026-11-20");
+  // The held contract's header says the report is inside its life, once.
+  await book.getByRole("button", { name: /^ORCL / }).click();
+  await expect(page.getByTestId("position-earnings")).toHaveText("Earnings Thu, before your Nov 20 expiry · time of day not published");
   await page.screenshot({ path: test.info().outputPath("book-tags.png") });
 });
 

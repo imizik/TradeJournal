@@ -91,3 +91,11 @@ export function EarningsTag({ tag, day, className }: { tag: DeskEarningsTag | un
     </span>
   );
 }
+
+/** The position header's line for a held option whose life spans the next report (``earningsLine``); nothing otherwise. */
+export function PositionEarnings({ row, earnings }: { row: DeskThread | null; earnings: DeskEvents | null }) {
+  const expiry = row && row.instrument !== "stock" ? row.book?.expiry : null;
+  const line = row?.symbol && earnings ? earningsLine(earnings.rows[row.symbol], expiry, earnings.today) : null;
+  if (!line) return null;
+  return <p data-testid="position-earnings" className="text-xs text-amber-200">{line}</p>;
+}
