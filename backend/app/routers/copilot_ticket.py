@@ -6,6 +6,9 @@ owner picked when the plan names no contract. 404 without a saved plan, 409 once
 
 There is no write here and nothing that places, sends or stages an order; the ticket's fields are copied into
 Robinhood by hand. Owner-only like every ``/copilot`` route; refuses while the lab is off.
+
+``GET /copilot/chain?symbol=&expiration=``: the desk's Chain tab (``engine/desk_chain.py``), one expiry of the ticker's
+option chain around the price with his held and planned contracts marked. Market data only; never Robinhood.
 """
 from datetime import date
 
@@ -14,7 +17,7 @@ from sqlmodel import Session
 
 from app.ai import copilot
 from app.database import get_session
-from app.engine import desk_ticket
+from app.engine import desk_chain, desk_ticket
 
 router = APIRouter()
 
@@ -41,3 +44,13 @@ def ticket(investigation_id: str, expiration: date | None = None, strike: float 
         return desk_ticket.build(db, investigation_id, mode=getattr(found, "evidence", "live"), pick=pick)
     except desk_ticket.TicketError as exc:
         raise HTTPException(404 if exc.code == "no_plan" else 409, str(exc)) from None
+
+
+@router.get("/chain")
+def chain(symbol: str = Query(..., min_length=1, max_length=15), expiration: date | None = None,
+          db: Session = Depends(get_session)):
+    found = _settings()
+    try:
+        return desk_chain.view(db, symbol, expiration, mode=getattr(found, "evidence", "live"))
+    except desk_chain.ChainError as exc:
+        raise HTTPException(400, str(exc)) from None

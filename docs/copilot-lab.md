@@ -658,8 +658,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   `POST /copilot/desk/robinhood/refresh`, no input) or, signed out, expired or stale, says so; then the book is exactly
   the journal's. Off, nothing changes and no line shows. Not followed tickers stay hidden. Display only: nothing is
   written to the journal. The copilot sees the same snapshot's numbers (§ Owner context), never a Robinhood tool.
-- **Centre.** A tab strip, **Chart** first, **Feed**, **Check a call** (§ Check a call) and **Ticket** (see
-  [Ticket](#ticket); no tab shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
+- **Centre.** A tab strip, **Chart** first, **Chain** (see [Chain](#chain)), **Feed**, **Check a call** (§ Check a
+  call) and **Ticket** (see [Ticket](#ticket); no tab shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
   position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's
   fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D, with studies (VWAP, EMAs, SMAs,
   volume), the symbol's alerts and a level menu to act from the chart, a reading line under the symbol and
@@ -1446,6 +1446,42 @@ that nothing in it places or sends anything.
   Robinhood's option order screen asks for them (symbol, Buy · Call/Put, expiration, strike, limit price, contracts),
   with a fallback copy where the page has no clipboard API. **I placed it** records nothing (the fill arrives by
   Robinhood's email as today) and returns to the symbol's chart; **Not now** closes the ticket.
+- **A pick from the Chain tab** (`?expiration=&strike=`, Put on ticket) replaces the contract the plan names, on the
+  plan's own side; the plan's own words still show under it.
+
+### Chain
+
+**The Chain tab reads; it never sends.** One expiry of the selected ticker's option chain, to pick a contract without
+opening Robinhood (`GET /copilot/chain?symbol=&expiration=`; `app/engine/desk_chain.py`,
+`frontend/components/copilot/DeskChain.tsx`). Market data comes from Tradier through the options feed, never
+Robinhood; `backend/tests/test_desk_chain.py` checks that nothing in it sends anything or reads Robinhood.
+
+- **Expiries** nearest first, today's 0DTE first when listed; third Fridays are marked monthly, and an expiry where he
+  holds a contract has a dot. The nearest is shown until he picks another.
+- **Strikes:** ten either side of the strike nearest the price (marked ATM), only the primary root (SPXW for SPX).
+  Calls and puts side by side when the tab is wide enough, else a Calls / Puts toggle; in-the-money cells are shaded.
+  The price line sits between the strikes and moves with the desk's shared ticker (§ Live prices). Without a price
+  the window centres where calls and puts cost the same, and says so.
+- **Per contract:** bid, ask, mark (the midpoint), spread, volume, open interest, delta and IV (columns drop on a
+  narrow tab; the tapped contract's row shows all of them). A spread at or over 10% of the mark is **wide**, in plain
+  words with what crossing it costs a contract. A missing bid or ask shows a dash and no mark, never a zero.
+- **Marks:** his open journal contracts (Webull out) with their count, the contract a saved plan names (**plan**), and
+  a live plan's entry or exit price within half a strike step of a strike (**entry**, **exit**).
+- **Quote age:** the read's time beside the price. In the regular session a chain whose last good read is more than
+  45 s old is greyed with that time and why; a contract whose older quote side is more than 15 minutes old is greyed
+  with its own time. Outside the session it says **Market closed** with the read's time. Fixture mode shows the
+  copilot's simulated NBIS chain, labelled; replay shows none.
+- **Cadence and budget:** one chain read per expiry through `options_feed.chains` (its cache, its single pass at a
+  time, its 24-a-minute share of the options budget's 30). A read serves for 12 s in the session and 5 minutes
+  outside; the tab asks every 15 s while it is open and the page is visible in the session, and once a minute
+  outside it (answered from the kept read, so at most one chain request per five minutes). With the tab open that is about 4 option-chain requests a minute, plus the stock's quote from the chart
+  feed's shared 15-second cache (at most 4 a minute) and the expiry list every 30 minutes. A read the pacing refuses
+  answers from the chain already kept, greyed once it ages. `Server-Timing` names `chain_read` and `chain_spot`.
+- **Tap a contract:** a row with its numbers and **Check it** (opens Check a call with the contract in the box, e.g.
+  "NBIS 11/14 105C"; nothing runs until he taps Check it), **Plan it** (the plan flow with the contract and its mark
+  as text he edits) and **Put on ticket** (the newest armed saved plan in that ticker on the same side opens its
+  ticket with this contract; a stock or sell-side plan has no option ticket and is not offered; with none the button
+  is off and says to plan it first). No order path of any kind.
 
 **Server time (2026-11-12).** Each desk read (every `GET /copilot/desk/…`, the thread header's
 `GET /charts/journal/positions/{symbol}/context` and `GET /copilot/symbol/{symbol}`) answers with a standard

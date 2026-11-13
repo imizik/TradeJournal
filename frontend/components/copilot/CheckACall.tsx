@@ -86,10 +86,12 @@ function Card({ check, onPassed }: { check: CheckedCall; onPassed(next: CheckedC
 
 /**
  * The desk's Check a call tab (docs/copilot-lab.md § Check a call): paste a Discord call, see what was read and the
- * copilot's card, then Plan it or Pass; the day's checked calls below, from here and from the Telegram bot alike.
+ * copilot's card, then Plan it or Pass; the day's checked calls below, from here and from the Telegram bot alike. ``seed``
+ * (the Chain tab's Check it) fills the box with a contract; nothing runs until he taps Check it.
  */
-export default function CheckACall() {
-  const [text, setText] = useState("");
+export default function CheckACall({ seed = null }: { seed?: { text: string; n: number } | null } = {}) {
+  const [text, setText] = useState(seed?.text ?? "");
+  useEffect(() => { if (seed) setText(seed.text); }, [seed]); // eslint-disable-line react-hooks/set-state-in-effect -- the Chain tab's Check it fills the box; he still taps Check it
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [current, setCurrent] = useState<CheckedCall | null>(null);

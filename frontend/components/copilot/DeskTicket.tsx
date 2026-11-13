@@ -20,14 +20,18 @@ const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foregr
 const READ_MS = 60_000;
 const STALE_S = 15 * 60;  // the server's QUOTE_STALE_S
 
+/** A contract he picked for a ticket (the Chain tab's Put on ticket): it replaces the contract the plan names. */
+export type TicketPick = { expiry: string; strike: number };
+
 /** Opens a saved plan's ticket: on the desk the Ticket tab takes it; anywhere else the desk opens on it. */
-export function openTicket(investigationId: string) {
-  const handled = !window.dispatchEvent(new CustomEvent(TICKET_EVENT, { detail: { investigationId }, cancelable: true }));
+export function openTicket(investigationId: string, pick?: TicketPick) {
+  const handled = !window.dispatchEvent(new CustomEvent(TICKET_EVENT, { detail: { investigationId, pick }, cancelable: true }));
   if (!handled) window.location.assign(`/copilot-lab?ticket=${encodeURIComponent(investigationId)}`);
 }
 
 export type TicketPlan = {
   investigation_id: string; symbol: string; direction: "long" | "short" | null; instrument: string | null; thesis: string | null;
+  option_type?: "call" | "put" | null; // a long call or put plan; anything else has no option ticket
   confirmed_at: number; entry: number | null; invalidation: number | null;
 };
 type Account = { id: string; label: string; last4: string | null; kind: "roth" | "mcp" | "other" };
@@ -143,11 +147,11 @@ function Row({ name, children, copy }: { name: string; children: React.ReactNode
 }
 
 /** The Ticket tab: the open ticket, else the list of saved plans a ticket can open, else what to do with none. */
-export default function DeskTicket({ plans, failed, open, onOpen, onClose, onPlaced, onPlan }: {
-  plans: TicketPlan[] | null; failed: boolean; open: string | null; onOpen(investigationId: string): void; onClose(): void;
+export default function DeskTicket({ plans, failed, open, pick = null, onOpen, onClose, onPlaced, onPlan }: {
+  plans: TicketPlan[] | null; failed: boolean; open: string | null; pick?: TicketPick | null; onOpen(investigationId: string): void; onClose(): void;
   onPlaced(symbol: string): void; onPlan(): void;
 }) {
-  if (open) return <TicketView key={open} investigationId={open} onClose={onClose} onPlaced={onPlaced} />;
+  if (open) return <TicketView key={`${open}|${pick?.expiry ?? ""}|${pick?.strike ?? ""}`} investigationId={open} initialPick={pick} onClose={onClose} onPlaced={onPlaced} />;
   return (
     <div data-testid="desk-ticket" className="space-y-3">
       <p className="text-xs text-muted-foreground">A ticket opens only from a saved plan. It fills in what you type into Robinhood; nothing is sent from here.</p>
@@ -176,8 +180,10 @@ export default function DeskTicket({ plans, failed, open, onOpen, onClose, onPla
   );
 }
 
-function TicketView({ investigationId, onClose, onPlaced }: { investigationId: string; onClose(): void; onPlaced(symbol: string): void }) {
-  const [pick, setPick] = useState<{ expiry: string; strike: number } | null>(null);
+function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
+  investigationId: string; initialPick: TicketPick | null; onClose(): void; onPlaced(symbol: string): void;
+}) {
+  const [pick, setPick] = useState<TicketPick | null>(initialPick);
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [account, setAccount] = useState<string | null>(null);
@@ -305,7 +311,7 @@ function TicketView({ investigationId, onClose, onPlaced }: { investigationId: s
       <div className="rounded-lg border bg-card px-3 py-1.5">
         <Row name="Contract" copy={<CopyButton text={k.label} label="contract" />}>
           <span className="font-mono tabular-nums">{k.label}</span>
-          {k.source === "picked" && <span className="block text-xs text-muted-foreground">Your pick from the chain</span>}
+          {k.source === "picked" && <span className="block text-xs text-muted-foreground">Your pick from the chain{ticket.plan_contract_words ? ` (your plan says: ${ticket.plan_contract_words})` : ""}</span>}
           {k.source === "plan" && ticket.plan_contract_words && <span className="block text-xs text-muted-foreground">Your plan says: {ticket.plan_contract_words}</span>}
         </Row>
         <Row name="Quantity" copy={<CopyButton text={qtyN ? String(qtyN) : ""} label="quantity" disabled={!qtyN} />}>
