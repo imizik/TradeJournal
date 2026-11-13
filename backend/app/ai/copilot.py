@@ -303,12 +303,13 @@ class AnthropicAdapter:
             "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             "messages": [wire(m) for m in messages],
             # A server tool (web search) runs at Anthropic and takes no streaming option.
-            "tools": [t if "type" in t else {**t, "eager_input_streaming": True} for t in tools],
             "thinking": {"type": "adaptive", "display": "updates"}, "output_config": {"effort": self.cfg.effort},
             "cache_control": {"type": "ephemeral"}, "betas": [PROGRESS_BETA],
         }
-        if not allow_tools:
-            kwargs["tool_choice"] = {"type": "none"}
+        if tools:  # a job with no tools (the day read) sends neither tools nor a tool choice
+            kwargs["tools"] = [t if "type" in t else {**t, "eager_input_streaming": True} for t in tools]
+            if not allow_tools:
+                kwargs["tool_choice"] = {"type": "none"}
         if self.container:
             kwargs["container"] = self.container
         if self.cfg.fallbacks:
@@ -418,6 +419,15 @@ class FakeAdapter:
                                        "input": call_check.tool_input(reading)}], "tool_use", _zero_usage(), self.model)
                 return
             text = call_check.fake_answer(reading, results.get("get_call_facts") or {})
+            for piece in re.findall(r"\S+\s*", text):
+                if self.delay_s:
+                    await asyncio.sleep(self.delay_s)
+                yield "text", piece
+            yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+            return
+        if prompt.startswith("Day read:"):  # the day_read job (engine/day_read.py): no tools, the facts in the message
+            from app.engine import day_read
+            text = day_read.fake_answer(prompt)
             for piece in re.findall(r"\S+\s*", text):
                 if self.delay_s:
                     await asyncio.sleep(self.delay_s)

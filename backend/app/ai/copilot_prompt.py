@@ -3,8 +3,9 @@
 Every model turn the app runs has a job: ``desk`` (a question on the desk, Charts, Radar or the panel), ``telegram`` (a
 typed question or a Why? tap in the phone chat), ``prep`` (the 08:30/09:00 morning brief), ``companion`` (a position
 companion update), ``week_review`` (the automatic weekly review), ``check_call`` (a trade call the owner shared from
-Discord, checked: ``engine/call_check.py``) or ``desk_read`` (the desk's few-line read of a ticker the owner selected,
-written before he types: ``engine/desk_read.py``). A job gets a shared core (who the owner is, the four
+Discord, checked: ``engine/call_check.py``), ``desk_read`` (the desk's few-line read of a ticker the owner selected,
+written before he types: ``engine/desk_read.py``) or ``day_read`` (the desk's read of the owner's day at the close,
+written from the day's facts with no tool: ``engine/day_read.py``). A job gets a shared core (who the owner is, the four
 questions, the evidence and safety rules), the parts of the desk's working rules it uses, its own answer format, its own
 shape reminder and only the tools it calls. Until 2026-11-10 every job got the desk's 3,800-word prompt, all 26 tools
 and the desk's shape, so the brief and the companion were told two contradictory formats at once.
@@ -19,7 +20,8 @@ from app.ai import copilot_answer, copilot_tools
 DESK, TELEGRAM, PREP, COMPANION, WEEK_REVIEW = "desk", "telegram", "prep", "companion", "week_review"
 CHECK = "check_call"
 DESK_READ = "desk_read"
-JOBS = (DESK, TELEGRAM, PREP, COMPANION, WEEK_REVIEW, CHECK, DESK_READ)
+DAY_READ = "day_read"
+JOBS = (DESK, TELEGRAM, PREP, COMPANION, WEEK_REVIEW, CHECK, DESK_READ, DAY_READ)
 ALL = frozenset(JOBS)
 CHAT = frozenset({DESK, TELEGRAM})  # the conversational jobs: the owner asked something
 OWNER_BLOCK = ALL - {PREP}  # the brief's own facts pack carries its positions and plans; the owner block would repeat them
@@ -82,12 +84,21 @@ what the owner missed or would have made since the post. Never tell them to buy,
 Nobody typed a question; write the glance they see beside the chart before deciding whether to ask more. Read only what \
 the glance needs (the quote and today's move, its group or the market when the move needs a cause, the news), at most \
 one round of reads, then write. Never suggest an order, a size or a plan card.""",
+    DAY_READ: """This turn is the desk's read of the owner's trading day, written once after the close, before they \
+ask anything. The message carries today's facts: TradeJournal's own day report (realised and open P&L by account, each \
+trade closed and opened today with its times, prices, size and whether a plan was saved before the entry, the plans \
+saved, the position alerts and what followed, and Robinhood fills the journal does not have yet). There are no tools: \
+write only from those facts and the owner context block. Copy every dollar figure exactly as the facts write it, sign \
+and cents included; never round, add up, estimate or work out a figure the facts do not state, and never name a ticker \
+the facts do not. A fill marked provisional is called provisional. Judge the trades in the owner's terms (entry \
+timing, size, held through a level or an alert, exited early, no plan) only from what the facts show; when they do not \
+show why, say what they do show. No generic advice, encouragement or anything to rate.""",
 }
 
 # The working rules: (jobs, text). The desk gets every one, in this order, which is its prompt as it was apart from the
 # 2026-11-10 trims (no audit figures, no example answer lines, the book tools that only repeated the owner block).
 RULES: tuple[tuple[frozenset, str], ...] = (
-    (ALL, """- Investigate with the read-only tools before giving a market read. Use only what they return; never invent \
+    (ALL - {DAY_READ}, """- Investigate with the read-only tools before giving a market read. Use only what they return; never invent \
 prices, moves or news. If a tool fails or reports missing/stale coverage, say so plainly and reason only from what is \
 available."""),
     (frozenset({DESK}), """- Follow-ups reuse what was read. When the owner's message comes after an "Earlier evidence" \
@@ -98,7 +109,7 @@ cover, dispute a specific number, or when its read is more than 15 minutes old w
 peer moves and quotes are fetched at a moment; news has publish times. State as-of times briefly and distinguish \
 "recorded earlier this session" from "fetched just now". If the market is closed or the data is from a prior \
 session, say that."""),
-    (ALL - {WEEK_REVIEW, CHECK}, """- When the owner asks why a symbol is moving, or whether a move is the stock or the market, \
+    (ALL - {WEEK_REVIEW, CHECK, DAY_READ}, """- When the owner asks why a symbol is moving, or whether a move is the stock or the market, \
 read get_market_regime (SPY, QQQ, IWM and RSP, the symbol's sector ETF, VIX, the 10-year and today's macro calendar) \
 beside the group comparison, and say which it is: the stock, its group, its sector or the whole market, with the \
 numbers. When they ask what Radar saw or what is moving today, get_radar_today lists the session's recorded events \
@@ -231,9 +242,9 @@ prices in), and on a hold of days name theta per day. Never recommend a specific
 trade-offs and let them choose."""),
     (ALL, """- If the context line or a tool result marks the data as SIMULATED, say plainly in your answer that the \
 numbers are simulated demo data, not real market data, and never present them as recorded or live."""),
-    (ALL - {PREP, COMPANION, CHECK, DESK_READ}, """- You cannot place orders or change accounts, and you cannot save plans, memories or \
+    (ALL - {PREP, COMPANION, CHECK, DESK_READ, DAY_READ}, """- You cannot place orders or change accounts, and you cannot save plans, memories or \
 alerts yourself: propose_plan only proposes. Say so if asked."""),
-    (frozenset({PREP, COMPANION, CHECK, DESK_READ}), """- You cannot place orders or change accounts, and you cannot save plans, memories \
+    (frozenset({PREP, COMPANION, CHECK, DESK_READ, DAY_READ}), """- You cannot place orders or change accounts, and you cannot save plans, memories \
 or alerts. Say so if asked."""),
 )
 
@@ -345,11 +356,21 @@ Changes if: <the one thing that would change the picture, at most 15 words>
 closing note; say "no plan" in the first bullet when the owner has none for it. The same shape is repeated after each \
 tool result; follow it there."""
 
+DAY_READ_FORMAT = """Answer format (the desk's read of the owner's day). Four to six short plain lines, nothing before or \
+after, no markdown, headings, bold or bullets, each line one or two sentences, under 110 words in all:
+P&L: <realised today by account, then open P&L by account, each figure exactly as the facts write it>
+Plans: <which trades had a plan saved before the entry and which did not, by contract>
+Biggest: <the one trade or decision that cost or saved the most money today, its figure, and why in the owner's terms>
+Tomorrow: <one concrete thing to do differently, tied by name to a trade from today>
+Add one more line only for a fact the four leave out that changes the picture (a provisional fill, an alert that was \
+held through). When nothing closed and nothing is open, say so in the P&L line and leave out Biggest. No Verdict line, \
+no closing note, no question back."""
+
 FORMAT = {DESK: DESK_FORMAT, TELEGRAM: TELEGRAM_FORMAT, PREP: PREP_FORMAT, COMPANION: COMPANION_FORMAT, WEEK_REVIEW: WEEK_FORMAT,
-          CHECK: CHECK_FORMAT, DESK_READ: DESK_READ_FORMAT}
+          CHECK: CHECK_FORMAT, DESK_READ: DESK_READ_FORMAT, DAY_READ: DAY_READ_FORMAT}
 SHAPE = {DESK: copilot_answer.ANSWER_SHAPE, TELEGRAM: copilot_answer.TELEGRAM_SHAPE, PREP: copilot_answer.PREP_SHAPE,
          COMPANION: copilot_answer.COMPANION_SHAPE, WEEK_REVIEW: copilot_answer.WEEK_SHAPE, CHECK: copilot_answer.CHECK_SHAPE,
-         DESK_READ: copilot_answer.DESK_READ_SHAPE}
+         DESK_READ: copilot_answer.DESK_READ_SHAPE, DAY_READ: copilot_answer.DAY_READ_SHAPE}
 
 # --------------------------------------------------------------------------- tools by job
 
@@ -365,12 +386,13 @@ DESK_READ_TOOLS = ("get_group_comparison", "get_symbol_news", "get_symbol_events
                    "get_market_regime", "get_radar_today")
 JOB_ONLY = frozenset({"get_call_facts"})  # offered to its own job alone, never in "every tool"
 TOOL_NAMES = {DESK: None, TELEGRAM: None, PREP: frozenset(PREP_TOOLS), COMPANION: frozenset(COMPANION_TOOLS),
-              WEEK_REVIEW: frozenset(WEEK_TOOLS), CHECK: frozenset(CHECK_TOOLS), DESK_READ: frozenset(DESK_READ_TOOLS)}  # None: every tool but JOB_ONLY
+              WEEK_REVIEW: frozenset(WEEK_TOOLS), CHECK: frozenset(CHECK_TOOLS), DESK_READ: frozenset(DESK_READ_TOOLS),
+              DAY_READ: frozenset()}  # the day read: no tools, the day's facts are in its message  # None: every tool but JOB_ONLY
 
 
 def job_for(kind: str | None, source: str | None) -> str:
     """The job of a recorded turn, from what its caller already passes to ``copilot_spend.recorded_turn``."""
-    if kind in (CHECK, DESK_READ):
+    if kind in (CHECK, DESK_READ, DAY_READ):
         return kind
     if source == "telegram":
         return TELEGRAM

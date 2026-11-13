@@ -16,6 +16,7 @@ import LongHolds from "@/components/copilot/LongHolds";
 import LinkedActivity from "@/components/copilot/LinkedActivity";
 import ProposalCard from "@/components/copilot/ProposalCard";
 import ResearchDeeper from "@/components/copilot/ResearchDeeper";
+import { DayRead } from "@/components/copilot/DayRead";
 import { DeskRead } from "@/components/copilot/DeskRead";
 import TradePlanCard from "@/components/copilot/TradePlanCard";
 import { useSpeakAnswer } from "@/components/copilot/SpeakAnswer";
@@ -1468,6 +1469,11 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       })}
 
       <div className={panel ? "space-y-4 py-1" : "space-y-5 py-2"} aria-live="polite">
+        {/* The day read: after the close, a few lines on his day above the day's conversation or none. */}
+        {desk && !panel && enabled && (!current || current.main_day) && !openingMain && !scoping && (
+          <DayRead render={text => <Answer text={text} />}
+            onAskMore={(text, at, facts) => fill(`Context: the desk's read of my day${at ? ` at ${at} ET` : ""}:\n${text}\n\nThe day report's facts it was written from:\n${facts}\n\n`)} />
+        )}
         {/* The desk read: a selected ticker with no conversation open gets a few lines without his typing. */}
         {desk && !panel && enabled && symbol && !current && !messages.length && !openingMain && !scoping && (
           <DeskRead symbol={symbol} render={text => <Answer text={text} />}

@@ -79,7 +79,12 @@ DESK_READ_SHAPE = (
     "against the owner's levels, then what is moving it today), then Changes if, at most "
     f"{CHANGES_WORDS} words. No Read or Against line, no headings, bold or closing note.]"
 )
-SHAPES = (ANSWER_SHAPE, TELEGRAM_SHAPE, PREP_SHAPE, COMPANION_SHAPE, WEEK_SHAPE, CHECK_SHAPE, DESK_READ_SHAPE)
+DAY_READ_SHAPE = (
+    "[Answer shape: the day read: four to six short plain lines, P&L, Plans, Biggest, Tomorrow (and one more only when "
+    "it changes the picture), under 110 words in all. Every dollar figure exactly as the facts write it. No Verdict line, "
+    "markdown, bullets or closing note.]"
+)
+SHAPES = (ANSWER_SHAPE, TELEGRAM_SHAPE, PREP_SHAPE, COMPANION_SHAPE, WEEK_SHAPE, CHECK_SHAPE, DESK_READ_SHAPE, DAY_READ_SHAPE)
 
 
 def without_shape(content: str) -> str:

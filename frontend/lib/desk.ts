@@ -761,6 +761,21 @@ export async function getDeskRead(symbol: string, refresh = false, signal?: Abor
   return body as DeskRead;
 }
 
+/** ``POST /copilot/desk/day-read`` (``engine/day_read.py``): the read of the owner's day after the close. ``early``: the
+ * session has not closed; ``quiet``: no fills and no plans (one line, no call); ``none``: today's automatic read already ran
+ * and nothing is kept (Refresh writes it again); ``facts``: what an ``ok`` read was written from, for Ask more. */
+export type DayRead = {
+  state: "early" | "quiet" | "ok" | "none" | "budget" | "error"; text?: string; at?: number; age_s?: number | null;
+  cached?: boolean; cost_usd?: number; message?: string; facts?: string; today?: DeskReadToday | null;
+};
+export async function getDayRead(refresh = false, signal?: AbortSignal): Promise<DayRead> {
+  const response = await fetch(apiUrl("/copilot/desk/day-read"), { method: "POST", cache: "no-store", signal,
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refresh }) });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  return body as DayRead;
+}
+
 // --------------------------------------------------------------------------- earnings on the book and Watching rows
 
 /** One symbol's earnings tag (``desk_events.tag``): ``grey`` within ``window`` trading days, ``amber`` when a held option

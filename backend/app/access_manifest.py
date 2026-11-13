@@ -113,6 +113,7 @@ DOMAIN_ROUTES = frozenset({
     'POST /copilot/desk/watching/robinhood',  # list ids checked against a fresh read of his own lists; two watchlist reads only
     'GET /copilot/desk/timings',  # section names and milliseconds only, and today's desk-read count and cost
     'POST /copilot/desk/read',  # one ticker's few-line read: a model turn on the daily budget, kept per ticker; Robinhood only as the owner context pack already reads it
+    'POST /copilot/desk/day-read',  # the read of his day after the close: one model turn a day on the daily budget, from the day report's facts; no tool, no Robinhood call
     'GET /copilot/checks',
     'POST /copilot/checks',
     'POST /copilot/checks/{check_id}/pass',
