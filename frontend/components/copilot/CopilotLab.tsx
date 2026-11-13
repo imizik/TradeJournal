@@ -136,6 +136,15 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // The tab survives a link that reopens the desk (a feed item's Ask or Plan it, a checked call's Plan it) for this browser tab.
   useEffect(() => { try { const kept = window.sessionStorage.getItem(CENTRE_KEY); if (kept === "feed" || kept === "check" || kept === "chain" || kept === "grid") setCentreTab(kept); } catch { /* chart */ } }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
   useEffect(() => { try { window.sessionStorage.setItem(CENTRE_KEY, centreTab); } catch { /* this view only */ } }, [centreTab]);
+  // On a phone the tab strip scrolls: keep the chosen tab in it (a link can choose Ticket), never moving the page.
+  useEffect(() => {
+    const strip = document.querySelector<HTMLElement>('[role="tablist"][aria-label="Centre"]');
+    const tab = strip?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!strip || !tab || strip.scrollWidth <= strip.clientWidth) return;
+    const box = strip.getBoundingClientRect(), at = tab.getBoundingClientRect();
+    if (at.left < box.left) strip.scrollLeft -= box.left - at.left + 8;
+    else if (at.right > box.right) strip.scrollLeft += at.right - box.right + 8;
+  }, [centreTab]);
   // The Ticket tab: a saved plan's ticket opens from its card, its thread's header, a book row or the tab's own list
   // (``openTicket``), or from a link (?ticket=) made where the desk was not open.
   const tickets = useTicketPlans(on);
@@ -686,11 +695,12 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         {on && (
           <section id="desk-centre" aria-label="Chart and feed" className={styles.centre}>
             {/* Chart first, then the Grid, Chain, Feed, Check a call and Ticket. */}
-            {/* Six tabs fit a 375 px phone (Linux fonts too) only with tighter spacing there. */}
-            <div role="tablist" aria-label="Centre" className="flex gap-0.5 border-b px-1.5 pt-1.5 sm:gap-1 sm:px-2">
+            {/* Six tabs are wider than a 375 px phone: the strip scrolls sideways inside itself, never the page. Its bottom
+                line is an inset shadow, so a tab's underline paints over it without spilling past the scroll box. */}
+            <div role="tablist" aria-label="Centre" className="flex gap-0.5 overflow-x-auto px-1.5 pt-1.5 shadow-[inset_0_-1px_0_hsl(var(--border))] [scrollbar-width:none] sm:gap-1 sm:px-2">
               {([["chart", "Chart"], ["grid", "Grid"], ["chain", "Chain"], ["feed", "Feed"], ["check", "Check a call"], ["ticket", "Ticket"]] as const).map(([id, label]) => (
                 <button key={id} type="button" role="tab" aria-selected={centreTab === id} onClick={() => setCentreTab(id)}
-                  className={cn("-mb-px min-h-11 shrink-0 whitespace-nowrap border-b-2 px-2 text-sm sm:min-h-9 sm:px-2.5", centreTab === id ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+                  className={cn("min-h-11 shrink-0 whitespace-nowrap border-b-2 px-2 text-sm sm:min-h-9 sm:px-2.5", centreTab === id ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
                   {label}
                   {id === "feed" && feedNew.count > 0 && <span data-testid="feed-new" className="ml-1.5 text-xs tabular-nums text-muted-foreground">{feedNew.count}<span className="sr-only"> new</span></span>}
                 </button>
