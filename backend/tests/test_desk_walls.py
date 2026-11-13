@@ -79,17 +79,17 @@ def test_replay_reads_nothing_and_the_fixture_is_simulated_nbis():
 # --- one model, one cache ------------------------------------------------------------------------------------------
 
 def test_the_desk_reads_through_the_ladder_and_shares_its_chain_cache():
-    clock = Clock()
-    client = FakeClient(clock)
-    feed = OptionsFeed(client=client, calendar=Calendar(), clock=clock, spawn=lambda work: work())
+    tick = Clock()
+    client = FakeClient(tick)
+    feed = OptionsFeed(client=client, calendar=Calendar(), clock=tick, spawn=lambda work: work())
     charts = feed.ladder("SPY", "nearest", True, 100.0)
     assert charts["state"] == "ready" and len(client.calls) == 2  # the list and the nearest chain
     # The desk a moment later: the same call, nothing read again; the same walls.
-    found = desk_walls.read("SPY", mode="live", now=clock(), ladder=lambda symbol, expiration: feed.ladder(symbol, "nearest", True, 100.0, expiration))
+    found = desk_walls.read("SPY", mode="live", now=tick(), ladder=lambda symbol, expiration: feed.ladder(symbol, "nearest", True, 100.0, expiration))
     assert len(client.calls) == 2 and found["state"] == "ready"
     assert {level["kind"]: level["price"] for level in found["levels"]}["call_wall"] == charts["walls"]["call_oi"]
     # The Chain tab having read the nearest chain leaves nothing for the walls to read either.
-    clock.advance(70)
+    tick.advance(70)
     feed.chains("SPY", lambda live: live[:1], ttl=12)
     calls = len(client.calls)
     feed.ladder("SPY", "nearest", True, 100.0)
@@ -97,12 +97,12 @@ def test_the_desk_reads_through_the_ladder_and_shares_its_chain_cache():
 
 
 def test_a_later_expiry_reads_only_that_chain_and_an_unlisted_one_falls_back_to_the_nearest():
-    clock = Clock()
-    client = FakeClient(clock)
+    tick = Clock()
+    client = FakeClient(tick)
     friday = date(2026, 10, 16)
     client.chains[("SPY", friday)] = [leg("SPY", friday, strike, side, oi=5000 if (side, strike) in (("call", 105), ("put", 95)) else 100)
                                       for strike in range(90, 111) for side in ("call", "put")]
-    feed = OptionsFeed(client=client, calendar=Calendar(), clock=clock, spawn=lambda work: work())
+    feed = OptionsFeed(client=client, calendar=Calendar(), clock=tick, spawn=lambda work: work())
     found = feed.ladder("SPY", "nearest", True, 100.0, friday)
     assert found["expirations"] == [friday.isoformat()] and found["walls"]["call_oi"] == 105.0 and found["walls"]["put_oi"] == 95.0
     assert [kind for _, kind, _ in client.calls] == ["list", "chain"]
