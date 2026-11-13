@@ -444,7 +444,42 @@ def _book(row: dict, plan: dict | None, flagged: dict | None) -> dict:
             "days_held": row.get("days_held"), "track": track,
             "state": _book_state(kinds, planned, gave_back, row.get("unrealized_usd")), "planned": planned,
             "stop_pct": level.get("distance_pct") if level and level.get("state") == "armed" else None,
-            "tick": _tick(row)}
+            "tick": _tick(row), "option": _option_terms(row)}
+
+
+def _option_terms(row: dict) -> dict | None:
+    """What the desk's option standing (``frontend/lib/optionStanding.ts``) needs for a held option: the contract, side,
+    quantity, the cost a contract (premium x 100) and the Greeks a share with where and when they came from. The
+    journal's Greeks are the app's own option quote's (Tradier's hourly ORATS figures, read from the quote cache the
+    positions' marks just filled; never a provider call); a Robinhood-matched row takes Robinhood's (``_live_terms``).
+    None for a stock. A missing figure stays None, never zero."""
+    option = row.get("option") or {}
+    if row.get("instrument") != "option" or not option:
+        return None
+    from app.engine.quotes import OptionQuoteRequest, cached_option_quote
+    greeks = None
+    try:
+        quote = cached_option_quote(OptionQuoteRequest(ticker=row["symbol"], expiration=option["expiry"],
+                                                       strike=float(option["strike"]), option_type=option.get("side") or ""))
+    except (KeyError, TypeError, ValueError):
+        quote = None
+    if quote is not None and any(v is not None for v in (quote.delta, quote.theta, quote.iv)):
+        greeks = {"delta": quote.delta, "theta": quote.theta, "iv": quote.iv, "as_of": quote.iv_updated_at, "source": "tradier"}
+    return {"side": option.get("side"), "strike": option.get("strike"), "expiry": option.get("expiry"),
+            "direction": row.get("direction"), "quantity": row.get("quantity"), "multiplier": 100,
+            "cost": row.get("avg_entry"), "greeks": greeks}
+
+
+def _live_terms(live: dict, as_of: float | None) -> dict | None:
+    """A Robinhood option's standing terms (``_option_terms``' shape) from the snapshot: its own cost, quantity and
+    multiplier, and the Greeks its last read kept (``as_of`` is that read's epoch). None for a stock."""
+    if live.get("instrument") != "option":
+        return None
+    raw = live.get("greeks") if isinstance(live.get("greeks"), dict) else {}
+    greeks = {"delta": raw.get("delta"), "theta": raw.get("theta"), "iv": raw.get("iv"), "as_of": as_of, "source": "robinhood"}
+    return {"side": live.get("side"), "strike": live.get("strike"), "expiry": live.get("expiry"), "direction": live.get("direction"),
+            "quantity": live.get("quantity"), "multiplier": live.get("multiplier"), "cost": live.get("avg_cost"),
+            "greeks": greeks if any(greeks[k] is not None for k in ("delta", "theta", "iv")) else None}
 
 
 def _tick(row: dict) -> dict | None:
@@ -788,6 +823,8 @@ def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict) -> li
         extra = [p for p in extra if rb.contract_key(p["symbol"], p["instrument"], p["side"], p["strike"], p["expiry"]) not in held]
     by_key = {r["key"]: r for r in rows if r.get("book") is not None}
 
+    as_of = snapshot.get("at")
+
     def facts(live: dict) -> dict:
         return {"usd": live["usd"], "pct": live["pct"], "quantity": live["quantity"], "mark": live["mark"],
                 "account": rb.account_tag(live)}
@@ -796,7 +833,10 @@ def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict) -> li
     for trade_id, live in matched.items():
         row = by_key.get(f"trade:{trade_id}")
         if row is not None:
-            row["book"] |= {**facts(live), "live": "matched"}
+            terms = _live_terms(live, as_of)
+            if terms is not None and terms["greeks"] is None:  # Robinhood gave no Greeks: the app's own quote's stand
+                terms["greeks"] = (row["book"].get("option") or {}).get("greeks")
+            row["book"] |= {**facts(live), "live": "matched", "option": terms or row["book"].get("option")}
             row["book"]["tick"] = _live_tick(row["book"].get("tick"), live)
             # Robinhood's P&L decides whether it is still in profit: the tag follows the live numbers too.
             if row["book"]["state"] not in ("past_stop", "near_stop"):
@@ -819,7 +859,8 @@ def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict) -> li
                    symbol=live["symbol"], instrument=_instrument(contract, live["symbol"], live["instrument"]), value=value,
                    path=f"/copilot-lab?{urlencode({'symbol': live['symbol']})}")
         row["book"] = {"usd": live["usd"], "pct": live["pct"], "expiry": live["expiry"], "days_held": None, "track": None,
-                       "state": "no_plan", "planned": False, "stop_pct": None, **facts(live), "live": "new"}
+                       "state": "no_plan", "planned": False, "stop_pct": None, **facts(live), "live": "new",
+                       "option": _live_terms(live, as_of)}
         new.append(row)
     return new
 

@@ -9,6 +9,7 @@ import type { PlanPosition } from "@/components/dashboard/PlansCard";
 import type { AlertFeedback } from "@/lib/alertFeedback";
 import { api, apiUrl } from "@/lib/api";
 import { UUID_RE, readDeepLink, type ExitLesson, type InvestigationSummary, type PlanBoardLevel, type PlanBoardRow, type PlansBoard } from "@/lib/copilot";
+import type { OptionTerms } from "@/lib/optionStanding";
 import type { RadarRating } from "@/lib/radar";
 
 /** The phone's three tabs; on a wide screen every pane shows at once. */
@@ -105,6 +106,9 @@ export type DeskBook = {
    * the symbol to quote (an option's OCC symbol), 100 for a contract or 1 for a share, the cost and quantity in those
    * units, and the side. Absent or null when the P&L is not derived from a price the desk can quote. */
   tick?: { quote: string; scale: number; cost: number; quantity: number; sign: 1 | -1 } | null;
+  /** A held option's terms for its standing (``_option_terms`` / ``_live_terms`` in copilot_desk.py; ``optionStanding`` in
+   * optionStanding.ts): contract, side, size, cost a contract and the Greeks with their source and time. Null for a stock. */
+  option?: OptionTerms | null;
 };
 
 /** The Robinhood feed's state on the desk (docs/robinhood-read-feed.md). ``ok`` (with ``joined``) drives the book;

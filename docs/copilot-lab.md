@@ -1383,6 +1383,31 @@ Cost: one tab in the session adds at most 12 Tradier calls a minute (one every 5
 minute reads above are unchanged. Proof: `backend/tests/test_desk_ticks.py` and `frontend/e2e/copilot-desk-ticks.spec.ts`
 (rows change in place without a remount, the grey and its time, the back-off, no polling when closed, 390 px).
 
+### Where a held option stands
+
+Selecting a held call or put shows, under the centre's header (and in one line under its book row), what Robinhood's
+position screen shows: break-even (strike ± the cost a share) and how far the stock is from it in $ and %, days left
+(0–2 days in words: "Expires today", "Expires Friday"), what the position is worth at expiry if the stock stays where it
+is (intrinsic value × contracts × 100) against what it is worth now (the difference is time value), decay a day
+(theta × 100 × contracts), "moves about $X per $1 up in the stock" (delta × 100 × contracts; a put's is negative), IV,
+and a small P&L-at-expiry line with the stock now (white) and break-even (amber) marked.
+
+- **Terms from the book read.** Each option row carries `book.option` (`_option_terms` / `_live_terms` in
+  `copilot_desk.py`): side, strike, expiry, direction, quantity, multiplier, the cost a contract and the Greeks with
+  their source and time. A Robinhood-matched or Robinhood-only row takes Robinhood's cost, size and the Greeks its last
+  snapshot kept (no new Robinhood read); a journal-only row takes the app's own option quote's hourly Greeks from the
+  quote cache the marks just filled (`quotes.cached_option_quote`, never a provider call).
+- **Math in one place.** `frontend/lib/optionStanding.ts`, drawn by `components/copilot/OptionStanding.tsx`. The
+  stock-price figures and the value now move with the live prices; the Greeks refresh with the book read. Robinhood's
+  Greeks older than 3 minutes, and the app's hourly ones always, are greyed with their time.
+- **Nothing rather than a wrong number.** A short contract, or a ticker that also holds a short option (a spread or a
+  calendar the journal keeps as separate trades), shows a one-line note and no figures. A missing input leaves its
+  figure out and says so ("Greeks unavailable"), never a zero. Stocks get no standing (their P&L and day change only).
+
+Proof: `frontend/e2e/option-standing.spec.ts` (calls, puts, 0DTE, missing Greeks, short and unknown structures),
+`frontend/e2e/copilot-desk-option-standing.spec.ts` (the header on a held call and put, live movement, a spread leg),
+`backend/tests/test_copilot_desk.py` and `test_robinhood_book.py` (the terms on each kind of row).
+
 ### Ticket
 
 **The Ticket copies; it never sends.** It fills in what the owner types into the Robinhood app by hand. No order is

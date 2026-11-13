@@ -127,6 +127,31 @@ def test_every_position_row_carries_its_book_line(desk, engine, quotes):  # noqa
     assert row["group"] == "act" and row["book"]["state"] == "near_stop" and row["book"]["track"]["last"] == 20.0
 
 
+def test_an_option_row_carries_its_standing_terms_with_the_apps_own_greeks(desk, engine, quotes, monkeypatch):  # noqa: F811
+    """The desk's option standing (frontend/lib/optionStanding.ts) needs the contract, side, size and cost a contract;
+    the journal's Greeks are the app's own quote's, read from the cache the marks filled, never a new provider call."""
+    import time
+    from app.engine.quotes import OptionQuoteResult
+    trade = planned_nbis(engine)
+    monkeypatch.setattr(quote_engine, "_option_contract_cache", {})
+    [row] = [r for r in read(desk)["threads"] if r["key"] == f"trade:{trade}"]
+    assert row["book"]["option"] == {"side": "call", "strike": 100.0, "expiry": "2026-10-23", "direction": "long",
+                                     "quantity": 2.0, "multiplier": 100, "cost": 310.0, "greeks": None}  # none cached: unavailable
+    monkeypatch.setattr(quote_engine, "_option_contract_cache", {"NBIS261023C00100000": (OptionQuoteResult(
+        mid=4.0, iv=0.62, delta=0.48, theta=-0.21, iv_updated_at="2026-10-21 14:00:00", provider="tradier"), time.monotonic())})
+    [row] = [r for r in read(desk)["threads"] if r["key"] == f"trade:{trade}"]
+    assert row["book"]["option"]["greeks"] == {"delta": 0.48, "theta": -0.21, "iv": 0.62, "as_of": "2026-10-21 14:00:00", "source": "tradier"}
+    # A cached quote older than an hour (a failed read since) is not passed off as today's: unavailable instead.
+    entry = quote_engine._option_contract_cache["NBIS261023C00100000"]
+    quote_engine._option_contract_cache["NBIS261023C00100000"] = (entry[0], time.monotonic() - 3700)
+    [row] = [r for r in read(desk)["threads"] if r["key"] == f"trade:{trade}"]
+    assert row["book"]["option"]["greeks"] is None
+
+
+def test_a_stock_row_has_no_option_terms():
+    assert copilot_desk._option_terms({"instrument": "stock", "symbol": "SPY", "quantity": 10, "avg_entry": 500.0}) is None
+
+
 def test_a_decision_logged_today_moves_the_row_to_watching(desk, engine, quotes):  # noqa: F811
     trade = planned_nbis(engine)
     quotes["rows"][0]["last"] = 93.2

@@ -239,6 +239,15 @@ def _occ_for_request(req: OptionQuoteRequest) -> str | None:
     return occ_symbol(req.ticker, expiration, req.option_type, req.strike)
 
 
+def cached_option_quote(req: OptionQuoteRequest, max_age: float = 3600.0) -> OptionQuoteResult | None:
+    """The contract's last Tradier quote (with its Greeks and their hourly stamp) from the cache when it was read in the
+    last ``max_age`` seconds, else None: never a provider call. For a reader that shows figures an earlier read in the
+    same request already fetched; an older entry (a failed read since) is not passed off as today's."""
+    symbol = _occ_for_request(req)
+    cached = _option_contract_cache.get(symbol) if symbol else None
+    return cached[0] if cached and time.monotonic() - cached[1] <= max_age else None
+
+
 def _fresh_contract(symbol: str, now: float) -> bool:
     cached = _option_contract_cache.get(symbol)
     return bool(cached and (now - cached[1]) < CACHE_TTL_SECONDS)

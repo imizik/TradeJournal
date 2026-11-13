@@ -211,6 +211,12 @@ def test_a_matched_position_takes_robinhoods_pnl_and_keeps_its_plan(desk, engine
     # Live prices move it from Robinhood's own numbers: the cost that gives +$220 at its 420 mark, not the journal's.
     assert row["book"]["tick"] == {"quote": "NBIS261023C00100000", "scale": 100, "cost": 310.0, "quantity": 2.0, "sign": 1}
     assert row["value"] == {"text": "+$220.00", "tone": "gain"}
+    # The standing's terms are Robinhood's own: its cost a contract, size, and the Greeks its last read kept.
+    option = row["book"]["option"]
+    assert option | {"greeks": None} == {"side": "call", "strike": 100.0, "expiry": "2026-10-23", "direction": "long",
+                                         "quantity": 2.0, "multiplier": 100.0, "cost": 310.0, "greeks": None}
+    assert option["greeks"] | {"as_of": None} == {"delta": 0.55, "theta": -0.12, "iv": 0.65, "as_of": None, "source": "robinhood"}
+    assert isinstance(option["greeks"]["as_of"], (int, float))
     assert row["investigation_id"] == NBIS and row["book"]["state"] == "on_plan" and row["book"]["track"] is not None
     assert body["robinhood"]["state"] == "ok" and body["robinhood"]["joined"] is True
     assert [a["masked"] for a in body["robinhood"]["accounts"]] == ["••8267", "••7884"]
@@ -236,7 +242,11 @@ def test_robinhood_only_positions_are_new_and_journal_only_ones_not_on_robinhood
     assert nbis["status"] == {"text": "New · not in the journal yet", "tone": "info"} and nbis["trade_id"] is None
     assert apld["book"] | {} == {"usd": -20.0, "pct": -16.7, "expiry": "2026-11-27", "days_held": None, "track": None, "state": "no_plan",
                                  "planned": False, "stop_pct": None, "quantity": 1.0, "mark": 100.0,
-                                 "account": {"label": "MCP", "masked": "••7884"}, "live": "new"}
+                                 "account": {"label": "MCP", "masked": "••7884"}, "live": "new",
+                                 "option": {"side": "put", "strike": 30.0, "expiry": "2026-11-27", "direction": "long", "quantity": 1.0,
+                                            "multiplier": 100.0, "cost": 120.0,
+                                            "greeks": apld["book"]["option"]["greeks"]}}
+    assert apld["book"]["option"]["greeks"]["source"] == "robinhood" and apld["book"]["option"]["greeks"]["theta"] == -0.12
     assert apld["path"] == "/copilot-lab?symbol=APLD" and apld["close"] is None and apld["horizon"] is None
 
 

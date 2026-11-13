@@ -7,7 +7,7 @@
  * to buy, sell or hold, sizes anything or sends an order.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { EyeOff } from "lucide-react";
 import { useKeptState } from "@/components/copilot/DeskMemory";
@@ -22,6 +22,7 @@ import {
 } from "@/lib/desk";
 import { staleSince, tickFor, tickedBook, useDeskTicks } from "@/lib/deskTicks";
 import { Flash, PricesAsOf } from "@/components/copilot/Ticks";
+import { OptionStanding, OptionStandingLine } from "@/components/copilot/OptionStanding";
 import { cn } from "@/lib/utils";
 
 export const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
@@ -234,6 +235,14 @@ function Track({ track }: { track: NonNullable<DeskThread["book"]>["track"] }) {
   );
 }
 
+/** A symbol's last price from the sparks read (the minute line), for a standing when the live ticker is not running. */
+const sparkPrice = (sparks: DeskSparks | null, symbol: string | null) => {
+  const spark = symbol ? sparks?.rows[symbol] : undefined;
+  const last = spark?.last ?? spark?.points.at(-1);
+  const at = sparks ? Date.parse(sparks.as_of) / 1000 : NaN;
+  return last != null && Number.isFinite(at) ? { last, at } : null;
+};
+
 const left = (expiry: string | null, day: string) => {
   if (!expiry) return null;
   const n = daysTo(expiry, day);
@@ -296,8 +305,8 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
             const under = tickFor(ticks, row.symbol);
             // The line's newest point follows the live price, so the row moves between the minute reads.
             const points = spark?.points.length && under && !under.stale ? [...spark.points.slice(0, -1), under.last] : spark?.points;
-            return (
-              <li key={row.key} className={cn("flex items-stretch border-t", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")}>
+            return (<Fragment key={row.key}>
+              <li className={cn("flex items-stretch border-t", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")}>
                 <button type="button" onClick={() => onSelect(row)} aria-pressed={on} aria-label={`${row.symbol} ${full}`}
                   className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_48px_minmax(60px,auto)] items-center gap-2 py-2 pl-3 text-left hover:bg-secondary">
                   <span className="min-w-0 overflow-hidden">
@@ -330,7 +339,8 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                   </button>
                 )}
               </li>
-            );
+              {on && book?.option && <li className="bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]"><OptionStandingLine row={row} rows={held} fallback={sparkPrice(sparks, row.symbol)} /></li>}
+            </Fragment>);
           })}
         </ul>
       ) : <p className="border-t px-3 py-2.5 text-xs text-muted-foreground">{!read ? "Reading positions…" : held.length ? "Only positions you don't follow are open." : "No open positions."}</p>}
@@ -458,8 +468,10 @@ function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
  * stock against SPY today, time held: P&L, the distance to the stop and expiry are the row's) and, folded, what touched
  * the thread. No symbol: QQQ with the owner's fills and pings.
  */
-export function CentreChart({ symbol, thread, row, sparks, actions }: {
+export function CentreChart({ symbol, thread, row, sparks, actions, rows = [] }: {
   symbol: string | null; thread: DeskThreadRef | null; row: DeskThread | null; sparks: DeskSparks | null; actions?: DeskChartActions;
+  /** The desk's rows, so a held option's standing can tell a lone long option from one leg of a structure. */
+  rows?: DeskThread[];
 }) {
   const ref = useMemo(() => thread ?? (symbol ? deskSymbolThread(symbol) : null), [thread, symbol]);
   const [timeline, setTimeline] = useState(false);
@@ -481,6 +493,8 @@ export function CentreChart({ symbol, thread, row, sparks, actions }: {
         <span className="min-w-0 truncate text-xs text-muted-foreground">{row ? (row.instrument && row.instrument !== row.symbol ? row.instrument : row.title) : symbol ? "today" : "market today"}</span>
       </div>
       <ReadingLine data={reading} fallback={fallback} live={live} />
+      {row?.book?.option && <OptionStanding row={row} rows={rows}
+        fallback={reading?.state === "ok" && reading.reading ? { last: reading.reading.last, at: reading.reading.at } : sparkPrice(sparks, symbol)} />}
       <div className="flex items-center gap-1">
         <div role="group" aria-label="Timeframe" className="flex gap-1">
           {DESK_TIMEFRAMES.map(item => (
