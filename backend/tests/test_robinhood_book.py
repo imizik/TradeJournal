@@ -182,6 +182,20 @@ def test_an_opening_fill_today_on_a_position_held_from_before_leaves_todays_chan
     assert accounts[0]["day_change"] == 140.0
 
 
+def test_on_a_weekend_fridays_add_still_leaves_fridays_change_unknown(tmp_path, fake):
+    from app.engine import robinhood_fills
+    view, snapshot = snap(tmp_path)  # read on Saturday: "today" is Friday's session
+    friday = datetime(2026, 11, 13, 11, tzinfo=rb.ET).timestamp()
+    line = {"last4": "8267", "instrument": "option", "symbol": "NBIS", "option_type": "call", "strike": 100.0, "expiry": "2026-10-23",
+            "action": "buy_to_open", "filled": 1.0, "filled_at": friday, "working": False}
+    poller = robinhood_fills.Poller(now=lambda: SATURDAY)
+    poller._desk = {"at": SATURDAY - 60, "orders": [line]}
+    assert poller.desk() == []  # the book's order lines are the calendar day's: none on a Saturday
+    accounts = [dict(a) for a in view["accounts"]]
+    rb.unsure_today(accounts, snapshot, poller.filled())  # the account line asks for every fill the pass holds
+    assert accounts[0]["day_change"] is None and accounts[1]["day_change"] == 0.0
+
+
 def test_the_individual_account_shows_with_its_figures_only_while_it_holds_something(tmp_path, fake):
     view, _ = snap(tmp_path)
     assert "Individual" not in [a["label"] for a in view["accounts"]]

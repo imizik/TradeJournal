@@ -485,7 +485,7 @@ OPENING = {"buy_to_open", "sell_to_open"}
 
 def unsure_today(accounts: list[dict], snapshot: dict, fills: list[dict] | None) -> None:
     """Leaves today's change unknown (in place, on the desk's account entries) for an account whose fills today, from
-    the order history's desk lines already in memory (``robinhood_fills.Poller.desk``; no call), show an opening fill on
+    the order history's lines already in memory (``robinhood_fills.Poller.filled``; no call), show an opening fill on
     a position the snapshot holds that it did not open in today's session: those contracts or shares count from
     yesterday's close in ``_totals``, which would be wrong. ``fills`` None (that switch off): left as computed."""
     if not fills:

@@ -806,7 +806,7 @@ def _robinhood() -> dict:
     from app.engine.robinhood_book import feed, unsure_today
     view, snapshot = feed.snapshot()
     if snapshot is not None and view.get("accounts"):
-        unsure_today(view["accounts"], snapshot, robinhood_fills.poller.desk())  # today's change unknown, never wrong
+        unsure_today(view["accounts"], snapshot, robinhood_fills.poller.filled())  # today's change unknown, never wrong
     return {"state": "ok", "view": view, "snapshot": snapshot}
 
 

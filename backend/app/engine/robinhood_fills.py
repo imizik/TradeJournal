@@ -869,14 +869,26 @@ class Poller:
         a fill today (New York). None when there is nothing current to show: the switch off, the feed off or signed
         out, no pass yet, or the last good pass older than three refreshes. No call and no write: the pass that
         already reads the order history once a minute (fifteen outside market hours) is the only read."""
-        view = self._desk
-        now = self._now() if now is None else now
-        # Stale against the interval the last pass was taken at (a quiet pass at 9:24 is not stale at 9:28).
-        if view is None or now - view["at"] > rb.STALE_REFRESHES * rb.ttl(view["at"]):
+        view, now = self._current(now)
+        if view is None:
             return None
         day = datetime.fromtimestamp(now, ET).date()
         return [dict(o) for o in view["orders"]
                 if o["working"] or o["filled_at"] is not None and datetime.fromtimestamp(o["filled_at"], ET).date() == day]
+
+    def filled(self, now: float | None = None) -> list[dict] | None:
+        """Every order line with a fill in the last good pass, whatever its day (the desk's account line asks for its
+        session's, which on a weekend is Friday's); None as ``desk``. No call and no write."""
+        view, _now = self._current(now)
+        return None if view is None else [dict(o) for o in view["orders"] if o["filled_at"] is not None]
+
+    def _current(self, now: float | None) -> tuple[dict | None, float]:
+        view = self._desk
+        now = self._now() if now is None else now
+        # Stale against the interval the last pass was taken at (a quiet pass at 9:24 is not stale at 9:28).
+        if view is None or now - view["at"] > rb.STALE_REFRESHES * rb.ttl(view["at"]):
+            return None, now
+        return view, now
 
     def _engine_(self):
         if self._engine is None:
