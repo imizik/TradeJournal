@@ -2,8 +2,9 @@
 
 Every model turn the app runs has a job: ``desk`` (a question on the desk, Charts, Radar or the panel), ``telegram`` (a
 typed question or a Why? tap in the phone chat), ``prep`` (the 08:30/09:00 morning brief), ``companion`` (a position
-companion update), ``week_review`` (the automatic weekly review) or ``check_call`` (a trade call the owner shared from
-Discord, checked: ``engine/call_check.py``). A job gets a shared core (who the owner is, the four
+companion update), ``week_review`` (the automatic weekly review), ``check_call`` (a trade call the owner shared from
+Discord, checked: ``engine/call_check.py``) or ``desk_read`` (the desk's few-line read of a ticker the owner selected,
+written before he types: ``engine/desk_read.py``). A job gets a shared core (who the owner is, the four
 questions, the evidence and safety rules), the parts of the desk's working rules it uses, its own answer format, its own
 shape reminder and only the tools it calls. Until 2026-11-10 every job got the desk's 3,800-word prompt, all 26 tools
 and the desk's shape, so the brief and the companion were told two contradictory formats at once.
@@ -17,7 +18,8 @@ from app.ai import copilot_answer, copilot_tools
 
 DESK, TELEGRAM, PREP, COMPANION, WEEK_REVIEW = "desk", "telegram", "prep", "companion", "week_review"
 CHECK = "check_call"
-JOBS = (DESK, TELEGRAM, PREP, COMPANION, WEEK_REVIEW, CHECK)
+DESK_READ = "desk_read"
+JOBS = (DESK, TELEGRAM, PREP, COMPANION, WEEK_REVIEW, CHECK, DESK_READ)
 ALL = frozenset(JOBS)
 CHAT = frozenset({DESK, TELEGRAM})  # the conversational jobs: the owner asked something
 OWNER_BLOCK = ALL - {PREP}  # the brief's own facts pack carries its positions and plans; the owner block would repeat them
@@ -76,6 +78,10 @@ like it (the symbol, the side, the kind of expiry such as 0DTE), and where the c
 get_chart_context when it gave none). The verdict weighs the owner's record, not only whether the call is fresh: a fresh \
 call on a kind of trade their record loses on is not a Draft. Figures are from now, the moment of the check; never say \
 what the owner missed or would have made since the post. Never tell them to buy, sell, take or skip it.""",
+    DESK_READ: """This turn is the desk's automatic read: the owner selected a ticker and has not asked anything yet. \
+Nobody typed a question; write the glance they see beside the chart before deciding whether to ask more. Read only what \
+the glance needs (the quote and today's move, its group or the market when the move needs a cause, the news), at most \
+one round of reads, then write. Never suggest an order, a size or a plan card.""",
 }
 
 # The working rules: (jobs, text). The desk gets every one, in this order, which is its prompt as it was apart from the
@@ -98,7 +104,7 @@ beside the group comparison, and say which it is: the stock, its group, its sect
 numbers. When they ask what Radar saw or what is moving today, get_radar_today lists the session's recorded events \
 (with their latest status and nearby headlines) and the latest pass's leaders and laggards; cite an event by its \
 summary and first-seen time."""),
-    (frozenset({DESK, TELEGRAM, PREP}), """- Off hours (before 09:30, after 16:00 New York, overnight and weekends) a \
+    (frozenset({DESK, TELEGRAM, PREP, DESK_READ}), """- Off hours (before 09:30, after 16:00 New York, overnight and weekends) a \
 quote's last and day change are the regular session's, so everything reads flat before the open. The real move is in \
 `extended`: get_quotes for the names, get_market_regime for SPY, QQQ, IWM and SMH, and before the open \
 get_radar_today's premarket_scan for the Radar universe. Give the pre-market or after-hours change with its last trade \
@@ -225,9 +231,9 @@ prices in), and on a hold of days name theta per day. Never recommend a specific
 trade-offs and let them choose."""),
     (ALL, """- If the context line or a tool result marks the data as SIMULATED, say plainly in your answer that the \
 numbers are simulated demo data, not real market data, and never present them as recorded or live."""),
-    (ALL - {PREP, COMPANION, CHECK}, """- You cannot place orders or change accounts, and you cannot save plans, memories or \
+    (ALL - {PREP, COMPANION, CHECK, DESK_READ}, """- You cannot place orders or change accounts, and you cannot save plans, memories or \
 alerts yourself: propose_plan only proposes. Say so if asked."""),
-    (frozenset({PREP, COMPANION, CHECK}), """- You cannot place orders or change accounts, and you cannot save plans, memories \
+    (frozenset({PREP, COMPANION, CHECK, DESK_READ}), """- You cannot place orders or change accounts, and you cannot save plans, memories \
 or alerts. Say so if asked."""),
 )
 
@@ -327,10 +333,23 @@ and then only "Verdict: Unclear — could not read a ticker", nothing else. When
 (a broker's positions or orders screen with quantities, average cost or market value; a chart with no call), write \
 only "Not a call"."""
 
+DESK_READ_FORMAT = f"""Answer format (the desk's read of a selected ticker). Exactly three or four lines, nothing \
+before or after, in the desk's answer voice:
+Verdict: <word> — <headline of at most 12 words>
+- <where it is: the price against their plan's levels or their position when the owner context block has one, else \
+against today's range or a nearby level; one sentence of at most 16 words with its figure and as-of>
+- <what is moving it today: the stock, its group, its sector or the market, or a headline with its time; one sentence \
+of at most 16 words; leave it out when nothing is>
+Changes if: <the one thing that would change the picture, at most 15 words>
+{VERDICT_WORDS} Never Draft: this read proposes nothing. No Read line, Against line, compare block, headings, bold or \
+closing note; say "no plan" in the first bullet when the owner has none for it. The same shape is repeated after each \
+tool result; follow it there."""
+
 FORMAT = {DESK: DESK_FORMAT, TELEGRAM: TELEGRAM_FORMAT, PREP: PREP_FORMAT, COMPANION: COMPANION_FORMAT, WEEK_REVIEW: WEEK_FORMAT,
-          CHECK: CHECK_FORMAT}
+          CHECK: CHECK_FORMAT, DESK_READ: DESK_READ_FORMAT}
 SHAPE = {DESK: copilot_answer.ANSWER_SHAPE, TELEGRAM: copilot_answer.TELEGRAM_SHAPE, PREP: copilot_answer.PREP_SHAPE,
-         COMPANION: copilot_answer.COMPANION_SHAPE, WEEK_REVIEW: copilot_answer.WEEK_SHAPE, CHECK: copilot_answer.CHECK_SHAPE}
+         COMPANION: copilot_answer.COMPANION_SHAPE, WEEK_REVIEW: copilot_answer.WEEK_SHAPE, CHECK: copilot_answer.CHECK_SHAPE,
+         DESK_READ: copilot_answer.DESK_READ_SHAPE}
 
 # --------------------------------------------------------------------------- tools by job
 
@@ -341,15 +360,18 @@ COMPANION_TOOLS = ("get_trade_review", "get_chart_context", "get_group_compariso
                    "get_option_candidates", "get_trades")
 WEEK_TOOLS = ("get_week_review", "get_trade_review", "get_trades", "get_proof", "propose_plan")
 CHECK_TOOLS = ("get_call_facts", "get_quotes", "get_chart_context", "get_level_history", "get_trades")
+# The desk read: a glance, so the reads that say where a name is and what moved it today; none that proposes or reviews.
+DESK_READ_TOOLS = ("get_group_comparison", "get_symbol_news", "get_symbol_events", "get_quotes", "get_chart_context",
+                   "get_market_regime", "get_radar_today")
 JOB_ONLY = frozenset({"get_call_facts"})  # offered to its own job alone, never in "every tool"
 TOOL_NAMES = {DESK: None, TELEGRAM: None, PREP: frozenset(PREP_TOOLS), COMPANION: frozenset(COMPANION_TOOLS),
-              WEEK_REVIEW: frozenset(WEEK_TOOLS), CHECK: frozenset(CHECK_TOOLS)}  # None: every tool but JOB_ONLY
+              WEEK_REVIEW: frozenset(WEEK_TOOLS), CHECK: frozenset(CHECK_TOOLS), DESK_READ: frozenset(DESK_READ_TOOLS)}  # None: every tool but JOB_ONLY
 
 
 def job_for(kind: str | None, source: str | None) -> str:
     """The job of a recorded turn, from what its caller already passes to ``copilot_spend.recorded_turn``."""
-    if kind == CHECK:
-        return CHECK
+    if kind in (CHECK, DESK_READ):
+        return kind
     if source == "telegram":
         return TELEGRAM
     if kind in (PREP, COMPANION, WEEK_REVIEW):

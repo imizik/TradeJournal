@@ -151,12 +151,13 @@ def test_a_jobs_prompt_names_only_the_tools_it_is_offered():
 
 def test_the_three_book_reads_are_offered_only_where_a_job_needs_them():
     """#730 dropped get_memories (the owner block carries them); the rest reach beyond the block, so desk and Telegram keep
-    all three, the companion and week review keep get_trades, the brief and the research jobs none."""
+    all three, the companion and week review keep get_trades, the brief, the desk read and the research jobs none."""
     names = {job: {t["name"] for t in copilot_prompt.TOOLS[job]} for job in JOBS}
     reads = {"get_positions", "get_trades", "get_owner_context", "get_memories"}
     assert {job: reads & n for job, n in names.items()} == {
         "desk": {"get_positions", "get_trades", "get_owner_context"}, "telegram": {"get_positions", "get_trades", "get_owner_context"},
-        "prep": set(), "companion": {"get_trades"}, "week_review": {"get_trades"}, "check_call": {"get_trades"}}
+        "prep": set(), "companion": {"get_trades"}, "week_review": {"get_trades"}, "check_call": {"get_trades"},
+        "desk_read": set()}
     assert len(copilot_tools.TOOLS) == 26  # 25 and the check job's own get_call_facts
 
 

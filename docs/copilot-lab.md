@@ -1495,6 +1495,41 @@ Within a read, the waits on a provider or the Radar file run beside the journal'
 backend reads the market calendar on its own thread (`copilot_desk.warm_at_start`), the one cache nearly every desk read
 needs that a fresh process lacks; startup and `/health` never wait for it.
 
+### The desk read
+
+When the owner selects a ticker on the desk (a book row, a Watching row, a strip tile) and no conversation about it is
+open, the copilot shows a few lines on it without his typing (`frontend/components/copilot/DeskRead.tsx`,
+`POST /copilot/desk/read`, `backend/app/engine/desk_read.py`): the Verdict line, where it is against his plan or position
+(or "no plan"), what is moving it today, and Changes if, in the `desk_read` job's format (§ Jobs). **Ask more** puts the
+read into the message box as a `Context:` line, so the conversation he starts carries it. **Refresh** reads again.
+
+Cost and noise are the point:
+
+- **The wait.** A selection waits 1.5 s before asking, so clicking through the book asks for the name he stops on.
+- **Kept per ticker.** A read is kept 30 minutes in the regular session and two hours outside it (never past that day's
+  open), in the browser and on the server; a reselect inside that time shows it with its age at once and, after the same
+  wait, only confirms it with the server (no model call; a ticker he has since stopped following loses it). A kept read
+  that expires while he is still on the ticker is read again (once the page is back in view, if it is hidden); two tabs
+  on one ticker share that call. Reads run one at a time on the server, and two requests for one ticker make one call.
+- **A small turn.** Two rounds (one of reads, then the answer), at most four reads, a $0.10 spend cap (the desk turn's is
+  $0.25), 1,500 output tokens, on the configured model: Haiku 5.5 dropped the Against line and wrote untraceable figures
+  in the follow-up eval (§ Follow-up model eval), so no cheaper model has been shown to hold the shape.
+- **The same daily budget.** Every read is a `copilot_turn` row (`kind="desk_read"`, `source="desk"`) on
+  `COPILOT_DAILY_BUDGET_USD`. A read starts only while two of its caps ($0.20; more on a model dearer than Opus) still
+  fit under the day's budget, since the cap is checked between rounds and the answer round runs past it, and the check
+  counts a just-finished read whose row is not written yet; otherwise
+  the panel shows one grey line ("No automatic read: today's copilot budget ($4.00) is spent.") and the refusal is a
+  zero-cost row. `GET /copilot/desk/timings` carries `desk_reads`: today's count, refusals and cost, and the read's own
+  line shows the count and cost under it.
+- **Never for a ticker he does not follow**, nor when that setting cannot be read; the panel shows nothing.
+- **Auto-read off.** The line under the read turns it off (and on) in this browser (`localStorage` `desk.read.v1`); off,
+  nothing is asked and one grey line says so.
+
+Expected cost: the job's prompt and tools are about 3,000 tokens (a quarter of the desk's), so a read is about
+$0.03–0.05 on Sonnet 5.5 (estimated from the desk eval's $0.06 a case at four times the prompt; no live read has been
+measured yet). Twenty different names viewed in a day is about $0.60–1.00; staying on a name past its 30 minutes adds a
+read each half hour. Proof: `backend/tests/test_desk_read.py`, `frontend/e2e/copilot-desk-read.spec.ts`.
+
 ## Chatter
 
 Buzz from r/wallstreetbets and NYT business headlines, behind the desk Feed's own **Chatter** filter
@@ -1773,7 +1808,7 @@ headings" and then the Verdict / Read / bullets / Against shape, and the
 companion "at most 80 words" beside the same five-part shape.
 `copilot.run_turn(..., job=)` now takes the turn's job, which
 `copilot_spend.recorded_turn` works out from what its callers already pass
-(`copilot_prompt.job_for`: kind `check_call`, else source `telegram`, else
+(`copilot_prompt.job_for`: kind `check_call` or `desk_read`, else source `telegram`, else
 kind `prep`, `companion` or `week_review`, else `desk`). Each job gets the shared core (who the owner
 is, the four questions, the evidence, time, untrusted-text, account,
 SIMULATED and no-order rules), a line framing its own job, only the working
@@ -1792,6 +1827,7 @@ answered as on the desk, in the chat format.
 | `companion` | position companion (`position_companion`) | exactly the shape its message gives (the adopt draft's six lines, an update's 80 words, the exit note) | 12: the trade review, chart, group, news, quotes, level history, option candidates, trades | 1,342 words + 9,200 chars, about 4,600 tokens |
 | `week_review` | automatic week review (`week_review_auto`) | Verdict line, then the review in short one-fact lines | 5: week and trade review, trades, proof, `propose_plan` | 1,278 words + 7,700 chars, about 4,100 tokens |
 | `check_call` | Check a call (`call_check.run`, from Telegram or the desk tab) | a Reading line (`?` for anything not stated), Verdict (Pass, Wait or Draft; Unclear only with no ticker), three or four `Tile: label \| value` lines, Against, Changes if, Also for other calls; "Not a call" for an image with none | 5: `get_call_facts` (its own job's alone), quotes, chart, level history, trades | 1,271 words + 5,000 chars, about 3,300 tokens |
+| `desk_read` | the desk read of a selected ticker (`desk_read.read`, § The desk read) | Verdict (never Draft), one or two one-sentence bullets (where it is against his levels, what is moving it today), Changes if; three or four lines | 7: group, news, events, quotes, chart, market regime, Radar today | 1,190 words + 4,300 chars, about 3,000 tokens |
 
 Token figures are estimates (characters ÷ 4 for prose, ÷ 3.5 for tool JSON);
 the scorecard's input and cache figures are the measured ones. The brief

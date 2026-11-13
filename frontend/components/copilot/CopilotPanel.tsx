@@ -16,6 +16,7 @@ import LongHolds from "@/components/copilot/LongHolds";
 import LinkedActivity from "@/components/copilot/LinkedActivity";
 import ProposalCard from "@/components/copilot/ProposalCard";
 import ResearchDeeper from "@/components/copilot/ResearchDeeper";
+import { DeskRead } from "@/components/copilot/DeskRead";
 import TradePlanCard from "@/components/copilot/TradePlanCard";
 import { useSpeakAnswer } from "@/components/copilot/SpeakAnswer";
 import { useVoiceInput } from "@/components/copilot/VoiceInput";
@@ -1467,6 +1468,11 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       })}
 
       <div className={panel ? "space-y-4 py-1" : "space-y-5 py-2"} aria-live="polite">
+        {/* The desk read: a selected ticker with no conversation open gets a few lines without his typing. */}
+        {desk && !panel && enabled && symbol && !current && !messages.length && !openingMain && !scoping && (
+          <DeskRead symbol={symbol} render={text => <Answer text={text} />}
+            onAskMore={(text, at) => fill(`Context: the desk's read of ${symbol}${at ? ` at ${at} ET` : ""}:\n${text}\n\n`)} />
+        )}
         {!messages.length && !current?.findings && !openingMain && (
           <p className="text-sm text-muted-foreground">
             {current?.main_day ? "What’s on your mind today?" : <>Ask about an opportunity, push back on the read, then ask for a plan. Try: “{symbol || "NBIS"} looks like it might recover. Is the whole group confirming?”</>}

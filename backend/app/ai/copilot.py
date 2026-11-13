@@ -424,6 +424,19 @@ class FakeAdapter:
                 yield "text", piece
             yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
             return
+        if prompt.startswith("Desk read:"):  # the desk_read job (engine/desk_read.py): the quote and the group, four lines
+            if isinstance(last["content"], str) and allow_tools:
+                content = [{"type": "tool_use", "id": f"fake_{len(messages)}_{i}", "name": n, "input": a} for i, (n, a) in
+                           enumerate([("get_quotes", {"symbols": [symbol]}), ("get_group_comparison", {"symbol": symbol})])]
+                yield "final", Round(content, "tool_use", _zero_usage(), self.model)
+                return
+            text = self._desk_read(symbol, results)
+            for piece in re.findall(r"\S+\s*", text):
+                if self.delay_s:
+                    await asyncio.sleep(self.delay_s)
+                yield "text", piece
+            yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+            return
         changed = re.search(r"investigation ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", prompt)
         if changed and "what changed" in lower:
             if isinstance(last["content"], str) and allow_tools:
@@ -983,6 +996,21 @@ class FakeAdapter:
                        "- How long: out by 15:30 if it has not worked; your audit's worst holds ran from an hour to the close.\n\n"
                        "Edit the card if my levels are off. **Nothing is saved or armed until you confirm it.**",
                         f"{symbol} trades through {plan['invalidation']['price']} before the entry triggers.")
+
+    @staticmethod
+    def _desk_read(symbol: str, results: dict) -> str:
+        """The desk read's four lines from the quote and the group comparison, labelled simulated in the headline."""
+        quote = ((results.get("get_quotes") or {}).get("quotes") or {}).get(symbol) or {}
+        last, change = quote.get("last"), quote.get("change_pct")
+        recent = ((results.get("get_group_comparison") or {}).get("recent_15m") or {}).get("rows") or []
+        peers = sorted(r["change_pct"] for r in recent if r.get("symbol") != symbol and r.get("change_pct") is not None)
+        median = peers[len(peers) // 2] if peers else None
+        where = (f"- Last {last} ({change:+.1f}% today); no plan for it in your context." if last is not None and change is not None
+                 else "- No quote for it in the scripted read.")
+        moving = (f"- Its group's 15-minute median is {median:+.1f}%; {sum(p > 0 for p in peers)} of {len(peers)} peers up."
+                  if median is not None else "- No group move recorded in the scripted read.")
+        return (f"Verdict: Unclear — Simulated: {symbol} read from scripted quotes, not Claude.\n{where}\n{moving}\n"
+                "Changes if: a real model reads its levels, news and group.")
 
     @staticmethod
     def _write(symbol: str, lower: str, results: dict) -> str:
