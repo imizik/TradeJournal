@@ -251,14 +251,7 @@ def test_the_read_reports_where_its_time_goes():
     assert any("/copilot/desk/moving".startswith(p) for p in request_timing.PREFIXES)  # Server-Timing and /desk/timings
 
 
-def test_his_positions_add_robinhoods_last_snapshot_without_asking_robinhood(engine, monkeypatch):  # noqa: F811
-    from app.engine import robinhood_book
-    asked = []
-
-    def snapshot(kick=True):
-        asked.append(kick)
-        return {"state": "ok"}, {"positions": [{"symbol": "hood"}, {"symbol": None}]}
-    monkeypatch.setattr(robinhood_book.feed, "snapshot", snapshot)
+def test_his_positions_are_the_journals_open_trades(engine):  # noqa: F811
     with Session(engine) as db:
         held = desk_moving._held(db)
-    assert "HOOD" in held and asked == [False]  # the feed's last snapshot only: no refresh is kicked
+    assert held == sorted(set(held)) and all(s == s.upper() for s in held)

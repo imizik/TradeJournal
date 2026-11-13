@@ -23,7 +23,7 @@ A change is kept ``CACHE_SECONDS``; the Radar read too. A ticker set to Not foll
 group's member list; if that setting cannot be read, no movers and no Watching group are shown. When neither source
 has anything, ``state`` is ``unavailable`` and the strip says so in one grey line: never a zero.
 
-Read-only: no Robinhood call (his live positions come from the feed's last snapshot, ``kick=False``), no write.
+Read-only: nothing here touches Robinhood (his positions are the journal's open trades), no write.
 """
 
 from __future__ import annotations
@@ -169,18 +169,12 @@ def _hidden(db: Session) -> set[str] | None:
 
 
 def _held(db: Session) -> list[str]:
-    """Open positions' tickers (the journal, Webull left out like the rest of the desk) and Robinhood's last snapshot,
-    read without asking Robinhood again."""
+    """Open positions' tickers from the journal (Webull left out like the rest of the desk). Nothing here touches the
+    Robinhood feed: only its listed callers may."""
     from app.ai.copilot_book import _not_webull
     from app.models import Account, Trade
     held = set(db.exec(select(Trade.ticker).join(Account, Account.id == Trade.account_id)
                        .where(Trade.status == "open").where(_not_webull())).all())
-    try:
-        from app.engine.robinhood_book import feed
-        _view, snapshot = feed.snapshot(kick=False)
-        held |= {p["symbol"] for p in (snapshot or {}).get("positions", []) if p.get("symbol")}
-    except Exception:  # noqa: BLE001 -- the journal's list stands
-        log.warning("desk moving: the Robinhood snapshot could not be read", exc_info=True)
     return sorted(s.upper() for s in held if s)
 
 

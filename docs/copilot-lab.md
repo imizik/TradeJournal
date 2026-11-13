@@ -581,8 +581,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   action is today. Group tiles first: SPY, QQQ, IWM, the sector ETFs (SMH and the eleven SPDRs, biggest gain first),
   then his own groups: Watching (the median of his watched names) and the Research tab's AI-buildout groups (the
   median of their companies; a group with a change for fewer than half its members is left out). Then the movers: the
-  biggest day changes among the names he holds (the journal and Robinhood's last snapshot, never a new Robinhood read)
-  or watches, then Radar's recorded movers, each with a one- or two-word reason only when the app already has one
+  biggest day changes among the names he holds (the journal's open trades; the strip never touches Robinhood) or
+  watches, then Radar's recorded movers, each with a one- or two-word reason only when the app already has one
   (Earnings from the earnings cache: a report that day or the weekday before; a Radar setup card or event that
   session). Each tile is tinted by the size of the move and always writes out the arrow, sign and number, so colour
   is never the only signal. A tile selects its symbol in place, as a watched name does; a group tile opens its
