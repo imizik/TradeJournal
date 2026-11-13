@@ -11,6 +11,7 @@ import type { ChartBar, Interval } from "@/lib/charts";
 import { alertText, createAlert, removeAlert, type AlertsPayload } from "@/lib/alerts";
 import { CONTEXT_MAX, copilotLabHref, type DrawnPlan } from "@/lib/copilot";
 import { Flash } from "@/components/copilot/Ticks";
+import { heldReading } from "@/lib/deskTicks";
 import { ChartEventMarks, chartEvents, earningsHeader, eventLogical, nyDayOf } from "@/components/copilot/ChartEvents";
 import { cn } from "@/lib/utils";
 import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type DeskChartMark, type DeskStudySeries, type DeskTimeframe } from "@/lib/desk";
@@ -370,22 +371,28 @@ export function askAboutLevel(symbol: string, timeframe: DeskTimeframe, level: n
 /**
  * The reading line under the symbol: the newest price, the day's change against the previous close, the distance from
  * VWAP and from the plan's invalidation, and volume against usual for the time of day, with their as-of. A part with
- * nothing behind it is left out. ``fallback`` is the book's change today when the read has no previous close.
+ * nothing behind it is left out. ``fallback`` is the book's change today when the read has no previous close. The line
+ * holds what it last showed for ``symbol`` rather than blank or step back (``heldReading``).
  */
-export function ReadingLine({ data, fallback = null, live = null }: {
-  data: DeskChartData | null; fallback?: { pct: number; at: number } | null;
+export function ReadingLine({ symbol, data, fallback = null, live = null }: {
+  symbol: string; data: DeskChartData | null; fallback?: { pct: number; at: number } | null;
   /** The desk's live price (``lib/deskTicks.ts``): newer than the chart's last minute, it is the reading's price and time. */
   live?: { last: number; at: number; stale: boolean } | null;
 }) {
-  const read = data?.state === "ok" ? data.reading : null;
-  const ticked = !!(read && live && !read.daily && live.at > read.at);
-  const reading = read && ticked ? { ...read, last: live!.last, at: live!.at } : read;
-  if (!reading) return <p data-testid="desk-reading" className="h-4" />;
+  const read = data?.state === "ok" && data.symbol === symbol ? data.reading : null;
+  const fresh = !!(read && live && !read.daily && live.at > read.at);
+  const next = read ? {
+    reading: fresh ? { ...read, last: live!.last, at: live!.at } : read,
+    invalidation: data?.levels.find(level => level.role === "invalidation")?.price ?? null, ticked: fresh,
+  } : null;
+  const held = heldReading(symbol, next);
+  if (!held) return <p data-testid="desk-reading" className="h-4" />;
+  const { reading, invalidation } = held;
+  const ticked = held.ticked && !!live;
   const { last, at, daily } = reading;
   // VWAP and RVol are the regular session's: after the close or before the open their time is not the price's.
   const sessionAt = reading.vwap_at !== null && !daily && Math.abs(reading.vwap_at - at) > 90 ? reading.vwap_at : null;
   const change = reading.prev_close ? (last / reading.prev_close - 1) * 100 : null;
-  const invalidation = data?.levels.find(level => level.role === "invalidation")?.price ?? null;
   const parts: { key: string; text: string; tone?: number; title?: string }[] = [];
   if (change !== null) parts.push({ key: "change", text: `${signedPct(change, 2)} vs prev close`, tone: change, title: `Previous close ${price(reading.prev_close!)}` });
   else if (fallback) parts.push({ key: "change", text: `${signedPct(fallback.pct, 2)} today (book, ${nyWhen(fallback.at)})`, tone: fallback.pct });

@@ -502,7 +502,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
         <span className="text-base font-semibold text-foreground">{symbol ?? "QQQ"}</span>
         <span className="min-w-0 truncate text-xs text-muted-foreground">{row ? (row.instrument && row.instrument !== row.symbol ? row.instrument : row.title) : symbol ? "today" : "market today"}</span>
       </div>
-      <ReadingLine data={reading} fallback={fallback} live={live} />
+      <ReadingLine symbol={symbol ?? "QQQ"} data={reading} fallback={fallback} live={live} />
       {row?.book?.option && <OptionStanding row={row} rows={rows}
         fallback={reading?.state === "ok" && reading.reading ? { last: reading.reading.last, at: reading.reading.at } : sparkPrice(sparks, symbol)}
         levels={{ entry: reading?.levels.find(l => l.role === "entry")?.price, stop: reading?.levels.find(l => l.role === "invalidation")?.price }}

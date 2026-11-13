@@ -262,7 +262,8 @@ def test_reads_of_different_tickers_run_one_at_a_time_and_see_the_last_ones_cost
         return await asyncio.gather(desk_read.read("NBIS", now=IN_SESSION), desk_read.read("CRWV", now=IN_SESSION))
     first, second = asyncio.run(both())
     assert live["most"] == 1
-    assert [first["state"], second["state"]] == ["ok", "budget"]
+    # Either may take the lock first (each looks up the follow setting on a thread before it): whichever waits sees the cost.
+    assert sorted([first["state"], second["state"]]) == ["budget", "ok"]
 
 
 def test_a_ticker_he_does_not_follow_never_gets_a_read_and_neither_does_an_unreadable_setting(turns, monkeypatch):
