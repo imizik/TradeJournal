@@ -8,6 +8,7 @@ happens before an authenticated POST /session. Use one process/worker only.
 from __future__ import annotations
 
 import asyncio
+import collections
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 import json
@@ -195,12 +196,34 @@ def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials
         # and a book of other market-maker IDs on one subscription; coalescing
         # them together would let the frequent one starve the other.
         latest = {}
+        # Trade prints since the last flush, newest kept: a burst past the cap
+        # drops the oldest and says how many, never queues without bound.
+        prints = collections.deque(maxlen=diagnostic.MAX_DISPLAY_TRADES)
+        dropped = 0
 
         def observe(event):
+            nonlocal dropped
             if event["event"] == "book":
                 latest[book_kind(event)] = event  # Replace, never append market-depth history.
+            elif event["event"] == "trades":
+                dropped += event.get("dropped", 0)  # prints past the bound within one provider message
+                for trade in event["trades"]:
+                    if len(prints) == prints.maxlen:
+                        dropped += 1
+                    prints.append({**trade, "received_ms": event["received_ms"]})
             else:
                 control.put_nowait(event)
+
+        def pending():
+            """The coalesced books, then one line with the prints since the last flush."""
+            nonlocal dropped
+            out = list(latest.values())
+            latest.clear()
+            if prints:
+                out.append({"event": "trades", "symbol": "US." + ticker, "trades": list(prints), "dropped": dropped})
+                prints.clear()
+                dropped = 0
+            return out
 
         async def run():
             try:
@@ -229,22 +252,18 @@ def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials
                     try:
                         event = await diagnostic.bounded_await(control.get(), 0.25)
                     except asyncio.TimeoutError:
-                        if latest:
-                            books = list(latest.values())
-                            latest.clear()
-                            for book in books:
-                                yield line(book)
+                        if latest or prints:
+                            for item in pending():
+                                yield line(item)
                             sent = time.monotonic()
                         elif time.monotonic() - sent >= KEEPALIVE_SECONDS:
                             # A quiet book must not trip a proxy's idle body timeout.
                             yield line({"event": "keepalive"})
                             sent = time.monotonic()
                         continue
-                    if event.get("event") == "summary" and latest:
-                        books = list(latest.values())
-                        latest.clear()
-                        for book in books:
-                            yield line(book)
+                    if event.get("event") == "summary" and (latest or prints):
+                        for item in pending():
+                            yield line(item)
                     yield line(event)
                     sent = time.monotonic()
                     if event.get("phase") == "closed":
@@ -257,6 +276,7 @@ def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials
                 with suppress(asyncio.CancelledError):
                     await asyncio.shield(task)
                 latest.clear()
+                prints.clear()
 
         return StreamingResponse(events(), media_type="application/x-ndjson", headers={
             "Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff"})

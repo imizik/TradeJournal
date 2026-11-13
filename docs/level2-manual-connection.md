@@ -67,6 +67,23 @@ contains bounded first/last diagnostic samples, total received counts and
 refresh counts. Reload starts without an active provider session. The lab's
 own heatmap uses invented replay data only.
 
+Trade prints from the same `ticker` subscription are forwarded too, after
+authentication: price, size, source time and sequence only (the provider's
+direction and type are dropped, and prints without a positive price and size are
+left out). Between flushes the bridge keeps at most the newest 200 and sends
+them as one `trades` line with a `dropped` count, so a burst never queues
+without bound. Charts and the lab ignore these lines; the desk's Tape shows them.
+
+## Desk tape
+
+The copilot desk's **Tape** ([desk contract](copilot-lab.md#the-desk)) opens the
+same session for its selected US stock or ETF ticker, without a Connect click:
+opening the panel is the start, and closing it, changing symbol or hiding the
+tab stops it. It shares the bridge's one-session rule; a 409 that does not follow
+its own stop is reported as another stream holding the bridge and is never
+retried by itself. Refused responses are read to their end. Only the
+ARCA-labelled book is shown; nothing is recorded.
+
 ## Charts dock panel and heatmap
 
 The owner's Charts dock has an optional **Level 2** tab (a phone reaches it from

@@ -695,7 +695,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's
   fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D, with studies (VWAP, EMAs, SMAs,
   volume), his Charts levels and drawings (with a pencil to draw), the symbol's alerts and a level menu to act from
-  the chart, a reading line under the symbol and
+  the chart, a reading line under the symbol, **Tape** (below) and
   **Open in Charts →**; then, for a held
   position, two tiles the book row does not carry: vs SPY today (the stock's change today less SPY's, from the sparks
   read) and Held (its P&L, distance to the stop and expiry are the row's, beside it); and **Timeline ▾** folded under it. The sparks read takes at most 12 symbols (the centre's first), plus up to 30 watched names (Watching, above), and
@@ -703,6 +703,20 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   its own small component on the library `/charts` uses (lightweight-charts), not the workspace's `PriceChart`: that
   chart is bound to the workspace's live feed, crosshair links, command bus and clock stores, so the desk draws from
   its own read instead of embedding it.
+- **Tape** (`components/copilot/DeskTape.tsx`, owner only): the chart header's **Tape** button opens the selected stock
+  or ETF's Level 2 and time & sales above the chart, from the same manual moomoo session Charts' Level 2 uses
+  (`useDepthSession`, `/api/level2-lab/session`; [Level 2 manual connection](level2-manual-connection.md#desk-tape)).
+  Closed by default; open or closed is remembered on this device (`desk.tape.v1`). It streams only while open and the
+  page shows: closing it, picking another symbol or hiding the tab ends the session (a reopen right after waits a few
+  seconds for the bridge to finish closing the old one, then starts). One symbol streams at a time across the app: when
+  another session holds the bridge (Charts, perhaps in another tab) it says so with **Try again** and never stops that
+  one. Shown: the ARCA-labelled book's best bid and ask with size and the spread in cents and percent, five levels a
+  side, and the newest 30 prints (price, size, time ET) kept from the last 200 in memory. A print is green "at ask" or
+  red "at bid" only when it was at or through the ask or bid of the last book received before it (within a second;
+  never a later book; the bridge sends only the newest book each quarter second); otherwise plain (the provider's direction flag is not used: it is not documented as the aggressor side). A print at
+  least 10× the session's median print (after 20 prints) is bold. An index (SPX, NDX, VIX…) or an option says the tape
+  covers US stocks and ETFs and starts nothing; on a held option it is the underlying's stock tape, and says so. A phone
+  shows the spread line and the newest 8 prints, no book. No pings, nothing saved, no Tradier or Robinhood read.
 - **Grid** (`components/copilot/DeskGrid.tsx`, `lib/deskGrid.ts`, `GET /copilot/desk/grid`, `app/engine/desk_grid.py`):
   4, 6 or 9 small charts at once (his choice; size, 1m/5m and pins kept in this browser's local storage,
   `desk.grid.v1`). Slots fill with the followed held positions (the book's order), then the Watching list in its order;

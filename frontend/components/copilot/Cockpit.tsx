@@ -26,6 +26,7 @@ import { staleSince, tickFor, tickedBook, useDeskTicks } from "@/lib/deskTicks";
 import { Flash, PricesAsOf } from "@/components/copilot/Ticks";
 import { OptionStanding, OptionStandingLine } from "@/components/copilot/OptionStanding";
 import { OrderLines, OrdersGroup } from "@/components/copilot/DeskOrders";
+import { DeskTape, TapeToggle, useTapeOpen } from "@/components/copilot/DeskTape";
 import { cn } from "@/lib/utils";
 
 export const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
@@ -478,6 +479,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
   const held = useMemo(() => heldContract(row, rows), [row, rows]);
   const contract = useContractView(held);
   const onContract = contract.view === "contract" && held && contract.data;
+  const [tape, setTape] = useTapeOpen();
   return (
     <div className="space-y-3" data-testid="desk-chart">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -502,8 +504,11 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
             </button>
           ))}
         </div>}
-        <Link href={charts} className="ml-auto inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Open in Charts →</Link>
+        <span className="ml-auto" />
+        <TapeToggle open={tape} onToggle={setTape} />
+        <Link href={charts} className="inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Open in Charts →</Link>
       </div>
+      {tape && <DeskTape symbol={symbol ?? "QQQ"} option={!!row?.book?.option} />}
       {onContract ? <ContractChart held={held} data={contract.data!} /> : <>
       <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0} onRead={setShown} actions={actions} live={live} guides={guides}
         label={`${symbol ?? "QQQ"} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />

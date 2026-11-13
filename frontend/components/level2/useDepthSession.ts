@@ -14,6 +14,10 @@ export type LiveBook = {
   asks: Level[];
 };
 export type BookEvent = { event: "book"; symbol: string; received_ms: number; books: LiveBook[] };
+/** One print as the bridge forwards it: no provider direction (it is not documented as the aggressor side). */
+export type Trade = { price: number; volume: number; time_ms: number | null; sequence: number | null; received_ms: number };
+/** The prints since the bridge's last flush, oldest first; ``dropped`` older ones did not fit its bound. */
+export type TradesEvent = { event: "trades"; symbol: string; trades: Trade[]; dropped: number };
 /** A US stock or ETF ticker the bridge will stream (BRK.B style classes included). */
 export const LEVEL2_TICKER = /^[A-Z]{1,5}(\.[A-Z])?$/;
 export type StatusEvent = { event: "status"; phase: Phase; kind?: Kind; code?: number | null };
@@ -67,6 +71,16 @@ function validBook(value: unknown, symbol: string): value is BookEvent {
     && Array.isArray(book.asks) && book.asks.length <= 60 && book.asks.every(validLevel));
 }
 
+function validTrades(value: unknown, symbol: string): value is TradesEvent {
+  if (!isRecord(value) || value.event !== "trades" || value.symbol !== `US.${symbol}` || !safeCount(value.dropped)
+    || !Array.isArray(value.trades) || value.trades.length > 200) return false;
+  return value.trades.every(trade => isRecord(trade)
+    && typeof trade.price === "number" && Number.isFinite(trade.price) && trade.price > 0
+    && typeof trade.volume === "number" && Number.isFinite(trade.volume) && trade.volume > 0
+    && safeTimestamp(trade.time_ms) && (trade.sequence === null || safeCount(trade.sequence))
+    && safeTimestamp(trade.received_ms) && trade.received_ms !== null && trade.received_ms > 0);
+}
+
 function validStatus(value: unknown): value is StatusEvent {
   return isRecord(value) && value.event === "status"
     && ["connecting", "authenticated", "subscribed", "refreshed", "failed", "closed"].includes(String(value.phase))
@@ -114,6 +128,8 @@ export type DepthSession = {
   refreshedAt: number | null;
   /** The ticker of the current or last session. */
   symbol: string | null;
+  /** The HTTP status of the last refused Connect (409: another session is running or still closing), else null. */
+  refused: number | null;
   connect(symbol: string): void;
   stop(): void;
 };
@@ -124,9 +140,12 @@ export type DepthSession = {
  * until `stop()`, unmount, the bridge's own ceiling or a failure; there is no
  * automatic reconnect. `stopWhenHidden` keeps the lab's hide-to-cancel rule;
  * the Charts heatmap keeps collecting while the page is in the background.
- * `onBook` sees each validated book, for memory-only views such as the heatmap.
+ * `onBook` sees each validated book, for memory-only views such as the heatmap;
+ * `onTrades` each validated batch of prints (the desk's tape).
  */
-export function useDepthSession({ active = true, stopWhenHidden = false, onBook }: { active?: boolean; stopWhenHidden?: boolean; onBook?: (event: BookEvent) => void } = {}): DepthSession {
+export function useDepthSession({ active = true, stopWhenHidden = false, onBook, onTrades }: {
+  active?: boolean; stopWhenHidden?: boolean; onBook?: (event: BookEvent) => void; onTrades?: (event: TradesEvent) => void;
+} = {}): DepthSession {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [availability, setAvailability] = useState<"checking" | "ready" | "unavailable">("checking");
   const [running, setRunning] = useState(false);
@@ -139,16 +158,20 @@ export function useDepthSession({ active = true, stopWhenHidden = false, onBook 
   const [protocolError, setProtocolError] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
   const [symbol, setSymbol] = useState<string | null>(null);
+  const [refused, setRefused] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const onBookRef = useRef(onBook);
   useEffect(() => { onBookRef.current = onBook; }, [onBook]);
+  const onTradesRef = useRef(onTrades);
+  useEffect(() => { onTradesRef.current = onTrades; }, [onTrades]);
 
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController();
     fetch("/api/level2-lab/session", { signal: controller.signal })
-      .then(response => {
-        if (!response.ok) throw new Error("unavailable");
+      .then(async response => {
+        // A refusal's body is read to its end too, so no request is left open.
+        if (!response.ok) { await response.text().catch(() => ""); throw new Error("unavailable"); }
         return response.json();
       })
       .then((payload: unknown) => {
@@ -182,7 +205,7 @@ export function useDepthSession({ active = true, stopWhenHidden = false, onBook 
     const controller = new AbortController();
     abortRef.current = controller;
     const timeout = window.setTimeout(() => controller.abort(), SESSION_TIMEOUT_MS);
-    setStarted(true); setRunning(true); setMessage("Connecting to the provider…"); setStatuses({}); setSessionPhase(null); setSummary(null); setBookEvent(null); setProtocolError(false); setRefreshedAt(null); setSymbol(ticker);
+    setStarted(true); setRunning(true); setMessage("Connecting to the provider…"); setStatuses({}); setSessionPhase(null); setSummary(null); setBookEvent(null); setProtocolError(false); setRefreshedAt(null); setSymbol(ticker); setRefused(null);
     let sawClosed = false;
     try {
       const response = await fetch(`/api/level2-lab/session?symbol=${ticker}`, {
@@ -191,6 +214,8 @@ export function useDepthSession({ active = true, stopWhenHidden = false, onBook 
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
+        await response.text().catch(() => ""); // read the refusal through to its end
+        setRefused(response.status);
         // The bridge keeps the last session until its unsubscribe finishes (a few seconds after Stop).
         setMessage(response.status === 409 ? "The previous session is still closing. Try Connect again in a few seconds." : "The local service could not start this session.");
         return;
@@ -214,6 +239,8 @@ export function useDepthSession({ active = true, stopWhenHidden = false, onBook 
           setBookEvent(parsed);
           onBookRef.current?.(parsed);
           setMessage("Receiving provider book updates. This display is for inspection only.");
+        } else if (validTrades(parsed, ticker)) {
+          onTradesRef.current?.(parsed);
         } else if (validSummary(parsed)) {
           setSummary(parsed.report);
           if (parsed.report.closed) sawClosed = true;
@@ -241,5 +268,5 @@ export function useDepthSession({ active = true, stopWhenHidden = false, onBook 
     }
   }, [availability, enabled]);
 
-  return { availability, enabled, running, started, message, statuses, sessionPhase, summary, bookEvent, protocolError, refreshedAt, symbol, connect, stop };
+  return { availability, enabled, running, started, message, statuses, sessionPhase, summary, bookEvent, protocolError, refreshedAt, symbol, refused, connect, stop };
 }
