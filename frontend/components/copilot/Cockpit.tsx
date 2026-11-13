@@ -57,30 +57,6 @@ export function DayPnl({ session, rows, read }: { session: DeskSession | null; r
   );
 }
 
-/** The top bar's account chips while the Robinhood feed is live (docs/robinhood-read-feed.md): each account's label,
- * number masked to the last four and total value. Nothing otherwise. A phone folds them behind one Accounts button, so
- * the strip and the book stay on the first screen. */
-export function AccountChips({ live }: { live: DeskLive | null }) {
-  const [open, setOpen] = useState(false);
-  if (!liveOn(live) || !live?.accounts?.length) return null;
-  return (
-    <>
-    <button type="button" aria-expanded={open} onClick={() => setOpen(shown => !shown)} data-testid="desk-accounts-toggle"
-      className="inline-flex min-h-11 items-center gap-1 whitespace-nowrap rounded-md border px-2.5 text-xs text-foreground sm:hidden">
-      Accounts <span className="tabular-nums text-muted-foreground">{live.accounts.length}</span> {open ? "▴" : "▾"}
-    </button>
-    <span data-testid="desk-accounts" aria-label="Accounts" className={cn("flex flex-wrap items-center gap-1.5", open ? "max-sm:basis-full" : "max-sm:hidden")}>
-      {live.accounts.map(a => (
-        <span key={a.masked} className="whitespace-nowrap rounded-md border px-2 py-0.5 text-xs text-foreground">
-          {a.label} <span className="tabular-nums text-muted-foreground">{a.masked}</span>{" "}
-          <span className="tabular-nums text-muted-foreground">{a.total_value != null ? `$${a.total_value.toLocaleString("en-US", { maximumFractionDigits: 0 })}` : "—"}</span>
-        </span>
-      ))}
-    </span>
-    </>
-  );
-}
-
 const LIVE_WORDS: Record<DeskLive["state"], string> = {
   off: "", signed_out: "Robinhood signed out · from the journal", expired: "Robinhood sign-in expired · from the journal",
   loading: "reading Robinhood…", unavailable: "Robinhood unavailable · from the journal", stale: "Robinhood stale · from the journal",

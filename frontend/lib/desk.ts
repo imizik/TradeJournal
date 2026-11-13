@@ -130,7 +130,11 @@ export type DeskOrder = {
 
 /** The Robinhood feed's state on the desk (docs/robinhood-read-feed.md). ``ok`` (with ``joined``) drives the book;
  * anything else leaves the book exactly as the journal has it. Account numbers only ever arrive masked. */
-export type DeskLiveAccount = { label: string; masked: string; total_value: number | null; cash: number | null; buying_power: number | null };
+export type DeskLiveAccount = {
+  label: string; masked: string; total_value: number | null; cash: number | null; buying_power: number | null;
+  /** The account line's figures, summed on the server from the feed's positions; null when a figure they need is unknown. */
+  options_value?: number | null; open_pnl?: number | null; day_change?: number | null; day_change_pct?: number | null;
+};
 export type DeskLive = {
   state: "off" | "signed_out" | "expired" | "loading" | "unavailable" | "stale" | "ok";
   as_of?: number; issue?: string | null; joined?: boolean; accounts?: DeskLiveAccount[];

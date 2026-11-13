@@ -23,7 +23,7 @@ import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import ArmChecklist from "@/components/copilot/ArmChecklist";
 import DeskFeed, { feedQuestion, useDeskFeed, useFeedNew, type FeedItem } from "@/components/copilot/DeskFeed";
 import { DeskStatus, useDeskSession } from "@/components/copilot/SessionTape";
-import { AccountChips, Book, CentreChart, DayFacts, DayPnl, NeedsStrip, SinceYouLooked, positionRows, useSparks } from "@/components/copilot/Cockpit";
+import { Book, CentreChart, DayFacts, DayPnl, NeedsStrip, SinceYouLooked, positionRows, useSparks } from "@/components/copilot/Cockpit";
 import type { DeskChartActions } from "@/components/copilot/DeskChart";
 import MorningBrief from "@/components/copilot/MorningBrief";
 import Watching, { useWatching } from "@/components/copilot/Watching";
@@ -39,6 +39,7 @@ import { WHAT_MATTERS_PROMPT, copilotLabHref, mainChatLabel, type InvestigationS
 import { useKept } from "@/components/copilot/DeskMemory";
 import { afterClose, answerSymbol, deskLinkIn, deskNeeds, refreshRobinhood, type DeskLive, deskSymbolThread, nyDay, readOpened, saveFollow, saveHorizon, saveOpened, threadInUrl, toReview, type DeskCommand, type DeskPlan, type DeskThreads, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
+import { DeskAccounts, activeAccount, forAccount } from "@/components/copilot/DeskAccounts";
 import styles from "./CopilotLab.module.css";
 
 /** The close pass in progress (its New York day), kept for this tab: a thread with no conversation opens by its link. */
@@ -116,6 +117,11 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const [rowsRead, setRowsRead] = useState(!!keptRows);
   const [rowsFresh, setRowsFresh] = useState(false); // read since this mount, not only kept
   const [live, setLive] = useState<DeskLive | null>(() => keptRows?.live ?? null);
+  // The account line's tap: the book narrowed to one account (its masked number), until tapped again.
+  const [pickedAccount, setAccount] = useState<string | null>(null);
+  const account = activeAccount(live, pickedAccount);
+  // The line went unavailable (or the account left it): the pick ends, so its return does not narrow the book unasked.
+  if (pickedAccount !== null && account === null) setAccount(null);
   // The thread list's armed plans (a level reached today is a strip item) and which of its sources read.
   const [plans, setPlans] = useState<DeskPlan[]>([]);
   const [sections, setSections] = useState<DeskThreads["sections"] | null>(null);
@@ -608,6 +614,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // The book's lower block by the time of day, one block each: the morning brief before the open (nothing until it is
   // written), the day report after the close, else what changed since the owner last looked. Arm today's plans and Close
   // the day are not repeated here: Close the day is one quiet link under the day report (and in ⌘K), never the strip.
+  const booked = forAccount(rows, live, account);
   const lower = dayPhase === "pre" ? <MorningBrief prep={session.data?.prep} fill={fill} max={3} />
     : dayPhase === "close" ? (
       <section aria-label="Day report" data-testid="day-report" className="space-y-1.5">
@@ -632,7 +639,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         <h1 className={styles.title}><MessagesSquare size={17} aria-hidden />Desk</h1>
         {on && <DeskStatus data={session.data} />}
         {on && <DayPnl session={session.data} rows={rows} read={rowsFresh} />}
-        {on && <AccountChips live={rowsFresh ? live : null} />}
+        {on && <DeskAccounts live={rowsFresh ? live : null} rows={rows} active={account} onPick={setAccount} />}
         {on && <ScalpShortlistNudge />}
         {on && (
           <div className={styles.barActions}>
@@ -684,8 +691,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         )}
         {on && (
           <div className={styles.book}>
-            <Book rows={rows} sparks={sparks} earnings={events} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} updating={rowsRead && !rowsFresh} onSelect={select} onFollow={changeFollow}
-              live={live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} />
+            <Book rows={booked.rows} sparks={sparks} earnings={events} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} updating={rowsRead && !rowsFresh} onSelect={select} onFollow={changeFollow}
+              live={booked.live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} />
             <Watching data={rowsRead ? watching.data : null} failed={watching.failed} sparks={sparks} earnings={events} held={held} selected={centreSymbol}
               onSelect={selectWatched} onAsk={askWatched} onPlan={planWatched} onChange={watching.set} />
             {lower}

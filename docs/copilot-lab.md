@@ -548,8 +548,20 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   Webull left out: the session read's `realized_today`) and **Open** (every open position's unrealized P&L now,
   followed or not). Then **Now** (back to today's Main chat; dropped on a phone while already there), **Threads** (the
   thread list's drawer; no count on the button, since the strip counts what needs him), Jump to… (⌘K) and Plan a trade (the same words as ⌘K).
-  Account chips come with the Robinhood stage; nothing fake stands in (on a phone they fold behind one **Accounts**
-  button, § Phone).
+  Then **the account line** while the Robinhood feed is live ([the feed](robinhood-read-feed.md)): one tappable group
+  per account (Roth IRA, MCP; Individual only while it holds something), its label and number masked to the last four,
+  total value, today's change in dollars and percent, options value, cash, buying power and **open** (its positions'
+  unrealized P&L). Today's change is not a figure Robinhood's portfolio read gives: it is each open position's move
+  since yesterday's close (an option opened in today's session, since its cost; a weekend read is Friday's session),
+  summed, so trades closed today are not in it (they are in Realized today). When Robinhood's order history shows an
+  opening fill today on a position held from before, that account's change is left off (the new contracts or shares
+  would count from yesterday's close); with the order history switched off it cannot be told. Whenever any position
+  lacks a figure (an option's open date included) the figure is left off, never shown as $0. Between Robinhood reads the
+  live prices move the total, today and open by what they move those positions' P&L. Tapping an account narrows the
+  book (and its Orders group) to that account's rows, and to a journal row carrying one of its orders; a journal row
+  Robinhood does not show belongs to no account and waits until the filter is cleared. Tapping it again shows every
+  row; the line going unavailable clears it too. Not live: one grey **Accounts unavailable**, or **Accounts as of 10:04 AM** when the read is
+  stale, and no money (on a phone it is one row that swipes sideways, § Phone).
 - **Needs you** (`NeedsStrip`), **the Needs-you strip**. Only what needs a decision now, in amber; most of the day
   there is none and the strip is absent. Nothing in it is dismissed and there is no Seen: the strip shows the single
   top item with its own answers, and **+N more** opens every other item at once, each with its own answers. The rules
@@ -799,8 +811,8 @@ for a closing price.
 
 **Phone (375 to 440 px).** The same pieces stacked: the strip, the book, then the centre, so the strip and the book's
 first rows are the first screen. The top bar is three short rows: Desk with its buttons (Threads, Jump to…, Plan a
-trade, as icons), the clock and SPY / QQQ / VIX, then Realized today, Open and one **Accounts** button that unfolds the
-account chips (masked). Installed on the home screen it runs full screen: the desk's top clears the notch and the
+trade, as icons), the clock and SPY / QQQ / VIX, then Realized today and Open, and the account line as one row that
+swipes sideways (numbers masked). Installed on the home screen it runs full screen: the desk's top clears the notch and the
 status bar, and the sheet's message box clears the home indicator (`env(safe-area-inset-*)`). The copilot is a
 full-screen sheet opened by the round **Ask the copilot** button at the bottom right (its name says "about NBIS" when
 a picked position differs; on a phone it is an icon so it never covers a book row's P&L) and by any Ask action;

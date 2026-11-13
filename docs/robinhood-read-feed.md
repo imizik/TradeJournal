@@ -1,6 +1,6 @@
 # Robinhood read-only feed
 
-The desk's book and account chips can come live from Robinhood instead of waiting for each fill email. This note says
+The desk's book and account line can come live from Robinhood instead of waiting for each fill email. This note says
 what the feed reads, what it can never do and why, where the sign-in lives, how Isaac signs in and switches it on, and
 how to switch it off and revoke it. What the desk shows is in [Copilot Lab § The desk](copilot-lab.md#the-desk).
 
@@ -15,7 +15,11 @@ history) for [fills from Robinhood's order history](robinhood-order-fills.md), w
 never writes to his Robinhood watchlists: every tool that would (`create_watchlist`, `update_watchlist`,
 `add_to_watchlist`, `remove_from_watchlist`, `add_option_to_watchlist`, `remove_option_from_watchlist`,
 `follow_watchlist`, `unfollow_watchlist`) is refused like any other write. From the position reads the desk gets, for each account shown: its label and number
-masked to the last four (`••8267`), total value, cash and buying power; and each open position: options with strike,
+masked to the last four (`••8267`), total value, options value, cash and buying power, plus two figures summed from
+its positions (`robinhood_book._totals`): open P&L and today's change (each position's move since yesterday's close,
+an option opened in today's session since its cost; unknown when any position lacks a figure or, from the order
+history's fills already held, an opening fill today added to a position held from before; a stale read shows no
+account money); and each open position: options with strike,
 call or put, expiry, quantity, Robinhood's average price, mark, bid, ask, the day's change and the Greeks; stocks with
 quantity, average cost and quote; each with unrealized P&L in dollars and percent from Robinhood's own average price and
 mark. A missing or odd field shows as unavailable, never as zero.
@@ -131,7 +135,7 @@ These steps are yours to run. Nobody else needs to see the sign-in.
    ROBINHOOD_ACCOUNTS=Roth IRA,MCP
    ```
 
-   Within a minute the desk shows the account chips and **live from Robinhood · as of HH:MM**.
+   Within a minute the desk shows the account line and **live from Robinhood · as of HH:MM**.
 
 Every five days or so, or whenever the desk says **sign-in expired**, repeat steps 1 and 2. No restart is needed: the
 app picks up the new file.

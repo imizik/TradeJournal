@@ -1,7 +1,7 @@
 """The desk's live book from Robinhood (app/engine/robinhood_book.py) and its join onto the desk's rows
 (``GET /copilot/desk/threads``). Runs against tests/robinhood_fake.py; nothing here reaches Robinhood."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import json
 from types import SimpleNamespace
 
@@ -45,8 +45,10 @@ def test_the_snapshot_joins_positions_with_instruments_and_quotes(tmp_path, fake
     view, snapshot = snap(tmp_path)
     assert view["state"] == "ok"
     assert view["accounts"] == [  # Roth and MCP by default; Individual only while it holds something
-        {"label": "Roth IRA", "masked": "••8267", "total_value": 9860.12, "cash": 1200.5, "buying_power": 1150.0},
-        {"label": "MCP", "masked": "••7884", "total_value": 0.0, "cash": 0.0, "buying_power": 0.0}]
+        {"label": "Roth IRA", "masked": "••8267", "total_value": 9860.12, "day_change": 140.0, "day_change_pct": 1.44,
+         "options_value": 0.0, "cash": 1200.5, "buying_power": 1150.0, "open_pnl": 220.0},
+        {"label": "MCP", "masked": "••7884", "total_value": 0.0, "day_change": 0.0, "day_change_pct": None,
+         "options_value": 0.0, "cash": 0.0, "buying_power": 0.0, "open_pnl": 0.0}]
     [p] = snapshot["positions"]
     assert (p["symbol"], p["side"], p["strike"], p["expiry"], p["quantity"]) == ("NBIS", "call", 100.0, "2026-10-23", 2.0)
     assert (p["avg_cost"], p["mark"], p["bid"], p["ask"]) == (310.0, 420.0, 4.15, 4.25)  # a contract: 4.20 x 100
@@ -86,6 +88,141 @@ def test_missing_or_odd_fields_read_as_unavailable_never_zero(tmp_path, fake):
     assert (nbis["mark"], nbis["usd"], nbis["pct"], nbis["day_change_pct"], nbis["avg_cost"]) == (None, None, None, None, 310.0)
     assert (crwv["side"], crwv["strike"], crwv["mark"], crwv["usd"], crwv["avg_cost"]) == (None, None, None, None, None)
     assert rb.contract_key(crwv["symbol"], "option", crwv["side"], crwv["strike"], crwv["expiry"]) is None  # never matched
+
+
+# --------------------------------------------------------------------------- the account line's figures
+
+def test_each_account_totals_its_own_positions_and_todays_change(tmp_path, fake):
+    from tests.robinhood_fake import portfolio
+    fake.portfolios["444447884"] = portfolio("5000.00", "800.00", "750.00") | {"options_value": "1530.00"}
+    fake.options["444447884"] = [
+        option_position("opt-crwv", "CRWV", quantity="3.0000", average="150.0000", expiry="2026-11-20"),  # held since Oct 21
+        option_position("opt-mu", "MU", quantity="1.0000", average="200.0000", expiry="2026-11-20",  # Friday: a Saturday
+                        ) | {"opened_at": "2026-11-13T15:00:00Z"},  # read's "today" is Friday's session
+        option_position("opt-ionq", "IONQ", quantity="2.0000", average="90.0000", expiry="2026-11-20", kind="short")]
+    for oid, sym, mark, prev in (("opt-crwv", "CRWV", "2.100000", "1.600000"), ("opt-mu", "MU", "2.600000", "3.000000"),
+                                 ("opt-ionq", "IONQ", "0.500000", "0.800000")):
+        fake.instruments[oid] = instrument(oid, sym, expiry="2026-11-20")
+        fake.quotes[oid] = option_quote(oid, mark=mark, prev=prev)
+    fake.stocks["444447884"] = [{"symbol": "RKLB", "quantity": "10.000000", "average_buy_price": "50.000000", "type": "long"}]
+    fake.stock_quotes["RKLB"] = {"quote": {"symbol": "RKLB", "last_trade_price": "55.000000", "previous_close": "56.000000"}}
+    view, _snapshot = snap(tmp_path)
+    roth, mcp = view["accounts"]
+    assert (roth["open_pnl"], roth["day_change"]) == (220.0, 140.0)  # its own NBIS only, never MCP's positions
+    # Open P&L: CRWV (210 - 150) x 3 + MU (260 - 200) + IONQ short (90 - 50) x 2 + RKLB (55 - 50) x 10 = 180 + 60 + 80 + 50
+    assert mcp["open_pnl"] == 370.0
+    # Today: CRWV (210 - 160) x 3 = 150; MU opened today counts from its cost, 260 - 200 = 60 (not from yesterday's 300);
+    # the short IONQ gains as it falls, (80 - 50) x 2 = 60; RKLB (55 - 56) x 10 = -10. 260 on a 4740 start: +5.49%
+    assert (mcp["day_change"], mcp["day_change_pct"]) == (260.0, 5.49)
+    assert (mcp["total_value"], mcp["options_value"], mcp["cash"], mcp["buying_power"]) == (5000.0, 1530.0, 800.0, 750.0)
+
+
+def test_an_unknown_figure_leaves_the_account_figure_unknown_never_zero_or_partial(tmp_path, fake):
+    fake.options["333338267"].append(option_position("opt-x", "CRWV"))
+    fake.instruments["opt-x"] = instrument("opt-x", "CRWV")
+    fake.quotes["opt-x"] = {"quote": {"instrument_id": "opt-x", "mark_price": "2.0"}}  # no previous close
+    view, _ = snap(tmp_path)
+    roth = view["accounts"][0]
+    assert (roth["open_pnl"], roth["day_change"], roth["day_change_pct"]) == (0.0, None, None)  # 220 + (200 - 310) x 2
+    fake.quotes["opt-x"] = {"quote": {"instrument_id": "opt-x"}}  # no mark either
+    roth = snap(tmp_path)[0]["accounts"][0]
+    assert (roth["open_pnl"], roth["day_change"]) == (None, None) and roth["total_value"] == 9860.12
+    fake.fail.add("get_equity_positions")  # its stocks did not read: what it holds is unknown
+    fake.quotes["opt-x"] = option_quote("opt-x")
+    roth = snap(tmp_path)[0]["accounts"][0]
+    assert (roth["open_pnl"], roth["day_change"], roth["day_change_pct"]) == (None, None, None)
+    fake.fail.add("get_portfolio")  # no total: the change in dollars stands, its percent cannot
+    fake.fail.discard("get_equity_positions")
+    roth = snap(tmp_path)[0]["accounts"][0]
+    assert (roth["total_value"], roth["options_value"], roth["day_change"], roth["day_change_pct"]) == (None, None, 280.0, None)
+
+
+def test_an_option_with_no_open_date_or_a_position_the_book_cannot_show_leaves_the_sums_unknown(tmp_path, fake):
+    fake.options["333338267"][0].pop("opened_at")  # "opened today?" cannot be told: the change is unknown, not a guess
+    roth = snap(tmp_path)[0]["accounts"][0]
+    assert (roth["open_pnl"], roth["day_change"], roth["day_change_pct"]) == (220.0, None, None)
+    fake.options["333338267"] = [option_position("opt-nbis", "NBIS"), {"option_id": "opt-y", "quantity": "1.0000", "type": "long"}]
+    roth = snap(tmp_path)[0]["accounts"][0]  # held, but no symbol: it is not on the book, so the sums would be partial
+    assert (roth["open_pnl"], roth["day_change"]) == (None, None)
+
+
+def test_two_accounts_sharing_their_last_four_keep_their_own_sums(tmp_path, fake):
+    mcp = next(a for a in fake.accounts if a["account_number"] == "444447884")
+    fake.accounts = [a for a in fake.accounts if a is not mcp] + [mcp | {"account_number": "444448267", "rhs_account_number": "444448267"}]
+    fake.portfolios["444448267"] = fake.portfolios.pop("444447884")
+    view, _ = snap(tmp_path)
+    roth, mcp_view = view["accounts"]
+    assert (roth["open_pnl"], roth["day_change"]) == (220.0, 140.0) and (mcp_view["open_pnl"], mcp_view["day_change"]) == (0.0, 0.0)
+
+
+def test_a_weekend_read_belongs_to_fridays_session():
+    from app.engine.chart_math import ET
+    at = lambda *a: datetime(*a, tzinfo=ET).timestamp()  # noqa: E731
+    assert [rb.session_day(at(2026, 11, d, 12)) for d in (13, 14, 15, 16)] == ["2026-11-13", "2026-11-13", "2026-11-13", "2026-11-16"]
+
+
+def test_an_opening_fill_today_on_a_position_held_from_before_leaves_todays_change_unknown(tmp_path, fake):
+    view, snapshot = snap(tmp_path)
+    friday = datetime(2026, 11, 13, 11, tzinfo=rb.ET).timestamp()
+    fill = {"last4": "8267", "instrument": "option", "symbol": "NBIS", "option_type": "call", "strike": 100.0, "expiry": "2026-10-23",
+            "action": "buy_to_open", "filled": 1.0, "filled_at": friday, "working": False}
+    for fills, unknown in (
+            (None, False),  # no order history to tell: as computed
+            ([fill | {"action": "sell_to_close"}], False),  # a close keeps the rest of the position right
+            ([fill | {"filled_at": friday - 86400}], False),  # Thursday's buy is in yesterday's close
+            ([fill | {"last4": "7884"}], False),  # MCP holds no NBIS: Roth's change stands
+            ([fill], True)):  # one more NBIS today on the October position: those contracts would count from yesterday
+        accounts = [dict(a) for a in view["accounts"]]
+        rb.unsure_today(accounts, snapshot, fills)
+        assert (accounts[0]["day_change"] is None, accounts[0]["day_change_pct"] is None) == (unknown, unknown)
+        assert accounts[0]["open_pnl"] == 220.0 and accounts[1]["day_change"] == 0.0
+    opened_today = {**snapshot, "positions": [p | {"opened_on": "2026-11-13"} for p in snapshot["positions"]]}
+    accounts = [dict(a) for a in view["accounts"]]
+    rb.unsure_today(accounts, opened_today, [fill])  # the whole position is today's: it already counts from its cost
+    assert accounts[0]["day_change"] == 140.0
+
+
+def test_on_a_weekend_fridays_add_still_leaves_fridays_change_unknown(tmp_path, fake):
+    from app.engine import robinhood_fills
+    view, snapshot = snap(tmp_path)  # read on Saturday: "today" is Friday's session
+    friday = datetime(2026, 11, 13, 11, tzinfo=rb.ET).timestamp()
+    line = {"last4": "8267", "instrument": "option", "symbol": "NBIS", "option_type": "call", "strike": 100.0, "expiry": "2026-10-23",
+            "action": "buy_to_open", "filled": 1.0, "filled_at": friday, "working": False}
+    poller = robinhood_fills.Poller(now=lambda: SATURDAY)
+    poller._desk = {"at": SATURDAY - 60, "orders": [line]}
+    assert poller.desk() == []  # the book's order lines are the calendar day's: none on a Saturday
+    accounts = [dict(a) for a in view["accounts"]]
+    rb.unsure_today(accounts, snapshot, poller.filled())  # the account line asks for every fill the pass holds
+    assert accounts[0]["day_change"] is None and accounts[1]["day_change"] == 0.0
+
+
+def test_the_individual_account_shows_with_its_figures_only_while_it_holds_something(tmp_path, fake):
+    view, _ = snap(tmp_path)
+    assert "Individual" not in [a["label"] for a in view["accounts"]]
+    from tests.robinhood_fake import portfolio
+    fake.portfolios["111118888"] = portfolio("400.00")
+    from tests.robinhood_fake import portfolio
+    fake.portfolios["111118888"] = portfolio("400.00")
+    fake.options["111118888"] = [option_position("opt-old", "MU", quantity="1.0000", average="500.0000", expiry="2026-11-20")]
+    fake.instruments["opt-old"] = instrument("opt-old", "MU", strike="870.0000", expiry="2026-11-20")
+    fake.quotes["opt-old"] = option_quote("opt-old", mark="4.000000", prev="4.500000")
+    [individual] = [a for a in snap(tmp_path)[0]["accounts"] if a["label"] == "Individual"]
+    assert (individual["masked"], individual["open_pnl"], individual["day_change"]) == ("••8888", -100.0, -50.0)
+    assert (individual["total_value"], individual["day_change_pct"]) == (400.0, -11.11)  # -50 on a 450 start
+
+
+def test_a_stale_or_unavailable_snapshot_shows_no_money(tmp_path, fake):
+    feed, moment = make_feed(tmp_path)
+    fake.fail.add("get_accounts")
+    feed.refresh()
+    assert feed.view(kick=False) == {"state": "unavailable"}
+    fake.fail.discard("get_accounts")
+    moment["t"] += rb.QUIET_TTL
+    feed.refresh()
+    assert feed.view(kick=False)["accounts"]
+    moment["t"] += (rb.STALE_REFRESHES + 1) * rb.QUIET_TTL
+    view = feed.view(kick=False)
+    assert view["state"] == "stale" and view["as_of"] and "accounts" not in view
 
 
 def test_positions_page_through_and_stocks_get_quotes(tmp_path, fake):
