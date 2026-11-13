@@ -81,8 +81,9 @@ async function poll() {
   const started = Date.now();
   try {
     const response = await fetch(apiUrl(`/copilot/desk/ticks?${new URLSearchParams({ symbols: symbols.join(",") })}`), { cache: "no-store", signal: controller.signal });
-    if (!response.ok) throw new Error(`Request failed (${response.status}).`);
-    const reply = await response.json() as DeskTicksReply;
+    // Read the body even when refused: an unread one keeps the request open in the browser (and the page never idle).
+    const reply = await response.json().catch(() => null) as DeskTicksReply | null;
+    if (!response.ok || !reply) throw new Error(`Request failed (${response.status}).`);
     const took = Date.now() - started;
     const now = Math.floor(Date.now() / 1000);
     if (reply.state === "closed") {
