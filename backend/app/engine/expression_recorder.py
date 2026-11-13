@@ -296,13 +296,15 @@ def score(position: dict, snapshots: list[dict]) -> dict:
         if snap["role"] == "expiry":
             # What he still held is valued at his contract's bid then: the journal's expiry price does not say
             # whether an in-the-money contract was exercised or sold.
-            actual += contracts * 100 * ((quotes.get(legs["as_traded"][0]["symbol"]) or {}).get("bid") or 0.0)
+            his = legs["as_traded"][0]
+            actual += contracts * his["multiplier"] * ((quotes.get(his["symbol"]) or {}).get("bid") or 0.0)
         else:
             actual += contracts * float(snap["price"] or 0)
         open_actual -= min(contracts, open_actual)
-    complete = problem is None and premium > 0 and open_actual <= 1e-9 and "as_traded" not in dead
+    checked = any(s["role"] == "expiry" for s in snapshots)  # the expiry-day check for fills never quoted ran
+    complete = problem is None and premium > 0 and open_actual <= 1e-9 and "as_traded" not in dead and checked
     return {"key": position["key"], "ticker": position["ticker"], "option_type": position["option_type"],
-            "complete": complete, "problem": problem if problem or complete else "still open or no entry",
+            "complete": complete, "problem": problem if problem or complete else "still open, or its expiry-day check has not run",
             "late": any(abs(lag) > LATE_SECONDS for lag in lags), "held": "past the entry session" if len(days) > 1 else "same session",
             "premium": round(premium, 2), "actual": round(actual, 2),
             "pnl": {a: round(cash[a], 2) for a in legs if a not in dead}}
@@ -460,7 +462,8 @@ class ExpressionRecorder:
         fills = db.exec(select(Fill).join(TradeFill, TradeFill.fill_id == Fill.id)
                         .where(TradeFill.trade_id == link.trade_id, Fill.side.in_(SIDES))).all() if link else []
         recorded = {s["fill_key"] for s in snaps if s["status"] == "recorded"}
-        return [fill_key(first.account_id, f) for f in fills if fill_key(first.account_id, f) not in recorded]
+        keys = [fill_key(first.account_id, f) for f in fills]
+        return [k for k in keys if k not in recorded and k not in self._failed]  # a fill awaiting a retry is not missed
 
     def _expiries(self, db: Session, today: date, now: float) -> None:
         for position in self.store.positions():
@@ -476,14 +479,16 @@ class ExpressionRecorder:
             if missed:
                 row.update(status="unavailable", note=f"{len(missed)} fill(s) of this position were never quoted")
             else:
+                # Written even for a position already closed: the scorecard counts a position only once this check ran.
                 left = sum(float(s["contracts"] or 0) * (1 if s["role"] == "entry" else -1) for s in snaps if s["role"] in ("entry", "exit"))
                 if left <= 1e-9:
-                    continue
-                try:
-                    row.update(status="recorded", quotes=_quotes(self.quote(_symbols(position["legs"]), greeks=True)))
-                except Exception as exc:
-                    log.warning("Expiry snapshot for %s failed: %s", position["key"], exc)
-                    row.update(status="unavailable", note=str(exc)[:200])
+                    row.update(status="recorded", note="closed before expiry; every fill quoted")
+                else:
+                    try:
+                        row.update(status="recorded", quotes=_quotes(self.quote(_symbols(position["legs"]), greeks=True)))
+                    except Exception as exc:
+                        log.warning("Expiry snapshot for %s failed: %s", position["key"], exc)
+                        row.update(status="unavailable", note=str(exc)[:200])
             self.store.add_snapshot(row)
 
 

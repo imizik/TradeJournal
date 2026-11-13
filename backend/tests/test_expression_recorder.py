@@ -217,6 +217,11 @@ def test_the_pass_records_entries_exits_and_expiry(engine, tmp_path):
     rec.run()  # throttled: nothing twice
     snaps = rec.store.snapshots(positions[0]["key"])
     assert sorted(s["role"] for s in snaps) == ["entry", "exit"] and all(s["status"] == "recorded" for s in snaps)
+    assert not er.score(positions[0], snaps)["complete"]  # counted only once the expiry-day check has run
+    clock.now = clock_at("15:58", EXP)
+    rec.run()
+    snaps = rec.store.snapshots(positions[0]["key"])
+    assert next(s for s in snaps if s["role"] == "expiry")["note"] == "closed before expiry; every fill quoted"
     result = er.score(positions[0], snaps)
     # Unchanged quotes: his contract bought at the 3.20 ask and sold at the 3.00 bid.
     assert result["complete"] and result["actual"] == 10.0 and result["pnl"]["as_traded"] == pytest.approx(-20.0)
