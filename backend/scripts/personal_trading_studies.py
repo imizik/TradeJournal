@@ -5,6 +5,7 @@ Protocols, committed before any outcome here was computed:
     research/stop-after-green/protocol.json   stop-after-green-20261024-v1
     research/size-cap/protocol.json           size-cap-20261024-v1
     research/long-holds/protocol.json         long-holds-20261024-v1
+    research/hold-limit/protocol.json         hold-limit-20261112-v1 (the long-holds rules on every trade)
 Changing a constant below makes a different study: register a new protocol id
 rather than editing these. Every result is exploratory: the October 21 audit
 read both periods.
@@ -40,7 +41,9 @@ from scripts import exit_counterfactual_study as x
 STOP_ID = "stop-after-green-20261024-v1"
 CAP_ID = "size-cap-20261024-v1"
 LONG_ID = "long-holds-20261024-v1"
+HOLD_ID = "hold-limit-20261112-v1"
 REGISTERED_EXTRACT_SHA256 = "023e0e11302cdc685f789dfd452d103feeb36d87385232c819fc8eedb1878eda"
+HOLD_EXTRACT_SHA256 = "4ada80b1977230773bd0d919cd3ea42f766b8fcc651d5484fee8253de7c33a47"  # the 2026-11-11 extract
 SEED = x.SEED
 BOOTSTRAP = x.BOOTSTRAP
 PERIODS = ("exploration", "check")
@@ -94,9 +97,9 @@ def load_trades(path: Path) -> tuple[list[dict], dict]:
     return trades, dict(excluded)
 
 
-def provenance(protocol_id: str, trades_path: Path) -> dict:
+def provenance(protocol_id: str, trades_path: Path, registered: str = REGISTERED_EXTRACT_SHA256) -> dict:
     receipt = {**x.provenance(trades_path), "protocol_id": protocol_id}
-    receipt["extract_is_registered"] = receipt["extract_sha256"] == REGISTERED_EXTRACT_SHA256
+    receipt["extract_is_registered"] = receipt["extract_sha256"] == registered
     return receipt
 
 
@@ -413,6 +416,16 @@ def fetch_daily_bars(cache: Path, symbol: str, start: date, end: date) -> list[d
     return [x.parse_bar(b) for b in alpaca.fetch_option_bars([symbol], "1Day", start, end).get(symbol, [])]
 
 
+def option_daily_bars(trade: dict, cache: Path, fetch: bool) -> tuple[list[dict] | None, int]:
+    """The trade's contract's daily bars over its window, from the cache or (with ``fetch``) Alpaca; (bars, fetches)."""
+    symbol = x.occ(trade["ticker"], trade["expiration"], trade["option_type"], trade["strike"])
+    start, end = trade["day"], trade["closed"].astimezone(x.ET).date() + timedelta(days=1)
+    bars = cached_daily_bars(cache, symbol, start, end)
+    if bars is None and fetch:
+        return fetch_daily_bars(cache, symbol, start, end) or None, 1
+    return bars, 0
+
+
 def run_long(trades_path: Path, cache: Path, out: Path, fetch: bool) -> dict:
     trades, excluded = load_trades(trades_path)
     extract_trades = len(trades) + sum(excluded.values())
@@ -423,12 +436,8 @@ def run_long(trades_path: Path, cache: Path, out: Path, fetch: bool) -> dict:
         if not trade["expiration"] or not trade["option_type"] or trade["strike"] is None:
             excluded["incomplete contract"] = excluded.get("incomplete contract", 0) + 1
             continue
-        symbol = x.occ(trade["ticker"], trade["expiration"], trade["option_type"], trade["strike"])
-        start, end = trade["day"], trade["closed"].astimezone(x.ET).date() + timedelta(days=1)
-        bars = cached_daily_bars(cache, symbol, start, end)
-        if bars is None and fetch:
-            bars = fetch_daily_bars(cache, symbol, start, end) or None
-            fetched += 1
+        bars, asked = option_daily_bars(trade, cache, fetch)
+        fetched += asked
         if not bars:
             excluded["no option daily bars"] = excluded.get("no option daily bars", 0) + 1
             continue
@@ -446,17 +455,66 @@ def run_long(trades_path: Path, cache: Path, out: Path, fetch: bool) -> dict:
     return write(out, "long-holds", results, rows)
 
 
+# ---------------------------------------------------------------- hold limit
+
+
+def untouched(trade: dict) -> dict:
+    """A trade no hold limit reaches (closed in its first session) or that has no bars: its actual exit stands."""
+    premium = trade["premium"]
+    return {"id": trade["id"], "day": trade["day"].isoformat(), "period": trade["period"],
+            "window_days": trade["window_days"], "actual_pnl": float(trade["pnl"]), "actual_premium": float(premium),
+            "actual_pct": float(trade["pnl"] / premium * 100) if premium else None, "rules": {r: None for r in LONG_RULES}}
+
+
+def run_hold(trades_path: Path, cache: Path, out: Path, fetch: bool) -> dict:
+    """The long-holds rules on every trade; the verdict rests on trades held 10 days or less, never measured before."""
+    trades, excluded = load_trades(trades_path)
+    extract_trades = len(trades) + sum(excluded.values())
+    rng = random.Random(SEED)
+    rows, fetched = [], 0
+    for trade in trades:
+        if trade["window_days"] <= 1:
+            rows.append(untouched(trade))
+            continue
+        reason = None
+        if not trade["expiration"] or not trade["option_type"] or trade["strike"] is None:
+            reason = "incomplete contract"
+        else:
+            bars, asked = option_daily_bars(trade, cache, fetch)
+            fetched += asked
+            if not bars:
+                reason = "no option daily bars"
+        if reason:
+            excluded[reason] = excluded.get(reason, 0) + 1
+            rows.append(untouched(trade))
+        else:
+            rows.append(simulate_long(trade, bars))
+    primary = [r if r["window_days"] <= x.MAX_WINDOW_DAYS else {**r, "rules": {k: None for k in LONG_RULES}} for r in rows]
+    results = {"protocol_id": HOLD_ID, "provenance": provenance(HOLD_ID, trades_path, HOLD_EXTRACT_SHA256),
+               "extract_trades": extract_trades, "analyzed": len(rows),
+               "held_past_session_1": sum(1 for t in trades if t["window_days"] > 1),
+               "held_longer_than_10_days": sum(1 for t in trades if t["window_days"] > x.MAX_WINDOW_DAYS),
+               "excluded": excluded, "fetched_windows": fetched, "recorded_pnl_mismatch": recorded_mismatch(trades),
+               "actual_total": round(sum(r["actual_pnl"] for r in rows), 2), "rules": {}}
+    for rule in LONG_RULES:
+        periods = {name: summarize_long([r for r in primary if r["period"] == name], rule, rng) for name in PERIODS}
+        full = summarize_long(primary, rule, rng)
+        results["rules"][rule] = {"primary": {"all": full, **periods}, "decision": decide_long(full, periods),
+                                  "with_long_holds": summarize_long(rows, rule, rng)}
+    return write(out, "hold-limit", results, rows)
+
+
 # ---------------------------------------------------------------- commands
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("stop-after-green", "size-cap", "long-holds"):
+    for name in ("stop-after-green", "size-cap", "long-holds", "hold-limit"):
         p = sub.add_parser(name)
         p.add_argument("--trades", type=Path, required=True, help="the exit_counterfactual_study extract")
         p.add_argument("--out", type=Path, required=True)
-        if name == "long-holds":
+        if name in ("long-holds", "hold-limit"):
             p.add_argument("--cache", type=Path, required=True)
             p.add_argument("--fetch", action="store_true", help="fetch an uncached window from Alpaca (market data only)")
     args = parser.parse_args(argv)
@@ -464,6 +522,8 @@ def main(argv: list[str] | None = None) -> None:
         results = run_stop(args.trades, args.out)
     elif args.command == "size-cap":
         results = run_cap(args.trades, args.out)
+    elif args.command == "hold-limit":
+        results = run_hold(args.trades, args.cache, args.out, args.fetch)
     else:
         results = run_long(args.trades, args.cache, args.out, args.fetch)
     print(json.dumps(results, indent=2))

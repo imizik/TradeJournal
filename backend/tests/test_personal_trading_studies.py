@@ -340,3 +340,45 @@ def test_fetch_asks_alpaca_for_daily_bars_over_the_trade_window(tmp_path, monkey
     results = s.run_long(path, tmp_path / "cache", tmp_path / "out", fetch=True)
     assert calls == [(["SPY260821C00700000"], "1Day", date(2026, 7, 2), date(2026, 7, 21), tmp_path / "cache")]
     assert results["fetched_windows"] == 1 and results["analyzed"] == 1
+
+
+# ---------------------------------------------------------------- hold limit
+
+
+def test_hold_limit_judges_only_trades_held_ten_days_or_less(tmp_path):
+    legs = [(x.ENTRY, "2026-07-02T10:00:00", 2, 300), (x.EXIT, "2026-07-20T14:00:00", 2, 50)]
+    long_one = (contract("L", "2026-07-02T10:00:00", "2026-07-20T14:00:00", pnl=-500), fills_for("L", legs))
+    week = [(x.ENTRY, "2026-07-02T10:00:00", 1, 300), (x.EXIT, "2026-07-08T10:00:00", 1, 400)]
+    winner = (contract("W", "2026-07-02T10:00:00", "2026-07-08T10:00:00", pnl=100, strike=702), fills_for("W", week))
+    unbarred = (contract("U", "2026-07-02T10:00:00", "2026-07-06T10:00:00", pnl=100, strike=701),
+                fills_for("U", [(x.ENTRY, "2026-07-02T10:00:00", 1, 300), (x.EXIT, "2026-07-06T10:00:00", 1, 400)]))
+    same_day = round_trip("S", "2026-07-02T10:00:00", "2026-07-02T11:00:00", 1, 100, 200)
+    path = write_extract(tmp_path, [long_one, winner, unbarred, same_day])
+    for symbol in ("SPY260821C00700000", "SPY260821C00702000"):
+        folder = tmp_path / "cache" / "options" / "1Day" / symbol
+        folder.mkdir(parents=True)
+        (folder / "2026-07-02_2026-07-21.json").write_text(json.dumps(LONG_BARS))
+    results = s.run_hold(path, tmp_path / "cache", tmp_path / "out", fetch=False)
+    assert results["protocol_id"] == s.HOLD_ID and results["provenance"]["extract_is_registered"] is False
+    assert results["extract_trades"] == 4 and results["analyzed"] == 4      # every trade stays in the resampling
+    assert results["held_past_session_1"] == 3 and results["held_longer_than_10_days"] == 1
+    assert results["excluded"] == {"no option daily bars": 1}
+    one = results["rules"]["exit_session_1"]
+    # Primary: only W (held 7 days). Sold at 250 - 3% = 242.50 against a $300 entry: -57.50, where it actually made +100.
+    assert one["primary"]["all"]["touched"] == 1 and one["primary"]["all"]["dollar_diff"] == pytest.approx(-157.5)
+    assert one["primary"]["all"]["diff_on_winners"] == pytest.approx(-157.5) and one["primary"]["all"]["diff_on_losers"] == 0
+    assert one["decision"].startswith("reject: exiting")
+    # With the long hold added back: +385 on L.
+    assert one["with_long_holds"]["touched"] == 2 and one["with_long_holds"]["dollar_diff"] == pytest.approx(227.5)
+    # Session 3 falls to the July 8 close, after W's actual exit that morning: the rule does not reach it.
+    assert results["rules"]["exit_session_3"]["primary"]["all"]["touched"] == 0
+    assert results["rules"]["exit_session_3"]["decision"] == "no trades touched"
+    assert results["rules"]["exit_session_3"]["with_long_holds"]["touched"] == 1
+    assert len((tmp_path / "out" / "hold-limit" / "trades.jsonl").read_text().splitlines()) == 4
+
+
+def test_a_trade_closed_in_its_first_session_needs_no_bars_and_is_never_touched(tmp_path):
+    trade = load(tmp_path, [round_trip("S", "2026-07-02T10:00:00", "2026-07-02T11:00:00", 1, 100, 200)])[0]
+    row = s.untouched(trade)
+    assert row["actual_pnl"] == 100 and row["actual_pct"] == pytest.approx(100.0)
+    assert row["rules"] == {"exit_session_1": None, "exit_session_3": None, "exit_session_5": None}
