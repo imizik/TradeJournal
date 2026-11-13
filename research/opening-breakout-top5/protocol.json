@@ -1,0 +1,55 @@
+{
+  "protocol_id": "opening-breakout-top5-20261113-v1",
+  "registered": "2026-11-13",
+  "registered_before": "any opening range, relative volume, minute bar, trade or quote of 2016-2023 was read for this rule set. Already known when it was written: opening-breakout-20261113-v1 (#788, result #794) found no evidence either way on 2024-01-02 to 2026-11-12 with its top 20 stocks in play, and, among its descriptive slices chosen after the result, the top 5 by relative volume did best (+0.24R a trade on 2,757 trades with one-minute fills and its costs, against about zero for ranks 6-20). That slice is the hypothesis here. The v1 result also showed the outcome depends on whether the stop was touched inside the fill's own minute, which one-minute bars cannot show. Other earlier work on these years used different universes (the strategy factory's 18 core names); none ranked the whole market by opening relative volume.",
+  "question": "On sessions no opening breakout study has read (2016-2023), does the v1 opening range breakout restricted to the top 5 stocks in play make money when entries, stops and exits are filled from the consolidated tape's trades and quotes instead of one-minute bars?",
+  "why_it_matters": "The owner wants opening breakout plays. If the top-5 slice holds on eight untouched years with tape fills, it earns a live paper test before any money; if not, opening range breakouts on stocks in play are closed for this account, including this slice.",
+  "sessions": "regular full sessions 2016-01-04 to 2023-12-29, New York, from the first session with the history the rules need (about February 2016, because Alpaca's SIP history starts in January 2016); half days left out (2016-11-25, 2017-07-03, 2017-11-24, 2018-07-03, 2018-11-23, 2018-12-24, 2019-07-03, 2019-11-29, 2019-12-24, 2020-11-27, 2020-12-24, 2021-11-26, 2022-11-25, 2023-07-03, 2023-11-24)",
+  "data": {
+    "names": "common stocks on any of Polygon's reference snapshots of 2016-01-04, 2016-07-01, 2017-01-03, 2017-07-03, 2018-01-02, 2018-07-02, 2019-01-02, 2019-07-01, 2020-01-02, 2020-07-01, 2021-01-04, 2021-07-01, 2022-01-03, 2022-07-01, 2023-01-03, 2023-07-03 and 2024-01-02, symbols of capital letters with an optional .X class",
+    "daily": "Alpaca SIP daily bars, unadjusted, 2016-01-04 to 2023-12-29, plus split-adjusted closes to detect splits",
+    "opening": "Alpaca SIP one-minute bars, unadjusted, 09:30-09:34, for every name that is a candidate on that session or within the 20 sessions after it",
+    "session": "for the day's 5 selected names: Alpaca SIP one-minute bars 09:35-15:59 (used only to find the minutes worth reading and for the bar comparison), and Alpaca SIP trades and quotes for the minutes the rules below read"
+  },
+  "selection": {
+    "rules": "exactly v1's candidate, opening range, direction and relative volume rules (research/opening-breakout/protocol.json, selection)",
+    "stocks_in_play": "candidates with a direction and relative volume of at least 1, ranked by relative volume (ties by symbol); the top 5"
+  },
+  "trade": {
+    "tape_trade": "a trade of at least 100 shares with a positive price, counted only if its price lies within the quote in effect at its time (the last valid quote at or before it, at most 60 seconds old) widened by the larger of one cent and 0.2% of that quote's midpoint. A valid quote has a positive bid and ask and an ask at or above the bid",
+    "entry": "a stop order at the range high (long) or low (short), live from 09:35:00. It triggers on the first tape trade at or above the range high (at or below the range low) up to 15:55:59, reading only minutes whose one-minute bar reaches the level. It fills at the ask (long) or bid (short) of the quote in effect one second after the trigger; no fill quote in 60 seconds means no trade, counted",
+    "stop": "0.10 x the name's average true range from the fill. From one second after the trigger until 15:58:59, the first tape trade at or below the stop (long) or at or above it (short) triggers it, reading the rest of the fill's minute and then only minutes whose bar reaches the stop; it fills at the bid (long) or ask (short) of the quote in effect one second later",
+    "exit": "otherwise a market order at 15:59:00, filled at the bid (long) or ask (short) of the quote in effect at 15:59:01; without one, the 15:59 bar's close, counted",
+    "costs": "the spread is paid through the quotes; no commission is added. The extra-cost check charges one more cent a share on each side",
+    "measure": "R = (exit - fill) x direction over the risk (0.10 x ATR); one trade per name per session"
+  },
+  "tests": {
+    "count": 2,
+    "both_sides": "every trade",
+    "long_side": "long trades only (what a Roth IRA can hold as shares)",
+    "statistic": "mean R per trade with tape fills",
+    "uncertainty": "2,000 bootstrap resamples of sessions (seed 20261113), each session's trades kept together; two-sided percentile interval at 97.5% (Bonferroni for two tests)"
+  },
+  "periods": {"first_half": "2016-01-04 to 2019-12-31", "second_half": "2020-01-01 to 2023-12-29", "independence": "no opening breakout study read any session of either half; the slice was chosen on 2024-2026"},
+  "decisions": {
+    "worth a paper test": "the interval's lower end is above 0, the mean is above 0 in each half, and the mean is still above 0 with the extra cent a share on each side",
+    "loses money": "the interval's upper end is below 0",
+    "no evidence either way": "anything else",
+    "what_each_allows": "Worth a paper test: a live paper recorder on the desk (top 5 at 09:35 from live data, fills from recorded quotes) before any money; options expressions are a later, separate question. Loses money or no evidence: opening range breakouts on stocks in play are closed for this account, the top-5 slice included; no further variants on any history"
+  },
+  "descriptive_only": [
+    "trades, share of picks that triggered, win rate, mean winning and losing R, total R, mean R per session",
+    "short side alone; by year; by rank 1 to 5; without the best 1% of sessions",
+    "the same picks replayed with v1's one-minute rules and costs, its fill-bar worst case, and the paired difference between tape and bar R on trades both entered",
+    "the spread paid at entry in R; counts of picks with no fill quote, stops with no fill quote, and exits from the bar close"
+  ],
+  "limits": [
+    "a retail stop order's trigger and routing differ by broker; the one-second delay and the tape-trade rule are stated assumptions",
+    "the quote in effect is the consolidated best bid and ask, so a fill larger than the displayed size could be worse",
+    "minutes are skipped when their one-minute bar does not reach the level; a trade the bar excludes cannot trigger",
+    "2016-2023 includes regimes (2020, 2021) unlike 2024-2026; the halves are reported for that reason",
+    "listing snapshots every six months can miss a name listed and delisted between two snapshots"
+  ],
+  "results": "Market data only: the aggregate results are committed beside this protocol after the single run; the downloaded data stays outside the repository.",
+  "one_run": "one historical run under this id. A changed constant is a new protocol id, recorded beside this one"
+}
