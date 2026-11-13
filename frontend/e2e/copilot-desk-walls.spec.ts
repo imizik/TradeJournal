@@ -14,15 +14,15 @@ const now = Math.floor(Date.now() / 1000);
 const NEAREST = "2026-11-12";
 const ASSUMPTION = "Dealer side assumed: dealers long calls and short puts. Open interest does not say who holds a contract, so the walls are positioning, the flip and the gamma a model.";
 
-/** 60 two-minute candles around 94 (93.4 to 95.4), no plan, no marks. */
-function chartRead() {
-  const step = 120, last = now - (now % step);
+/** 60 candles of the asked timeframe around 94 (93.4 to 95.4), no plan, no marks. */
+function chartRead(timeframe = "2m") {
+  const step = timeframe === "15m" ? 900 : 120, last = now - (now % step);
   const bars = Array.from({ length: 60 }, (_, i) => {
     const open = 94.3 + Math.sin(i / 5);
     return { time: last - (59 - i) * step, open, high: open + 0.1, low: open - 0.1, close: open + (i % 3 === 0 ? -0.05 : 0.05), volume: 1000, extended: false };
   });
   return {
-    symbol: "NBIS", timeframe: "2m", step, as_of: now, live: false, state: "ok", reason: null, bars, studies: {}, reference: [],
+    symbol: "NBIS", timeframe, step, as_of: now, live: false, state: "ok", reason: null, bars, studies: {}, reference: [],
     reading: { last: bars[59].close, at: bars[59].time + 60, daily: false, prev_close: 93.1, vwap: null, vwap_at: null, rvol: null },
     levels: [], alerts: [], marks: [], time_stop: null,
   };
@@ -67,7 +67,7 @@ async function desk(page: Page) {
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route("**/copilot/chat", (route) => route.abort());
   await page.route(/\/copilot\/desk\/symbol(:|%3A)NBIS\//, (route) => new URL(route.request().url()).pathname.endsWith("/chart")
-    ? route.fulfill({ json: chartRead() })
+    ? route.fulfill({ json: chartRead(new URL(route.request().url()).searchParams.get("timeframe") ?? "2m") })
     : route.fulfill({ json: { state: "ok", symbol: "NBIS", count: 0, unavailable: [], recent_days: 7, rows: [] } }));
   await page.route("**/copilot/desk/read", (route) => route.fulfill({ json: { state: "hidden" } }));
   await page.route(/\/copilot\/desk\/walls\?/, (route) => {
