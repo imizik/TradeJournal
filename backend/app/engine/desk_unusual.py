@@ -14,10 +14,10 @@ Read-only. Nothing here places, sends or stages an order, nothing reads Robinhoo
 - **The two rules.** A contract is unusual when its volume today is at least ``VOL_OI`` times its open interest (last
   night's count, as OCC publishes it) and at least ``MIN_VOLUME`` contracts; a contract with no open interest at all
   and that much volume counts too. A ticker is unusual on its call (or put) side when that side's volume so far today,
-  over the same nearest expiries, is at least ``TICKER_X`` times its average full session over its last
+  over its nearest ``TICKER_EXPIRIES`` expiries after today (same-day expiries left out on both sides), is at least ``TICKER_X`` times its average full session over its last
   ``HISTORY_SESSIONS`` recorded sessions (the nightly option snapshots, ``options_recorder``) and at least
   ``TICKER_MIN`` contracts. A name the recorder has fewer than ``MIN_HISTORY`` sessions of gets the contract rule only,
-  and the reply says so.
+  and the reply says so; so does a name whose read came back short (``partial``).
 - **No side guessed.** The chain carries volume and the last price, not which trades hit the bid or the ask, so no side
   is shown.
 - **Honest gaps.** A missing volume or open interest is skipped, never read as zero. A name not read yet, or whose read
@@ -49,6 +49,9 @@ TICKER_MIN = 1000  # and at least this many contracts
 HISTORY_SESSIONS = 20
 MIN_HISTORY = 5
 EXPIRIES = 3  # the nearest expiries read per name
+# The ticker rule's expiries: the nearest two after the session's own day, on both sides of the comparison, so a same-day
+# (0DTE) expiry the nightly snapshot may or may not list never makes today look busier than its history.
+TICKER_EXPIRIES = 2
 MAX_SYMBOLS = 12
 PER_SYMBOL = 5  # contracts shown per name
 MAX_ROWS = 20
@@ -59,8 +62,9 @@ PATH = Path(__file__).resolve().parents[2] / "data" / "desk_unusual.json"
 ALIASES = {"SPXW": "SPX"}
 
 RULE = (f"Unusual: a contract that has traded at least {VOL_OI:g}× its open interest today, and at least {MIN_VOLUME:,} "
-        f"contracts; or a ticker whose call or put volume so far today is at least {TICKER_X:g}× its average full day over "
-        f"its last {HISTORY_SESSIONS} recorded sessions, and at least {TICKER_MIN:,} contracts. Only the nearest "
+        f"contracts; or a ticker whose call or put volume so far today, on its nearest two expiries after today, is at least "
+        f"{TICKER_X:g}× its average full day on the same expiries over its last {HISTORY_SESSIONS} recorded sessions, and "
+        f"at least {TICKER_MIN:,} contracts. Only the nearest "
         f"{EXPIRIES} expiries of names you hold or watch are read, every few minutes in market hours. Open interest is "
         "last night's count. The chain does not say whether trades hit the bid or the ask, so no side is shown.")
 
@@ -79,12 +83,14 @@ def scope(db: Session) -> list[dict]:
     from app.engine.options_chain import SYMBOL
     from app.models import Account, Trade
     hidden = day_journal.not_following(db)
+    hidden |= {_name(h) for h in hidden}  # Not following SPXW hides SPX too
     held = db.exec(select(Trade.ticker).join(Account, Account.id == Trade.account_id).where(Trade.status == "open")
                    .where(or_(Account.broker.is_(None), Account.broker != "webull"))).all()
     held_names = [_name(t) for t in held]
-    watched = [_name(s) for s in desk_watch.state(db)["symbols"]]
     out: list[dict] = []
-    for name in held_names + watched:
+    for raw, name in [(t, _name(t)) for t in held] + [(s, _name(s)) for s in desk_watch.state(db)["symbols"]]:
+        if (raw or "").strip().upper() in hidden:
+            continue
         if name and SYMBOL.fullmatch(name) and name not in hidden and all(o["symbol"] != name for o in out):
             out.append({"symbol": name, "held": name in held_names})
     return out[:MAX_SYMBOLS]
@@ -138,7 +144,8 @@ def ticker_flags(totals: dict[str, int | None], usual: dict | None) -> list[dict
 
 
 def history(db: Session, symbol: str, before: date, root: str) -> dict | None:
-    """The average full-session call and put volume over each recorded session's nearest ``EXPIRIES`` expiries, from the
+    """The average full-session call and put volume over each recorded session's nearest ``TICKER_EXPIRIES`` expiries
+    after its own day, from the
     nightly snapshots: ``{"call", "put", "sessions"}``; None with fewer than ``MIN_HISTORY`` usable sessions."""
     from app.models import OptionChainSnapshot, OptionSnapshotDay
     days = db.exec(select(OptionSnapshotDay.session_date).where(
@@ -149,7 +156,7 @@ def history(db: Session, symbol: str, before: date, root: str) -> dict | None:
     sums: dict[str, list[int]] = {"call": [], "put": []}
     for day in days:
         listed = sorted(e for e in db.exec(select(OptionChainSnapshot.expiration).where(
-            OptionChainSnapshot.underlying == symbol, OptionChainSnapshot.session_date == day)).all() if e >= day)[:EXPIRIES]
+            OptionChainSnapshot.underlying == symbol, OptionChainSnapshot.session_date == day)).all() if e > day)[:TICKER_EXPIRIES]
         if not listed:
             continue
         blobs = db.exec(select(OptionChainSnapshot.data_json).where(
@@ -184,12 +191,13 @@ def evaluate(symbol: str, chains, fetched: float | None, day: date, usual: dict 
     """One name's reading: its unusual contracts (at most ``PER_SYMBOL``), its ticker flags and what could not be read."""
     from app.engine.options_positioning import primary_root
     root = primary_root(symbol)
-    complete = len(chains) >= EXPIRIES and issue is None
-    totals = side_totals(chains, root) if complete else {"call": None, "put": None}
+    later = sorted((c for c in chains if c.expiration > day), key=lambda c: c.expiration)[:TICKER_EXPIRIES]
+    complete = len(later) >= TICKER_EXPIRIES and issue is None
+    totals = side_totals(later, root) if complete else {"call": None, "put": None}
     return {"symbol": symbol, "day": day.isoformat(), "read_at": int(fetched) if fetched is not None else None,
             "expirations": sorted(c.expiration.isoformat() for c in chains),
             "contracts": unusual_contracts(chains, root)[:PER_SYMBOL], "tickers": ticker_flags(totals, usual),
-            "history": usual is not None, "issue": issue}
+            "history": usual is not None, "partial": usual is not None and not complete, "issue": issue}
 
 
 # --------------------------------------------------------------------------- reading
@@ -314,7 +322,8 @@ def reset() -> None:
 
 def _base(state: str, **more) -> dict:
     return {"state": state, "session": "closed", "label": None, "day": None, "rule": RULE, "rows": [], "tickers": [],
-            "unread": [], "no_history": [], "stale": [], "held": [], "message": None, "simulated": False, **more}
+            "unread": [], "no_history": [], "partial": [], "stale": [], "held": [], "read_at": None, "message": None,
+            "simulated": False, **more}
 
 
 def view(db: Session, now: float | None = None, *, mode: str = "live", spawn=None) -> dict:
@@ -330,6 +339,9 @@ def view(db: Session, now: float | None = None, *, mode: str = "live", spawn=Non
         db.rollback()
         return _base("unavailable", message="Which tickers you follow could not be read, so nothing is shown.")
     if mode == "fixture":
+        from app.engine import day_journal
+        if "NBIS" in day_journal.not_following(db):
+            return _base("ok", label="at the close", simulated=True)
         return _fixture(any(n["symbol"] == "NBIS" and n["held"] for n in names))
     if not names:
         return _base("none", message="No held or watched names to read.")
@@ -360,7 +372,9 @@ def view(db: Session, now: float | None = None, *, mode: str = "live", spawn=Non
     out = _base("ok", session="open" if live else "closed", label="live" if live else ("at the close" if day else None),
                 day=day, rows=rows[:MAX_ROWS], tickers=tickers,
                 unread=[n["symbol"] for n in names if n["symbol"] not in shown],
-                no_history=[s for s, e in shown.items() if not e.get("history")], stale=stale, held=sorted(held))
+                no_history=[s for s, e in shown.items() if not e.get("history")],
+                partial=[s for s, e in shown.items() if e.get("partial")], stale=stale, held=sorted(held),
+                read_at=max((e["read_at"] for e in shown.values()), default=None))
     if not live and day is None:
         out["message"] = "No reading from a market session yet; the list fills in while the desk is open in market hours."
     elif live and not shown:
@@ -382,10 +396,10 @@ def _fixture(held: bool) -> dict:
         picked.append(replace(chain, contracts=tuple(
             replace(c, volume=invented.get((d, c.option_type, c.strike), c.volume)) for c in chain.contracts)))
     at = datetime.fromisoformat(AT.replace("Z", "+00:00")).timestamp()
-    totals = side_totals(picked, "NBIS")
+    totals = side_totals([c for c in picked if c.expiration > session][:TICKER_EXPIRIES], "NBIS")
     usual = {"call": totals["call"] / 2.6 if totals["call"] else None, "put": None, "sessions": HISTORY_SESSIONS}  # invented
     entry = evaluate("NBIS", picked, at, session, usual, None)
     extra = {"symbol": "NBIS", "held": held, "read_at": entry["read_at"], "stale": False}
-    return _base("ok", label="at the close", day=SESSION, simulated=True,
+    return _base("ok", label="at the close", day=SESSION, simulated=True, read_at=entry["read_at"],
                  rows=[{**r, **extra} for r in entry["contracts"]], tickers=[{**f, **extra} for f in entry["tickers"]],
                  held=["NBIS"] if held else [])

@@ -78,13 +78,15 @@ def hide(engine, symbol):  # noqa: F811
 
 
 def record(engine, symbol, days, call=1000, put=800, expiries=4):  # noqa: F811
-    """``days`` recorded sessions before WED, each with ``expiries`` expirations (the nearest three count)."""
+    """``days`` recorded sessions before WED, each with ``expiries`` expirations from the session's own day: the same-day
+    one and those past the nearest two after it are huge, so counting them would show."""
     with Session(engine) as db:
         for back in range(1, days + 1):
             day = WED - timedelta(days=back)
             db.add(OptionSnapshotDay(session_date=day, underlying=symbol, status="recorded"))
             for k in range(expiries):
-                rows = [[symbol, "C", 100.0, 50, call // 3 if k < 3 else 99999], [symbol, "P", 100.0, 50, put // 3 if k < 3 else 99999],
+                counts = 0 < k < 3
+                rows = [[symbol, "C", 100.0, 50, call // 2 if counts else 99999], [symbol, "P", 100.0, 50, put // 2 if counts else 99999],
                         ["OTHER", "C", 100.0, 50, 99999]]
                 db.add(OptionChainSnapshot(session_date=day, underlying=symbol, expiration=day + timedelta(days=k), provider="tradier",
                                            captured_at=datetime(2026, 10, 1), contracts=3,
@@ -139,11 +141,11 @@ def test_a_ticker_side_is_unusual_at_twice_its_usual_day_and_the_minimum():
     assert du.ticker_flags({"call": 5000, "put": 5000}, None) == []
 
 
-def test_history_averages_the_nearest_three_expiries_of_recorded_sessions(engine):  # noqa: F811
+def test_history_averages_the_nearest_two_expiries_after_each_session(engine):  # noqa: F811
     record(engine, "NBIS", 6, call=900, put=600)
     with Session(engine) as db:
         found = du.history(db, "NBIS", WED, "NBIS")
-    assert found == {"sessions": 6, "call": 900, "put": 600}  # the fourth expiry and the other root are left out
+    assert found == {"sessions": 6, "call": 900, "put": 600}  # same-day, later expiries and the other root left out
 
 
 def test_fewer_than_five_recorded_sessions_is_no_history(engine):  # noqa: F811
@@ -164,6 +166,14 @@ def test_scope_is_held_then_watching_without_hidden_or_webull_or_closed(engine):
     with Session(engine) as db:
         assert du.scope(db) == [{"symbol": "NBIS", "held": True}, {"symbol": "SPX", "held": True},
                                 {"symbol": "AMD", "held": False}, {"symbol": "CRWV", "held": False}]
+
+
+def test_not_following_spxw_hides_spx_and_the_other_way(engine):  # noqa: F811
+    hold(engine, "SPXW")
+    watch(engine, "SPX", "AMD")
+    hide(engine, "SPXW")
+    with Session(engine) as db:
+        assert du.scope(db) == [{"symbol": "AMD", "held": False}]
 
 
 def test_scope_is_capped(engine):  # noqa: F811
@@ -241,19 +251,30 @@ def test_live_rows_are_most_traded_first_with_contract_and_ticker_flags(engine, 
     assert [(r["symbol"], r["strike"], r["volume"]) for r in found["rows"]] == [
         ("AMD", 50.0, 3000), ("NBIS", 110.0, 2400), ("NBIS", 90.0, 700)]
     assert {r["symbol"]: r["held"] for r in found["rows"]} == {"AMD": False, "NBIS": True}
-    # NBIS calls today: 3 quiet x 10 + 2400 = 2430 against a usual 900: 2.7x. Puts 730: under the minimum.
-    assert [(t["symbol"], t["side"], t["today"], t["usual"], t["multiple"]) for t in found["tickers"]] == [("NBIS", "call", 2430, 900, 2.7)]
+    # The 110 call is today's (0DTE) expiry: never in the ticker check. Calls on E2 and E3: 2 x 10, under the minimum.
+    assert found["tickers"] == []
     assert found["no_history"] == ["AMD"] and found["unread"] == [] and found["stale"] == []
     assert found["rule"].startswith("Unusual: a contract that has traded at least 3×") and "bid or the ask" in found["rule"]
 
 
-def test_a_partial_read_keeps_the_contract_rule_but_not_the_ticker_rule(engine, market_open):  # noqa: F811
+def test_the_ticker_rule_counts_the_nearest_two_expiries_after_today(engine, market_open):  # noqa: F811
+    watch(engine, "NBIS")
+    record(engine, "NBIS", 6, call=900, put=600)
+    run(engine, ["NBIS"], three(contract(120.0, volume=5000, oi=5000, expiry=E1),  # today's expiry: left out
+                                contract(110.0, volume=1200, oi=900, expiry=E2), contract(111.0, volume=1180, oi=900, expiry=E3)))
+    found = view(engine, spawn=lambda work: None)
+    # Calls on E2 and E3: 10 + 1200 + 10 + 1180 = 2400 against a usual 900: 2.7x. Puts 20: under the minimum.
+    assert [(t["symbol"], t["side"], t["today"], t["usual"], t["multiple"]) for t in found["tickers"]] == [("NBIS", "call", 2400, 900, 2.7)]
+    assert found["rows"] == [] and found["partial"] == [] and found["read_at"] == int(NOW - 5)
+
+
+def test_a_short_read_keeps_the_contract_rule_and_says_the_ticker_check_was_skipped(engine, market_open):  # noqa: F811
     watch(engine, "NBIS")
     record(engine, "NBIS", 6, call=100, put=100)
-    run(engine, ["NBIS"], {"chains": three(contract(110.0, volume=2400, oi=300))[:2], "fetched": NOW - 5,
-                           "issue": "Option reads are pacing"})
+    run(engine, ["NBIS"], {"chains": three(contract(110.0, volume=2400, oi=300), contract(111.0, volume=9000, oi=9000, expiry=E2))[:2],
+                           "fetched": NOW - 5, "issue": "Option reads are pacing"})
     found = view(engine, spawn=lambda work: None)
-    assert [r["strike"] for r in found["rows"]] == [110.0] and found["tickers"] == []
+    assert [r["strike"] for r in found["rows"]] == [110.0] and found["tickers"] == [] and found["partial"] == ["NBIS"]
 
 
 # --- stale and unavailable -------------------------------------------------------------------------------------------
@@ -323,7 +344,9 @@ def test_the_route_is_owner_only_and_the_fixture_is_simulated(engine, lab, monke
     body = lab.get("/copilot/unusual").json()
     assert body["simulated"] is True and body["label"] == "at the close"
     assert [(r["symbol"], r["side"], r["strike"]) for r in body["rows"]] == [("NBIS", "call", 105.0), ("NBIS", "put", 85.0), ("NBIS", "call", 110.0)]
-    assert [t["side"] for t in body["tickers"]] == ["call"]
+    assert [t["side"] for t in body["tickers"]] == ["call"] and body["read_at"]
+    hide(engine, "NBIS")
+    assert lab.get("/copilot/unusual").json()["rows"] == []
     monkeypatch.setattr(routes.copilot, "settings", lambda: SimpleNamespace(enabled=False))
     assert lab.get("/copilot/unusual").status_code == 503
 

@@ -193,6 +193,7 @@ test("an Unusual options row in the Feed selects its contract in the Chain tab, 
   await expect(row).toContainText("NBIS $97.5 Put 11/20/26");
   await expect(row).toContainText("Vol 4,200 · OI 900 · Last 3.10");
   await expect(row).toContainText("4.7× OI");
+  const before = chainReads.length; // the setup opened the Chain once already
   await row.click();
   await expect(pane.getByRole("tab", { name: "Chain" })).toHaveAttribute("aria-selected", "true");
   const tab = pane.getByTestId("desk-chain");
@@ -200,5 +201,11 @@ test("an Unusual options row in the Feed selects its contract in the Chain tab, 
   await expect.poll(() => chainReads.at(-1)).toBe("?symbol=NBIS&expiration=2026-11-20&strike=97.5");
   await expect(tab.getByTestId("chain-actions")).toContainText("NBIS $97.5 Put 11/20/26");
   await expect(tab.locator("tr[data-strike='97.5']").getByTestId("chain-unusual")).toHaveText("unusual");
+  expect(chainReads.slice(before).filter(q => !q.includes("expiration"))).toEqual([]); // the pick's expiry is the first read
+  // Leaving the Chain and coming back is a fresh look: the nearest expiry, nothing selected.
+  await pane.getByRole("tab", { name: "Chart" }).click();
+  await pane.getByRole("tab", { name: "Chain" }).click();
+  await expect(tab.getByRole("radiogroup", { name: "Expiry" }).getByRole("radio", { checked: true })).toContainText("Nov 13");
+  await expect(tab.getByTestId("chain-actions")).toHaveCount(0);
   expect(methods.filter(m => m.startsWith("POST"))).toEqual([]);
 });

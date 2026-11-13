@@ -152,11 +152,13 @@ export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, un
   unusual?: UnusualRow[]; focus?: { pick: ChainPick; n: number } | null;
 }) {
   // The expiry he picked belongs to its ticker: a new ticker starts at its nearest, with no extra read of the old date.
-  const [chosen, setChosen] = useState<{ symbol: string | null; date: string } | null>(null);
+  // A Feed pick seeds the first read, so the tab never reads the nearest expiry first.
+  const seeded = focus && focus.pick.symbol === symbol ? focus.pick : null;
+  const [chosen, setChosen] = useState<{ symbol: string | null; date: string } | null>(seeded ? { symbol, date: seeded.expiry } : null);
   const expiry = chosen && chosen.symbol === symbol ? chosen.date : null;
   const setExpiry = (date: string) => setChosen({ symbol, date });
-  const [side, setSide] = useState<ChainSide>("call");
-  const [picked, setPicked] = useState<ChainPick | null>(null);
+  const [side, setSide] = useState<ChainSide>(seeded?.side ?? "call");
+  const [picked, setPicked] = useState<ChainPick | null>(seeded);
   // A Feed row's contract: its expiry, selected, on the side shown, its strike inside the window.
   useEffect(() => {
     if (!focus || focus.pick.symbol !== symbol) return;

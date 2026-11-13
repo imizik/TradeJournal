@@ -21,7 +21,8 @@ export type UnusualTicker = { symbol: string; held: boolean; side: ChainSide; to
 export type UnusualReply = {
   state: "ok" | "none" | "unavailable"; session: "open" | "closed"; label: "live" | "at the close" | null; day: string | null;
   rule: string; rows: UnusualRow[]; tickers: UnusualTicker[]; unread: string[]; no_history: string[]; stale: string[];
-  held: string[]; message: string | null; simulated: boolean;
+  /** Names whose read came back short, so the whole-ticker check was skipped. */
+  partial?: string[]; held: string[]; read_at?: number | null; message: string | null; simulated: boolean;
 };
 
 const READ_MS = 60_000;
@@ -61,13 +62,14 @@ export const ratioText = (row: Pick<UnusualRow, "ratio">) => row.ratio === null 
 /** The Feed's Unusual options section. */
 export function UnusualList({ reply, onPick }: { reply: UnusualReply | null; onPick(pick: ChainPick): void }) {
   if (!reply) return <p className="text-xs text-muted-foreground">Reading unusual options…</p>;
-  const newest = Math.max(0, ...reply.rows.map(r => r.read_at), ...reply.tickers.map(t => t.read_at));
+  const newest = reply.read_at ?? Math.max(0, ...reply.rows.map(r => r.read_at), ...reply.tickers.map(t => t.read_at));
   const when = reply.simulated ? "Simulated (sandbox fixture)"
     : reply.label === "live" ? `Live${newest ? ` · read ${clock(newest)} ET` : ""}`
-    : reply.label === "at the close" && reply.day ? `At the close · ${dayText(reply.day)}` : null;
+    : reply.label === "at the close" && reply.day ? `At the close · ${dayText(reply.day)}${newest ? ` · last read ${clock(newest)} ET` : ""}` : null;
   const grey: string[] = [];
   if (reply.unread.length) grey.push(`${reply.label === "live" ? "Not read yet" : "No reading from that session"}: ${reply.unread.join(", ")}.`);
   if (reply.no_history.length) grey.push(`No volume history yet for ${reply.no_history.join(", ")}, so only the volume-vs-open-interest rule applies.`);
+  if (reply.partial?.length) grey.push(`Only part of the chain was read for ${reply.partial.join(", ")}, so the whole-ticker check was skipped.`);
   if (reply.stale.length) grey.push(`Not read again lately (greyed): ${reply.stale.join(", ")}.`);
   return (
     <section data-testid="feed-unusual" aria-label="Unusual options" className="space-y-2">

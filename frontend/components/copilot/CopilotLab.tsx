@@ -179,6 +179,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const feedNew = useFeedNew(feed.data, on && centreTab === "feed");
   const unusual = useDeskUnusual(on);
   const [chainFocus, setChainFocus] = useState<{ pick: ChainPick; n: number } | null>(null); // a Feed row's unusual contract
+  useEffect(() => { if (centreTab !== "chain") setChainFocus(null); }, [centreTab]); // eslint-disable-line react-hooks/set-state-in-effect -- the pick opens the Chain once, not on every later visit
   // The tickers opened today in this browser: opening one clears its strip items (``deskNeeds``); nothing is dismissed.
   const [opened, setOpened] = useState<Record<string, number>>({});
   useEffect(() => { setOpened(readOpened(nyDay())); }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
