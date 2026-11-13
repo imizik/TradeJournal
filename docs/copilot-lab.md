@@ -678,7 +678,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   calendar's FOMC, CPI and jobs days, faint; no other chart does. The Chain tab marks **ER** on each expiry that lives
   through the next report (on or after its date), with one line naming the report; its read carries `earnings` and each
   expiry's `earnings` flag, from the same cache (`desk_events.next_report`).
-- **Centre.** A tab strip, **Chart** first, **Chain** (see [Chain](#chain)), **Feed**, **Check a call** (§ Check a
+- **Centre.** A tab strip, **Chart** first, **Grid** (below), **Chain** (see [Chain](#chain)), **Feed**, **Check a call** (§ Check a
   call) and **Ticket** (see [Ticket](#ticket); no tab shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
   position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's
   fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D, with studies (VWAP, EMAs, SMAs,
@@ -690,6 +690,27 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   its own small component on the library `/charts` uses (lightweight-charts), not the workspace's `PriceChart`: that
   chart is bound to the workspace's live feed, crosshair links, command bus and clock stores, so the desk draws from
   its own read instead of embedding it.
+- **Grid** (`components/copilot/DeskGrid.tsx`, `lib/deskGrid.ts`, `GET /copilot/desk/grid`, `app/engine/desk_grid.py`):
+  4, 6 or 9 small charts at once (his choice; size, 1m/5m and pins kept in this browser's local storage,
+  `desk.grid.v1`). Slots fill with the followed held positions (the book's order), then the Watching list in its order;
+  a pinned name keeps its slot (pin or unpin on the tile, or **⋯** to put any ticker there); a ticker set to Not
+  following never fills a slot, pinned or not, and the route drops it too. Each tile: ticker, last price and day change
+  (the shared ticker, else the sparks read), the earnings tag, and today's candles (pre-market to now, extended ones
+  faded) after the previous session's last 30 minutes (grey), with today's RTH VWAP and the symbol's armed plan and alert
+  levels within 4% as thin lines. No studies, zoom or crosshair: a click opens the name on the Chart tab in place, as its
+  book or Watching row would. One read for every tile when the names or timeframe change, then at most once a minute
+  while the Grid shows, the session is on and the browser tab is visible; between reads the ticker moves each tile's
+  last candle and starts the next. Bars older than 150 s on a live day (their re-read failed or waited for the feed's
+  budget) show greyed with their read time ("bars 10:50 AM") and the ticker does not extend them; a finished session's
+  minutes count as the day only when read after its last window ended (20:00; 17:00 after a 13:00 close), else they show
+  greyed with their time too, and the Grid looks again every 15 minutes outside the session so
+  it moves to the next one. A name the server leaves out (Not following with no row here) leaves its slot. Server order for a symbol's minutes: the grid's own 55-second cache (a timeframe
+  switch or a second desk costs nothing), a chart's cached minutes under a minute old, one batched Alpaca read for the
+  rest (SIP, ten-minute back-off on refusal), then the chart feed's low-priority read per symbol only while the feed has
+  made fewer than 30 of its 60 calls in the minute. The previous session's tail comes from stored sessions on disk, else
+  rides the Alpaca read; it never gets a Tradier call. With a 9-tile grid open: one Alpaca call a minute and no Tradier
+  call when Alpaca serves; at most nine low-priority Tradier calls a minute (two at once, shared with the Chart tab's
+  own request) when it does not.
 - **Feed** (`components/copilot/DeskFeed.tsx`, `GET /copilot/desk/feed`, `app/engine/desk_feed.py`): one stream of what
   the app already knows today, so there is a reason to open the desk that is not a ping. Its tab carries a grey count of
   the items new since the Feed was last opened in this browser. Each item is one row: its source (**Alert**, **Plan**,
