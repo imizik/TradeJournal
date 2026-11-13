@@ -686,10 +686,11 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         {on && (
           <section id="desk-centre" aria-label="Chart and feed" className={styles.centre}>
             {/* Chart first, then the Grid, Chain, Feed, Check a call and Ticket. */}
-            <div role="tablist" aria-label="Centre" className="flex gap-1 border-b px-2 pt-1.5">
+            {/* Six tabs fit a 375 px phone (Linux fonts too) only with tighter spacing there. */}
+            <div role="tablist" aria-label="Centre" className="flex gap-0.5 border-b px-1.5 pt-1.5 sm:gap-1 sm:px-2">
               {([["chart", "Chart"], ["grid", "Grid"], ["chain", "Chain"], ["feed", "Feed"], ["check", "Check a call"], ["ticket", "Ticket"]] as const).map(([id, label]) => (
                 <button key={id} type="button" role="tab" aria-selected={centreTab === id} onClick={() => setCentreTab(id)}
-                  className={cn("-mb-px min-h-11 border-b-2 px-2.5 text-sm sm:min-h-9", centreTab === id ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+                  className={cn("-mb-px min-h-11 shrink-0 whitespace-nowrap border-b-2 px-2 text-sm sm:min-h-9 sm:px-2.5", centreTab === id ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
                   {label}
                   {id === "feed" && feedNew.count > 0 && <span data-testid="feed-new" className="ml-1.5 text-xs tabular-nums text-muted-foreground">{feedNew.count}<span className="sr-only"> new</span></span>}
                 </button>
