@@ -1545,6 +1545,29 @@ that nothing in it places or sends anything.
   or made-up price. Proof: `frontend/e2e/closing-ticket.spec.ts` (the math for calls and puts, the floors, every
   missing input), `frontend/e2e/copilot-desk-close-from-plan.spec.ts` (the target line, both buttons, the ticket, no
   request and no Send, a phone), `backend/tests/test_plan_target.py` and `test_desk_ticket.py`.
+- **Play check** (`app/engine/play_check.py`, `frontend/components/copilot/PlayCheck.tsx`, the ticket's `check`), one
+  compact block above Copy all: two lines when clean, opening up only for a missing part, a habit that fired, or a
+  hold past today's close. No model call, no extra route, nothing placed or staged, no Robinhood read.
+  - **Play:** stop (the invalidation), target (only once plans carry one), time (the time stop, else the horizon
+    check-in), size (contracts or dollars at risk), each ✓ or a plain "missing", with what to add and **Edit the
+    plan**. Missing parts never block the ticket.
+  - **Your habits:** the fill interrupts' own rules (late short-dated, put entry, adding to a loser in this exact
+    contract, large size against the same median and multiple, day already green in the plan's account, losing
+    ticker record) judged on this order as if it filled now, each with the after-fill message's record line and
+    "Your record, not advice."; nothing fired is one quiet line. The records are the same `load_history`, cached on
+    the same signature. The size rule is judged again in the browser on the count and limit he types. A ticker he
+    set to Not following shows no habits. The after-fill pings are unchanged.
+  - **Holding overnight:** shown when the time stop (else a swing or long horizon) runs past today's close, else
+    folded under "If you held it to the next close". Time decay a day from the chain's theta (with the greeks' as-of)
+    and as a share of the premium; at the end of the hold, what an unchanged price costs and the break-even price,
+    against the move the contract's implied volatility gives over that time. Beside it the same-delta alternatives
+    `expression_recorder.choose` picks (deeper, debit spread, later expiry, shares; a put's short shares say "not in
+    a Roth IRA"), each with cost, the most it can lose, decay a day and the same break-even, at the mid. Repricing is
+    Black-Scholes at the volatility each leg's own mid implies (so it prices at what it costs; the provider's hourly
+    IV only when the mid implies none), rate zero, price and volatility held, and says so. The later
+    expiry's chain is read in the ticket's own options-feed pass (one more chain at most, under its pacing). Dollars
+    are per contract from the server and scaled by the count he types. A stale or missing quote is grey with its
+    time, never a number. `backend/tests/test_play_check.py`, `frontend/e2e/copilot-desk-play-check.spec.ts`.
 
 ### Chain
 

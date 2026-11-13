@@ -254,9 +254,7 @@ def line(kind: str, rec: dict, day_pnl: float | None = None, paid: float | None 
         return f"{head}, too few to read" if n < MIN_SAMPLE else f"{head}, {round(100 * rec['green'] / n)}% won, {money(rec['pnl'])}"
     if kind == "large_size":
         paid, usual = paid or 0.0, rec["median"]
-        head = f"Size: ${paid:,.0f} is {paid / usual:.1f}× your median (${usual:,.0f})"
-        tail = f"your {n:,} past {'entry' if n == 1 else 'entries'} above {LARGE_MULTIPLE:g}×"
-        return f"{head}; {tail}, too few to read" if n < MIN_SAMPLE else f"{head}; {tail}: {round(100 * rec['green'] / n)}% won, {money(rec['pnl'])}"
+        return f"Size: ${paid:,.0f} is {paid / usual:.1f}× your median (${usual:,.0f}); {size_tail(rec)}"
     if kind == "add_to_loser":
         head = f"Adding to a loser: {_plural(n, 'past add')}"
         return f"{head}, too few to read" if n < MIN_SAMPLE else f"{head}, {rec['green']:,} ended green, {money(rec['pnl'])}"
@@ -273,6 +271,13 @@ def line(kind: str, rec: dict, day_pnl: float | None = None, paid: float | None 
     if n < MIN_SAMPLE:
         return f"{head}, too few to read"
     return f"{head}, {round(100 * rec['expired'] / n)}% expired worthless, {money(rec['pnl'])}"
+
+
+def size_tail(rec: dict) -> str:
+    """The size line's record half (after the paid-versus-median half), which does not depend on the size paid."""
+    n = rec["n"]
+    tail = f"your {n:,} past {'entry' if n == 1 else 'entries'} above {LARGE_MULTIPLE:g}×"
+    return f"{tail}, too few to read" if n < MIN_SAMPLE else f"{tail}: {round(100 * rec['green'] / n)}% won, {money(rec['pnl'])}"
 
 
 def short_label(ticker: str, instrument_type: str, option_type: str | None, strike) -> str:
@@ -361,9 +366,7 @@ class FillInterrupts:
 
     def history(self, db: Session, today: date) -> list[dict]:
         """The record rows, rebuilt only on a new day or when the closed trades' count or realized total moved."""
-        count, total = db.exec(select(func.count(Trade.id), func.sum(Trade.realized_pnl))
-                               .where(Trade.status.in_(("closed", "expired")))).one()
-        signature = (today, count, round(float(total or 0), 2))
+        signature = history_signature(db, today)
         if self._history is None or self._history[0] != signature:
             self._history = (signature, load_history(db))
         return self._history[1]
@@ -486,6 +489,13 @@ def path(row: FillInterrupt, *, noted: bool = False) -> str:
 def _picture(db: Session, row: FillInterrupt, now: float):
     """The message's chart: the last 90 minutes with the position's entries."""
     return ping_images.fill_window(row.title, row.ticker, ping_images.entry_fills(db, row.trade_id), now)
+
+
+def history_signature(db: Session, today: date) -> tuple:
+    """What the cached record rows depend on: the New York day, and the closed trades' count and realized total."""
+    count, total = db.exec(select(func.count(Trade.id), func.sum(Trade.realized_pnl))
+                           .where(Trade.status.in_(("closed", "expired")))).one()
+    return today, count, round(float(total or 0), 2)
 
 
 def load_history(db: Session) -> list[dict]:
