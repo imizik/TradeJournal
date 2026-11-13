@@ -63,16 +63,16 @@ for (const width of [1440, 375]) {
     const lines = nbis.getByTestId("book-order");
     await expect(lines).toHaveCount(2);
     await expect(lines.nth(0)).toHaveAttribute("data-working", "true");
-    await expect(lines.nth(0)).toContainText("Working · Sell 2 @ 4.50 limit · 1/2 filled · Roth IRA · 9m");
+    await expect(lines.nth(0)).toContainText("Working: Sell 2 @ 4.50 · 1/2 filled · Roth IRA · 9m");
     await expect(lines.nth(0).getByTestId("book-order-mark")).toHaveText("provisional");
-    await expect(lines.nth(1)).toContainText("Filled · Buy 1 @ 3.08, 10:42 AM");
+    await expect(lines.nth(1)).toContainText("Filled: Buy 1 @ 3.08, 10:42");
     await expect(lines.nth(1).getByTestId("book-order-mark")).toHaveText("provisional");
     const group = shelf.getByTestId("book-orders");
     await expect(group.getByRole("heading")).toHaveText("Orders");
     await expect(group.getByTestId("book-order")).toHaveCount(2);
     await expect(group.getByTestId("book-order").nth(0)).toContainText("APLD 11/27/26 30P");
-    await expect(group.getByTestId("book-order").nth(0)).toContainText("Working · Buy to open 3 @ 1.05 limit · MCP · 2m");
-    await expect(group.getByTestId("book-order").nth(1)).toContainText("Filled · Sell to close 2 @ 1.93, 10:36 AM");
+    await expect(group.getByTestId("book-order").nth(0)).toContainText("Working: Buy to open 3 @ 1.05 · MCP · 2m");
+    await expect(group.getByTestId("book-order").nth(1)).toContainText("Filled: Sell to close 2 @ 1.93, 10:36");
     await expect(group.getByTestId("book-order-mark")).toHaveCount(0); // matched: the email is in, no mark
     // Read only: nothing on the book offers to place, change or cancel an order.
     await expect(shelf.getByRole("button", { name: /cancel|replace|modify|change order|place|submit/i })).toHaveCount(0);
@@ -85,7 +85,7 @@ for (const width of [1440, 375]) {
 test("when the email matches the mark goes; Robinhood not live shows no orders and no empty group", async ({ page }) => {
   await open(page, desk({ ...LIVE }, [NBIS_ROW([{ ...FILLED, pairing: "matched" }])]));
   const shelf = page.getByTestId("desk-book");
-  await expect(shelf.getByTestId("book-order")).toContainText("Filled · Buy 1 @ 3.08, 10:42 AM");
+  await expect(shelf.getByTestId("book-order")).toContainText("Filled: Buy 1 @ 3.08, 10:42");
   await expect(shelf.getByTestId("book-order-mark")).toHaveCount(0);
   await expect(shelf.getByTestId("book-orders")).toHaveCount(0); // no leftovers: no heading at all
   for (const robinhood of [{ state: "stale", as_of: AS_OF, orders: GROUP }, { state: "signed_out" }, { state: "off" }]) {
@@ -94,4 +94,16 @@ test("when the email matches the mark goes; Robinhood not live shows no orders a
     await expect(page.getByTestId("book-order")).toHaveCount(0);
     await expect(page.getByTestId("book-orders")).toHaveCount(0);
   }
+});
+
+test("a roll reads its net price and a recurring buy says no email is coming", async ({ page }) => {
+  await open(page, desk({ ...LIVE, orders: [
+    order({ contract: "CRWV 11/21/26 70C", symbol: "CRWV", quantity: 1, price_kind: "net", limit: 0.5 }),
+    order({ contract: "VTI stock", symbol: "VTI", instrument: "stock", action: "Buy", working: false, quantity: null, filled: 0.299212,
+      price_kind: "market", limit: null, avg: 317.5, filled_at: at("2026-10-23T13:35:00Z"), pairing: "recurring" }),
+  ] }, [NBIS_ROW()]));
+  const group = page.getByTestId("book-orders").getByTestId("book-order");
+  await expect(group.nth(0)).toContainText("Working: Sell to close 1 net 0.50");
+  await expect(group.nth(1)).toContainText("Filled: Buy 0.2992 @ 317.50, 9:35");
+  await expect(group.nth(1).getByTestId("book-order-mark")).toHaveText("recurring · no email");
 });

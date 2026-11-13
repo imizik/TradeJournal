@@ -117,13 +117,15 @@ export type DeskBook = {
 /** One Robinhood order on the desk (docs/robinhood-order-fills.md § On the desk): still working (``working``, with what
  * has ``filled`` so far), or filled today. Prices are a share's (an option's premium as quoted). ``pairing`` says whether
  * the journal has the fill yet: ``provisional`` until its email arrives and matches, then ``matched``; ``differs`` when
- * the email disagrees; ``roll`` for a two-leg order (left to its email). Display only: the app never places, changes or
+ * the email disagrees; ``roll`` for a two-leg order (left to its email); ``recurring`` for a recurring buy Robinhood
+ * never emails. Display only: the app never places, changes or
  * cancels an order. */
 export type DeskOrder = {
   contract: string; symbol: string; instrument: "option" | "stock"; action: string; working: boolean;
-  quantity: number | null; filled: number; price_kind: "limit" | "market" | "stop"; limit: number | null; avg: number | null;
+  /** ``net``: a roll's price, the whole order's credit or debit (not one leg's). */
+  quantity: number | null; filled: number; price_kind: "limit" | "market" | "stop" | "net"; limit: number | null; avg: number | null;
   placed_at: number | null; filled_at: number | null; account: { label: string; masked: string };
-  pairing: "provisional" | "matched" | "differs" | "roll" | null;
+  pairing: "provisional" | "matched" | "differs" | "roll" | "recurring" | null;
 };
 
 /** The Robinhood feed's state on the desk (docs/robinhood-read-feed.md). ``ok`` (with ``joined``) drives the book;

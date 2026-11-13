@@ -207,7 +207,9 @@ def _filled(executions) -> tuple[float, float | None, int | None]:
     return qty, (round(value / qty, 4) if qty else None), last
 
 
-def _price_kind(order: dict) -> tuple[str, float | None]:
+def _price_kind(order: dict, legs: int = 1) -> tuple[str, float | None]:
+    if legs > 1:  # a roll's price is the whole order's net credit or debit, never one leg's premium
+        return "net", rb._num(order.get("price"))
     if order.get("trigger") == "stop" and rb._num(order.get("stop_price")) is not None:
         return "stop", rb._num(order.get("stop_price"))
     if order.get("type") == "market":
@@ -224,7 +226,8 @@ def desk_orders(data: dict, account: dict, kind: str) -> list[dict]:
         order_id, state = order.get("id"), order.get("state")
         if not isinstance(order_id, str) or not order_id or not isinstance(state, str):
             continue
-        how, price = _price_kind(order)
+        legs_n = len(order.get("legs")) if kind == "option" and isinstance(order.get("legs"), list) else 1
+        how, price = _price_kind(order, legs_n)
         base = {"order_id": order_id[:64], "last4": account["last4"], "account": account["label"], "state": state[:24],
                 "working": state in WORKING_STATES, "price_kind": how, "limit": price, "placed_at": _epoch(order.get("created_at"))}
         if kind == "option":
@@ -811,8 +814,9 @@ def view(session: Session, days: int = 7) -> dict:
 def desk_pairing(session: Session, orders: list[dict]) -> dict[str, str]:
     """Each filled order's standing against the journal, from this pass's reconciliation (read only): ``matched`` (the
     journal has its fill: its email, a manual entry, or a recurring buy written from the order history), ``differs``
-    (a mismatch), ``roll`` (a two-leg order, left to its email and not paired here) or ``provisional`` (anything else:
-    its email is not in yet)."""
+    (a mismatch), ``roll`` (a two-leg order, left to its email and not paired here), ``recurring`` (a recurring buy
+    Robinhood never emails, not written while the switch is ``shadow``) or ``provisional`` (anything else: its email is
+    not in yet). Read after the pass is committed."""
     ids = sorted({o["order_id"] for o in orders if o["filled"] > 0})
     if not ids:
         return {}
@@ -830,6 +834,8 @@ def desk_pairing(session: Session, orders: list[dict]) -> dict[str, str]:
             out[order_id] = "differs"
         elif row.outcome == "matched" or row.action == "wrote_fill":
             out[order_id] = "matched"
+        elif row.action == "would_write_fill":  # a recurring buy in shadow: no email will come for it
+            out[order_id] = "recurring"
         else:
             out[order_id] = "provisional"
     return out
@@ -860,7 +866,8 @@ class Poller:
         already reads the order history once a minute (fifteen outside market hours) is the only read."""
         view = self._desk
         now = self._now() if now is None else now
-        if view is None or now - view["at"] > rb.STALE_REFRESHES * rb.ttl(now):
+        # Stale against the interval the last pass was taken at (a quiet pass at 9:24 is not stale at 9:28).
+        if view is None or now - view["at"] > rb.STALE_REFRESHES * rb.ttl(view["at"]):
             return None
         day = datetime.fromtimestamp(now, ET).date()
         return [dict(o) for o in view["orders"]
@@ -898,12 +905,24 @@ class Poller:
             with Session(self._engine_()) as session:
                 try:
                     result, new = self.apply(session, got, now_et, current)
-                    pairing = desk_pairing(session, got.orders)
                     session.commit()
                 except Exception:
                     session.rollback()
                     raise
-            self._desk = {"at": now, "orders": [{**o, "pairing": pairing.get(o["order_id"])} for o in got.orders]}
+                try:  # the desk's marks, read after the pass is committed: a failure here never costs the pass
+                    pairing = desk_pairing(session, got.orders)
+                except Exception as exc:  # noqa: BLE001 - the lines then read provisional
+                    log.warning("Robinhood desk order marks unavailable (%s)", type(exc).__name__)
+                    session.rollback()
+                    pairing = {}
+            lines = [{**o, "pairing": pairing.get(o["order_id"])} for o in got.orders]
+            if self._desk is not None:
+                # An account and kind this pass could not read whole keeps its last good lines (a working order does
+                # not vanish, as if cancelled, because one read failed); what this pass did read of it comes first.
+                seen = {o["order_id"] for o in lines}
+                lines += [o for o in self._desk["orders"] if (o["last4"], o["instrument"]) not in got.complete
+                          and o["order_id"] not in seen]
+            self._desk = {"at": now, "orders": lines}
             self._status = {"at": int(now), "state": "ok", "mode": current, "new_executions": new, "written": result.written,
                             "calls": got.calls, "outcomes": result.outcomes,
                             "complete": len(got.complete) == 2 * len(got.account_types)}
@@ -932,7 +951,18 @@ class Poller:
                 await asyncio.to_thread(self.run_once)
             except Exception as error:  # the type only: a message could carry a row's values
                 log.warning("Robinhood order history pass failed (%s)", type(error).__name__)
-            await asyncio.sleep(rb.ttl(self._now()))
+            await asyncio.sleep(pause(self._now()))
+
+
+def pause(now: float) -> float:
+    """Seconds to the next pass: the feed's interval, but never past the 9:25 switch to market hours, so the open is
+    read within a minute (a quiet interval begun at 9:24 would otherwise wait until 9:39)."""
+    wait = rb.ttl(now)
+    moment = datetime.fromtimestamp(now, ET)
+    open_at = moment.replace(hour=9, minute=25, second=0, microsecond=0)
+    if moment.weekday() < 5 and moment < open_at:
+        wait = min(wait, max(1.0, (open_at - moment).total_seconds()))
+    return wait
 
 
 poller = Poller()

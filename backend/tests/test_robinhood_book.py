@@ -439,7 +439,7 @@ def utc_epoch(hh, mm):
     return epoch(hh, mm, day=DAY)
 
 
-def test_an_order_with_no_position_or_on_a_hidden_ticker_goes_to_the_orders_group(desk, engine, quotes, live, orders, fake):  # noqa: F811
+def test_an_order_with_no_position_goes_to_the_orders_group_and_a_hidden_ticker_stays_hidden(desk, engine, quotes, live, orders, fake):  # noqa: F811
     from app.models import DayJournalEntry
     from tests.robinhood_fake import equity_order, execution, option_order
     from tests.test_copilot_plans import WED
@@ -456,10 +456,10 @@ def test_an_order_with_no_position_or_on_a_hidden_ticker_goes_to_the_orders_grou
     body = read(desk)
     group = body["robinhood"]["orders"]
     assert [(o["contract"], o["action"], o["working"], o["account"]["masked"]) for o in group] == [
-        ("NBIS 10/23/26 100C", "Sell to close", True, "••8267"),  # its row is not followed: shown here instead
-        ("APLD 11/27/26 30P", "Buy to open", True, "••7884"),
+        ("APLD 11/27/26 30P", "Buy to open", True, "••7884"),  # NBIS is not followed: its order stays hidden too
         ("RKLB stock", "Sell", False, "••8267")]
-    assert group[2]["price_kind"] == "market" and group[2]["avg"] == 55.1 and group[2]["pairing"] == "provisional"
+    assert group[1]["price_kind"] == "market" and group[1]["avg"] == 55.1 and group[1]["pairing"] == "provisional"
+    assert "NBIS" not in json.dumps(body["robinhood"])
     assert not any(r.get("book", {}).get("orders") for r in body["threads"])
 
 

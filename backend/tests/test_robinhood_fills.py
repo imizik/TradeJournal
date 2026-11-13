@@ -841,3 +841,52 @@ def test_off_signed_out_or_stale_shows_nothing(desk):
     desk.mode = "off"
     desk.poll()
     assert desk.poller.desk() is None
+
+
+def test_a_roll_working_shows_its_net_price_not_a_leg_premium(desk):
+    desk.option(option_order("roll", "CRWV", [], quantity="1.00000", state="confirmed", created_at=utc(13, 0), legs=[
+        {"side": "sell", "position_effect": "close", "option_type": "call", "strike_price": "70", "expiration_date": "2026-11-21",
+         "ratio_quantity": 1, "executions": []},
+        {"side": "buy", "position_effect": "open", "option_type": "call", "strike_price": "75", "expiration_date": "2026-11-28",
+         "ratio_quantity": 1, "executions": []}]) | {"price": "0.50000000"})
+    desk.option(mu_buy("one", "1.00000", "1.50000000", 13, 1, state="confirmed"))  # a single leg keeps its limit
+    desk.at(13, 5).poll()
+    got = {(o["order_id"], o["strike"]): (o["price_kind"], o["limit"]) for o in desk.poller.desk()}
+    assert got == {("roll", 70.0): ("net", 0.5), ("roll", 75.0): ("net", 0.5), ("one", 835.0): ("limit", 1.5)}
+
+
+def test_a_recurring_buy_in_shadow_is_marked_recurring_not_waiting_for_an_email(desk):
+    desk.mode = "shadow"
+    desk.stock(recurring_vti())
+    desk.at(9, 40).poll()
+    [line] = desk.poller.desk()
+    assert (line["symbol"], line["filled"], line["pairing"]) == ("VTI", 0.299212, "recurring")
+    desk.mode = "on"  # switched on, it is written from the order history: the journal has it
+    desk.at(9, 41).poll()
+    assert desk.poller.desk()[0]["pairing"] == "matched"
+
+
+def test_an_account_whose_orders_did_not_read_keeps_its_last_lines(desk):
+    desk.option(option_order("w", "MU", [], quantity="1.00000", state="queued", created_at=utc(10, 1)))
+    desk.stock(equity_order("s", "RKLB", [], state="confirmed", created_at=utc(10, 2)) | {"type": "limit", "price": "50.00"})
+    desk.at(10, 5).poll()
+    assert sorted(o["order_id"] for o in desk.poller.desk()) == ["s", "w"]
+    desk.fake.fail.add("get_option_orders")  # this pass reads every account's stocks but no options
+    desk.fake.equity_orders[ROTH] = []  # the stock order is gone (cancelled): a whole read says so
+    desk.at(10, 6).poll()
+    assert [o["order_id"] for o in desk.poller.desk()] == ["w"]  # kept, not shown as vanished
+    desk.fake.fail.clear()
+    desk.fake.option_orders[ROTH] = []
+    desk.at(10, 7).poll()
+    assert desk.poller.desk() == []
+
+
+def test_a_quiet_pass_just_before_the_open_is_not_stale_and_the_next_pass_comes_at_9_25(desk):
+    desk.option(option_order("w", "MU", [], quantity="1.00000", state="queued", created_at=utc(9, 0)))
+    desk.at(9, 24).poll()
+    desk.at(9, 28)
+    assert desk.poller.desk()  # 4 minutes after a quiet-hours pass: still current
+    assert rf.pause(epoch(9, 24)) == 60  # the next pass at 9:25, not 9:39
+    assert rf.pause(epoch(9, 10)) == 15 * 60
+    assert rf.pause(epoch(10, 0)) == 60
+    assert rf.pause(epoch(20, 0)) == 15 * 60

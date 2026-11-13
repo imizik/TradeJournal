@@ -740,7 +740,7 @@ def threads(db: Session, now: float) -> dict:
         row["hidden"] = bool(row["symbol"]) and row["symbol"] in hidden
     # Robinhood's working orders and today's fills, on their book rows; display only (no call, no write).
     if live.get("view", {}).get("joined"):
-        lines = today._section(db, "desk robinhood orders", lambda: {"state": "ok", "rows": _order_lines(found, act + watch, now)})
+        lines = today._section(db, "desk robinhood orders", lambda: {"state": "ok", "rows": _order_lines(found, act + watch, now, hidden)})
         if lines.get("rows"):
             live["view"]["orders"] = lines["rows"]
     if _after_close(now):
@@ -872,22 +872,22 @@ def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict) -> li
     return new
 
 
-def _order_lines(found: dict, rows: list[dict], now: float) -> list[dict]:
+def _order_lines(found: dict, rows: list[dict], now: float, hidden: set[str] = frozenset()) -> list[dict]:
     """Robinhood's orders on the book (``robinhood_fills.Poller.desk``: the order-history pass's last good read, held in
     memory): each working order, and each order with a fill today, goes on its contract's followed book row
     (``book.orders``), in its own account first, else on a row no account is known for. The rest are returned for the
-    book's small "Orders" group (a contract with no position yet, or one the fill closed). Nothing when that pass is off
-    or its read is stale. Display only: no Robinhood call, no write, and no Robinhood id leaves the server."""
+    book's small "Orders" group (a contract with no position yet, or one the fill closed). A ticker set to Not following
+    stays hidden here too. Nothing when that pass is off or its read is stale. Display only: no Robinhood call, no write, and no Robinhood id leaves the server."""
     from app.engine import robinhood_book as rb
     from app.engine import robinhood_fills
-    orders = robinhood_fills.poller.desk(now)
+    orders = [o for o in robinhood_fills.poller.desk(now) or [] if o["symbol"] not in hidden]
     if not orders:
         return []
     keys = {}
     for p in found["positions"]:
         option = p.get("option") or {}
         keys[f"trade:{p['trade_id']}"] = rb.contract_key(p["symbol"], p["instrument"], option.get("side"), option.get("strike"), option.get("expiry"))
-    book = [r for r in rows if r.get("book") is not None and not r.get("hidden")]
+    book = [r for r in rows if r.get("book") is not None]
     spare = []
     orders.sort(key=lambda o: (not o["working"], -(o["filled_at"] or o["placed_at"] or 0)))
     for o in orders:
