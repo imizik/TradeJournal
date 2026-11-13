@@ -90,6 +90,21 @@ test("a spent budget is one grey line with no Refresh", async ({ page }) => {
   await expect(page.getByTestId("day-read-refresh")).toHaveCount(0);
 });
 
+test("a tab left open after a Refresh asks the next day's read as an automatic one, never as a refresh", async ({ page }) => {
+  const thursday = Date.parse("2026-11-12T22:30:00Z") / 1000; // 17:30 New York
+  const asks = await open(page, ok, { at: thursday });
+  await expect(page.getByTestId("day-read-text")).toBeVisible();
+  await page.getByTestId("day-read-refresh").click();
+  await expect.poll(() => asks.length).toBe(2);
+  await page.clock.fastForward("07:00:00"); // 00:30 Friday: the read goes
+  await page.clock.runFor(61_000);
+  await expect(page.getByTestId("day-read")).toHaveCount(0);
+  await page.clock.fastForward("16:00:00"); // 16:31 Friday: after the close again
+  await page.clock.runFor(61_000);
+  await expect.poll(() => asks.length).toBe(3);
+  expect(asks).toEqual([{ refresh: false }, { refresh: true }, { refresh: false }]);
+});
+
 test("before the close nothing is asked", async ({ page }) => {
   const asks = await open(page, ok, { at: MIDDAY });
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();

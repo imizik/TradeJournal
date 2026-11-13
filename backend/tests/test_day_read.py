@@ -225,7 +225,8 @@ def test_the_read_is_one_round_with_no_tools_on_the_configured_model(facts_from,
     assert started["kind"] == "day_read" and started["source"] == "desk"
     assert copilot_prompt.job_for("day_read", "desk") == "day_read" and copilot_prompt.TOOLS["day_read"] == []
     prompt = copilot_prompt.PROMPTS["day_read"]
-    assert "Copy every dollar figure exactly" in prompt and "get_market_regime" not in prompt and "propose_plan" not in prompt
+    assert "copied exactly as" in prompt and "never take a dollar figure from the owner context block" in prompt
+    assert "get_market_regime" not in prompt and "propose_plan" not in prompt
     assert copilot_prompt.shape("day_read") == copilot_answer.DAY_READ_SHAPE
     # A request with no tools sends neither tools nor a tool choice.
     request = copilot.AnthropicAdapter(day_read.small(copilot.settings()), client=object()).request("s", [{"role": "user", "content": "x"}], [], False)
@@ -246,7 +247,10 @@ def test_the_figure_check_catches_a_rounded_an_invented_and_a_flipped_figure():
     assert day_read.unmatched("You lost $375 on NBIS.", facts) == []  # the same value, written without cents
     assert day_read.unmatched("Down $250 on the day.", facts) == ["$250.00"]
     assert day_read.unmatched("Up +$375.00 on NBIS.", facts) == ["+$375.00"]
-    assert day_read.unmatched("About $1.2k lost.", facts) == ["$1.20"]
+    assert day_read.unmatched("About $1.2k lost.", "$1.20 a contract") == ["$1.20k"]  # $1,200, never $1.20
+    assert day_read.unmatched("Lost $-375.00 on NBIS.", facts) == [] and day_read.unmatched("Made $+375.00.", facts) == ["+$375.00"]
+    assert day_read.unmatched("Filled between $1.20-$1.50.", "at $1.20; at $1.50") == []  # a range, not a negative
+    assert day_read.unmatched("NBIS lost −$375.00.", facts) == []  # the Unicode minus
 
 
 class Priced:
@@ -298,6 +302,39 @@ def test_a_read_quoting_a_figure_the_report_does_not_hold_is_not_shown(facts_fro
     assert len(_rows(1)) == 1  # the call is counted
     again = _read(now=EVENING + 60)  # not asked again by itself
     assert again["state"] == "error" and again["cached"] is True and len(_rows()) == 1
+
+
+def test_a_read_naming_a_ticker_he_does_not_follow_is_not_shown(facts_from, monkeypatch):
+    _api(monkeypatch, GOOD + "\nOLDX was the other loser.")
+    out = _read()
+    assert out["state"] == "error" and "ticker you do not follow" in out["message"] and "OLDX" not in out["message"]
+
+
+def test_a_failed_refresh_never_hides_the_days_good_read(facts_from, turns, monkeypatch):
+    first = _read()
+    assert first["state"] == "ok"
+    _api(monkeypatch, GOOD.replace("-$252.50", "-$999.00"))
+    failed = _read(now=EVENING + 60, refresh=True)
+    assert failed["state"] == "error"
+    again = _read(now=EVENING + 120)
+    assert again["state"] == "ok" and again["text"] == first["text"]
+    monkeypatch.setattr(copilot_spend, "spent_today", lambda session=None: 3.99)  # a refused Refresh hides nothing either
+    assert _read(now=EVENING + 180, refresh=True)["state"] == "budget"
+    assert _read(now=EVENING + 240)["text"] == first["text"]
+
+
+def test_a_quiet_day_is_not_kept_so_fills_that_arrive_later_get_their_read(facts_from, turns, monkeypatch):
+    real = day_read._facts
+    monkeypatch.setattr(day_read, "_facts", lambda now: {"closed": [], "opened": [], "plans": [], "provisional": [], "alerts": []})
+    assert _read()["state"] == "quiet"
+    monkeypatch.setattr(day_read, "_facts", real)
+    assert _read(now=EVENING + 600)["state"] == "ok" and len(turns) == 1
+
+
+def test_a_trade_the_plan_streak_does_not_track_says_so_and_never_claims_it_is_older(journal, monkeypatch):
+    monkeypatch.setattr(plan_streak, "streak", lambda db, now=None: {"this_week": {"entries": []}})
+    text = day_read.pack(_facts(journal))
+    assert "plan not tracked for this trade" in text and "before this week" not in text
 
 
 def test_a_spent_budget_refuses_the_read_with_a_zero_cost_row_and_no_call(facts_from, turns, monkeypatch):

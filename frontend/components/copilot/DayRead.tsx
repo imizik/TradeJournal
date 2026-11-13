@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { afterClose, getDayRead, type DayRead as Read } from "@/lib/desk";
 
 /**
@@ -28,13 +28,18 @@ export function DayRead({ render, onAskMore }: { render(text: string): ReactNode
   const [read, setRead] = useState<Read | null>(null);
   const [reading, setReading] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
-  const [asked, setAsked] = useState(0); // his Refresh taps
+  const [asked, setAsked] = useState(0); // his Refresh taps, each asking once
+  // Set by the tap and spent by the ask it starts: an automatic ask (a later day's first, in a tab left open) is never a
+  // refresh, so it can never run a second read of a day.
+  const tapped = useRef(false);
 
   useEffect(() => {
     if (!closed) return;
     const controller = new AbortController();
     setReading(true); setFailed(null); // eslint-disable-line react-hooks/set-state-in-effect -- the ask starts here
-    getDayRead(asked > 0, controller.signal).then(result => { setRead(result); setReading(false); }).catch(error => {
+    const refresh = tapped.current;
+    tapped.current = false;
+    getDayRead(refresh, controller.signal).then(result => { setRead(result); setReading(false); }).catch(error => {
       if (controller.signal.aborted) return;
       setReading(false);
       setFailed(error instanceof Error ? error.message : String(error));
@@ -45,7 +50,7 @@ export function DayRead({ render, onAskMore }: { render(text: string): ReactNode
   if (!closed || read?.state === "early" || (!read && !reading && !failed)) return null;
   const today = read?.today;
   const refresh = (label: string) => (
-    <button type="button" disabled={reading} onClick={() => setAsked(n => n + 1)} data-testid="day-read-refresh"
+    <button type="button" disabled={reading} onClick={() => { tapped.current = true; setAsked(n => n + 1); }} data-testid="day-read-refresh"
       className="min-h-11 underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50 sm:min-h-0">{reading ? "Reading…" : label}</button>
   );
   if (read?.state === "quiet" && !reading) {

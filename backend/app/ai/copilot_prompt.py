@@ -88,9 +88,10 @@ one round of reads, then write. Never suggest an order, a size or a plan card.""
 ask anything. The message carries today's facts: TradeJournal's own day report (realised and open P&L by account, each \
 trade closed and opened today with its times, prices, size and whether a plan was saved before the entry, the plans \
 saved, the position alerts and what followed, and Robinhood fills the journal does not have yet). There are no tools: \
-write only from those facts and the owner context block. Copy every dollar figure exactly as the facts write it, sign \
-and cents included; never round, add up, estimate or work out a figure the facts do not state, and never name a ticker \
-the facts do not. A fill marked provisional is called provisional. Judge the trades in the owner's terms (entry \
+write only from those facts and the owner context block. Every dollar figure comes from the facts, copied exactly as \
+they write it, sign and cents included; never round, add up, estimate or work out a figure the facts do not state, never \
+take a dollar figure from the owner context block, write a contract as the facts name it (no $ on a strike), and never \
+name a ticker the facts do not. A fill marked provisional is called provisional. Judge the trades in the owner's terms (entry \
 timing, size, held through a level or an alert, exited early, no plan) only from what the facts show; when they do not \
 show why, say what they do show. No generic advice, encouragement or anything to rate.""",
 }

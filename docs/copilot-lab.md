@@ -1644,18 +1644,22 @@ message box as a `Context:` block, so the conversation he starts carries the day
   and its total, the plans saved today, the position alerts sent today with what followed (the alert scorecard's
   figures), open P&L by account from the Robinhood account line the desk already holds (no call: the feed's snapshot
   without a refresh) and today's Robinhood fills the journal does not have yet (the order-history pass's lines in memory),
-  marked **provisional**. Every dollar figure is written in the facts exactly as the read must quote it, and a read that
-  quotes any other figure (rounded, summed, invented or with its sign flipped) is not shown
+  marked **provisional**. A trade the plan streak does not track says "plan not tracked". Every dollar figure is
+  written in the facts exactly as the read must quote it, and a read that quotes any other figure (rounded, summed,
+  invented, from the owner context block, with a k or M suffix, or with its sign flipped) is not shown
   (`day_read.unmatched`); the call still counts.
-- **Not following.** A ticker he does not follow is left out of every part. An account holding one shows its open P&L
+- **Not following.** A ticker he does not follow is left out of every part, and a read that names one anyway (the owner
+  context block can carry it) is not shown. An account holding one shows its open P&L
   from its followed positions only, with no change today; the realised figures leave its trades out, so they can differ
   from the top bar's on such a day.
 - **One read a day.** Asked on the first open after the close (the server checks the market calendar's close, so an
   early-close day counts from 13:00) and kept for the New York day, in memory and in `backend/data/day_read/<day>.json`,
   so a reload, a second tab or a restart shows the same read. Once a `day_read` row exists for the day, an automatic ask
-  that finds nothing kept writes nothing and offers Refresh: only his tap runs a second read.
+  that finds nothing kept writes nothing and offers Refresh: only his tap runs a second read, and only the ask that tap
+  starts is sent as a refresh (a tab left open overnight asks the next day's read as an automatic one). A Refresh that
+  fails or is refused never hides the day's good read.
 - **A day with nothing in it** (no fills, provisional ones included, and no plans) is one grey line, "Nothing to read
-  today: no fills and no plans.", and no call.
+  today: no fills and no plans.", and no call; it is not kept, so fills that reach the journal later get their read.
 - **A small turn.** One round, no tools, a $0.10 spend cap and 1,500 output tokens, on the configured model (Sonnet 5.5
   by default): no cheaper model has been shown to hold an answer shape (§ Follow-up model eval), so none is used here.
 - **The same daily budget.** Every read is a `copilot_turn` row (`kind="day_read"`, `source="desk"`) on

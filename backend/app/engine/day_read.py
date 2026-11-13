@@ -47,7 +47,9 @@ MAX_TOKENS = 1500
 ROOT = Path(__file__).resolve().parents[2] / "data" / "day_read"
 QUIET = "Nothing to read today: no fills and no plans."
 QUESTION = ("Day read: {day}. Read my day from the facts below and write the close-of-day read.\n\n{pack}")
-MONEY = re.compile(r"([+\-−]?)\$\s?(\d[\d,]*(?:\.\d+)?)")
+# A dollar figure: a sign before the $ only at a word's start (so "$1.20-$1.50" is two unsigned figures), or right after
+# it ("$-375"), and a k or M suffix ("$1.2k"), which the facts never use.
+MONEY = re.compile(r"(?:(?<![\w$.])([+\-−]))?\$\s?([+\-−]?)(\d[\d,]*(?:\.\d+)?)([kKmM]\b)?")
 
 _kept: dict[str, dict] = {}
 _lock: asyncio.Lock | None = None
@@ -111,7 +113,7 @@ def facts(db, now: float) -> dict:
 
     def plan_of(trade_id: str) -> dict:
         entry = by_trade.get(trade_id)
-        if entry is None:
+        if entry is None:  # the plan streak does not track it: an older entry, or an untracked account or untimed fill
             return {"state": "unknown"}
         capture = captures.get(entry.get("capture_id") or "")
         words = " ".join(((capture.setup_label or "") + " " + (capture.wording or "")).split())[:160] if capture else ""
@@ -152,7 +154,7 @@ def facts(db, now: float) -> dict:
     since = day_utc[0].replace(tzinfo=UTC).timestamp()
     alerts = [r for r in alert_scorecard.scorecard(db, now, days=1)["rows"] if r["at"] >= since and r["symbol"] not in hidden]
 
-    return {"day": day.isoformat(), "as_of": now, "closed": closed, "realized": realized,
+    return {"day": day.isoformat(), "as_of": now, "hidden": hidden, "closed": closed, "realized": realized,
             "realized_total": round(sum(realized.values()), 2), "opened": opened, "plans": plans, "alerts": alerts,
             "accounts": copilot_desk.day_accounts(hidden), "provisional": copilot_desk.day_provisional(now, hidden)}
 
@@ -163,7 +165,7 @@ def quiet(f: dict) -> bool:
 
 
 PLAN_WORDS = {"planned": "plan saved before the entry", "late": "plan saved after the entry", "unplanned": "no plan",
-              "pending": "a plan being linked", "unknown": "opened before this week; plan not checked"}
+              "pending": "a plan being linked", "unknown": "plan not tracked for this trade"}
 
 
 def _plan(p: dict) -> str:
@@ -240,12 +242,13 @@ def pack(f: dict) -> str:
     return "\n".join(lines)
 
 
-def figures(text: str) -> list[tuple[str, float]]:
-    """Each dollar figure in ``text``: (its sign, "" when none is written; its value)."""
+def figures(text: str) -> list[tuple[str, float, str]]:
+    """Each dollar figure in ``text``: (its sign, "" when none is written; its value; its k or M suffix, or "")."""
     out = []
-    for sign, digits in MONEY.findall(text):
+    for before, after, digits, suffix in MONEY.findall(text):
+        sign = before or after
         try:
-            out.append(("-" if sign in "-−" and sign else sign, round(float(digits.replace(",", "")), 2)))
+            out.append(("-" if sign in ("-", "−") else sign, round(float(digits.replace(",", "")), 2), suffix))
         except ValueError:
             continue
     return out
@@ -254,13 +257,18 @@ def figures(text: str) -> list[tuple[str, float]]:
 def unmatched(text: str, facts_text: str) -> list[str]:
     """The dollar figures in the read that the facts do not hold (by value; a written sign must match too)."""
     held = figures(facts_text)
-    values = {v for _, v in held}
-    signed = {(s, v) for s, v in held if s}
+    values = {v for _, v, _ in held}
+    signed = {(s, v) for s, v, _ in held if s}
     bad = []
-    for sign, value in figures(text):
-        if value not in values or (sign and (sign, value) not in signed and value != 0):
-            bad.append(f"{sign}${value:,.2f}")
+    for sign, value, suffix in figures(text):
+        if suffix or value not in values or (sign and (sign, value) not in signed and value != 0):
+            bad.append(f"{sign}${value:,.2f}{suffix}")
     return bad
+
+
+def hidden_named(text: str, hidden: set[str]) -> list[str]:
+    """Tickers he does not follow that the read names anyway (the owner context block can carry them)."""
+    return sorted(s for s in hidden if re.search(rf"(?<![A-Za-z]){re.escape(s)}(?![A-Za-z])", text))
 
 
 # --------------------------------------------------------------------------- the kept read
@@ -340,9 +348,8 @@ async def read(*, refresh: bool = False, now: float | None = None) -> dict:
         except Exception:  # noqa: BLE001 - no read without its facts
             log.warning("day read facts unreadable", exc_info=True)
             return {"state": "error", "message": "The day report could not be read."}
-        if quiet(found):
+        if quiet(found):  # not kept: fills that reach the journal later make it a day with something to read
             entry = {"state": "quiet", "text": QUIET, "at": asked}
-            _kept[key] = entry
             return {**_shown(entry, asked, False), "today": await asyncio.to_thread(today)}
         before = await asyncio.to_thread(today)
         if not refresh and before and before["count"] + before["refused"] > 0:
@@ -354,7 +361,8 @@ async def read(*, refresh: bool = False, now: float | None = None) -> dict:
                 await asyncio.to_thread(copilot_spend.record_refused, kind=KIND, source="desk", backend=cfg.backend, code="daily_budget")
                 entry = {"state": "budget", "at": asked,
                          "message": f"No read of your day: today's copilot budget (${cfg.daily_budget_usd:.2f}) is spent."}
-                _kept[key] = entry
+                if not _good(key):
+                    _kept[key] = entry
                 return {**entry, "today": await asyncio.to_thread(today)}
         facts_text = pack(found)
         result = await _run(key, facts_text, cfg, asked)
@@ -362,13 +370,24 @@ async def read(*, refresh: bool = False, now: float | None = None) -> dict:
             **before, "count": before["count"] + 1, "cost_usd": round(before["cost_usd"] + result["cost_usd"], 4)}
         if result["state"] == "ok":
             bad = unmatched(result["text"], facts_text)
+            named = hidden_named(result["text"], found.get("hidden") or set())
             if bad:
                 log.warning("day read quoted figures the facts do not hold: %s", ", ".join(bad))
                 result = {"state": "error", "cost_usd": result["cost_usd"],
                           "message": f"The read quoted a figure the day report does not hold ({bad[0]}), so it is not shown."}
+            elif named:
+                log.warning("day read named %d ticker(s) he does not follow", len(named))
+                result = {"state": "error", "cost_usd": result["cost_usd"],
+                          "message": "The read named a ticker you do not follow, so it is not shown."}
         entry = {**result, "at": asked, **({"facts": facts_text} if result["state"] == "ok" else {})}
-        await asyncio.to_thread(_keep, key, entry)
+        if entry["state"] == "ok" or not _good(key):  # a failed Refresh never hides the day's good read
+            await asyncio.to_thread(_keep, key, entry)
         return {**_shown(entry, asked, False), "today": counted}
+
+
+def _good(day: str) -> bool:
+    kept = _kept.get(day)
+    return bool(kept and kept.get("state") == "ok")
 
 
 def _facts(now: float) -> dict:
