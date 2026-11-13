@@ -122,6 +122,17 @@ class ChartDaily:
                     self._entries.popitem(last=False)
             return made
 
+    def kept_close(self, symbol: str, before: date, today: date) -> float | None:
+        """The adjusted official close of the last completed day before ``before``, from a series already read today and
+        kept in memory; None when there is none. Never a request, and never waits on a read in flight."""
+        saved = self._entries.get(symbol)
+        if saved is None or saved.day != today:
+            return None
+        for bar in reversed(saved.bars):
+            if datetime.fromtimestamp(bar["time"], ET).date() < before:
+                return float(bar["close"])
+        return None
+
     def assemble(self, entry: DailyEntry, tail: list[dict]) -> tuple[list[dict], dict[str, str]]:
         """The completed series joined to a fresh tail by date; the tail wins wherever it overlaps.
 

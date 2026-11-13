@@ -20,8 +20,10 @@ conversation reads its symbol's plan (in a position first, else armed) and, with
   sentence built from those counts. No plan, or a plan without an invalidation, says what is missing.
 - ``symbol_thread``: the thread for ``SYMBOL_PREFIX`` + a symbol, so the routes take it where they take an investigation.
 - ``chart``: the cockpit centre's interactive chart as data (the same reads as ``picture``, bounded to ``MAX_BARS``
-  candles and ``MAX_MARKS`` marks): candles (2m today with the pre-market and after-hours flagged), the plan's levels,
-  the owner's fills, today's pings and Radar hits, and the time stop still ahead. The picture stays for the phone pings.
+  candles and ``MAX_MARKS`` marks): candles (2m today with the pre-market and after-hours flagged) with their studies
+  (``AVERAGES``, VWAP, RVol) warmed on the candles before them, the reference lines and the reading line, the plan's
+  levels, the symbol's other armed alerts, the owner's fills, today's pings and Radar hits, and the time stop still
+  ahead. The picture stays for the phone pings.
 - ``market_picture``: the Briefing's chart, today's ``MARKET`` (QQQ) minutes with the day's fills and phone pings sent
   as dots, under the picture route's reserved ``MARKET_ID``.
 
@@ -40,8 +42,8 @@ import uuid
 
 from sqlmodel import Session, select
 
-from app.engine import chart_render, copilot_plans, ping_images
-from app.engine.chart_math import ET, chart_bars
+from app.engine import chart_math, chart_render, copilot_plans, ping_images
+from app.engine.chart_math import ET, REGULAR_OPEN, chart_bars
 from app.engine.chart_render import Chart, Mark, Time
 from app.models import (Account, CaptureLink, CopilotInvestigation, DayJournalEntry, Fill, LevelAlert, LevelAlertEvent,
                         PhonePing, PlanTimeStop, ResearchJob, ThesisWatchTrigger, Trade, TradeCapture, TradeFill)
@@ -276,14 +278,16 @@ def _day_title(symbol: str, shown: list[dict]) -> str:
 
 
 def fifteen_bars(symbol: str) -> list[dict]:
-    """Regular-session 15-minute bars: today's from the chart feed, and up to ``SESSIONS_15M - 1`` completed sessions
-    before it from the chart history (from disk, or fetched once and stored), split-adjusted like a chart page."""
+    """Regular-session 15-minute bars: today's from the chart feed (each with its RVol, C2.4, when the stored baseline is
+    ready), and up to ``SESSIONS_15M - 1`` completed sessions before it from the chart history (from disk, or fetched
+    once and stored), split-adjusted like a chart page."""
     from app.engine.chart_adjust import adjust_minutes
     from app.engine.chart_calendar import chart_calendar
     from app.engine.chart_feed import chart_feed
     from app.engine.chart_history import HistoryError, chart_history
     from app.engine.chart_splits import UNAVAILABLE
-    data = chart_feed.workspace(symbol, ["15m"], [], "regular", calendar=chart_calendar, quotes=False)
+    data = chart_feed.workspace(symbol, ["15m"], [], "regular", calendar=chart_calendar, quotes=False,
+                                volume_profile=chart_history.volume_profile)
     today = list(((data.get("panels") or {}).get("15m") or {}).get("bars") or [])
     info = chart_history.splits.get(symbol) if chart_history.splits else UNAVAILABLE
     earlier: list[list[dict]] = []
@@ -392,6 +396,12 @@ STEP = {"2m": 120, "15m": 900, "1D": 86400}
 MAX_BARS = 600  # one chart read's bars: a whole 04:00-20:00 day of 2m candles is 480
 MAX_MARKS = 60
 LEVEL_WORD = {"entry": "Entry", "invalidation": "Invalidation"}
+WARM_SESSIONS = 3  # stored sessions before the 15m chart's first that warm its averages (from disk, never fetched)
+USUAL_DAYS = 30  # a daily candle's volume against the average of this many before it
+# The averages each timeframe draws, on the workspace's own math (``chart_math.ema``/``sma``); VWAP and RVol ride too.
+AVERAGES = {"2m": (("ema9", chart_math.ema, 9), ("ema21", chart_math.ema, 21)),
+            "15m": (("ema9", chart_math.ema, 9), ("ema21", chart_math.ema, 21)),
+            "1D": (("ema21", chart_math.ema, 21), ("sma50", chart_math.sma, 50), ("sma200", chart_math.sma, 200))}
 
 
 def _two_minute(minutes: list[dict]) -> list[dict]:
@@ -438,39 +448,229 @@ def _live(now: float) -> bool:
     return moment.weekday() < 5 and 4 <= moment.hour < 20
 
 
-def _chart_bars(read, symbol: str, timeframe: str, now: float) -> list[dict]:
+def today_minutes(symbol: str) -> list[dict]:
+    """Today's minute bars (extended hours) with each regular-session minute's RTH VWAP and RVol (C2.4): the chart feed's
+    cached read, the same provider request as ``ping_images.today_bars``; the RVol baseline is read from disk only."""
+    from app.engine.chart_calendar import chart_calendar
+    from app.engine.chart_feed import chart_feed
+    from app.engine.chart_history import chart_history
+    data = chart_feed.workspace(symbol, ["1m"], [], "extended", calendar=chart_calendar, quotes=False,
+                                volume_profile=chart_history.volume_profile)
+    return list(((data.get("panels") or {}).get("1m") or {}).get("bars") or [])
+
+
+def cached_minutes(symbol: str, day: date) -> list[dict]:
+    """``day``'s minute bars with their RTH VWAP from the chart feed's response cache alone (any age; the 2m or 15m
+    chart, a ping picture or Charts read them), never a request; none when it holds none. No RVol."""
+    from app.engine.chart_calendar import chart_calendar
+    from app.engine.chart_feed import chart_feed
+    found = chart_feed.peek_minutes(symbol, day)
+    return chart_bars(found[0], [], "1m", "extended", {day: chart_calendar.hours(day)}) if found else []
+
+
+def stored_sessions(symbol: str, before: date, count: int) -> list[tuple[date, dict | None, list[dict]]]:
+    """Up to ``count`` completed sessions before ``before`` that are already on disk (no bar request; the market
+    calendar's month may be read once to skip holidays), oldest first: each date, its calendar hours and its minutes,
+    split-adjusted like a chart page. Stops at the first missing one, so the sessions are always consecutive."""
+    from app.engine.chart_adjust import adjust_minutes
+    from app.engine.chart_calendar import chart_calendar
+    from app.engine.chart_history import chart_history
+    from app.engine.chart_splits import UNAVAILABLE
+    info = chart_history.splits.get(symbol) if chart_history.splits else UNAVAILABLE
+    out: list[tuple[date, dict | None, list[dict]]] = []
+    day = before
+    for _ in range(10 + 2 * count):  # calendar days back, past weekends and holidays
+        if len(out) >= count:
+            break
+        day -= timedelta(days=1)
+        hours = chart_calendar.hours(day) if day.weekday() < 5 else None
+        if day.weekday() >= 5 or (hours is not None and hours["status"] == "closed"):
+            continue
+        raw = chart_history.stored(symbol, day)
+        if raw is None:
+            break
+        if raw:
+            out.insert(0, (day, hours, adjust_minutes(raw, day, info["splits"])))
+    return out
+
+
+_warmed: dict[tuple[str, str, date], list[dict]] = {}  # completed sessions' candles never change: kept for the process
+_warmed_lock = threading.Lock()
+
+
+def _warm(symbol: str, timeframe: str, before: date) -> list[dict]:
+    """The candles before ``before`` that warm a timeframe's averages: on 2m the session before today (pre-market to
+    after hours, as today's are drawn), on 15m ``WARM_SESSIONS`` regular sessions. From disk only; a result is kept
+    once all its sessions are on disk, so a minute's refresh reads no file (a split recorded later shows after a restart,
+    as the workspace's own caches do)."""
+    key = (symbol, timeframe, before)
+    with _warmed_lock:
+        kept = _warmed.get(key)
+    if kept is not None:
+        return kept
+    count = 1 if timeframe == "2m" else WARM_SESSIONS
+    sessions = stored_sessions(symbol, before, count)
     if timeframe == "2m":
-        today = datetime.fromtimestamp(now, ET).date()
-        minutes = [b for b in read(symbol) if b["time"] <= now and datetime.fromtimestamp(b["time"], ET).date() == today]
-        found = _two_minute(minutes)
-    elif timeframe == "15m":
-        found = [b for b in read(symbol) if b["time"] <= now]
+        found = [b for day, hours, raw in sessions for b in _two_minute(chart_bars(raw, [], "1m", "extended", {day: hours}))]
     else:
-        found = [b for b in read(symbol) if now - DAILY_DAYS * 86400 <= b["time"] <= now]
-    return [_plain(b) for b in found[-MAX_BARS:]]
+        found = [b for day, hours, raw in sessions for b in chart_bars(raw, [], "15m", "regular", {day: hours})]
+    if len(sessions) == count:  # a partial warm-up is read again until the rest is stored
+        with _warmed_lock:
+            while len(_warmed) >= 64:
+                _warmed.pop(next(iter(_warmed)))
+            _warmed[key] = found
+    return found
+
+
+def _at_candles(candles: list[dict], step: int, minutes: list[dict], key: str) -> list[float | None]:
+    """Each candle's ``key`` as of its last minute (the RTH VWAP and RVol are running values), None without one."""
+    out: list[float | None] = []
+    j = 0
+    for candle in candles:
+        value = None
+        while j < len(minutes) and minutes[j]["time"] < candle["time"]:
+            j += 1
+        while j < len(minutes) and minutes[j]["time"] < candle["time"] + step:
+            value = minutes[j].get(key)
+            j += 1
+        out.append(value)
+    return out
+
+
+def kept_close(symbol: str, before: date, today: date) -> float | None:
+    """The official close of the session before ``before`` from the daily series the chart feed already holds for today
+    (read by any daily chart of the symbol today), never a request; None when it holds none."""
+    from app.engine.chart_feed import chart_feed
+    return chart_feed.daily.kept_close(symbol, before, today)
+
+
+def _minute_of_day(stamp: int) -> int:
+    moment = datetime.fromtimestamp(stamp, ET)
+    return moment.hour * 60 + moment.minute
+
+
+def _usual_volume(bars: list[dict]) -> list[float | None]:
+    """Each daily candle's volume over the average of the ``USUAL_DAYS`` before it."""
+    volumes = [float(b.get("volume") or 0) for b in bars]
+    usual = chart_math.sma(volumes, USUAL_DAYS)
+    return [None] + [volume / before if before else None for volume, before in zip(volumes[1:], usual)]
+
+
+def _desk_read(symbol: str, timeframe: str, now: float) -> dict | None:
+    """One timeframe's candles with their studies, warmed on the candles before the first shown, and what the reading
+    line and the reference lines need. None when there are no candles."""
+    today = datetime.fromtimestamp(now, ET).date()
+    on_today = lambda bars: [b for b in bars if b["time"] <= now and datetime.fromtimestamp(b["time"], ET).date() == today]  # noqa: E731
+    warm: list[dict] = []
+    if timeframe == "2m":
+        minutes = on_today(today_minutes(symbol))
+        shown = _two_minute(minutes)
+        for candle, vwap, rvol in zip(shown, _at_candles(shown, 120, minutes, "vwap"), _at_candles(shown, 120, minutes, "rvol")):
+            candle.update(vwap=vwap, rvol=rvol)
+        warm = _warm(symbol, "2m", today) if shown else []
+    else:
+        try:
+            # 15m's own read makes this same request (a cache hit); 1D takes only what the cache already holds, so the
+            # daily chart makes no request it did not make before.
+            minutes = on_today(today_minutes(symbol) if timeframe == "15m" else cached_minutes(symbol, today))
+        except Exception:  # noqa: BLE001 - the reading line is a bonus on these timeframes; the candles still show
+            log.warning("Desk chart minutes for %s failed", symbol, exc_info=True)
+            minutes = []
+        if timeframe == "15m":
+            shown = [b for b in fifteen_bars(symbol) if b["time"] <= now]
+            if shown:
+                warm = _warm(symbol, "15m", datetime.fromtimestamp(shown[0]["time"], ET).date())
+        else:
+            history = [dict(b) for b in daily_bars(symbol) if b["time"] <= now]
+            closed = datetime.fromtimestamp(now, ET).hour >= 16
+            for bar, usual in zip(history, _usual_volume(history)):
+                # Today's candle before the close holds part of a day's volume: against whole days it would mislead.
+                bar["rvol"] = None if datetime.fromtimestamp(bar["time"], ET).date() == today and not closed else usual
+            cut = next((i for i, b in enumerate(history) if b["time"] >= now - DAILY_DAYS * 86400), len(history))
+            warm, shown = history[:cut], history[cut:]
+    if not shown:
+        return None
+    every = warm + shown
+    closes = [float(b["close"]) for b in every]
+    studies: dict[str, list[float | None]] = {}
+    for name, average, length in AVERAGES[timeframe]:
+        studies[name] = average(closes, length)[len(warm):]
+    for name in ("vwap", "rvol"):
+        studies[name] = [b.get(name) for b in shown]
+    if len(shown) > MAX_BARS:
+        shown = shown[-MAX_BARS:]
+        studies = {name: values[-MAX_BARS:] for name, values in studies.items()}
+    studies = {name: [None if v is None else round(float(v), 4) for v in values] for name, values in studies.items()}
+    regular = [m for m in minutes if not m.get("extended")]
+    last = minutes[-1] if minutes else shown[-1]
+    day_of = lambda stamp: datetime.fromtimestamp(stamp, ET).date()  # noqa: E731
+    # The official close of the session before the newest price's: a daily candle's own, else the daily series already
+    # held in memory. A minute's last trade is not the close (the closing auction prints after it), so none is better.
+    if timeframe == "1D":
+        prev_close = next((float(b["close"]) for b in reversed(shown) if day_of(b["time"]) < day_of(last["time"])), None)
+    else:
+        prev_close = kept_close(symbol, day_of(last["time"]), today)
+    at = last["time"] if minutes else min(last.get("end_time") or last["time"], now)  # a candle's price is its end's
+    reading = {"last": float(last["close"]), "at": int(at), "daily": not minutes and timeframe == "1D",
+               "prev_close": prev_close,
+               "vwap": regular[-1].get("vwap") if regular else None, "vwap_at": int(regular[-1]["time"]) if regular else None,
+               "rvol": regular[-1].get("rvol") if regular else None}
+    reading = {k: round(v, 4) if isinstance(v, float) else v for k, v in reading.items()}
+    reference = []
+    if timeframe != "1D":
+        if prev_close is not None:
+            reference.append({"key": "prev_close", "price": round(prev_close, 4), "label": f"Prev close {_price(prev_close)}"})
+        pre = [m for m in minutes if m.get("extended") and _minute_of_day(m["time"]) < REGULAR_OPEN]
+        if pre:
+            high, low = max(m["high"] for m in pre), min(m["low"] for m in pre)
+            reference += [{"key": "pm_high", "price": round(float(high), 4), "label": f"PM high {_price(high)}"},
+                          {"key": "pm_low", "price": round(float(low), 4), "label": f"PM low {_price(low)}"}]
+    return {"bars": [_plain(b) for b in shown], "studies": studies, "reading": reading, "reference": reference}
+
+
+def _alerts(db: Session, symbol: str, plan_ids: set[str]) -> list[dict]:
+    """The symbol's armed level alerts other than the plan's own lines: each as a thin line on the chart. One from a plan
+    (any thread's) cannot be removed from the chart."""
+    alerts = db.exec(select(LevelAlert).where(LevelAlert.symbol == symbol, LevelAlert.state == "active")
+                     .order_by(LevelAlert.price)).all()
+    out = []
+    for alert in alerts:
+        if str(alert.id) in plan_ids:
+            continue
+        side = "above" if alert.direction == "up" else "below"
+        what = (f"Touches {_price(alert.price)}" if alert.condition == "touches" else f"Crosses {side} {_price(alert.price)}"
+                if alert.condition == "crosses" else f"{alert.interval} close {side} {_price(alert.price)}")
+        out.append({"id": str(alert.id), "price": float(alert.price), "text": what, "label": alert.label or None,
+                    "condition": alert.condition, "interval": alert.interval, "session": alert.session,
+                    "removable": alert.plan_role is None})
+    return out
 
 
 def chart(db: Session, inv: CopilotInvestigation | SymbolThread | None, now: float, timeframe: str = "2m",
-          events: list[dict] = (), bars=None, budget: float = BUDGET_SECONDS) -> dict:
+          events: list[dict] = (), budget: float = BUDGET_SECONDS) -> dict:
     """The desk's interactive chart as data: the symbol's candles on ``timeframe`` (``2m`` today from the pre-market to
     now, extended candles flagged; ``15m`` recent sessions; ``1D`` the last ``DAILY_DAYS``), read from the same cached
-    chart feed as the picture; its plan's entry and invalidation as ``levels``; ``marks``: the owner's fills on the
+    chart feed as the picture, with ``studies`` (``AVERAGES`` plus the RTH VWAP and RVol), one value or None per candle,
+    the averages warmed on the candles before the first shown (stored sessions on disk, the rest of the daily history)
+    so they are right from the first candle; ``reference`` lines (intraday: the previous close and today's pre-market
+    high and low); ``reading``: the newest price, the previous close, VWAP and RVol, each with its time; its plan's
+    entry and invalidation as ``levels``; the symbol's other armed level ``alerts``; ``marks``: the owner's fills on the
     symbol since the first candle and ``events`` (today's pings sent and Radar hits, ``kind``/``at``/``text``); the
     plan's time stop while still ahead. ``inv`` None is the market chart: ``MARKET`` with ``events`` alone (the day's
     fills on any symbol and pings sent). ``live`` says bars can still change, so the desk reads again each minute.
     No bars, a failed read or a run past the budget is ``state`` "unavailable" with the reason."""
     symbol = MARKET if inv is None else inv.symbol
     base = {"symbol": symbol, "timeframe": timeframe, "step": STEP.get(timeframe), "as_of": int(now), "live": _live(now),
-            "bars": [], "levels": [], "marks": [], "time_stop": None}
+            "bars": [], "studies": {}, "reference": [], "reading": None, "levels": [], "alerts": [], "marks": [], "time_stop": None}
     if not symbol:
         return {**base, "state": "unavailable", "reason": "This thread has no symbol, so there is no chart."}
     if timeframe not in TIMEFRAMES:
         return {**base, "state": "unavailable", "reason": f"No {timeframe} chart; the choices are {', '.join(TIMEFRAMES)}."}
-    read = bars or {"2m": ping_images.today_bars, "15m": fifteen_bars, "1D": daily_bars}[timeframe]
     try:
-        shown = _budgeted(symbol, lambda: _chart_bars(read, symbol, timeframe, now) or None, budget, WHAT[timeframe])
+        read = _budgeted(symbol, lambda: _desk_read(symbol, timeframe, now), budget, WHAT[timeframe])
     except Unavailable as exc:
         return {**base, "state": "unavailable", "reason": str(exc)}
+    shown = read["bars"]
     marks = [{"kind": e["kind"], "at": int(e["at"]), "price": None, "side": None, "text": e.get("text") or e["kind"].title()}
              for e in events if e.get("at") is not None and e["kind"] in ("fill", "ping", "radar")]
     levels: list[dict] = []
@@ -479,7 +679,7 @@ def chart(db: Session, inv: CopilotInvestigation | SymbolThread | None, now: flo
         found = plan(db, str(inv.id)) if inv.id else None
         for alert in (found["entry"], found["invalidation"]) if found else ():
             if alert is not None:
-                levels.append({"role": alert.plan_role, "price": float(alert.price),
+                levels.append({"role": alert.plan_role, "price": float(alert.price), "id": str(alert.id),
                                "label": f"{LEVEL_WORD[alert.plan_role]} {_price(float(alert.price))}"})
         stop = found["stop"] if found else None
         due = _epoch_utc(stop.due_at) if stop is not None else None
@@ -490,7 +690,9 @@ def chart(db: Session, inv: CopilotInvestigation | SymbolThread | None, now: flo
                         .order_by(Fill.executed_at.desc()).limit(MAX_FILLS)).all()
         marks = [_fill_mark(f) for f in reversed(fills)] + marks
     marks = sorted((m for m in marks if m["at"] is not None and m["at"] >= shown[0]["time"]), key=lambda m: m["at"])[-MAX_MARKS:]
-    return {**base, "state": "ok", "reason": None, "bars": shown, "levels": levels, "marks": marks, "time_stop": time_stop}
+    alerts = _alerts(db, symbol, {level["id"] for level in levels})
+    return {**base, **read, "state": "ok", "reason": None, "levels": levels, "alerts": alerts, "marks": marks,
+            "time_stop": time_stop}
 
 
 # ------------------------------------------------------------------ timeline
