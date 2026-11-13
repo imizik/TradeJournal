@@ -1682,6 +1682,26 @@ Robinhood.
   10:05), kept across restarts in `backend/data/desk_unusual.json`.
   Fixture mode shows invented NBIS contracts, labelled simulated; replay shows none.
 
+### Scanner on the desk
+
+**What the setup scanner found today, without leaving the desk.** `GET /copilot/scanner`
+(`app/engine/desk_scanner.py`, `frontend/components/copilot/DeskScanner.tsx`), shown behind the Feed's **Scanner**
+filter while the scanner is switched on. Display only: it reads the candidates and paper events the scanner already
+saved (as the Scanner page does) and changes nothing about its rules, scoring, schedule or records. Database reads
+only: no provider, no Robinhood, no ping, nothing counted as new; read once a minute while the lab is on.
+
+- **Rows:** today's candidates, newest bar first: ticker, setup (opening-range break or VWAP fade, long or short),
+  the setup bar's close as the trigger, the stock stop and target, the contract the scanner chose and its rules paper
+  status and result, as the Scanner page shows them. A ticker set to Not following is left out (nothing is shown when
+  that setting cannot be read); a name he neither holds, watches nor plans is marked **new to you**.
+- **Radar too:** a candidate on the same name, day and direction as a Radar setup card is one row carrying that card's
+  levels and its own **Plan it**, not a second card.
+- **Freshness:** the Scanner page's monitoring line. When the scanner is stale the rows grey and the head says when it
+  last judged a bar.
+- **Tap a row:** the ticker opens on the desk chart in place with the trigger, stop and target as thin lines (the
+  level menu snaps to a line pressed on it, so Plan from here and Alert work at those prices); another ticker drops
+  them. Fixture mode shows two invented candidates (NBIS held, CRWV new), labelled simulated.
+
 **Server time (2026-11-12).** Each desk read (every `GET /copilot/desk/…`, the thread header's
 `GET /charts/journal/positions/{symbol}/context` and `GET /copilot/symbol/{symbol}`) answers with a standard
 `Server-Timing` header: each section's name and milliseconds and the `total`, nothing else

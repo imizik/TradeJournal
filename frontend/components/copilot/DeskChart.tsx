@@ -43,12 +43,14 @@ import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type 
  * undo; on a phone the line and Delete. A right-click or long-press on a drawn line opens the level menu at the line's
  * price (a trend line's where it is at the last candle): an alert there, a plan from it, a question, or delete it. The
  * bell in the header opens the symbol's armed alerts, to move or remove one (``DeskAlerts``).
+ * ``guides`` (a Feed Scanner row's trigger, stop and target) are thin lines named in the header; the level menu opened
+ * on one snaps to its price.
  */
 
 const ET = "America/New_York";
 const REFRESH_MS = 60_000;
 const COLOR = { fill: "#e9a23b", ping: "#a78bfa", radar: "#60a5fa", entry: "#7db3f0", invalidation: "#fca5a5", target: "#86efac", stop: "#a1a1aa",
-  alert: "#f4c66bb0", reference: "#9a9aa3a0", pick: "#e4e4e7" };
+  alert: "#f4c66bb0", reference: "#9a9aa3a0", pick: "#e4e4e7", guide: "#5eead4c0" };
 
 /** The studies each timeframe offers, in the legend's order; ``levels`` is the previous close and the pre-market high
  * and low; ``news`` the symbol's headlines at their candles (``ChartNews``). All on by default. */
@@ -79,6 +81,7 @@ const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFra
 const KIND_WORD: Record<DeskChartMark["kind"], string> = { fill: "Fill", ping: "Ping", radar: "Radar" };
 /** A plan line further than this from the last price does not stretch the price scale; the row above still names it. */
 const LEVEL_REACH = 0.1;
+const NO_GUIDES: DeskGuide[] = [];
 /** Candles of room kept past the last one; more when the time stop is ahead (up to ``STOP_ROOM``). */
 const RIGHT_ROOM = 4;
 const STOP_ROOM = 120;
@@ -260,7 +263,9 @@ function defaultRange(parts: Parts, data: DeskChartData, host: HTMLElement | nul
 type Read = { key: string; at?: number; data: DeskChartData } | { key: string; at?: number; error: string };
 const good = (read: Read) => "data" in read && read.data.state === "ok" && read.data.bars.length > 0;
 /** What the chart shows now, for the crosshair and the primitives; ``applied`` is the key last painted. */
-type Painted = { shown: DeskChartData | null; byCandle: Map<number, DeskChartMark[]>; applied: string | null; timeline: ChartBar[] };
+type Painted = { shown: DeskChartData | null; byCandle: Map<number, DeskChartMark[]>; applied: string | null; timeline: ChartBar[]; guides: DeskGuide[] };
+/** A thin reference line handed in by the desk (a Scanner row's levels): drawn under the plan's lines, never saved. */
+export type DeskGuide = { price: number; label: string };
 
 /** One study's points: a gap where it has no value, and none drawn across a session's end (VWAP starts again each day). */
 function studyPoints(bars: Bar[], values: (number | null)[] | undefined, key: LineKey): (LineData<Time> | WhitespaceData<Time>)[] {
@@ -294,7 +299,7 @@ function setVolume(current: Parts, data: DeskChartData | null, on: boolean) {
 /** The read's candles, lines and marks onto the chart, with the studies ``shown``; the view resets only for a new symbol
  * or timeframe. ``alerts`` (the symbol's other armed alerts) and ``pick`` (the level menu's price) are thin lines. */
 function paint(current: Parts, read: Read, state: Painted, host: HTMLElement | null, shown: (key: StudyKey) => boolean,
-  alerts: DeskChartAlert[], pick: number | null) {
+  alerts: DeskChartAlert[], pick: number | null, guides: DeskGuide[] = []) {
   const fresh = read.key !== state.applied;
   const next = "data" in read && read.data.state === "ok" && read.data.bars.length ? read.data : null;
   state.shown = next;
@@ -302,6 +307,7 @@ function paint(current: Parts, read: Read, state: Painted, host: HTMLElement | n
   // The drawings' time axis: each candle from its start to the next step (Charts' ``Timeline``).
   state.timeline = next ? next.bars.map(b => ({ ...b, end_time: b.time + next.step }) as unknown as ChartBar) : [];
   state.applied = next ? read.key : null;  // after an empty read, the next good one opens on the default view
+  state.guides = guides;
   for (const line of current.lines) current.candles.removePriceLine(line);
   current.lines = [];
   const offers = (key: StudyKey) => !!next && STUDIES[next.timeframe].includes(key) && shown(key);
@@ -324,6 +330,9 @@ function paint(current: Parts, read: Read, state: Painted, host: HTMLElement | n
   }
   current.lines.push(...alerts.map(alert => current.candles.createPriceLine({
     price: alert.price, color: COLOR.alert, lineWidth: 1, lineStyle: LineStyle.SparseDotted, axisLabelVisible: false, title: "Alert",
+  })));
+  current.lines.push(...guides.map(guide => current.candles.createPriceLine({
+    price: guide.price, color: COLOR.guide, lineWidth: 1, lineStyle: LineStyle.LargeDashed, axisLabelVisible: true, title: guide.label,
   })));
   current.lines.push(...next.levels.map(level => current.candles.createPriceLine({
     price: level.price, color: COLOR[level.role], lineWidth: 2, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: level.label,
@@ -464,14 +473,16 @@ export function linePrice(item: PriceLevel | Drawing, timeline: Timeline, last: 
 
 /** The chart for ``id`` (a thread, ``symbol:X`` or ``market``) on ``timeframe``. ``refreshKey`` reads it again. ``onRead``
  * hears each read shown (the reading line); ``actions`` lets the level menu's Plan and Ask reach the desk. */
-export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, actions, live: now = null }: {
+export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, actions, live: now = null, guides = NO_GUIDES }: {
   id: string; timeframe: DeskTimeframe; refreshKey?: number; label: string; onRead?(data: DeskChartData | null): void; actions?: DeskChartActions;
+  /** Thin reference lines for this symbol (a Feed Scanner row's levels). */
+  guides?: DeskGuide[];
   /** The desk's live price: it moves the last candle (and the price line) between the minute reads. */
   live?: { last: number; at: number; stale: boolean } | null;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const parts = useRef<Parts | null>(null);
-  const painted = useRef<Painted>({ shown: null, byCandle: new Map(), applied: null, timeline: [] });
+  const painted = useRef<Painted>({ shown: null, byCandle: new Map(), applied: null, timeline: [], guides: [] });
   const latest = useRef<Read | null>(null);
   const [read, setRead] = useState<Read | null>(null);
   const [tick, setTick] = useState(0);
@@ -529,7 +540,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
         const data = painted.current.shown;
         if (!found?.priceRange || !data?.bars.length) return found;
         const last = data.bars[data.bars.length - 1].close;
-        const near = data.levels.map(l => l.price).filter(p => Math.abs(p - last) / last <= LEVEL_REACH);
+        const near = [...data.levels.map(l => l.price), ...painted.current.guides.map(g => g.price)].filter(p => Math.abs(p - last) / last <= LEVEL_REACH);
         if (!near.length) return found;
         return { ...found, priceRange: { minValue: Math.min(found.priceRange.minValue, ...near), maxValue: Math.max(found.priceRange.maxValue, ...near) } };
       },
@@ -574,7 +585,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     parts.current = { chart, candles, volume: null, markers, shade, stop, lines: [], studies, layer, timeline, gestures };
     setChartApi(chart);
     painted.current.applied = null;  // a new chart starts from the default view
-    if (latest.current) paint(parts.current, latest.current, painted.current, host.current, () => true, [], null);
+    if (latest.current) paint(parts.current, latest.current, painted.current, host.current, () => true, [], null, painted.current.guides);
     chart.subscribeCrosshairMove((event) => {
       if (drawActions.current.tool) gestures.hover(event.point && (event.paneIndex ?? 0) === 0 ? event.point : null, false);
       const data = painted.current.shown;
@@ -675,8 +686,8 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   useEffect(() => {
     latest.current = read;
     const tf = read && "data" in read ? read.data.timeframe : timeframe;
-    if (parts.current && read) paint(parts.current, read, painted.current, host.current, k => isOn(choices, tf, k), alerts, pick);
-  }, [read, choices, alerts, pick, shownKey, timeframe]);
+    if (parts.current && read) paint(parts.current, read, painted.current, host.current, k => isOn(choices, tf, k), alerts, pick, guides);
+  }, [read, choices, alerts, pick, shownKey, timeframe, guides]);
 
   // The live price onto the candle still forming: its close, and its high or low when it goes past them. A price after
   // that candle waits for the next read (a new candle needs its volume and studies); a stale one is left off.
@@ -716,12 +727,18 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     const line = hit ? drawRef.current.find(hit.id) : null;
     const last = shown ? shown.reading?.last ?? shown.bars[shown.bars.length - 1]?.close ?? null : null;
     const where = line && current ? linePrice(line, current.timeline, last) : null;
+    // Not on a drawn line but on a guide (a Scanner level): the menu opens at the guide's price.
+    const slop = spot.touch ? TOUCH_SLOP : MOUSE_SLOP;
+    const guide = !line && current ? painted.current.guides.find(g => {
+      const y = current.candles.priceToCoordinate(g.price);
+      return y !== null && Math.abs(y - spot.y) <= slop;
+    }) : undefined;
     const item = line ? { id: line.id, name: itemName(line), at: where ? where.at : "where you pressed" } : undefined;
     const width = host.current?.clientWidth ?? 360;
     const pane = parts.current?.chart.timeScale().width() ?? width;
     const x = spot.axis ? pane - MENU_W - 6 : spot.x > width / 2 ? spot.x - MENU_W - 12 : spot.x + 12;
     const height = host.current?.clientHeight ?? 320;
-    setMenu({ price: where ? where.price : spot.price, x: Math.max(4, Math.min(width - MENU_W - 4, x)), y: Math.max(4, Math.min(spot.y - 20, height - 220)), plan: false, item });
+    setMenu({ price: where ? where.price : guide ? guide.price : spot.price, x: Math.max(4, Math.min(width - MENU_W - 4, x)), y: Math.max(4, Math.min(spot.y - 20, height - 220)), plan: false, item });
     setStatus(null);
   }, []);
   const clearPress = () => { if (press.current?.timer) window.clearTimeout(press.current.timer); press.current = null; };
@@ -867,7 +884,8 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
         {data?.levels.map(level => (
           <span key={level.role} style={{ color: COLOR[level.role] }}>{level.label}{offScale.has(level.role) ? " (off the chart)" : ""}</span>
         ))}
-        {data && !data.levels.length && id !== "market" && <span>no plan lines saved</span>}
+        {data && !data.levels.length && id !== "market" && !guides.length && <span>no plan lines saved</span>}
+        {data && guides.length > 0 && <span data-testid="desk-chart-guides" style={{ color: COLOR.guide }}>{guides.map(g => `${g.label} ${price(g.price)}`).join(" · ")}</span>}
         {data?.time_stop && <span style={{ color: COLOR.stop }}>Time stop {stopWhen(data.time_stop.at)}</span>}
         {data && earningsHeader(data.events, data.as_of) && <span data-testid="desk-chart-earnings" className="text-sky-200">{earningsHeader(data.events, data.as_of)}</span>}
         <span className="ml-auto flex items-center gap-1">
@@ -988,6 +1006,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
         <ul aria-label="On the chart" className="sr-only" data-testid="desk-chart-marks">
           {data.levels.map(level => <li key={level.role}>{level.label}</li>)}
           {(data.reference ?? []).map(line => <li key={line.key}>{line.label}</li>)}
+          {guides.map(g => <li key={g.label}>{g.label} {price(g.price)}</li>)}
           {alerts.map(alert => <li key={alert.id}>Alert · {alert.text}</li>)}
           {allMarks.map((mark, i) => <li key={i}>{KIND_WORD[mark.kind]} · {mark.text} · {nyWhen(mark.at)}</li>)}
           {data.time_stop && <li>Time stop {stopWhen(data.time_stop.at)} · {data.time_stop.text}</li>}

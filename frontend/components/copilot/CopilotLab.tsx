@@ -24,9 +24,10 @@ import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import ArmChecklist from "@/components/copilot/ArmChecklist";
 import DeskFeed, { feedQuestion, useDeskFeed, useFeedNew, type FeedItem } from "@/components/copilot/DeskFeed";
 import { useDeskUnusual } from "@/components/copilot/DeskUnusual";
+import { scannerGuides, useDeskScanner, type DeskScannerRow } from "@/components/copilot/DeskScanner";
 import { DeskStatus, useDeskSession } from "@/components/copilot/SessionTape";
 import { Book, CentreChart, DayFacts, DayPnl, NeedsStrip, SinceYouLooked, positionRows, useSparks } from "@/components/copilot/Cockpit";
-import type { DeskChartActions } from "@/components/copilot/DeskChart";
+import type { DeskChartActions, DeskGuide } from "@/components/copilot/DeskChart";
 import MorningBrief from "@/components/copilot/MorningBrief";
 import Watching, { useWatching } from "@/components/copilot/Watching";
 import { useDeskEvents } from "@/components/copilot/EarningsTag";
@@ -178,6 +179,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const feed = useDeskFeed(on);
   const feedNew = useFeedNew(feed.data, on && centreTab === "feed");
   const unusual = useDeskUnusual(on);
+  const scanner = useDeskScanner(on);
+  const [scanLines, setScanLines] = useState<{ symbol: string; lines: DeskGuide[] } | null>(null); // a Scanner row's levels on the chart
   const [chainFocus, setChainFocus] = useState<{ pick: ChainPick; n: number } | null>(null); // a Feed row's unusual contract
   useEffect(() => { if (centreTab !== "chain") setChainFocus(null); }, [centreTab]); // eslint-disable-line react-hooks/set-state-in-effect -- the pick opens the Chain once, not on every later visit
   // The tickers opened today in this browser: opening one clears its strip items (``deskNeeds``); nothing is dismissed.
@@ -495,6 +498,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // is the market.
   const followed = useMemo(() => positionRows(rows).filter(r => !r.hidden), [rows]);
   const centreSymbol = picked ?? talking ?? focus ?? (day && turnText ? null : followed[0]?.symbol ?? null);
+  // Another ticker on the chart drops a Scanner row's lines for good.
+  useEffect(() => { if (scanLines && scanLines.symbol !== centreSymbol) setScanLines(null); }, [scanLines, centreSymbol]); // eslint-disable-line react-hooks/set-state-in-effect -- follows the chart's ticker
   const centreRow = centreSymbol ? followed.find(r => r.symbol === centreSymbol) ?? rows.find(r => r.symbol === centreSymbol && r.key.startsWith("trade:")) ?? null : null;
   // The chart reads by the conversation when it is about that ticker (its plan's lines), else by the position's plan.
   const centreThread = useMemo<DeskThreadRef | null>(() => {
@@ -581,6 +586,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const chainTicket = useCallback((id: string, pick: ChainPick) => openTicket(id, { expiry: pick.expiry, strike: pick.strike }), []);
   // An Unusual options row: its contract selected in the Chain tab, in place.
   const openUnusual = useCallback((pick: ChainPick) => { setPicked(pick.symbol); setPickedKey(null); setChainFocus(f => ({ pick, n: (f?.n ?? 0) + 1 })); setCentreTab("chain"); }, []);
+  // A Scanner row: its ticker on the desk chart, in place, with the scanner's levels as thin lines.
+  const openScanner = useCallback((row: DeskScannerRow) => { setPicked(row.symbol); setPickedKey(null); setScanLines({ symbol: row.symbol, lines: scannerGuides(row) }); setCentreTab("chart"); }, []);
   const chartActions = useMemo<DeskChartActions>(() => ({ go, ask: (symbol, text) => askAbout(symbol, text) }), [go, askAbout]);
   // A feed item's Plan it: a Radar setup card opens on its own Plan it (the desk's Radar card); his own position or plan
   // opens its plan thread, else the plan form for the symbol. Nothing is saved or sent from the feed.
@@ -729,8 +736,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} pick={ticketPick} close={ticketClose} onOpen={id => { setTicketFor(id); setTicketPick(null); setTicketClose(null); }} onClose={() => { setTicketFor(null); setTicketPick(null); setTicketClose(null); }}
                 onPlaced={symbol => { setTicketFor(null); setTicketClose(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
                 : centreTab === "chart"
-                ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events} />
-                : <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed} unusual={unusual} onUnusual={openUnusual} />}
+                ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events}
+                  guides={scanLines && scanLines.symbol === centreSymbol ? scanLines.lines : undefined} />
+                : <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed} unusual={unusual} onUnusual={openUnusual}
+                  scanner={scanner} onScanner={openScanner} onScannerPlan={go} />}
             </div>
           </section>
         )}
