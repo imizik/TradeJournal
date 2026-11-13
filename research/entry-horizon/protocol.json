@@ -1,0 +1,60 @@
+{
+  "protocol_id": "entry-horizon-20261112-v1",
+  "registered": "2026-11-12",
+  "registered_before": "any outcome of this measure was computed. Already known when it was written: entry-skill-20261112-v1 (no direction edge on the stock 30 minutes after entry; the stock had moved the trade's way before entry); hold-limit-20261112-v1 (closing every overnight trade at the close of session 1 would have cost about $15,900 on 321 trades, which is the lead behind this study); the October 21 audit and the earlier studies on the same trades.",
+  "question": "Measured on the underlying stock, do the owner's option entries move in the trade's direction by the close of the next session by more than matched control entries do?",
+  "why_it_might_be_true": "The hold-limit study found the owner's overnight trades did better after the first session's close than at it. One reading is that the entries carry information that plays out over days, not minutes; the other is that the owner holds the right trades overnight, which is a decision made after entry. The primary test asks the first. A registered secondary asks the second. If either holds, the other side would be traders with a shorter horizon; it would be an inefficiency and would need a forward check.",
+  "population": {
+    "trades": "every trade in the extract: closed or expired long option trades opened 2025-07-10 to 2026-10-19, one observation per trade at its first buy_to_open fill",
+    "extract": "the file written on 2026-11-11 by `python -m scripts.exit_counterfactual_study extract`; bytes sha256 4ada80b1977230773bd0d919cd3ea42f766b8fcc651d5484fee8253de7c33a47. A run on any other file reports extract_is_registered false and must say so",
+    "underlying": "the trade's ticker; SPXW and SPX are scored on SPY",
+    "excluded_and_counted": ["no buy_to_open fill", "first entry outside the regular session", "no minute bars for the underlying on the entry session"]
+  },
+  "prices": "The reference price is taken as in entry-skill-20261112-v1: the OPEN of the first regular-session Alpaca SIP minute bar at entry minute + 1, + 2 or + 3 (raw). Horizon prices are SIP daily closes. For horizons after the entry session, both the reference and the close are put on one share basis with the split-adjusted daily series: reference x (split-adjusted close / raw close on the entry session). Dividends are not adjusted.",
+  "measure": "signed move % = side x (horizon close / reference - 1) x 100, with side +1 for a call and -1 for a put",
+  "horizons": {"primary": "the close of the next session (+1)", "also": ["the close of the entry session (+0)", "the close 3 sessions later (+3)", "the close 5 sessions later (+5)"], "sessions": "the days SPY has a daily bar"},
+  "controls": {
+    "day": "same underlying, same minute, same side, on each of the 10 sessions before and the 10 after the entry session, each measured to its own horizon closes. Asks: was this a better day to enter that stock than its neighbours?",
+    "stock": "each other name of the factory's 18-name core universe at the same session and minute, same side. Asks: was this a better stock than the others from that moment? The market's move cancels.",
+    "scoring": "as the entry: same clock, same measure. A baseline needs at least 5 scored controls for a trade at a horizon, else the trade has no edge for it (counted). No random draw."
+  },
+  "edge": "for each baseline and horizon, the trade's signed move minus the mean signed move of its controls",
+  "tests": 2,
+  "uncertainty": "2,000 bootstrap resamples by ISO week of first entry (seed 20261112). Weeks, not days, because multi-day windows overlap across neighbouring days. Bonferroni across the 2 baselines: 97.5% two-sided percentile intervals on the mean edge at +1.",
+  "expected_precision": "Not computed from the data. A one-day signed move in these names has a standard deviation near 3 points; with about 1,450 scored trades in about 66 weeks and clustering that inflates the error two to three times, the standard error is about 0.15 to 0.25 points. Only an edge of roughly half a point a trade is likely to be detected. A smaller real edge will read as 'no evidence either way'; the report states the realized interval.",
+  "periods": {
+    "exploration": "opened 2025-07-10 to 2026-03-31",
+    "check": "opened 2026-04-01 to 2026-10-19",
+    "independence": "neither period is untouched. Every result is exploratory; agreement between the periods is consistency, not confirmation"
+  },
+  "decisions": {
+    "per_baseline": {
+      "beats chance": "the 97.5% interval on the +1 mean edge is above 0, the mean edge is above 0 in each period, and the mean edge is above 0 at +0 and at +3",
+      "worse than chance": "the 97.5% interval on the +1 mean edge is below 0",
+      "no evidence either way": "anything else"
+    },
+    "large_enough_to_matter": "a baseline that beats chance is also marked large enough to matter when its +1 mean edge is at least 0.25 points. That figure is a judgment about what a week-dated option gives up to a day of decay, not a measurement",
+    "what_a_pass_allows": "eligible for a forward check on new trades under its own protocol, and a reason to study longer-dated contracts on paper. Not proof of an edge and not a reason to change size",
+    "what_no_pass_means": "on this history the entries show no measurable direction skill on the stock over one to five sessions at the size this sample can detect"
+  },
+  "registered_secondary": {
+    "hold_choice": "For each scored trade, the stock's signed move from the entry session's close to the next session's close (split-adjusted). Compare the trades the owner still held after the entry session's close (final exit or expiry on a later date) with the trades closed in the entry session: the difference in means with a 90% week-resampled range.",
+    "prediction": "fixed now: the held trades' mean is higher. A range above 0 says the owner tends to keep the trades whose stock keeps going, which is a decision made after entry and no evidence about entries. It decides nothing by itself and would be the next thing to test forward."
+  },
+  "descriptive_only": [
+    "the raw mean signed move and the share above zero at each horizon, for calls and for puts",
+    "each baseline's mean edge by side, by period and at +0, +3 and +5"
+  ],
+  "limits": [
+    "the stock's move, not the option's",
+    "first entry only; minute timestamps and a next-minute reference",
+    "low power: one-day moves are large next to any plausible edge, and multi-day windows overlap, so only a big effect can show",
+    "the day control uses sessions after the entry as well as before; it is a baseline, not a tradable rule",
+    "the 18 comparison names were themselves picked from the journal's names",
+    "the hold-choice comparison describes what the owner did after seeing the first session; it cannot separate skill from the stock's own drift on the days he chose to hold",
+    "seen data: these are associations in trades several studies have already read"
+  ],
+  "results": "The repository is public. Aggregates and the per-trade file are written outside it and reported to the owner directly; they are not committed.",
+  "prospective": "not registered here; a forward check needs its own protocol id after this run",
+  "one_run": "one historical run under this id. A changed constant is a new protocol id, recorded beside this one"
+}
