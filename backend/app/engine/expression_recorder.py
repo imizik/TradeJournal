@@ -19,9 +19,13 @@ live chains and quotes every leg:
 Every alternative is sized to his fill's delta: units = contracts x (his contract's delta per contract) / (the
 alternative's delta per unit), at each entry fill's own quotes. Each later entry fill adds units the same way;
 each ``sell_to_close`` closes the same fraction of every alternative as of his open contracts; a position still
-open at 15:58 New York on its expiration day is closed there. Buys pay the ask and sells receive the bid, for him
-and for every alternative. Quotes are taken when the fill is seen, not at the fill's own second; the lag is
-stored and the scorecard leaves out positions with a snapshot later than ``LATE_SECONDS``.
+open two minutes before the close on its expiration day (market calendar: 15:58, 12:58 on a half day) is closed
+there, after any exit that comes later. Buys pay the ask and sells receive the bid, for him and for every
+alternative. Quotes are taken when the fill is seen, not at the fill's own second; the lag is stored and the
+scorecard leaves out positions with a snapshot later than ``LATE_SECONDS``. A position with any journal fill the
+recorder never quoted (an email seen late, after hours or across a restart) is marked incomplete at expiry, and an
+entry whose email came after a later entry's joins that position. At most ``OPENS_PER_PASS`` new positions are
+opened a pass, with short chain timeouts, so a slow provider cannot hold the monitor loop.
 
 Storage is an append-only SQLite file of its own (``EXPRESSION_RECORDER_PATH``), not the journal database: no
 migration, and nothing here writes the journal, sends a message or suggests an order. A position opened before
@@ -40,6 +44,7 @@ from pathlib import Path
 import sqlite3
 import time
 from typing import Callable
+import uuid
 
 from sqlalchemy import or_
 from sqlmodel import Session, select
@@ -63,8 +68,11 @@ LATE_SECONDS = 5 * 60  # the scorecard leaves out positions with a snapshot this
 DEEP_DELTA = 0.70
 DEEPER_BY = 0.10
 LATER_DAYS = 21
-EXPIRY_MINUTE = 15 * 60 + 58
-OPEN_MINUTE, LAST_MINUTE = 9 * 60 + 30, 16 * 60 + 15
+EXPIRY_BEFORE_CLOSE = 2  # minutes: a position still open on its expiration day closes at 15:58 (12:58 on a half day)
+OPEN_MINUTE, CLOSE_MINUTE, AFTER_CLOSE_MINUTES = 9 * 60 + 30, 16 * 60, 15  # index options trade to 16:15
+OPENS_PER_PASS = 2  # new positions per pass: each costs four provider requests
+CHAIN_TIMEOUT = 8.0  # seconds per chain request, so a slow provider cannot hold the monitor loop for long
+SIDES = ("buy_to_open", "sell_to_close")
 CHAIN_SYMBOL = {"SPXW": "SPX"}
 NO_SHARES = {"SPX", "SPXW", "NDX", "NDXP", "XSP", "RUT", "RUTW", "VIX", "VIXW"}
 ALTERNATIVES = ("as_traded", "deeper", "spread", "later", "shares")
@@ -190,8 +198,8 @@ def choose(traded: OptionContract, chain: OptionChain, later: OptionChain | None
         far = [c for c in later.contracts if c.root == traded.root and c.option_type == traded.option_type]
         if far:
             legs["later"] = [_leg(min(far, key=lambda c: (abs(c.strike - traded.strike), c.strike)), 1)]
-    if shares:
-        legs["shares"] = [{"symbol": shares, "kind": "share", "sign": 1, "multiplier": 1}]
+    if shares:  # long for a call, short for a put
+        legs["shares"] = [{"symbol": shares, "kind": "share", "sign": 1 if traded.option_type == "call" else -1, "multiplier": 1}]
     return legs
 
 
@@ -241,11 +249,14 @@ def score(position: dict, snapshots: list[dict]) -> dict:
     dead: set[str] = set()
     open_actual = premium = actual = 0.0
     lags, days, problem = [], set(), None
-    for snap in sorted(snapshots, key=lambda s: (s["executed_at"] or "", s["quoted_at"])):
+    # The expiry close comes last whatever its time: an exit after 15:58 closes contracts first, and the expiry
+    # close takes only what is still open.
+    for snap in sorted(snapshots, key=lambda s: (s["role"] == "expiry", s["executed_at"] or "", s["quoted_at"])):
         if snap["status"] != "recorded":
             problem = f"a {snap['role']} snapshot is {snap['status']}"
             break
-        quotes, contracts = snap["quotes"], float(snap["contracts"])
+        quotes = snap["quotes"]
+        contracts = open_actual if snap["role"] == "expiry" else float(snap["contracts"])
         days.add((snap["executed_at"] or "")[:10])
         if snap["role"] == "entry":
             lags.append(snap["quoted_at"] - _epoch(snap["executed_at"]))
@@ -282,8 +293,13 @@ def score(position: dict, snapshots: list[dict]) -> dict:
                 units[a] -= units[a] * share
             except Missing:
                 dead.add(a)
+        if snap["role"] == "expiry":
+            # What he still held is valued at his contract's bid then: the journal's expiry price does not say
+            # whether an in-the-money contract was exercised or sold.
+            actual += contracts * 100 * ((quotes.get(legs["as_traded"][0]["symbol"]) or {}).get("bid") or 0.0)
+        else:
+            actual += contracts * float(snap["price"] or 0)
         open_actual -= min(contracts, open_actual)
-        actual += contracts * float(snap["price"] or 0)
     complete = problem is None and premium > 0 and open_actual <= 1e-9 and "as_traded" not in dead
     return {"key": position["key"], "ticker": position["ticker"], "option_type": position["option_type"],
             "complete": complete, "problem": problem if problem or complete else "still open or no entry",
@@ -308,9 +324,10 @@ def _symbols(legs: dict) -> list[str]:
 
 
 class ExpressionRecorder:
-    def __init__(self, engine, *, clock: Callable[[], float] = time.time, chains=options_chain,
+    def __init__(self, engine, calendar=None, *, clock: Callable[[], float] = time.time, chains=options_chain,
                  quote: Callable = tradier.get_quotes_once, store: Store | None = None):
         self.engine = engine
+        self.calendar = calendar
         self.clock = clock
         self.chains = chains
         self.quote = quote
@@ -322,6 +339,17 @@ class ExpressionRecorder:
     def deliver(self) -> None:
         """Nothing to send; present so the monitor can treat it like its other stages."""
 
+    def close_minute(self, day: date) -> int | None:
+        """The regular close in minutes of the New York day, or None when the market is shut."""
+        if day.weekday() >= 5:
+            return None
+        hours = self.calendar.hours(day) if self.calendar is not None else None
+        if not hours:
+            return CLOSE_MINUTE
+        if hours.get("status") not in (None, "open") or hours.get("close") is None:
+            return None
+        return int(hours["close"])
+
     def run(self) -> None:
         now = self.clock()
         if now - self._last_run < RUN_SECONDS:
@@ -329,60 +357,72 @@ class ExpressionRecorder:
         self._last_run = now
         moment = datetime.fromtimestamp(now, ET)
         minute = moment.hour * 60 + moment.minute
-        if moment.weekday() >= 5 or not OPEN_MINUTE <= minute <= LAST_MINUTE:
+        close = self.close_minute(moment.date())
+        if close is None or not OPEN_MINUTE <= minute <= close + AFTER_CLOSE_MINUTES:
             return
+        opened = 0
         with Session(self.engine) as db:
-            fresh = self._new_fills(db, now)
-            for fill in fresh:
+            for fill in self._new_fills(db, now):
                 if now - self._failed.get(fill["key"], 0.0) < RETRY_SECONDS:
                     continue
                 try:
-                    self._handle(db, fill, now)
+                    opened += self._handle(db, fill, now, room=opened < OPENS_PER_PASS)
                 except Exception as exc:  # a provider failure: retried every RETRY_SECONDS until GIVE_UP_SECONDS
                     log.warning("Expression snapshot for %s failed: %s", fill["key"], exc)
                     self._failed[fill["key"]] = now
                     if now - _epoch(fill["executed_at"].isoformat()) > GIVE_UP_SECONDS:
                         self._unavailable(db, fill, now, str(exc)[:200])
-        if minute >= EXPIRY_MINUTE:
-            self._expiries(moment.date(), now)
+            if minute >= close - EXPIRY_BEFORE_CLOSE:
+                self._expiries(db, moment.date(), now)
 
     def _new_fills(self, db: Session, now: float) -> list[dict]:
         since = datetime.fromtimestamp(max(self.started_at - 60, now - STALE_SECONDS), ET).replace(tzinfo=None)
         rows = db.exec(select(TradeFill.trade_id, Fill.id, Fill.account_id, Fill.raw_email_id, Fill.side, Fill.contracts,
                               Fill.price, Fill.executed_at)
                        .join(TradeFill, TradeFill.fill_id == Fill.id).join(Account, Account.id == Fill.account_id)
-                       .where(Fill.instrument_type == "option", Fill.side.in_(("buy_to_open", "sell_to_close")),
+                       .where(Fill.instrument_type == "option", Fill.side.in_(SIDES),
                               Fill.executed_at > since, or_(Account.broker.is_(None), Account.broker != "webull"))).all()
-        fills = [{"trade_id": r.trade_id, "account_id": r.account_id, "key": f"{r.account_id}|{r.raw_email_id or r.id}",
+        fills = [{"trade_id": r.trade_id, "account_id": r.account_id, "key": fill_key(r.account_id, r),
                   "side": r.side, "contracts": float(r.contracts), "price": float(r.price), "executed_at": wall_time(r.executed_at)}
                  for r in rows]
         seen = self.store.seen([f["key"] for f in fills])
         return sorted((f for f in fills if f["key"] not in seen), key=lambda f: (f["executed_at"], f["key"]))
 
-    def _position_key(self, db: Session, fill: dict) -> tuple[str, Trade]:
+    def _find(self, db: Session, fill: dict) -> tuple[str, dict | None, Trade]:
+        """The position's anchor key and its recorded row, found through any of the trade's entry fills (an entry
+        whose email came late must join the position its later entry opened, not open a second one)."""
         trade = db.get(Trade, fill["trade_id"])
         entries = db.exec(select(Fill).join(TradeFill, TradeFill.fill_id == Fill.id)
                           .where(TradeFill.trade_id == trade.id, TradeFill.role == "entry")).all()
-        return f"{fill['account_id']}|{anchor(entries)}", trade
+        key = f"{fill['account_id']}|{anchor(entries)}"
+        for candidate in [key] + sorted(fill_key(fill["account_id"], e) for e in entries):
+            row = self.store.position(candidate)
+            if row is not None:
+                return candidate, row, trade
+        return key, None, trade
 
-    def _handle(self, db: Session, fill: dict, now: float) -> None:
-        key, trade = self._position_key(db, fill)
-        position = self.store.position(key)
+    def _handle(self, db: Session, fill: dict, now: float, room: bool) -> int:
+        """Record one fill; returns 1 when it opened a position (each costs several provider requests)."""
+        key, position, trade = self._find(db, fill)
+        opened = 0
         if position is None:
             if fill["side"] != "buy_to_open" or key != fill["key"] or trade.option_type not in ("call", "put"):
                 self.store.add_snapshot({"fill_key": fill["key"], "position_key": key, "role": "skipped", "quoted_at": now,
                                          "status": "skipped", "note": "the recorder did not see this position's first entry"})
-                return
-            position = self._open(trade, key, fill, now)
+                return 0
+            if not room:
+                return 0  # next pass
+            position, opened = self._open(trade, key, fill, now), 1
         quotes = _quotes(self.quote(_symbols(position["legs"]), greeks=True))
         self.store.add_snapshot({"fill_key": fill["key"], "position_key": key,
                                  "role": "entry" if fill["side"] == "buy_to_open" else "exit",
                                  "executed_at": fill["executed_at"].isoformat(), "contracts": fill["contracts"], "price": fill["price"],
                                  "quoted_at": self.clock(), "status": "recorded", "quotes": quotes})
+        return opened
 
     def _open(self, trade: Trade, key: str, fill: dict, now: float) -> dict:
         symbol = CHAIN_SYMBOL.get(trade.ticker, trade.ticker)
-        chain = self.chains.chain(symbol, trade.expiration)
+        chain = self.chains.chain(symbol, trade.expiration, timeout=CHAIN_TIMEOUT)
         strike = float(trade.strike)
         traded = next((c for c in chain.contracts if c.root == trade.ticker and c.option_type == trade.option_type
                        and abs(c.strike - strike) < 1e-6), None)
@@ -390,8 +430,8 @@ class ExpressionRecorder:
             raise LookupError(f"{trade.ticker} {trade.expiration} {strike:g} {trade.option_type} is not in the chain")
         spot_quote = self.quote([symbol]).get(symbol)
         spot = (spot_quote.mid or spot_quote.last) if spot_quote else None
-        when = later_expiration(self.chains.expirations(symbol), trade.expiration, fill["executed_at"].date())
-        later = self.chains.chain(symbol, when) if when else None
+        when = later_expiration(self.chains.expirations(symbol, timeout=CHAIN_TIMEOUT), trade.expiration, fill["executed_at"].date())
+        later = self.chains.chain(symbol, when, timeout=CHAIN_TIMEOUT) if when else None
         legs = choose(traded, chain, later, spot, None if trade.ticker in NO_SHARES else symbol)
         row = {"key": key, "trade_id": str(trade.id), "ticker": trade.ticker, "option_type": trade.option_type, "strike": strike,
                "expiration": trade.expiration.isoformat(), "legs": legs, "created_at": now}
@@ -399,8 +439,8 @@ class ExpressionRecorder:
         return row
 
     def _unavailable(self, db: Session, fill: dict, now: float, note: str) -> None:
-        key, _ = self._position_key(db, fill)
-        if self.store.position(key) is None:
+        key, position, _ = self._find(db, fill)
+        if position is None:
             self.store.add_snapshot({"fill_key": fill["key"], "position_key": key, "role": "skipped", "quoted_at": now,
                                      "status": "skipped", "note": note})
             return
@@ -409,22 +449,50 @@ class ExpressionRecorder:
                                  "executed_at": fill["executed_at"].isoformat(), "contracts": fill["contracts"],
                                  "price": fill["price"], "quoted_at": now, "status": "unavailable", "note": note})
 
-    def _expiries(self, today: date, now: float) -> None:
+    def _missed(self, db: Session, position: dict, snaps: list[dict]) -> list[str]:
+        """The position's journal fills with no recorded snapshot: an email seen late, after hours or across a restart."""
+        account, source = position["key"].split("|", 1)
+        first = db.exec(select(Fill).where(Fill.account_id == uuid.UUID(account),
+                                           or_(Fill.raw_email_id == source, Fill.id == _uuid(source)))).first()
+        if first is None:
+            return ["the first entry fill is no longer in the journal"]
+        link = db.exec(select(TradeFill).where(TradeFill.fill_id == first.id)).first()
+        fills = db.exec(select(Fill).join(TradeFill, TradeFill.fill_id == Fill.id)
+                        .where(TradeFill.trade_id == link.trade_id, Fill.side.in_(SIDES))).all() if link else []
+        recorded = {s["fill_key"] for s in snaps if s["status"] == "recorded"}
+        return [fill_key(first.account_id, f) for f in fills if fill_key(first.account_id, f) not in recorded]
+
+    def _expiries(self, db: Session, today: date, now: float) -> None:
         for position in self.store.positions():
             if position["expiration"] != today.isoformat():
                 continue
             snaps = self.store.snapshots(position["key"])
             if any(s["role"] == "expiry" for s in snaps):
                 continue
-            left = sum(float(s["contracts"] or 0) * (1 if s["role"] == "entry" else -1) for s in snaps if s["role"] in ("entry", "exit"))
-            if left <= 1e-9:
-                continue
             stamp = datetime.fromtimestamp(now, ET).replace(tzinfo=None, second=0, microsecond=0).isoformat()
             row = {"fill_key": f"expiry|{position['key']}", "position_key": position["key"], "role": "expiry",
-                   "executed_at": stamp, "contracts": left, "price": 0.0, "quoted_at": now}
-            try:
-                row.update(status="recorded", quotes=_quotes(self.quote(_symbols(position["legs"]), greeks=True)))
-            except Exception as exc:
-                log.warning("Expiry snapshot for %s failed: %s", position["key"], exc)
-                row.update(status="unavailable", note=str(exc)[:200])
+                   "executed_at": stamp, "contracts": None, "price": None, "quoted_at": now}
+            missed = self._missed(db, position, snaps)
+            if missed:
+                row.update(status="unavailable", note=f"{len(missed)} fill(s) of this position were never quoted")
+            else:
+                left = sum(float(s["contracts"] or 0) * (1 if s["role"] == "entry" else -1) for s in snaps if s["role"] in ("entry", "exit"))
+                if left <= 1e-9:
+                    continue
+                try:
+                    row.update(status="recorded", quotes=_quotes(self.quote(_symbols(position["legs"]), greeks=True)))
+                except Exception as exc:
+                    log.warning("Expiry snapshot for %s failed: %s", position["key"], exc)
+                    row.update(status="unavailable", note=str(exc)[:200])
             self.store.add_snapshot(row)
+
+
+def fill_key(account_id, fill) -> str:
+    return f"{account_id}|{fill.raw_email_id or fill.id}"
+
+
+def _uuid(text: str):
+    try:
+        return uuid.UUID(text)
+    except ValueError:
+        return None

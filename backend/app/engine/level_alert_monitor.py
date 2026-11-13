@@ -78,7 +78,10 @@ class LevelAlertMonitor:
             interrupts = fill_interrupts.FillInterrupts(engine, calendar, clock=clock)
         self.interrupts = interrupts  # Fill-time pattern interrupts, when FILL_INTERRUPTS_ENABLED
         if expressions is None and expression_recorder.enabled():
-            expressions = expression_recorder.ExpressionRecorder(engine, clock=clock)
+            try:
+                expressions = expression_recorder.ExpressionRecorder(engine, calendar, clock=clock)
+            except Exception:  # an unusable EXPRESSION_RECORDER_PATH turns off this stage, not the monitor
+                log.exception("Expression recorder could not open its file; it stays off")
         self.expressions = expressions  # Alternative expressions quoted at each option fill, when EXPRESSION_RECORDER_ENABLED
         self.follow_ups = follow_ups  # notification_policy.FollowUps: what the owner did after each ping
         self.prep = prep  # The copilot's pre-market prep ping, when PREMARKET_PREP_ENABLED

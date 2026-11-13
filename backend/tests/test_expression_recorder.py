@@ -68,6 +68,7 @@ def test_alternatives_for_a_put_and_what_is_left_out():
     legs = er.choose(by("put", 100), chain(), None, 100.0, None)
     assert strikes(legs) == {"as_traded": [("00100000", 1)], "deeper": [("00105000", 1)],
                              "spread": [("00100000", 1), ("00095000", -1)]}
+    assert er.choose(by("put", 100), chain(), None, 100.0, "AAA")["shares"][0]["sign"] == -1  # short shares for a put
     assert "deeper" not in er.choose(by("call", 95), chain(), None, None, None)  # already 0.66
     assert "spread" not in er.choose(by("call", 100), chain(), None, None, None)  # no price, no straddle
 
@@ -162,13 +163,13 @@ class Chains:
         self.calls = []
         self.fail = False
 
-    def chain(self, symbol, expiration):
+    def chain(self, symbol, expiration, timeout=None):
         self.calls.append(("chain", symbol, expiration))
         if self.fail:
             raise RuntimeError("rate limited")
         return chain() if expiration == EXP else far()
 
-    def expirations(self, symbol):
+    def expirations(self, symbol, timeout=None):
         return [EXP, LATER]
 
 
@@ -197,8 +198,8 @@ class Clock:
         return self.now
 
 
-def recorder(engine, tmp_path, clock, chains):
-    return er.ExpressionRecorder(engine, clock=clock, chains=chains, quote=quote, store=er.Store(tmp_path / "x.sqlite3"))
+def recorder(engine, tmp_path, clock, chains, calendar=None):
+    return er.ExpressionRecorder(engine, calendar, clock=clock, chains=chains, quote=quote, store=er.Store(tmp_path / "x.sqlite3"))
 
 
 def test_the_pass_records_entries_exits_and_expiry(engine, tmp_path):
@@ -281,3 +282,83 @@ def test_the_monitor_builds_it_only_when_switched_on(engine, tmp_path, monkeypat
     monkeypatch.setenv("EXPRESSION_RECORDER_PATH", str(tmp_path / "on.sqlite3"))
     assert isinstance(LevelAlertMonitor(engine).expressions, er.ExpressionRecorder)
     assert (tmp_path / "on.sqlite3").exists()
+
+
+P = "AAA261023P00100000"
+
+
+def test_a_put_holds_short_shares():
+    legs = {"as_traded": [{"symbol": P, "kind": "option", "sign": 1, "multiplier": 100}],
+            "shares": [{"symbol": "AAA", "kind": "share", "sign": -1, "multiplier": 1}]}
+    snaps = [snap("entry", "2026-10-21T10:00:00", 1, 200, {P: {"bid": 1.9, "ask": 2.0, "delta": -0.5},
+                                                          "AAA": {"bid": 99.99, "ask": 100.01, "delta": None}}),
+             snap("exit", "2026-10-21T11:00:00", 1, 290, {P: {"bid": 2.9, "ask": 3.0, "delta": -0.6},
+                                                         "AAA": {"bid": 98.0, "ask": 98.02, "delta": None}})]
+    out = er.score({"key": "k", "ticker": "AAA", "option_type": "put", "legs": legs}, snaps)
+    # 50 shares sold short at the 99.99 bid, bought back at the 98.02 ask.
+    assert out["pnl"] == {"as_traded": 90.0, "shares": 98.5}
+
+
+def test_an_exit_after_the_expiry_close_comes_first():
+    snaps = [SNAPS[0], dict(SNAPS[2], contracts=None, executed_at="2026-10-23T15:58:00"),
+             snap("exit", "2026-10-23T15:59:00", 2, 50, q((0.4, 0.5), (0.0, 0.05), (101.0, 101.02)))]
+    out = er.score({"key": "k", "ticker": "AAA", "option_type": "call", "legs": LEGS}, snaps)
+    assert out["complete"] and out["actual"] == -500.0 and out["pnl"]["as_traded"] == -520.0
+
+
+def test_a_missed_exit_makes_the_position_incomplete(engine, tmp_path):
+    clock = Clock(clock_at("09:59"))
+    rec = recorder(engine, tmp_path, clock, Chains())
+    fill(engine, "10:00", qty=2)
+    clock.now = clock_at("10:01")
+    rec.run()
+    fill(engine, "11:00", side="sell_to_close", qty=1, price=350)  # its email is never seen in time
+    clock.now = clock_at("15:58", EXP)
+    rec.run()
+    position = rec.store.positions()[0]
+    snaps = rec.store.snapshots(position["key"])
+    expiry = next(s for s in snaps if s["role"] == "expiry")
+    assert expiry["status"] == "unavailable" and "never quoted" in expiry["note"]
+    assert not er.score(position, snaps)["complete"]
+
+
+def test_an_entry_seen_late_joins_the_position_its_add_opened(engine, tmp_path):
+    clock = Clock(clock_at("09:59"))
+    rec = recorder(engine, tmp_path, clock, Chains())
+    fill(engine, "10:05")
+    clock.now = clock_at("10:06")
+    rec.run()
+    fill(engine, "10:00")  # an earlier entry whose email came later
+    clock.now = clock_at("10:07")
+    rec.run()
+    positions = rec.store.positions()
+    assert len(positions) == 1
+    assert [s["role"] for s in rec.store.snapshots(positions[0]["key"])] == ["entry", "entry"]
+
+
+class HalfDay:
+    def hours(self, day):
+        return {"status": "open", "open": 570, "close": 780 if day == EXP else 960}
+
+
+def test_a_half_day_closes_at_its_own_close(engine, tmp_path):
+    clock = Clock(clock_at("09:59"))
+    rec = recorder(engine, tmp_path, clock, Chains(), HalfDay())
+    fill(engine, "10:00")
+    clock.now = clock_at("10:01")
+    rec.run()
+    clock.now = clock_at("12:58", EXP)
+    rec.run()
+    snaps = rec.store.snapshots(rec.store.positions()[0]["key"])
+    assert any(s["role"] == "expiry" and s["executed_at"].endswith("12:58:00") for s in snaps)
+    clock.now = clock_at("13:30", EXP)
+    rec._last_run = 0
+    rec.run()  # after the half-day close plus 15 minutes: nothing runs
+    assert rec.close_minute(date(2026, 10, 24)) is None  # a Saturday
+
+
+def test_an_unusable_path_turns_off_only_the_recorder(engine, tmp_path, monkeypatch):
+    (tmp_path / "plain").write_text("x")
+    monkeypatch.setenv("EXPRESSION_RECORDER_ENABLED", "true")
+    monkeypatch.setenv("EXPRESSION_RECORDER_PATH", str(tmp_path / "plain" / "x.sqlite3"))
+    assert LevelAlertMonitor(engine).expressions is None
