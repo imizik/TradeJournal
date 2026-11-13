@@ -26,7 +26,7 @@ export type PlayCheckData = {
   habits: { state: "ok" | "quiet" | "error"; fired: Habit[]; size: { median: number; multiple: number; tail: string } | null; footer: string } | null;
   overnight: ({ state: "ok"; show: boolean; until: number; until_source: string; expires_first: boolean; trading_days: number;
     hold_days: number; greeks_as_of: string | null; expected_move_pct: number | null; basis: string; rows: AltRow[] }
-    | { state: "stale" | "missing" | "passed"; show: boolean; as_of?: number | null; reason?: string }) | null;
+    | { state: "stale" | "missing"; show: boolean; as_of?: number | null; reason?: string }) | null;
 };
 
 const SECTION = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
@@ -93,7 +93,7 @@ export default function PlayCheck({ check, investigationId, symbol, contracts, p
         )
       )}
 
-      {overnight && overnight.state !== "ok" && overnight.state !== "passed" && (
+      {overnight && overnight.state !== "ok" && (
         <p data-testid="play-overnight" className="text-muted-foreground">
           Holding overnight: {overnight.state === "stale" ? `quote stale (last ${clock(overnight.as_of)}), no figures` : overnight.reason ?? "no figures"}
         </p>

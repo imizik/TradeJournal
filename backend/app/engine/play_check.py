@@ -244,12 +244,13 @@ def hold_until(now: datetime, time_stop: dict | None, horizon: str | None) -> tu
     time stop, else a swing or long horizon's days to that day's close, else the next weekday's close (a day horizon
     a time stop due today, or no plan for time: the overnight figures then answer "if I held it to the next close")."""
     today = now.date()
+    stop = None
     if time_stop and time_stop.get("state") == "pending" and time_stop.get("due_at"):
-        end = datetime.fromtimestamp(time_stop["due_at"], ET)
-        if end.date() > today:
-            return end, "time stop", True
-        # A time stop due today ends the hold today: the folded figures answer the next close, as without one.
-    if horizon in HOLD_DAYS:
+        stop = datetime.fromtimestamp(time_stop["due_at"], ET)
+        if stop.date() > today:
+            return stop, "time stop", True
+    # A time stop due today ends the hold today, whatever the horizon: the folded figures answer the next close.
+    if stop is None and horizon in HOLD_DAYS:
         return datetime.combine(today + timedelta(days=HOLD_DAYS[horizon]), CLOSE, ET), f"{horizon} horizon", True
     day = today + timedelta(days=1)
     while day.weekday() >= 5:
@@ -333,8 +334,6 @@ def overnight(*, symbol: str, traded, chain, later, spot: float, now: datetime, 
     end, source, past_close = hold_until(now, time_stop, horizon)
     expiry = expires_at(traded.expiration, root, closes)
     expires_first = end >= expiry
-    if end <= now:
-        return {"state": "passed", "show": False, "reason": "The plan's time stop has already passed."}
     picks = expression_recorder.choose(traded, chain, later, spot, None if symbol in expression_recorder.NO_SHARES else symbol)
     found = {c.symbol: (c, chain) for c in chain.contracts}
     if later is not None:

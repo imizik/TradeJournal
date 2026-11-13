@@ -292,6 +292,10 @@ def test_when_the_plan_ends_today_the_figures_are_folded_for_the_next_close():
     monday = int(datetime(2026, 11, 16, 16, 0, tzinfo=ET).timestamp())
     assert folded["show"] is False and folded["until_source"] == "next close" and folded["until"] == monday
     assert folded["trading_days"] == 1
+    # Even with a swing horizon checked in: the plan exits today, so no week of figures opens.
+    both = play_check.overnight(symbol="NBIS", traded=MINE, chain=NEAR, later=None, spot=95.0, now=NOW, time_stop=today,
+                                horizon="swing", quote_for=fresh)
+    assert both["show"] is False and both["until_source"] == "next close" and both["until"] == monday
     nothing = play_check.overnight(symbol="NBIS", traded=MINE, chain=NEAR, later=None, spot=95.0, now=NOW, time_stop=None,
                                    horizon=None, quote_for=fresh)
     assert nothing["show"] is False and nothing["until_source"] == "next close"
@@ -355,7 +359,7 @@ def test_the_ticket_carries_the_check(monkeypatch):
     with Session(engine) as db:
         found = desk_ticket.build(db, "11111111-1111-4111-8111-111111111111", now=TICKET_NOW, chain_read=read)
     check = found["check"]
-    assert [(line["part"], line["ok"]) for line in check["play"]["lines"]] == [("stop", True), ("time", True), ("size", False)]
+    assert [(line["part"], line["ok"]) for line in check["play"]["lines"]] == [("stop", True), ("target", False), ("time", True), ("size", False)]
     assert check["habits"]["fired"] == []
     night = check["overnight"]
     assert night["state"] == "ok" and night["show"] is True  # the time stop is two days out
