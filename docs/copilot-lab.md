@@ -1423,6 +1423,14 @@ and a small P&L-at-expiry line with the stock now (white) and break-even (amber)
 - **Nothing rather than a wrong number.** A short contract, or a ticker that also holds a short option (a spread or a
   calendar the journal keeps as separate trades), shows a one-line note and no figures. A missing input leaves its
   figure out and says so ("Greeks unavailable"), never a zero. Stocks get no standing (their P&L and day change only).
+- **What if…** Folded by default under the standing (open or folded is remembered on the browser): a stock-price and
+  a date slider (today to expiry) give the position's estimated value and P&L in $ and %, with the P&L across stock
+  prices on that date (now, break-even and the plan's entry and stop marked; click or drag it to pick a price). Presets:
+  at the plan's stop, at its target (greyed: plans save no target today), and "If earnings is flat" (the first weekday
+  after the report from the desk's earnings tags, the stock unchanged, IV assumed 30% lower, stated on screen). Priced
+  with Black-Scholes (`whatIfModel` in `lib/optionStanding.ts`: European exercise, no dividends, a 4% rate, IV held
+  steady; the caveat sits in a tooltip) from the standing's own IV, checked against today's mark: more than 5% off, it
+  uses the IV the mark implies and says so. No IV or no stock price: one grey line, no what-if. No new data reads.
 
 Proof: `frontend/e2e/option-standing.spec.ts` (calls, puts, 0DTE, missing Greeks, short and unknown structures),
 `frontend/e2e/copilot-desk-option-standing.spec.ts` (the header on a held call and put, live movement, a spread leg),

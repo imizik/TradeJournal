@@ -150,3 +150,146 @@ export function worthNow(book: DeskBook | undefined, ticks: DeskTicks): number |
   const cost = terms?.cost ?? book?.option?.cost ?? null;
   return pnl != null && cost != null && quantity ? cost * quantity + pnl : null;
 }
+
+// --------------------------------------------------------------------------- what if
+
+/**
+ * What if (docs/copilot-lab.md § The desk): the held option's estimated value at a stock price and a date up to expiry,
+ * priced with Black-Scholes from the IV the standing already has. An estimate, said so on screen: European exercise, no
+ * dividends, a flat ``RATE``. Before anything is shown the model is priced at today's stock price and checked against
+ * today's mark; when it misses by more than ``MARK_TOLERANCE`` the IV the mark implies is used instead, and the screen
+ * says so. No IV (or no stock price) means no what-if; a short or multi-leg position gets nothing (``optionStanding``).
+ */
+
+/** The yearly risk-free rate the estimate assumes (stated on screen). */
+export const RATE = 0.04;
+/** "If earnings is flat": IV after the report, as a share of today's (a plain assumption, stated on screen). */
+export const EARNINGS_IV_KEPT = 0.7;
+/** How far the model may sit from today's mark (a share of the mark, never under ``MARK_FLOOR`` a share). */
+export const MARK_TOLERANCE = 0.05;
+export const MARK_FLOOR = 0.02;
+const MINUTES_A_YEAR = 365 * 24 * 60;
+const CLOSE_MINUTE = 16 * 60; // 16:00 New York: an equity option's last trading minute
+
+/** The standard normal CDF (Abramowitz & Stegun 7.1.26 for erf, error under 1.5e-7). */
+export function normCdf(x: number): number {
+  const z = Math.abs(x) / Math.SQRT2;
+  const t = 1 / (1 + 0.3275911 * z);
+  const erf = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-z * z);
+  return x >= 0 ? 0.5 * (1 + erf) : 0.5 * (1 - erf);
+}
+
+/** A share's Black-Scholes value; ``years`` ≤ 0 is expiry, where it is exactly the intrinsic value. */
+export function bsValue(side: "call" | "put", spot: number, strike: number, years: number, iv: number, rate = RATE): number {
+  if (years <= 0 || iv <= 0 || spot <= 0) return intrinsic(side, strike, spot);
+  const sd = iv * Math.sqrt(years);
+  const d1 = (Math.log(spot / strike) + (rate + iv * iv / 2) * years) / sd;
+  const d2 = d1 - sd;
+  const discounted = strike * Math.exp(-rate * years);
+  return side === "call" ? spot * normCdf(d1) - discounted * normCdf(d2) : discounted * normCdf(-d2) - spot * normCdf(-d1);
+}
+
+/** The IV at which ``bsValue`` equals ``price`` (a share's), by bisection over 1%–500%; null when no IV there does. */
+export function impliedVol(side: "call" | "put", spot: number, strike: number, years: number, price: number, rate = RATE): number | null {
+  if (years <= 0 || !(price > 0)) return null;
+  let lo = 0.01, hi = 5;
+  if (price < bsValue(side, spot, strike, years, lo, rate) || price > bsValue(side, spot, strike, years, hi, rate)) return null;
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2;
+    if (bsValue(side, spot, strike, years, mid, rate) < price) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+/** Years from now to expiry's 16:00 close: whole days to ``expiry`` from ``day`` plus what is left of today, given the
+ * New York minute of the day now (0–1439). Never negative. */
+export const yearsLeft = (expiry: string, day: string, nyMinute: number) =>
+  Math.max(0, daysLeft(expiry, day) * 1440 + CLOSE_MINUTE - nyMinute) / MINUTES_A_YEAR;
+
+/** ``day`` (YYYY-MM-DD) moved by ``n`` calendar days. */
+export function addDays(day: string, n: number): string {
+  return new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** The first weekday after the earnings date (holidays not known), for "If earnings is flat"; null when the report is
+ * already past or that day falls after expiry. */
+export function dayAfterEarnings(earnings: string | null | undefined, day: string, expiry: string): string | null {
+  if (!earnings || !DAY.test(earnings) || earnings < day) return null;
+  let next = addDays(earnings, 1);
+  while ([0, 6].includes(new Date(`${next}T12:00:00Z`).getUTCDay())) next = addDays(next, 1);
+  return next <= expiry ? next : null;
+}
+
+export type WhatIfModel = {
+  side: "call" | "put"; strike: number; expiry: string;
+  /** Shares the position controls, and its total cost (null when the book has none: value without P&L). */
+  size: number; cost: number | null;
+  /** Today (New York), the stock now, and years left from now to expiry's close. */
+  day: string; price: number; yearsNow: number;
+  /** The IV the estimate uses, and where it came from: the standing's Greeks, or implied from today's mark because the
+   * Greeks' IV missed the mark by more than ``MARK_TOLERANCE``. */
+  iv: number; ivSource: "greeks" | "mark"; givenIv: number;
+  /** Today's model value against today's mark, both a share's (null without a mark). */
+  check: { model: number; mark: number } | null;
+};
+
+/**
+ * The what-if's inputs for one held option, or a plain reason it has none (no IV, no stock price, a model that cannot
+ * reproduce today's mark). Null for anything ``optionStanding`` does not read as a single long call or put.
+ */
+export function whatIfModel(terms: OptionTerms | null | undefined, { price, worth, day, nyMinute }: {
+  price: number | null | undefined; worth: number | null | undefined; day: string; nyMinute: number;
+}): WhatIfModel | { reason: string } | null {
+  const leg = readable(terms);
+  if (!leg) return null;
+  const given = terms?.greeks?.iv;
+  if (!finite(given) || given <= 0) return { reason: "no IV for this contract" };
+  if (!finite(price) || price <= 0) return { reason: "no stock price" };
+  if (leg.expiry < day) return { reason: "expired" };
+  const size = leg.quantity * leg.multiplier;
+  const yearsNow = yearsLeft(leg.expiry, day, nyMinute);
+  const base = { side: leg.side, strike: leg.strike, expiry: leg.expiry, size, day, price, yearsNow, givenIv: given,
+    cost: leg.cost === null ? null : leg.cost * leg.quantity };
+  const mark = finite(worth) && worth > 0 ? worth / size : null;
+  if (mark === null) return { ...base, iv: given, ivSource: "greeks", check: null };
+  const model = bsValue(leg.side, price, leg.strike, yearsNow, given);
+  if (Math.abs(model - mark) <= Math.max(MARK_TOLERANCE * mark, MARK_FLOOR)) return { ...base, iv: given, ivSource: "greeks", check: { model, mark } };
+  const implied = impliedVol(leg.side, price, leg.strike, yearsNow, mark);
+  if (implied === null) return { reason: "the estimate cannot match today's mark" };
+  return { ...base, iv: implied, ivSource: "mark", check: { model, mark } };
+}
+
+/** Years from ``day``'s close to expiry's close; today counts from now. */
+export const yearsAt = (m: WhatIfModel, day: string) => day <= m.day ? m.yearsNow : Math.max(0, daysLeft(m.expiry, day)) / 365;
+
+export type WhatIfPoint = { share: number; value: number; pnl: number | null; pnlPct: number | null };
+
+/** The estimate at a stock price on a date (its close; today: now), with ``iv`` (default the model's). */
+export function whatIfAt(m: WhatIfModel, { price, day, iv = m.iv }: { price: number; day: string; iv?: number }): WhatIfPoint {
+  const share = bsValue(m.side, price, m.strike, yearsAt(m, day), iv);
+  const value = share * m.size;
+  const pnl = m.cost === null ? null : value - m.cost;
+  return { share, value, pnl, pnlPct: pnl === null || !m.cost ? null : pnl / m.cost * 100 };
+}
+
+/** The price range the what-if offers: about 2.5 standard deviations to expiry around today's price (10%–60%), widened
+ * to take in the strike and the plan's levels, its ends on a round ``step`` (about 400 steps) so a dragged price lands
+ * on whole cents like 247.25. */
+export function whatIfRange(m: WhatIfModel, levels: readonly number[] = []): { lo: number; hi: number; step: number } {
+  const span = Math.min(0.6, Math.max(0.1, 2.5 * m.iv * Math.sqrt(Math.max(m.yearsNow, 1 / 365))));
+  const marks = [m.strike, ...levels.filter(l => finite(l) && l > 0)];
+  const lo = Math.min(m.price * (1 - span), ...marks.map(l => l * 0.97));
+  const hi = Math.max(m.price * (1 + span), ...marks.map(l => l * 1.03));
+  const step = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10].find(s => (hi - lo) / s <= 400) ?? 25;
+  const cents = (value: number) => Math.round(value * 100) / 100;
+  return { lo: Math.max(step, cents(Math.floor(lo / step) * step)), hi: cents(Math.ceil(hi / step) * step), step };
+}
+
+/** The estimate across the range on a date: P&L (value when the cost is unknown) at 61 stock prices. */
+export function whatIfCurve(m: WhatIfModel, { day, iv = m.iv, lo, hi }: { day: string; iv?: number; lo: number; hi: number }) {
+  return Array.from({ length: 61 }, (_, i) => {
+    const price = lo + (hi - lo) * i / 60;
+    const at = whatIfAt(m, { price, day, iv });
+    return { price, y: at.pnl ?? at.value };
+  });
+}
