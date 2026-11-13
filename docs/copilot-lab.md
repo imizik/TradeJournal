@@ -534,7 +534,8 @@ Open Desk to land on the **cockpit** (since 2026-11-10, stage 1 of the approved 
 screen of #733): one screen that says in a few seconds what is going on and puts the best information one tap away
 (`frontend/components/copilot/CopilotLab.tsx` lays it out, the pieces are in `Cockpit.tsx`, the look in
 `CopilotLab.module.css`). From reads the desk already makes (`GET /copilot/desk/session`, `GET /copilot/desk/threads`)
-plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
+plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and one for What's moving
+(`GET /copilot/desk/moving`):
 
 - **Top bar.** Desk, the market phase with the New York clock of the session read ("Live · 11:48 ET", "Pre-market ·
   8:52 ET", "Closed 16:00"), SPY / QQQ / VIX's change, **Realized today** (the trades closed today, New York's day,
@@ -574,6 +575,26 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   plan; a plan near (within 1% of) its entry or invalidation; a position within 1% of its stop (the book's Near stop
   tag); a time stop coming due; Act now's give-back reason from an alert on an earlier day; Close the day and its
   count; and the Seen button.
+- **What's moving** (`components/copilot/MovingStrip.tsx`, `GET /copilot/desk/moving`, `app/engine/desk_moving.py`,
+  since 2026-11-12), under the Needs-you strip and across the book and the centre: one thin row (36 px; collapsed, a
+  24 px "Moving ▸" line, remembered in this browser's `localStorage` `desk.moving.collapsed.v1`) that says where the
+  action is today. Group tiles first: SPY, QQQ, IWM, the sector ETFs (SMH and the eleven SPDRs, biggest gain first),
+  then his own groups: Watching (the median of his watched names) and the Research tab's AI-buildout groups (the
+  median of their companies; a group with a change for fewer than half its members is left out). Then the movers: the
+  biggest day changes among the names he holds (the journal and Robinhood's last snapshot, never a new Robinhood read)
+  or watches, then Radar's recorded movers, each with a one- or two-word reason only when the app already has one
+  (Earnings from the earnings cache: a report that day or the weekday before; a Radar setup card or event that
+  session). Each tile is tinted by the size of the move and always writes out the arrow, sign and number, so colour
+  is never the only signal. A tile selects its symbol in place, as a watched name does; a group tile opens its
+  members (the sector's Radar stocks, the group's companies) to pick from. Nothing to rate, dismiss or count. Changes
+  come from Radar's recorder first (the newest pass: live while it is under three minutes old in the session, else the
+  last session's close) and one batched quote read for the rest, only in the session and after today's close (then
+  the regular-session close); before the open those names have no change rather than a rolled-over one. Kept 45
+  seconds. Outside the session the row starts "At the close" ("At Wed's close" for an earlier day); with nothing to
+  show, one grey line says moves are unavailable, never zeros. A ticker set to Not following is in no tile or list,
+  and if that setting cannot be read no movers or Watching group show. Placed above the book and the centre rather
+  than atop the centre: it takes the same height from the chart either way, but here it is about twice as wide and,
+  on a phone, first on the screen.
 - **Left: the book** (`Book`). One dense row per open position the owner follows: ticker, contract, unrealized P&L in
   dollars and percent, a sparkline of the underlying today, the bar placing it between the plan's invalidation (left)
   and entry (the tick) (nothing without both: no bar, no plan), the distance to the stop ("4.3% to stop"), days to

@@ -1065,6 +1065,20 @@ def desk_sparks(symbols: str = "", watch: str = ""):
     return sparks.read(symbols, today._now(), watch=watch)
 
 
+@router.get("/desk/moving")
+def desk_moving(db: Session = Depends(get_session)):
+    """The desk's "what's moving" strip (``app/engine/desk_moving.py``): SPY/QQQ/IWM, the sector ETFs and his own groups
+    (the Watching list, the Research tab's groups) as day changes, then the biggest movers among his names and Radar's
+    recorded ones, each with a reason only when the app already has one. Radar's recorder first, then one batched quote
+    read; kept 45 seconds. Outside the session it is the last session's close (``mode: close``); with nothing to show,
+    ``state: unavailable``, never zeros. A ticker set to Not following is never in it. Read-only, owner-only, refused
+    while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import desk_moving
+    return desk_moving.build(db, today._now())
+
+
 # --------------------------------------------------------------------------- the Watching list (app/engine/desk_watch.py)
 
 class WatchAdd(BaseModel):

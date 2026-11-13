@@ -25,6 +25,7 @@ import { AccountChips, Book, CentreChart, DayFacts, DayPnl, NeedsStrip, SinceYou
 import type { DeskChartActions } from "@/components/copilot/DeskChart";
 import MorningBrief from "@/components/copilot/MorningBrief";
 import Watching, { useWatching } from "@/components/copilot/Watching";
+import { MovingStrip } from "@/components/copilot/MovingStrip";
 import PreviousDays from "@/components/copilot/PreviousDays";
 import ThreadRail from "@/components/copilot/ThreadRail";
 import ThisWeek from "@/components/copilot/ThisWeek";
@@ -625,10 +626,12 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         )}
       </header>
       <div className={styles.cockpit}>
-        {on && (needs.length > 0 || unchecked) && (
+        {on && (
           <div className={styles.strip}>
             {needs.length > 0 && <NeedsStrip needs={needs} actions={needActions} />}
             {unchecked && <p data-testid="needs-you-unchecked" className="px-1 pt-1 text-xs text-muted-foreground">Needs you could not check {unchecked} just now; it will read again in a minute.</p>}
+            {/* What's moving: one thin row across the book and the centre; a tile selects its symbol in place, as a watched name does. */}
+            <MovingStrip on={on} selected={centreSymbol} onSelect={selectWatched} />
           </div>
         )}
         {on && (
