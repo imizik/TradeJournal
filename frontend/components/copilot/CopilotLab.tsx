@@ -23,6 +23,7 @@ import { planContext } from "@/components/copilot/PlanATrade";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import ArmChecklist from "@/components/copilot/ArmChecklist";
 import DeskFeed, { feedQuestion, useDeskFeed, useFeedNew, type FeedItem } from "@/components/copilot/DeskFeed";
+import { useDeskUnusual } from "@/components/copilot/DeskUnusual";
 import { DeskStatus, useDeskSession } from "@/components/copilot/SessionTape";
 import { Book, CentreChart, DayFacts, DayPnl, NeedsStrip, SinceYouLooked, positionRows, useSparks } from "@/components/copilot/Cockpit";
 import type { DeskChartActions } from "@/components/copilot/DeskChart";
@@ -176,6 +177,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   }, []);
   const feed = useDeskFeed(on);
   const feedNew = useFeedNew(feed.data, on && centreTab === "feed");
+  const unusual = useDeskUnusual(on);
+  const [chainFocus, setChainFocus] = useState<{ pick: ChainPick; n: number } | null>(null); // a Feed row's unusual contract
   // The tickers opened today in this browser: opening one clears its strip items (``deskNeeds``); nothing is dismissed.
   const [opened, setOpened] = useState<Record<string, number>>({});
   useEffect(() => { setOpened(readOpened(nyDay())); }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
@@ -575,6 +578,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const chainCheck = useCallback((text: string) => { setCheckSeed(seed => ({ text, n: (seed?.n ?? 0) + 1 })); setCentreTab("check"); }, []);
   const chainPlan = useCallback((pick: ChainPick, line: string) => go(copilotLabHref(pick.symbol, planContext(line), { kind: "copilot", ref: null })), [go]);
   const chainTicket = useCallback((id: string, pick: ChainPick) => openTicket(id, { expiry: pick.expiry, strike: pick.strike }), []);
+  // An Unusual options row: its contract selected in the Chain tab, in place.
+  const openUnusual = useCallback((pick: ChainPick) => { setPicked(pick.symbol); setPickedKey(null); setChainFocus(f => ({ pick, n: (f?.n ?? 0) + 1 })); setCentreTab("chain"); }, []);
   const chartActions = useMemo<DeskChartActions>(() => ({ go, ask: (symbol, text) => askAbout(symbol, text) }), [go, askAbout]);
   // A feed item's Plan it: a Radar setup card opens on its own Plan it (the desk's Radar card); his own position or plan
   // opens its plan thread, else the plan form for the symbol. Nothing is saved or sent from the feed.
@@ -719,12 +724,12 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
             <div role="tabpanel" aria-label={centreTab === "chart" ? "Chart" : centreTab === "grid" ? "Grid" : centreTab === "chain" ? "Chain" : centreTab === "check" ? "Check a call" : centreTab === "ticket" ? "Ticket" : "Feed"} className="p-3">
               {centreTab === "check" ? <CheckACall seed={checkSeed} />
                 : centreTab === "grid" ? <DeskGrid held={gridHeld} watched={watched} hidden={gridHidden} sparks={sparks} earnings={events} selected={centreSymbol} onOpen={openFromGrid} />
-                : centreTab === "chain" ? <DeskChain symbol={centreSymbol} plans={tickets.plans} onCheck={chainCheck} onPlan={chainPlan} onTicket={chainTicket} />
+                : centreTab === "chain" ? <DeskChain symbol={centreSymbol} plans={tickets.plans} onCheck={chainCheck} onPlan={chainPlan} onTicket={chainTicket} unusual={unusual?.rows} focus={chainFocus} />
                 : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} pick={ticketPick} close={ticketClose} onOpen={id => { setTicketFor(id); setTicketPick(null); setTicketClose(null); }} onClose={() => { setTicketFor(null); setTicketPick(null); setTicketClose(null); }}
                 onPlaced={symbol => { setTicketFor(null); setTicketClose(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
                 : centreTab === "chart"
                 ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events} />
-                : <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed} />}
+                : <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed} unusual={unusual} onUnusual={openUnusual} />}
             </div>
           </section>
         )}

@@ -9,6 +9,9 @@ Robinhood by hand. Owner-only like every ``/copilot`` route; refuses while the l
 
 ``GET /copilot/chain?symbol=&expiration=``: the desk's Chain tab (``engine/desk_chain.py``), one expiry of the ticker's
 option chain around the price with his held and planned contracts marked. Market data only; never Robinhood.
+
+``GET /copilot/unusual``: unusual options activity on his held and watched names (``engine/desk_unusual.py``), from the
+same option chain reads. Market data only; never Robinhood, never a ping.
 """
 from datetime import date
 
@@ -17,7 +20,7 @@ from sqlmodel import Session
 
 from app.ai import copilot
 from app.database import get_session
-from app.engine import desk_chain, desk_ticket
+from app.engine import desk_chain, desk_ticket, desk_unusual
 
 router = APIRouter()
 
@@ -48,9 +51,15 @@ def ticket(investigation_id: str, expiration: date | None = None, strike: float 
 
 @router.get("/chain")
 def chain(symbol: str = Query(..., min_length=1, max_length=15), expiration: date | None = None,
-          db: Session = Depends(get_session)):
+          strike: float | None = Query(None, gt=0, lt=100000), db: Session = Depends(get_session)):
     found = _settings()
     try:
-        return desk_chain.view(db, symbol, expiration, mode=getattr(found, "evidence", "live"))
+        return desk_chain.view(db, symbol, expiration, mode=getattr(found, "evidence", "live"), strike=strike)
     except desk_chain.ChainError as exc:
         raise HTTPException(400, str(exc)) from None
+
+
+@router.get("/unusual")
+def unusual(db: Session = Depends(get_session)):
+    found = _settings()
+    return desk_unusual.view(db, mode=getattr(found, "evidence", "live"))
