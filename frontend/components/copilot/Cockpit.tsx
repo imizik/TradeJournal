@@ -16,6 +16,7 @@ import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
 import { getExposure } from "@/lib/copilot";
 import { DeskChart, ReadingLine, type DeskChartActions } from "@/components/copilot/DeskChart";
 import { DeskTimeline } from "@/components/copilot/Inspector";
+import { ChartViewToggle, ContractChart, heldContract, useContractView } from "@/components/copilot/DeskContract";
 import { EarningsTag, PositionEarnings } from "@/components/copilot/EarningsTag";
 import {
   DESK_MARKET, DESK_TIMEFRAMES, daysTo, deskSymbolThread, getDeskSparks, liveOn, money, nyDay, readLook, saveLook, signedPct, sinceLines,
@@ -472,6 +473,9 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
   const fallback = change !== null && Number.isFinite(sparksAt) ? { pct: change, at: sparksAt } : null;
   const reading = shown && shown.symbol === (symbol ?? "QQQ") ? shown : null;
   const live = tickFor(useDeskTicks([symbol ?? "QQQ"]), symbol ?? "QQQ");
+  const held = useMemo(() => heldContract(row, rows), [row, rows]);
+  const contract = useContractView(held);
+  const onContract = contract.view === "contract" && held && contract.data;
   return (
     <div className="space-y-3" data-testid="desk-chart">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -486,7 +490,8 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
         earnings={symbol ? earnings?.rows[symbol]?.date ?? null : null} />}
       <PositionEarnings row={row} earnings={earnings} />
       <div className="flex items-center gap-1">
-        <div role="group" aria-label="Timeframe" className="flex gap-1">
+        {contract.available && <ChartViewToggle view={contract.view} onPick={contract.pick} />}
+        {!onContract && <div role="group" aria-label="Timeframe" className="flex gap-1">
           {DESK_TIMEFRAMES.map(item => (
             <button key={item} type="button" aria-pressed={timeframe === item} onClick={() => pickTimeframe(item)}
               className={cn("min-h-11 min-w-11 rounded border px-2 text-xs tabular-nums sm:min-h-0 sm:min-w-0 sm:py-0.5",
@@ -494,9 +499,10 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
               {item}
             </button>
           ))}
-        </div>
+        </div>}
         <Link href={charts} className="ml-auto inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Open in Charts →</Link>
       </div>
+      {onContract ? <ContractChart held={held} data={contract.data!} /> : <>
       <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0} onRead={setShown} actions={actions} live={live}
         label={`${symbol ?? "QQQ"} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />
       <p aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -504,6 +510,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
         <Key color="#a78bfa" glyph="●">pings</Key>
         {ref && <Key color="#60a5fa" glyph="■">Radar</Key>}
       </p>
+      </>}
       {book && (versus !== null || book.days_held != null) && (
         <div data-testid="desk-tiles" className="grid grid-cols-[repeat(auto-fit,minmax(104px,1fr))] gap-1.5">
           {versus !== null && <Tile label="vs SPY today" className={tone(versus)}>{`${versus > 0 ? "+" : versus < 0 ? "−" : ""}${Math.abs(versus).toFixed(1)} pts`}</Tile>}

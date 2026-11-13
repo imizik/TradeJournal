@@ -581,6 +581,25 @@ export async function getDeskChart(id: string, timeframe: DeskTimeframe, signal?
   return deskRead<DeskChartData>(id, `chart?timeframe=${encodeURIComponent(timeframe)}`, signal);
 }
 
+/** A held option's own chart (``GET /copilot/desk/contract``, ``app/engine/desk_contract.py``): the latest session with
+ * trades as 2-minute candles (``style``: candles when trades are dense, else a line), today's marks the live prices
+ * remembered (bid/ask midpoints, one per slot), the stock's price per slot and the journal's fills at their per-share
+ * premium. ``none``: nothing to draw, so the desk offers no Contract view. Times are epoch seconds. */
+export type DeskContractFill = { at: number; side: "buy" | "sell"; opening: boolean; contracts: number; price: number; provisional: boolean; text: string };
+export type DeskContractData = {
+  state: "ok" | "none" | "unavailable"; symbol: string; occ?: string; label?: string | null; step?: number; as_of?: number; live?: boolean;
+  day?: string | null; source?: string; style?: "candles" | "line"; reason: string | null; stale?: string | null;
+  bars?: { time: number; open: number; high: number; low: number; close: number; volume: number }[];
+  marks?: { time: number; price: number }[]; stock?: { time: number; price: number }[]; fills?: DeskContractFill[];
+};
+
+export async function getDeskContract(symbol: string, occ: string, signal?: AbortSignal): Promise<DeskContractData> {
+  const response = await fetch(apiUrl(`/copilot/desk/contract?symbol=${encodeURIComponent(symbol)}&occ=${encodeURIComponent(occ)}`), { cache: "no-store", signal });
+  const body = await response.json().catch(() => null);  // read through, refused or not: an unread body never idles
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  return body as DeskContractData;
+}
+
 /** The symbol's headlines on the desk chart (``desk_news.build``): one marker per group of headlines on candles a few
  * minutes apart, at the group's first candle (``time``). ``emphasis``: a headline was published within a few minutes of a
  * move well beyond the day's typical candle (``move``); a move with no headline has no marker. ``before``: published
