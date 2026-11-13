@@ -102,6 +102,11 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/desk/session',
     'GET /copilot/desk/sparks',
     'POST /copilot/desk/robinhood/refresh',  # parameterless: nothing from the request reaches Robinhood
+    'GET /copilot/desk/watching',  # the app's own watchlist (the Charts one), levels and setups: database reads only
+    'POST /copilot/desk/watching',  # add one checked ticker to the app's own watchlist; never written to Robinhood
+    'DELETE /copilot/desk/watching/{symbol}',  # stop watching: the app's own watchlist only
+    'GET /copilot/desk/watching/robinhood',  # his own lists' names and sizes: get_watchlists only, on his tap
+    'POST /copilot/desk/watching/robinhood',  # list ids checked against a fresh read of his own lists; two watchlist reads only
     'GET /copilot/desk/timings',  # section names and milliseconds only
     'GET /copilot/checks',
     'POST /copilot/checks',

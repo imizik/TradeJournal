@@ -45,7 +45,8 @@ def sign(tmp_path):
 def test_the_allowlist_is_exactly_the_reads_and_holds_no_write():
     assert rh.READ_TOOLS == {"get_accounts", "get_portfolio", "get_option_positions", "get_option_instruments",
                              "get_option_quotes", "get_equity_positions", "get_equity_quotes",
-                             "get_option_orders", "get_equity_orders"}  # order history: read only (robinhood_fills)
+                             "get_option_orders", "get_equity_orders",  # order history: read only (robinhood_fills)
+                             "get_watchlists", "get_watchlist_items"}  # his watchlists: read only (desk_watch's import)
     for name in rh.READ_TOOLS:
         assert name.startswith("get_") and not any(p in name for p in WRITE_PREFIXES), name
 
@@ -85,7 +86,7 @@ def test_no_generic_call_entry_point():
     public = {n for n in vars(rh.Reader) if not n.startswith("_")}
     assert public == {"get_accounts", "get_portfolio", "get_option_positions", "get_equity_positions",
                       "get_option_instruments", "get_option_quotes", "get_equity_quotes",
-                      "get_option_orders", "get_equity_orders"}
+                      "get_option_orders", "get_equity_orders", "get_watchlists", "get_watchlist_items"}
 
 
 SKIP_DIRS = {".git", "node_modules", ".next", ".venv", "venv", "__pycache__", ".pytest_cache", "test-results", "playwright-report"}
@@ -122,8 +123,12 @@ def test_only_the_client_names_the_endpoint_or_builds_a_tools_call():
     assert "tools/call" not in signin.read_text() and "_transport" not in signin.read_text()
     # The feed and the order-history fills are the client's callers; the desk's thread read and the copilot's book view
     # the feed. The copilot's book reads the cached snapshot and the feed's match, never a refresh and never the client.
-    assert sorted(users) == ["backend/app/ai/copilot_book.py", "backend/app/engine/robinhood_book.py",
+    assert sorted(users) == ["backend/app/ai/copilot_book.py", "backend/app/engine/desk_watch.py", "backend/app/engine/robinhood_book.py",
                              "backend/app/engine/robinhood_fills.py", "backend/app/routers/copilot_desk.py"]
+    watch = (REPO / "backend" / "app" / "engine" / "desk_watch.py").read_text()
+    # The desk's watchlist import calls only the two watchlist reads, through the feed's sign-in, and never a write.
+    assert set(re.findall(r"\.(get_\w+)\(", watch)) == {"get_watchlists", "get_watchlist_items"}
+    assert "_call(" not in watch and "_post(" not in watch and "_transport" not in watch
     fills = (REPO / "backend" / "app" / "engine" / "robinhood_fills.py").read_text()
     # The order-history poller calls only the accounts read and the two order-history reads, through the feed's sign-in.
     assert set(re.findall(r"reader\.(get_\w+)", fills)) == {"get_accounts", "get_option_orders", "get_equity_orders"}
@@ -135,6 +140,31 @@ def test_only_the_client_names_the_endpoint_or_builds_a_tools_call():
 
 
 # --------------------------------------------------------------------------- a read on the wire
+
+WATCHLIST_WRITES = ("create_watchlist", "update_watchlist", "add_to_watchlist", "remove_from_watchlist",
+                    "add_option_to_watchlist", "remove_option_from_watchlist", "follow_watchlist", "unfollow_watchlist")
+
+
+def test_the_two_watchlist_reads_are_allowed_and_every_watchlist_write_is_refused(fake, sign, monkeypatch):
+    assert {"get_watchlists", "get_watchlist_items"} <= rh.READ_TOOLS
+    assert not set(WATCHLIST_WRITES) & rh.READ_TOOLS
+    assert set(WATCHLIST_WRITES) <= set(WRITE_TOOLS)  # each also stays in the general refusal above
+    reader = rh.Reader(sign)
+    lists = reader.get_watchlists()["watchlists"]
+    assert [w["display_name"] for w in lists][:2] == ["My First List", "Options Watchlist"]
+    custom = next(w for w in lists if w["owner_type"] == "custom" and w["item_count"] > 1)
+    assert [i["symbol"] for i in reader.get_watchlist_items(custom["id"])["items"]][:2] == ["NVDA", "RKLB"]
+    assert fake.calls == [("get_watchlists", {}), ("get_watchlist_items", {"list_id": custom["id"]})]
+    sent = []
+    monkeypatch.setattr(rh, "_transport", lambda *a: sent.append(a) or (200, {}, ""))
+    for name in WATCHLIST_WRITES:
+        with pytest.raises(rh.RefusedTool):
+            reader._call(name, {"list_id": custom["id"], "symbols": ["NVDA"]})
+        body = json.dumps({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": name, "arguments": {}}}).encode()
+        with pytest.raises(rh.RefusedTool):
+            rh._post(rh.MCP_URL, body, {})
+    assert sent == []
+
 
 def test_the_order_history_reads_send_only_their_own_read(fake, sign):
     reader = rh.Reader(sign)

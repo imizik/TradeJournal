@@ -6,11 +6,15 @@ how to switch it off and revoke it. What the desk shows is in [Copilot Lab § Th
 
 ## What it reads
 
-Robinhood's official agent connection (an MCP server over streamable HTTP), through nine read tools only:
+Robinhood's official agent connection (an MCP server over streamable HTTP), through eleven read tools only:
 `get_accounts`, `get_portfolio`, `get_option_positions`, `get_option_instruments`, `get_option_quotes`,
 `get_equity_positions` and `get_equity_quotes` for the desk, and `get_option_orders` and `get_equity_orders` (order
 history) for [fills from Robinhood's order history](robinhood-order-fills.md), which is off unless
-`ROBINHOOD_FILLS_ENABLED` is `shadow` or `true`. From them the desk gets, for each account shown: its label and number
+`ROBINHOOD_FILLS_ENABLED` is `shadow` or `true`, and `get_watchlists` and `get_watchlist_items` for the desk's
+[Watching list import](copilot-lab.md#the-desk), which reads his own lists only when he taps Import or Sync. The app
+never writes to his Robinhood watchlists: every tool that would (`create_watchlist`, `update_watchlist`,
+`add_to_watchlist`, `remove_from_watchlist`, `add_option_to_watchlist`, `remove_option_from_watchlist`,
+`follow_watchlist`, `unfollow_watchlist`) is refused like any other write. From the position reads the desk gets, for each account shown: its label and number
 masked to the last four (`••8267`), total value, cash and buying power; and each open position: options with strike,
 call or put, expiry, quantity, Robinhood's average price, mark, bid, ask, the day's change and the Greeks; stocks with
 quantity, average cost and quote; each with unrealized P&L in dollars and percent from Robinhood's own average price and
@@ -36,14 +40,21 @@ approvals setting is off and not yet available on this account, so nothing on Ro
 The app's own code is the only guard:
 
 - `backend/app/engine/robinhood_read.py` is the one module that talks to Robinhood. It has a hard-coded allowlist of the
-  nine read tools. The one function that builds a tool call refuses any other name before any network I/O, and every
+  eleven read tools. The one function that builds a tool call refuses any other name before any network I/O, and every
   message on its way out is checked again: only the session handshake and an allowlisted read reach the connection,
   and only a sign-in renewal reaches the token endpoint.
 - There is no "call any tool" entry point. No tool name comes from a request, the environment, configuration or a
   model. The copilot has no Robinhood tool.
-- The only new route, `POST /copilot/desk/robinhood/refresh`, takes no input.
+- The only new route, `POST /copilot/desk/robinhood/refresh`, takes no input. The Watching import's routes
+  (`GET`/`POST /copilot/desk/watching/robinhood`) call only the two watchlist reads: one `get_watchlists`, then one
+  `get_watchlist_items` per chosen list, at most ten; a list id from the request is used only if a fresh
+  `get_watchlists` read shows it as one of his own (`owner_type` `custom`) stock lists. Curated Robinhood lists are never read,
+  nor the options watchlist when Robinhood marks it options-only (`allowed_object_types`); if a reply leaves that field
+  out, the options list could be offered, and its items read is then refused by Robinhood and counted as a list that
+  could not be read (still only a read). List names and emoji are shown as data and never reach a model; the copilot is told
+  only the watched symbols (§ What the copilot sees).
 - Tests (`backend/tests/test_robinhood_read.py`) fail if a write-looking name is added to the allowlist, if any
-  changing or trading tool is not refused, or if anything else in the repository names the endpoint or builds a tool call.
+  changing or trading tool (each watchlist write by name included) is not refused, or if anything else in the repository names the endpoint or builds a tool call.
 - Display only: nothing from the feed is written to the journal (fills, trades, P&L, FIFO stay as the emails make them).
   The one exception is separate and off by default: with `ROBINHOOD_FILLS_ENABLED=true`, a recurring buy (which
   Robinhood never emails) is written as a fill from the order history; everything else from the order history stays a

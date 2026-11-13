@@ -592,6 +592,31 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   below), so the book, the top bar, the strip and the centre keep their data. Each row's eye sets its ticker to **Not following**; those sit behind "N not followed
   ▾" at the bottom, each with Show again. Under the book, the time of day's block (below), then one quiet facts line:
   **At risk now** (see Exposure) and the practice goal.
+- **Watching** (`components/copilot/Watching.tsx`, `GET /copilot/desk/watching`, `app/engine/desk_watch.py`), under
+  the book: the names he watches and does not hold. The list of record is the app's own watchlist, the Charts one (the
+  `chart_settings` row's `watchlist`, at most 30; never saved, both screens show Charts' starting names), so Charts and
+  the desk show one list. One compact row each: ticker, last price, change today, the book's sparkline, and when he has
+  one, the nearest armed level (a confirmed plan's entry or invalidation, or a chart alert: "entry 168.00 · 1.1% away")
+  or a Radar setup card that fired today (a small "Setup 10:42 AM" mark). A name he holds is the book's row only; a
+  ticker set to Not following is in neither (if that setting cannot be read the list says it could not be read). Order:
+  near names first (a level within 3%, or a setup today), then today's biggest moves, a name with no price yet last;
+  eight show and the rest wait behind "N more". No amber: facts only, nothing asks for a trade. Selecting a row is
+  selecting a position: the centre's chart and, beside it, the copilot (the symbol's newest open conversation, else its
+  desk view) switch in place. Its menu: **Ask the copilot**, **Plan a trade** (the plan form), **Open in Charts** and
+  **Stop watching**. **Add** takes a ticker the app knows (Radar's universe or one he has traded, else one quote read
+  must return a price). A phone folds the section to one line, "Watching · 16 ▾", until tapped.
+  Adding and removing write the app's list, never Robinhood. **Import from Robinhood** (then **Sync from Robinhood**)
+  reads his own lists only on his tap ([robinhood-read-feed.md](robinhood-read-feed.md)): it offers his custom lists by
+  name and size, ticked (after an import: the ones he chose then, and any list made since); curated Robinhood lists and
+  the options watchlist are not offered. The stocks and ETFs of the ticked lists are added; crypto pairs, futures and
+  indexes are skipped and counted ("11 added, 4 skipped: 2 crypto, 1 futures, 1 index"). A name stopped here is kept in
+  the settings' `watchRemoved` and a later sync does not bring it back (adding it by hand forgets that); the list never
+  passes 30 (the rest are counted). With the feed off, signed out or expired the import says so and the list works by
+  hand. Prices cost no new read: the watched names ride the book's sparks read (`watch=`): their last price and change
+  come from its one quote read (or Radar's recorder), and their line only from the sources that make no call of their
+  own (the recorder, a chart's cache, the batched Alpaca read), never a Tradier minute read each; before the open a
+  watched row shows no change rather than a rolled-over +0.00%. The Watching read itself is database reads only. Being
+  watched starts no model turn, alert or ping. The copilot is told the watched symbols in one line (§ Owner context).
 - **Live from Robinhood** ([robinhood-read-feed.md](robinhood-read-feed.md); off unless `ROBINHOOD_READ_ENABLED=true`
   and a usable sign-in file). `GET /copilot/desk/threads` carries `robinhood`: its `state` (`off`, `signed_out`,
   `expired`, `loading`, `unavailable`, `stale` or `ok`), `as_of`, and each shown account's label, masked number, total
@@ -613,7 +638,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
   volume), the symbol's alerts and a level menu to act from the chart, a reading line under the symbol and
   **Open in Charts →**; then, for a held
   position, two tiles the book row does not carry: vs SPY today (the stock's change today less SPY's, from the sparks
-  read) and Held (its P&L, distance to the stop and expiry are the row's, beside it); and **Timeline ▾** folded under it. The sparks read takes at most 12 symbols (the centre's first) and
+  read) and Held (its P&L, distance to the stop and expiry are the row's, beside it); and **Timeline ▾** folded under it. The sparks read takes at most 12 symbols (the centre's first), plus up to 30 watched names (Watching, above), and
   answers a repeat within 30 seconds from memory, so several open desks cost one chart-feed read a minute. The chart is
   its own small component on the library `/charts` uses (lightweight-charts), not the workspace's `PriceChart`: that
   chart is bound to the workspace's live feed, crosshair links, command bus and clock stores, so the desk draws from
@@ -1768,7 +1793,10 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
   - `watches` (saved): armed level alerts for the symbol, and queued or running
     research jobs that name it (question jobs) or are linked to one of its
     investigations (reassessments); Radar event jobs name an event, not a
-    symbol, so they are not matched. At most 6.
+    symbol, so they are not matched. At most 6. Its `watching` is one line of the
+    tickers on his saved watchlist that he follows ("NVDA, RKLB, …"; the desk's
+    Watching list): symbols only, no prices or list names; dropped early when
+    the pack is over its size cap; absent when the list was never saved.
   - `practice` (owner said; its count measured): the active practice goal the
     owner confirmed from a Review my week card (`practice_goal.current`, the
     same read as the briefing's grey line): their words, the measure, the

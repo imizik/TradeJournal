@@ -4,7 +4,7 @@ Robinhood's agent connection (an MCP server over streamable HTTP) has one sign-i
 the same sign-in that reads the owner's accounts can place, cancel and exercise orders. This module is the guard.
 
 - ``READ_TOOLS`` is a hard-coded allowlist of the read tools the desk's feed and the order-history fills
-  (docs/robinhood-order-fills.md) need. ``_call`` is the only function that
+  (docs/robinhood-order-fills.md) and the desk's watchlist import need: never a tool that changes his watchlists. ``_call`` is the only function that
   builds a ``tools/call`` and refuses any other name before any network I/O; ``_post`` (every byte sent to Robinhood
   passes through it) refuses again on the bytes themselves: only ``initialize``, ``notifications/initialized`` and a
   ``tools/call`` of an allowlisted name may reach the MCP endpoint, and only a ``refresh_token`` grant the token
@@ -55,6 +55,8 @@ READ_TOOLS = frozenset({
     "get_equity_quotes",
     "get_option_orders",
     "get_equity_orders",
+    "get_watchlists",
+    "get_watchlist_items",
 })
 MCP_METHODS = frozenset({"initialize", "notifications/initialized", "tools/call"})
 
@@ -403,3 +405,10 @@ class Reader:
     def get_equity_orders(self, account_number: str, created_at_gte: str, cursor: str | None = None) -> dict:
         return self._call("get_equity_orders", {"account_number": str(account_number), "created_at_gte": str(created_at_gte),
                                                 **({"cursor": str(cursor)} if cursor else {})})
+
+    # Watchlists (read only: his lists' names and symbols for the desk's import; the app never writes to his lists).
+    def get_watchlists(self) -> dict:
+        return self._call("get_watchlists", {})
+
+    def get_watchlist_items(self, list_id: str) -> dict:
+        return self._call("get_watchlist_items", {"list_id": str(list_id)})

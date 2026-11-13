@@ -669,14 +669,43 @@ export async function getDayReport(signal?: AbortSignal): Promise<DayReport> {
 
 // --------------------------------------------------------------------------- the book's sparklines
 
-/** ``GET /copilot/desk/sparks``: each symbol's closes today (thinned), its change today and SPY's. */
-export type DeskSparks = { as_of: string; rows: Record<string, { points: number[]; change_pct: number | null }>; spy_change_pct: number | null };
+/** ``GET /copilot/desk/sparks``: each symbol's closes today (thinned), its change today and SPY's. A Watching row
+ * (``watch``) also carries its last price, and may have a change with no line. */
+export type DeskSparks = { as_of: string; rows: Record<string, { points: number[]; change_pct: number | null; last?: number | null }>; spy_change_pct: number | null };
 
-export async function getDeskSparks(symbols: string[], signal?: AbortSignal): Promise<DeskSparks> {
-  const response = await fetch(apiUrl(`/copilot/desk/sparks?${new URLSearchParams({ symbols: symbols.join(",") })}`), { cache: "no-store", signal });
+export async function getDeskSparks(symbols: string[], signal?: AbortSignal, watch: string[] = []): Promise<DeskSparks> {
+  const query = new URLSearchParams({ symbols: symbols.join(","), ...(watch.length ? { watch: watch.join(",") } : {}) });
+  const response = await fetch(apiUrl(`/copilot/desk/sparks?${query}`), { cache: "no-store", signal });
   if (!response.ok) throw new Error(`Request failed (${response.status}).`);
   return await response.json() as DeskSparks;
 }
+
+// --------------------------------------------------------------------------- the Watching list
+
+/** ``GET /copilot/desk/watching``: the watched symbols he follows (the app's watchlist, the Charts one, in its order),
+ * each one's armed levels (a plan's entry or invalidation, or a chart alert) and a Radar setup card today, and the
+ * Robinhood connection's state for the import. Prices come from the sparks read. */
+export type DeskWatching = {
+  state: "ok" | "unavailable"; symbols: string[]; count?: number; max?: number;
+  levels: Record<string, { price: number; role: "entry" | "invalidation" | null }[]>;
+  setups: Record<string, { at: number | null; event_id: string }>;
+  imported_at?: string | null; robinhood?: "ready" | "off" | "signed_out" | "expired" | "loading" | "unavailable" | "stale" | "ok";
+};
+/** His own Robinhood lists the import offers (one read, on his tap). */
+export type WatchLists = { state: string; lists: { id: string; name: string; emoji: string; count: number; ticked: boolean }[]; not_offered: number };
+export type WatchImported = { state: string; line?: string; added?: string[]; watching?: DeskWatching };
+
+async function watchCall<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(apiUrl(path), { cache: "no-store", ...init, headers: init?.body ? { "Content-Type": "application/json" } : undefined });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  return body as T;
+}
+export const getWatching = (signal?: AbortSignal) => watchCall<DeskWatching>("/copilot/desk/watching", { signal });
+export const watchSymbol = (symbol: string) => watchCall<DeskWatching>("/copilot/desk/watching", { method: "POST", body: JSON.stringify({ symbol }) });
+export const stopWatching = (symbol: string) => watchCall<DeskWatching>(`/copilot/desk/watching/${encodeURIComponent(symbol)}`, { method: "DELETE" });
+export const getWatchLists = () => watchCall<WatchLists>("/copilot/desk/watching/robinhood");
+export const importWatchLists = (lists: string[]) => watchCall<WatchImported>("/copilot/desk/watching/robinhood", { method: "POST", body: JSON.stringify({ lists }) });
 
 // --------------------------------------------------------------------------- the cockpit's Needs-you strip
 

@@ -146,3 +146,41 @@ def test_sparks_eleven_symbols(slow_desk, monkeypatch, tmp_path):  # noqa: F811
             took = list(pool.map(timed_get, paths))
         print(f"| {label_} | " + " | ".join(f"{ms:.0f}" for ms in took) + " |")
     print()
+
+
+WATCH = ("NVDA", "RKLB", "AMD", "PLTR", "SOFI", "HOOD", "TSLA", "MSFT", "AAPL", "META", "SMCI", "IONQ", "MU", "AVGO", "ORCL", "ASTS")
+
+
+def test_first_paint_with_a_16_name_watchlist(slow_desk, monkeypatch, tmp_path):  # noqa: F811
+    """The desk's first paint before the Watching list (the seven reads) and with a 16-name watchlist (the Watching read
+    added, its names riding the sparks read): cold, warm and at the minute boundary, with the outside calls each paint
+    made, once with no Radar recording or batched read (every watched line skipped) and once with the recorder live."""
+    bench = slow_desk
+    monkeypatch.setattr(latency, "seconds", LATENCY)
+    from sqlmodel import Session
+    import json as _json
+    from app.engine import alpaca
+    from app.models import ChartSettingsRecord
+    with Session(bench.engine) as db:
+        db.add(ChartSettingsRecord(name="default", data_json=_json.dumps({"watchlist": list(WATCH)}), revision=1))
+        db.commit()
+    monkeypatch.setattr(alpaca, "alpaca_configured", lambda: False)
+    before = FIRST_PAINT
+    after = [p if not p.startswith("/copilot/desk/sparks") else f"{p}&watch={','.join(WATCH)}" for p in FIRST_PAINT] + ["/copilot/desk/watching"]
+    print(f"\n\nLatency per outside call: {LATENCY * 1000:.0f} ms; {len(WATCH)} watched names\n")
+    print("| Radar | Paint | Cold ms | Warm ms | Minute boundary ms | Outside calls (cold) |")
+    print("|---|---|---:|---:|---:|---|")
+    for label_, radar_on in (("none, no batched read", False), ("recorder live", True)):
+        if radar_on:
+            seed_radar(tmp_path / "radar.sqlite", bench.clock["t"], tuple(dict.fromkeys((*BOOK, *WATCH, "SPY"))), monkeypatch=monkeypatch)
+        for name, paths in (("before (7 reads)", before), ("with Watching (8 reads, 16 names)", after)):
+            bench.expire()
+            made = len(bench.providers.calls)
+            cold = _paint(bench.client, paths)
+            calls = bench.providers.calls[made:]
+            warm = _paint(bench.client, paths)
+            bench.expire()
+            boundary = _paint(bench.client, paths)
+            print(f"| {label_} | {name} | {cold:.0f} | {warm:.0f} | {boundary:.0f} | "
+                  f"{len(calls)} ({', '.join(f'{k} {calls.count(k)}' for k in sorted(set(calls)))}) |")
+    print()

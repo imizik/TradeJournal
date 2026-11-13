@@ -392,3 +392,56 @@ def test_old_quote_rows_from_a_failed_read_are_no_change(rig):
     rig.minutes["NBIS"] = day_of([90.0, 91.0])
     body = sparks_for(rig.client, "NBIS")
     assert body["rows"]["NBIS"] == {"points": [90.0, 91.0], "change_pct": None} and body["spy_change_pct"] is None
+
+
+# ---------------------------------------------------------------------------------------------------- the Watching list
+
+
+def test_watched_names_ride_the_same_quote_read_and_never_get_a_read_of_their_own(rig):
+    rig.minutes.update({"NBIS": day_of([90.0, 91.0])})
+    rig.quotes["rows"] += [{"symbol": "RKLB", "last": 25.5, "change_percentage": 3.1}, {"symbol": "PLTR", "last": 180.0, "change_percentage": -0.8}]
+    rig.quotes["asked"] = []
+    response = rig.client.get("/copilot/desk/sparks", params={"symbols": "NBIS", "watch": "RKLB,PLTR,NBIS"})
+    body = response.json()
+    assert rig.read == ["NBIS"]  # the book's own line read; the watched names made none
+    assert len(rig.quotes["asked"]) == 1 and set(rig.quotes["asked"][0]) >= {"NBIS", "RKLB", "PLTR", "SPY"}  # one quote read
+    assert body["rows"]["RKLB"] == {"points": [], "change_pct": 3.1, "last": 25.5}
+    assert body["rows"]["PLTR"] == {"points": [], "change_pct": -0.8, "last": 180.0}
+    assert "last" not in body["rows"]["NBIS"]  # a name in both lists is the book's row
+
+
+def test_watched_names_take_a_line_from_the_batched_read_only(rig):
+    alpaca_on(rig, {"RKLB": [alpaca_bar(OPEN, 25.0), alpaca_bar(OPEN + 60, 25.5)]})
+    rig.quotes["rows"] += [{"symbol": "RKLB", "last": 25.5, "change_percentage": 3.1}, {"symbol": "SOFI", "last": 30.0, "change_percentage": 1.0}]
+    body = rig.client.get("/copilot/desk/sparks", params={"watch": "RKLB,SOFI"}).json()
+    assert len(rig.alpaca) == 1 and rig.alpaca[0]["symbols"] == "RKLB,SOFI"
+    assert body["rows"]["RKLB"]["points"] == [25.0, 25.5] and body["rows"]["SOFI"]["points"] == []
+    assert rig.read == []  # SOFI, missing from the batched read, is not read on its own
+
+
+def test_before_the_open_a_watched_name_shows_no_change(rig):
+    rig.clock["t"] = OPEN - 30 * 60  # 9:00 New York
+    rig.quotes["rows"] += [{"symbol": "RKLB", "last": 25.5, "change_percentage": 0.0}]
+    body = rig.client.get("/copilot/desk/sparks", params={"watch": "RKLB"}).json()
+    assert body["rows"]["RKLB"] == {"points": [], "change_pct": None, "last": None}  # never a +0.00% from a rolled close
+
+
+def test_a_long_watchlist_that_overflows_its_batch_never_turns_off_the_books(rig):
+    """Book and Watching names are separate batched reads: a watchlist batch that needs more pages than allowed (or
+    fails) gives the watched names no line, and the book's batch, its lines and its back-off are untouched."""
+    book_bars = {"NBIS": [alpaca_bar(OPEN, 90.0), alpaca_bar(OPEN + 60, 91.0)], "IREN": [alpaca_bar(OPEN, 5.0), alpaca_bar(OPEN + 60, 5.5)]}
+    rig.patch.setattr(alpaca, "alpaca_configured", lambda: True)
+
+    def alpaca_get(path, params):
+        rig.alpaca.append(params)
+        if "NBIS" in params["symbols"]:
+            return {"bars": book_bars, "next_page_token": None}
+        return {"bars": {}, "next_page_token": "more"}  # the watched batch never ends within the pages
+    rig.patch.setattr(alpaca, "_alpaca_get_fast", alpaca_get)
+    rig.quotes["rows"] += [{"symbol": s, "last": 10.0, "change_percentage": 1.0} for s in ("RKLB", "SOFI")]
+    body = rig.client.get("/copilot/desk/sparks", params={"symbols": "NBIS,IREN", "watch": "RKLB,SOFI"}).json()
+    assert [p["symbols"] for p in rig.alpaca][0] == "IREN,NBIS"
+    assert all(p["symbols"] == "RKLB,SOFI" for p in rig.alpaca[1:]) and len(rig.alpaca) == 1 + desk_sparks.SIP_PAGES
+    assert body["rows"]["NBIS"]["points"] == [90.0, 91.0] and body["rows"]["RKLB"]["points"] == []
+    assert rig.read == []  # no Tradier minute read, for the book or the watched names
+    assert desk_sparks._sip_off_until == 0.0 and desk_sparks._sip_watch_off_until > 0  # only the watched batch backs off

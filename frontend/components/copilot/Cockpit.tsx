@@ -7,7 +7,7 @@
  * to buy, sell or hold, sizes anything or sends an order.
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { EyeOff } from "lucide-react";
 import { useKeptState } from "@/components/copilot/DeskMemory";
@@ -17,15 +17,15 @@ import { getExposure } from "@/lib/copilot";
 import { DeskChart, ReadingLine, type DeskChartActions } from "@/components/copilot/DeskChart";
 import { DeskTimeline } from "@/components/copilot/Inspector";
 import {
-  DESK_MARKET, DESK_TIMEFRAMES, daysTo, deskSymbolThread, getDeskSparks, liveOn, money, readLook, saveLook, signedPct, sinceLines,
+  DESK_MARKET, DESK_TIMEFRAMES, daysTo, deskSymbolThread, getDeskSparks, liveOn, money, nyDay, readLook, saveLook, signedPct, sinceLines,
   type DeskBookState, type DeskChartData, type DeskLive, type DeskLook, type DeskTimeframe, type DeskNeed, type DeskSession, type DeskSparks, type DeskThread, type DeskThreadRef,
 } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
-const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
+export const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
 const ET = "America/New_York";
 const REFRESH_MS = 60_000;
-const tone = (value: number | null | undefined) => value == null || value === 0 ? "text-muted-foreground" : value > 0 ? "text-emerald-300" : "text-rose-300";
+export const tone = (value: number | null | undefined) => value == null || value === 0 ? "text-muted-foreground" : value > 0 ? "text-emerald-300" : "text-rose-300";
 const clockOf = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" });
 
 /** The open positions' rows: the journal's ``trade:`` rows and, while the Robinhood feed is live, the ``robinhood:`` rows
@@ -149,27 +149,43 @@ export function NeedsStrip({ needs, actions }: { needs: DeskNeed[]; actions(need
 // ------------------------------------------------------------------------------------------------ the book
 
 /** Each symbol's day so far (``GET /copilot/desk/sparks``, at most ``SPARKS`` symbols in the order given), read once a
- * minute while the page shows; nothing when the read fails. */
+ * minute while the page shows; nothing when the read fails. ``watch``, the Watching list's names, ride the same read
+ * (its price and change, a line only where one costs no read of its own). A read started for an earlier set of symbols
+ * is not cut off: its rows land beside the new read's (the Watching list often arrives a moment after the book). */
 const SPARKS = 12;
-export function useSparks(symbols: string[]): DeskSparks | null {
+export function useSparks(symbols: string[], watch: string[] = []): DeskSparks | null {
   const [data, setData] = useKeptState<DeskSparks | null>("desk.sparks", null); // the last lines, until today's read
-  const key = [...new Set(symbols)].slice(0, SPARKS).sort().join(",");
+  const shown = useRef(data);
+  const book = [...new Set(symbols)].slice(0, SPARKS);
+  const key = book.sort().join(",");
+  const watchKey = [...new Set(watch)].filter(s => !book.includes(s)).sort().join(",");
+  const controllers = useRef(new Set<AbortController>());
   useEffect(() => {
-    if (!key) return;
-    let controller = new AbortController();
+    const open = controllers.current;
+    return () => { for (const c of open) c.abort(); }; // leaving the desk cuts every read off
+  }, []);
+  useEffect(() => {
+    if (!key && !watchKey) return;
     const read = () => {
-      controller.abort();
-      controller = new AbortController();
-      getDeskSparks(key.split(","), controller.signal).then(setData).catch(() => { /* the lines are extra */ });
+      const controller = new AbortController();
+      controllers.current.add(controller);
+      getDeskSparks(key ? key.split(",") : [], controller.signal, watchKey ? watchKey.split(",") : []).then(next => {
+        const prev = shown.current;
+        if (prev && next.as_of < prev.as_of) return; // a slower, older read never replaces a newer one
+        // Rows of symbols this read did not name stay only within the same New York day: never yesterday's line as today's.
+        const merged = prev && nyDay(new Date(prev.as_of)) === nyDay(new Date(next.as_of)) ? { ...next, rows: { ...prev.rows, ...next.rows } } : next;
+        shown.current = merged;
+        setData(merged);
+      }).catch(() => { /* the lines are extra */ }).finally(() => controllers.current.delete(controller));
     };
     read();
     const timer = setInterval(() => { if (document.visibilityState === "visible") read(); }, REFRESH_MS);
-    return () => { controller.abort(); clearInterval(timer); };
-  }, [key, setData]);
+    return () => clearInterval(timer); // a new set of symbols starts another read; the one in flight still lands
+  }, [key, watchKey, setData]);
   return data;
 }
 
-function Spark({ points, label }: { points: number[] | undefined; label: string }) {
+export function Spark({ points, label }: { points: number[] | undefined; label: string }) {
   if (!points || points.length < 2) return <span aria-hidden className="w-12" />;
   const lo = Math.min(...points), hi = Math.max(...points);
   const line = points.map((v, i) => `${(i * 56 / (points.length - 1)).toFixed(1)},${(20 - ((v - lo) / (hi - lo || 1)) * 18).toFixed(1)}`).join(" ");

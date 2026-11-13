@@ -10,6 +10,10 @@ A line is built from the cheapest source that has today's minutes, in this order
 4. **One Tradier read per symbol, low priority** (``chart_feed.today_minutes``): at most two at once, so the reads the
    screen is waiting on keep two of the feed's four places.
 
+The Watching list's symbols (``watch``) come in the same read: their last price and change from the same quote read (or
+the recorder), and a line only from sources 1 to 3. They never get a read of their own (4), so watching a name costs no
+provider call per symbol; a watched name none of those has today shows its price and change without a line.
+
 A symbol that is still unread when the budget ends is left out and the read carries on in the background, so the next
 refresh finds it. A line is kept for a minute (five after the close, while after-hours minutes still come in), and,
 once the extended session is over or on a day with no session, until the next 04:00 New York or midnight, whichever is
@@ -33,6 +37,7 @@ log = logging.getLogger(__name__)
 
 POINTS = 48  # a book row's sparkline: today's minutes, thinned to this many closes
 SYMBOLS = 12
+WATCH = 30  # the Watching list's limit (desk_watch.MAX)
 BUDGET_SECONDS = 6.0
 LINE_SECONDS = 60  # a line, in the session
 AFTER_CLOSE_SECONDS = 300  # after the regular close, until the extended session ends
@@ -46,16 +51,18 @@ SIP_PAGES = 3
 
 _lock = threading.Lock()
 _lines: dict[str, tuple[float, date, list[float]]] = {}  # symbol -> (valid until, its New York date, thinned closes)
-_changes: dict[str, tuple[float, date, float | None]] = {}
+_changes: dict[str, tuple[float, date, float | None, float | None]] = {}  # (valid until, date, change %, last price)
 _sip_off_until = 0.0
+_sip_watch_off_until = 0.0  # the Watching names' own batched read: its failure never turns the book's off
 
 
 def clear() -> None:
-    global _sip_off_until
+    global _sip_off_until, _sip_watch_off_until
     with _lock:
         _lines.clear()
         _changes.clear()
         _sip_off_until = 0.0
+        _sip_watch_off_until = 0.0
 
 
 # ------------------------------------------------------------------ the session and what a line may be kept for
@@ -146,7 +153,8 @@ def _radar(symbols: list[str], day: date, now: float, regular: tuple[int, int] |
             continue
         previous = kept[-1]["prev_close"]
         change = round((marks[-1][1] - previous) / previous * 100, 2) if previous and previous > 0 else None
-        found[symbol] = {"bars": [{"time": int(t), "close": c, "extended": False} for t, c in marks], "change_pct": change}
+        found[symbol] = {"bars": [{"time": int(t), "close": c, "extended": False} for t, c in marks], "change_pct": change,
+                         "last": marks[-1][1]}
     return found
 
 
@@ -159,14 +167,15 @@ def _chart_cache(symbol: str, day: date, hours: dict | None) -> list[dict] | Non
     return _bars(held[0], day, hours)
 
 
-def _sip(symbols: list[str], day: date, now: float, hours: dict | None) -> dict[str, list[dict]]:
+def _sip(symbols: list[str], day: date, now: float, hours: dict | None, watch: bool = False) -> dict[str, list[dict]]:
     """Today's minutes (extended hours) for every symbol in one Alpaca read, SIP like the charts. {} when Alpaca is not
     set up, refuses (403: the account's plan may not allow recent SIP minutes), fails or needs more than ``SIP_PAGES`` pages
-    (a cut-off day is not a line); any of those turns it off for ``SIP_BACKOFF_SECONDS``."""
-    global _sip_off_until
+    (a cut-off day is not a line); any of those turns it off for ``SIP_BACKOFF_SECONDS``. ``watch``: the Watching names'
+    own read, with its own back-off, so a long watchlist that overflows the pages never turns off the book's read."""
+    global _sip_off_until, _sip_watch_off_until
     from app.engine import alpaca
     start = datetime.combine(day, wall_time(4), ET)
-    if not alpaca.alpaca_configured() or time.time() < _sip_off_until or datetime.fromtimestamp(now, ET) <= start:
+    if not alpaca.alpaca_configured() or time.time() < (_sip_watch_off_until if watch else _sip_off_until) or datetime.fromtimestamp(now, ET) <= start:
         return {}
     params = {"symbols": ",".join(symbols), "timeframe": "1Min", "start": start.isoformat(),
               "end": datetime.fromtimestamp(now, UTC).isoformat(), "adjustment": "split", "feed": "sip", "limit": 10000}
@@ -184,8 +193,12 @@ def _sip(symbols: list[str], day: date, now: float, hours: dict | None) -> dict[
         else:
             raise RuntimeError("more minutes than the pages read")
     except Exception as exc:  # noqa: BLE001 -- the symbols fall to the Tradier reads
-        _sip_off_until = time.time() + SIP_BACKOFF_SECONDS
-        log.warning("desk sparks: the batched Alpaca read is off for %d s (%s)", SIP_BACKOFF_SECONDS, exc)
+        if watch:
+            _sip_watch_off_until = time.time() + SIP_BACKOFF_SECONDS
+        else:
+            _sip_off_until = time.time() + SIP_BACKOFF_SECONDS
+        log.warning("desk sparks: the %sbatched Alpaca read is off for %d s (%s)", "Watching names' " if watch else "",
+                    SIP_BACKOFF_SECONDS, exc)
         return {}
     out: dict[str, list[dict]] = {}
     for symbol, found in rows.items():
@@ -221,20 +234,26 @@ def _store_line(symbol: str, bars: list[dict], now: float, day: date, valid: flo
         _lines[symbol] = (valid, day, _thin(shown))
 
 
-def _store_change(symbol: str, change: float | None, day: date, valid: float) -> None:
+def _store_change(symbol: str, change: float | None, day: date, valid: float, last: float | None = None) -> None:
     with _lock:
-        _changes[symbol] = (valid, day, change)
+        _changes[symbol] = (valid, day, change, last)
 
 
-def _fill(symbols: list[str], day: date, now: float, valid: float, hours: dict | None, abandon: threading.Event) -> None:
-    """The lines nothing in hand served: one batched read, then one low-priority read each. Stores each line as it lands."""
+def _fill(symbols: list[str], day: date, now: float, valid: float, hours: dict | None, abandon: threading.Event,
+          batched_only: frozenset[str] = frozenset()) -> None:
+    """The lines nothing in hand served: one batched read, then one low-priority read each (never for ``batched_only``,
+    the Watching list's names). Stores each line as it lands."""
     from app.engine.chart_feed import LOW_SLOTS, chart_feed
-    todo = list(symbols)
-    if len(todo) >= 2:
-        got = _sip(todo, day, now, hours)
-        for symbol, bars in got.items():
-            _store_line(symbol, bars, now, day, valid)
-        todo = [s for s in todo if s not in got]
+    todo = [s for s in symbols if s not in batched_only]
+    watched = [s for s in symbols if s in batched_only]
+    # The book's names in their own batch first; the Watching names in a second one that cannot fail the book's.
+    for names, watch in ((todo, False), (watched, True)):
+        if len(names) >= 2 or (watch and names):
+            got = _sip(names, day, now, hours, watch=watch)
+            for symbol, bars in got.items():
+                _store_line(symbol, bars, now, day, valid)
+            if not watch:
+                todo = [s for s in todo if s not in got]
 
     def one(symbol: str) -> None:
         if abandon.is_set():  # the request gave up: do not start a read nobody waits for
@@ -264,10 +283,16 @@ def _quotes(symbols: list[str]) -> dict:
     return {"state": "ok", "rows": rows}
 
 
-def read(symbols: str, now: float) -> dict:
+def _names(symbols: str) -> list[str]:
+    return sorted({s.strip().upper() for s in symbols.split(",") if s.strip().replace(".", "").isalnum()})
+
+
+def read(symbols: str, now: float, watch: str = "") -> dict:
     from app.engine.request_timing import timed
     from app.routers import today
-    names = sorted({s.strip().upper() for s in symbols.split(",") if s.strip().replace(".", "").isalnum()})[:SYMBOLS]
+    book = _names(symbols)[:SYMBOLS]
+    watched = [n for n in _names(watch) if n not in book][:WATCH]
+    names = book + watched
     day, phase, hours, regular = _session(now)
     valid = _valid_until(now, phase, hours)
     with _lock:
@@ -279,7 +304,7 @@ def read(symbols: str, now: float) -> dict:
                 if symbol in need_lines:
                     _store_line(symbol, found["bars"], now, day, valid)
                 if found["change_pct"] is not None:  # none recorded: the quote read below gives it
-                    _store_change(symbol, found["change_pct"], day, valid)
+                    _store_change(symbol, found["change_pct"], day, valid, found["last"])
         with _lock:
             need_lines = [n for n in need_lines if not _fresh(_lines.get(n), now, day)]
             need_change = [n for n in need_change if not _fresh(_changes.get(n), now, day)]
@@ -293,7 +318,7 @@ def read(symbols: str, now: float) -> dict:
             need_lines.remove(symbol)
     if need_lines:
         abandon = threading.Event()
-        job: Future = today._start(lambda: _fill_logged(need_lines, day, now, valid, hours, abandon))
+        job: Future = today._start(lambda: _fill_logged(need_lines, day, now, valid, hours, abandon, frozenset(watched)))
         with timed("sparks closes"):
             done, _late = wait([job], timeout=BUDGET_SECONDS)
         if not done:
@@ -301,16 +326,27 @@ def read(symbols: str, now: float) -> dict:
     if quoted_ahead is not None:
         read_back = quoted_ahead.get()  # its failure is logged by the section; the lines stand without the changes
         if read_back["state"] == "ok":
-            quoted = {r["symbol"]: r.get("change_percentage") for r in read_back["rows"]}
+            quoted = {r["symbol"]: r for r in read_back["rows"]}
             for symbol in need_change:
-                _store_change(symbol, quoted.get(symbol), day, valid)
+                row = quoted.get(symbol) or {}
+                _store_change(symbol, row.get("change_percentage"), day, valid, row.get("last"))
     rows: dict[str, dict] = {}
     with _lock:
         for name in names:
-            line = _lines.get(name)
-            if _fresh(line, now, day):
-                change = _changes.get(name)
-                rows[name] = {"points": list(line[2]), "change_pct": change[2] if _fresh(change, now, day) else None}
+            line, change = _lines.get(name), _changes.get(name)
+            change = change if _fresh(change, now, day) else None
+            # A book row needs its line; a watched row shows its price and change without one.
+            drawn = _fresh(line, now, day)
+            points = list(line[2]) if drawn else []
+            if name in watched and phase == "pre":
+                # Before the open the quote carries no pre-market trade and its previous close has rolled (#718): a
+                # watched row shows the line's last minute and no change, never a +0.00%.
+                rows[name] = {"points": points, "change_pct": None, "last": points[-1] if points else None}
+            elif name in watched and (drawn or change is not None):
+                rows[name] = {"points": points, "change_pct": change[2] if change else None,
+                              "last": change[3] if change and change[3] is not None else (points[-1] if points else None)}
+            elif drawn:
+                rows[name] = {"points": points, "change_pct": change[2] if change else None}
         spy = _changes.get("SPY")
         spy_change = spy[2] if _fresh(spy, now, day) else None
         for table in (_lines, _changes):
