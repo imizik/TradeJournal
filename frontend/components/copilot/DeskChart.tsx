@@ -21,6 +21,7 @@ import { heldReading } from "@/lib/deskTicks";
 import { ChartEventMarks, chartEvents, earningsHeader, eventLogical, nyDayOf } from "@/components/copilot/ChartEvents";
 import { ChartNewsMarks, newsWhen, useChartNews } from "@/components/copilot/ChartNews";
 import { cn } from "@/lib/utils";
+import { drawableWalls, useDeskWalls, type DeskWalls } from "@/lib/deskWalls";
 import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type DeskChartNews, type DeskChartMark, type DeskStudySeries, type DeskTimeframe } from "@/lib/desk";
 
 /*
@@ -45,6 +46,11 @@ import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type 
  * bell in the header opens the symbol's armed alerts, to move or remove one (``DeskAlerts``).
  * ``guides`` (a Feed Scanner row's trigger, stop and target) are thin lines named in the header; the level menu opened
  * on one snaps to its price.
+ *
+ * Walls (off by default, in the studies row, one choice for every timeframe): the Charts strike ladder's put wall, call
+ * wall, gamma flip and max pain for the nearest expiry as thin labelled lines, and its expected move as a faint band
+ * (``lib/deskWalls.ts``). Hovering one says what it is in plain words and that the dealer side is assumed; the level
+ * menu snaps to a wall pressed near it. A stale or missing read draws nothing.
  */
 
 const ET = "America/New_York";
@@ -54,28 +60,38 @@ const COLOR = { fill: "#e9a23b", ping: "#a78bfa", radar: "#60a5fa", entry: "#7db
 
 /** The studies each timeframe offers, in the legend's order; ``levels`` is the previous close and the pre-market high
  * and low; ``news`` the symbol's headlines at their candles (``ChartNews``). All on by default. */
-export type StudyKey = "vwap" | "ema9" | "ema21" | "sma50" | "sma200" | "volume" | "levels" | "news";
+export type StudyKey = "vwap" | "ema9" | "ema21" | "sma50" | "sma200" | "volume" | "levels" | "news" | "walls";
 const LINES = ["vwap", "ema9", "ema21", "sma50", "sma200"] as const;
 type LineKey = typeof LINES[number];
 export const STUDIES: Record<DeskTimeframe, StudyKey[]> = {
-  "2m": ["vwap", "ema9", "ema21", "volume", "levels", "news"], "15m": ["vwap", "ema9", "ema21", "volume", "levels", "news"], "1D": ["ema21", "sma50", "sma200", "volume"],
+  "2m": ["vwap", "ema9", "ema21", "volume", "levels", "news", "walls"], "15m": ["vwap", "ema9", "ema21", "volume", "levels", "news", "walls"],
+  "1D": ["ema21", "sma50", "sma200", "volume", "walls"],
 };
+/** Studies that start hidden until he turns them on. */
+const OFF_BY_DEFAULT = new Set<StudyKey>(["walls"]);
 /** The Charts workspace's study colours (EMA 21 takes its EMA 20's, the SMAs its EMA 50's and 200's), thin and faded so
  * the plan's lines stay the boldest thing after price. */
 const STUDY: Record<StudyKey, { name: string; color: string }> = {
   vwap: { name: "VWAP", color: "#f5e6a1" }, ema9: { name: "EMA 9", color: "#67d5eb" }, ema21: { name: "EMA 21", color: "#f4c66b" },
   sma50: { name: "SMA 50", color: "#b494f5" }, sma200: { name: "SMA 200", color: "#ee86bd" }, volume: { name: "Vol", color: "#8d8d96" },
   levels: { name: "Prev close · PM high/low", color: "#9a9aa3" }, news: { name: "News", color: "#7dd3fc" },
+  walls: { name: "Walls", color: "#c4b5fd" },
 };
+/** The ladder's colours (``OptionsLadder``), thin and a little faded: context, never louder than the plan. */
+const WALL_COLOR: Record<DeskWalls["levels"][number]["kind"], string> = { put_wall: "#fb7185cc", call_wall: "#34d399cc", gamma_flip: "#e4e4e7b0", max_pain: "#fcd34db0" };
+const WALL_TITLE: Record<DeskWalls["levels"][number]["kind"], string> = { put_wall: "Put wall", call_wall: "Call wall", gamma_flip: "Flip (model)", max_pain: "Max pain" };
 const FADE = "99";
 const STUDY_STORE = "desk.chart.studies.v1";
 type Shown = Partial<Record<StudyKey, boolean>>;
-type Choices = Partial<Record<DeskTimeframe, Shown>>;
+/** Choices per timeframe; ``all`` holds the ones kept across timeframes (Walls: strikes mean the same on any candles). */
+type Choices = Partial<Record<DeskTimeframe | "all", Shown>>;
+const SHARED = new Set<StudyKey>(["walls"]);
+const slot = (timeframe: DeskTimeframe, key: StudyKey): DeskTimeframe | "all" => SHARED.has(key) ? "all" : timeframe;
 const readChoices = (): Choices => {
   try { const saved = JSON.parse(window.localStorage.getItem(STUDY_STORE) ?? "{}"); return saved && typeof saved === "object" ? saved : {}; } catch { return {}; }
 };
 const saveChoices = (choices: Choices) => { try { window.localStorage.setItem(STUDY_STORE, JSON.stringify(choices)); } catch { /* this visit only */ } };
-const isOn = (choices: Choices, timeframe: DeskTimeframe, key: StudyKey) => choices[timeframe]?.[key] ?? true;
+const isOn = (choices: Choices, timeframe: DeskTimeframe, key: StudyKey) => choices[slot(timeframe, key)]?.[key] ?? !OFF_BY_DEFAULT.has(key);
 const REFERENCE_TITLE = { prev_close: "Prev close", pm_high: "PM high", pm_low: "PM low" } as const;
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
 const KIND_WORD: Record<DeskChartMark["kind"], string> = { fill: "Fill", ping: "Ping", radar: "Radar" };
@@ -222,10 +238,107 @@ class TimeStopLine implements ISeriesPrimitive<Time> {
   }
 }
 
+/** The walls' labels and expected move: each wall's name at the left end of its line, and the expected move as a faint
+ * band across the pane between its two prices, its size at the top edge on the right. Outside the price scale's fit. */
+type WallLabel = { price: number; text: string; color: string };
+const LABEL_ROW = 12;  // pixels: labels nearer than this share a row
+class ExpectedBand implements ISeriesPrimitive<Time> {
+  private series: SeriesAttachedParameter<Time>["series"] | null = null;
+  private requestUpdate: (() => void) | null = null;
+  private band: { low: number; high: number; label: string } | null = null;
+  private labels: WallLabel[] = [];
+  private ys: [number, number] | null = null;
+  private placed: { y: number; text: string; color: string }[] = [];
+  private readonly renderer: IPrimitivePaneRenderer = { draw: (target) => this.draw(target) };
+  private readonly views: readonly IPrimitivePaneView[] = [{ zOrder: () => "bottom", renderer: () => this.renderer }];
+
+  attached({ series, requestUpdate }: SeriesAttachedParameter<Time>) { this.series = series; this.requestUpdate = requestUpdate; }
+  detached() { this.series = null; this.requestUpdate = null; }
+  set(band: { low: number; high: number; label: string } | null, labels: WallLabel[] = []) { this.band = band; this.labels = labels; this.requestUpdate?.(); }
+
+  updateAllViews() {
+    this.ys = null;
+    this.placed = [];
+    if (!this.series) return;
+    for (const label of this.labels) {
+      const y = this.series.priceToCoordinate(label.price);
+      if (y !== null) this.placed.push({ y, text: label.text, color: label.color });
+    }
+    if (!this.band) return;
+    const top = this.series.priceToCoordinate(this.band.high), bottom = this.series.priceToCoordinate(this.band.low);
+    if (top !== null && bottom !== null) this.ys = [top, bottom];
+  }
+
+  paneViews() { return this.views; }
+
+  private draw(target: Target) {
+    const { ys, band, placed } = this;
+    target.useMediaCoordinateSpace(({ context, mediaSize }) => {
+      context.font = "10px ui-sans-serif, system-ui, -apple-system, sans-serif";
+      context.textAlign = "left";
+      // Labels closer than a line of text share one row (top first), each in its own colour, so none overprints.
+      const rows: { y: number; items: typeof placed }[] = [];
+      for (const label of [...placed].sort((a, b) => a.y - b.y)) {
+        if (label.y < 10 || label.y > mediaSize.height) continue;
+        const row = rows[rows.length - 1];
+        if (row && label.y - row.y < LABEL_ROW) row.items.push(label); else rows.push({ y: label.y, items: [label] });
+      }
+      for (const row of rows) {
+        let x = 4;
+        row.items.forEach((label, i) => {
+          if (i) { context.fillStyle = "#77777f"; context.fillText(" · ", x, row.y - 3); x += context.measureText(" · ").width; }
+          context.fillStyle = label.color;
+          context.fillText(label.text, x, row.y - 3);
+          x += context.measureText(label.text).width;
+        });
+      }
+      if (!ys || !band) return;
+      const y0 = Math.max(0, Math.min(...ys)), y1 = Math.min(mediaSize.height, Math.max(...ys));
+      if (y1 <= y0) return;
+      context.fillStyle = "rgba(196, 181, 253, 0.06)";
+      context.fillRect(0, y0, mediaSize.width, y1 - y0);
+      context.strokeStyle = "rgba(196, 181, 253, 0.25)";
+      context.setLineDash([2, 4]);
+      context.lineWidth = 1;
+      for (const y of ys) {
+        if (y < 0 || y > mediaSize.height) continue;
+        context.beginPath();
+        context.moveTo(0, Math.round(y) + 0.5);
+        context.lineTo(mediaSize.width, Math.round(y) + 0.5);
+        context.stroke();
+      }
+      context.setLineDash([]);
+      context.fillStyle = "rgba(196, 181, 253, 0.7)";
+      context.textAlign = "right";
+      // Inside the band when it has room, else just above it.
+      if (Math.min(...ys) >= 0) context.fillText(band.label, mediaSize.width - 4, y1 - y0 >= 16 ? y0 + 11 : y0 - 3);
+    });
+  }
+}
+
+/** The wall (or expected-move edge) within ``slop`` pixels of ``y``, nearest first; null when none is drawn there. */
+type WallSpot = { key: string; name: string; price: number; hint: string; color: string; y: number };
+function wallNear(series: ISeriesApi<"Candlestick">, walls: DeskWalls | null, y: number, slop: number): WallSpot | null {
+  if (!walls) return null;
+  const move = walls.expected_move;
+  const spots = [
+    ...walls.levels.map(level => ({ key: level.kind, name: level.name, price: level.price, hint: level.hint, color: WALL_COLOR[level.kind] })),
+    ...(move ? [{ key: "em_high", name: "Expected move high", price: move.high, hint: move.hint, color: "#c4b5fd" },
+      { key: "em_low", name: "Expected move low", price: move.low, hint: move.hint, color: "#c4b5fd" }] : []),
+  ];
+  let best: (WallSpot & { gap: number }) | null = null;
+  for (const spot of spots) {
+    const at = series.priceToCoordinate(spot.price);
+    const gap = at === null ? Infinity : Math.abs(at - y);
+    if (gap <= slop && (!best || gap < best.gap)) best = { ...spot, y: at!, gap };
+  }
+  return best;
+}
+
 type Parts = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram"> | null; markers: ISeriesMarkersPluginApi<Time>;
   shade: SessionShade; stop: TimeStopLine; lines: IPriceLine[]; studies: Record<LineKey, ISeriesApi<"Line">>;
-  layer: DrawingLayer; timeline: Timeline; gestures: DrawingGestures;
+  layer: DrawingLayer; timeline: Timeline; gestures: DrawingGestures; band: ExpectedBand; wallLines: IPriceLine[];
 };
 type Hover = { bar: Bar; marks: DeskChartMark[]; x: number; width: number };
 
@@ -353,7 +466,7 @@ function paint(current: Parts, read: Read, state: Painted, host: HTMLElement | n
 export type DeskChartActions = { go(href: string): void; ask(symbol: string, text: string): void };
 
 /** ``item``: the drawn line the menu was opened on, if any (its price is the line's). */
-type Menu = { price: number; x: number; y: number; plan: boolean; item?: { id: string; name: string; at: string } };
+type Menu = { price: number; x: number; y: number; plan: boolean; item?: { id: string; name: string; at: string }; wall?: { name: string } };
 type Status = { text: string; tone: "ok" | "error"; undo?: () => void } | null;
 type Press = { x: number; y: number; price: number; axis: boolean; touch: boolean; clientX: number; clientY: number; at: number; timer: number | null };
 
@@ -446,6 +559,17 @@ export function ReadingLine({ symbol, data, fallback = null, live = null }: {
 }
 
 /** The News toggle's tooltip: why there are none, or from when the markers are complete. */
+/** An expiry for the walls: "0DTE" on the chart's own day, else "Nov 14". */
+const expiryWord = (iso: string, asOf?: number) => asOf !== undefined && nyDayOf(asOf) === iso ? "0DTE"
+  : new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
+/** The Walls toggle's tooltip: what it draws, where it comes from, and the assumption it rests on. */
+const wallsTitle = (on: boolean, walls: DeskWalls | null, failed: string | null): string => {
+  const what = "Put wall, call wall, gamma flip and max pain for the nearest expiry, with its expected move (the Charts strike ladder's read). Dealer side assumed: long calls, short puts.";
+  if (!on) return `Show Walls: ${what}`;
+  if (failed) return `Hide Walls. Not drawn: ${failed}`;
+  if (walls && walls.state !== "ready") return `Hide Walls. Not drawn: ${walls.message ?? (walls.state === "stale" ? "the read is not current." : "no read yet.")}`;
+  return `Hide Walls. ${what} Hover a line for what it is.`;
+};
 const newsTitle = (news: DeskChartNews): string =>
   news.state !== "ok" ? news.reason ?? "Hide News"
     : news.complete_from ? `Hide News. Only the newest headlines were read: any before ${newsWhen(news.complete_from, news.as_of)} are not marked.` : "Hide News";
@@ -494,6 +618,8 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   const [listed, setListed] = useState<{ key: string; at: number; alerts: DeskChartAlert[] } | null>(null);
   const press = useRef<Press | null>(null);
   const menuBox = useRef<HTMLDivElement>(null);
+  const wallsRef = useRef<DeskWalls | null>(null);  // the walls drawn now, for the crosshair and the level menu
+  const [wallTip, setWallTip] = useState<WallSpot | null>(null);
   const key = `${id}|${timeframe}`;
   // Drawing: off until the pencil; the armed tool, the selected line, a two-point tool's first point down.
   const [drawOn, setDrawOn] = useState(false);
@@ -555,6 +681,8 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     candles.attachPrimitive(shade);
     const stop = new TimeStopLine(() => painted.current.shown?.bars ?? [], () => painted.current.shown?.step ?? 60);
     candles.attachPrimitive(stop);
+    const band = new ExpectedBand();
+    candles.attachPrimitive(band);
     // His Charts levels and drawings, on Charts' drawing layer and gestures.
     const timeline = new Timeline(() => painted.current.timeline, () => painted.current.shown?.step ?? 60);
     const layer = new DrawingLayer(timeline);
@@ -582,12 +710,14 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
       const hit = event.point && (event.paneIndex ?? 0) === 0 ? layer.hit(event.point.x, event.point.y, touched.current ? TOUCH_SLOP : MOUSE_SLOP) : null;
       now.onSelect?.(hit?.id ?? null);
     });
-    parts.current = { chart, candles, volume: null, markers, shade, stop, lines: [], studies, layer, timeline, gestures };
+    parts.current = { chart, candles, volume: null, markers, shade, stop, lines: [], studies, layer, timeline, gestures, band, wallLines: [] };
     setChartApi(chart);
     painted.current.applied = null;  // a new chart starts from the default view
     if (latest.current) paint(parts.current, latest.current, painted.current, host.current, () => true, [], null, painted.current.guides);
     chart.subscribeCrosshairMove((event) => {
       if (drawActions.current.tool) gestures.hover(event.point && (event.paneIndex ?? 0) === 0 ? event.point : null, false);
+      const wall = event.point && (event.paneIndex ?? 0) === 0 ? wallNear(candles, wallsRef.current, event.point.y, touched.current ? TOUCH_SLOP : MOUSE_SLOP) : null;
+      setWallTip(prev => prev?.key === wall?.key ? prev : wall);
       const data = painted.current.shown;
       if (!data || !event.point || typeof event.time !== "number") { setHover(null); return; }
       const bar = candleOf(data.bars, data.step, event.time);
@@ -681,6 +811,22 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   const pick = menu?.price ?? null;
   const news = useChartNews(id, timeframe, data, isOn(choices, timeframe, "news"));
   const headlines = news?.state === "ok" ? news.groups.reduce((n, g) => n + g.count, 0) : 0;
+  // Walls: read only while shown, drawn only while current (a stale or failing read draws nothing).
+  const wallsOn = STUDIES[timeframe].includes("walls") && isOn(choices, timeframe, "walls");
+  const wallsRead = useDeskWalls(wallsOn && data ? data.symbol : null);
+  const shownWalls = wallsOn && data && wallsRead.data?.symbol === data.symbol ? drawableWalls(wallsRead.data, wallsRead.failed) : null;
+  useEffect(() => {
+    wallsRef.current = shownWalls;
+    const current = parts.current;
+    if (!current) return;
+    for (const line of current.wallLines) current.candles.removePriceLine(line);
+    current.wallLines = (shownWalls?.levels ?? []).map(level => current.candles.createPriceLine({
+      price: level.price, color: WALL_COLOR[level.kind], lineWidth: 1, lineStyle: LineStyle.LargeDashed, axisLabelVisible: false, title: "",
+    }));
+    const move = shownWalls?.expected_move;
+    current.band.set(move ? { low: move.low, high: move.high, label: `Expected move ±${move.move.toFixed(2)}` } : null,
+      (shownWalls?.levels ?? []).map(level => ({ price: level.price, text: `${WALL_TITLE[level.kind]} ${price(level.price)}`, color: WALL_COLOR[level.kind] })));
+  }, [shownWalls, chartApi]);
   // The read onto the chart (and onto a chart built again, e.g. after a hot reload, from the last read), with the
   // studies chosen for its timeframe, the alerts and the level the menu is open on.
   useEffect(() => {
@@ -704,7 +850,8 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   }, [now, read, key, choices, alerts, pick]);
 
   const toggle = (study: StudyKey) => setChoices(prev => {
-    const next = { ...prev, [timeframe]: { ...prev[timeframe], [study]: !isOn(prev, timeframe, study) } };
+    const at = slot(timeframe, study);
+    const next = { ...prev, [at]: { ...prev[at], [study]: !isOn(prev, timeframe, study) } };
     saveChoices(next);
     return next;
   });
@@ -735,11 +882,14 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
       return y !== null && Math.abs(y - spot.y) <= slop;
     }) : undefined;
     const item = line ? { id: line.id, name: itemName(line), at: where ? where.at : "where you pressed" } : undefined;
+    // Near a wall (or the expected move's edge): the menu is that line's, at its price.
+    const wall = !line && !guide && current ? wallNear(current.candles, wallsRef.current, spot.y, spot.touch ? TOUCH_SLOP : MOUSE_SLOP) : null;
     const width = host.current?.clientWidth ?? 360;
     const pane = parts.current?.chart.timeScale().width() ?? width;
     const x = spot.axis ? pane - MENU_W - 6 : spot.x > width / 2 ? spot.x - MENU_W - 12 : spot.x + 12;
     const height = host.current?.clientHeight ?? 320;
-    setMenu({ price: where ? where.price : guide ? guide.price : spot.price, x: Math.max(4, Math.min(width - MENU_W - 4, x)), y: Math.max(4, Math.min(spot.y - 20, height - 220)), plan: false, item });
+    setMenu({ price: where ? where.price : guide ? guide.price : wall ? wall.price : spot.price, x: Math.max(4, Math.min(width - MENU_W - 4, x)), y: Math.max(4, Math.min(spot.y - 20, height - 220)), plan: false, item,
+      wall: wall ? { name: wall.name } : undefined });
     setStatus(null);
   }, []);
   const clearPress = () => { if (press.current?.timer) window.clearTimeout(press.current.timer); press.current = null; };
@@ -783,13 +933,13 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     setStatus({ text: "Removing the alert…", tone: "ok" });
     removeAlert(alertId).then(listing => { show(listing, symbol); setStatus({ text: "Alert removed.", tone: "ok" }); }).catch(fail);
   };
-  const alertHere = (level: number, item?: Menu["item"]) => {
+  const alertHere = (level: number, item?: Menu["item"], wall?: Menu["wall"]) => {
     if (!data || lastPrice === null) return;
     const symbol = data.symbol;
     // From a drawn line: tied to it as Charts ties one (a level's own kind, any drawing's as a drawing), so Charts' menu on that line lists it.
     const line = item ? draw.find(item.id) : null;
     const source = line ? { source_kind: "kind" in line ? "drawing" as const : "level" as const, source_id: line.id,
-      label: "kind" in line ? `${item!.name}${item!.at ? ` (${item!.at})` : ""}` : line.label } : { source_kind: "level" as const, source_id: "desk", label: DESK_LABEL };
+      label: "kind" in line ? `${item!.name}${item!.at ? ` (${item!.at})` : ""}` : line.label } : { source_kind: "level" as const, source_id: "desk", label: wall ? `${wall.name}, from the desk` : DESK_LABEL };
     setMenu(null);
     setStatus({ text: "Setting the alert…", tone: "ok" });
     createAlert({ symbol, price: level, reference: lastPrice, condition: "crosses", interval: null, session: "regular", ...source })
@@ -865,7 +1015,10 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     if (!data || !lastBar) return new Set<string>();
     return new Set(data.levels.filter(l => Math.abs(l.price - lastBar.close) / lastBar.close > LEVEL_REACH).map(l => l.role));
   }, [data, lastBar]);
+  const wallsWord = !wallsOn ? "" : shownWalls ? (shownWalls.expiration ? expiryWord(shownWalls.expiration, data?.as_of) : "")
+    : wallsRead.failed || wallsRead.data?.state === "stale" ? "stale" : !wallsRead.data || wallsRead.data.state === "loading" ? "…" : "none";
   const value = (study: StudyKey): string => {
+    if (study === "walls") return wallsWord;
     if (!data || at_i === null) return "";
     if (study === "levels") return "";
     if (study === "news") return headlines ? String(headlines) : "";
@@ -916,7 +1069,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           const on = isOn(choices, timeframe, study);
           return (
             <button key={study} type="button" aria-pressed={on} onClick={() => toggle(study)} data-testid={`desk-study-${study}`}
-              title={study === "news" && on && news ? newsTitle(news) : `${on ? "Hide" : "Show"} ${STUDY[study].name}`}
+              title={study === "news" && on && news ? newsTitle(news) : study === "walls" ? wallsTitle(on, wallsRead.data, wallsRead.failed) : `${on ? "Hide" : "Show"} ${STUDY[study].name}`}
               className={`min-h-11 shrink-0 rounded px-1.5 hover:bg-secondary sm:min-h-0 sm:py-0.5 ${on ? "" : "text-muted-foreground/60 line-through"}`}
               style={on ? { color: STUDY[study].color } : undefined}>
               {STUDY[study].name}{on && value(study) ? <span className="text-foreground/80"> {value(study)}</span> : null}
@@ -949,6 +1102,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           data-reference={data && isOn(choices, data.timeframe, "levels") && STUDIES[data.timeframe].includes("levels") ? (data.reference ?? []).length : 0}
           data-alerts={alerts.length} data-drawings={draw.shapes.length} data-selected={editing && selected ? selected : undefined} data-tool={editing && tool ? tool : undefined}
           data-news={!isOn(choices, timeframe, "news") ? "off" : news?.state === "ok" ? news.groups.length : news?.state ?? "loading"}
+          data-walls={!wallsOn ? "off" : shownWalls ? shownWalls.levels.length : wallsRead.failed ? "failed" : wallsRead.data?.state ?? "loading"}
           style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
           className={cn("h-[320px] w-full overflow-hidden rounded border sm:h-[420px]", editing && tool && "cursor-crosshair")} />
         {!unavailable && !switching && <ChartEventMarks chart={chartApi} data={data} />}
@@ -967,16 +1121,26 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
             ))}
           </div>
         )}
+        {wallTip && shownWalls && !menu && !(hover && hover.marks.length > 0) && (
+          <div role="tooltip" data-testid="desk-walls-tip"
+            className="pointer-events-none absolute left-2 z-10 max-w-[min(22rem,85%)] rounded border bg-popover/95 px-2 py-1.5 text-xs leading-snug shadow"
+            style={{ top: `${Math.max(4, wallTip.y + 10)}px` }}>
+            <p><span style={{ color: wallTip.color }}>{wallTip.name}</span> <span className="tabular-nums text-foreground">{price(wallTip.price)}</span></p>
+            <p className="text-foreground/90">{wallTip.hint}</p>
+            <p className="text-muted-foreground">{shownWalls.expiration ? `${expiryWord(shownWalls.expiration, data?.as_of)} expiry · ` : ""}dealer side assumed (long calls, short puts), not known</p>
+          </div>
+        )}
         {menu && data && (
           <div ref={menuBox} role="menu" aria-label={`At ${price(menu.price)}`} data-testid="desk-level-menu"
             className="absolute z-20 rounded-md border bg-popover/95 p-1 text-xs shadow-lg"
             style={{ left: menu.x, top: menu.y, width: MENU_W }}>
             <p className="flex items-center justify-between px-2 py-1 tabular-nums text-muted-foreground">
-              <span>{menu.item ? <span data-testid="desk-level-menu-line" className="text-foreground">{menu.item.name}{menu.item.at ? ` (${menu.item.at})` : ""} · </span> : `${data.symbol} `}<span className="text-foreground">{price(menu.price)}</span>{lastPrice !== null ? ` · ${signedPct((menu.price / lastPrice - 1) * 100, 1)} from last` : ""}</span>
+              <span>{menu.item ? <span data-testid="desk-level-menu-line" className="text-foreground">{menu.item.name}{menu.item.at ? ` (${menu.item.at})` : ""} · </span>
+                : menu.wall ? <span data-testid="desk-level-menu-wall" className="text-foreground">{data.symbol} {menu.wall.name} · </span> : `${data.symbol} `}<span className="text-foreground">{price(menu.price)}</span>{lastPrice !== null ? ` · ${signedPct((menu.price / lastPrice - 1) * 100, 1)} from last` : ""}</span>
               <button type="button" aria-label="Close" onClick={() => setMenu(null)} className="min-h-11 min-w-11 rounded text-muted-foreground hover:text-foreground sm:min-h-6 sm:min-w-6">×</button>
             </p>
             {!menu.plan ? <>
-              <button type="button" role="menuitem" onClick={() => alertHere(menu.price, menu.item)}
+              <button type="button" role="menuitem" onClick={() => alertHere(menu.price, menu.item, menu.wall)}
                 className="block min-h-11 w-full rounded px-2 text-left hover:bg-secondary sm:min-h-8">Alert when price crosses here</button>
               {actions && <button type="button" role="menuitem" onClick={() => setMenu({ ...menu, plan: true })}
                 className="block min-h-11 w-full rounded px-2 text-left hover:bg-secondary sm:min-h-8">Plan from here…</button>}
@@ -1011,6 +1175,9 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           {alerts.map(alert => <li key={alert.id}>Alert · {alert.text}</li>)}
           {allMarks.map((mark, i) => <li key={i}>{KIND_WORD[mark.kind]} · {mark.text} · {nyWhen(mark.at)}</li>)}
           {data.time_stop && <li>Time stop {stopWhen(data.time_stop.at)} · {data.time_stop.text}</li>}
+          {shownWalls?.levels.map(level => <li key={level.kind}>{level.name} {price(level.price)} · {level.hint}</li>)}
+          {shownWalls?.expected_move && <li>Expected move {price(shownWalls.expected_move.low)} to {price(shownWalls.expected_move.high)} · {shownWalls.expected_move.hint}</li>}
+          {shownWalls && <li>{shownWalls.assumption}</li>}
           {chartEvents(data.events, nyDayOf(data.as_of)).map(e => <li key={e.key}>{e.lines.join(" ")}</li>)}
           {news?.state === "ok" && news.groups.flatMap(g => g.items.map(item => <li key={item.url}>Headline · {item.source} · {newsWhen(item.at, news.as_of)} · {item.headline}</li>))}
         </ul>

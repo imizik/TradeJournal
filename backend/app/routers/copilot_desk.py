@@ -63,7 +63,7 @@ entries with how many had a plan before the fill, and the calls he checked score
 happened in it, from the same kind of existing readers, and the alerts and Radar hits still waiting on an answer.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 import json
 import logging
 import uuid
@@ -1314,6 +1314,23 @@ def desk_contract(symbol: str = "", occ: str = "", db: Session = Depends(get_ses
     if hidden.get("state") == "unavailable" or symbol.strip().upper() in set(hidden.get("rows", [])):
         return {"state": "none", "symbol": symbol.strip().upper(), "reason": None}  # silent: never a hidden ticker's contract
     return desk_contract.read(db, symbol, occ, today._now())
+
+
+@router.get("/desk/walls")
+def desk_walls(symbol: str = "", expiration: date | None = None, db: Session = Depends(get_session)):
+    """The Charts strike ladder's dealer-positioning read for the desk (``app/engine/desk_walls.py``): put wall, call
+    wall, gamma flip, max pain and the expected move for the nearest expiry (or ``expiration``), from the same
+    ``options_feed.ladder`` call and chain cache as Charts. The dealer side is assumed and said so. A ticker set to Not
+    following is never read. Read-only, owner-only, no Robinhood call, refused while the lab is off."""
+    found = copilot.settings()
+    if not found.enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import day_journal, desk_walls as walls
+    hidden = today._section(db, "desk walls hidden", lambda: {"rows": sorted(day_journal.not_following(db))})
+    if hidden.get("state") == "unavailable" or symbol.strip().upper() in set(hidden.get("rows", [])):
+        return {"state": "none", "symbol": symbol.strip().upper(), "levels": [], "expected_move": None,
+                "message": None, "refresh_seconds": walls.REFRESH_SECONDS}  # silent: never a hidden ticker's walls
+    return walls.read(symbol, expiration, mode=getattr(found, "evidence", "live"), now=today._now())
 
 
 @router.get("/desk/events")

@@ -1668,6 +1668,29 @@ Robinhood; `backend/tests/test_desk_chain.py` checks that nothing in it sends an
 - **Unusual marks:** a contract on the desk's unusual-options list (§ Unusual options) is marked **unusual** on its
   strike, with its volume and open interest in the tooltip. A Feed row opens here on its expiry with the contract
   selected; a strike outside the ten-a-side window widens it (`strike=` on the chain read).
+- **Walls:** a line above the strikes reads the shown expiry's walls, flip, max pain and expected move ("Walls 600 /
+  615 · flip 607 · max pain 610 · expected move ±4.20 · dealer side assumed"), and the put-wall, call-wall and
+  max-pain strikes are marked (§ Walls). A read that is not current is grey with its time and why.
+
+### Walls
+
+**The Charts strike ladder's read on the desk, off by default.** `GET /copilot/desk/walls?symbol=&expiration=`
+(`app/engine/desk_walls.py`, `frontend/lib/deskWalls.ts`) answers with the put wall and call wall (most put and call
+open interest), the gamma flip (SPY, QQQ and SPX only), max pain and the at-the-money straddle's expected move for the
+nearest expiry, or the Chain tab's shown one. There is no second model: it is `options_feed.ladder`, signed, the same
+call the Charts ladder makes, so it shares that chain cache, budget and pacing; the stock's price is the chart feed's
+shared quote. Never Robinhood, nothing written; a ticker set to Not following answers `none` without a read.
+
+- **Chart:** **Walls** in the studies row (off until turned on, then on for every timeframe, remembered in this browser) draws the four as thin
+  labelled dashed lines in the ladder's colours and the expected move as a faint band. Hovering one says what it is in
+  plain words and that the dealer side is assumed (long calls, short puts); a long-press, right-click or price-scale
+  tap near one opens the level menu at its price (alert there, plan from it, ask about it).
+- **Assumed, never fact:** every hint and the answer's `assumption` say the dealer side is assumed; open interest does
+  not say who holds a contract.
+- **Stale or missing:** in the regular session a read more than 3 minutes old is `stale`; the chart draws nothing for
+  a stale, loading, unavailable or failing read, and the Chain line greys with its time.
+- **Cadence:** once a minute while the page is visible, as the ladder; the chart and the Chain tab share one request a
+  minute for the same ticker and expiry. Fixture mode reads the simulated NBIS chain (walls 90 / 100); replay none.
 
 ### Unusual options
 

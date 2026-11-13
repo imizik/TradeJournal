@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiUrl } from "@/lib/api";
 import { tickFor, useDeskTicks } from "@/lib/deskTicks";
+import { useDeskWalls, wallsLine, type DeskWalls } from "@/lib/deskWalls";
 import type { TicketPlan } from "@/components/copilot/DeskTicket";
 import type { UnusualRow } from "@/components/copilot/DeskUnusual";
 import { cn } from "@/lib/utils";
@@ -15,6 +16,8 @@ import { cn } from "@/lib/utils";
  * pre-filled), Plan it (the plan flow) and Put on ticket (a saved plan's ticket, copy to Robinhood). Nothing here
  * places, sends or stages an order. Contracts on the desk's unusual-options list (``DeskUnusual``) carry a small mark; a
  * Feed row picked there (``focus``) opens here on its expiry with the contract selected, the strike window widened to it.
+ * Above the strikes, the shown expiry's walls in one line (the Charts strike ladder's read, ``lib/deskWalls.ts``, once a
+ * minute), with the wall and max-pain strikes marked; a read that is not current is grey with its time.
  */
 
 export type ChainSide = "call" | "put";
@@ -168,6 +171,9 @@ export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, un
   }, [focus?.n]); // eslint-disable-line react-hooks/exhaustive-deps -- once per pick
   const focusStrike = focus && focus.pick.symbol === symbol && focus.pick.expiry === expiry ? focus.pick.strike : null;
   const { data, error, failedAt } = useDeskChain(symbol, expiry, true, focusStrike);
+  // The shown expiry's walls; the nearest asks as the desk chart does, so the two share one read a minute.
+  const chainOk = data && data.symbol === symbol && data.state === "ok" && data.expiration ? data : null;
+  const walls = useDeskWalls(chainOk ? symbol : null, chainOk && chainOk.expiration !== chainOk.expiries[0]?.date ? chainOk.expiration : null);
   const scrolled = useRef<number | null>(null);
   const ticks = useDeskTicks(symbol ? [symbol] : []);
   const live = tickFor(ticks, symbol);
@@ -201,6 +207,8 @@ export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, un
   const lineAfter = price != null ? lineIndex(shown.rows, price) : null;
   const span = 1 + cols.length * sides.length;
   const marks = new Map(unusual.filter(u => u.symbol === symbol && u.expiration === shown.expiration).map(u => [`${u.side}:${u.strike}`, u]));
+  const wallsHere = walls.data && walls.data.symbol === symbol && walls.data.expiration === shown.expiration ? walls.data : null;
+  const strikeWalls = wallStrikes(wallsHere && wallsHere.state === "ready" && !walls.failed ? wallsHere : null);
 
   return (
     <div data-testid="desk-chain" ref={ref} className="space-y-2">
@@ -220,6 +228,7 @@ export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, un
           ))}
         </span>
       )}
+      {shown.state === "ok" && <WallsRead walls={wallsHere} failed={walls.failed} />}
       {shown.state !== "ok" ? <p className="text-sm text-muted-foreground">{shown.message}</p> : (
         <div className={cn("overflow-x-auto rounded-lg border", stale && "opacity-60")} data-stale={stale ? "true" : undefined}>
           <table className="w-full border-collapse text-xs tabular-nums" aria-label={`${symbol} ${shown.expiration} option chain`}>
@@ -245,7 +254,7 @@ export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, un
                     {both && <Cells cell={row.call} cols={[...cols].reverse()} itm={price != null && row.strike < price}
                       chosen={selected?.side === "call" && selected.strike === row.strike}
                       onPick={() => setPicked({ symbol, expiry: shown.expiration!, strike: row.strike, side: "call" })} side="call" strike={row.strike} />}
-                    <StrikeCell row={row} sides={sides} marks={marks} />
+                    <StrikeCell row={row} sides={sides} marks={marks} walls={strikeWalls.get(row.strike)} />
                     {sides.slice(both ? 1 : 0).map(s => (
                       <Cells key={s} cell={row[s]} cols={cols} itm={price != null && (s === "call" ? row.strike < price : row.strike > price)}
                         chosen={selected?.side === s && selected.strike === row.strike}
@@ -293,7 +302,39 @@ function PriceLine({ span, symbol, price, stale }: { span: number; symbol: strin
   );
 }
 
-function StrikeCell({ row, sides, marks }: { row: Row; sides: ChainSide[]; marks: Map<string, UnusualRow> }) {
+/** The strikes the walls name (put wall, call wall, max pain), each with its names and what they mean. The gamma flip is a
+ * price between strikes, so it stays in the read line. */
+function wallStrikes(walls: DeskWalls | null): Map<number, { name: string; hint: string }[]> {
+  const out = new Map<number, { name: string; hint: string }[]>();
+  for (const level of walls?.levels ?? []) {
+    if (level.kind === "gamma_flip") continue;
+    out.set(level.price, [...(out.get(level.price) ?? []), { name: level.name.toLowerCase(), hint: level.hint }]);
+  }
+  return out;
+}
+
+/** The shown expiry's walls in one line: current, or grey with its time and why it is not. */
+function WallsRead({ walls, failed }: { walls: DeskWalls | null; failed: string | null }) {
+  if (!walls && !failed) return <p data-testid="chain-walls" data-state="loading" className="text-[11px] text-muted-foreground">Walls: reading…</p>;
+  if (!walls || walls.state === "none") return failed ? <p data-testid="chain-walls" data-state="failed" className="text-[11px] text-muted-foreground">Walls unavailable: {failed}</p> : null;
+  if (walls.state === "loading") return <p data-testid="chain-walls" data-state="loading" className="text-[11px] text-muted-foreground">Walls: {walls.message ?? "reading the chain…"}</p>;
+  const current = walls.state === "ready" && !failed;
+  const has = walls.levels.length > 0 || !!walls.expected_move;
+  const when = walls.fetched_at ? `as of ${clock(walls.fetched_at)} ET` : "time unknown";
+  const why = failed ?? walls.message;
+  return (
+    <p data-testid="chain-walls" data-state={current ? "ready" : "stale"} title={walls.assumption ?? undefined}
+      className={cn("text-xs tabular-nums", current ? "text-foreground/90" : "text-muted-foreground")}>
+      {has ? wallsLine(walls) : "Walls unavailable"}
+      <span className="text-[11px] text-muted-foreground">
+        {current ? " · dealer side assumed" : ` · ${when}, not current${why ? `: ${why}` : ""}`}
+        {walls.simulated ? " · simulated" : ""}
+      </span>
+    </p>
+  );
+}
+
+function StrikeCell({ row, sides, marks, walls = [] }: { row: Row; sides: ChainSide[]; marks: Map<string, UnusualRow>; walls?: { name: string; hint: string }[] }) {
   const held = sides.flatMap(s => row[s]?.held ? [`${row[s]!.held} held ${s}${row[s]!.held === 1 ? "" : "s"}`] : []);
   const planned = sides.some(s => row[s]?.planned);
   const odd = sides.flatMap(s => { const u = marks.get(`${s}:${row.strike}`); return u ? [`Unusual ${s}: volume ${u.volume.toLocaleString("en-US")} against open interest ${u.open_interest.toLocaleString("en-US")}${u.ratio === null ? "" : ` (${u.ratio}×)`}`] : []; });
@@ -301,12 +342,13 @@ function StrikeCell({ row, sides, marks }: { row: Row; sides: ChainSide[]; marks
     <td className={cn("whitespace-nowrap border-x px-1.5 py-1 text-center", row.atm && "font-semibold")}>
       <span>{strikeText(row.strike)}</span>
       {row.atm && <span className="ml-1 text-[10px] font-normal text-sky-300" title="At the money: the strike nearest the price">ATM</span>}
-      {(held.length > 0 || planned || row.levels.length > 0 || odd.length > 0) && (
+      {(held.length > 0 || planned || row.levels.length > 0 || odd.length > 0 || walls.length > 0) && (
         <span className="block text-[10px] font-normal leading-tight">
           {held.length > 0 && <span data-testid="chain-held" className="text-emerald-400" title={held.join(", ")}>held</span>}
           {planned && <span data-testid="chain-planned" className="ml-1 text-amber-300" title="The contract a saved plan names">plan</span>}
           {row.levels.map(l => <span key={l} data-testid="chain-level" className="ml-1 text-muted-foreground" title={`Your plan's ${l} price is at this strike`}>{l}</span>)}
           {odd.length > 0 && <span data-testid="chain-unusual" className="ml-1 text-orange-300" title={odd.join("; ")}>unusual</span>}
+          {walls.map(w => <span key={w.name} data-testid="chain-wall" className="ml-1 text-violet-300" title={`${w.hint} Dealer side assumed.`}>{w.name}</span>)}
         </span>
       )}
     </td>

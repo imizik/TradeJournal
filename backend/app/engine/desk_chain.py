@@ -224,7 +224,7 @@ def _fixture_read(symbol: str, expiration: date | None, ttl: int) -> dict:
     if symbol != "NBIS":
         return {"live": [], "chain": None, "fetched": None, "issue": "The sandbox fixture has a simulated NBIS chain only.",
                 "spot": None, "spot_at": None, "spot_issue": None, "simulated": True}
-    chains = simulated_chains("NBIS", 94.35, date.fromisoformat(SESSION))
+    chains = simulated_chains("NBIS", 94.35, date.fromisoformat(SESSION), walls=True)
     live = sorted(d for d in chains if d >= date.fromisoformat(SESSION))
     chosen = expiration if expiration in live else live[0]
     return {"live": live, "chain": chains[chosen], "fetched": at, "issue": None, "spot": 94.35, "spot_at": at,
