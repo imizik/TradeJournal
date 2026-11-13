@@ -76,6 +76,10 @@
   min-width: 0;
 }
 
+.moving {
+  min-width: 0;
+}
+
 .cockpit {
   position: relative;
   display: grid;
@@ -269,8 +273,32 @@
     margin-right: 8px;
   }
 
+  /* Positions and what needs a decision fill the first screen: the Needs-you strip, the book, then What's moving and the
+     centre. */
   .cockpit {
+    display: flex;
+    flex-direction: column;
     padding-inline: 8px;
+  }
+
+  .strip {
+    display: contents;
+  }
+
+  .book {
+    order: 2;
+  }
+
+  .moving {
+    order: 3;
+  }
+
+  .centre {
+    order: 4;
+  }
+
+  .thread {
+    order: 5;
   }
 }
 

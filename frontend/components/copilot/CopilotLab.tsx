@@ -689,8 +689,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           <div className={styles.strip}>
             {needs.length > 0 && <NeedsStrip needs={needs} actions={needActions} />}
             {unchecked && <p data-testid="needs-you-unchecked" className="px-1 pt-1 text-xs text-muted-foreground">Needs you could not check {unchecked} just now; it will read again in a minute.</p>}
-            {/* What's moving: one thin row across the book and the centre; a tile selects its symbol in place, as a watched name does. */}
-            <MovingStrip on={on} selected={centreSymbol} onSelect={selectWatched} />
+            {/* What's moving: one thin row across the book and the centre, folded until opened; a tile selects its symbol in
+                place, as a watched name does. A phone puts it under the book. */}
+            <div className={styles.moving}><MovingStrip on={on} selected={centreSymbol} onSelect={selectWatched} /></div>
           </div>
         )}
         {on && (

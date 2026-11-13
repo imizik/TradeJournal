@@ -220,7 +220,7 @@ test("Radar hits sit in the Feed, not the ticker list: each hit opening its even
   await lab(page);
   const centre = page.getByRole("region", { name: "Chart and feed" });
   await centre.getByRole("tab", { name: "Feed" }).click();
-  await centre.getByRole("button", { name: "Market", exact: true }).click();
+  await centre.getByRole("button", { name: "Ideas", exact: true }).click(); // opens on Radar
   const hit = centre.getByTestId("feed-item");
   await expect(hit).toContainText("MU up 4.1% while SMH is up 0.6%");
   await expect(hit.getByRole("link", { name: "Open", exact: true })).toHaveAttribute("href", `/radar?event=${EVENT}`);

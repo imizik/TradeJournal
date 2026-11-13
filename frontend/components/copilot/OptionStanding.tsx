@@ -359,7 +359,8 @@ export function OptionStandingLine({ row, rows, fallback = null }: {
   if (s.decayPerDay !== null) parts.push(`${dollars(s.decayPerDay, true)}/day`);
   if (s.perDollar !== null) parts.push(`${dollars(s.perDollar, true)} per $1`);
   if (s.ivPct !== null) parts.push(`IV ${s.ivPct.toFixed(0)}%`);
-  if (!s.greeks) parts.push("Greeks unavailable");
+  // A missing Greeks read is said once, in the chart's standing above, not again on the book row.
+  if (!parts.length) return <CloseButtons closing={closing} className="px-3 pb-2" />;
   return (
     <>
       <p data-testid="book-standing" className={cn("truncate px-3 pb-1.5 text-[11px] tabular-nums text-muted-foreground", stock && !stock.live && "opacity-70")}>

@@ -34,8 +34,16 @@ export type DeskFeedBody = { as_of: string; now: number; day: string; items: Fee
 
 const SEEN_KEY = "desk.feed.seen.v1";
 const ACTION = "inline-flex min-h-11 items-center gap-1 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-7";
-const FILTERS = [["mine", "Mine"], ["market", "Market"], ["all", "Mine + Market"], ["unusual", "Unusual options"]] as const;
-type Filter = (typeof FILTERS)[number][0] | "chatter" | "scanner";
+/** The Feed's four groups: what is his, ideas he could act on, the market's news, and everything. Ideas and Market each
+ * carry a small second row (Radar, Scanner, Unusual options; News & calendar, Chatter) when there is more than one. */
+const GROUPS = [["mine", "Mine"], ["ideas", "Ideas"], ["market", "Market"], ["all", "All"]] as const;
+type Group = (typeof GROUPS)[number][0];
+type Idea = "radar" | "scanner" | "unusual";
+type MarketPick = "news" | "chatter";
+/** What the list shows: a group, or one of its second row's picks. */
+type Filter = "mine" | "all" | Idea | MarketPick;
+const RADAR: readonly FeedSource[] = ["Radar", "Radar setup"];
+const isRadar = (item: FeedItem) => RADAR.includes(item.source);
 
 const ny = (at: number, options: Intl.DateTimeFormatOptions) => new Date(at * 1000).toLocaleString("en-US", { timeZone: "America/New_York", ...options });
 /** "10:40" today, "Thu 08:30" on another day; a date-only item reads "Today" or "Thu". */
@@ -86,7 +94,8 @@ export function useDeskFeed(on: boolean): { data: DeskFeedBody | null; failed: b
   return { data, failed };
 }
 
-/** How many items arrived since the Feed was last opened in this browser; on a first visit, all of today's so far. */
+/** How many of his own items (Mine: his book, plans and day) arrived since the Feed was last opened in this browser; on a
+ * first visit, all of today's so far. Ideas and the market's news never count: the tab badges only what is his. */
 export function useFeedNew(data: DeskFeedBody | null, open: boolean): { count: number; since: number | null } {
   const [seen, setSeen] = useState<number | null | undefined>(undefined);
   const [since, setSince] = useState<number | null>(null); // what counted as new when the tab opened, for its dots
@@ -98,48 +107,56 @@ export function useFeedNew(data: DeskFeedBody | null, open: boolean): { count: n
     setSeen(data.now);
   }, [open, data, seen]);
   useEffect(() => { if (!open) setSince(null); }, [open]); // eslint-disable-line react-hooks/set-state-in-effect -- closed: the next open counts afresh
-  const count = !data || seen === undefined ? 0 : data.items.filter(i => !i.upcoming && i.at > (seen ?? 0)).length;
+  const count = !data || seen === undefined ? 0 : data.items.filter(i => i.mine && !i.upcoming && i.at > (seen ?? 0)).length;
   return { count, since };
 }
 
 /**
  * The centre's Feed tab (docs/copilot-lab.md § The desk): one stream of what the app already knows today, from
- * ``GET /copilot/desk/feed``. Mine (his book, plans and day), Market, or both; tapping a symbol shows that symbol's story,
- * with a way back. Each row: its source, time, symbol and words, and the same small actions: Ask the copilot, Open in
- * Charts, the headline at its publisher, and Plan it only on a Radar setup card or his own position or plan. Facts
- * only; nothing here is an order. A source that could not be read is left out quietly. The copilot's own questions
- * (What matters right now?, Review my week) are in the copilot and ⌘K, not repeated here.
- * **Chatter** (r/wallstreetbets buzz from ApeWisdom's counts, NYT headlines) is a fourth filter that shows only while a chatter source has rows;
- * its rows never show under the other filters, never count as new, and carry only Ask the copilot and their link; what
- * a chatter source did not deliver is said only under that filter.
- * **Unusual options** (``DeskUnusual``) is its own filter: unusual contracts on his held and watched names; a row selects
- * the contract in the Chain tab. Never counted as new, never mixed into the other filters.
- * **Scanner** (``DeskScanner``) is its own filter while the setup scanner is switched on: today's candidates; a row opens
- * the ticker on the desk chart with the scanner's levels. Never counted as new, never mixed into the other filters.
+ * ``GET /copilot/desk/feed``, in four groups: **Mine** (the default: his book, plans and day), **Ideas** (things he could
+ * act on that are not his yet: Radar's events and setup cards, the setup scanner's candidates while it is on, and unusual
+ * options on his held and watched names, one tap apart on a small second row), **Market** (the rest: headlines and the
+ * calendar, and Chatter beside them while a chatter source has rows) and **All** (Mine, Radar and Market's news
+ * together, never the Scanner, Unusual or Chatter lists). Tapping a symbol shows that symbol's story, with a way back.
+ * Each row: its source, time, symbol and words, and the same small actions: Ask the copilot, Open in Charts, the
+ * headline at its publisher, and Plan it only on a Radar setup card or his own position or plan. Facts only; nothing here
+ * is an order. A source that could not be read is left out quietly. The copilot's own questions (What matters right
+ * now?, Review my week) are in the copilot and ⌘K, not repeated here.
+ * **Chatter** (r/wallstreetbets buzz from ApeWisdom's counts, NYT headlines): its rows never show under the other picks,
+ * never count as new, and carry only Ask the copilot and their link; what a chatter source did not deliver is said only
+ * under it.
+ * **Unusual options** (``DeskUnusual``): unusual contracts on his held and watched names; a row selects the contract in
+ * the Chain tab. **Scanner** (``DeskScanner``), while the setup scanner is switched on: today's candidates; a row opens
+ * the ticker on the desk chart with the scanner's levels. Neither counts as new or mixes into the other picks.
  */
 export default function DeskFeed({ data, failed, since, onAsk, onPlan, unusual = null, onUnusual, scanner = null, onScanner, onScannerPlan }: {
   data: DeskFeedBody | null; failed: boolean; since: number | null; onAsk(item: FeedItem): void; onPlan(item: FeedItem): void;
   unusual?: UnusualReply | null; onUnusual?(pick: ChainPick): void;
   scanner?: DeskScannerReply | null; onScanner?(row: DeskScannerRow): void; onScannerPlan?(href: string): void;
 }) {
-  const [picked, setFilter] = useState<Filter>("mine");
+  const [group, setGroup] = useState<Group>("mine");
+  const [ideaPick, setIdea] = useState<Idea>("radar");
+  const [marketPick, setMarket] = useState<MarketPick>("news");
   const [symbol, setSymbol] = useState<string | null>(null);
   const chatter = data?.chatter ?? null;
   const chatterOn = (chatter?.items.length ?? 0) > 0;
   const scannerOn = !!scanner && scanner.state !== "off";
-  const filter: Filter = (picked === "chatter" && !chatterOn) || (picked === "scanner" && !scannerOn) ? "mine" : picked;
-  // Chatter gone (nothing to show this minute): back to Mine for good, so it never reopens without a tap.
-  useEffect(() => { if (picked === "chatter" && data && !chatterOn) setFilter("mine"); }, [picked, data, chatterOn]); // eslint-disable-line react-hooks/set-state-in-effect -- follows the feed's own read
+  const idea: Idea = ideaPick === "scanner" && !scannerOn ? "radar" : ideaPick;
+  const marketShown: MarketPick = marketPick === "chatter" && !chatterOn ? "news" : marketPick;
+  const filter: Filter = group === "ideas" ? idea : group === "market" ? marketShown : group;
+  // Chatter gone (nothing to show this minute): back to News & calendar for good, so it never reopens without a tap.
+  useEffect(() => { if (marketPick === "chatter" && data && !chatterOn) setMarket("news"); }, [marketPick, data, chatterOn]); // eslint-disable-line react-hooks/set-state-in-effect -- follows the feed's own read
   const items = useMemo(() => {
     if ((filter === "chatter" || filter === "unusual" || filter === "scanner") && !symbol) return filter === "chatter" ? chatter?.items ?? [] : [];
     const all = (data?.items ?? []).filter(i => !i.chatter);
     if (symbol) return all.filter(i => i.symbol === symbol);
-    return all.filter(i => filter === "all" || (filter === "mine") === i.mine);
+    // Mine: his book, plans and day. Radar: every Radar event and setup card. News & calendar: the rest that is not his.
+    return all.filter(i => filter === "all" || (filter === "mine" ? i.mine : filter === "radar" ? isRadar(i) : !i.mine && !isRadar(i)));
   }, [data, chatter, filter, symbol]);
   const day = data?.day ?? "";
-  const market = (data?.items ?? []).filter(i => !i.mine).length;
-  const filters: readonly (readonly [Filter, string])[] = [...FILTERS, ...(scannerOn ? [["scanner", "Scanner"] as const] : []),
-    ...(chatterOn ? [["chatter", "Chatter"] as const] : [])];
+  const notMine = (data?.items ?? []).filter(i => !i.mine).length;
+  const ideas: readonly (readonly [Idea, string])[] = [["radar", "Radar"], ...(scannerOn ? [["scanner", "Scanner"] as const] : []), ["unusual", "Unusual options"]];
+  const markets: readonly (readonly [MarketPick, string])[] = chatterOn ? [["news", "News & calendar"], ["chatter", "Chatter"]] : [];
   const chatterNote = chatterWhy(chatter);
 
   return (
@@ -150,13 +167,17 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, unusual =
           <span className="text-sm"><span className="font-semibold">{symbol}</span><span className="text-muted-foreground"> · its story today</span></span>
         </div>
       ) : (
-        <div role="group" aria-label="Show" className="inline-flex flex-wrap rounded-md border p-0.5">
-          {filters.map(([id, label]) => (
-            <button key={id} type="button" aria-pressed={filter === id} onClick={() => setFilter(id)}
-              className={cn("min-h-11 rounded px-2.5 text-xs sm:min-h-7", filter === id ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}>
-              {label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <div role="group" aria-label="Show" className="inline-flex flex-wrap rounded-md border p-0.5">
+            {GROUPS.map(([id, label]) => (
+              <button key={id} type="button" aria-pressed={group === id} onClick={() => setGroup(id)}
+                className={cn("min-h-11 rounded px-2.5 text-xs sm:min-h-7", group === id ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {group === "ideas" && <SubPicks<Idea> label="Ideas" picks={ideas} value={idea} onPick={setIdea} />}
+          {group === "market" && markets.length > 0 && <SubPicks<MarketPick> label="Market" picks={markets} value={marketShown} onPick={setMarket} />}
         </div>
       )}
       {filter === "chatter" && !symbol && chatter && <ChatterHead chatter={chatter} day={day} />}
@@ -166,7 +187,7 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, unusual =
         : <p className="text-xs text-muted-foreground">Reading the feed…</p>)}
       {data && !items.length && (
         <p className="rounded-md border bg-card px-3 py-2.5 text-xs text-muted-foreground">
-          {filter === "mine" && !symbol && market ? `Nothing on your book or plans yet today. Market has ${market}.` : "Nothing here yet today."}
+          {filter === "mine" && !symbol && notMine ? `Nothing on your book or plans yet today. Ideas and Market have ${notMine}.` : "Nothing here yet today."}
         </p>
       )}
       {items.length > 0 && (
@@ -183,6 +204,20 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, unusual =
       {chatterNote && filter === "chatter" && <p data-testid="feed-chatter-note" className="px-1 text-xs text-muted-foreground">{chatterNote}</p>}
       </>}
     </section>
+  );
+}
+
+/** A group's second row: plain words, the picked one underlined. */
+function SubPicks<T extends string>({ label, picks, value, onPick }: { label: string; picks: readonly (readonly [T, string])[]; value: T; onPick(pick: T): void }) {
+  return (
+    <div role="group" aria-label={label} className="inline-flex flex-wrap gap-x-2.5">
+      {picks.map(([id, text]) => (
+        <button key={id} type="button" aria-pressed={value === id} onClick={() => onPick(id)}
+          className={cn("min-h-11 border-b text-xs sm:min-h-7", value === id ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+          {text}
+        </button>
+      ))}
+    </div>
   );
 }
 

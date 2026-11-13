@@ -84,15 +84,16 @@ const TILE = "inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap ro
 
 /**
  * The strip. ``onSelect`` puts a symbol on the desk in place (the chart switches and the copilot follows); nothing here
- * navigates. Collapsed, it is one short line; the choice is remembered on this device.
+ * navigates. Folded by default, it is one short line; opened or folded, the choice is remembered on this device.
  */
 export function MovingStrip({ on, selected, onSelect }: { on: boolean; selected: string | null; onSelect(symbol: string): void }) {
   const { data, failed } = useMoving(on);
-  const [collapsed, setCollapsed] = useState(false);
+  // Folded until he opens it (it is the market's, not his book's); his choice is remembered on this device.
+  const [collapsed, setCollapsed] = useState(true);
   const [open, setOpen] = useState<{ key: string; left: number; top: number } | null>(null);
   const popover = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    try { setCollapsed(window.localStorage.getItem(COLLAPSED_KEY) === "1"); } catch { /* the default: open */ } // eslint-disable-line react-hooks/set-state-in-effect -- read once after mount, the server render has no storage
+    try { setCollapsed(window.localStorage.getItem(COLLAPSED_KEY) !== "0"); } catch { /* the default: folded */ } // eslint-disable-line react-hooks/set-state-in-effect -- read once after mount, the server render has no storage
   }, []);
   const toggle = () => {
     const next = !collapsed;
