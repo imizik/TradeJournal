@@ -69,7 +69,7 @@ export function UnusualList({ reply, onPick }: { reply: UnusualReply | null; onP
   const grey: string[] = [];
   if (reply.unread.length) grey.push(`${reply.label === "live" ? "Not read yet" : "No reading from that session"}: ${reply.unread.join(", ")}.`);
   if (reply.no_history.length) grey.push(`No volume history yet for ${reply.no_history.join(", ")}, so only the volume-vs-open-interest rule applies.`);
-  if (reply.partial?.length) grey.push(`Only part of the chain was read for ${reply.partial.join(", ")}, so the whole-ticker check was skipped.`);
+  if (reply.partial?.length) grey.push(`The whole-ticker check was skipped for ${reply.partial.join(", ")}: fewer than two expiries after today were read.`);
   if (reply.stale.length) grey.push(`Not read again lately (greyed): ${reply.stale.join(", ")}.`);
   return (
     <section data-testid="feed-unusual" aria-label="Unusual options" className="space-y-2">
