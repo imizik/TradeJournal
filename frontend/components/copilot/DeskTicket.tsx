@@ -414,10 +414,12 @@ function ClosingView({ ticket: t, onClose, onPlaced }: { ticket: ClosingTicket; 
             <span data-testid="closing-mark" className="text-xs tabular-nums text-muted-foreground">Mark now {t.mark.toFixed(2)}{t.markLive ? "" : " (last read)"}</span>
           </span>
           <span data-testid="closing-estimate" className="block text-xs text-amber-300">
-            Estimate, not a quote: if {t.symbol} reaches {t.level.toFixed(2)} (now {t.stock.toFixed(2)}{t.stockAt ? `, ${clock(t.stockAt)}` : ""}), the mark {t.mark.toFixed(2)} {signed(t.delta * (t.level - t.stock))} by its delta {t.delta.toFixed(2)} ≈ {t.estimate.toFixed(2)}. Time, IV and the spread move it; set your own.
+            {t.past
+              ? <>{t.symbol} is already {t.at === "stop" ? "through your stop" : "past your target"} ({t.stock.toFixed(2)}{t.stockAt ? `, ${clock(t.stockAt)}` : ""} against {t.level.toFixed(2)}): the limit starts at today&apos;s mark, not a price for the level. Set your own.</>
+              : <>Estimate, not a quote: if {t.symbol} reaches {t.level.toFixed(2)} (now {t.stock.toFixed(2)}{t.stockAt ? `, ${clock(t.stockAt)}` : ""}), the mark {t.mark.toFixed(2)} {signed(t.delta * (t.level - t.stock))} by its delta {signed(t.delta)}{t.floored ? `, raised to ${t.estimate.toFixed(2)}, its least value there (worth at expiry, or a cent)` : ` ≈ ${t.estimate.toFixed(2)}`}. Time, IV and the spread move it; set your own.</>}
           </span>
         </Row>
-        <Row name="Proceeds"><span className="tabular-nums">{limitN !== null && qtyN ? `about ${usd(limitN * 100 * qtyN)} at this limit` : "—"}</span></Row>
+        <Row name="Proceeds"><span className="tabular-nums">{limitN !== null && qtyN ? `about ${usd(limitN * t.multiplier * qtyN)} at this limit` : "—"}</span></Row>
       </div>
       <div className="space-y-2">
         <CopyButton text={all} label="Copy all for Robinhood" wide />

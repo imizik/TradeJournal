@@ -5,7 +5,9 @@
  * places, sends or reads anything: the owner copies the fields into Robinhood himself.
  *
  * The estimate moves today's option mark by its delta: mark + delta x (level - stock), never below the contract's value
- * at expiry with the stock at the level, rounded to the cent and at least $0.01. A call's delta is positive and a put's
+ * at expiry with the stock at the level, rounded to the cent and at least $0.01. When the stock is already at or past
+ * the level (through the stop, or beyond the target), the limit is today's mark instead: a sell priced for a level the
+ * stock has left would sit above the market at the stop, so the ticket starts where the option trades now and says so. A call's delta is positive and a put's
  * negative, so a call's estimate rises with the stock and a put's falls. It is a first-order guess (no gamma, no time,
  * no IV change), shown as one. Any missing input (no mark, no delta, a delta on the wrong side for the contract, no
  * stock price, no level, no size, no account) gives no ticket, so the button is absent: never a zero or made-up price.
@@ -36,6 +38,12 @@ export type ClosingTicket = {
   delta: number;
   /** The estimated limit, a share's premium, in cents. */
   estimate: number;
+  /** The stock is already at or past the level: the limit is today's mark, not a move to the level. */
+  past: boolean;
+  /** The delta move alone came out lower: the limit is the contract's value at expiry there (or the $0.01 floor). */
+  floored: boolean;
+  /** Shares a contract (100 for a standard contract), for the proceeds. */
+  multiplier: number;
 };
 
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
@@ -68,7 +76,13 @@ export function closingTicket({ symbol, at, terms, levels, account, stock, worth
   if (!finite(level) || level <= 0 || !stock || !finite(worth) || worth <= 0) return null;
   const mark = Math.round(worth / (quantity * multiplier) * 10000) / 10000;
   const delta = terms.greeks?.delta;
-  const estimate = closeEstimate(side, strike, mark, delta, stock.last, level);
-  if (estimate === null || !finite(delta)) return null;
-  return { at, symbol, side, strike, expiry, contracts: quantity, account, level, stock: stock.last, stockAt: stock.at, mark, markLive, delta, estimate };
+  const moved = closeEstimate(side, strike, mark, delta, stock.last, level);
+  if (moved === null || !finite(delta)) return null;
+  // Past the level: a call's stop or a put's target is below the stock's path, so "past" is at or under it.
+  const below = (side === "call") === (at === "stop");
+  const past = below ? stock.last <= level : stock.last >= level;
+  const estimate = past ? Math.max(0.01, Math.round(mark * 100) / 100) : moved;
+  const floored = !past && estimate > Math.max(0.01, Math.round((mark + delta * (level - stock.last)) * 100) / 100);
+  return { at, symbol, side, strike, expiry, contracts: quantity, account, level, stock: stock.last, stockAt: stock.at, mark, markLive, delta,
+    estimate, past, floored, multiplier };
 }

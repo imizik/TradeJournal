@@ -1521,8 +1521,9 @@ that nothing in it places or sends anything.
   contracts held, filled in the browser from the book row (`frontend/lib/closingTicket.ts`): the account holding it
   (Robinhood's label and masked number, else the journal account), the contract, the quantity held, and a limit
   estimated for the stock at that plan level, mark + delta x (level − stock), never below the contract's value at
-  expiry there, rounded to the cent and at least $0.01, labelled **Estimate, not a quote** with the sum shown and
-  today's mark beside it ("Mark now 4.10", or "(last read)" without a live option tick). Quantity and limit are
+  expiry there, rounded to the cent and at least $0.01, labelled **Estimate, not a quote** with the sum shown (and
+  when a floor set it) and today's mark beside it; with the stock already at or past the level (through the stop,
+  beyond the target) the limit is today's mark instead and the ticket says so, never a sell priced above the market ("Mark now 4.10", or "(last read)" without a live option tick). Quantity and limit are
   editable; **Copy all for Robinhood** puts Sell · Call/Put in place of Buy. It reads no route and has no Send button
   at all. A missing input (no plan level, no target, no mark, no delta or a delta on the wrong side for the contract,
   no stock price, no account, a fractional size, a short or multi-leg structure) leaves that button out: never a zero

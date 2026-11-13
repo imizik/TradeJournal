@@ -132,11 +132,14 @@ test("a planned call: the target line on the chart, then Close at target fills a
   await expect(t.getByLabel("Limit price per share")).toHaveValue("8.28");
   await expect(t.getByTestId("closing-mark")).toHaveText("Mark now 4.10");
   await expect(t.getByTestId("closing-estimate")).toContainText("Estimate, not a quote: if ORCL reaches 258.00 (now 247.00");
-  await expect(t.getByTestId("closing-estimate")).toContainText("the mark 4.10 +4.18 by its delta 0.38 ≈ 8.28");
+  await expect(t.getByTestId("closing-estimate")).toContainText("the mark 4.10 +4.18 by its delta +0.38 ≈ 8.28");
   await expect(t).toContainText("about $1,656.00 at this limit");
   // Copy only: no Send button of any kind, and opening the ticket wrote nothing.
   await expect(t.getByRole("button", { name: /send/i })).toHaveCount(0);
-  await expect(t.getByRole("button", { name: "Copy all for Robinhood" })).toBeVisible();
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await t.getByRole("button", { name: "Copy all for Robinhood" }).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    "ORCL\nSell · Call\nExpiration 11/20/26\nStrike $250\nLimit price 8.28\nContracts 2");
   expect(writes.slice(before).map(r => `${r.method()} ${new URL(r.url()).pathname}`)).toEqual([]);
 
   // Close at stop, from the book row while the Ticket has the centre: 4.10 + 0.38 x (240 − 247) = 1.44.

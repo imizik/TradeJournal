@@ -21,7 +21,8 @@ test("a call: the mark moves by its delta toward the level, up at the target and
   const atTarget = closingTicket({ ...orcl, at: "target" })!;
   // 4.10 + 0.38 x (258 − 247) = 8.28, above the 8.00 it is worth at expiry there.
   expect(atTarget).toEqual({ at: "target", symbol: "ORCL", side: "call", strike: 250, expiry: "2026-11-20", contracts: 2,
-    account: "Roth IRA ••8267", level: 258, stock: 247, stockAt: 1_794_000_000, mark: 4.1, markLive: true, delta: 0.38, estimate: 8.28 });
+    account: "Roth IRA ••8267", level: 258, stock: 247, stockAt: 1_794_000_000, mark: 4.1, markLive: true, delta: 0.38, estimate: 8.28,
+    past: false, floored: false, multiplier: 100 });
   // 4.10 + 0.38 x (240 − 247) = 1.44.
   expect(closingTicket({ ...orcl, at: "stop" })!.estimate).toBe(1.44);
 });
@@ -31,6 +32,7 @@ test("a put: a negative delta raises the estimate as the stock falls to the targ
     stock: { last: 28.6, at: null }, worth: 3 * 148, markLive: false };
   // 1.48 − 0.42 x (27.8 − 28.6) = 1.816, below the 2.20 it is worth at expiry there: 2.20.
   expect(closingTicket({ ...apld, at: "target" })!.estimate).toBe(2.2);
+  expect(closingTicket({ ...apld, at: "target" })!.floored).toBe(true); // the screen says the floor set it
   // Closer in, the delta's move shows: 1.48 − 0.42 x (28.5 − 28.6) = 1.522 → 1.52, above the 1.50 at expiry.
   expect(closeEstimate("put", 30, 1.48, -0.42, 28.6, 28.5)).toBe(1.52);
   // 1.48 − 0.42 x (29.5 − 28.6) = 1.102 → 1.10; intrinsic at 29.5 is 0.50.
@@ -67,4 +69,21 @@ test("any missing input or a delta that does not fit the contract gives no ticke
   expect(closeEstimate("put", 30, 1.48, 0.42, 28.6, 27)).toBeNull(); // a put's delta is negative
   expect(closeEstimate("call", 250, 4.1, 1.4, 247, 258)).toBeNull();
   expect(closeEstimate("call", 250, 0, 0.38, 247, 258)).toBeNull();
+});
+
+test("already through the stop or past the target: the limit is today's mark, never a price above the market", () => {
+  // A call with the stock at 238, under its 240 stop: the delta move would ask 4.10 + 0.38 x 2 = 4.86 against a 4.10 market.
+  const through = closingTicket({ ...orcl, at: "stop", stock: { last: 238, at: null } })!;
+  expect(through.past).toBe(true);
+  expect(through.estimate).toBe(4.1);
+  // At the stop exactly counts as there.
+  expect(closingTicket({ ...orcl, at: "stop", stock: { last: 240, at: null } })!.past).toBe(true);
+  // A call already above its 258 target: the mark, not a lower price for the level it left.
+  const beyond = closingTicket({ ...orcl, at: "target", stock: { last: 260, at: null } })!;
+  expect([beyond.past, beyond.estimate]).toEqual([true, 4.1]);
+  // A put: its stop is above the stock and its target below.
+  const apld = { symbol: "APLD", terms: put, levels: { stop: 29.5, target: 27.8 }, account: "Individual ••1234", worth: 3 * 148 };
+  expect(closingTicket({ ...apld, at: "stop", stock: { last: 29.8, at: null } })!.estimate).toBe(1.48);
+  expect(closingTicket({ ...apld, at: "target", stock: { last: 27.5, at: null } })!.past).toBe(true);
+  expect(closingTicket({ ...apld, at: "stop", stock: { last: 28.6, at: null } })!.past).toBe(false);
 });
