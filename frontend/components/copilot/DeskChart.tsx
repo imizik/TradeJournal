@@ -578,6 +578,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     clearPress();
     // Only a first finger or the mouse: a second finger is a pinch.
     if (!event.isPrimary || event.button !== 0 || (menuBox.current && menuBox.current.contains(event.target as Node))) return;
+    if ((event.target as HTMLElement).closest?.('[data-testid="desk-chart-event"]')) return;  // an event chip: its own tooltip
     const spot = at(event.clientX, event.clientY);
     if (!spot) return;
     press.current = { ...spot, clientX: event.clientX, clientY: event.clientY, at: Date.now(),

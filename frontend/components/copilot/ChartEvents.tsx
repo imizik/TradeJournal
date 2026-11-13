@@ -81,10 +81,13 @@ export function eventLogical(data: Pick<DeskChartData, "bars" | "step" | "timefr
   }
   const ahead = weekdaysBetween(last, date);
   if (data.timeframe === "1D") return bars.length - 1 + ahead;
-  // Intraday: from the last candle to the end of its session, whole sessions between, then the day's first candle.
+  // Intraday: from the last day's last regular candle to the end of its session (its after-hours candles already sit
+  // past it), whole sessions between, then the day's first candle.
   const perDay = Math.max(1, Math.round(REGULAR_SECONDS / data.step));
-  const rest = Math.max(0, perDay - bars.filter((b, i) => days[i] === last && !b.extended).length);
-  return bars.length - 1 + rest + (ahead - 1) * perDay + 1;
+  let anchor = bars.length - 1;
+  while (anchor > 0 && days[anchor] === last && bars[anchor].extended) anchor -= 1;
+  const regular = bars.filter((b, i) => days[i] === last && !b.extended).length;
+  return Math.max(bars.length, anchor + Math.max(0, perDay - regular) + (ahead - 1) * perDay + 1);
 }
 
 type Placed = ChartEvent & { x: number | null; pinned: boolean };
@@ -124,7 +127,7 @@ export function ChartEventMarks({ chart, data }: { chart: IChartApi | null; data
   const chip = (p: Placed, style: CSSProperties, arrow = false) => (
     <button key={p.key} type="button" data-testid="desk-chart-event" data-kind={p.kind} data-date={p.date} data-pinned={arrow ? "true" : "false"}
       aria-label={p.lines.join(" ")} aria-expanded={open === p.key}
-      onPointerDownCapture={e => e.stopPropagation()} onClick={() => setOpen(o => o === p.key ? null : p.key)}
+      onClick={() => setOpen(o => o === p.key ? null : p.key)}
       onMouseEnter={() => setOpen(p.key)} onMouseLeave={() => setOpen(o => o === p.key ? null : o)}
       onFocus={() => setOpen(p.key)} onBlur={() => setOpen(o => o === p.key ? null : o)}
       className={cn("pointer-events-auto absolute z-10 rounded border px-1 text-[10px] leading-4 tabular-nums",
