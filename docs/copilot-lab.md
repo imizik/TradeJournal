@@ -1680,6 +1680,51 @@ $0.03–0.05 on Sonnet 5.5 (estimated from the desk eval's $0.06 a case at four 
 measured yet). Twenty different names viewed in a day is about $0.60–1.00; staying on a name past its 30 minutes adds a
 read each half hour. Proof: `backend/tests/test_desk_read.py`, `frontend/e2e/copilot-desk-read.spec.ts`.
 
+### The day read
+
+After the close (16:00 New York on a weekday) the desk's copilot panel opens with four to six lines on the owner's day,
+above the day's conversation (`frontend/components/copilot/DayRead.tsx`, `POST /copilot/desk/day-read`,
+`backend/app/engine/day_read.py`): **P&L** (realised today by account, then open P&L by account), **Plans** (which
+trades had a plan saved before the entry and which did not), **Biggest** (the one trade or decision that cost or saved
+the most money and why, in his terms: entry timing, size, held through a level or an alert, exited early) and
+**Tomorrow** (one concrete thing to do differently, tied by name to a trade from today), in the `day_read` job's format
+(§ Jobs). Nothing to rate and no generic advice. **Ask more** puts the read and the facts it was written from into the
+message box as a `Context:` block, so the conversation he starts carries the day report. **Refresh** writes it again.
+
+- **Facts only.** The server builds the day's facts and the model writes from them and the owner context block alone,
+  with no tool: the journal's trades closed today (each with its times, premium a share, size, realised P&L and whether
+  a plan was saved before the entry, from the plan streak) and those opened today and still open, realised P&L by account
+  and its total, the plans saved today, the position alerts sent today with what followed (the alert scorecard's
+  figures), open P&L by account from the Robinhood account line the desk already holds (no call: the feed's snapshot
+  without a refresh) and today's Robinhood fills the journal does not have yet (the order-history pass's lines in memory),
+  marked **provisional**. A trade the plan streak does not track says "plan not tracked". Every dollar figure is
+  written in the facts exactly as the read must quote it, and a read that quotes any other figure (rounded, summed,
+  invented, from the owner context block, with a k or M suffix, or with its sign flipped) is not shown
+  (`day_read.unmatched`); the call still counts.
+- **Not following.** A ticker he does not follow is left out of every part, and a read that names one anyway (the owner
+  context block can carry it) is not shown. An account holding one shows its open P&L
+  from its followed positions only, with no change today; the realised figures leave its trades out, so they can differ
+  from the top bar's on such a day.
+- **One read a day.** Asked on the first open after the close (the server checks the market calendar's close, so an
+  early-close day counts from 13:00) and kept for the New York day, in memory and in `backend/data/day_read/<day>.json`,
+  so a reload, a second tab or a restart shows the same read. Once a `day_read` row exists for the day, an automatic ask
+  that finds nothing kept writes nothing and offers Refresh: only his tap runs a second read, and only the ask that tap
+  starts is sent as a refresh (a tab left open overnight asks the next day's read as an automatic one). A Refresh that
+  fails or is refused never hides the day's good read.
+- **A day with nothing in it** (no fills, provisional ones included, and no plans) is one grey line, "Nothing to read
+  today: no fills and no plans.", and no call; it is not kept, so fills that reach the journal later get their read.
+- **A small turn.** One round, no tools, a $0.10 spend cap and 1,500 output tokens, on the configured model (Sonnet 5.5
+  by default): no cheaper model has been shown to hold an answer shape (§ Follow-up model eval), so none is used here.
+- **The same daily budget.** Every read is a `copilot_turn` row (`kind="day_read"`, `source="desk"`) on
+  `COPILOT_DAILY_BUDGET_USD`. A read starts only while two of its caps still fit under the day's budget; otherwise the
+  panel shows one grey line ("No read of your day: today's copilot budget ($4.00) is spent.") and the refusal is a
+  zero-cost row. `GET /copilot/desk/timings` carries `day_reads`: today's count, refusals and cost.
+
+Expected cost: the job's prompt is about 1,300 tokens, the owner context block and the day's facts a few thousand more
+and the answer about 150 words, so a read is about $0.02–0.04 on Sonnet 5.5 (estimated; no live read has been measured
+yet). One read a day is under $1 a month; each Refresh adds one. Proof: `backend/tests/test_day_read.py`,
+`frontend/e2e/copilot-day-read.spec.ts`.
+
 ## Chatter
 
 Buzz from r/wallstreetbets and NYT business headlines, behind the desk Feed's own **Chatter** filter
@@ -1958,7 +2003,7 @@ headings" and then the Verdict / Read / bullets / Against shape, and the
 companion "at most 80 words" beside the same five-part shape.
 `copilot.run_turn(..., job=)` now takes the turn's job, which
 `copilot_spend.recorded_turn` works out from what its callers already pass
-(`copilot_prompt.job_for`: kind `check_call` or `desk_read`, else source `telegram`, else
+(`copilot_prompt.job_for`: kind `check_call`, `desk_read` or `day_read`, else source `telegram`, else
 kind `prep`, `companion` or `week_review`, else `desk`). Each job gets the shared core (who the owner
 is, the four questions, the evidence, time, untrusted-text, account,
 SIMULATED and no-order rules), a line framing its own job, only the working
@@ -1978,6 +2023,7 @@ answered as on the desk, in the chat format.
 | `week_review` | automatic week review (`week_review_auto`) | Verdict line, then the review in short one-fact lines | 5: week and trade review, trades, proof, `propose_plan` | 1,278 words + 7,700 chars, about 4,100 tokens |
 | `check_call` | Check a call (`call_check.run`, from Telegram or the desk tab) | a Reading line (`?` for anything not stated), Verdict (Pass, Wait or Draft; Unclear only with no ticker), three or four `Tile: label \| value` lines, Against, Changes if, Also for other calls; "Not a call" for an image with none | 5: `get_call_facts` (its own job's alone), quotes, chart, level history, trades | 1,271 words + 5,000 chars, about 3,300 tokens |
 | `desk_read` | the desk read of a selected ticker (`desk_read.read`, § The desk read) | Verdict (never Draft), one or two one-sentence bullets (where it is against his levels, what is moving it today), Changes if; three or four lines | 7: group, news, events, quotes, chart, market regime, Radar today | 1,190 words + 4,300 chars, about 3,000 tokens |
+| `day_read` | the read of his day after the close (`day_read.read`, § The day read) | P&L, Plans, Biggest, Tomorrow (and one more line only when it changes the picture); four to six plain lines, under 110 words, every dollar figure as the facts write it | none: the day's facts are in its message | 960 words, about 1,300 tokens |
 
 Token figures are estimates (characters ÷ 4 for prose, ÷ 3.5 for tool JSON);
 the scorecard's input and cache figures are the measured ones. The brief

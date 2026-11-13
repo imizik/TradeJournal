@@ -56,8 +56,9 @@ owner's rating.
 trading session (``day_only``: today's) and what followed it; a ticker he does not follow is left out.
 ``GET /copilot/desk/day-report`` is the after-close day report's other parts (``app/engine/day_report.py``): today's
 entries with how many had a plan before the fill, and the calls he checked scored from the price when he checked.
-``POST /copilot/desk/read`` is the desk's read of a selected ticker (``app/engine/desk_read.py``); ``GET
-/copilot/desk/timings`` carries today's read count and cost under ``desk_reads``.
+``POST /copilot/desk/read`` is the desk's read of a selected ticker (``app/engine/desk_read.py``); ``POST
+/copilot/desk/day-read`` is the read of the owner's day after the close (``app/engine/day_read.py``); ``GET
+/copilot/desk/timings`` carries today's counts and cost under ``desk_reads`` and ``day_reads``.
 ``GET /copilot/desk/session`` (at the end) is the Briefing's session timeline: today's regular session and what
 happened in it, from the same kind of existing readers, and the alerts and Radar hits still waiting on an answer.
 """
@@ -878,6 +879,49 @@ def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict) -> li
     return new
 
 
+def day_accounts(hidden: set[str]) -> dict:
+    """The day read's open P&L by account (``engine/day_read.py``): the Robinhood account line as the desk holds it (no call: the feed's snapshot without a refresh). An account
+    holding a ticker he does not follow shows its open P&L from its followed positions only, and no change today."""
+    from app.engine import robinhood_book as rb
+    try:
+        summary, snap = rb.feed.snapshot(kick=False)
+    except Exception:  # noqa: BLE001 - the read stands without the account line
+        log.warning("day read: the account line could not be read", exc_info=True)
+        return {"state": "unavailable", "rows": []}
+    if snap is None:
+        return {"state": summary.get("state") or "unavailable", "rows": []}
+    rows = []
+    for a in snap["accounts"]:
+        mine = [p for p in snap["positions"] if p.get("last4") == a["last4"]]
+        if any(p.get("symbol") in hidden for p in mine):
+            followed = [p.get("usd") for p in mine if p.get("symbol") not in hidden]
+            rows.append({"account": a["label"], "open_pnl": round(sum(followed), 2) if None not in followed else None,
+                         "day_change": None, "followed_only": True})
+        else:
+            rows.append({"account": a["label"], "open_pnl": a.get("open_pnl"), "day_change": a.get("day_change"), "followed_only": False})
+    return {"state": "ok", "as_of": snap["at"], "rows": rows}
+
+
+def day_provisional(now: float, hidden: set[str]) -> list[dict]:
+    """The day read's provisional fills: today's Robinhood fills the journal does not have yet (the order-history pass's lines in memory, no call)."""
+    from app.engine import robinhood_book as rb
+    from app.engine import robinhood_fills
+    try:
+        lines = robinhood_fills.poller.desk(now) or []
+    except Exception:  # noqa: BLE001
+        log.warning("day read: Robinhood order lines unreadable", exc_info=True)
+        return []
+    out = []
+    for o in lines:
+        if o["filled"] <= 0 or o["filled_at"] is None or o["symbol"] in hidden or o.get("pairing") not in (None, "provisional"):
+            continue
+        contract = rb.label({"symbol": o["symbol"], "instrument": o["instrument"], "side": o["option_type"], "strike": o["strike"],
+                             "expiry": o["expiry"]})
+        out.append({"contract": contract, "action": robinhood_fills.OPTION_ACTIONS.get(o["action"], o["action"]),
+                    "filled": o["filled"], "avg": o["avg"], "at": o["filled_at"], "account": o["account"]})
+    return out
+
+
 def _order_lines(found: dict, rows: list[dict], now: float, hidden: set[str] = frozenset()) -> list[dict]:
     """Robinhood's orders on the book (``robinhood_fills.Poller.desk``: the order-history pass's last good read, held in
     memory): each working order, and each order with a fill today, goes on its contract's followed book row
@@ -1101,8 +1145,9 @@ def desk_timings(limit: int = 10):
     per route, p50/p90/max of the last timings kept since the backend started, p50/p90 of each section, and the newest
     ``limit`` timings (``first``: the route's first request since the start, the cold one). Section names and
     milliseconds only. Owner-only; answers while the lab is off, so a slow start can still be read."""
-    from app.engine import desk_read, request_timing
-    return {**request_timing.summary(max(0, min(limit, request_timing.KEEP))), "desk_reads": desk_read.today()}
+    from app.engine import day_read, desk_read, request_timing
+    return {**request_timing.summary(max(0, min(limit, request_timing.KEEP))), "desk_reads": desk_read.today(),
+            "day_reads": day_read.today()}
 
 
 class ReadAsk(BaseModel):
@@ -1121,6 +1166,22 @@ async def desk_read_route(body: ReadAsk):
         raise HTTPException(503, "Copilot Lab is off.")
     from app.engine import desk_read
     return await desk_read.read(body.symbol, refresh=body.refresh, kept_only=body.kept_only)
+
+
+class DayReadAsk(BaseModel):
+    refresh: bool = False  # his tap: the only way a second read runs on one day
+
+
+@router.post("/desk/day-read")
+async def desk_day_read_route(body: DayReadAsk):
+    """The copilot's read of the owner's day after the close (``app/engine/day_read.py``): four to six lines written once
+    a day from the day report's facts, kept for the day; one line and no call on a day with no fills and no plans;
+    refused when the day's copilot budget has no room. A ``copilot_turn`` row (``kind="day_read"``) on the shared daily
+    budget; ``today`` is the day's count and cost. Owner-only; refused while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import day_read
+    return await day_read.read(refresh=body.refresh)
 
 
 @router.post("/desk/robinhood/refresh")

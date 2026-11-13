@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 # "plan" only labels turns recorded before everything moved to the API.
 BILLING = {"anthropic": "api", "shadow": "api_background", "plan": "claude_plan", "fake": "none"}
 KINDS = frozenset({"ask", "briefing", "plan", "review", "week_review", "moment", "changes", "compare", "pushback", "prep",
-                   "companion", "shadow", "check_call", "desk_read"})
+                   "companion", "shadow", "check_call", "desk_read", "day_read"})
 SOURCES = frozenset({"desk", "charts", "radar", "panel", "telegram", "prep", "week_review", "companion", "shadow", "eval"})
 PUSHBACK = re.compile(r"^\s*push back on\b", re.I)
 COMPARE_LINE = re.compile(r"^\**compare\**\s*:", re.I | re.M)

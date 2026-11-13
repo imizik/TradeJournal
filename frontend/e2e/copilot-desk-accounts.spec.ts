@@ -120,6 +120,7 @@ test("on a phone the accounts are one row that swipes", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await open(page, desk(LIVE));
   const line = page.getByTestId("desk-accounts");
+  await expect(account(page, "MCP")).toBeVisible(); // evaluateAll does not wait: measure once the line has rendered
   const tops = await line.getByTestId("desk-account").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().top)));
   expect(new Set(tops).size).toBe(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
