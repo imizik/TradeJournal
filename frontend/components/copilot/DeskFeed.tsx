@@ -7,6 +7,7 @@ import { apiUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { ChainPick } from "@/components/copilot/DeskChain";
 import { UnusualList, type UnusualReply } from "@/components/copilot/DeskUnusual";
+import { ScannerList, type DeskScannerReply, type DeskScannerRow } from "@/components/copilot/DeskScanner";
 
 export type FeedSource = "Alert" | "Plan" | "Radar" | "Radar setup" | "News" | "Calendar" | "Copilot note" | "r/wallstreetbets" | "NYT";
 /** One feed row (``app/engine/desk_feed.py``). ``plan``: "setup" (a Radar setup card's own Plan it) or "own" (his own
@@ -35,7 +36,7 @@ const SEEN_KEY = "desk.feed.seen.v1";
 const READ_MS = 60_000;
 const ACTION = "inline-flex min-h-11 items-center gap-1 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-7";
 const FILTERS = [["mine", "Mine"], ["market", "Market"], ["all", "Mine + Market"], ["unusual", "Unusual options"]] as const;
-type Filter = (typeof FILTERS)[number][0] | "chatter";
+type Filter = (typeof FILTERS)[number][0] | "chatter" | "scanner";
 
 const ny = (at: number, options: Intl.DateTimeFormatOptions) => new Date(at * 1000).toLocaleString("en-US", { timeZone: "America/New_York", ...options });
 /** "10:40" today, "Thu 08:30" on another day; a date-only item reads "Today" or "Thu". */
@@ -113,27 +114,32 @@ export function useFeedNew(data: DeskFeedBody | null, open: boolean): { count: n
  * a chatter source did not deliver is said only under that filter.
  * **Unusual options** (``DeskUnusual``) is its own filter: unusual contracts on his held and watched names; a row selects
  * the contract in the Chain tab. Never counted as new, never mixed into the other filters.
+ * **Scanner** (``DeskScanner``) is its own filter while the setup scanner is switched on: today's candidates; a row opens
+ * the ticker on the desk chart with the scanner's levels. Never counted as new, never mixed into the other filters.
  */
-export default function DeskFeed({ data, failed, since, onAsk, onPlan, unusual = null, onUnusual }: {
+export default function DeskFeed({ data, failed, since, onAsk, onPlan, unusual = null, onUnusual, scanner = null, onScanner, onScannerPlan }: {
   data: DeskFeedBody | null; failed: boolean; since: number | null; onAsk(item: FeedItem): void; onPlan(item: FeedItem): void;
   unusual?: UnusualReply | null; onUnusual?(pick: ChainPick): void;
+  scanner?: DeskScannerReply | null; onScanner?(row: DeskScannerRow): void; onScannerPlan?(href: string): void;
 }) {
   const [picked, setFilter] = useState<Filter>("mine");
   const [symbol, setSymbol] = useState<string | null>(null);
   const chatter = data?.chatter ?? null;
   const chatterOn = (chatter?.items.length ?? 0) > 0;
-  const filter: Filter = picked === "chatter" && !chatterOn ? "mine" : picked;
+  const scannerOn = !!scanner && scanner.state !== "off";
+  const filter: Filter = (picked === "chatter" && !chatterOn) || (picked === "scanner" && !scannerOn) ? "mine" : picked;
   // Chatter gone (nothing to show this minute): back to Mine for good, so it never reopens without a tap.
   useEffect(() => { if (picked === "chatter" && data && !chatterOn) setFilter("mine"); }, [picked, data, chatterOn]); // eslint-disable-line react-hooks/set-state-in-effect -- follows the feed's own read
   const items = useMemo(() => {
-    if ((filter === "chatter" || filter === "unusual") && !symbol) return filter === "chatter" ? chatter?.items ?? [] : [];
+    if ((filter === "chatter" || filter === "unusual" || filter === "scanner") && !symbol) return filter === "chatter" ? chatter?.items ?? [] : [];
     const all = (data?.items ?? []).filter(i => !i.chatter);
     if (symbol) return all.filter(i => i.symbol === symbol);
     return all.filter(i => filter === "all" || (filter === "mine") === i.mine);
   }, [data, chatter, filter, symbol]);
   const day = data?.day ?? "";
   const market = (data?.items ?? []).filter(i => !i.mine).length;
-  const filters: readonly (readonly [Filter, string])[] = chatterOn ? [...FILTERS, ["chatter", "Chatter"]] : FILTERS;
+  const filters: readonly (readonly [Filter, string])[] = [...FILTERS, ...(scannerOn ? [["scanner", "Scanner"] as const] : []),
+    ...(chatterOn ? [["chatter", "Chatter"] as const] : [])];
   const chatterNote = chatterWhy(chatter);
 
   return (
@@ -154,7 +160,8 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, unusual =
         </div>
       )}
       {filter === "chatter" && !symbol && chatter && <ChatterHead chatter={chatter} day={day} />}
-      {filter === "unusual" && !symbol ? <UnusualList reply={unusual} onPick={pick => onUnusual?.(pick)} /> : <>
+      {filter === "unusual" && !symbol ? <UnusualList reply={unusual} onPick={pick => onUnusual?.(pick)} />
+        : filter === "scanner" && !symbol ? <ScannerList reply={scanner} onOpen={row => onScanner?.(row)} onPlan={href => onScannerPlan?.(href)} /> : <>
       {!data && (failed ? <p className="text-xs text-muted-foreground">The feed could not be read right now.</p>
         : <p className="text-xs text-muted-foreground">Reading the feed…</p>)}
       {data && !items.length && (

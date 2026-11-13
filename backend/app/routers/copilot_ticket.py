@@ -12,15 +12,19 @@ option chain around the price with his held and planned contracts marked. Market
 
 ``GET /copilot/unusual``: unusual options activity on his held and watched names (``engine/desk_unusual.py``), from the
 same option chain reads. Market data only; never Robinhood, never a ping.
+
+``GET /copilot/scanner``: today's setup-scanner candidates (``engine/desk_scanner.py``) with the Scanner page's own
+freshness read. Database reads only; the scanner's rules, scoring and records are untouched.
 """
 from datetime import date
+import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlmodel import Session
 
 from app.ai import copilot
 from app.database import get_session
-from app.engine import desk_chain, desk_ticket, desk_unusual
+from app.engine import desk_chain, desk_scanner, desk_ticket, desk_unusual
 
 router = APIRouter()
 
@@ -63,3 +67,12 @@ def chain(symbol: str = Query(..., min_length=1, max_length=15), expiration: dat
 def unusual(db: Session = Depends(get_session)):
     found = _settings()
     return desk_unusual.view(db, mode=getattr(found, "evidence", "live"))
+
+
+@router.get("/scanner")
+def scanner(request: Request, db: Session = Depends(get_session)):
+    from app.routers.scanner import _monitoring
+    found = _settings()
+    mode = getattr(found, "evidence", "live")
+    now = time.time()
+    return desk_scanner.view(db, _monitoring(request, db, now) if mode == "live" else None, now, mode=mode)

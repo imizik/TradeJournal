@@ -6,14 +6,14 @@ import type { ScannerMonitoring } from "@/lib/api";
 
 const REFRESH_SECONDS = 60;
 
-function etTime(iso: string, seconds = true) {
+export function etTime(iso: string, seconds = true) {
   return new Date(iso).toLocaleTimeString("en-US", {
     timeZone: "America/New_York", hour: "numeric", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}),
   });
 }
 
 // The page load time says nothing about the scanner; only a judged bar does.
-function monitoringText(m: ScannerMonitoring): { text: string; warn: boolean } {
+export function monitoringText(m: ScannerMonitoring): { text: string; warn: boolean } {
   const judged = m.last_judged_bar_end
     ? `last judged the ${etTime(m.last_judged_bar_end, false)} ET bar close for ${m.symbols_judged} / ${m.symbols_selected} tickers`
     : "no setup bar judged yet today";

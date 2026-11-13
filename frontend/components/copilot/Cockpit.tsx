@@ -14,7 +14,7 @@ import { useKeptState } from "@/components/copilot/DeskMemory";
 import { NotFollowed } from "@/components/copilot/SessionTape";
 import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
 import { getExposure } from "@/lib/copilot";
-import { DeskChart, ReadingLine, type DeskChartActions } from "@/components/copilot/DeskChart";
+import { DeskChart, ReadingLine, type DeskChartActions, type DeskGuide } from "@/components/copilot/DeskChart";
 import { DeskTimeline } from "@/components/copilot/Inspector";
 import { ChartViewToggle, ContractChart, heldContract, useContractView } from "@/components/copilot/DeskContract";
 import { EarningsTag, PositionEarnings } from "@/components/copilot/EarningsTag";
@@ -453,12 +453,14 @@ function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
  * stock against SPY today, time held: P&L, the distance to the stop and expiry are the row's) and, folded, what touched
  * the thread. No symbol: QQQ with the owner's fills and pings.
  */
-export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], earnings = null }: {
+export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], earnings = null, guides }: {
   symbol: string | null; thread: DeskThreadRef | null; row: DeskThread | null; sparks: DeskSparks | null; actions?: DeskChartActions;
   /** The desk's rows, so a held option's standing can tell a lone long option from one leg of a structure. */
   rows?: DeskThread[];
   /** Earnings tags (``useDeskEvents``): a held option's header says when a report falls inside its life. */
   earnings?: DeskEvents | null;
+  /** Thin lines for this symbol (a Feed Scanner row's trigger, stop and target). */
+  guides?: DeskGuide[];
 }) {
   const ref = useMemo(() => thread ?? (symbol ? deskSymbolThread(symbol) : null), [thread, symbol]);
   const [timeline, setTimeline] = useState(false);
@@ -503,7 +505,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
         <Link href={charts} className="ml-auto inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Open in Charts →</Link>
       </div>
       {onContract ? <ContractChart held={held} data={contract.data!} /> : <>
-      <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0} onRead={setShown} actions={actions} live={live}
+      <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0} onRead={setShown} actions={actions} live={live} guides={guides}
         label={`${symbol ?? "QQQ"} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />
       <p aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <Key color="#e9a23b" glyph="▲▼">your fills</Key>
