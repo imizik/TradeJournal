@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Info } from "lucide-react";
-import { apiUrl } from "@/lib/api";
+import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { contractLabel, type ChainPick, type ChainSide } from "@/components/copilot/DeskChain";
 import { cn } from "@/lib/utils";
 
@@ -25,21 +25,20 @@ export type UnusualReply = {
   partial?: string[]; held: string[]; read_at?: number | null; message: string | null; simulated: boolean;
 };
 
-const READ_MS = 60_000;
 
 export function useDeskUnusual(on: boolean): UnusualReply | null {
   const [data, setData] = useState<UnusualReply | null>(null);
   useEffect(() => {
     if (!on) return;
     const controller = new AbortController();
-    const load = () => fetch(apiUrl("/copilot/unusual"), { cache: "no-store", signal: controller.signal })
+    const load = () => deskGet("/copilot/unusual", controller.signal)
       // A refusal is read through too, so the request ends (an unread body holds it open).
       .then(async r => (r.ok ? r.json() : r.text().catch(() => "").then(() => Promise.reject(new Error(String(r.status))))))
       .then((body: UnusualReply) => setData(body))
       .catch(() => { /* the last good list stays; nothing new is shown */ });
     load();
-    const timer = setInterval(load, READ_MS);
-    return () => { controller.abort(); clearInterval(timer); };
+    const stop = everyDeskMinute(load); // the shared minute: one request with the desk's other reads, none while hidden
+    return () => { controller.abort(); stop(); };
   }, [on]);
   return data;
 }

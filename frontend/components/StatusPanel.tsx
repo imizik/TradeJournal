@@ -354,11 +354,12 @@ export function useAnyJobRunning(enabled = true): boolean {
       setRunning(results.some((r) => r.status === "fulfilled" && r.value.running));
     }
     check();
-    // 30s idle cadence + skip hidden tabs: this poll runs for the whole app
-    // session and every request is metered egress on hosted Postgres.
+    // A minute's idle cadence + skip hidden tabs: this poll runs for the whole
+    // app session, three requests a time, for a dot that changes when a job
+    // starts or ends (a job takes minutes).
     const id = setInterval(() => {
       if (!document.hidden) check();
-    }, 30000);
+    }, 60000);
     return () => { mounted = false; clearInterval(id); };
   }, [enabled]);
 

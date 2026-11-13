@@ -1753,6 +1753,35 @@ Within a read, the waits on a provider or the Radar file run beside the journal'
 backend reads the market calendar on its own thread (`copilot_desk.warm_at_start`), the one cache nearly every desk read
 needs that a fresh process lacks; startup and `/health` never wait for it.
 
+### What an open desk asks
+
+Measured 2026-11-13 in market hours (UX sandbox with live market data, production build, one tab idle on the Chart tab,
+2 minutes): 35 requests a minute before, 20 after (17.5 on the Grid with nine tiles, 17 on the Chain tab). Live prices
+are 12 of them (`GET /copilot/desk/ticks` every 5 s, § Live prices); the rest:
+
+- **One clock, one request a minute** (`frontend/lib/deskMinute.ts`). The book, session, Watching, what's moving,
+  sparklines, Feed, unusual options, scanner picks, armed plans, exposure, saved conversations and the centre chart each
+  read on mount as before (a cold page never waits on the slowest), then re-read on one shared minute beat
+  (`everyDeskMinute`); what they ask during the beat goes out as `GET /copilot/desk/minute?read=…`
+  (`backend/app/engine/desk_minute.py`), each read dispatched through the whole app with the browser's own headers and
+  answered exactly as its own route would (status and body, its own `Server-Timing` and timings entry), in order. Only
+  those reads are accepted (400 for anything else, without dispatching it; the chart id in the characters the frontend
+  proxy allows); owner-only; no cache or provider call of its own. A read past 8 s answers 504 for itself and the next
+  minute asks again, so one stuck provider never holds the others. A backend without the route (404) gets the reads one
+  by one.
+- **Nothing while the page is hidden.** The beat skips; showing the page after a skipped beat turns one at once (one
+  request). Before, the Feed, unusual options, scanner and armed plans kept polling a hidden tab.
+- The app-wide job dot and Gmail health read once a minute, not every 30 s.
+- The Grid and the Tape load their code the first time they open (the desk's JavaScript: 1,413 → 1,382 KB, 429 →
+  421 KB over the wire).
+
+Provider calls did not move: Tradier ~15 a minute with one tab and the same with two (every desk shares the server's
+caches; 12 are the live prices' one batched quote every 4–5 s), Alpaca news ~1. Before this week's desk builds
+(2620deaab, 2026-11-09) the idle desk made 12 requests and ~2 Tradier calls a minute: live prices are the difference.
+Cold load did not change (first paint ~50 ms; a usable book ~0.9 s, bound by the book's own read). Main thread 4–5%
+busy, no dropped frames, before and after. `frontend/e2e/copilot-desk-load.spec.ts` pins the idle rate (≤ 20 a minute,
+the minute's reads only inside the one request) and the hidden page's zero.
+
 ### The desk read
 
 When the owner selects a ticker on the desk (a book row, a Watching row, a strip tile) and no conversation about it is

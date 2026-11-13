@@ -1,4 +1,5 @@
 import { apiUrl } from "./api";
+import { deskGet } from "./deskMinute";
 import type { AlertsPayload } from "./alerts";
 import type { Capture, CaptureOrigin, CaptureSide, OriginKind } from "./captures";
 import type { PlanPosition } from "@/components/dashboard/PlansCard";
@@ -910,7 +911,12 @@ export const getPractice = (signal?: AbortSignal, investigation?: string) =>
  * usual day's premium bought (null under 10 entry days). ``line`` is the rendered sentence, null when unavailable or none is open. */
 export type Exposure = { state: "ok" | "unavailable"; at_risk_usd: number | null; positions: number | null; usual_day_usd: number | null;
   sample_days: number | null; as_of: string; line: string | null };
-export const getExposure = (signal?: AbortSignal) => request<Exposure>("/copilot/exposure", { signal });
+export async function getExposure(signal?: AbortSignal): Promise<Exposure> {
+  const response = await deskGet("/copilot/exposure", signal); // joins the desk's minute request
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  return body as Exposure;
+}
 /** The automatic week review's saved investigations (``backend/app/engine/week_review_auto.py``) are titled this way. */
 export const AUTO_WEEK_REVIEW_TITLE = "Week review ";
 /** Confirming a practice card makes it the one active goal; the previous one ends. */

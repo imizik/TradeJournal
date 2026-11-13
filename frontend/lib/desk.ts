@@ -8,6 +8,7 @@ import type { PanelLink } from "@/components/copilot/CopilotPanel";
 import type { PlanPosition } from "@/components/dashboard/PlansCard";
 import type { AlertFeedback } from "@/lib/alertFeedback";
 import { api, apiUrl } from "@/lib/api";
+import { deskGet } from "@/lib/deskMinute";
 import { UUID_RE, readDeepLink, type ExitLesson, type InvestigationSummary, type PlanBoardLevel, type PlanBoardRow, type PlansBoard } from "@/lib/copilot";
 import type { OptionTerms } from "@/lib/optionStanding";
 import type { RadarRating } from "@/lib/radar";
@@ -220,9 +221,10 @@ const nyDate = (at: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Ameri
 
 /** The latest 50 saved conversations, open and closed, newest first: the thread list's subthreads and the breadcrumb. */
 export async function getSavedConversations(signal?: AbortSignal): Promise<InvestigationSummary[]> {
-  const response = await fetch(apiUrl("/copilot/investigations?limit=50"), { cache: "no-store", signal });
+  const response = await deskGet("/copilot/investigations?limit=50", signal);
+  const body = await response.json().catch(() => null); // read through, refused or not: an unread body never idles
   if (!response.ok) throw new Error(`Request failed (${response.status}).`);
-  return ((await response.json()) as { investigations: InvestigationSummary[] }).investigations;
+  return (body as { investigations: InvestigationSummary[] }).investigations;
 }
 
 /** Every saved conversation whose title, symbol or conclusion holds the words, newest first; Jump's reach past the list. */
@@ -233,7 +235,7 @@ export async function searchConversations(query: string, signal?: AbortSignal): 
 }
 
 export async function getDeskThreads(signal?: AbortSignal): Promise<DeskThreads> {
-  const response = await fetch(apiUrl("/copilot/desk/threads"), { cache: "no-store", signal });
+  const response = await deskGet("/copilot/desk/threads", signal);
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
   const wire = body as Wire;
@@ -465,7 +467,7 @@ export type DeskHistory =
 const deskPath = (id: string, part: string) => apiUrl(`/copilot/desk/${encodeURIComponent(id)}/${part}`);
 
 async function deskRead<T>(id: string, part: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(deskPath(id, part), { cache: "no-store", signal });
+  const response = await deskGet(`/copilot/desk/${encodeURIComponent(id)}/${part}`, signal); // the chart joins the minute's one request
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
   return body as T;
@@ -647,7 +649,7 @@ export type DeskAlertToAnswer = { id: string; trade_id: string; symbol: string; 
 export type DeskHitToRate = { event_id: string; symbol: string | null; kind: string; at: number | null; today: boolean; rating: RadarRating | null };
 
 export async function getDeskSession(signal?: AbortSignal): Promise<DeskSession> {
-  const response = await fetch(apiUrl("/copilot/desk/session"), { cache: "no-store", signal });
+  const response = await deskGet("/copilot/desk/session", signal);
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
   return body as DeskSession;
@@ -757,9 +759,10 @@ export type DeskSparks = { as_of: string; rows: Record<string, { points: number[
 
 export async function getDeskSparks(symbols: string[], signal?: AbortSignal, watch: string[] = []): Promise<DeskSparks> {
   const query = new URLSearchParams({ symbols: symbols.join(","), ...(watch.length ? { watch: watch.join(",") } : {}) });
-  const response = await fetch(apiUrl(`/copilot/desk/sparks?${query}`), { cache: "no-store", signal });
+  const response = await deskGet(`/copilot/desk/sparks?${query}`, signal);
+  const body = await response.json().catch(() => null); // read through, refused or not: an unread body never idles
   if (!response.ok) throw new Error(`Request failed (${response.status}).`);
-  return await response.json() as DeskSparks;
+  return body as DeskSparks;
 }
 
 // --------------------------------------------------------------------------- the desk read
@@ -832,7 +835,12 @@ async function watchCall<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
   return body as T;
 }
-export const getWatching = (signal?: AbortSignal) => watchCall<DeskWatching>("/copilot/desk/watching", { signal });
+export async function getWatching(signal?: AbortSignal): Promise<DeskWatching> {
+  const response = await deskGet("/copilot/desk/watching", signal);
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  return body as DeskWatching;
+}
 export const watchSymbol = (symbol: string) => watchCall<DeskWatching>("/copilot/desk/watching", { method: "POST", body: JSON.stringify({ symbol }) });
 export const stopWatching = (symbol: string) => watchCall<DeskWatching>(`/copilot/desk/watching/${encodeURIComponent(symbol)}`, { method: "DELETE" });
 export const getWatchLists = () => watchCall<WatchLists>("/copilot/desk/watching/robinhood");

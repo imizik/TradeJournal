@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { apiUrl, type ScannerCandidateRow, type ScannerMonitoring } from "@/lib/api";
+import { type ScannerCandidateRow, type ScannerMonitoring } from "@/lib/api";
 import { etTime, monitoringText } from "@/components/ScannerFreshness";
 import type { DeskGuide } from "@/components/copilot/DeskChart";
 import { cn } from "@/lib/utils";
+import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 
 /**
  * Today's setup-scanner candidates on the desk (docs/copilot-lab.md § Scanner on the desk), from ``GET /copilot/scanner``:
@@ -29,21 +30,20 @@ export type DeskScannerReply = {
   message: string | null; simulated: boolean;
 };
 
-const READ_MS = 60_000;
 
 export function useDeskScanner(on: boolean): DeskScannerReply | null {
   const [data, setData] = useState<DeskScannerReply | null>(null);
   useEffect(() => {
     if (!on) return;
     const controller = new AbortController();
-    const load = () => fetch(apiUrl("/copilot/scanner"), { cache: "no-store", signal: controller.signal })
+    const load = () => deskGet("/copilot/scanner", controller.signal)
       // A refusal is read through too, so the request ends (an unread body holds it open).
       .then(async r => (r.ok ? r.json() : r.text().catch(() => "").then(() => Promise.reject(new Error(String(r.status))))))
       .then((body: DeskScannerReply) => setData(body))
       .catch(() => { /* the last good list stays */ });
     load();
-    const timer = setInterval(load, READ_MS);
-    return () => { controller.abort(); clearInterval(timer); };
+    const stop = everyDeskMinute(load); // the shared minute: one request with the desk's other reads, none while hidden
+    return () => { controller.abort(); stop(); };
   }, [on]);
   return data;
 }

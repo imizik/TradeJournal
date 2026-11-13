@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink } from "lucide-react";
-import { apiUrl } from "@/lib/api";
+import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { cn } from "@/lib/utils";
 import type { ChainPick } from "@/components/copilot/DeskChain";
 import { UnusualList, type UnusualReply } from "@/components/copilot/DeskUnusual";
@@ -33,7 +33,6 @@ export type DeskFeedBody = { as_of: string; now: number; day: string; items: Fee
   sources: Record<string, string>; unavailable: string[]; chatter?: DeskChatter };
 
 const SEEN_KEY = "desk.feed.seen.v1";
-const READ_MS = 60_000;
 const ACTION = "inline-flex min-h-11 items-center gap-1 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-7";
 const FILTERS = [["mine", "Mine"], ["market", "Market"], ["all", "Mine + Market"], ["unusual", "Unusual options"]] as const;
 type Filter = (typeof FILTERS)[number][0] | "chatter" | "scanner";
@@ -75,13 +74,14 @@ export function useDeskFeed(on: boolean): { data: DeskFeedBody | null; failed: b
   useEffect(() => {
     if (!on) return;
     const controller = new AbortController();
-    const load = () => fetch(apiUrl("/copilot/desk/feed"), { cache: "no-store", signal: controller.signal })
-      .then(r => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    const load = () => deskGet("/copilot/desk/feed", controller.signal)
+      // A refusal is read through too, so the request ends (an unread body holds it open).
+      .then(async r => (r.ok ? r.json() : r.text().catch(() => "").then(() => Promise.reject(new Error(String(r.status))))))
       .then((body: DeskFeedBody) => { setData(body); setFailed(false); })
       .catch(() => { if (!controller.signal.aborted) setFailed(true); });
     load();
-    const timer = setInterval(load, READ_MS);
-    return () => { controller.abort(); clearInterval(timer); };
+    const stop = everyDeskMinute(load); // the shared minute: one request with the desk's other reads, none while hidden
+    return () => { controller.abort(); stop(); };
   }, [on]);
   return { data, failed };
 }

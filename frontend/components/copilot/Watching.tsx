@@ -10,13 +10,13 @@ import { getWatchLists, getWatching, importWatchLists, signedPct, stopWatching, 
 import { staleSince, tickFor, useDeskTicks, type DeskTicks } from "@/lib/deskTicks";
 import { Flash, PricesAsOf } from "@/components/copilot/Ticks";
 import { cn } from "@/lib/utils";
+import { everyDeskMinute } from "@/lib/deskMinute";
 import { EarningsTag } from "@/components/copilot/EarningsTag";
 
 /** Rows shown before "N more". */
 const SHOWN = 8;
 /** A level this close (percent of the price) counts as near: the row sorts first. */
 const NEAR_PCT = 3;
-const REFRESH_MS = 60_000;
 const ROLE = { entry: "entry", invalidation: "stop" } as const;
 
 /** ``GET /copilot/desk/watching``, read on open, once a minute while the page shows and after ``refresh`` changes (a
@@ -34,8 +34,8 @@ export function useWatching(on: boolean, refresh: number): { data: DeskWatching 
         .catch(error => { if ((error as Error).name !== "AbortError") setFailed(true); });
     };
     read();
-    const timer = setInterval(() => { if (document.visibilityState === "visible") read(); }, REFRESH_MS);
-    return () => { controller.abort(); clearInterval(timer); };
+    const stop = everyDeskMinute(read);
+    return () => { controller.abort(); stop(); };
   }, [on, refresh, setData]);
   return { data, failed, set: setData };
 }

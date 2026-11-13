@@ -14,7 +14,6 @@ import { LEVEL2_TICKER, useDepthSession, type BookEvent, type Level, type Trade,
 import { heatBookKind } from "@/lib/depthHeatmap";
 import { cn } from "@/lib/utils";
 
-const OPEN_KEY = "desk.tape.v1";
 /** Prints kept in memory for the tape; the desktop shows this many, a phone the last ``PHONE_PRINTS``. */
 const KEPT = 200;
 const SHOWN = 30;
@@ -34,30 +33,6 @@ const INDEXES = new Set(["SPX", "SPXW", "NDX", "RUT", "VIX", "DJX", "XSP", "XND"
 
 /** When the desk itself last ended a tape session (unmount included), so a quick reopen waits for the bridge. */
 let lastStop = 0;
-
-/** Whether the tape is open, remembered on this device (closed until the owner opens it). */
-export function useTapeOpen(): [boolean, (next: boolean) => void] {
-  const [open, setOpen] = useState(false);
-  useEffect(() => { try { setOpen(window.localStorage.getItem(OPEN_KEY) === "open"); } catch { /* closed */ } }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
-  const pick = useCallback((next: boolean) => {
-    setOpen(next);
-    try { window.localStorage.setItem(OPEN_KEY, next ? "open" : "closed"); } catch { /* this view only */ }
-  }, []);
-  return [open, pick];
-}
-
-/** The chart header's Tape button; nothing for an assistant (the depth route is the owner's). */
-export function TapeToggle({ open, onToggle }: { open: boolean; onToggle(next: boolean): void }) {
-  const { owner } = useAppAccess();
-  if (!owner) return null;
-  return (
-    <button type="button" aria-pressed={open} onClick={() => onToggle(!open)} data-testid="tape-toggle" title="Level 2 and time & sales"
-      className={cn("min-h-11 rounded border px-2 text-xs sm:min-h-0 sm:py-0.5",
-        open ? "border-foreground/60 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
-      Tape
-    </button>
-  );
-}
 
 const px = (value: number) => value >= 1 ? value.toFixed(2) : value.toFixed(4);
 const size = (value: number) => Math.round(value).toLocaleString("en-US");

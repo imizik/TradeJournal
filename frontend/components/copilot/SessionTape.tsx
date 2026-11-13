@@ -6,8 +6,8 @@ import { useKeptState } from "@/components/copilot/DeskMemory";
 import { TONE, numeric } from "@/components/copilot/ThreadRail";
 import { getDeskSession, type DeskSession, type DeskThread } from "@/lib/desk";
 import { cn } from "@/lib/utils";
+import { everyDeskMinute } from "@/lib/deskMinute";
 
-const REFRESH_MS = 60_000;
 /** New York wall time without a leading zero ("9:30", "14:00"). */
 export const hhmm = (seconds: number) => new Date(seconds * 1000)
   .toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).replace(/^0/, "");
@@ -31,10 +31,8 @@ export function useDeskSession(on: boolean): { data: DeskSession | null; error: 
       });
     };
     read();
-    const timer = setInterval(() => { if (document.visibilityState === "visible") read(); }, REFRESH_MS);
-    const shown = () => { if (document.visibilityState === "visible") read(); };
-    document.addEventListener("visibilitychange", shown);
-    return () => { controller.abort(); clearInterval(timer); document.removeEventListener("visibilitychange", shown); };
+    const stop = everyDeskMinute(read); // skipped while hidden; back on the page after a skipped minute, read at once
+    return () => { controller.abort(); stop(); };
   }, [on, setData]);
   return { data, error };
 }

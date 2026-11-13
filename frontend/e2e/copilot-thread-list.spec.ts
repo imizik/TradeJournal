@@ -52,6 +52,8 @@ async function lab(page: Page, desk: unknown = DESK) {
   await page.clock.install({ time: NOW });
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/desk/threads", (route) => { reads += 1; return route.fulfill({ json: desk }); });
+  // The desk's minute re-reads go out as one request (lib/deskMinute.ts); a 404 sends them one by one, to these stubs.
+  await page.route("**/copilot/desk/minute?*", (route) => route.fulfill({ status: 404, json: { detail: "One by one in this test." } }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route(`**/copilot/investigations/${NBIS}`, (route) => route.fulfill({ json: saved }));
   await page.route("**/copilot/chat", (route) => { chats.push(route.request().postDataJSON()); return route.abort(); });
