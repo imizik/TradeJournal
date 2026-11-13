@@ -45,8 +45,8 @@ BUDGET_SECONDS = 6.0
 TRADIER_HEADROOM = 30  # of the chart feed's 60 calls a minute: above this the grid asks Tradier for nothing
 ALPACA_BACKOFF_SECONDS = 600
 ALPACA_PAGES = 3
-TAIL_RETRY_SECONDS = 600
-STALE_SECONDS = 150  # a live tile's minutes older than this (its re-read failed or waited) are marked stale  # a previous session's tail no source had is asked again after this long
+TAIL_RETRY_SECONDS = 600  # a previous session's tail no source had is asked again after this long
+STALE_SECONDS = 150  # a live tile's minutes older than this (its re-read failed or waited) are marked stale
 
 _TICKER = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 
@@ -128,7 +128,7 @@ def _regular(day: date, hours: dict | None) -> tuple[int, int] | None:
 # ------------------------------------------------------------------ the sources
 
 
-def _kept(symbol: str, day: date, now: float, live: bool) -> list[dict] | None:
+def _kept(symbol: str, day: date, hours: dict | None, live: bool) -> list[dict] | None:
     with _lock:
         found = _minutes.get(symbol)
     if found is None or found[1] != day:
@@ -136,11 +136,14 @@ def _kept(symbol: str, day: date, now: float, live: bool) -> list[dict] | None:
     if live:
         return found[2] if time.time() - found[0] <= KEEP_SECONDS else None
     # A finished day: only minutes read after it ended are the whole day (one read at 15:00 stops short).
-    return found[2] if found[0] >= _day_end(day) else None
+    return found[2] if found[0] >= _day_end(day, hours) else None
 
 
-def _day_end(day: date) -> float:
-    return datetime.combine(day, wall_time(20), ET).timestamp()
+def _day_end(day: date, hours: dict | None) -> float:
+    """When the day's last window (after hours) ends: 20:00, or earlier after an early close."""
+    ends = [end for _n, _s, end in session_windows(day, hours)]
+    minute = max(ends) if ends else 20 * 60
+    return datetime.combine(day, wall_time(minute // 60, minute % 60), ET).timestamp()
 
 
 def _keep(symbol: str, day: date, minutes: list[dict], source: str) -> None:
@@ -150,7 +153,7 @@ def _keep(symbol: str, day: date, minutes: list[dict], source: str) -> None:
             _minutes.pop(next(iter(_minutes)))
 
 
-def _chart_cache(symbol: str, day: date, live: bool) -> list[dict] | None:
+def _chart_cache(symbol: str, day: date, hours: dict | None, live: bool) -> list[dict] | None:
     """Minutes a chart read: for a live day only when at most ``CHART_CACHE_SECONDS`` old; for a finished day only when
     read after it ended (an earlier read stops short)."""
     from app.engine.chart_feed import chart_feed
@@ -160,7 +163,7 @@ def _chart_cache(symbol: str, day: date, live: bool) -> list[dict] | None:
     minutes, read_at = held
     if live:
         return minutes if time.time() - read_at <= CHART_CACHE_SECONDS else None
-    return minutes if read_at >= _day_end(day) else None
+    return minutes if read_at >= _day_end(day, hours) else None
 
 
 def _alpaca(symbols: list[str], start: datetime, end: datetime) -> dict[str, list[dict]] | None:
@@ -329,9 +332,9 @@ def read(symbols: list[str], timeframe: str, now: float, levels: dict[str, list[
     with timed("grid cache"):
         todo: list[str] = []
         for symbol in symbols:
-            if _kept(symbol, day, now, live) is not None:
+            if _kept(symbol, day, hours, live) is not None:
                 continue
-            found = _chart_cache(symbol, day, live)
+            found = _chart_cache(symbol, day, hours, live)
             if found is not None:
                 _keep(symbol, day, [m for m in found if datetime.fromtimestamp(m["time"], ET).date() == day], "chart")
             else:
@@ -377,8 +380,9 @@ def read(symbols: list[str], timeframe: str, now: float, levels: dict[str, list[
             continue
         bars = tile(symbol, minutes, tail, timeframe, day, hours, prior, now)
         today_bars = [b for b in bars if not b["prior"]]
-        # Minutes older than a refresh or two while the day is live: shown, but marked with their time, never as now.
-        stale = live and time.time() - found[0] > STALE_SECONDS
+        # Shown, but marked with their time, never as now: minutes older than a refresh or two while the day is live,
+        # and, on a finished day, minutes read before it ended (the read after it failed or waited).
+        stale = (time.time() - found[0] > STALE_SECONDS) if live else found[0] < _day_end(day, hours)
         rows[symbol] = {"state": "ok" if today_bars else "unavailable", "bars": bars, "read_at": int(found[0]), "stale": stale,
                         "last": today_bars[-1]["close"] if today_bars else None,
                         "change_pct": _change(symbol, day, now) if day == datetime.fromtimestamp(now, ET).date() else None,

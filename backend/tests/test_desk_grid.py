@@ -226,3 +226,20 @@ def test_an_empty_batched_answer_is_not_kept_as_the_day(rig):
     alpaca_on(rig, {"NBIS": []})
     rig.tradier_minutes["NBIS"] = [minute(OPEN, 90.0)]
     assert grid(rig, "NBIS")["rows"]["NBIS"]["source"] == "tradier"
+
+
+def test_a_finished_day_read_before_it_ended_is_marked_stale_when_the_re_read_fails(rig):
+    rig.tradier_minutes["NBIS"] = [minute(OPEN + 60 * i, 90.0) for i in range(5)]
+    grid(rig, "NBIS")
+    kept = desk_grid._minutes["NBIS"]
+    desk_grid._minutes["NBIS"] = (float(rig.clock["t"]), *kept[1:])  # read at 14:49 on the test's clock
+    rig.clock["t"] = int(datetime(2026, 10, 22, 1, 0, tzinfo=UTC).timestamp())  # 21:00 New York
+    rig.calls = desk_grid.TRADIER_HEADROOM  # the evening re-read cannot happen
+    row = grid(rig, "NBIS")["rows"]["NBIS"]
+    assert row["state"] == "ok" and row["stale"] is True
+
+
+def test_an_early_close_day_ends_with_its_own_after_hours():
+    early = {"status": "open", "open": 570, "close": 780}  # 13:00 close: after hours end 17:00
+    assert desk_grid._day_end(date(2026, 11, 27), early) == datetime(2026, 11, 27, 22, 0, tzinfo=UTC).timestamp()
+    assert desk_grid._day_end(date(2026, 10, 21), HOURS) == datetime(2026, 10, 22, 0, 0, tzinfo=UTC).timestamp()

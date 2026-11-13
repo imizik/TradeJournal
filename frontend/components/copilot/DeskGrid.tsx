@@ -153,7 +153,7 @@ export default function DeskGrid({ held, watched, hidden, sparks, earnings, sele
             className={cn("relative min-w-0 rounded-md border bg-background/40", symbol && symbol === selected ? "border-foreground/40" : "border-border",
               !symbol && "border-dashed")}>
             {editing === slot ? (
-              <PinForm slot={slot} onPin={name => { change(pinTo(layout, slot, name)); setEditing(null); }} onCancel={() => setEditing(null)} heightClass={HEIGHT[layout.size]} />
+              <PinForm slot={slot} onPin={name => { setDropped(prev => { const next = new Set(prev); next.delete(name); return next; }); change(pinTo(layout, slot, name)); setEditing(null); }} onCancel={() => setEditing(null)} heightClass={HEIGHT[layout.size]} />
             ) : symbol ? (
               <Tile symbol={symbol} tile={data?.rows[symbol]} step={data?.step ?? 60} live={!!data?.live} asOf={data?.as_of ?? null}
                 tick={tickFor(ticks, symbol)} spark={sparks?.rows[symbol] ?? null} tag={earnings?.rows[symbol]} day={day}
@@ -211,7 +211,7 @@ const Tile = memo(function Tile({ symbol, tile, step, live, asOf, tick, spark, t
   const bars = tile?.state === "ok" ? tile.bars : null;
   // Bars from an older read (this one failed or waited): greyed with their time, and the ticker does not extend them,
   // so a gap never looks like a live chart.
-  const old = !!bars && live && (tile!.stale || (tile!.read_at != null && asOf != null && asOf - tile!.read_at > STALE_SECONDS));
+  const old = !!bars && (tile!.stale || (live && tile!.read_at != null && asOf != null && asOf - tile!.read_at > STALE_SECONDS));
   return (
     <div className="flex flex-col">
       {/* On a phone the price and change wrap under the ticker and its buttons; one line from sm up. */}
