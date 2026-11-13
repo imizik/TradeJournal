@@ -39,6 +39,7 @@ NONE = "44444444-4444-4444-8444-444444444444"
 @pytest.fixture
 def lab(engine, quotes, clock, monkeypatch):  # noqa: F811
     monkeypatch.setattr(plan_routes.copilot, "settings", lambda: SimpleNamespace(enabled=True))
+    monkeypatch.setattr(desk_context, "stored_sessions", lambda symbol, before, count: [])  # no history on disk
     app = FastAPI()
     app.include_router(plan_routes.router, prefix="/copilot")
 
@@ -297,15 +298,16 @@ def test_the_chart_is_todays_candles_with_the_plan_lines_fills_pings_radar_and_t
         db.commit()
     radar_hits(tmp_path, monkeypatch, ("NBIS", "2026-10-21T14:30:00.000Z"), ("MU", "2026-10-21T14:31:00.000Z"))
     late = [{"time": int(NOW) + 60, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0}]  # after now: not shown
-    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: bars() + late)
+    monkeypatch.setattr(desk_context, "today_minutes", lambda symbol: bars() + late)
     body = lab.get(f"/copilot/desk/{NBIS}/chart").json()
     assert body["state"] == "ok" and body["symbol"] == "NBIS" and body["timeframe"] == "2m" and body["step"] == 120
     # The two pre-market minutes are one extended candle; 120 session minutes are 60 two-minute candles.
     assert len(body["bars"]) == 61 and body["bars"][0]["extended"] is True and body["bars"][1]["extended"] is False
     assert body["bars"][1] == {"time": int(epoch(T0)), "open": 94.0, "high": 94.06, "low": 93.95, "close": 94.01, "volume": 0.0,
                                "extended": False}
-    assert body["levels"] == [{"role": "entry", "price": 95.9, "label": "Entry 95.90"},
-                              {"role": "invalidation", "price": 92.3, "label": "Invalidation 92.30"}]
+    assert [{k: v for k, v in level.items() if k != "id"} for level in body["levels"]] == [
+        {"role": "entry", "price": 95.9, "label": "Entry 95.90"}, {"role": "invalidation", "price": 92.3, "label": "Invalidation 92.30"}]
+    assert body["alerts"] == []  # the plan's own alerts are its lines, not extra alert lines
     assert body["time_stop"] == {"at": int(epoch(T0 + timedelta(minutes=330))), "text": "out by 15:30"}
     assert [(m["kind"], m["at"], m["price"], m["side"]) for m in body["marks"]] == [
         ("fill", int(epoch(T0 + timedelta(minutes=5))), None, "buy"),
@@ -325,7 +327,7 @@ def test_the_chart_reads_each_timeframe_and_says_why_when_there_are_no_bars(lab,
     daily = [{"time": int(NOW) - 86400 * i, "open": 90.0, "high": 91.0, "low": 89.0, "close": 90.0} for i in range(200, -1, -1)]
     monkeypatch.setattr(desk_context, "fifteen_bars", lambda symbol: fifteen)
     monkeypatch.setattr(desk_context, "daily_bars", lambda symbol: daily)
-    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: [])
+    monkeypatch.setattr(desk_context, "today_minutes", lambda symbol: [])
     body = lab.get(f"/copilot/desk/{NBIS}/chart?timeframe=15m").json()
     assert body["state"] == "ok" and body["step"] == 900 and len(body["bars"]) == 30
     assert body["levels"] == [] and body["time_stop"] is None and body["marks"] == []
@@ -337,7 +339,7 @@ def test_the_chart_reads_each_timeframe_and_says_why_when_there_are_no_bars(lab,
 
     def broken(symbol):
         raise RuntimeError("Tradier unavailable")
-    monkeypatch.setattr(ping_images, "today_bars", broken)
+    monkeypatch.setattr(desk_context, "today_minutes", broken)
     body = lab.get(f"/copilot/desk/{NBIS}/chart").json()
     assert body["state"] == "unavailable" and body["reason"] == "The NBIS minute bars for today could not be read."
 
@@ -352,7 +354,7 @@ def test_the_market_chart_is_qqq_with_the_days_fills_and_pings_and_a_bounded_day
     start = int(epoch(T0)) - 6 * 3600  # 04:00 New York: a whole extended day, minute by minute
     day = [{"time": start + 60 * i, "open": 480.0, "high": 480.0, "low": 480.0, "close": 480.0, "extended": i < 330}
            for i in range(16 * 60)]
-    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: asked.append(symbol) or day)
+    monkeypatch.setattr(desk_context, "today_minutes", lambda symbol: asked.append(symbol) or day)
     body = lab.get("/copilot/desk/market/chart").json()
     assert asked == ["QQQ"] and body["symbol"] == "QQQ" and body["levels"] == []
     assert len(body["bars"]) <= desk_context.MAX_BARS and body["bars"][-1]["time"] <= NOW
@@ -362,6 +364,31 @@ def test_the_market_chart_is_qqq_with_the_days_fills_and_pings_and_a_bounded_day
     assert lab.get("/copilot/desk/market/chart").json()["marks"] == []
     monkeypatch.setattr(plan_routes.copilot, "settings", lambda: SimpleNamespace(enabled=False))
     assert lab.get("/copilot/desk/market/chart").status_code == 503
+
+
+def test_the_chart_carries_the_symbols_other_armed_alerts_as_lines_and_only_plain_ones_can_be_removed(lab, engine, monkeypatch):  # noqa: F811
+    investigation(engine)
+    capture(engine, "NBIS")
+    alert(engine, NBIS, "NBIS", "entry", 95.9)  # this thread's plan: drawn as its entry line, not as an alert
+    alert(engine, CRWV, "NBIS", "invalidation", 91.0)  # another plan's line on the same symbol: shown, kept
+    with Session(engine) as db:
+        db.add(LevelAlert(symbol="NBIS", price=96.5, created_on=date(2026, 10, 21), condition="crosses", session="regular",
+                          direction="up", source_kind="level", source_id="desk", label="From the desk"))
+        db.add(LevelAlert(symbol="NBIS", price=97.0, created_on=date(2026, 10, 21), condition="crosses", session="regular",
+                          direction="up", source_kind="level", source_id="desk", label="", state="fired"))  # fired: no line
+        db.add(LevelAlert(symbol="APLD", price=30.0, created_on=date(2026, 10, 21), condition="touches", session="regular",
+                          direction="down", source_kind="level", source_id="x", label=""))  # another symbol
+        db.commit()
+    monkeypatch.setattr(desk_context, "today_minutes", lambda symbol: bars())
+    body = lab.get(f"/copilot/desk/{NBIS}/chart").json()
+    assert [level["role"] for level in body["levels"]] == ["entry"] and body["levels"][0]["id"]
+    assert [(a["price"], a["text"], a["label"], a["removable"]) for a in body["alerts"]] == [
+        (91.0, "Crosses above 91.00", "NBIS invalidation", False), (96.5, "Crosses above 96.50", "From the desk", True)]
+    # A symbol with no plan, no position and no fills: candles, studies and its alerts all the same.
+    body = lab.get("/copilot/desk/symbol:APLD/chart").json()
+    assert body["state"] == "ok" and body["levels"] == [] and body["marks"] == [] and body["time_stop"] is None
+    assert [(a["text"], a["removable"]) for a in body["alerts"]] == [("Touches 30.00", True)] and body["studies"]["vwap"]
+    assert body["reading"]["last"] == body["bars"][-1]["close"]
 
 
 def test_two_minute_candles_sit_on_the_even_minute_and_are_extended_only_when_all_minutes_are():

@@ -22,6 +22,7 @@ import ArmChecklist from "@/components/copilot/ArmChecklist";
 import DeskFeed, { feedQuestion, useDeskFeed, useFeedNew, type FeedItem } from "@/components/copilot/DeskFeed";
 import { DeskStatus, useDeskSession } from "@/components/copilot/SessionTape";
 import { AccountChips, Book, CentreChart, DayFacts, DayPnl, NeedsStrip, SinceYouLooked, positionRows, useSparks } from "@/components/copilot/Cockpit";
+import type { DeskChartActions } from "@/components/copilot/DeskChart";
 import MorningBrief from "@/components/copilot/MorningBrief";
 import Watching, { useWatching } from "@/components/copilot/Watching";
 import PreviousDays from "@/components/copilot/PreviousDays";
@@ -520,17 +521,18 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // A feed item's Ask: its question in the box, unsent, in the item's own thread (a plan's), else the symbol's open
   // conversation, else the symbol's desk view; an item with no symbol in today's conversation (or a new one when another
   // thread is open). A phone opens the sheet.
-  const askFeed = useCallback((item: FeedItem) => {
-    const text = feedQuestion(item, today);
-    const symbol = item.symbol;
+  const askAbout = useCallback((symbol: string | null, text: string, investigationId: string | null = null) => {
     if (symbol) setPicked(symbol);
-    const talk = item.investigation_id ?? (symbol ? deskRow(symbol)?.investigationId ?? rows.find(r => r.symbol === symbol && r.investigationId)?.investigationId
+    const talk = investigationId ?? (symbol ? deskRow(symbol)?.investigationId ?? rows.find(r => r.symbol === symbol && r.investigationId)?.investigationId
       ?? saved.filter(t => t.symbol === symbol && t.status !== "closed").sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]?.id ?? null : null);
     if (talk) { setCommand({ kind: "open", id: talk, text, n: ++sent.current }); setSheet(true); }
     else if (symbol) go(copilotLabHref(symbol, text));
     else if (!thread || thread.mainDay === today) fill(text);
     else go(copilotLabHref("", text));
   }, [today, deskRow, rows, saved, go, thread, fill]);
+  const askFeed = useCallback((item: FeedItem) => askAbout(item.symbol, feedQuestion(item, today), item.investigation_id), [askAbout, today]);
+  // The chart's level menu: Plan from here follows its desk link in place; Ask scopes the copilot like a feed item's Ask.
+  const chartActions = useMemo<DeskChartActions>(() => ({ go, ask: (symbol, text) => askAbout(symbol, text) }), [go, askAbout]);
   // A feed item's Plan it: a Radar setup card opens on its own Plan it (the desk's Radar card); his own position or plan
   // opens its plan thread, else the plan form for the symbol. Nothing is saved or sent from the feed.
   const planFeed = useCallback((item: FeedItem) => {
@@ -671,7 +673,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} onOpen={setTicketFor} onClose={() => setTicketFor(null)}
                 onPlaced={symbol => { setTicketFor(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
                 : centreTab === "chart"
-                ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} />
+                ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} />
                 : <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed} />}
             </div>
           </section>
