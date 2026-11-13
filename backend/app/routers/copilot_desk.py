@@ -1060,6 +1060,7 @@ def desk_timings(limit: int = 10):
 class ReadAsk(BaseModel):
     symbol: str = PydField(min_length=1, max_length=12)
     refresh: bool = False
+    kept_only: bool = False  # confirm a read the panel already shows; never starts a turn
 
 
 @router.post("/desk/read")
@@ -1071,7 +1072,7 @@ async def desk_read_route(body: ReadAsk):
     if not copilot.settings().enabled:
         raise HTTPException(503, "Copilot Lab is off.")
     from app.engine import desk_read
-    return await desk_read.read(body.symbol, refresh=body.refresh)
+    return await desk_read.read(body.symbol, refresh=body.refresh, kept_only=body.kept_only)
 
 
 @router.post("/desk/robinhood/refresh")

@@ -294,3 +294,24 @@ def test_the_route_reads_and_the_timings_view_counts_the_days_reads_and_cost(tur
         monkeypatch.setenv("COPILOT_ENABLED", "false")
         assert client.post("/copilot/desk/read", json={"symbol": "NBIS"}).status_code == 503
     assert len(turns) == 1
+
+
+def test_a_kept_only_confirmation_never_starts_a_read(turns):
+    """The panel confirms a read it already shows with ``kept_only``: after a restart the server has none, and says so."""
+    assert _read(now=IN_SESSION, kept_only=True) == {"state": "none"} and turns == []
+    _read(now=IN_SESSION)
+    confirmed = _read(now=IN_SESSION + 60, kept_only=True)
+    assert confirmed["state"] == "ok" and confirmed["cached"] is True and len(turns) == 1
+    _hide("NBIS")
+    assert _read(now=IN_SESSION + 120, kept_only=True) == {"state": "hidden"}
+
+
+def test_a_ticker_unfollowed_while_its_read_waits_its_turn_is_not_read(turns, monkeypatch):
+    calls = {"n": 0}
+    real = desk_read._not_followed
+
+    def hidden_on_second_look(symbol):
+        calls["n"] += 1
+        return real(symbol) if calls["n"] == 1 else True
+    monkeypatch.setattr(desk_read, "_not_followed", hidden_on_second_look)
+    assert _read(now=IN_SESSION) == {"state": "hidden"} and turns == []

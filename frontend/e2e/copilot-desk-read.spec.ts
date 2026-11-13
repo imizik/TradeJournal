@@ -120,7 +120,7 @@ test("clicking through names asks for the one he stops on, after the wait; a res
     await page.clock.runFor(5 * 60_000);
     expect(reads.asked.length).toBe(4); // nothing until it expires
   }
-  await page.clock.runFor(5 * 60_000 + 1000);
+  await page.clock.runFor(5 * 60_000 + 2000);
   await expect.poll(() => reads.asked.length).toBe(5);
   expect(reads.asked.at(-1)).toEqual({ symbol: "PLTR", refresh: false });
 });

@@ -23,7 +23,8 @@ const ET = "America/New_York";
 type Kept = Read & { made: number; until: number };
 const keptFrom = (read: Read): Kept => {
   const made = Date.now() - (read.age_s ?? 0) * 1000;
-  return { ...read, made, until: made + Math.max(0, (read.expires_at ?? 0) - (read.at ?? 0)) * 1000 };
+  // A second's margin: ``age_s`` is rounded, and asking before the server's read has expired would only get it back.
+  return { ...read, made, until: made + Math.max(0, (read.expires_at ?? 0) - (read.at ?? 0) + 1) * 1000 };
 };
 const clock = (epoch: number) => new Date(epoch * 1000).toLocaleTimeString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" });
 const ago = (read: Kept, now: number) => {
@@ -56,14 +57,16 @@ export function DeskRead({ symbol, render, onAskMore }: { symbol: string; render
     // has stopped following the ticker since.
     const fetchRead = (refresh: boolean, quiet = false) => {
       if (!quiet) { setReading(true); setFailed(null); }
-      getDeskRead(symbol, refresh, controller.signal).then(result => {
+      getDeskRead(symbol, refresh, controller.signal, quiet).then(result => {
+        if (result.state === "none") { fetchRead(false); return; } // the server lost it (a restart): read it, visibly
         const next = keptFrom(result);
         keep(next); // a refusal or "hidden" replaces the kept read, so it is never shown again from here
         setRead(next);
         setReading(false);
         if (result.state === "ok") expireLater(next);
       }).catch(error => {
-        if (controller.signal.aborted || quiet) return; // a failed confirmation leaves the shown read as it was
+        if (controller.signal.aborted) return;
+        if (quiet) { const shown = keptNow.current; if (shown?.state === "ok") expireLater(shown); return; } // the shown read stands until it expires
         setReading(false);
         setFailed(error instanceof Error ? error.message : String(error));
       });

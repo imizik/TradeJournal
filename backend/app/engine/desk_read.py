@@ -107,10 +107,11 @@ def today() -> dict | None:
         return None
 
 
-async def read(symbol: str, *, refresh: bool = False, now: float | None = None) -> dict:
+async def read(symbol: str, *, refresh: bool = False, kept_only: bool = False, now: float | None = None) -> dict:
     """The read for ``symbol``: ``state`` ``ok`` (``text``, ``at``, ``expires_at``, ``age_s``, ``cached``), ``hidden``
     (not followed, or the setting unreadable), ``budget`` (the day's budget has no room for a read: ``message``) or
-    ``error`` (``message``). ``today`` carries the day's read count and cost on every answer."""
+    ``error`` (``message``). ``today`` carries the day's read count and cost on every answer. ``kept_only`` (the panel
+    confirming a read it already shows) never starts a turn: ``none`` when no current read is kept here (a restart)."""
     from app.ai import copilot, copilot_spend
     symbol = (symbol or "").strip().upper()
     if not SYMBOL.match(symbol):
@@ -124,6 +125,8 @@ async def read(symbol: str, *, refresh: bool = False, now: float | None = None) 
     entry = _kept.get(symbol)
     if entry and not refresh and asked < entry["expires_at"]:
         return {**_shown(entry, asked, True), "today": await asyncio.to_thread(today)}
+    if kept_only:
+        return {"state": "none"}
     global _lock
     if _lock is None:
         _lock = asyncio.Lock()
@@ -132,6 +135,9 @@ async def read(symbol: str, *, refresh: bool = False, now: float | None = None) 
         # Another request read it while this one waited (``at`` is when a read was asked): its read is the fresh one.
         if entry and (entry["at"] >= asked or (not refresh and asked < entry["expires_at"])):
             return {**_shown(entry, asked, True), "today": await asyncio.to_thread(today)}
+        # Asked again after the wait for the lock: he may have stopped following it meanwhile.
+        if await asyncio.to_thread(_not_followed, symbol) is not False:
+            return {"state": "hidden"}
         if cfg.backend == "anthropic":
             fresh = time.monotonic() - UNRECORDED_S
             _just_spent[:] = [(t, c) for t, c in _just_spent if t >= fresh]
