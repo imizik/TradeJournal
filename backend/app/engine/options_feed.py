@@ -211,11 +211,12 @@ class OptionsFeed:
             state, reasons = "none", ["No listed expiration."]
         return levels, {**info, "state": state, "bands": bands, "message": " ".join(dict.fromkeys(reasons)) or None}
 
-    def ladder(self, symbol: str, scope: str, signed: bool, spot: float | None) -> dict:
-        """Every strike near the price for the side panel, reading what is stale first."""
-        issue = self.refresh(symbol, scope)
+    def ladder(self, symbol: str, scope: str, signed: bool, spot: float | None, expiration: date | None = None) -> dict:
+        """Every strike near the price for the side panel, reading what is stale first. ``expiration``: one listed
+        expiration instead of the scope's (the desk's Chain tab on a later expiry); an unlisted one falls back to it."""
+        issue = self.refresh(symbol, scope, only=expiration)
         now = self._now()
-        found, info, chains = self._read(symbol, scope, spot, now, issue)
+        found, info, chains = self._read(symbol, scope, spot, now, issue, only=expiration)
         if found is None:
             return {**info, "signed": signed, "rows": [], "walls": {}, "flip": None, "max_pain": None,
                     "net_gamma": None, "top_gamma": None, "expected_move": None, "touch": None,
@@ -223,7 +224,7 @@ class OptionsFeed:
         strikes = list(found.strikes)
         centre = min(range(len(strikes)), key=lambda i: abs(strikes[i].strike - spot)) if spot and strikes else len(strikes) // 2
         near = strikes[max(0, centre - LADDER_STRIKES):centre + LADDER_STRIKES + 1]
-        flip = self._flip(scope, found, chains, now) if signed else None
+        flip = self._flip(scope if expiration is None else expiration.isoformat(), found, chains, now) if signed else None
         walls = {f"{side}_{measure}": getattr(found.wall(measure, side), "strike", None)
                  for measure in ("oi", "volume") for side in ("call", "put")}
         # The read: every strike in scope, signed on the assumed dealer side whatever the rows show.
@@ -321,7 +322,7 @@ class OptionsFeed:
             return None
         return {"mid": round((found.bid + found.ask) / 2, 3), "fetched": read.fetched}
 
-    def refresh(self, symbol: str, scope: str, limit: int = PER_PASS) -> str | None:
+    def refresh(self, symbol: str, scope: str, limit: int = PER_PASS, only: date | None = None) -> str | None:
         """Read the expiration list and up to ``limit`` of the scope's stale chains, nearest
         first. Returns why it could not read something, or None."""
         with self._fetching:
@@ -330,13 +331,13 @@ class OptionsFeed:
             if listed is None:
                 return issue
             now = self._now()
-            stale = [d for d, ttl in self._wanted(symbol, scope, listed, now) if self._chain_stale(symbol, d, ttl, now.date())]
+            stale = [d for d, ttl in self._wanted(symbol, scope, listed, now, only) if self._chain_stale(symbol, d, ttl, now.date())]
             return self._read_chains(symbol, stale[:limit]) or issue
 
     # ------------------------------------------------------------------ views
 
     def _read(self, symbol: str, scope: str, spot: float | None, now: datetime,
-              issue: str | None = None) -> tuple[Positioning | None, dict, list[OptionChain]]:
+              issue: str | None = None, only: date | None = None) -> tuple[Positioning | None, dict, list[OptionChain]]:
         """Positioning over the scope's chains (and the chains), once every one of them is in memory."""
         root = primary_root(symbol)
         info = {"symbol": symbol, "root": root, "scope": scope, "source": SOURCE, "spot": spot,
@@ -344,7 +345,7 @@ class OptionsFeed:
         listed = self._list(symbol)
         if listed is None:
             return None, {**info, "state": "unavailable" if info["message"] else "loading"}, []
-        wanted = [d for d, _ in self._wanted(symbol, scope, listed, now)]
+        wanted = [d for d, _ in self._wanted(symbol, scope, listed, now, only)]
         info["expirations"] = [d.isoformat() for d in wanted]
         info["scope_note"] = _scope_note(scope, wanted, now.date())
         if not wanted:
@@ -390,11 +391,13 @@ class OptionsFeed:
 
     # ------------------------------------------------------------------ cache
 
-    def _wanted(self, symbol: str, scope: str, listed: list[date], now: datetime) -> list[tuple[date, int]]:
-        """The scope's expirations, each with how long its chain stays fresh."""
+    def _wanted(self, symbol: str, scope: str, listed: list[date], now: datetime, only: date | None = None) -> list[tuple[date, int]]:
+        """The scope's expirations (or ``only``, when it is listed and unexpired), each with how long its chain stays fresh."""
         root = primary_root(symbol)
         live = scope_expirations(listed, "all", now, root, self._closes(listed[:FAST]))
         fast = set(live[:FAST])
+        if only is not None and only in unexpired(listed, root, now, self._closes(listed[:FAST])):
+            return [(only, FAST_TTL if only in fast else SLOW_TTL)]
         chosen = scope_expirations(listed, scope, now, root, self._closes(listed[:FAST]))
         return [(d, FAST_TTL if d in fast else SLOW_TTL) for d in chosen]
 

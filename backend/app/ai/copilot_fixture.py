@@ -479,10 +479,12 @@ class FixtureEvidence:
                                              direction, budget_usd, AT), "simulated": True}
 
 
-def simulated_chains(symbol: str, spot: float, today) -> dict:
+def simulated_chains(symbol: str, spot: float, today, walls: bool = False) -> dict:
     """SIMULATED option chains: strikes every 2.5 from 80 to 115, premiums from a fixed 75% volatility rule of thumb
     (intrinsic value plus 0.4 x price x vol x sqrt(years), fading away from the money), 4% wide, with Greeks from the
-    same rule (delta from moneyness, theta from the premium's decay over the days left). Not market data."""
+    same rule (delta from moneyness, theta from the premium's decay over the days left). Not market data. ``walls``:
+    call open interest peaks about six dollars above the price and put open interest about five below (the desk's
+    Chain tab and walls), instead of both at the money."""
     from datetime import date, datetime, timezone
     from math import erf, exp, log, sqrt
     from app.engine.options_models import OptionChain, OptionContract
@@ -490,6 +492,7 @@ def simulated_chains(symbol: str, spot: float, today) -> dict:
              date(2026, 12, 18), date(2027, 1, 15), date(2027, 3, 19)]
     fetched = datetime.fromisoformat(AT.replace("Z", "+00:00")).astimezone(timezone.utc)
     out = {}
+    shift = {"call": 6.0, "put": -5.0} if walls else {"call": 0.0, "put": 0.0}
     for expiry in dates:
         years = max((expiry - today).days, 0.3) / 365
         scale = 0.75 * sqrt(years)
@@ -508,7 +511,7 @@ def simulated_chains(symbol: str, spot: float, today) -> dict:
                 contracts.append(OptionContract(
                     symbol=occ, underlying=symbol, root=symbol, expiration=expiry, option_type=kind, strike=strike, multiplier=100,
                     bid=round(max(mid - half, 0), 2), ask=round(mid + half, 2), last=round(mid, 2), bid_size=10, ask_size=10,
-                    volume=int(400 * exp(-abs(strike - spot) / 6)), open_interest=int(3000 * exp(-abs(strike - spot) / 10)),
+                    volume=int(400 * exp(-abs(strike - spot) / 6)), open_interest=int(3000 * exp(-abs(strike - spot - shift[kind]) / 10)),
                     bid_time=fetched, ask_time=fetched, trade_time=fetched, iv=0.75, iv_smoothed=0.74, delta=round(delta, 3),
                     gamma=round(exp(-0.5 * d1 ** 2) / (spot * 0.75 * sqrt(years) * sqrt(2 * 3.141592653589793)), 4),
                     theta=round(-(mid - intrinsic) / days_left / 2, 4), vega=round(spot * sqrt(years) * exp(-0.5 * d1 ** 2) / 100, 4),

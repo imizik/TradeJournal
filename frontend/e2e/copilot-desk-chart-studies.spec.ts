@@ -84,9 +84,12 @@ test("each study has a toggle that shows its value at the crosshair, and the cho
   const { pane, writes } = await desk(page);
   const canvas = pane.getByTestId("desk-chart-canvas");
   const legend = pane.getByTestId("desk-chart-studies");
-  // Intraday defaults: VWAP, EMA 9 and 21, volume and the reference lines, each with its value on the last candle.
-  await expect(legend.getByRole("button")).toHaveText([/^VWAP \d+\.\d{2}$/, /^EMA 9 \d+\.\d{2}$/, /^EMA 21 \d+\.\d{2}$/, /^Vol 1\.6K · 1\.4×$/, "Prev close · PM high/low", "News"]);
-  for (const button of await legend.getByRole("button").all()) await expect(button).toHaveAttribute("aria-pressed", "true");
+  // Intraday defaults: VWAP, EMA 9 and 21, volume and the reference lines, each with its value on the last candle; Walls
+  // (its own spec) starts off.
+  await expect(legend.getByRole("button")).toHaveText([/^VWAP \d+\.\d{2}$/, /^EMA 9 \d+\.\d{2}$/, /^EMA 21 \d+\.\d{2}$/, /^Vol 1\.6K · 1\.4×$/, "Prev close · PM high/low", "News", "Walls"]);
+  for (const button of await legend.getByRole("button").all()) {
+    await expect(button).toHaveAttribute("aria-pressed", (await button.getAttribute("data-testid")) === "desk-study-walls" ? "false" : "true");
+  }
   await expect(canvas).toHaveAttribute("data-studies", "vwap,ema9,ema21");
   await expect(canvas).toHaveAttribute("data-volume", "on");
   await expect(canvas).toHaveAttribute("data-reference", "3");
@@ -108,10 +111,10 @@ test("each study has a toggle that shows its value at the crosshair, and the cho
   await expect(canvas).toHaveAttribute("data-studies", "vwap,ema21");
   await expect(canvas).toHaveAttribute("data-volume", "off");
 
-  // The daily chart offers its own studies, all on, untouched by the 2m choices.
+  // The daily chart offers its own studies, all on but Walls, untouched by the 2m choices.
   await pane.getByRole("group", { name: "Timeframe" }).getByRole("button", { name: "1D" }).click();
   await expect(canvas).toHaveAttribute("data-timeframe", "1D");
-  await expect(legend.getByRole("button")).toHaveText([/^EMA 21 /, /^SMA 50 /, "SMA 200 —", /^Vol .* · 1\.2× 30d$/]);
+  await expect(legend.getByRole("button")).toHaveText([/^EMA 21 /, /^SMA 50 /, "SMA 200 —", /^Vol .* · 1\.2× 30d$/, "Walls"]);
   await expect(canvas).toHaveAttribute("data-studies", "ema21,sma50"); // SMA 200 has no value yet: nothing drawn, no flat line
   await expect(canvas).toHaveAttribute("data-volume", "on");
   await expect(canvas).toHaveAttribute("data-reference", "0");
