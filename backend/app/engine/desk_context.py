@@ -395,7 +395,7 @@ def market_picture(events: list[dict], now: float, bars=None, budget: float = BU
 STEP = {"2m": 120, "15m": 900, "1D": 86400}
 MAX_BARS = 600  # one chart read's bars: a whole 04:00-20:00 day of 2m candles is 480
 MAX_MARKS = 60
-LEVEL_WORD = {"entry": "Entry", "invalidation": "Invalidation"}
+LEVEL_WORD = {"entry": "Entry", "invalidation": "Invalidation", "target": "Target"}
 WARM_SESSIONS = 3  # stored sessions before the 15m chart's first that warm its averages (from disk, never fetched)
 USUAL_DAYS = 30  # a daily candle's volume against the average of this many before it
 # The averages each timeframe draws, on the workspace's own math (``chart_math.ema``/``sma``); VWAP and RVol ride too.
@@ -654,8 +654,8 @@ def chart(db: Session, inv: CopilotInvestigation | SymbolThread | None, now: flo
     the averages warmed on the candles before the first shown (stored sessions on disk, the rest of the daily history)
     so they are right from the first candle; ``reference`` lines (intraday: the previous close and today's pre-market
     high and low); ``reading``: the newest price, the previous close, VWAP and RVol, each with its time; its plan's
-    entry and invalidation as ``levels``; the symbol's other armed level ``alerts``; ``marks``: the owner's fills on the
-    symbol since the first candle and ``events`` (today's pings sent and Radar hits, ``kind``/``at``/``text``); the
+    entry and invalidation (and its saved target, a line with no alert) as ``levels``; the symbol's other armed level
+    ``alerts``; ``marks``: the owner's fills on the symbol since the first candle and ``events`` (today's pings sent and Radar hits, ``kind``/``at``/``text``); the
     plan's time stop while still ahead. ``inv`` None is the market chart: ``MARKET`` with ``events`` alone (the day's
     fills on any symbol and pings sent). ``live`` says bars can still change, so the desk reads again each minute.
     No bars, a failed read or a run past the budget is ``state`` "unavailable" with the reason."""
@@ -682,6 +682,10 @@ def chart(db: Session, inv: CopilotInvestigation | SymbolThread | None, now: flo
             if alert is not None:
                 levels.append({"role": alert.plan_role, "price": float(alert.price), "id": str(alert.id),
                                "label": f"{LEVEL_WORD[alert.plan_role]} {_price(float(alert.price))}"})
+        target = found["capture"].target_price if found and found["capture"] is not None else None
+        if target:  # the plan's saved target: a line only, no alert is armed at it
+            levels.append({"role": "target", "price": float(target), "id": f"target:{found['capture'].id}",
+                           "label": f"{LEVEL_WORD['target']} {_price(float(target))}"})
         stop = found["stop"] if found else None
         due = _epoch_utc(stop.due_at) if stop is not None else None
         if due is not None and stop.delivery == "scheduled" and due > now:

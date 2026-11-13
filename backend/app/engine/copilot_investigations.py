@@ -61,6 +61,7 @@ class PlanFields(_Strict):
     contract: str = Field("", max_length=80)
     entry: str = Field("", max_length=24)
     invalidation: str = Field("", max_length=24)
+    target: str | None = Field(None, max_length=24)  # optional: absent on a plan without one and on every older card
     time_stop: str = Field("", max_length=80)
     size_note: str = Field("", max_length=120)
     horizon: Literal["", "day", "swing", "long"] = ""  # how often the desk checks in (day_journal.HORIZONS)

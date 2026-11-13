@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 
 /*
  * The open thread's plan as one scale: invalidation on the left, the entry, then 1R and 2R past it, with the live price
- * marked. R is the entry-to-invalidation distance; plans have no target, so 1R and 2R only measure, they are not exits.
+ * marked. R is the entry-to-invalidation distance; 1R and 2R only measure, they are not exits. A plan's own saved target
+ * (optional) is listed in Details with its R multiple.
  * The levels are the symbol's own, so for an option they are the underlying's, said in the title. Advice only.
  */
 
@@ -74,6 +75,7 @@ function Details({ plan, ladder, position }: { plan: PlanBoardRow; ladder: Ladde
     ["Invalidation alert", `${CONDITION[plan.invalidation!.condition] ?? plan.invalidation!.condition} ${price(ladder.invalidation)}${plan.invalidation!.interval ? ` (${plan.invalidation!.interval})` : ""} · ${plan.invalidation!.state}`],
     [`1R (${option ? "underlying" : "a share"})`, price(ladder.risk)],
   ];
+  if (plan.target != null) rows.push(["Target", `${price(plan.target)} · ${((ladder.long ? plan.target - ladder.entry : ladder.entry - plan.target) / ladder.risk).toFixed(1)}R`]);
   if (position) {
     if (position.avg_entry != null) rows.push([option ? "Entry premium" : "Average cost", price(option ? position.avg_entry / 100 : position.avg_entry)]);
     rows.push(["Size", `${position.quantity} ${option ? `contract${position.quantity === 1 ? "" : "s"}` : `share${position.quantity === 1 ? "" : "s"}`}`]);

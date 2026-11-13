@@ -653,3 +653,42 @@ test("a Main plan keeps option sizing inputs and an in-flight follow-up survives
   await page.reload();
   await expect(box).toHaveValue("Follow up after lunch");
 });
+
+test("a drafted target shows with its R multiple, is checked against the entry, and is saved with the plan; blank is no target", async ({ page }) => {
+  const server: Server = { alerts: [], posts: [] };
+  await lab(page, server);
+  await page.route("**/copilot/chat", (route) => route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" },
+    body: turnWith({ ...PLAN, target_price: 103.1 }, null) }));
+  await aboutNbis(page);
+  const card = await askForPlan(page);
+  const target = card.getByLabel("Target");
+  await expect(target).toHaveValue("103.1");
+  // 103.1 − 95.9 = 7.2 against a 3.6 risk: 2.0R.
+  await expect(card.getByLabel("Plan numbers")).toContainText("Target 103.1, +7.5% from entry, 2.0R");
+  await target.fill("95");
+  await expect(card.getByRole("alert")).toHaveText("A long plan's target must be above its entry.");
+  await expect(card.getByRole("button", { name: "Confirm" })).toBeDisabled();
+  await target.fill("abc");
+  await expect(card.getByRole("alert")).toHaveText("The target must be a positive price, or leave it blank.");
+  await target.fill("101.5");
+  await card.getByRole("button", { name: "Confirm" }).click();
+  await expect(card.getByRole("status")).toHaveText("Plan confirmed.");
+  const [capture] = posts(server, "captures");
+  expect(capture).toMatchObject({ target_price: 101.5,
+    wording: "Entry: 5m close beyond 95.9. Invalidation: crosses 92.3. Target: 101.5. Time stop: out by 15:30 if the entry has not worked. Size: one starter, no adds." });
+  await expect(target).toBeDisabled();
+});
+
+test("a plan drafted without a target saves none and reads as before", async ({ page }) => {
+  const server: Server = { alerts: [], posts: [] };
+  await lab(page, server);
+  await aboutNbis(page);
+  const card = await askForPlan(page);
+  await expect(card.getByLabel("Target")).toHaveValue("");
+  await expect(card.getByLabel("Plan numbers")).not.toContainText("Target");
+  await card.getByRole("button", { name: "Confirm" }).click();
+  await expect(card.getByRole("status")).toHaveText("Plan confirmed.");
+  const [capture] = posts(server, "captures");
+  expect(capture.target_price).toBeNull();
+  expect(capture.wording).not.toContain("Target");
+});

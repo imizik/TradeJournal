@@ -358,6 +358,11 @@ def test_nothing_in_the_ticket_places_or_sends_anything():
     sources = [inspect.getsource(desk_ticket), inspect.getsource(ticket_routes)]
     screen = REPO / "frontend/components/copilot/DeskTicket.tsx"
     sources.append(screen.read_text())
+    # The closing ticket ("Close at target" / "Close at stop") is filled in the browser from the book row: its math and
+    # its buttons are in these files, and none of them reads or sends anything either.
+    closing = REPO / "frontend/lib/closingTicket.ts"
+    sources += [closing.read_text(), (REPO / "frontend/components/copilot/OptionStanding.tsx").read_text()]
+    assert "fetch(" not in closing.read_text() and "apiUrl" not in closing.read_text()
     forbidden = ("robinhood_trading", "place_option_order", "place_equity_order", "review_option_order", "order_tool",
                  "requests.post", "httpx", "urllib", "method: \"POST\"", "method: 'POST'", "ntfy", "telegram")
     for text in sources:
@@ -366,3 +371,7 @@ def test_nothing_in_the_ticket_places_or_sends_anything():
     # The screen's Send button is drawn disabled and has no handler.
     send = next(line for line in screen.read_text().splitlines() if "Send to Robinhood for your approval" in line)
     assert "disabled" in send and "onClick" not in send
+    assert screen.read_text().count("Send to Robinhood") == 1
+    # The closing view has no Send button at all, disabled or not, and reads no route.
+    view = screen.read_text()[screen.read_text().index("function ClosingView("):]
+    assert "Send" not in view and "read<" not in view and "fetch(" not in view

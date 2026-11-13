@@ -975,12 +975,13 @@ class FakeAdapter:
         levels = (results.get("get_chart_context") or {}).get("levels") or {}
         above, below = (levels.get("above") or [{}])[0].get("high"), (levels.get("below") or [{}])[0].get("low")
         entry, stop = round(above or price * 1.02, 2), round(below or price * 0.98, 2)
+        target = round(entry + 2 * (entry - stop), 2)  # two times the risk past the entry
         return [("get_level_history", {"symbol": symbol, "level": stop, "side": "below", "entry": entry}),
                 ("propose_plan", {"kind": "trade_plan", "symbol": symbol, "direction": "long", "instrument": "calls",
                                   "contract": "nearest weekly, first strike above entry",
                                   "thesis": f"{symbol} reclaims the level overhead with its group, so the bounce has room.",
                                   "entry_trigger": {"condition": "closes_beyond", "price": entry, "interval": "5m"},
-                                  "invalidation": {"condition": "crosses", "price": stop},
+                                  "invalidation": {"condition": "crosses", "price": stop}, "target_price": target,
                                   "time_stop": "out by 15:30 if the entry has not worked", "size_note": "one starter, no adds"})]
 
     @staticmethod

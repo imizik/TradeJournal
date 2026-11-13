@@ -328,7 +328,9 @@ TOOLS: list[dict] = [
                        "= expects up, short = expects down), `instrument` (stock; calls only when long; puts only when "
                        "short), optional `contract` hint (strike/expiry as text, at most 40), `thesis` (at most 300), "
                        "`entry_trigger` and `invalidation` (each {condition, price, interval for closes_beyond}; a long's "
-                       "invalidation is below its entry, a short's above), optional `time_stop` (at most 80, e.g. \"out by "
+                       "invalidation is below its entry, a short's above), optional `target_price` (the underlying's "
+                       "price the trade aims for: above a long's entry, below a short's; leave it out when there is no "
+                       "honest target), optional `time_stop` (at most 80, e.g. \"out by "
                        "15:30\") and `size_note` (at most 120). The owner edits and confirms it; Confirm saves it as their "
                        "pre-trade plan and arms the entry and invalidation alerts. kind=practice (after a week review only, at most one "
                        "per answer): one thing to practice next week, `text` in plain words (at most 200), `measure` (one the "
@@ -352,6 +354,7 @@ TOOLS: list[dict] = [
                                         "instrument": {"type": "string", "enum": ["stock", "calls", "puts"]},
                                         "contract": {"type": "string"}, "thesis": {"type": "string"},
                                         "entry_trigger": _LEVEL_SCHEMA, "invalidation": _LEVEL_SCHEMA,
+                                        "target_price": {"type": "number", "description": "trade_plan: the underlying's profit target, optional"},
                                         "time_stop": {"type": "string"}, "size_note": {"type": "string"},
                                         "measure": {"type": "string", "enum": ["plan_before_entry", "exit_at_invalidation",
                                                                                "respond_to_giveback_15m", "no_trade_after_hour_red",
@@ -425,6 +428,13 @@ def _trade_plan(args: dict) -> dict:
         raise ToolInputError(f"a {direction} plan's invalidation must be {'below' if direction == 'long' else 'above'} its entry")
     out = {"kind": "trade_plan", "symbol": _symbol(args.get("symbol")), "direction": direction, "instrument": instrument,
            "contract": None, "thesis": _text(args, "thesis", 300), **levels, "time_stop": None, "size_note": None}
+    target = args.get("target_price")
+    if target is not None:
+        if not isinstance(target, (int, float)) or isinstance(target, bool) or not math.isfinite(target) or not 0 < target < 1_000_000:
+            raise ToolInputError("target_price must be a positive number")
+        if (direction == "long" and not target > entry) or (direction == "short" and not target < entry):
+            raise ToolInputError(f"a {direction} plan's target must be {'above' if direction == 'long' else 'below'} its entry")
+        out["target_price"] = round(float(target), 4)  # absent, not null, without one: cards saved before targets read the same
     for key, most in (("contract", 40), ("time_stop", 80), ("size_note", 120)):
         if args.get(key) is not None:
             out[key] = _text(args, key, most)
@@ -449,7 +459,7 @@ def _proposal(args: dict) -> dict:
             "revisit": {"kind", "question", "horizon_days"},
             "memory": {"kind", "memory_kind", "symbol", "text", "interpretation"},
             "trade_plan": {"kind", "symbol", "direction", "instrument", "contract", "thesis", "entry_trigger", "invalidation",
-                           "time_stop", "size_note"},
+                           "target_price", "time_stop", "size_note"},
             "practice": {"kind", "text", "measure", "target", "why"}}.get(kind)
     if keys is None:
         raise ToolInputError("kind must be watch, revisit, memory, trade_plan or practice")

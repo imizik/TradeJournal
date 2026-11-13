@@ -204,7 +204,8 @@ def board(db: Session, quotes=None) -> dict:
                 "investigation_id": plan["investigation_id"], "symbol": plan["symbol"], "direction": draft.get("direction"),
                 "instrument": adopted.contract.removeprefix(adopted.ticker).strip(),
                 "thesis": draft.get("thesis") or titles.get(plan["investigation_id"]), "last": price,
-                "entry": _adopted_entry(adopted), "invalidation": _level(plan["invalidation"], price), "time_stop": _stop_row(stop),
+                "entry": _adopted_entry(adopted), "invalidation": _level(plan["invalidation"], price), "target": None,
+                "time_stop": _stop_row(stop),
                 "position": plan["position"], "confirmed_at": int(_epoch(plan["newest"])),
             })
             continue
@@ -218,6 +219,7 @@ def board(db: Session, quotes=None) -> dict:
             "investigation_id": plan["investigation_id"], "symbol": plan["symbol"], "direction": direction,
             "instrument": _instrument(capture), "thesis": _thesis(capture.note if capture else None) or titles.get(plan["investigation_id"]),
             "last": price, "entry": _level(plan["entry"], price), "invalidation": _level(plan["invalidation"], price),
+            "target": capture.target_price if capture else None,  # the underlying's price; no alert is armed at it
             "time_stop": _stop_row(stop),
             "position": plan["position"], "confirmed_at": int(_epoch(plan["newest"])),
         })

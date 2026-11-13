@@ -56,6 +56,6 @@ export function planHref(check: CheckedCall, mine: Partial<Record<Level, string>
   const posted = LEVELS.flatMap(k => check.reading[k] != null ? [`posted ${k} ${num(check.reading[k] as number)}`] : []);
   const set = LEVELS.flatMap(k => check.reading[k] == null && mine[k]?.trim() ? [`my ${k} ${mine[k]!.trim()}`] : []);
   const levels = [...posted, ...set].join("; ");
-  const context = `Plan a trade: ${contractWords(check)}, from a Discord call I checked${levels ? ` (${levels})` : ""}. My own entry trigger, invalidation and time stop:`;
+  const context = `Plan a trade: ${contractWords(check)}, from a Discord call I checked${levels ? ` (${levels})` : ""}. My own entry trigger, invalidation, target and time stop:`;
   return copilotLabHref(check.symbol, context.replace(/\s+/g, " ").slice(0, CONTEXT_MAX), { kind: "checked_call", ref: check.id });
 }
