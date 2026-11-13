@@ -59,8 +59,12 @@ async function desk(page: Page, { alerts = [ALERT] as object[] } = {}) {
     }
     return route.fulfill({ json: { state: "ok", symbol: "NBIS", count: 0, unavailable: [], recent_days: 7, rows: [] } });
   });
+  // The desk read of NBIS (a read sent as a POST; its own spec covers it) answers with no read here.
+  await page.route("**/copilot/desk/read", (route) => route.fulfill({ json: { state: "hidden" } }));
   // Every write this page makes is recorded; the alert routes answer as the backend's listing would.
-  page.on("request", (request) => { if (request.method() !== "GET") posted.push(request); });
+  page.on("request", (request) => {
+    if (request.method() !== "GET" && !new URL(request.url()).pathname.endsWith("/copilot/desk/read")) posted.push(request);
+  });
   await page.route("**/charts/alerts**", async (route) => {
     const request = route.request();
     if (request.method() === "POST") {
