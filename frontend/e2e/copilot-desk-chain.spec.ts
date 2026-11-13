@@ -38,7 +38,8 @@ function chain(expiration = "2026-11-13") {
   return {
     symbol: "NBIS", state: "ok", session: "open", poll_seconds: 15, simulated: false, root: "NBIS", centred_on: "price",
     expiries: [{ date: "2026-11-12", days: 0, kind: "0dte", held: false }, { date: "2026-11-13", days: 1, kind: "weekly", held: true },
-      { date: "2026-11-20", days: 8, kind: "monthly", held: false }],
+      { date: "2026-11-20", days: 8, kind: "monthly", held: false, earnings: true }],
+    earnings: { date: "2026-11-19", status: "confirmed" },
     expiration, spot: 95.4, spot_at: now - 5, spot_issue: null, atm_strike: 95, fetched_at: now - 3, age_s: 3, stale: false, message: null,
     rows, levels: [{ role: "entry", price: 95.2, strike: 95 }],
   };
@@ -158,4 +159,14 @@ test("a put tapped on the phone layout uses the calls and puts toggle", async ({
   await toggle.getByRole("radio", { name: "Puts" }).click();
   await tab.getByRole("button", { name: "97.5 put" }).click();
   await expect(tab.getByTestId("chain-actions")).toContainText("NBIS $97.5 Put 11/13/26");
+});
+
+test("the expiries that live through the next earnings report are marked ER, with one line saying so", async ({ page }) => {
+  const { pane } = await lab(page);
+  const tab = pane.getByTestId("desk-chain");
+  const expiries = tab.getByRole("radiogroup", { name: "Expiry" }).getByRole("radio");
+  await expect(expiries.nth(2).getByTestId("chain-expiry-earnings")).toHaveText("ER");
+  await expect(expiries.nth(2)).toHaveAttribute("title", /includes the 11\/19\/26 earnings report \(time of day not published\)/);
+  await expect(tab.getByTestId("chain-expiry-earnings")).toHaveCount(1);
+  await expect(tab.getByTestId("chain-earnings-note")).toHaveText("ER: these expiries include the 11/19/26 earnings report; time of day not published.");
 });

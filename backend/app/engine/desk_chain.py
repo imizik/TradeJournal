@@ -50,14 +50,16 @@ def _third_friday(day: date) -> bool:
     return day.weekday() == 4 and 15 <= day.day <= 21
 
 
-def expiries(live: list[date], today: date, held: set[date]) -> list[dict]:
+def expiries(live: list[date], today: date, held: set[date], report: date | None = None) -> list[dict]:
     """Every unexpired expiry, nearest first (today's 0DTE first when there is one), each with its days left, a kind
-    (``0dte``, ``monthly`` for a third Friday, else ``weekly``) and whether he holds a contract in it."""
+    (``0dte``, ``monthly`` for a third Friday, else ``weekly``), whether he holds a contract in it and whether it lives
+    through the next earnings ``report`` (on or after its date: the calendar has no time of day)."""
     out = []
     for day in sorted(set(live)):
         days = (day - today).days
         kind = "0dte" if days == 0 else "monthly" if _third_friday(day) else "weekly"
-        out.append({"date": day.isoformat(), "days": days, "kind": kind, "held": day in held})
+        out.append({"date": day.isoformat(), "days": days, "kind": kind, "held": day in held,
+                    "earnings": report is not None and day >= report})
     return out
 
 
@@ -240,7 +242,7 @@ def view(db: Session, symbol: str, expiration: date | None = None, *, mode: str 
     base = {"symbol": symbol, "state": "ok", "session": "open" if live_session else "closed",
             "poll_seconds": POLL_SECONDS if live_session else None, "expiries": [], "expiration": None, "spot": None,
             "spot_at": None, "spot_issue": None, "atm_strike": None, "fetched_at": None, "age_s": None, "stale": False,
-            "message": None, "rows": [], "levels": [], "simulated": mode == "fixture", "root": None}
+            "message": None, "rows": [], "levels": [], "simulated": mode == "fixture", "root": None, "earnings": None}
     if mode == "replay":
         return {**base, "state": "unavailable", "message": "Replay reads no live quotes, so there is no chain to show."}
     reader = read or (_fixture_read if mode == "fixture" else _live_read)
@@ -254,8 +256,11 @@ def view(db: Session, symbol: str, expiration: date | None = None, *, mode: str 
         return {**base, "state": "unavailable", "message": got.get("issue") or "The option expirations could not be read."}
     from app.engine.chart_math import ET
     today = datetime.fromtimestamp(now, ET).date() if not simulated else min(listed, default=date.today())
-    out = {**base, "expiries": expiries(listed, today, {k[0] for k in held}), "spot_issue": got.get("spot_issue"),
-           "simulated": simulated}
+    # The next earnings from the cache only (``desk_events``); a simulated chain has none.
+    from app.engine.desk_events import next_report
+    report = None if simulated else next_report(symbol, today)
+    out = {**base, "expiries": expiries(listed, today, {k[0] for k in held}, date.fromisoformat(report["date"]) if report else None),
+           "spot_issue": got.get("spot_issue"), "simulated": simulated, "earnings": report}
     if not listed:
         return {**out, "state": "none", "message": f"{symbol} has no listed options."}
     chain = got.get("chain")

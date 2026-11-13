@@ -672,7 +672,9 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   the chart ("Earnings Thu · ±5.2% implied"), and on hover the date, whether it is confirmed, "Time of day not
   published" and, when the option chain is already in memory today, the at-the-money straddle of the first expiry after
   the report (`options_implied`; never a read of its own). SPY, QQQ and IWM (the market chart is QQQ) show the macro
-  calendar's FOMC, CPI and jobs days, faint; no other chart does.
+  calendar's FOMC, CPI and jobs days, faint; no other chart does. The Chain tab marks **ER** on each expiry that lives
+  through the next report (on or after its date), with one line naming the report; its read carries `earnings` and each
+  expiry's `earnings` flag, from the same cache (`desk_events.next_report`).
 - **Centre.** A tab strip, **Chart** first, **Chain** (see [Chain](#chain)), **Feed**, **Check a call** (§ Check a
   call) and **Ticket** (see [Ticket](#ticket); no tab shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
   position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's

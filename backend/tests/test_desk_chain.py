@@ -111,6 +111,20 @@ def test_expiries_are_nearest_first_with_0dte_weekly_and_monthly(engine, session
     assert asked == [{"symbol": "NBIS", "expiration": None, "ttl": desk_chain.LIVE_TTL}]
 
 
+def test_expiries_that_live_through_the_next_report_are_marked(engine, session_open, monkeypatch):  # noqa: F811
+    from app.engine import desk_events
+    live = [date(2026, 10, 23), date(2026, 10, 28), date(2026, 10, 30), EXPIRY]
+    monkeypatch.setattr(desk_events, "_earnings", lambda symbols, today: {"NBIS": {"next": {"date": "2026-10-28", "status": "confirmed"}}})
+    found = view(engine, reader(chain_of([95.0], expiry=date(2026, 10, 23)), live=live))
+    assert found["earnings"] == {"date": "2026-10-28", "status": "confirmed"}
+    # The report's day counts: its time of day is not published, so that expiry may close after it.
+    assert [(e["date"], e["earnings"]) for e in found["expiries"]] == [
+        ("2026-10-23", False), ("2026-10-28", True), ("2026-10-30", True), ("2026-11-13", True)]
+    monkeypatch.setattr(desk_events, "_earnings", lambda symbols, today: {"NBIS": {"state": "none", "next": None}})
+    unknown = view(engine, reader(chain_of([95.0], expiry=date(2026, 10, 23)), live=live))
+    assert unknown["earnings"] is None and not any(e["earnings"] for e in unknown["expiries"])
+
+
 def test_the_asked_expiry_is_passed_through(engine, session_open):  # noqa: F811
     asked = []
     found = view(engine, reader(chain_of([95.0]), asked=asked), EXPIRY)
@@ -227,7 +241,7 @@ def test_the_fixture_is_the_simulated_nbis_chain_labelled(engine):  # noqa: F811
         found = desk_chain.view(db, "NBIS", mode="fixture", now=NOW)
         other = desk_chain.view(db, "CRWV", mode="fixture", now=NOW)
     assert found["simulated"] is True and found["state"] == "ok" and found["spot"] == 94.35
-    assert found["expiries"][0] == {"date": "2026-10-23", "days": 0, "kind": "0dte", "held": False}
+    assert found["expiries"][0] == {"date": "2026-10-23", "days": 0, "kind": "0dte", "held": False, "earnings": False}
     assert found["atm_strike"] == 95.0 and all(r["call"]["state"] != "stale" for r in found["rows"])
     assert other["state"] == "none" or other["state"] == "unavailable"
 

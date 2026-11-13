@@ -120,6 +120,21 @@ def parse_held(text: str) -> dict[str, list[date]]:
     return out
 
 
+def next_report(symbol: str, today: date, read: Callable[[list[str], date], dict[str, dict]] | None = None) -> dict | None:
+    """``symbol``'s next report on or after ``today`` ({date, status}) from the earnings cache, or None: a fund, no known
+    date, or a cache that could not be read."""
+    if not symbol or symbol in NO_EARNINGS:
+        return None
+    try:
+        upcoming = ((read or _earnings)([symbol], today).get(symbol) or {}).get("next")
+    except Exception:  # noqa: BLE001 -- the mark is extra
+        log.warning("desk events: the earnings cache could not be read for %s", symbol, exc_info=True)
+        return None
+    if not upcoming or not upcoming.get("date") or upcoming["date"] < today.isoformat():
+        return None
+    return {"date": upcoming["date"], "status": upcoming.get("status")}
+
+
 # ------------------------------------------------------------------ the chart
 
 
