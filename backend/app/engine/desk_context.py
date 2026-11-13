@@ -661,7 +661,8 @@ def chart(db: Session, inv: CopilotInvestigation | SymbolThread | None, now: flo
     No bars, a failed read or a run past the budget is ``state`` "unavailable" with the reason."""
     symbol = MARKET if inv is None else inv.symbol
     base = {"symbol": symbol, "timeframe": timeframe, "step": STEP.get(timeframe), "as_of": int(now), "live": _live(now),
-            "bars": [], "studies": {}, "reference": [], "reading": None, "levels": [], "alerts": [], "marks": [], "time_stop": None}
+            "bars": [], "studies": {}, "reference": [], "reading": None, "levels": [], "alerts": [], "marks": [], "time_stop": None,
+            "events": {"earnings": None, "macro": [], "note": None}}
     if not symbol:
         return {**base, "state": "unavailable", "reason": "This thread has no symbol, so there is no chart."}
     if timeframe not in TIMEFRAMES:
@@ -692,7 +693,19 @@ def chart(db: Session, inv: CopilotInvestigation | SymbolThread | None, now: flo
     marks = sorted((m for m in marks if m["at"] is not None and m["at"] >= shown[0]["time"]), key=lambda m: m["at"])[-MAX_MARKS:]
     alerts = _alerts(db, symbol, {level["id"] for level in levels})
     return {**base, **read, "state": "ok", "reason": None, "levels": levels, "alerts": alerts, "marks": marks,
-            "time_stop": time_stop}
+            "time_stop": time_stop, "events": _events(symbol, now, shown, read.get("reading"))}
+
+
+def _events(symbol: str, now: float, shown: list[dict], reading: dict | None) -> dict:
+    """The chart's earnings and macro markers (``desk_events.chart``): cache reads only; an error leaves them off."""
+    from app.engine import desk_events
+    at = datetime.fromtimestamp(now, ET)
+    try:
+        return desk_events.chart(symbol, at.date(), at, datetime.fromtimestamp(shown[0]["time"], ET).date(),
+                                 (reading or {}).get("last"))
+    except Exception:  # noqa: BLE001 - the markers are extra
+        log.warning("Desk chart events for %s failed", symbol, exc_info=True)
+        return {"earnings": None, "macro": [], "note": None}
 
 
 # ------------------------------------------------------------------ timeline

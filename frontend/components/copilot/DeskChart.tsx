@@ -11,6 +11,7 @@ import type { ChartBar, Interval } from "@/lib/charts";
 import { alertText, createAlert, removeAlert, type AlertsPayload } from "@/lib/alerts";
 import { CONTEXT_MAX, copilotLabHref, type DrawnPlan } from "@/lib/copilot";
 import { Flash } from "@/components/copilot/Ticks";
+import { ChartEventMarks, chartEvents, earningsHeader, eventLogical, nyDayOf } from "@/components/copilot/ChartEvents";
 import { cn } from "@/lib/utils";
 import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type DeskChartMark, type DeskStudySeries, type DeskTimeframe } from "@/lib/desk";
 
@@ -67,6 +68,8 @@ const LEVEL_REACH = 0.1;
 /** Candles of room kept past the last one; more when the time stop is ahead (up to ``STOP_ROOM``). */
 const RIGHT_ROOM = 4;
 const STOP_ROOM = 120;
+/** Daily candles of room for a report ahead (about two weeks of sessions). */
+const REPORT_ROOM = 10;
 /** Pixels from a mark within which the pointer shows what it was. */
 const HOVER_PX = 10;
 
@@ -219,7 +222,10 @@ const MIN_BAR_SPACING = 0.5;
 function defaultRange(parts: Parts, data: DeskChartData, host: HTMLElement | null) {
   const last = data.bars.length - 1;
   const ahead = data.time_stop && data.timeframe !== "1D" ? Math.ceil((data.time_stop.at - data.bars[last].time) / data.step) : 0;
-  const room = ahead > 0 ? Math.min(ahead, STOP_ROOM) + RIGHT_ROOM : RIGHT_ROOM;
+  // On daily candles a report in the next couple of weeks is kept in view, so its chip sits on the axis.
+  const report = data.timeframe === "1D" && data.events?.earnings?.next ? eventLogical(data, data.events.earnings.next.date) : null;
+  const toReport = report !== null && report - last <= REPORT_ROOM ? report - last + 2 : 0;
+  const room = Math.max(ahead > 0 ? Math.min(ahead, STOP_ROOM) + RIGHT_ROOM : RIGHT_ROOM, toReport);
   parts.chart.priceScale("right").applyOptions({ autoScale: true });
   const scale = parts.chart.timeScale();
   const width = scale.width();
@@ -420,6 +426,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   const [read, setRead] = useState<Read | null>(null);
   const [tick, setTick] = useState(0);
   const [hover, setHover] = useState<Hover | null>(null);
+  const [chartApi, setChartApi] = useState<IChartApi | null>(null);  // for the event chips over the chart
   const [choices, setChoices] = useState<Choices>({});
   const [menu, setMenu] = useState<Menu | null>(null);
   const [status, setStatus] = useState<Status>(null);
@@ -472,6 +479,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     const stop = new TimeStopLine(() => painted.current.shown?.bars ?? [], () => painted.current.shown?.step ?? 60);
     candles.attachPrimitive(stop);
     parts.current = { chart, candles, volume: null, markers, shade, stop, lines: [], studies };
+    setChartApi(chart);
     painted.current.applied = null;  // a new chart starts from the default view
     if (latest.current) paint(parts.current, latest.current, painted.current, host.current, () => true, [], null);
     chart.subscribeCrosshairMove((event) => {
@@ -488,7 +496,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
       }
       setHover({ bar, marks: near ? painted.current.byCandle.get(near.time) ?? [] : [], x: event.point.x, width: element.clientWidth });
     });
-    return () => { parts.current = null; chart.remove(); };
+    return () => { parts.current = null; setChartApi(null); chart.remove(); };
   }, []);
 
   useEffect(() => {
@@ -683,6 +691,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
         ))}
         {data && !data.levels.length && id !== "market" && <span>no plan lines saved</span>}
         {data?.time_stop && <span style={{ color: COLOR.stop }}>Time stop {stopWhen(data.time_stop.at)}</span>}
+        {data && earningsHeader(data.events, data.as_of) && <span data-testid="desk-chart-earnings" className="text-sky-200">{earningsHeader(data.events, data.as_of)}</span>}
         <button type="button" onClick={reset} disabled={!data}
           className="ml-auto min-h-11 rounded border border-transparent px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 sm:min-h-0 sm:py-0.5">
           Reset
@@ -748,6 +757,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           data-alerts={alerts.length}
           style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
           className="h-[320px] w-full overflow-hidden rounded border sm:h-[420px]" />
+        {!unavailable && !switching && <ChartEventMarks chart={chartApi} data={data} />}
         {hover && hover.marks.length > 0 && !menu && (
           <div role="tooltip" data-testid="desk-chart-tip"
             className="pointer-events-none absolute top-2 z-10 max-w-[min(20rem,85%)] rounded border bg-popover/95 px-2 py-1.5 text-xs shadow"
@@ -802,6 +812,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           {alerts.map(alert => <li key={alert.id}>Alert · {alert.text}</li>)}
           {allMarks.map((mark, i) => <li key={i}>{KIND_WORD[mark.kind]} · {mark.text} · {nyWhen(mark.at)}</li>)}
           {data.time_stop && <li>Time stop {stopWhen(data.time_stop.at)} · {data.time_stop.text}</li>}
+          {chartEvents(data.events, nyDayOf(data.as_of)).map(e => <li key={e.key}>{e.lines.join(" ")}</li>)}
         </ul>
       )}
     </div>

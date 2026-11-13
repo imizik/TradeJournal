@@ -26,6 +26,7 @@ import { AccountChips, Book, CentreChart, DayFacts, DayPnl, NeedsStrip, SinceYou
 import type { DeskChartActions } from "@/components/copilot/DeskChart";
 import MorningBrief from "@/components/copilot/MorningBrief";
 import Watching, { useWatching } from "@/components/copilot/Watching";
+import { useDeskEvents } from "@/components/copilot/EarningsTag";
 import { MovingStrip } from "@/components/copilot/MovingStrip";
 import PreviousDays from "@/components/copilot/PreviousDays";
 import ThreadRail from "@/components/copilot/ThreadRail";
@@ -485,6 +486,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // Only once the book has read: before that a held name would show here, then jump to the book.
   const watched = useMemo(() => rowsRead ? (watching.data?.symbols ?? []).filter(s => !held.has(s)) : [], [rowsRead, watching.data, held]);
   const sparks = useSparks(on ? [...(centreSymbol ? [centreSymbol] : []), ...followed.flatMap(r => r.symbol ? [r.symbol] : [])] : [], on ? watched : []);
+  // Earnings tags for the book and the Watching list: one read for both, kept for half an hour.
+  const events = useDeskEvents(on && rowsRead, followed, watched);
   // A thread opened from anywhere but the book (the drawer, J / K, the palette, a link) takes the centre with it.
   const lastTalking = useRef(talking);
   useEffect(() => {
@@ -663,9 +666,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         )}
         {on && (
           <div className={styles.book}>
-            <Book rows={rows} sparks={sparks} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} updating={rowsRead && !rowsFresh} onSelect={select} onFollow={changeFollow}
+            <Book rows={rows} sparks={sparks} earnings={events} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} updating={rowsRead && !rowsFresh} onSelect={select} onFollow={changeFollow}
               live={live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} />
-            <Watching data={rowsRead ? watching.data : null} failed={watching.failed} sparks={sparks} held={held} selected={centreSymbol}
+            <Watching data={rowsRead ? watching.data : null} failed={watching.failed} sparks={sparks} earnings={events} held={held} selected={centreSymbol}
               onSelect={selectWatched} onAsk={askWatched} onPlan={planWatched} onChange={watching.set} />
             {lower}
             <DayFacts session={session.data} />
