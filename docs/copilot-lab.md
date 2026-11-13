@@ -712,8 +712,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   another session holds the bridge (Charts, perhaps in another tab) it says so with **Try again** and never stops that
   one. Shown: the ARCA-labelled book's best bid and ask with size and the spread in cents and percent, five levels a
   side, and the newest 30 prints (price, size, time ET) kept from the last 200 in memory. A print is green "at ask" or
-  red "at bid" only when it was at or through that book's ask or bid in a book that arrived within a second of it;
-  otherwise plain (the provider's direction flag is not used: it is not documented as the aggressor side). A print at
+  red "at bid" only when it was at or through the ask or bid of the book standing when it arrived (received at or before
+  it, within a second; never a later book); otherwise plain (the provider's direction flag is not used: it is not documented as the aggressor side). A print at
   least 10× the session's median print (after 20 prints) is bold. An index (SPX, NDX, VIX…) or an option says the tape
   covers US stocks and ETFs and starts nothing; on a held option it is the underlying's stock tape, and says so. A phone
   shows the spread line and the newest 8 prints, no book. No pings, nothing saved, no Tradier or Robinhood read.

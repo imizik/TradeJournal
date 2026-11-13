@@ -22,6 +22,7 @@ const PHONE_PRINTS = 8;
 const LEVELS = 5;
 /** A print is compared with the ARCA book only when that book arrived within this long of it. */
 const BOOK_MATCH_MS = 1_000;
+const TOPS_KEPT = 8;
 /** A print this many times the session's median print size, with enough prints to judge, is a big print. */
 const BIG_TIMES = 10;
 const BIG_MIN_PRINTS = 20;
@@ -77,9 +78,17 @@ type Side = "ask" | "bid" | null;
 type Print = Trade & { side: Side; key: string };
 type Top = { bids: Level[]; asks: Level[]; at: number };
 
-/** At the ask or bid only when the ARCA book that came within a second of the print says so; otherwise nothing. */
+/** The newest of ``tops`` (oldest first) that the bridge received at or before the print, within a second of it. */
+export function bookAt(trade: Trade, tops: Top[]): Top | null {
+  for (let i = tops.length - 1; i >= 0; i--) {
+    if (tops[i].at <= trade.received_ms) return trade.received_ms - tops[i].at <= BOOK_MATCH_MS ? tops[i] : null;
+  }
+  return null;
+}
+
+/** At the ask or bid only when the ARCA book standing when the print arrived says so (never a later book); else nothing. */
 export function sideOf(trade: Trade, top: Top | null): Side {
-  if (!top || Math.abs(trade.received_ms - top.at) > BOOK_MATCH_MS) return null;
+  if (!top) return null;
   const bid = top.bids[0]?.price, ask = top.asks[0]?.price;
   if (bid === undefined || ask === undefined || bid >= ask) return null;
   if (trade.price >= ask) return "ask";
@@ -102,7 +111,9 @@ export function tapeCovers(symbol: string): string | null {
 }
 
 export function DeskTape({ symbol, option = false }: { symbol: string; option?: boolean }) {
+  const { owner } = useAppAccess();
   const unsupported = tapeCovers(symbol);
+  if (!owner) return null; // the depth route is the owner's: an assistant's remembered "open" starts nothing
   return (
     <section aria-label="Tape" data-testid="desk-tape" className="rounded-md border bg-card/60 px-3 py-2 text-xs">
       {unsupported ? <p role="status" className="text-muted-foreground">{unsupported} Nothing was started.</p>
@@ -113,7 +124,9 @@ export function DeskTape({ symbol, option = false }: { symbol: string; option?: 
 }
 
 function TapeStream({ symbol }: { symbol: string }) {
-  const top = useRef<Top | null>(null);
+  // The last few ARCA books (oldest first): a flush sends its books before its prints, so a print is matched with the
+  // book standing when it arrived, not a newer one.
+  const tops = useRef<Top[]>([]);
   const [book, setBook] = useState<Top | null>(null);
   const [prints, setPrints] = useState<Print[]>([]);
   const [dropped, setDropped] = useState(0);
@@ -121,26 +134,32 @@ function TapeStream({ symbol }: { symbol: string }) {
     // The ARCA-labelled book only (one row per price); the other market-maker book is never merged into it.
     const arca = event.books.find(b => heatBookKind(b) === "arca");
     if (!arca || (!arca.bids.length && !arca.asks.length)) return;
-    top.current = { bids: arca.bids, asks: arca.asks, at: event.received_ms };
-    setBook(top.current);
+    const next = { bids: arca.bids, asks: arca.asks, at: event.received_ms };
+    tops.current = [...tops.current, next].slice(-TOPS_KEPT);
+    setBook(next);
   }, []);
   const onTrades = useCallback((event: TradesEvent) => {
-    const fresh = event.trades.map((t, i) => ({ ...t, side: sideOf(t, top.current), key: `${t.received_ms}-${t.sequence ?? ""}-${i}` }));
+    const fresh = event.trades.map((t, i) => ({ ...t, side: sideOf(t, bookAt(t, tops.current)), key: `${t.received_ms}-${t.sequence ?? ""}-${i}` }));
     setPrints(current => [...fresh.reverse(), ...current].slice(0, KEPT));
     if (event.dropped) setDropped(n => n + event.dropped);
   }, []);
   const session = useDepthSession({ stopWhenHidden: true, onBook, onTrades });
   const { availability, enabled, running, refused, connect } = session;
+  // Only a session this panel had running counts as its own stop (hiding or closing it while refused stops nothing).
+  const ownRunning = useRef(false);
+  useEffect(() => { ownRunning.current = running; }, [running]);
+  const lastRefused = useRef<number | null>(null);
+  useEffect(() => { lastRefused.current = refused; }, [refused]);
 
   // The page's visibility: hiding stops the stream (the hook), showing again starts it.
   const [visible, setVisible] = useState(true);
   useEffect(() => {
-    const seen = () => { if (document.hidden) lastStop = Date.now(); setVisible(!document.hidden); };
+    const seen = () => { if (document.hidden && ownRunning.current) lastStop = Date.now(); setVisible(!document.hidden); };
     seen();
     document.addEventListener("visibilitychange", seen);
     return () => document.removeEventListener("visibilitychange", seen);
   }, []);
-  useEffect(() => () => { lastStop = Date.now(); }, []); // closing the panel or changing symbol ends this session
+  useEffect(() => () => { if (ownRunning.current) lastStop = Date.now(); }, []); // closing the panel or changing symbol ends this session
 
   // Start once per showing; a refusal right after the desk's own stop is the old session still closing: try again
   // a few times. Any other refusal waits for Try again.
@@ -153,7 +172,8 @@ function TapeStream({ symbol }: { symbol: string }) {
     startedFor.current = key;
     connect(symbol);
   }, [visible, availability, enabled, running, attempt, connect, symbol]);
-  useEffect(() => { if (!visible) startedFor.current = null; }, [visible]); // the next showing starts again
+  // The next showing starts again, unless another session held the bridge: that waits for Try again.
+  useEffect(() => { if (!visible && lastRefused.current !== 409) startedFor.current = null; }, [visible]);
   const [closing, setClosing] = useState(false);
   useEffect(() => {
     const wait = refused === 409 && !running && Date.now() - lastStop < CLOSING_MS;
@@ -195,8 +215,8 @@ function TapeStream({ symbol }: { symbol: string }) {
       {dropped > 0 && <p className="text-[11px] text-muted-foreground">{dropped.toLocaleString("en-US")} prints in fast bursts were too many to show.</p>}
       <p className="text-[10px] leading-4 text-muted-foreground max-sm:hidden">
         Level 2 is the ARCA-labelled book from moomoo (sizes as the provider reports them), not the whole market. Green
-        or red: the print was at or through that book&apos;s ask or bid within a second of it; plain when it fell between
-        them or no fresh book was there. Bold: at least {BIG_TIMES}× the median print so far. Nothing is saved.
+        or red: the print was at or through that book&apos;s ask or bid as it stood when the print arrived; plain when it
+        fell between them or no book from the second before was there. Bold: at least {BIG_TIMES}× the median print so far. Nothing is saved.
       </p>
     </div>
   );

@@ -401,9 +401,13 @@ TICKS = {"type": "TICKER", "symbol": "US.NVDA", "data": {"data_time_ms": 0, "tic
 
 def test_trade_prints_are_allowlisted_without_provider_direction():
     result = d.display_trades(TICKS, 1710000000200, "US.NVDA")
-    assert result == {"event": "trades", "symbol": "US.NVDA", "received_ms": 1710000000200, "trades": [
+    assert result == {"event": "trades", "symbol": "US.NVDA", "received_ms": 1710000000200, "dropped": 0, "trades": [
         {"price": 230.12, "volume": 300, "time_ms": 1710000000123, "sequence": 7},
         {"price": 230.15, "volume": 12.5, "time_ms": None, "sequence": None}]}
+    burst = copy.deepcopy(TICKS)
+    burst["data"]["ticker_list"] = [{"price": 1.0, "volume": 1, "time_ms": 1710000000000 + i, "sequence": i} for i in range(230)]
+    many = d.display_trades(burst, 1, "US.NVDA")
+    assert len(many["trades"]) == d.MAX_DISPLAY_TRADES and many["dropped"] == 30 and many["trades"][0]["sequence"] == 30
     assert "DO-NOT-ECHO" not in json.dumps(result) and "BUY" not in json.dumps(result)
     other = copy.deepcopy(TICKS)
     other["symbol"] = "US.AAPL"

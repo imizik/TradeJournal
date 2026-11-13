@@ -206,6 +206,7 @@ def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials
             if event["event"] == "book":
                 latest[book_kind(event)] = event  # Replace, never append market-depth history.
             elif event["event"] == "trades":
+                dropped += event.get("dropped", 0)  # prints past the bound within one provider message
                 for trade in event["trades"]:
                     if len(prints) == prints.maxlen:
                         dropped += 1

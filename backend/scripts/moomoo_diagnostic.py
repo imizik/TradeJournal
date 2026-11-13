@@ -472,7 +472,8 @@ def display_trades(message: dict, received_ms: int, symbol: str = SYMBOL) -> dic
         sequence = number(tick.get("sequence"))
         trades.append({"price": price, "volume": volume, "time_ms": timestamp(tick.get("time_ms")),
                        "sequence": sequence if isinstance(sequence, int) and sequence >= 0 else None})
-    return {"event": "trades", "symbol": symbol, "received_ms": received_ms, "trades": trades}
+    return {"event": "trades", "symbol": symbol, "received_ms": received_ms, "trades": trades,
+            "dropped": max(0, len(ticks) - MAX_DISPLAY_TRADES)}
 
 
 async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connector=NoRedirectConnect, observer=None,

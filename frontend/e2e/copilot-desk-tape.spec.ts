@@ -19,9 +19,11 @@ const BOOK = { event: "book", symbol: "US.NBIS", received_ms: RX, books: [{
   asks: [level(94.12, 300), level(94.13, 500), level(94.14, 2500), level(94.15, 800), level(94.16, 200)],
 }] };
 const print = (i: number, price: number, volume: number, at = RX + 100) => ({ price, volume, time_ms: at - 5, sequence: i, received_ms: at });
-// 24 small prints between the quotes, then one at the ask, one at the bid, one big one at the ask, and one that came
-// long after the book (no colour: no book of its moment).
+// One at the bid price that arrived before the book (no colour: the later book is not its moment), 24 small prints
+// between the quotes, then one at the ask, one at the bid, one big one at the ask, and one that came long after the book
+// (no colour: no book of its moment).
 const PRINTS = [
+  print(28, 94.1, 100, RX - 100),
   ...Array.from({ length: 24 }, (_, i) => print(i, 94.11, 100)),
   print(24, 94.12, 200), print(25, 94.1, 300), print(26, 94.12, 5000), print(27, 94.2, 100, RX + 5_000),
 ];
@@ -67,7 +69,7 @@ test("Tape is closed by default, opens the ticker's book and prints, and stays o
   await expect(tape.getByTestId("tape-levels").locator("tbody tr")).toHaveCount(5);
   await expect(tape.getByTestId("tape-levels").locator("tbody tr").first()).toContainText("40094.1094.12300");
   const rows = tape.getByTestId("tape-prints").locator("li");
-  await expect(rows).toHaveCount(28);
+  await expect(rows).toHaveCount(29);
   // Newest first: the late print is plain, the big one is at the ask and bold, then at the bid, at the ask, then between.
   await expect(rows.nth(0)).not.toHaveAttribute("data-side", /.*/);
   await expect(rows.nth(1)).toHaveAttribute("data-side", "ask");
@@ -78,13 +80,15 @@ test("Tape is closed by default, opens the ticker's book and prints, and stays o
   await expect(rows.nth(3)).toHaveAttribute("data-side", "ask");
   await expect(rows.nth(3)).not.toHaveAttribute("data-big", /.*/);
   await expect(rows.nth(4)).not.toHaveAttribute("data-side", /.*/);
+  await expect(rows.nth(28)).toContainText("94.10");
+  await expect(rows.nth(28)).not.toHaveAttribute("data-side", /.*/); // before the book: never matched with a later one
   // The stub's stream ended: the tape says so and does not reconnect by itself.
   await expect(tape.getByTestId("tape-status")).toHaveText("The tape ended.");
   expect(depth.posts).toHaveLength(1);
 
   await page.reload();
   await expect(page.getByTestId("tape-toggle")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByTestId("desk-tape").getByTestId("tape-prints").locator("li")).toHaveCount(28);
+  await expect(page.getByTestId("desk-tape").getByTestId("tape-prints").locator("li")).toHaveCount(29);
 
   await page.getByTestId("tape-toggle").click();
   await expect(page.getByTestId("desk-tape")).toHaveCount(0);
@@ -144,4 +148,51 @@ test("a phone shows the spread and a short tape, not the book", async ({ page })
   await expect(tape.getByTestId("tape-spread")).toBeVisible();
   await expect(tape.getByTestId("tape-levels")).toBeHidden();
   await expect(tape.getByTestId("tape-prints").locator("li:visible")).toHaveCount(8);
+});
+
+/** Makes the page look hidden or shown to the app, as switching browser tabs does. */
+const setHidden = (page: Page, hidden: boolean) => page.evaluate(value => {
+  Object.defineProperty(document, "hidden", { configurable: true, get: () => value });
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => value ? "hidden" : "visible" });
+  document.dispatchEvent(new Event("visibilitychange"));
+}, hidden);
+
+test("hiding the tab stops the stream and showing it starts again", async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = window.fetch.bind(window);
+    const record = { posts: 0, aborted: 0 };
+    Object.assign(window, { tapeRecord: record });
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if ((init?.method ?? "GET") === "POST" && url.includes("/api/level2-lab/session") && init?.signal) {
+        record.posts += 1;
+        return new Promise<Response>((_, reject) => init.signal!.addEventListener("abort", () => {
+          record.aborted += 1; reject(new DOMException("aborted", "AbortError"));
+        }, { once: true }));
+      }
+      return original(input, init);
+    }) as typeof window.fetch;
+  });
+  await desk(page, "NBIS", streaming());
+  await page.getByTestId("tape-toggle").click();
+  const record = () => page.evaluate(() => (window as unknown as { tapeRecord: { posts: number; aborted: number } }).tapeRecord);
+  await expect.poll(record).toEqual({ posts: 1, aborted: 0 });
+  await setHidden(page, true);
+  await expect.poll(record).toEqual({ posts: 1, aborted: 1 });
+  await expect(page.getByTestId("tape-status")).toHaveText("Paused while the page is hidden.");
+  await setHidden(page, false);
+  await expect.poll(record).toEqual({ posts: 2, aborted: 1 });
+  await expect(page.getByTestId("tape-status")).toHaveText("Connecting NBIS…");
+});
+
+test("hiding and showing the tab does not retry against another session holding the bridge", async ({ page }) => {
+  const depth: Depth = { posts: [], answer: route => route.fulfill({ status: 409, json: { detail: "Local lab unavailable" } }) };
+  await desk(page, "NBIS", depth);
+  await page.getByTestId("tape-toggle").click();
+  await expect(page.getByTestId("tape-status")).toHaveText(/Another Level 2 stream is running/);
+  await setHidden(page, true);
+  await setHidden(page, false);
+  await page.waitForTimeout(3_000);
+  expect(depth.posts).toHaveLength(1);
+  await expect(page.getByTestId("tape-status")).toHaveText(/Another Level 2 stream is running/);
 });
