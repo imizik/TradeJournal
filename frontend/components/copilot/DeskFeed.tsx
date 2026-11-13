@@ -17,13 +17,17 @@ export type FeedItem = {
   setup: { id: string; event_id: string; words: string; levels_line: string; contract_line: string | null; record: string | null;
     paper_record: string | null; plan_state: string; investigation_id: string | null } | null;
   plan: "setup" | "own" | null; mine: boolean; upcoming: boolean; chatter?: boolean;
+  /** A chatter buzz row whose counts are not current: shown grey. */
+  stale?: boolean;
 };
-/** One buzz chip (``app/engine/chatter.py`` ``buzz``): mentions in the last hour against the same hour on recent days;
- * ``multiple`` null without enough history ("no usual yet") or when it is usually never named then. */
-export type ChatterBuzz = { symbol: string; count: number; usual: number | null; multiple: number | null; history: boolean; held: boolean };
-export type ChatterState = "on" | "not set up" | "unavailable";
+/** One buzz chip (``app/engine/chatter.py`` ``buzz``): ApeWisdom's r/wallstreetbets mentions in the last 24h against
+ * the 24h before (``multiple`` null when none were counted then) and the rank change. ``stale``: counts not updated
+ * since ``as_of``, shown grey with that time. */
+export type ChatterBuzz = { symbol: string; count: number; before: number | null; multiple: number | null; rank: number | null;
+  rank_before: number | null; climbed: number | null; held: boolean; as_of: number; stale: boolean };
+export type ChatterState = "on" | "stale" | "not set up" | "unavailable";
 /** The Feed's chatter block: shown only behind its own Chatter filter, never in ``items``. */
-export type DeskChatter = { sources: Record<string, ChatterState>; buzz: ChatterBuzz[]; record: string | null; items: FeedItem[] };
+export type DeskChatter = { sources: Record<string, ChatterState>; buzz: ChatterBuzz[]; items: FeedItem[] };
 export type DeskFeedBody = { as_of: string; now: number; day: string; items: FeedItem[]; total: number;
   sources: Record<string, string>; unavailable: string[]; chatter?: DeskChatter };
 
@@ -104,7 +108,7 @@ export function useFeedNew(data: DeskFeedBody | null, open: boolean): { count: n
  * Charts, the headline at its publisher, and Plan it only on a Radar setup card or his own position or plan. Facts
  * only; nothing here is an order. A source that could not be read is left out quietly. The copilot's own questions
  * (What matters right now?, Review my week) are in the copilot and ⌘K, not repeated here.
- * **Chatter** (r/wallstreetbets buzz, NYT headlines) is a fourth filter that shows only while a chatter source has rows;
+ * **Chatter** (r/wallstreetbets buzz from ApeWisdom's counts, NYT headlines) is a fourth filter that shows only while a chatter source has rows;
  * its rows never show under the other filters, never count as new, and carry only Ask the copilot and their link; what
  * a chatter source did not deliver is said only under that filter.
  * **Unusual options** (``DeskUnusual``) is its own filter: unusual contracts on his held and watched names; a row selects
@@ -149,7 +153,7 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, unusual =
           ))}
         </div>
       )}
-      {filter === "chatter" && !symbol && chatter && <ChatterHead chatter={chatter} />}
+      {filter === "chatter" && !symbol && chatter && <ChatterHead chatter={chatter} day={day} />}
       {filter === "unusual" && !symbol ? <UnusualList reply={unusual} onPick={pick => onUnusual?.(pick)} /> : <>
       {!data && (failed ? <p className="text-xs text-muted-foreground">The feed could not be read right now.</p>
         : <p className="text-xs text-muted-foreground">Reading the feed…</p>)}
@@ -180,29 +184,40 @@ function chatterWhy(chatter: DeskChatter | null): string | null {
   if (!chatter) return null;
   const sources = Object.entries(chatter.sources).filter(([, state]) => state !== "not set up");
   const has = new Set(chatter.items.map(i => i.source as string));
+  // r/wallstreetbets read fine but with nothing at 2× its day before: no buzz, not "nothing read".
   const parts = sources.flatMap(([name, state]) => state === "unavailable" ? [`${name} could not be read`]
-    : !has.has(name) ? [`nothing from ${name} yet`] : []);
+    : has.has(name) ? [] : name === "r/wallstreetbets" ? [`no buzz on ${name} right now`] : [`nothing from ${name} yet`]);
   if (!parts.length) return null;
   const said = parts.join("; ");
-  return `${said[0].toUpperCase()}${said.slice(1)}.`;
+  return `${said.startsWith("r/") ? said[0] : said[0].toUpperCase()}${said.slice(1)}.`; // "r/wallstreetbets" keeps its r/
 }
 
-/** The Chatter filter's head: buzz chips (ticker and multiple, outlined when he holds it). His record on entries made
- * during a mention spike sits in each buzz row. Counts only. */
-function ChatterHead({ chatter }: { chatter: DeskChatter }) {
+const APEWISDOM = "Counts from ApeWisdom, a third party; may stop in 2027 if Reddit closes its access.";
+
+/** The Chatter filter's head: buzz chips (ticker and its multiple of the 24h before, outlined when he holds it), grey
+ * with their time when the counts are stale, and one line saying whose counts they are. Counts only. */
+function ChatterHead({ chatter, day }: { chatter: DeskChatter; day: string }) {
   if (!chatter.buzz.length) return null;
+  const stale = chatter.buzz.find(b => b.stale);
   return (
-    <ul data-testid="feed-chatter-head" aria-label="Mentions on r/wallstreetbets in the last hour" className="flex flex-wrap gap-1.5">
-      {chatter.buzz.map(b => (
-        <li key={b.symbol} data-testid="buzz-chip" data-held={b.held || undefined}
-          title={`${b.count} post${b.count === 1 ? "" : "s"} in the last hour${b.held ? " · you hold it" : ""}`}
-          className={cn("rounded-full border px-2 py-0.5 text-xs tabular-nums",
-            b.held ? "border-foreground text-foreground" : "border-transparent bg-secondary text-muted-foreground")}>
-          <span className="font-semibold text-foreground">{b.symbol}</span>{" "}
-          {b.multiple !== null ? `${b.multiple}×` : b.history ? `${b.count}, usually none` : `${b.count} posts`}
-        </li>
-      ))}
-    </ul>
+    <div data-testid="feed-chatter-head" className="space-y-1">
+      <ul aria-label="Mentions on r/wallstreetbets in the last 24h against the 24h before" className="flex flex-wrap gap-1.5">
+        {chatter.buzz.map(b => (
+          <li key={b.symbol} data-testid="buzz-chip" data-held={b.held || undefined} data-stale={b.stale || undefined}
+            title={`${b.count} mention${b.count === 1 ? "" : "s"} in the last 24h, ${b.before ?? "none counted"} the 24h before${
+              b.rank ? ` · rank ${b.rank}${b.rank_before ? `, was ${b.rank_before}` : ""}` : ""}${b.held ? " · you hold it" : ""}`}
+            className={cn("rounded-full border px-2 py-0.5 text-xs tabular-nums", b.stale && "opacity-60",
+              b.held ? (b.stale ? "border-muted-foreground text-muted-foreground" : "border-foreground text-foreground")
+                : "border-transparent bg-secondary text-muted-foreground")}>
+            <span className={cn("font-semibold", b.stale ? "text-muted-foreground" : "text-foreground")}>{b.symbol}</span>{" "}
+            {b.multiple !== null ? `${b.multiple}×` : `${b.count}, none before`}
+          </li>
+        ))}
+      </ul>
+      <p data-testid="buzz-note" className="px-1 text-[11px] text-muted-foreground">
+        {stale ? `As of ${feedWhen({ at: stale.as_of, has_time: true }, day)}, not updated since. ` : "Last 24h vs the 24h before. "}{APEWISDOM}
+      </p>
+    </div>
   );
 }
 
@@ -224,7 +239,7 @@ function FeedRow({ item, day, fresh, ahead, onSymbol, onAsk, onPlan }: {
             className="ml-auto inline-flex min-h-11 items-center font-semibold text-foreground hover:underline sm:min-h-0">{item.symbol}</button>
         )}
       </p>
-      <p className="mt-1 line-clamp-3 break-words text-sm text-foreground">{item.text}</p>
+      <p data-stale={item.stale || undefined} className={cn("mt-1 line-clamp-3 break-words text-sm", item.stale ? "text-muted-foreground" : "text-foreground")}>{item.text}</p>
       {item.publisher && !chatter && <p className="text-xs text-muted-foreground">{item.publisher}</p>}
       {item.detail && <p className="line-clamp-2 break-words text-xs text-muted-foreground">{item.detail}</p>}
       {item.setup && (
