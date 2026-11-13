@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 # "plan" only labels turns recorded before everything moved to the API.
 BILLING = {"anthropic": "api", "shadow": "api_background", "plan": "claude_plan", "fake": "none"}
 KINDS = frozenset({"ask", "briefing", "plan", "review", "week_review", "moment", "changes", "compare", "pushback", "prep",
-                   "companion", "shadow", "check_call"})
+                   "companion", "shadow", "check_call", "desk_read"})
 SOURCES = frozenset({"desk", "charts", "radar", "panel", "telegram", "prep", "week_review", "companion", "shadow", "eval"})
 PUSHBACK = re.compile(r"^\s*push back on\b", re.I)
 COMPARE_LINE = re.compile(r"^\**compare\**\s*:", re.I | re.M)
@@ -209,3 +209,17 @@ def spent_today(session=None) -> float:
         rows = db.exec(select(CopilotTurn.cost_usd).where(CopilotTurn.billing == "api",
                                                           col(CopilotTurn.started_at) >= _day_start_utc())).all()
     return round(sum(float(c or 0) for c in rows), 6)
+
+
+def kind_today(kind: str, session=None) -> dict:
+    """Today's turns of one ``kind`` (New York day): how many ran, how many were refused for the daily budget, and their
+    estimated API dollars (``billing == "api"`` only, as ``spent_today`` counts them)."""
+    from sqlmodel import Session, col, select
+    from app.database import engine
+    from app.models import CopilotTurn
+    with (Session(engine) if session is None else nullcontext(session)) as db:
+        rows = db.exec(select(CopilotTurn.billing, CopilotTurn.cost_usd, CopilotTurn.error).where(
+            CopilotTurn.kind == kind, col(CopilotTurn.started_at) >= _day_start_utc())).all()
+    refused = sum(1 for _, _, error in rows if error == "daily_budget")
+    return {"count": len(rows) - refused, "refused": refused,
+            "cost_usd": round(sum(float(cost or 0) for billing, cost, _ in rows if billing == "api"), 4)}

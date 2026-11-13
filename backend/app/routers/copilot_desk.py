@@ -56,6 +56,8 @@ owner's rating.
 trading session (``day_only``: today's) and what followed it; a ticker he does not follow is left out.
 ``GET /copilot/desk/day-report`` is the after-close day report's other parts (``app/engine/day_report.py``): today's
 entries with how many had a plan before the fill, and the calls he checked scored from the price when he checked.
+``POST /copilot/desk/read`` is the desk's read of a selected ticker (``app/engine/desk_read.py``); ``GET
+/copilot/desk/timings`` carries today's read count and cost under ``desk_reads``.
 ``GET /copilot/desk/session`` (at the end) is the Briefing's session timeline: today's regular session and what
 happened in it, from the same kind of existing readers, and the alerts and Radar hits still waiting on an answer.
 """
@@ -1051,8 +1053,26 @@ def desk_timings(limit: int = 10):
     per route, p50/p90/max of the last timings kept since the backend started, p50/p90 of each section, and the newest
     ``limit`` timings (``first``: the route's first request since the start, the cold one). Section names and
     milliseconds only. Owner-only; answers while the lab is off, so a slow start can still be read."""
-    from app.engine import request_timing
-    return request_timing.summary(max(0, min(limit, request_timing.KEEP)))
+    from app.engine import desk_read, request_timing
+    return {**request_timing.summary(max(0, min(limit, request_timing.KEEP))), "desk_reads": desk_read.today()}
+
+
+class ReadAsk(BaseModel):
+    symbol: str = PydField(min_length=1, max_length=12)
+    refresh: bool = False
+    kept_only: bool = False  # confirm a read the panel already shows; never starts a turn
+
+
+@router.post("/desk/read")
+async def desk_read_route(body: ReadAsk):
+    """The desk's few-line read of a selected ticker (``app/engine/desk_read.py``): kept per ticker for 30 minutes in the
+    regular session (longer outside it), refused when the day's copilot budget has no room for one, never for a ticker
+    he does not follow. Each read is a ``copilot_turn`` row on the shared daily budget; ``today`` is the day's count and
+    cost. Owner-only; refused while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import desk_read
+    return await desk_read.read(body.symbol, refresh=body.refresh, kept_only=body.kept_only)
 
 
 @router.post("/desk/robinhood/refresh")

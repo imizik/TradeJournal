@@ -124,7 +124,8 @@ test("the chart draws the plan's lines, the fills, pings, Radar and the time sto
   await expect(canvas).toHaveAttribute("data-marks", "3");
   await expect(canvas.locator("canvas").first()).toBeVisible(); // the library drew
   // The lines and the time stop are named above the chart; every mark, with its New York time, in the chart's own list.
-  await expect(pane.getByTestId("desk-chart-lines")).toHaveText(/^Entry 95.90Invalidation 92.30Time stop \d{1,2}:\d{2} [AP]MReset$/);
+  // The stop is 20 minutes ahead, so after about 23:40 New York it falls on the next day and carries that day's date.
+  await expect(pane.getByTestId("desk-chart-lines")).toHaveText(/^Entry 95.90Invalidation 92.30Time stop (?:[A-Z][a-z]{2} \d{1,2} )?\d{1,2}:\d{2} [AP]MReset$/);
   const marks = pane.getByRole("list", { name: "On the chart" }).getByRole("listitem");
   await expect(marks).toHaveText(["Entry 95.90", "Invalidation 92.30",
     /^Fill · Bought 2 NBIS 11\/20\/26 100C · NBIS at 94.40 · .*\d{1,2}:\d{2} [AP]M ET$/,

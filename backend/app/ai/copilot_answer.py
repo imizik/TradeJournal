@@ -73,7 +73,13 @@ CHECK_SHAPE = (
     "Draft; Unclear only when no ticker can be read), three or four Tile lines (label | value), Against, Changes if, and "
     "Also only for other calls in the message. Nothing else: no preamble, bullets, markdown or closing note.]"
 )
-SHAPES = (ANSWER_SHAPE, TELEGRAM_SHAPE, PREP_SHAPE, COMPANION_SHAPE, WEEK_SHAPE, CHECK_SHAPE)
+DESK_READ_SHAPE = (
+    f"[Answer shape: the desk's read: three or four lines in all. The Verdict line (headline at most 12 words, never "
+    f"Draft), one or two bullets of one sentence each, at most {BULLET_WORDS} words with figures and as-of (where it is "
+    "against the owner's levels, then what is moving it today), then Changes if, at most "
+    f"{CHANGES_WORDS} words. No Read or Against line, no headings, bold or closing note.]"
+)
+SHAPES = (ANSWER_SHAPE, TELEGRAM_SHAPE, PREP_SHAPE, COMPANION_SHAPE, WEEK_SHAPE, CHECK_SHAPE, DESK_READ_SHAPE)
 
 
 def without_shape(content: str) -> str:

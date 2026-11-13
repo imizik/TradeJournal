@@ -699,6 +699,24 @@ export async function getDeskSparks(symbols: string[], signal?: AbortSignal, wat
   return await response.json() as DeskSparks;
 }
 
+// --------------------------------------------------------------------------- the desk read
+
+/** ``POST /copilot/desk/read`` (``backend/app/engine/desk_read.py``): a few lines on a selected ticker, kept per ticker on
+ * the server (30 minutes in the session, longer outside it). ``hidden``: a ticker he does not follow, nothing shown;
+ * ``budget``: the day's copilot budget has no room for a read; ``none``: asked ``keptOnly`` and nothing is kept there. ``today``: the day's reads, refusals and their cost. */
+export type DeskReadToday = { count: number; refused: number; cost_usd: number };
+export type DeskRead = {
+  state: "ok" | "hidden" | "budget" | "error" | "none"; text?: string; at?: number; expires_at?: number; age_s?: number; cached?: boolean;
+  cost_usd?: number; message?: string; today?: DeskReadToday | null;
+};
+export async function getDeskRead(symbol: string, refresh = false, signal?: AbortSignal, keptOnly = false): Promise<DeskRead> {
+  const response = await fetch(apiUrl("/copilot/desk/read"), { method: "POST", cache: "no-store", signal,
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol, refresh, kept_only: keptOnly }) });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  return body as DeskRead;
+}
+
 // --------------------------------------------------------------------------- earnings on the book and Watching rows
 
 /** One symbol's earnings tag (``desk_events.tag``): ``grey`` within ``window`` trading days, ``amber`` when a held option

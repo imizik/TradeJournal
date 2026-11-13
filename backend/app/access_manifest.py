@@ -110,7 +110,8 @@ DOMAIN_ROUTES = frozenset({
     'DELETE /copilot/desk/watching/{symbol}',  # stop watching: the app's own watchlist only
     'GET /copilot/desk/watching/robinhood',  # his own lists' names and sizes: get_watchlists only, on his tap
     'POST /copilot/desk/watching/robinhood',  # list ids checked against a fresh read of his own lists; two watchlist reads only
-    'GET /copilot/desk/timings',  # section names and milliseconds only
+    'GET /copilot/desk/timings',  # section names and milliseconds only, and today's desk-read count and cost
+    'POST /copilot/desk/read',  # one ticker's few-line read: a model turn on the daily budget, kept per ticker; Robinhood only as the owner context pack already reads it
     'GET /copilot/checks',
     'POST /copilot/checks',
     'POST /copilot/checks/{check_id}/pass',
