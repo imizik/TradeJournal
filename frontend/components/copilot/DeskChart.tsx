@@ -686,8 +686,9 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   useEffect(() => {
     latest.current = read;
     const tf = read && "data" in read ? read.data.timeframe : timeframe;
-    if (parts.current && read) paint(parts.current, read, painted.current, host.current, k => isOn(choices, tf, k), alerts, pick, guides);
-  }, [read, choices, alerts, pick, shownKey, timeframe, guides]);
+    // A new ticker's guides wait for its own read: never drawn on the previous ticker's candles.
+    if (parts.current && read) paint(parts.current, read, painted.current, host.current, k => isOn(choices, tf, k), alerts, pick, read.key === key ? guides : NO_GUIDES);
+  }, [read, choices, alerts, pick, shownKey, timeframe, guides, key]);
 
   // The live price onto the candle still forming: its close, and its high or low when it goes past them. A price after
   // that candle waits for the next read (a new candle needs its volume and studies); a stale one is left off.
@@ -885,7 +886,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           <span key={level.role} style={{ color: COLOR[level.role] }}>{level.label}{offScale.has(level.role) ? " (off the chart)" : ""}</span>
         ))}
         {data && !data.levels.length && id !== "market" && !guides.length && <span>no plan lines saved</span>}
-        {data && guides.length > 0 && <span data-testid="desk-chart-guides" style={{ color: COLOR.guide }}>{guides.map(g => `${g.label} ${price(g.price)}`).join(" · ")}</span>}
+        {data && guides.length > 0 && <span data-testid="desk-chart-guides" style={{ color: COLOR.guide }}>{guides.map(g => `${g.label} ${price(g.price)}${lastBar && Math.abs(g.price - lastBar.close) / lastBar.close > LEVEL_REACH ? " (off the chart)" : ""}`).join(" · ")}</span>}
         {data?.time_stop && <span style={{ color: COLOR.stop }}>Time stop {stopWhen(data.time_stop.at)}</span>}
         {data && earningsHeader(data.events, data.as_of) && <span data-testid="desk-chart-earnings" className="text-sky-200">{earningsHeader(data.events, data.as_of)}</span>}
         <span className="ml-auto flex items-center gap-1">

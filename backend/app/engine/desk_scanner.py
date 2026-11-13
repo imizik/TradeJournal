@@ -16,7 +16,7 @@ No provider call, no Robinhood, no ping, no write.
 """
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 import json
 import logging
 from urllib.parse import urlencode
@@ -152,11 +152,16 @@ def _fixture(db: Session, now: float) -> dict:
         {"id": "fixture-nbis", "symbol": "NBIS", "setup": "orb", "direction": "long", "trigger": 94.12, "stop": 93.18,
          "target": 96.0, "vwap": 93.6, "range_high": 94.05, "range_low": 92.9, "contract_line": "11-21 95C · Δ0.46",
          "status": "open", "pnl": None, "exit_reason": None, "new": False},
-        {"id": "fixture-crwv", "symbol": "CRWV", "setup": "fade", "direction": "short", "trigger": 118.4, "stop": 120.15,
-         "target": 115.9, "vwap": 116.8, "range_high": 119.2, "range_low": 116.3, "contract_line": "11-21 115P · Δ0.41",
-         "status": "exit", "pnl": 42.0, "exit_reason": "target", "new": True},
+        {"id": "fixture-crwv", "symbol": "CRWV", "setup": "fade", "direction": "short", "trigger": 52.4, "stop": 53.15,
+         "target": 51.3, "vwap": 51.8, "range_high": 53.0, "range_low": 51.6, "contract_line": "11-21 52P · Δ0.41",
+         "status": "exit", "pnl": 42.0, "exit_reason": "target", "new": True, "minutes": 25},
     ]
-    hidden = day_journal.quiet(db)
-    rows = [{**r, "words": SETUP_WORDS[(r["setup"], r["direction"])], "bar_end": _iso(at), "flags": [], "radar": None}
+    try:
+        hidden = day_journal.not_following(db)
+    except Exception:  # noqa: BLE001 -- as live: not knowing what is hidden, show nothing
+        db.rollback()
+        return _base("unavailable", monitoring, message="Which tickers you follow could not be read, so nothing is shown.")
+    rows = [{**{k: v for k, v in r.items() if k != "minutes"}, "words": SETUP_WORDS[(r["setup"], r["direction"])],
+             "bar_end": _iso(at - timedelta(minutes=r.get("minutes", 0))), "flags": [], "radar": None}
             for r in invented if r["symbol"] not in hidden]
     return _base("ok", monitoring, day=SESSION, rows=rows, simulated=True)
