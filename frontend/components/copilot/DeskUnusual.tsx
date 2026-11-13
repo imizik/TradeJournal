@@ -33,7 +33,8 @@ export function useDeskUnusual(on: boolean): UnusualReply | null {
     if (!on) return;
     const controller = new AbortController();
     const load = () => fetch(apiUrl("/copilot/unusual"), { cache: "no-store", signal: controller.signal })
-      .then(r => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      // A refusal is read through too, so the request ends (an unread body holds it open).
+      .then(async r => (r.ok ? r.json() : r.text().catch(() => "").then(() => Promise.reject(new Error(String(r.status))))))
       .then((body: UnusualReply) => setData(body))
       .catch(() => { /* the last good list stays; nothing new is shown */ });
     load();
