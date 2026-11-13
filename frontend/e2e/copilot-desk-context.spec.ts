@@ -125,7 +125,7 @@ test("the chart draws the plan's lines, the fills, pings, Radar and the time sto
   await expect(canvas.locator("canvas").first()).toBeVisible(); // the library drew
   // The lines and the time stop are named above the chart; every mark, with its New York time, in the chart's own list.
   // The stop is 20 minutes ahead, so after about 23:40 New York it falls on the next day and carries that day's date.
-  await expect(pane.getByTestId("desk-chart-lines")).toHaveText(/^Entry 95.90Invalidation 92.30Time stop (?:[A-Z][a-z]{2} \d{1,2} )?\d{1,2}:\d{2} [AP]MReset$/);
+  await expect(pane.getByTestId("desk-chart-lines")).toHaveText(/^Entry 95.90Invalidation 92.30Time stop (?:[A-Z][a-z]{2} \d{1,2} )?\d{1,2}:\d{2} [AP]M0Reset$/); // then the bell (no alerts) and Reset
   const marks = pane.getByRole("list", { name: "On the chart" }).getByRole("listitem");
   await expect(marks).toHaveText(["Entry 95.90", "Invalidation 92.30",
     /^Fill · Bought 2 NBIS 11\/20\/26 100C · NBIS at 94.40 · .*\d{1,2}:\d{2} [AP]M ET$/,
@@ -202,7 +202,7 @@ test("a symbol opened with no saved conversation charts it by the symbol", async
   await page.goto("/copilot-lab?symbol=NBIS");
   const pane = page.getByRole("region", { name: "Chart and feed" });
   await expect(pane.getByRole("img", { name: /NBIS today: 2-minute candles/ })).toBeVisible();
-  await expect(pane.getByTestId("desk-chart-lines")).toHaveText("no plan lines savedReset"); // a symbol with no plan draws no lines and says so
+  await expect(pane.getByTestId("desk-chart-lines")).toHaveText("no plan lines saved0Reset"); // a symbol with no plan draws no lines and says so (then the bell, no alerts)
   await expect(pane.getByRole("list", { name: "On the chart" }).getByRole("listitem")).toHaveCount(3);
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
