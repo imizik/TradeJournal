@@ -77,9 +77,10 @@ function useStanding(row: DeskThread, rows: readonly DeskThread[], fallback: { l
   const live = tickFor(ticks, row.symbol);
   const stock = live ? { last: live.last, at: live.at, live: !live.stale } : fallback ? { ...fallback, live: false } : null;
   const standing = optionStanding(terms, { price: stock?.last, worth: worthNow(book, ticks), day: todayNewYork() });
-  return standing ? { standing, stock } : "unknown" as const;
+  return standing ? { standing, stock } : terms.direction === "long" ? "incomplete" as const : "unknown" as const;
 }
 
+const INCOMPLETE = "Break-even and Greeks not shown: the book is missing this contract's side, strike, expiry or size.";
 const UNKNOWN = "Break-even and Greeks not shown: a short or multi-leg position the book cannot read as one option.";
 
 function distance(s: Standing) {
@@ -99,7 +100,7 @@ export function OptionStanding({ row, rows, fallback = null }: {
 }) {
   const read = useStanding(row, rows, fallback);
   if (read === null) return null;
-  if (read === "unknown") return <p data-testid="option-standing" className="text-xs text-muted-foreground">{UNKNOWN}</p>;
+  if (read === "unknown" || read === "incomplete") return <p data-testid="option-standing" className="text-xs text-muted-foreground">{read === "unknown" ? UNKNOWN : INCOMPLETE}</p>;
   const { standing: s, stock } = read;
   const dim = !!stock && !stock.live;
   const greeks = greeksLine(s.greeks);
@@ -137,7 +138,7 @@ export function OptionStandingLine({ row, rows, fallback = null }: {
   row: DeskThread; rows: readonly DeskThread[]; fallback?: { last: number; at: number } | null;
 }) {
   const read = useStanding(row, rows, fallback);
-  if (read === null || read === "unknown") return null;
+  if (read === null || read === "unknown" || read === "incomplete") return null;
   const { standing: s, stock } = read;
   const parts: string[] = [];
   if (s.breakEven !== null) parts.push(`BE ${priceText(s.breakEven)}${s.toBreakEven ? ` ${s.toBreakEven.past ? "passed" : pct(s.toBreakEven.pct)}` : ""}`);
