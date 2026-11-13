@@ -20,9 +20,10 @@ later-expiry alternative, in the same options-feed pass and under its pacing).
   next close), what an unchanged price costs and the price it needs to break even, against the move the contract's
   implied volatility gives over that time. Beside it the same-exposure alternatives ``expression_recorder.choose``
   picks (deeper, debit spread, later expiry, shares), each sized to the same delta as his contract and priced at the
-  mid, with its cost, the most it can lose, its decay a day and the same break-even. Repricing is Black-Scholes at each
-  leg's own implied volatility, rate and dividend zero (``options_positioning``'s inputs), the volatility held where
-  it is: a model, and said to be one. Dollars are per one of his contracts (``basis``); the desk scales them by the
+  mid, with its cost, the most it can lose, its decay a day and the same break-even. Repricing is Black-Scholes at the
+  volatility each leg's own mid implies now (so the model prices it at what it costs; the provider's hourly implied
+  volatility only when the mid implies none), rate and dividend zero (``options_positioning``'s inputs), the
+  volatility held where it is: a model, and said to be one. Dollars are per one of his contracts (``basis``); the desk scales them by the
   count he types, which every dollar figure here is linear in.
 
 A quote that is stale or missing carries its time and reason and no number, never a zero.
@@ -178,6 +179,26 @@ def bs_value(kind: str, spot: float, strike: float, years: float, iv: float | No
     return spot * _cdf(d1) - strike * _cdf(d2) if kind == "call" else strike * _cdf(-d2) - spot * _cdf(-d1)
 
 
+def implied_vol(kind: str, spot: float, strike: float, years: float, price: float | None) -> float | None:
+    """The volatility at which ``bs_value`` equals ``price`` (bisection, 1% to 500%); None at or past expiry, without a
+    price, or for a price at or below the intrinsic value (no time value to explain)."""
+    if price is None or years <= 0 or spot <= 0 or strike <= 0:
+        return None
+    intrinsic = max(spot - strike, 0.0) if kind == "call" else max(strike - spot, 0.0)
+    if price <= intrinsic + 1e-9:
+        return None
+    lo, hi = 0.01, 5.0
+    if bs_value(kind, spot, strike, years, hi) < price or bs_value(kind, spot, strike, years, lo) > price:
+        return None
+    for _ in range(100):
+        mid = (lo + hi) / 2
+        if bs_value(kind, spot, strike, years, mid) < price:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
 def structure_value(legs: list[dict], spot: float, at: datetime) -> float | None:
     """One unit's model value at ``spot`` and moment ``at``: each option leg's Black-Scholes value times its sign and
     multiplier, a share leg its sign times the price."""
@@ -276,8 +297,8 @@ def _row(name: str, symbol: str, legs: list[dict], base_delta: float, spot: floa
            "cost": round(abs(cost), 2), "credit": cost < 0,
            "max_loss": None if short else round(cost, 2),
            "max_loss_note": "no limit" if short else None,
-           "decay_day": round(decay, 2) if decay is not None else None,
-           "decay_pct": round(decay / cost * 100, 1) if decay is not None and cost > 0 else None,
+           "decay_day": round(decay, 2) + 0.0 if decay is not None else None,
+           "decay_pct": round(decay / cost * 100, 1) + 0.0 if decay is not None and cost > 0 else None,
            "hold_cost": round(hold_cost, 2) if hold_cost is not None else None,
            "hold_cost_pct": round(hold_cost / cost * 100, 1) if hold_cost is not None and cost > 0 else None,
            "breakeven": round(even, 2) if even is not None else None,
@@ -288,12 +309,17 @@ def _row(name: str, symbol: str, legs: list[dict], base_delta: float, spot: floa
     return out
 
 
-def _leg(contract, sign: int, quote: dict, root: str, closes) -> dict:
+def _leg(contract, sign: int, quote: dict, root: str, closes, spot: float, now: datetime) -> dict:
+    """One option leg. Its volatility is the one its own mid implies now, so the model prices it at what it costs;
+    the provider's (hourly) implied volatility only when the mid implies none."""
+    expires = expires_at(contract.expiration, root, closes)
+    years = max((expires - now).total_seconds(), 0.0) / YEAR_SECONDS
+    implied = implied_vol(contract.option_type, spot, contract.strike, years, quote.get("mid"))
     return {"kind": "option", "symbol": contract.symbol, "type": contract.option_type, "strike": contract.strike,
-            "expiration": contract.expiration, "expires": expires_at(contract.expiration, root, closes), "sign": sign,
+            "expiration": contract.expiration, "expires": expires, "sign": sign,
             "multiplier": contract.multiplier or 100, "delta": contract.delta, "theta": contract.theta,
-            "iv": contract.iv if contract.iv is not None else contract.iv_smoothed, "quote": quote,
-            "mid": quote.get("mid")}
+            "iv": implied if implied is not None else contract.iv if contract.iv is not None else contract.iv_smoothed,
+            "quote": quote, "mid": quote.get("mid")}
 
 
 def overnight(*, symbol: str, traded, chain, later, spot: float, now: datetime, time_stop: dict | None, horizon: str | None,
@@ -312,9 +338,9 @@ def overnight(*, symbol: str, traded, chain, later, spot: float, now: datetime, 
     if later is not None:
         found.update({c.symbol: (c, later) for c in later.contracts})
     hold_years = (min(end, expiry) - now).total_seconds() / YEAR_SECONDS
-    iv = traded.iv if traded.iv is not None else traded.iv_smoothed
+    mine = _leg(traded, 1, quote_for(traded, chain), root, closes, spot, now)
+    iv = mine["iv"]
     expected_pct = round(iv * sqrt(hold_years) * 100, 2) if iv and hold_years > 0 else None
-    mine = _leg(traded, 1, quote_for(traded, chain), root, closes)
     base_delta = (traded.delta or 0) * mine["multiplier"]
     rows = []
     for name in NAMES:
@@ -326,7 +352,7 @@ def overnight(*, symbol: str, traded, chain, later, spot: float, now: datetime, 
                 legs.append({"kind": "share", "sign": part["sign"], "multiplier": 1})
                 continue
             contract, its_chain = found[part["symbol"]]
-            legs.append(_leg(contract, part["sign"], quote_for(contract, its_chain), root, closes))
+            legs.append(_leg(contract, part["sign"], quote_for(contract, its_chain), root, closes, spot, now))
         rows.append(_row(name, symbol, legs, base_delta, spot, now, end, expected_pct))
     return {"state": "ok", "show": past_close, "until": int(end.timestamp()), "until_source": source,
             "expires_first": expires_first, "trading_days": rules.trading_days(now.date(), min(end, expiry).date()),

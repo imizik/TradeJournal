@@ -133,7 +133,7 @@ test("a put's short-share alternative is said as not in a Roth IRA", async ({ pa
   const shortRow = { name: "shares", label: "Short NBIS shares", unit: "shares", state: "ok", units: 30, cost: 2850, credit: true, max_loss: null,
     max_loss_note: "no limit", decay_day: 0, decay_pct: 0, hold_cost: 0, hold_cost_pct: 0, breakeven: 95, breakeven_move_pct: 0, vs_expected: 0, note: "not in a Roth IRA" };
   const { check } = await open(page, { ...TICKET, contracts: 1, check: { ...TICKET.check, overnight: { ...NIGHT, rows: [ROWS[0], shortRow] } } });
-  await expect(check.getByTestId("play-alt")).toContainText("Short NBIS shares30 shares · takes in $2,850.00 · most you can lose no limit · no time decay");
+  await expect(check.getByTestId("play-alt")).toContainText("Short NBIS shares · 30 shares · takes in $2,850.00 · most you can lose no limit · no time decay");
   await expect(check.getByTestId("play-alt")).toContainText("not in a Roth IRA");
 });
 

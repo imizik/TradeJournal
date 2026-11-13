@@ -72,7 +72,7 @@ export default function PlayCheck({ check, investigationId, symbol, contracts, p
           <ul className="space-y-0.5">
             {play.lines.map(l => (
               <li key={l.part} className={cn("leading-5", !l.ok && "text-amber-300")}>
-                {l.ok ? <span className="text-emerald-400">✓</span> : <span aria-hidden>·</span>} {PART[l.part]}: {l.text}
+                {l.ok ? <span className="text-emerald-400">✓</span> : <span aria-hidden>○</span>} {PART[l.part]}: {l.text}
               </li>
             ))}
           </ul>
@@ -124,8 +124,8 @@ function Overnight({ night, symbol, count, counted }: {
       <p className="text-muted-foreground">To {by}: {night.trading_days} trading day{night.trading_days === 1 ? "" : "s"}{night.expires_first ? "; the contract expires first" : ""}. {counted ? `For your ${count} contract${count === 1 ? "" : "s"}` : "For 1 contract"}.</p>
       {mine && mine.state === "ok" ? (
         <>
-          <p className="tabular-nums">Time decay: {mine.decay_day != null ? `${usd(mine.decay_day * count)} a day${mine.decay_pct != null ? ` (${mine.decay_pct}% of the premium)` : ""}` : "no theta in the chain"}<span className="text-muted-foreground">{greeks}</span></p>
-          <p className="tabular-nums">
+          <p>Time decay: {mine.decay_day != null ? `${usd(mine.decay_day * count)} a day${mine.decay_pct != null ? ` (${mine.decay_pct}% of the premium)` : ""}` : "no theta in the chain"}<span className="text-muted-foreground">{greeks}</span></p>
+          <p>
             {mine.hold_cost != null && <>If {symbol} does not move: −{usd(mine.hold_cost * count)}{mine.hold_cost_pct != null ? ` (${mine.hold_cost_pct}%)` : ""} by then. </>}
             {mine.breakeven != null ? <>Break-even then: {symbol} {mine.breakeven.toFixed(2)}{mine.breakeven_move_pct != null ? ` (${signedPct(mine.breakeven_move_pct)})` : ""}</> : "No break-even inside the range searched"}
             <span className="text-muted-foreground">{expected}</span>
@@ -137,11 +137,11 @@ function Overnight({ night, symbol, count, counted }: {
           <p className="text-muted-foreground">The same exposure (same delta as yours), at the mid:</p>
           <ul className="divide-y" aria-label="Same exposure">
             {others.map(r => (
-              <li key={r.name} data-testid="play-alt" className={cn("py-1 tabular-nums leading-5", r.state !== "ok" && "text-muted-foreground")}>
+              <li key={r.name} data-testid="play-alt" className={cn("py-1 leading-5", r.state !== "ok" && "text-muted-foreground")}>
                 <span className="font-medium">{ALT_NAMES[r.name]}</span> <span className="text-muted-foreground">{r.label}</span>
                 {r.state !== "ok" ? <span> · {r.state === "stale" ? `quote stale (last ${clock(r.as_of)})` : r.reason}</span> : (
                   <span className="block sm:inline">
-                    <span className="sm:ml-1">{r.unit === "shares" ? Math.round((r.units ?? 0) * count) : trim((r.units ?? 0) * count)} {r.unit}</span>
+                    <span className="hidden sm:inline"> · </span>{r.unit === "shares" ? Math.round((r.units ?? 0) * count) : trim((r.units ?? 0) * count)} {r.unit}
                     {" · "}{r.credit ? "takes in" : "costs"} {usd((r.cost ?? 0) * count)}
                     {" · "}most you can lose {r.max_loss != null ? usd(r.max_loss * count) : r.max_loss_note}
                     {" · "}{r.decay_day ? `${usd(r.decay_day * count)} a day` : "no time decay"}
@@ -154,7 +154,7 @@ function Overnight({ night, symbol, count, counted }: {
           </ul>
         </div>
       )}
-      <p className="text-muted-foreground">Arithmetic, not a pick: Black-Scholes at each contract&apos;s implied volatility, price and volatility held.</p>
+      <p className="text-muted-foreground">Arithmetic, not a pick: Black-Scholes at the volatility each contract&apos;s mid implies, price and volatility held.</p>
     </div>
   );
 }

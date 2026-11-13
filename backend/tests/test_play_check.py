@@ -213,6 +213,9 @@ def test_black_scholes_against_known_values():
     assert play_check.bs_value("put", 100, 100, 1.0, 0.2) == pytest.approx(7.9656, abs=1e-4)
     assert play_check.bs_value("call", 105, 100, 0.0, None) == 5 and play_check.bs_value("put", 105, 100, 0.0, 0.3) == 0
     assert play_check.bs_value("call", 100, 100, 0.5, None) is None
+    # And back: 7.9656 at the money for a year implies 20%; a price with no time value implies nothing.
+    assert play_check.implied_vol("call", 100, 100, 1.0, 7.9656) == pytest.approx(0.2, abs=1e-4)
+    assert play_check.implied_vol("call", 105, 100, 1.0, 4.99) is None and play_check.implied_vol("call", 100, 100, 0.0, 3) is None
 
 
 def test_decay_and_the_alternatives_sized_to_the_same_delta():
@@ -245,21 +248,21 @@ def test_decay_and_the_alternatives_sized_to_the_same_delta():
     # Shares: 40 shares at 95, no decay, break-even where bought.
     shares = rows["shares"]
     assert (shares["units"], shares["cost"], shares["max_loss"], shares["decay_day"], shares["breakeven"]) == (40, 3800.0, 3800.0, 0.0, 95.0)
-    # The hold costs the option its time value at an unchanged price; shares nothing.
-    assert mine["hold_cost"] > 0 and shares["hold_cost"] == 0
+    # Held to the expiry at an unchanged 95, the out-of-the-money call loses all of its $320; shares nothing.
+    assert mine["hold_cost"] == 320.0 and mine["hold_cost_pct"] == 100.0 and shares["hold_cost"] == 0
 
 
 def test_hold_cost_and_expected_move_hand_checked():
-    # A year to expiry at the money, 20% volatility: held to expiry at an unchanged price it loses all its model value,
-    # 7.9656 x 100 = $796.56; the move the volatility gives over the year is 20%.
+    # A year to expiry at the money, bought at 7.97: held to expiry at an unchanged price it loses all of it, $797 (the
+    # model prices it at its mid). 7.97 implies about 20% volatility, so the move over the year is about 20%.
     now = datetime(2026, 11, 13, 16, 0, tzinfo=ET)
     year = date(2027, 11, 13)
     mine = oc(100, mid=7.97, delta=0.54, theta=-0.01, iv=0.2, expiry=year)
     found = play_check.overnight(symbol="NBIS", traded=mine, chain=chain(mine, expiry=year), later=None, spot=100.0, now=now,
                                  time_stop=stop_at(datetime(2027, 11, 13, 16, 0, tzinfo=ET)), horizon=None, quote_for=fresh)
     row = found["rows"][0]
-    assert found["expected_move_pct"] == 20.0
-    assert row["hold_cost"] == pytest.approx(796.56, abs=0.01) and row["hold_cost_pct"] == pytest.approx(99.9, abs=0.1)
+    assert found["expected_move_pct"] == pytest.approx(20.0, abs=0.05)
+    assert row["hold_cost"] == 797.0 and row["hold_cost_pct"] == 100.0
     assert row["breakeven"] == 107.97 and row["breakeven_move_pct"] == 7.97 and row["vs_expected"] == 0.4
 
 
@@ -269,9 +272,14 @@ def test_a_stop_before_expiry_breaks_even_below_the_expiry_break_even():
     mine = found["rows"][0]
     assert found["expires_first"] is False and found["trading_days"] == 2 and found["show"] is True
     assert 95 < mine["breakeven"] < 103.2  # time value left at the stop
-    # The expected move over the hold: 0.6 x sqrt(hold in years).
+    # The expected move over the hold: the volatility his 3.20 mid implies x sqrt(hold in years).
     hold = (datetime(2026, 11, 17, 15, 30, tzinfo=ET) - NOW).total_seconds() / (365 * 86400)
-    assert found["expected_move_pct"] == round(0.6 * sqrt(hold) * 100, 2)
+    iv = play_check.implied_vol("call", 95.0, 100.0, (datetime(2026, 11, 20, 16, 0, tzinfo=ET) - NOW).total_seconds() / (365 * 86400), 3.20)
+    assert found["expected_move_pct"] == round(iv * sqrt(hold) * 100, 2)
+    # Priced at its mid now, the model's value at the break-even then is what he paid.
+    end = datetime(2026, 11, 17, 15, 30, tzinfo=ET)
+    left = (datetime(2026, 11, 20, 16, 0, tzinfo=ET) - end).total_seconds() / (365 * 86400)
+    assert play_check.bs_value("call", mine["breakeven"], 100, left, iv) == pytest.approx(3.20, abs=0.01)
     assert "later" not in {r["name"] for r in found["rows"]}  # no later chain read, no later row
 
 
