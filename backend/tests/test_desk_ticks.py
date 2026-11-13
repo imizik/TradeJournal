@@ -116,3 +116,22 @@ def test_refused_while_the_lab_is_off(rig):
     from app.routers import copilot_desk
     rig["patch"].setattr(copilot_desk.copilot, "settings", lambda: SimpleNamespace(enabled=False))
     assert rig["client"].get("/copilot/desk/ticks", params={"symbols": "NBIS"}).status_code == 503
+
+
+def test_a_symbol_with_no_price_is_remembered_so_every_tab_shares_one_call(rig):
+    ticks(rig, "NBIS", "ILLQ")  # ILLQ: the provider has no price for it
+    for _ in range(3):  # three more tabs inside the window
+        rig["clock"]["t"] += 1
+        assert set(ticks(rig, "NBIS", "ILLQ").json()["rows"]) == {"NBIS"}
+    assert len(rig["calls"]) == 1
+
+
+def test_a_book_row_ticks_from_the_cost_that_gives_its_own_pnl():
+    from app.routers.copilot_desk import _tick
+    # 1000 shares at an average of 45.6789 (shown as 45.68), marked 50.00: the server's +4321.10, not +4320.00.
+    row = {"symbol": "NBIS", "instrument": "stock", "avg_entry": 45.68, "quantity": 1000.0, "mark": 50.0, "unrealized_usd": 4321.1,
+           "direction": "long"}
+    tick = _tick(row)
+    assert tick["quote"] == "NBIS" and tick["scale"] == 1 and round((50.0 - tick["cost"]) * 1000, 2) == 4321.1
+    assert _tick({**row, "unrealized_usd": None})["cost"] == 45.68  # no P&L yet: the journal's cost
+    assert _tick({**row, "direction": "short", "unrealized_usd": -4321.1})["cost"] == tick["cost"]

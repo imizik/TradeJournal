@@ -72,18 +72,17 @@ const feedOf = (state: Feed["state"]): Feed => ({ state, mark: 1.0, nvda: 101, a
 test("in the session the book and Watching rows move in place every few seconds", async ({ page }) => {
   const feed = feedOf("ok");
   await open(page, feed);
-  await expect(pnl(page)).toContainText("−$120.00");
+  await expect(pnl(page)).toHaveText("−$120−55%");
   await expect(watchPrice(page)).toContainText("101.00");
-  // One read for every piece: the held contract, its underlying, the watched name and the chart's symbol.
-  expect(feed.asked[0].split(",")).toEqual(expect.arrayContaining([CALL, "ORCL", "NVDA"]));
   const reads = { ...feed.reads };
   // Mark the row's element: a remount would replace it.
   await pnl(page).evaluate(node => { (node as HTMLElement & { kept?: boolean }).kept = true; });
   feed.mark = 1.5;
   feed.nvda = 102.25;
   await page.clock.runFor(5_000);
-  await expect(pnl(page)).toContainText("−$70.00");
-  await expect(pnl(page)).toContainText("−31.8%");
+  await expect(pnl(page)).toHaveText("−$70−32%");
+  // One read for every piece: the held contract, its underlying, the watched name (the chart's symbol is ORCL too).
+  expect(feed.asked.at(-1)!.split(",")).toEqual(expect.arrayContaining([CALL, "ORCL", "NVDA"]));
   await expect(watchPrice(page)).toContainText("102.25");
   await expect(watchPrice(page)).toContainText("+1.25%");
   expect(await pnl(page).evaluate(node => (node as HTMLElement & { kept?: boolean }).kept)).toBe(true); // the same element
@@ -92,30 +91,41 @@ test("in the session the book and Watching rows move in place every few seconds"
   expect(await pnl(page).evaluate(node => node.className)).not.toMatch(/opacity-50/);
 });
 
-test("a price no longer live is greyed with its time, and the reads back off", async ({ page }) => {
+test("a price no longer live is greyed with its time, then hands back to the minute reads; the reads back off", async ({ page }) => {
   const feed = feedOf("ok");
   await open(page, feed);
-  await expect(pnl(page)).toContainText("−$120.00");
+  await expect.poll(() => feed.asked.some(symbols => symbols.includes(CALL))).toBe(true); // the contract's price is in
+  feed.mark = 1.1;
+  await page.clock.runFor(5_000);
+  await expect(pnl(page)).toHaveText("−$110−50%");
+  await expect(page.getByTestId("desk-pnl-open")).toHaveText("−$110");
   feed.state = "fail";
+  const before = feed.asked.length;
   await page.clock.runFor(25_000);
   // The last good price stays, greyed, with the time it was read: never a zero, never a number that looks live.
-  await expect(pnl(page)).toContainText("−$120.00");
+  await expect(pnl(page)).toHaveText("−$110−50%");
   await expect.poll(() => pnl(page).evaluate(node => node.className)).toMatch(/opacity-50/);
+  await expect.poll(() => page.getByTestId("desk-pnl-open").evaluate(node => node.className)).toMatch(/opacity-50/);
   await expect(page.getByTestId("desk-book").getByTestId("prices-as-of")).toHaveText(/^prices 11:00:\d\d AM$/);
   await expect(page.getByTestId("desk-watching").getByTestId("prices-as-of")).toHaveText(/^prices 11:00:\d\d AM$/);
   // 25 s of failures: 5, 10 then 20 s apart, not one every 5 s.
-  expect(feed.asked.length).toBeLessThanOrEqual(4);
+  expect(feed.asked.length - before).toBeLessThanOrEqual(3);
+  // Past a minute the old tick is dropped: the desk's own minute read (the server's -$120) shows, as before live prices.
+  await page.clock.runFor(40_000);
+  await expect(pnl(page)).toHaveText("−$120−55%");
+  expect(await pnl(page).evaluate(node => node.className)).not.toMatch(/opacity-50/);
+  await expect(page.getByTestId("prices-as-of")).toHaveCount(0);
   feed.state = "ok";
   feed.mark = 1.2;
-  await page.clock.runFor(30_000);
-  await expect(pnl(page)).toContainText("−$100.00");
-  await expect(page.getByTestId("prices-as-of")).toHaveCount(0);
+  await page.clock.runFor(60_000);
+  await expect(pnl(page)).toHaveText("−$100−46%");
+  await expect(page.getByTestId("desk-pnl-open")).toHaveText("−$100");
 });
 
 test("outside the session nothing polls", async ({ page }) => {
   const feed = feedOf("closed");
   await open(page, feed);
-  await expect(pnl(page)).toContainText("−$120.00");
+  await expect(pnl(page)).toHaveText("−$120−55%");
   await page.clock.runFor(5 * 60_000);
   expect(feed.asked.length).toBe(1); // the one read that said closed; the next is after the half hour
   await expect(page.getByTestId("prices-as-of")).toHaveCount(0);
@@ -124,11 +134,11 @@ test("outside the session nothing polls", async ({ page }) => {
 test("on a phone the rows tick without changing the layout", async ({ page }) => {
   const feed = feedOf("ok");
   await open(page, feed, { width: 390, height: 844 });
-  await expect(pnl(page)).toContainText("−$120.00");
+  await expect(pnl(page)).toHaveText("−$120−55%");
   const before = await pnl(page).boundingBox();
   feed.mark = 1.5;
   await page.clock.runFor(5_000);
-  await expect(pnl(page)).toContainText("−$70.00");
+  await expect(pnl(page)).toHaveText("−$70−32%");
   const after = await pnl(page).boundingBox();
   expect(Math.abs(after!.y - before!.y)).toBeLessThan(1);
   expect(Math.abs(after!.height - before!.height)).toBeLessThan(1);

@@ -35,7 +35,7 @@ _TICKER = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 _OCC = re.compile(r"^[A-Z]{1,6}\d{6}[CP]\d{8}$")
 
 _lock = threading.Lock()
-_kept: dict[str, tuple[float, dict]] = {}  # symbol -> (read at, row)
+_kept: dict[str, tuple[float, dict | None]] = {}  # symbol -> (read at, row; None: the read had no price for it)
 _wanted: dict[str, float] = {}  # symbol -> last asked at
 _flight: threading.Event | None = None
 _issue: tuple[float, str] | None = None  # the newest failed read: (when, what)
@@ -94,8 +94,9 @@ def _read(batch: list[str], now: float) -> None:
         if row is not None:
             found[str(quote.get("symbol"))] = row
     with _lock:
-        for symbol, row in found.items():
-            _kept[symbol] = (now, row)
+        for symbol in batch:
+            # "No price" is kept as long as a price: an unpriced contract never makes each tab's poll its own call.
+            _kept[symbol] = (now, found.get(symbol))
 
 
 def _session(now: float):
@@ -140,9 +141,9 @@ def read(symbols: str, now: float) -> dict:
     elif stale and waiting is not None:
         waiting.wait(FLIGHT_WAIT)
     with _lock:
-        rows = {s: dict(_kept[s][1]) for s in asked if s in _kept}
+        rows = {s: dict(_kept[s][1]) for s in asked if s in _kept and _kept[s][1] is not None}
         failed = _issue is not None and now - _issue[0] < TICK_SECONDS
-        fresh = any(now - _kept[s][0] < TICK_SECONDS for s in asked if s in _kept)
+        fresh = any(now - _kept[s][0] < TICK_SECONDS for s in asked if s in _kept and _kept[s][1] is not None)
         if len(_kept) > 512:
             for symbol in [s for s in _kept if s not in _wanted]:
                 del _kept[symbol]

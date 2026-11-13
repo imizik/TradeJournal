@@ -40,14 +40,16 @@ export const positionRows = (rows: DeskThread[]) => rows.filter(r => r.key.start
  * unrealized P&L now (the thread list's read, followed or not: it is the account's money). Nothing until read. */
 export function DayPnl({ session, rows, read }: { session: DeskSession | null; rows: DeskThread[]; read: boolean }) {
   const ticks = useDeskTicks(positionRows(rows).map(r => r.book?.tick?.quote));
-  const open = positionRows(rows).flatMap(r => { const usd = tickedBook(r.book, ticks).usd; return usd != null ? [usd] : []; });
+  const ticked = positionRows(rows).map(r => tickedBook(r.book, ticks));
+  const open = ticked.flatMap(p => p.usd != null ? [p.usd] : []);
+  const stale = ticked.some(p => p.stale); // a price in it is no longer live: greyed, as its book row is
   const total = open.reduce((a, b) => a + b, 0);
   const realized = session?.realized_today ?? null;
   if (realized === null && !(read && open.length)) return null;
   return (
     <span data-testid="desk-pnl" className="flex items-baseline gap-3 whitespace-nowrap text-xs">
       {realized !== null && <span><span className="text-muted-foreground">Realized today </span><span className={cn("tabular-nums", tone(realized))}>{money(realized)}</span></span>}
-      {read && open.length > 0 && <span><span className="text-muted-foreground">Open </span><span className={cn("tabular-nums", tone(total))}>{money(total)}</span></span>}
+      {read && open.length > 0 && <span><span className="text-muted-foreground">Open </span><span data-testid="desk-pnl-open" className={cn("tabular-nums", tone(total), stale && "opacity-50")}>{money(total)}</span></span>}
     </span>
   );
 }

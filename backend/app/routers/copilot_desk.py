@@ -468,7 +468,12 @@ def _tick(row: dict) -> dict | None:
         return None
     if not quote:
         return None
-    return {"quote": quote, "scale": scale, "cost": cost, "quantity": quantity, "sign": -1 if row.get("direction") == "short" else 1}
+    sign = -1 if row.get("direction") == "short" else 1
+    # The journal's avg_entry is rounded to the cent; the cost that gives the row's own P&L at its own mark is not, so
+    # the first tick at an unchanged price shows the same number.
+    usd, mark = row.get("unrealized_usd"), row.get("mark")
+    exact = round(mark - usd / (sign * quantity), 6) if usd is not None and mark else None
+    return {"quote": quote, "scale": scale, "cost": exact if exact and exact > 0 else cost, "quantity": quantity, "sign": sign}
 
 
 def _exit_rows(exits: list[dict]) -> list[dict]:
