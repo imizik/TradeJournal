@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
+import PlayCheck, { type PlayCheckData } from "@/components/copilot/PlayCheck";
 import SetupRecordLines, { premiumLine } from "@/components/copilot/SetupRecordLines";
 import { apiUrl } from "@/lib/api";
 import { getSymbolLoop, type SetupRecord } from "@/lib/copilot";
@@ -56,6 +57,7 @@ type Ticket = {
   candidates: { state: "ok" | "stale" | "missing"; reason?: string; as_of?: number | null; rows: Candidate[] } | null;
   quote: Quote | null; underlying: { state: "ok" | "stale" | "missing"; last?: number; as_of?: number | null; reason?: string } | null;
   expected_move_pct: number | null; limit: number | null; contracts: number | null;
+  check?: PlayCheckData | null; // the Play check: plan parts, habits before the entry, holding overnight
 };
 
 async function read<T>(path: string, signal?: AbortSignal): Promise<T> {
@@ -276,6 +278,7 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
     return (
       <div data-testid="desk-ticket" className="space-y-3">
         {head}
+        {ticket.check && <PlayCheck check={ticket.check} investigationId={ticket.investigation_id} symbol={ticket.symbol} contracts={null} paid={null} />}
         <div className="rounded-lg border bg-card p-3">
           <p className={LABEL}>Choose a contract</p>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -361,6 +364,7 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
           )}
         </Row>
       </div>
+      {ticket.check && <PlayCheck check={ticket.check} investigationId={ticket.investigation_id} symbol={ticket.symbol} contracts={qtyN} paid={f.cost} />}
       {chosen?.kind === "mcp" ? (
         <div className="space-y-2">
           <div className="flex flex-wrap gap-2">

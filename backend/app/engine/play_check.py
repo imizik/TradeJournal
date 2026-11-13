@@ -275,7 +275,7 @@ def _row(name: str, symbol: str, legs: list[dict], base_delta: float, spot: floa
     out = {**row, "state": "ok", "units": round(units, 2 if name != "shares" else 0),
            "cost": round(abs(cost), 2), "credit": cost < 0,
            "max_loss": None if short else round(cost, 2),
-           "max_loss_note": "no limit; a short sale is not possible in a Roth IRA" if short else None,
+           "max_loss_note": "no limit" if short else None,
            "decay_day": round(decay, 2) if decay is not None else None,
            "decay_pct": round(decay / cost * 100, 1) if decay is not None and cost > 0 else None,
            "hold_cost": round(hold_cost, 2) if hold_cost is not None else None,
