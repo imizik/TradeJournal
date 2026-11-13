@@ -118,6 +118,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/desk/feed',
     'GET /copilot/tickets',
     'GET /copilot/tickets/{investigation_id}',
+    'GET /copilot/chain',  # the desk's Chain tab: one expiry's option chain (Tradier via the options feed) and journal marks
     'GET /copilot/desk/to-rate',
     'GET /copilot/desk/radar-setup',
     'POST /copilot/desk/radar-setup/{setup_id}/plan',

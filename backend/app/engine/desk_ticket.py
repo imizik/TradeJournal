@@ -314,7 +314,8 @@ def _candidates(read: dict, now: float, simulated: bool) -> dict:
 def build(db: Session, investigation_id: str, *, mode: str = "live", now: float | None = None,
           pick: tuple[date, float] | None = None, chain_read: Callable[[str, date], dict] | None = None,
           candidates_read: Callable[[str, int, str], dict] | None = None) -> dict:
-    """One saved plan's ticket. ``pick``: the candidate he chose (its expiry and strike) for a plan that names none.
+    """One saved plan's ticket. ``pick``: the contract he chose (its expiry and strike), from the ticket's candidates or
+    the Chain tab; it replaces the contract the plan names, on the plan's own side.
     ``mode``: the copilot's evidence (``live``; ``fixture`` reads the simulated chain; ``replay`` reads no quote).
     Raises ``TicketError`` without a saved, armed, not-entered plan."""
     now = time.time() if now is None else now
@@ -342,7 +343,7 @@ def build(db: Session, investigation_id: str, *, mode: str = "live", now: float 
     if named and named[2] != kind:
         named = None  # a contract on the other side is not this plan's
     source = "plan" if named else None
-    if named is None and pick is not None:
+    if pick is not None:  # his pick (a candidate here, or a contract from the Chain tab) wins; the plan's words still show
         named, source = (pick[1], pick[0], kind), "picked"
     if named is None:
         read = (candidates_read or _candidates_reader(mode))(symbol, _horizon_days(db, row, now), row["direction"] or ("long" if kind == "call" else "short"))

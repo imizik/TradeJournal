@@ -8,7 +8,8 @@ import { openNavMenu, useFoldedNav } from "@/components/Nav";
 import CheckACall from "@/components/copilot/CheckACall";
 import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
-import DeskTicket, { TICKET_EVENT, useTicketPlans } from "@/components/copilot/DeskTicket";
+import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
+import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
 import CopilotPanel, { rememberedThread, type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import DecisionBar from "@/components/copilot/DecisionBar";
 import FillLinkBar, { FillsToLink, useFillLinks } from "@/components/copilot/FillLinkBar";
@@ -128,18 +129,24 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // or the Feed.
   const [picked, setPicked] = useState<string | null>(null);
   const [pickedKey, setPickedKey] = useState<string | null>(null);
-  const [centreTab, setCentreTab] = useState<"chart" | "feed" | "check" | "ticket">("chart");
+  const [centreTab, setCentreTab] = useState<"chart" | "chain" | "feed" | "check" | "ticket">("chart");
   // The tab survives a link that reopens the desk (a feed item's Ask or Plan it, a checked call's Plan it) for this browser tab.
-  useEffect(() => { try { const kept = window.sessionStorage.getItem(CENTRE_KEY); if (kept === "feed" || kept === "check") setCentreTab(kept); } catch { /* chart */ } }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+  useEffect(() => { try { const kept = window.sessionStorage.getItem(CENTRE_KEY); if (kept === "feed" || kept === "check" || kept === "chain") setCentreTab(kept); } catch { /* chart */ } }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
   useEffect(() => { try { window.sessionStorage.setItem(CENTRE_KEY, centreTab); } catch { /* this view only */ } }, [centreTab]);
   // The Ticket tab: a saved plan's ticket opens from its card, its thread's header, a book row or the tab's own list
   // (``openTicket``), or from a link (?ticket=) made where the desk was not open.
   const tickets = useTicketPlans(on);
   const [ticketFor, setTicketFor] = useState<string | null>(null);
+  const [ticketPick, setTicketPick] = useState<TicketPick | null>(null); // the Chain tab's Put on ticket
+  const [checkSeed, setCheckSeed] = useState<{ text: string; n: number } | null>(null); // the Chain tab's Check it
   const ticketLinked = useRef(false); // a ?ticket= link on a phone: the Ticket comes into view once the book above it has read
   useEffect(() => {
-    const show = (id: string) => { setTicketFor(id); setCentreTab("ticket"); if (sheetLayout()) document.getElementById("desk-centre")?.scrollIntoView({ behavior: "smooth", block: "start" }); };
-    const onTicket = (event: Event) => { event.preventDefault(); show((event as CustomEvent<{ investigationId: string }>).detail.investigationId); };
+    const show = (id: string, pick: TicketPick | null = null) => { setTicketFor(id); setTicketPick(pick); setCentreTab("ticket"); if (sheetLayout()) document.getElementById("desk-centre")?.scrollIntoView({ behavior: "smooth", block: "start" }); };
+    const onTicket = (event: Event) => {
+      event.preventDefault();
+      const detail = (event as CustomEvent<{ investigationId: string; pick?: TicketPick }>).detail;
+      show(detail.investigationId, detail.pick ?? null);
+    };
     const linked = new URLSearchParams(window.location.search).get("ticket");
     if (linked) { show(linked); ticketLinked.current = true; }
     window.addEventListener(TICKET_EVENT, onTicket);
@@ -532,6 +539,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   }, [today, deskRow, rows, saved, go, thread, fill]);
   const askFeed = useCallback((item: FeedItem) => askAbout(item.symbol, feedQuestion(item, today), item.investigation_id), [askAbout, today]);
   // The chart's level menu: Plan from here follows its desk link in place; Ask scopes the copilot like a feed item's Ask.
+  // The Chain tab's actions: Check a call with the contract in the box, the plan flow, a saved plan's ticket.
+  const chainCheck = useCallback((text: string) => { setCheckSeed(seed => ({ text, n: (seed?.n ?? 0) + 1 })); setCentreTab("check"); }, []);
+  const chainPlan = useCallback((pick: ChainPick, line: string) => go(copilotLabHref(pick.symbol, planContext(line), { kind: "copilot", ref: null })), [go]);
+  const chainTicket = useCallback((id: string, pick: ChainPick) => openTicket(id, { expiry: pick.expiry, strike: pick.strike }), []);
   const chartActions = useMemo<DeskChartActions>(() => ({ go, ask: (symbol, text) => askAbout(symbol, text) }), [go, askAbout]);
   // A feed item's Plan it: a Radar setup card opens on its own Plan it (the desk's Radar card); his own position or plan
   // opens its plan thread, else the plan form for the symbol. Nothing is saved or sent from the feed.
@@ -660,7 +671,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           <section id="desk-centre" aria-label="Chart and feed" className={styles.centre}>
             {/* Chart first, then Feed, Check a call and Ticket. */}
             <div role="tablist" aria-label="Centre" className="flex gap-1 border-b px-2 pt-1.5">
-              {([["chart", "Chart"], ["feed", "Feed"], ["check", "Check a call"], ["ticket", "Ticket"]] as const).map(([id, label]) => (
+              {([["chart", "Chart"], ["chain", "Chain"], ["feed", "Feed"], ["check", "Check a call"], ["ticket", "Ticket"]] as const).map(([id, label]) => (
                 <button key={id} type="button" role="tab" aria-selected={centreTab === id} onClick={() => setCentreTab(id)}
                   className={cn("-mb-px min-h-11 border-b-2 px-2.5 text-sm sm:min-h-9", centreTab === id ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
                   {label}
@@ -668,9 +679,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 </button>
               ))}
             </div>
-            <div role="tabpanel" aria-label={centreTab === "chart" ? "Chart" : centreTab === "check" ? "Check a call" : centreTab === "ticket" ? "Ticket" : "Feed"} className="p-3">
-              {centreTab === "check" ? <CheckACall />
-                : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} onOpen={setTicketFor} onClose={() => setTicketFor(null)}
+            <div role="tabpanel" aria-label={centreTab === "chart" ? "Chart" : centreTab === "chain" ? "Chain" : centreTab === "check" ? "Check a call" : centreTab === "ticket" ? "Ticket" : "Feed"} className="p-3">
+              {centreTab === "check" ? <CheckACall seed={checkSeed} />
+                : centreTab === "chain" ? <DeskChain symbol={centreSymbol} plans={tickets.plans} onCheck={chainCheck} onPlan={chainPlan} onTicket={chainTicket} />
+                : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} pick={ticketPick} onOpen={id => { setTicketFor(id); setTicketPick(null); }} onClose={() => { setTicketFor(null); setTicketPick(null); }}
                 onPlaced={symbol => { setTicketFor(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
                 : centreTab === "chart"
                 ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} />

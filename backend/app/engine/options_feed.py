@@ -294,10 +294,11 @@ class OptionsFeed:
         return {**base, "state": "ready" if listed else "none", "moves": moves, "earnings_note": note,
                 "message": issue if any(m["state"] == "unavailable" for m in moves) else None}
 
-    def chains(self, symbol: str, pick: Callable[[list[date]], list[date]]) -> tuple[list[Read], str | None]:
+    def chains(self, symbol: str, pick: Callable[[list[date]], list[date]], ttl: int = FAST_TTL) -> tuple[list[Read], str | None]:
         """The chains of the unexpired expirations ``pick`` chooses (at most ``PER_PASS``), for a reader outside the
-        chart (the copilot's option candidates): one pass under the same cache and pacing, reading what is stale first.
-        Returns what is in memory for today and why something could not be read, or None."""
+        chart (the copilot's option candidates, the desk's Chain tab): one pass under the same cache and pacing, reading
+        what is older than ``ttl`` seconds first. Returns what is in memory for today and why something could not be
+        read, or None."""
         now = self._now()
         today = now.date()
         with self._fetching:
@@ -307,7 +308,7 @@ class OptionsFeed:
                 return [], issue or "Option expirations are not loaded yet."
             live = unexpired(listed, primary_root(symbol), now, self._closes(listed[:FAST]))
             wanted = list(dict.fromkeys(pick(live)))[:PER_PASS]
-            issue = self._read_chains(symbol, [d for d in wanted if self._chain_stale(symbol, d, FAST_TTL, today)]) or issue
+            issue = self._read_chains(symbol, [d for d in wanted if self._chain_stale(symbol, d, ttl, today)]) or issue
         reads = [read for d in wanted if (read := self._chain(symbol, d, today)) is not None]
         return reads, issue if len(reads) < len(wanted) else None
 
