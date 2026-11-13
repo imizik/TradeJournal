@@ -13,7 +13,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { apiUrl } from "@/lib/api";
-import type { DeskBook } from "@/lib/desk";
+import type { DeskBook, DeskChartData } from "@/lib/desk";
 
 /** One symbol's price (an option's OCC symbol: its mark per share of premium), change today and when it was read. */
 export type DeskTick = { last: number; change_pct: number | null; prev_close: number | null; at: number };
@@ -202,4 +202,32 @@ export function resetDeskTicks() {
   wanted.clear();
   restAt = 0;
   snapshot = EMPTY;
+}
+
+type Reading = NonNullable<DeskChartData["reading"]>;
+const nyDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
+const nyDay = (seconds: number) => nyDate.format(seconds * 1000);
+/** A reading line as shown: the price and its read, and the plan's invalidation then. */
+export type HeldReading = { reading: Reading; invalidation: number | null; ticked: boolean };
+const heldReadings = new Map<string, HeldReading>();
+
+/**
+ * What the chart's reading line (``ReadingLine``) shows for ``symbol``: ``next`` unless it would step back. While a read
+ * loads (``next`` null), or when one comes back older than what is on screen (the regular close after an extended-hours
+ * price, a daily close after a minute's), the line holds what it last showed for that symbol, so it never blanks or
+ * flashes an older price. A read without a previous close keeps the one already shown that day. Never another symbol's.
+ */
+export function heldReading(symbol: string, next: HeldReading | null, store: Map<string, HeldReading> = heldReadings): HeldReading | null {
+  const before = store.get(symbol) ?? null;
+  if (!next) return before;
+  if (before) {
+    const older = next.reading.at < before.reading.at;
+    const closeOverMinute = next.reading.daily && !before.reading.daily && nyDay(before.reading.at) >= nyDay(next.reading.at);
+    if (older || closeOverMinute) return before;
+  }
+  const shown = before && next.reading.prev_close === null && before.reading.prev_close !== null
+    && nyDay(before.reading.at) === nyDay(next.reading.at)
+    ? { ...next, reading: { ...next.reading, prev_close: before.reading.prev_close } } : next;
+  store.set(symbol, shown);
+  return shown;
 }
