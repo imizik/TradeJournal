@@ -92,9 +92,9 @@ def test_held_pairs_parse_and_skip_bad_ones():
 
 def test_one_batched_read_is_kept_for_hours(tmp_path):
     """The tags ride the earnings cache: one batched provider read for all the symbols, then none for 12 hours."""
-    clock = [1_000_000.0]
+    seconds = [1_000_000.0]
     queued = []
-    events = SymbolEvents(root=tmp_path, clock=lambda: clock[0], spawn=queued.append)
+    events = SymbolEvents(root=tmp_path, clock=lambda: seconds[0], spawn=queued.append)
     calls = []
 
     def fake_read(dataset, symbols):
@@ -112,7 +112,7 @@ def test_one_batched_read_is_kept_for_hours(tmp_path):
         assert first["rows"] == {} and first["loading"] is True and not calls  # never a read in the request
         queued.pop()()  # the one background refresh
         assert calls == [("calendars", ("NVDA", "AMD"))]
-        clock[0] += 6 * 3600
+        seconds[0] += 6 * 3600
         later = desk_events.tags(["NVDA", "AMD"], {}, WED, set(), read)
         assert later["rows"]["NVDA"]["label"] == "ER Thu" and later["rows"]["AMD"]["label"] == "ER Tue?"
         assert later["loading"] is False and not queued and len(calls) == 1
