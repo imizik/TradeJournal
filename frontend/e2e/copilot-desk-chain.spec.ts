@@ -72,7 +72,8 @@ async function lab(page: Page, plans: object[] = []) {
   await page.route("**/copilot/tickets", route => route.fulfill({ json: { plans } }));
   await page.route(/\/copilot\/tickets\/[^/?]+(\?.*)?$/, route => {
     methods.push(route.request().method());
-    tickets.push(new URL(route.request().url()).search);
+    const url = new URL(route.request().url());
+    tickets.push(`${url.pathname.split("/").pop()}${url.search}`);
     return route.fulfill({ json: TICKET });
   });
   await page.goto(`/copilot-lab?investigation=${INV}`);
@@ -84,8 +85,10 @@ async function lab(page: Page, plans: object[] = []) {
   return { pane, chainReads, methods, tickets };
 }
 
-const PLAN = { investigation_id: INV, symbol: "NBIS", direction: "long", instrument: "calls", thesis: "Reclaims VWAP with the group",
+const PLAN = { investigation_id: INV, symbol: "NBIS", direction: "long", instrument: "calls", option_type: "call", thesis: "Reclaims VWAP with the group",
   confirmed_at: now - 600, entry: 95.9, invalidation: 92.3 };
+// A newer share-buying plan in the same ticker: long too, but it has no option ticket, so a call pick never goes on it.
+const STOCK_PLAN = { ...PLAN, investigation_id: "77777777-7777-4777-8777-777777777777", instrument: "stock", option_type: null, confirmed_at: now - 60 };
 
 test("the chain shows the expiries, the money line and his marks; a new expiry reads that expiry", async ({ page }) => {
   const { pane, chainReads } = await lab(page);
@@ -132,7 +135,7 @@ test("tap a contract: Plan it opens the plan flow with the contract as text he e
 });
 
 test("tap a contract: Put on ticket opens the saved plan's ticket with that contract, and only reads", async ({ page }) => {
-  const { pane, methods, tickets } = await lab(page, [PLAN]);
+  const { pane, methods, tickets } = await lab(page, [STOCK_PLAN, PLAN]);
   const tab = pane.getByTestId("desk-chain");
   await tab.getByRole("button", { name: "102.5 call" }).click();
   const actions = tab.getByTestId("chain-actions");
@@ -142,7 +145,7 @@ test("tap a contract: Put on ticket opens the saved plan's ticket with that cont
   const ticket = pane.getByTestId("desk-ticket");
   await expect(ticket).toContainText("NBIS $102.5 Call 11/13/26");
   await expect(ticket).toContainText("Your pick from the chain (your plan says: NBIS 11/13 100C)");
-  expect(tickets).toEqual(["?expiration=2026-11-13&strike=102.5"]);
+  expect(tickets).toEqual([`${INV}?expiration=2026-11-13&strike=102.5`]); // the call plan's ticket, not the newer stock plan's
   expect([...new Set(methods)]).toEqual(["GET"]);
 });
 

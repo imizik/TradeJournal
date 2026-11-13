@@ -139,6 +139,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const [ticketFor, setTicketFor] = useState<string | null>(null);
   const [ticketPick, setTicketPick] = useState<TicketPick | null>(null); // the Chain tab's Put on ticket
   const [checkSeed, setCheckSeed] = useState<{ text: string; n: number } | null>(null); // the Chain tab's Check it
+  useEffect(() => { if (centreTab !== "check") setCheckSeed(null); }, [centreTab]); // eslint-disable-line react-hooks/set-state-in-effect -- the Chain's contract fills Check a call once, not on every later visit
   const ticketLinked = useRef(false); // a ?ticket= link on a phone: the Ticket comes into view once the book above it has read
   useEffect(() => {
     const show = (id: string, pick: TicketPick | null = null) => { setTicketFor(id); setTicketPick(pick); setCentreTab("ticket"); if (sheetLayout()) document.getElementById("desk-centre")?.scrollIntoView({ behavior: "smooth", block: "start" }); };

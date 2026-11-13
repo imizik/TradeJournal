@@ -33,7 +33,7 @@ export type ChainReply = {
 export type ChainPick = { symbol: string; expiry: string; strike: number; side: ChainSide };
 
 const RETRY_MS = [5_000, 15_000, 30_000, 60_000];
-const CLOSED_RECHECK_MS = 5 * 60_000; // outside the session: a quiet look every five minutes (the server keeps a read that long)
+const CLOSED_RECHECK_MS = 60_000; // outside the session: a quiet look each minute (the server keeps its read five minutes)
 const STALE_AFTER_S = 45; // the server's CHAIN_STALE_S: a chain whose last good read is older is greyed
 
 /** The chain for ``symbol`` at ``expiry`` (the nearest when null), asked again on the server's cadence while ``on`` and
@@ -52,12 +52,14 @@ export function useDeskChain(symbol: string | null, expiry: string | null, on: b
     let cadence: number | null = null;
     let gone = false;
     let loaded = false;
+    let skipped = false; // a load the hidden page skipped: the page showing again makes it
     const schedule = (ms: number | null) => {
       if (timer) clearTimeout(timer);
       timer = ms !== null && !gone ? setTimeout(load, ms) : null;
     };
     const load = async () => {
-      if (document.visibilityState === "hidden") return; // picked up again when the page shows
+      if (document.visibilityState === "hidden") { skipped = true; return; } // picked up again when the page shows
+      skipped = false;
       controller?.abort();
       controller = new AbortController();
       try {
@@ -78,7 +80,7 @@ export function useDeskChain(symbol: string | null, expiry: string | null, on: b
         schedule(RETRY_MS[Math.min(failures++, RETRY_MS.length - 1)]);
       }
     };
-    const onShow = () => { if (document.visibilityState === "visible" && (cadence || failures || !loaded)) load(); };
+    const onShow = () => { if (document.visibilityState === "visible" && (skipped || cadence || failures || !loaded)) load(); };
     load();
     document.addEventListener("visibilitychange", onShow);
     return () => { gone = true; controller?.abort(); if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", onShow); };
@@ -92,6 +94,8 @@ const clock = (epoch: number | null | undefined, seconds = false) => epoch
 const money = (n: number | null | undefined) => n == null ? "—" : n.toFixed(2);
 const count = (n: number | null | undefined) => n == null ? "—" : n >= 10_000 ? `${(n / 1000).toFixed(0)}k` : n.toLocaleString("en-US");
 const delta = (n: number | null | undefined) => n == null ? "—" : n.toFixed(2).replace(/^(-?)0\./, "$1.");
+/** A bid or ask: a contract with no market shows a dash, never 0.00. */
+const quote = (c: Cell, n: number | null) => c.state === "missing" && !n ? "—" : money(n);
 const pct = (n: number | null | undefined) => n == null ? "—" : `${n.toFixed(0)}%`;
 const strikeText = (n: number) => Number.isInteger(n) ? String(n) : String(+n.toFixed(2));
 const kindWord = (side: ChainSide) => side === "call" ? "Call" : "Put";
@@ -105,8 +109,8 @@ export const callText = (p: ChainPick) => { const [, m, d] = p.expiry.split("-")
 
 type Column = { key: string; label: string; title: string; show(c: Cell): string };
 const COL: Record<string, Column> = {
-  bid: { key: "bid", label: "Bid", title: "Bid", show: c => money(c.bid) },
-  ask: { key: "ask", label: "Ask", title: "Ask", show: c => money(c.ask) },
+  bid: { key: "bid", label: "Bid", title: "Bid", show: c => quote(c, c.bid) },
+  ask: { key: "ask", label: "Ask", title: "Ask", show: c => quote(c, c.ask) },
   mark: { key: "mark", label: "Mark", title: "Mark: the middle of bid and ask", show: c => money(c.mark) },
   spread: { key: "spread", label: "Spr", title: "Spread: ask minus bid", show: c => money(c.spread) },
   delta: { key: "delta", label: "Δ", title: "Delta", show: c => delta(c.delta) },
@@ -132,19 +136,21 @@ function useWidth() {
   return { ref, width };
 }
 
-/** The saved plan whose ticket a contract can go on: the newest armed plan in this ticker on the same side. */
+/** The saved plan whose ticket a contract can go on: the newest armed long-call (or long-put) plan in this ticker. */
 export function ticketPlanFor(plans: TicketPlan[] | null, symbol: string, side: ChainSide): TicketPlan | null {
-  return (plans ?? []).find(p => p.symbol === symbol && p.direction === (side === "call" ? "long" : "short")) ?? null;
+  return (plans ?? []).find(p => p.symbol === symbol && p.option_type === side) ?? null;
 }
 
 export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket }: {
   symbol: string | null; plans: TicketPlan[] | null;
   onCheck(text: string): void; onPlan(pick: ChainPick, line: string): void; onTicket(investigationId: string, pick: ChainPick): void;
 }) {
-  const [expiry, setExpiry] = useState<string | null>(null);
+  // The expiry he picked belongs to its ticker: a new ticker starts at its nearest, with no extra read of the old date.
+  const [chosen, setChosen] = useState<{ symbol: string | null; date: string } | null>(null);
+  const expiry = chosen && chosen.symbol === symbol ? chosen.date : null;
+  const setExpiry = (date: string) => setChosen({ symbol, date });
   const [side, setSide] = useState<ChainSide>("call");
   const [picked, setPicked] = useState<ChainPick | null>(null);
-  useEffect(() => { setExpiry(null); setPicked(null); }, [symbol]); // eslint-disable-line react-hooks/set-state-in-effect -- a new ticker starts at its nearest expiry
   const { data, error, failedAt } = useDeskChain(symbol, expiry, true);
   const ticks = useDeskTicks(symbol ? [symbol] : []);
   const live = tickFor(ticks, symbol);
@@ -358,7 +364,7 @@ function Actions({ pick, cell, plans, onCheck, onPlan, onTicket, onClose }: {
         {cell && (
           <span className="text-xs text-muted-foreground">
             {cell.state === "missing" ? "No usable bid and ask right now."
-              : <>Bid {money(cell.bid)} · Ask {money(cell.ask)} · Mark {money(cell.mark)} · Spread {money(cell.spread)}{cell.spread_pct != null ? ` (${cell.spread_pct}%)` : ""} · Vol {count(cell.volume)} · OI {count(cell.open_interest)} · Δ {delta(cell.delta)} · IV {pct(cell.iv)}</>}
+              : <>Bid {quote(cell, cell.bid)} · Ask {quote(cell, cell.ask)} · Mark {money(cell.mark)} · Spread {money(cell.spread)}{cell.spread_pct != null ? ` (${cell.spread_pct}%)` : ""} · Vol {count(cell.volume)} · OI {count(cell.open_interest)} · Δ {delta(cell.delta)} · IV {pct(cell.iv)}</>}
             {cell.state === "stale" && <> · <span className="text-muted-foreground">quote from {clock(cell.quoted_at)}, not live</span></>}
             {cell.held ? <> · <span className="text-emerald-400">you hold {cell.held}</span></> : null}
           </span>

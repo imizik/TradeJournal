@@ -10,7 +10,7 @@ from uuid import UUID
 import pytest
 from sqlmodel import Session
 
-from app.engine import desk_chain
+from app.engine import desk_chain, desk_ticket
 from app.engine.options_feed import OptionsFeed
 from app.engine.options_models import OptionChain, OptionContract
 from app.models import Trade
@@ -288,6 +288,14 @@ def test_put_on_ticket_the_chains_pick_replaces_the_plans_contract(engine):  # n
     picked = ticket(engine, pick=(date(2026, 11, 13), 105.0), chain_read=chain_read(ticket_contract(100), ticket_contract(105, bid=1.5, ask=1.7)))
     assert picked["contract"]["strike"] == 105 and picked["contract"]["source"] == "picked" and picked["limit"] == 1.6
     assert picked["plan_contract_words"] == "NBIS 11/13 100C"  # the plan's own words still show
+
+
+def test_the_ticket_list_says_which_plans_are_a_long_call_or_put(engine):  # noqa: F811
+    plan(engine, contract="NBIS 11/13 100C")
+    plan(engine, "22222222-2222-4222-8222-222222222222", "CRWV", side="buy_stock", instrument="stock", contract=None, client_id="b")
+    with Session(engine) as db:
+        rows = {r["symbol"]: r["option_type"] for r in desk_ticket.armed(db)}
+    assert rows == {"NBIS": "call", "CRWV": None}
 
 
 # --- the route, and nothing sends ------------------------------------------------------------------------------------

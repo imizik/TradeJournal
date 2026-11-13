@@ -256,8 +256,10 @@ def armed(db: Session) -> list[dict]:
     """The saved plans a ticket can open: on the board, armed, not yet entered, with a pre-trade plan; newest first."""
     board = copilot_plans.board(db, quotes=_no_quotes)["plans"]
     plans = copilot_plans._plans(db)[0]
-    saved = {p["investigation_id"] for p in plans if p["capture"] is not None} - _entered(db, plans)
+    sides = {p["investigation_id"]: p["capture"].side for p in plans if p["capture"] is not None}
+    saved = set(sides) - _entered(db, plans)
     rows = [{"investigation_id": p["investigation_id"], "symbol": p["symbol"], "direction": p["direction"],
+             "option_type": SIDES.get(sides[p["investigation_id"]]),  # a long call or put; None: no option ticket
              "instrument": p["instrument"], "thesis": p["thesis"], "confirmed_at": p["confirmed_at"],
              "entry": p["entry"] and p["entry"]["price"], "invalidation": p["invalidation"] and p["invalidation"]["price"]}
             for p in board if p["position"] == "waiting" and p["investigation_id"] in saved]

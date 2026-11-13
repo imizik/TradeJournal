@@ -1427,14 +1427,15 @@ Robinhood; `backend/tests/test_desk_chain.py` checks that nothing in it sends an
   copilot's simulated NBIS chain, labelled; replay shows none.
 - **Cadence and budget:** one chain read per expiry through `options_feed.chains` (its cache, its single pass at a
   time, its 24-a-minute share of the options budget's 30). A read serves for 12 s in the session and 5 minutes
-  outside; the tab asks every 15 s while it is open and the page is visible in the session, and every 5 minutes
-  outside it. With the tab open that is about 4 option-chain requests a minute, plus the stock's quote from the chart
+  outside; the tab asks every 15 s while it is open and the page is visible in the session, and once a minute
+  outside it (answered from the kept read, so at most one chain request per five minutes). With the tab open that is about 4 option-chain requests a minute, plus the stock's quote from the chart
   feed's shared 15-second cache (at most 4 a minute) and the expiry list every 30 minutes. A read the pacing refuses
   answers from the chain already kept, greyed once it ages. `Server-Timing` names `chain_read` and `chain_spot`.
 - **Tap a contract:** a row with its numbers and **Check it** (opens Check a call with the contract in the box, e.g.
   "NBIS 11/14 105C"; nothing runs until he taps Check it), **Plan it** (the plan flow with the contract and its mark
   as text he edits) and **Put on ticket** (the newest armed saved plan in that ticker on the same side opens its
-  ticket with this contract; with none the button is off and says to plan it first). No order path of any kind.
+  ticket with this contract; a stock or sell-side plan has no option ticket and is not offered; with none the button
+  is off and says to plan it first). No order path of any kind.
 
 **Server time (2026-11-12).** Each desk read (every `GET /copilot/desk/…`, the thread header's
 `GET /charts/journal/positions/{symbol}/context` and `GET /copilot/symbol/{symbol}`) answers with a standard

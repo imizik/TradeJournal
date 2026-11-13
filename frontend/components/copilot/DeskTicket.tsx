@@ -31,6 +31,7 @@ export function openTicket(investigationId: string, pick?: TicketPick) {
 
 export type TicketPlan = {
   investigation_id: string; symbol: string; direction: "long" | "short" | null; instrument: string | null; thesis: string | null;
+  option_type?: "call" | "put" | null; // a long call or put plan; anything else has no option ticket
   confirmed_at: number; entry: number | null; invalidation: number | null;
 };
 type Account = { id: string; label: string; last4: string | null; kind: "roth" | "mcp" | "other" };
