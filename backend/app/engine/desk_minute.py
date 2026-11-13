@@ -17,16 +17,20 @@ import logging
 import re
 from urllib.parse import unquote, urlsplit
 
+from app.engine import request_timing
+
 log = logging.getLogger(__name__)
 
 MAX_READS = 16
+READ_SECONDS = 8.0  # one read past this answers 504 for itself, so a stuck provider never holds the minute's other reads
 # The desk's minute reads (frontend lib/deskMinute.ts ``BATCHED``): read-only GETs.
 PATHS = frozenset({
     "/copilot/desk/threads", "/copilot/desk/session", "/copilot/desk/watching", "/copilot/desk/moving",
     "/copilot/desk/feed", "/copilot/desk/sparks", "/copilot/unusual", "/copilot/scanner", "/copilot/tickets",
     "/copilot/exposure", "/copilot/investigations",
 })
-CHART = re.compile(r"/copilot/desk/[^/]+/chart")  # the centre chart's minute bars (a thread id or ``symbol:NVDA``)
+# The centre chart's minute bars: a thread id or ``symbol:NVDA``, in the characters the frontend proxy lets through.
+CHART = re.compile(r"/copilot/desk/(?!\.\.?/)[A-Za-z0-9_.:-]+/chart")
 _COPIED = ("type", "asgi", "http_version", "scheme", "server", "client", "root_path")
 _DROPPED = {b"content-length", b"content-type", b"transfer-encoding"}
 
@@ -37,7 +41,17 @@ def allowed(path: str) -> bool:
 
 async def read_all(app, scope: dict, targets: list[str]) -> list[dict]:
     """Each target (a path with its query) answered as ``{"status", "body"}``, in order, side by side."""
-    return list(await asyncio.gather(*(_one(app, scope, target) for target in targets)))
+    return list(await asyncio.gather(*(_bounded(app, scope, target) for target in targets)))
+
+
+async def _bounded(app, scope: dict, target: str) -> dict:
+    # Each read times itself as its own route (its own Server-Timing and timings entry), never under this request.
+    request_timing._current.set(None)
+    try:
+        return await asyncio.wait_for(_one(app, scope, target), READ_SECONDS)
+    except TimeoutError:
+        log.warning("desk minute: a read ran past %.0f s", READ_SECONDS)
+        return {"status": 504, "body": {"detail": "This read took too long; the next minute asks again."}}
 
 
 async def _one(app, scope: dict, target: str) -> dict:

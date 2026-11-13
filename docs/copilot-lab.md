@@ -1764,9 +1764,11 @@ are 12 of them (`GET /copilot/desk/ticks` every 5 s, § Live prices); the rest:
   read on mount as before (a cold page never waits on the slowest), then re-read on one shared minute beat
   (`everyDeskMinute`); what they ask during the beat goes out as `GET /copilot/desk/minute?read=…`
   (`backend/app/engine/desk_minute.py`), each read dispatched through the whole app with the browser's own headers and
-  answered exactly as its own route would (status and body), in order. Only those reads are accepted (400 for anything
-  else, without dispatching it); owner-only; no cache or provider call of its own. A backend without the route (404)
-  gets the reads one by one.
+  answered exactly as its own route would (status and body, its own `Server-Timing` and timings entry), in order. Only
+  those reads are accepted (400 for anything else, without dispatching it; the chart id in the characters the frontend
+  proxy allows); owner-only; no cache or provider call of its own. A read past 8 s answers 504 for itself and the next
+  minute asks again, so one stuck provider never holds the others. A backend without the route (404) gets the reads one
+  by one.
 - **Nothing while the page is hidden.** The beat skips; showing the page after a skipped beat turns one at once (one
   request). Before, the Feed, unusual options, scanner and armed plans kept polling a hidden tab.
 - The app-wide job dot and Gmail health read once a minute, not every 30 s.

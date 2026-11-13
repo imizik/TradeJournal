@@ -22,7 +22,7 @@ export const BATCHED = new Set([
   "/copilot/desk/feed", "/copilot/desk/sparks", "/copilot/unusual", "/copilot/scanner", "/copilot/tickets",
   "/copilot/exposure", "/copilot/investigations",
 ]);
-const CHART = /^\/copilot\/desk\/[^/]+\/chart$/;
+const CHART = /^\/copilot\/desk\/(?!\.\.?\/)[A-Za-z0-9_.:%-]+\/chart$/; // an id as the proxy lets through (``:`` may be encoded)
 
 type Waiting = { path: string; signal?: AbortSignal; resolve(r: Response): void; reject(e: unknown): void };
 const readers = new Map<number, { read: () => void; since: number }>();
@@ -42,9 +42,9 @@ function beat() {
   beats += 1;
   open = true;
   const now = Date.now();
-  for (const reader of readers.values()) if (now - reader.since >= FRESH_MS) reader.read();
+  setTimeout(flush, WINDOW_MS); // first, so a piece that throws can never leave the window open
+  for (const reader of readers.values()) if (now - reader.since >= FRESH_MS) { try { reader.read(); } catch { /* that piece's own */ } }
   for (const listener of beatListeners) listener();
-  setTimeout(flush, WINDOW_MS);
 }
 
 function onVisibility() {
@@ -125,8 +125,11 @@ async function flush() {
   if (!reads && status === 404) { items.forEach(alone); return; } // a backend without the batched route
   items.forEach((item, i) => {
     if (item.signal?.aborted) { item.reject(aborted()); return; }
-    const read = reads ? reads[i] : { status: status || 502, body: reply };
-    item.resolve(new Response(JSON.stringify(read.body ?? null), { status: read.status, headers: { "Content-Type": "application/json" } }));
+    // A 200 that is not the batch's own shape (something in between answered) is a failed read, never a body.
+    const read = reads ? reads[i] : { status: status === 200 ? 502 : status || 502, body: status === 200 ? null : reply };
+    const code = Number.isInteger(read.status) && read.status >= 200 && read.status <= 599 ? read.status : 502;
+    const empty = code === 204 || code === 205 || code === 304;
+    item.resolve(new Response(empty ? null : JSON.stringify(read.body ?? null), { status: code, headers: { "Content-Type": "application/json" } }));
   });
 }
 

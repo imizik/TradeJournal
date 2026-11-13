@@ -126,8 +126,8 @@ test("a hidden desk asks nothing; showing it again catches up in one request", a
     return Date.now();
   });
   await page.clock.runFor(2_000);
+  await expect.poll(() => count(seen, back)["/copilot/desk/minute"] ?? 0).toBe(1);
   const by = count(seen, back);
-  expect(by["/copilot/desk/minute"]).toBe(1);
   for (const path of Object.keys(READS)) expect(by[path] ?? 0, path).toBe(0);
   // The book still reads the stubbed position after the catch-up (each read got its own answer back).
   await expect(page.getByTestId("desk-book").getByTestId("book-pnl")).toHaveText("−$120−55%");

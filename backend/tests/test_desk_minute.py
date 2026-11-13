@@ -13,6 +13,7 @@ from app.engine import desk_minute
 from app.routers import copilot_desk
 from tests.test_copilot_desk import desk  # noqa: F401  (the desk app over the shared fixtures)
 from tests.test_copilot_plans import engine, quotes  # noqa: F401  (fixtures)
+from tests.test_owner_lock import lock  # noqa: F401  (fixture)
 from tests.test_today import clock, marks  # noqa: F401  (fixtures)
 
 
@@ -48,11 +49,13 @@ def test_only_the_desks_minute_reads_are_dispatched(desk, monkeypatch):  # noqa:
         return await real(app, scope, target)
     monkeypatch.setattr(desk_minute, "_one", spy)
     outside = ["/copilot/desk/robinhood/refresh", "/copilot/desk/read", "/copilot/desk/timings", "/fills",
-               "http://elsewhere.example/copilot/desk/threads", "/copilot/desk/a%2Fb/chart", "/copilot/desk/minute?read=/copilot/desk/threads"]
+               "http://elsewhere.example/copilot/desk/threads", "/copilot/desk/a%2Fb/chart", "/copilot/desk/minute?read=/copilot/desk/threads",
+               "/copilot/desk/../chart", "/copilot/desk/%3Cx%3E%20y/chart", "/copilot/desk/watching/robinhood"]
     got = minute(desk, *outside).json()["reads"]
     assert [r["status"] for r in got] == [400] * len(outside)
     assert all(r["body"] == {"detail": "Not a desk minute read."} for r in got)
     assert desk_minute.allowed("/copilot/desk/symbol:NVDA/chart") and desk_minute.allowed("/copilot/tickets")
+    assert desk_minute.allowed("/copilot/desk/symbol:BRK.B/chart") and desk_minute.allowed("/copilot/desk/market/chart")
     assert minute(desk).status_code == 400  # nothing named
     assert minute(desk, *["/copilot/desk/threads"] * (desk_minute.MAX_READS + 1)).status_code == 400
 
@@ -83,3 +86,41 @@ def test_the_server_list_matches_the_desks():
     source = (Path(__file__).resolve().parents[2] / "frontend" / "lib" / "deskMinute.ts").read_text()
     for path in desk_minute.PATHS:
         assert f'"{path}"' in source, path
+
+
+def test_a_read_past_its_time_answers_504_for_itself_and_the_rest_land(desk, monkeypatch):  # noqa: F811
+    import asyncio
+    real = desk_minute._one
+
+    async def slow(app, scope, target):
+        if target.startswith("/copilot/desk/session"):
+            await asyncio.sleep(5)
+        return await real(app, scope, target)
+    monkeypatch.setattr(desk_minute, "_one", slow)
+    monkeypatch.setattr(desk_minute, "READ_SECONDS", 0.5)
+    got = minute(desk, "/copilot/desk/threads", "/copilot/desk/session").json()["reads"]
+    assert [r["status"] for r in got] == [200, 504]
+
+
+def test_through_the_owner_lock_a_signed_out_batch_dispatches_nothing_and_a_signed_in_one_reads(lock, monkeypatch):  # noqa: F811
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from tests.test_owner_lock import BROWSER, token
+    monkeypatch.setattr(copilot_desk.copilot, "settings", lambda: SimpleNamespace(enabled=True))
+    calls = []
+    real = desk_minute._one
+
+    async def spy(app_, scope, target):
+        calls.append(target)
+        return await real(app_, scope, target)
+    monkeypatch.setattr(desk_minute, "_one", spy)
+    remote = TestClient(app, client=("100.64.0.7", 50000))  # a browser on the tailnet, not a process on the server
+    target = "/copilot/desk/sparks?symbols="
+    refused = remote.get("/copilot/desk/minute", params={"read": target}, headers=BROWSER)
+    assert (refused.status_code, calls) == (401, [])
+    cookie = {"__Host-tj_owner_lock": token(lock)}
+    alone = remote.get(target, headers=BROWSER, cookies=cookie)
+    got = remote.get("/copilot/desk/minute", params={"read": target}, headers=BROWSER, cookies=cookie)
+    assert got.status_code == 200 and calls == [target]
+    assert got.json()["reads"][0]["status"] == alone.status_code == 200
