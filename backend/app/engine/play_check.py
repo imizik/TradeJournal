@@ -242,11 +242,13 @@ def breakeven(legs: list[dict], cost: float, spot: float, at: datetime) -> float
 def hold_until(now: datetime, time_stop: dict | None, horizon: str | None) -> tuple[datetime, str, bool]:
     """When the hold ends (aware New York), what set it, and whether it runs past today's close: the plan's pending
     time stop, else a swing or long horizon's days to that day's close, else the next weekday's close (a day horizon
-    or no plan for time: the overnight figures then answer "if I held it to tomorrow's close")."""
+    a time stop due today, or no plan for time: the overnight figures then answer "if I held it to the next close")."""
     today = now.date()
     if time_stop and time_stop.get("state") == "pending" and time_stop.get("due_at"):
         end = datetime.fromtimestamp(time_stop["due_at"], ET)
-        return end, "time stop", end.date() > today
+        if end.date() > today:
+            return end, "time stop", True
+        # A time stop due today ends the hold today: the folded figures answer the next close, as without one.
     if horizon in HOLD_DAYS:
         return datetime.combine(today + timedelta(days=HOLD_DAYS[horizon]), CLOSE, ET), f"{horizon} horizon", True
     day = today + timedelta(days=1)
@@ -293,7 +295,7 @@ def _row(name: str, symbol: str, legs: list[dict], base_delta: float, spot: floa
     hold_cost = units * (now_value - end_value) if now_value is not None and end_value is not None else None
     even = breakeven(legs, cost_each, spot, end)
     move = (even - spot) / spot * 100 if even is not None else None
-    out = {**row, "state": "ok", "units": round(units, 2 if name != "shares" else 0),
+    out = {**row, "state": "ok", "units": round(units, 6),  # unrounded: the desk scales it by his count, then rounds
            "cost": round(abs(cost), 2), "credit": cost < 0,
            "max_loss": None if short else round(cost, 2),
            "max_loss_note": "no limit" if short else None,

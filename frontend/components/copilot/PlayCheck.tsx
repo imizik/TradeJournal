@@ -102,7 +102,7 @@ export default function PlayCheck({ check, investigationId, symbol, contracts, p
         <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
           className="inline-flex min-h-11 items-center gap-1 text-muted-foreground hover:text-foreground sm:min-h-6">
           {open ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
-          If you held it to {night.until_source === "time stop" ? "past your time stop" : "the next close"}
+          If you held it to the next close
         </button>
       )}
       {night && showNight && <Overnight night={night} symbol={symbol} count={count} counted={!!contracts && contracts > 0} />}

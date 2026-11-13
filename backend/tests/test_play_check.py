@@ -234,7 +234,8 @@ def test_decay_and_the_alternatives_sized_to_the_same_delta():
     # Deeper: the 92.5 call (delta 0.70, nearest 0.70). 40 deltas / 70 = 0.571 contracts: $400, $4.57 a day, break-even 99.50.
     deep = rows["deeper"]
     assert deep["label"] == "NBIS $92.5 Call 11/20/26"
-    assert (deep["units"], deep["cost"], deep["decay_day"], deep["breakeven"]) == (0.57, 400.0, 4.57, 99.5)
+    assert deep["units"] == pytest.approx(40 / 70, abs=1e-6)
+    assert (deep["cost"], deep["decay_day"], deep["breakeven"]) == (400.0, 4.57, 99.5)
     # Spread: 100/107.5 (the 95 straddle is 8.00, so the short strike nearest 108). 40 / (40 - 20) = 2 spreads at 2.20: $440;
     # theta -0.10 + 0.06 = -0.04 a share, x 100 x 2 = $8 a day; break-even 102.20.
     spread = rows["spread"]
@@ -243,7 +244,7 @@ def test_decay_and_the_alternatives_sized_to_the_same_delta():
     # Later: the December 100 call (delta 0.45). 40 / 45 = 0.889: $533.33, $4.44 a day; still worth time value on Nov 20,
     # so it breaks even below the November contract's 103.20.
     later = rows["later"]
-    assert (later["units"], later["cost"], later["decay_day"]) == (0.89, 533.33, 4.44)
+    assert later["units"] == pytest.approx(40 / 45, abs=1e-6) and (later["cost"], later["decay_day"]) == (533.33, 4.44)
     assert 95 < later["breakeven"] < 103.2
     # Shares: 40 shares at 95, no decay, break-even where bought.
     shares = rows["shares"]
@@ -287,7 +288,10 @@ def test_when_the_plan_ends_today_the_figures_are_folded_for_the_next_close():
     today = stop_at(datetime(2026, 11, 13, 15, 30, tzinfo=ET))
     folded = play_check.overnight(symbol="NBIS", traded=MINE, chain=NEAR, later=None, spot=95.0, now=NOW, time_stop=today,
                                   horizon=None, quote_for=fresh)
-    assert folded["show"] is False and folded["until_source"] == "time stop"
+    # A time stop due later today ends the hold today: the folded figures are for holding to the next close instead.
+    monday = int(datetime(2026, 11, 16, 16, 0, tzinfo=ET).timestamp())
+    assert folded["show"] is False and folded["until_source"] == "next close" and folded["until"] == monday
+    assert folded["trading_days"] == 1
     nothing = play_check.overnight(symbol="NBIS", traded=MINE, chain=NEAR, later=None, spot=95.0, now=NOW, time_stop=None,
                                    horizon=None, quote_for=fresh)
     assert nothing["show"] is False and nothing["until_source"] == "next close"
