@@ -4,6 +4,7 @@ chart carry it as a line with no alert, and the book row hands it to the closing
 without a target reads exactly as before. The migration only adds the column: no backfill, no existing value changes.
 No network."""
 
+import json
 import math
 import os
 from pathlib import Path
@@ -22,6 +23,7 @@ from tests import test_telegram
 from tests.test_browser_access import boundary, signin  # noqa: F401  (the shared access fixture)
 from tests.test_copilot_desk_context import bars, investigation, lab  # noqa: F401  (fixtures)
 from tests.test_copilot_plans import NBIS, ROTH, alert, capture, engine, quotes, time_stop  # noqa: F401  (fixtures)
+from tests.test_plan_positions import buy, link, marks  # noqa: F401  (fixtures)
 from tests.test_telegram import Bot, ask_plan, card_data, case, confirm, saved_plan  # noqa: F401  (fixtures)
 from tests.test_today import clock  # noqa: F401  (fixture)
 
@@ -144,12 +146,12 @@ def test_telegram_shows_and_saves_the_drafted_target(case, monkeypatch):  # noqa
 # ------------------------------------------------------------------ the book row's closing-ticket inputs
 
 
-def test_the_book_row_hands_the_closing_ticket_its_stop_target_and_account():
+def test_the_book_row_hands_the_closing_ticket_its_stop_and_target():
     row = {"symbol": "NBIS", "instrument": "stock", "account": "Roth IRA ••8267", "unrealized_usd": 10.0,
            "plan": {"invalidation": {"price": 92.3, "state": "armed", "distance_pct": -1.8}}}
     plan = {"entry": {"price": 95.9}, "invalidation": {"price": 92.3}, "target": 101.0, "last": 94.0}
     book = copilot_desk._book(row, plan, None)
-    assert book["plan_levels"] == {"stop": 92.3, "target": 101.0} and book["journal_account"] == "Roth IRA ••8267"
+    assert book["plan_levels"] == {"stop": 92.3, "target": 101.0}
     bare = copilot_desk._book({**row, "plan": None}, None, None)
     assert bare["plan_levels"] == {"stop": None, "target": None}  # no plan: no closing ticket
 
@@ -190,3 +192,20 @@ def test_the_migration_only_adds_a_nullable_column_and_leaves_every_saved_plan_a
         assert conn.execute(text("SELECT target_price FROM trade_capture")).scalar() is None
     db.dispose()
 
+
+
+
+def test_a_real_journal_position_gets_its_plan_levels_and_never_the_account_name(engine, marks):  # noqa: F811
+    from app.engine import plan_positions
+    plan = capture(engine, "NBIS")
+    set_target(engine, plan, 101.0)
+    time_stop(engine, NBIS, "NBIS")
+    alert(engine, NBIS, "NBIS", "invalidation", 92.3)
+    buy(engine, 500)
+    link(engine, plan, 500)
+    with Session(engine) as db:
+        [row] = plan_positions.positions(db, quotes=lambda symbols: ({"NBIS": 94.0}, None, None))["positions"]
+        board = {p["investigation_id"]: p for p in copilot_plans.board(db, quotes=lambda symbols: ({}, None, None))["plans"]}
+    book = copilot_desk._book(row, board[NBIS], None)
+    assert book["plan_levels"] == {"stop": 92.3, "target": 101.0}
+    assert "account" not in book and "Roth" not in json.dumps(book)  # the account comes only from Robinhood's masked tag

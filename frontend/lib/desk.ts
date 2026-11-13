@@ -112,10 +112,9 @@ export type DeskBook = {
   /** Robinhood's working orders and today's fills on this contract (``_order_lines`` in copilot_desk.py); absent when
    * there are none or the order-history read is off, signed out or stale. */
   orders?: DeskOrder[];
-  /** The plan's two exits on the underlying (its invalidation and saved target; null without one) and the journal
-   * account holding the position, for the closing ticket (``lib/closingTicket.ts``). Absent from an older backend. */
+  /** The plan's two exits on the underlying (its invalidation and saved target; null without one), for the closing
+   * ticket (``lib/closingTicket.ts``). Absent from an older backend. */
   plan_levels?: { stop: number | null; target: number | null };
-  journal_account?: string | null;
 };
 
 /** One Robinhood order on the desk (docs/robinhood-order-fills.md § On the desk): still working (``working``, with what

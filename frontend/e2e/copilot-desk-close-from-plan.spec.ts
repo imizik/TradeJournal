@@ -30,20 +30,21 @@ const THREADS = {
   threads: [
     // Two ORCL 250 calls (Robinhood's account and Greeks), a plan with stop 240 and target 258.
     position(ids.orcl, plans.orcl, "ORCL", "11/20/26 250C", { ...base, usd: -420, pct: -33.9, expiry: "2026-11-20",
-      account: { label: "Roth IRA", masked: "••8267" }, plan_levels: { stop: 240, target: 258 }, journal_account: "Roth IRA ••8267",
+      account: { label: "Roth IRA", masked: "••8267" }, plan_levels: { stop: 240, target: 258 },
       tick: { quote: ORCL_CALL, scale: 100, cost: 620, quantity: 2, sign: 1 },
       option: { side: "call", strike: 250, expiry: "2026-11-20", direction: "long", quantity: 2, multiplier: 100, cost: 620,
         greeks: { delta: 0.38, theta: -0.31, iv: 0.44, as_of: epoch("2026-11-13T15:59:30Z"), source: "robinhood" } } }),
-    // Three APLD 30 puts in the journal only; a plan with a stop and no target.
+    // Three APLD 30 puts on Robinhood's Individual account; a plan with a stop and no target.
     position(ids.apld, plans.apld, "APLD", "11/27/26 30P", { ...base, usd: 159, pct: 55.8, expiry: "2026-11-27",
-      plan_levels: { stop: 29.5, target: null }, journal_account: "Individual ••1234",
+      account: { label: "Individual", masked: "••1234" }, plan_levels: { stop: 29.5, target: null },
       tick: { quote: APLD_PUT, scale: 100, cost: 95, quantity: 3, sign: 1 },
       option: { side: "put", strike: 30, expiry: "2026-11-27", direction: "long", quantity: 3, multiplier: 100, cost: 95,
         greeks: { delta: -0.42, theta: -0.04, iv: 0.9, as_of: "2026-11-13 15:00:00", source: "tradier" } } }),
-    // An MU call with a plan but no Greeks: no delta, so no estimate and no button.
+    // An MU call in the journal only (no Robinhood account to name) with a plan: no closing ticket, so no button.
     position(ids.mu, plans.mu, "MU", "11/20/26 120C", { ...base, usd: 50, pct: 10, expiry: "2026-11-20",
-      plan_levels: { stop: 110, target: 130 }, journal_account: "Roth IRA ••8267", tick: null,
-      option: { side: "call", strike: 120, expiry: "2026-11-20", direction: "long", quantity: 1, multiplier: 100, cost: 500, greeks: null } }),
+      plan_levels: { stop: 110, target: 130 }, tick: null, mark: 600, quantity: 1,
+      option: { side: "call", strike: 120, expiry: "2026-11-20", direction: "long", quantity: 1, multiplier: 100, cost: 500,
+        greeks: { delta: 0.5, theta: -0.2, iv: 0.5, as_of: epoch("2026-11-13T15:59:30Z"), source: "robinhood" } } }),
   ],
 };
 const SESSION = {
@@ -126,6 +127,7 @@ test("a planned call: the target line on the chart, then Close at target fills a
   await expect(t).toContainText("A closing sell of the 2 contracts you hold");
   await expect(t).toContainText("Roth IRA ••8267");
   await expect(t).toContainText("Sell to close");
+  await expect(t.getByTestId("closing-when")).toContainText("It can wait in Robinhood as a limit: it fills only if the option trades up to it.");
   await expect(t).toContainText("ORCL $250 Call 11/20/26");
   await expect(t.getByLabel("Quantity in contracts")).toHaveValue("2");
   // 4.10 + 0.38 x (258 − 247) = 8.28, marked as an estimate with today's mark beside it.
@@ -146,16 +148,18 @@ test("a planned call: the target line on the chart, then Close at target fills a
   await book(page).getByRole("button", { name: "Close at stop" }).click();
   await expect(ticket(page)).toHaveAttribute("data-closing", "stop");
   await expect(ticket(page).getByLabel("Limit price per share")).toHaveValue("1.44");
+  // A sell under today's bid fills at once: the ticket says to place it only once ORCL is at the stop.
+  await expect(ticket(page).getByTestId("closing-when")).toContainText("Place it only once ORCL is at 240.00");
   await ticket(page).getByRole("button", { name: "Not now" }).click();
   await expect(page.getByTestId("desk-ticket")).toContainText("A ticket opens only from a saved plan.");
 });
 
-test("a put with a stop and no target offers only Close at stop; a plan without a delta offers neither", async ({ page }) => {
+test("a put with a stop and no target offers only Close at stop; a journal-only position offers neither", async ({ page }) => {
   await open(page);
   await book(page).getByRole("button", { name: "APLD 11/27/26 30P" }).click();
   await expect(header(page).getByTestId("close-from-plan").getByRole("button")).toHaveText(["Close at stop"]);
   await header(page).getByRole("button", { name: "Close at stop" }).click();
-  // 1.48 − 0.42 x (29.5 − 28.6) = 1.102 → 1.10, from the journal account.
+  // 1.48 − 0.42 x (29.5 − 28.6) = 1.102 → 1.10, on Robinhood's Individual account.
   await expect(ticket(page).getByLabel("Limit price per share")).toHaveValue("1.10");
   await expect(ticket(page)).toContainText("Individual ••1234");
   await expect(ticket(page).getByLabel("Quantity in contracts")).toHaveValue("3");

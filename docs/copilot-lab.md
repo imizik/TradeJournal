@@ -1519,11 +1519,14 @@ that nothing in it places or sends anything.
 - **Closing tickets: Close at target / Close at stop.** A held single long call or put with a plan shows these in the
   position header (beside the What if…) and under its book row. Each opens the Ticket as a **sell to close** of the
   contracts held, filled in the browser from the book row (`frontend/lib/closingTicket.ts`): the account holding it
-  (Robinhood's label and masked number, else the journal account), the contract, the quantity held, and a limit
+  (Robinhood's label and masked number, so a position the live feed does not show gets no closing ticket), the contract, the quantity held, and a limit
   estimated for the stock at that plan level, mark + delta x (level − stock), never below the contract's value at
   expiry there, rounded to the cent and at least $0.01, labelled **Estimate, not a quote** with the sum shown (and
   when a floor set it) and today's mark beside it; with the stock already at or past the level (through the stop,
-  beyond the target) the limit is today's mark instead and the ticket says so, never a sell priced above the market ("Mark now 4.10", or "(last read)" without a live option tick). Quantity and limit are
+  beyond the target) the limit is today's mark instead and the ticket says so, never a sell priced above the market.
+  **When to place it** says what a sell limit does: at the target it can wait in Robinhood until the option trades up
+  to it; at the stop the limit is under today's mark and would fill at once, so it says to place it only once the stock
+  is at the stop ("Mark now 4.10", or "(last read)" without a live option tick). Quantity and limit are
   editable; **Copy all for Robinhood** puts Sell · Call/Put in place of Buy. It reads no route and has no Send button
   at all. A missing input (no plan level, no target, no mark, no delta or a delta on the wrong side for the contract,
   no stock price, no account, a fractional size, a short or multi-leg structure) leaves that button out: never a zero

@@ -88,7 +88,8 @@ function useStanding(row: DeskThread, rows: readonly DeskThread[], fallback: { l
   if (!standing) return terms.direction === "long" ? "incomplete" as const : "unknown" as const;
   // The plan's exits as closing tickets: each only with every input it needs (``closingTicket``), else no button.
   const optionTick = book.tick ? tickFor(ticks, book.tick.quote) : null;
-  const account = book.account ? `${book.account.label}${book.account.masked ? ` ${book.account.masked}` : ""}` : book.journal_account;
+  // Robinhood's label and masked number (a matched row): the journal's account name never leaves the server here.
+  const account = book.account ? `${book.account.label}${book.account.masked ? ` ${book.account.masked}` : ""}` : null;
   const closing = (["target", "stop"] as ClosingAt[]).flatMap((at): ClosingTicket[] => {
     const ticket = closingTicket({ symbol: row.symbol, at, terms, levels: book.plan_levels, account, worth,
       stock: stock ? { last: stock.last, at: stock.at } : null, markLive: !!optionTick && !optionTick.stale });

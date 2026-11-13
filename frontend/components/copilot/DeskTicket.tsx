@@ -161,7 +161,8 @@ export default function DeskTicket({ plans, failed, open, pick = null, close = n
   close?: ClosingTicket | null;
   onPlaced(symbol: string): void; onPlan(): void;
 }) {
-  if (close) return <ClosingView key={`${close.symbol}|${close.expiry}|${close.strike}|${close.at}`} ticket={close} onClose={onClose} onPlaced={onPlaced} />;
+  // Each click is a fresh ticket (a new mark or stock price re-fills the limit), keyed on what it was priced from.
+  if (close) return <ClosingView key={`${close.symbol}|${close.expiry}|${close.strike}|${close.at}|${close.stock}|${close.mark}`} ticket={close} onClose={onClose} onPlaced={onPlaced} />;
   if (open) return <TicketView key={`${open}|${pick?.expiry ?? ""}|${pick?.strike ?? ""}`} investigationId={open} initialPick={pick} onClose={onClose} onPlaced={onPlaced} />;
   return (
     <div data-testid="desk-ticket" className="space-y-3">
@@ -417,6 +418,13 @@ function ClosingView({ ticket: t, onClose, onPlaced }: { ticket: ClosingTicket; 
             {t.past
               ? <>{t.symbol} is already {t.at === "stop" ? "through your stop" : "past your target"} ({t.stock.toFixed(2)}{t.stockAt ? `, ${clock(t.stockAt)}` : ""} against {t.level.toFixed(2)}): the limit starts at today&apos;s mark, not a price for the level. Set your own.</>
               : <>Estimate, not a quote: if {t.symbol} reaches {t.level.toFixed(2)} (now {t.stock.toFixed(2)}{t.stockAt ? `, ${clock(t.stockAt)}` : ""}), the mark {t.mark.toFixed(2)} {signed(t.delta * (t.level - t.stock))} by its delta {signed(t.delta)}{t.floored ? `, raised to ${t.estimate.toFixed(2)}, its least value there (worth at expiry, or a cent)` : ` ≈ ${t.estimate.toFixed(2)}`}. Time, IV and the spread move it; set your own.</>}
+          </span>
+        </Row>
+        <Row name="When to place it">
+          <span data-testid="closing-when" className="text-xs">
+            {t.past ? `${t.symbol} is already there: placed now, a sell at about today's mark closes it now.`
+              : t.at === "stop" ? `Place it only once ${t.symbol} is at ${t.level.toFixed(2)}. This limit is under today's mark ${t.mark.toFixed(2)}, and a sell limit under the bid fills at once, at about the bid: placed early, it closes the position now, not at your stop.`
+              : `It can wait in Robinhood as a limit: it fills only if the option trades up to it. If ${t.symbol} gets there faster or slower than the estimate assumes, the option may not reach it.`}
           </span>
         </Row>
         <Row name="Proceeds"><span className="tabular-nums">{limitN !== null && qtyN ? `about ${usd(limitN * t.multiplier * qtyN)} at this limit` : "—"}</span></Row>
