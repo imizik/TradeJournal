@@ -62,7 +62,8 @@ export function DeskAccounts({ live, rows, active, onPick }: {
   live: DeskLive | null; rows: DeskThread[]; active: string | null; onPick(masked: string | null): void;
 }) {
   const ticks = useDeskTicks(positionRows(rows).map(r => r.book?.account ? r.book.tick?.quote : null));
-  if (!live || live.state === "loading") return null; // the first read is on its way; the book says so
+  // Off: no account line at all (the book is the journal's, as it always was). Loading: the first read is on its way.
+  if (!live || live.state === "off" || live.state === "loading") return null;
   if (!liveOn(live) || !live.accounts?.length) {
     const age = live.state === "stale" && live.as_of
       ? `Accounts as of ${new Date(live.as_of * 1000).toLocaleTimeString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" })}`

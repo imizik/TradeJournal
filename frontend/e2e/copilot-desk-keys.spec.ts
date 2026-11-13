@@ -336,8 +336,9 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
     // Mid-session the lower block is Since you looked (a first visit says so); no phase button.
     await expect(page.getByTestId("since-you-looked")).toContainText("First look from this browser");
     await expect(page.getByRole("button", { name: /Close the day|Arm today's plans/ })).toHaveCount(0);
-    // The day's pings, Radar, news and calendar sit behind the centre's Feed tab: a grey count of what is new, mine first.
-    await expect(page.getByTestId("feed-new")).toHaveText("5 new");
+    // The day's pings, Radar, news and calendar sit behind the centre's Feed tab: a grey count of what is new on his own
+    // book, plans and day (the alert, the NBIS headline, the brief); Radar and the market's news never add to it.
+    await expect(page.getByTestId("feed-new")).toHaveText("3 new");
     await page.getByRole("tab", { name: "Feed" }).click();
     await expect(page.getByTestId("feed-item").first()).toContainText(/Alert\s*10:31\s*NBIS\s*NBIS 100C give-back/);
     await expect(page.getByTestId("feed-new")).toHaveCount(0); // looked at
@@ -854,7 +855,7 @@ test("the palette finds a saved conversation that is not on the list, by what it
 });
 
 for (const width of [1440, 375] as const) {
-  test(`the Feed: Mine, Market and both; a symbol's story; Ask puts the item in its thread's box; Plan it only on his own items and a setup card, at ${width} px`, async ({ page }) => {
+  test(`the Feed: Mine, Ideas, Market and All; a symbol's story; Ask puts the item in its thread's box; Plan it only on his own items and a setup card, at ${width} px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width < 768 ? 812 : 900 });
     const { chats } = await lab(page, { showThreads: false });
     const centre = page.getByRole("region", { name: "Chart and feed" });
@@ -871,16 +872,20 @@ for (const width of [1440, 375] as const) {
     await expect(rows.nth(0).getByRole("link", { name: "Open in Charts" })).toHaveAttribute("href", "/charts?symbol=NBIS");
     await expect(feed).not.toContainText("Could not read"); // a source that failed is left out quietly
     await expect(feed.getByText(/\b(buy|sell|hold)\b/i)).toHaveCount(0); // facts, never orders
-    await expect(feed.getByRole("button", { name: "Chatter" })).toHaveCount(0); // no chatter source: no filter
-    // Market: the Radar setup card with its level, contract and his record, and the market headline.
-    await feed.getByRole("button", { name: "Market", exact: true }).click();
-    await expect(rows.getByTestId("feed-source")).toHaveText(["Radar setup", "News"]);
+    // Ideas opens on Radar: the Radar setup card with its level, contract and his record.
+    await feed.getByRole("button", { name: "Ideas", exact: true }).click();
+    await expect(feed.getByRole("group", { name: "Ideas" }).getByRole("button", { name: "Radar" })).toHaveAttribute("aria-pressed", "true");
+    await expect(rows.getByTestId("feed-source")).toHaveText(["Radar setup"]);
     const setup = rows.nth(0).getByTestId("feed-setup");
     await expect(setup).toContainText("In near 100.00 · out below 98.50");
     await expect(setup).toContainText("Candidate: MU 10/30 100C");
     await expect(setup).toContainText("Your record on this setup: 7 trades, 4 up.");
-    await expect(rows.nth(1).getByRole("button", { name: "Plan it" })).toHaveCount(0);
-    await feed.getByRole("button", { name: "Mine + Market" }).click();
+    // Market: the market headline, no Plan it.
+    await feed.getByRole("button", { name: "Market", exact: true }).click();
+    await expect(rows.getByTestId("feed-source")).toHaveText(["News"]);
+    await expect(rows.nth(0).getByRole("button", { name: "Plan it" })).toHaveCount(0);
+    await expect(feed.getByRole("button", { name: "Chatter" })).toHaveCount(0); // no chatter source: no Chatter pick
+    await feed.getByRole("button", { name: "All", exact: true }).click();
     await expect(rows).toHaveCount(6);
     if (width >= 768) await page.screenshot({ path: test.info().outputPath(`desk-feed-${width}.png`) });
     else await page.screenshot({ path: test.info().outputPath(`desk-feed-${width}.png`), fullPage: true });
@@ -924,17 +929,19 @@ for (const width of [1440, 375] as const) {
   test(`Chatter: its own filter only, buzz chips outlined when held, whose counts they are, only Ask and the link, at ${width} px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width < 768 ? 812 : 900 });
     const { chats } = await lab(page, { showThreads: false, feed: { ...FEED, chatter: CHATTER } });
-    // The tab's new count is the feed's own items only: chatter never counts.
-    await expect(page.getByTestId("feed-new")).toHaveText("5 new");
+    // The tab's new count is his own items only: chatter (and Ideas or Market) never counts.
+    await expect(page.getByTestId("feed-new")).toHaveText("3 new");
     const centre = page.getByRole("region", { name: "Chart and feed" });
     await centre.getByRole("tab", { name: "Feed" }).click();
     const feed = centre.getByTestId("desk-feed");
     const rows = feed.getByTestId("feed-item");
-    // Mine, Market and both never show chatter.
+    // Mine, Market's news and All never show chatter.
     await expect(rows.getByTestId("feed-source")).toHaveText(["Alert", "News", "Copilot note", "Plan"]);
-    await feed.getByRole("button", { name: "Mine + Market" }).click();
+    await feed.getByRole("button", { name: "All", exact: true }).click();
     await expect(rows).toHaveCount(6);
     await expect(rows.getByTestId("feed-source")).not.toContainText(["r/wallstreetbets"]);
+    await feed.getByRole("button", { name: "Market", exact: true }).click();
+    await expect(rows.getByTestId("feed-source")).toHaveText(["News"]);
     await feed.getByRole("button", { name: "Chatter" }).click();
     await expect(rows.getByTestId("feed-source")).toHaveText(["r/wallstreetbets", "r/wallstreetbets", "NYT"]);
     const chips = feed.getByTestId("buzz-chip");
@@ -970,6 +977,7 @@ test("Chatter counts not updated: chips grey with their time, never zero", async
   const centre = page.getByRole("region", { name: "Chart and feed" });
   await centre.getByRole("tab", { name: "Feed" }).click();
   const feed = centre.getByTestId("desk-feed");
+  await feed.getByRole("button", { name: "Market", exact: true }).click();
   await feed.getByRole("button", { name: "Chatter" }).click();
   await expect(feed.getByTestId("buzz-chip").nth(0)).toHaveAttribute("data-stale", "true");
   await expect(feed.getByTestId("buzz-chip")).toHaveText(["NBIS 6.5×", "RKLB 41, none before"]);
@@ -983,6 +991,7 @@ test("Chatter that is on but has nothing yet: no filter, and nothing about it ou
   const centre = page.getByRole("region", { name: "Chart and feed" });
   await centre.getByRole("tab", { name: "Feed" }).click();
   const feed = centre.getByTestId("desk-feed");
+  await feed.getByRole("button", { name: "Market", exact: true }).click();
   await expect(feed.getByRole("button", { name: "Chatter" })).toHaveCount(0);
   await expect(feed.getByTestId("feed-chatter-note")).toHaveCount(0);
   await expect(feed).not.toContainText(/chatter|wallstreetbets/i);

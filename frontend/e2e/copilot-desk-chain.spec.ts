@@ -184,6 +184,7 @@ test("the expiries that live through the next earnings report are marked ER, wit
 test("an Unusual options row in the Feed selects its contract in the Chain tab, on its expiry, marked", async ({ page }) => {
   const { pane, chainReads, methods } = await lab(page);
   await pane.getByRole("tab", { name: "Feed" }).click();
+  await pane.getByRole("button", { name: "Ideas", exact: true }).click();
   await pane.getByRole("button", { name: "Unusual options" }).click();
   const list = pane.getByTestId("feed-unusual");
   await expect(list.getByTestId("unusual-rule")).toHaveAttribute("title", /3× its open interest/);

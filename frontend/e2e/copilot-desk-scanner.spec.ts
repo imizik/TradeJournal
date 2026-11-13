@@ -61,6 +61,7 @@ async function desk(page: Page, body: object) {
 
 test("the Scanner filter lists today's candidates; a row opens its ticker on the chart with the scanner's levels", async ({ page }) => {
   const { pane, reads } = await desk(page, reply());
+  await pane.getByRole("button", { name: "Ideas", exact: true }).click();
   await pane.getByRole("button", { name: "Scanner", exact: true }).click();
   const list = pane.getByTestId("feed-scanner");
   await expect(list.getByTestId("scanner-freshness")).toContainText("Current — last judged");
@@ -80,8 +81,9 @@ test("the Scanner filter lists today's candidates; a row opens its ticker on the
   await expect(nbis.getByRole("button", { name: "Plan it" })).toBeVisible();
   await expect(list).toHaveCount(1);
   // Never mixed into the other filters.
-  await pane.getByRole("button", { name: "Mine + Market" }).click();
+  await pane.getByRole("button", { name: "All", exact: true }).click();
   await expect(pane.getByTestId("scanner-row")).toHaveCount(0);
+  await pane.getByRole("button", { name: "Ideas", exact: true }).click();
   await pane.getByRole("button", { name: "Scanner", exact: true }).click();
 
   await crwv.getByRole("button").first().click();
@@ -100,6 +102,7 @@ test("the Scanner filter lists today's candidates; a row opens its ticker on the
   await page.keyboard.press("Escape");
   // Another ticker drops the lines.
   await pane.getByRole("tab", { name: "Feed" }).click();
+  await pane.getByRole("button", { name: "Ideas", exact: true }).click();
   await pane.getByRole("button", { name: "Scanner", exact: true }).click();
   await pane.getByTestId("scanner-row").nth(1).getByRole("button").first().click();
   await expect(pane.getByTestId("desk-chart-guides")).toHaveText("Scan trigger 94.12 · Scan stop 93.18 · Scan target 96.00");
@@ -108,6 +111,7 @@ test("the Scanner filter lists today's candidates; a row opens its ticker on the
 
 test("a stale scanner greys its rows with the time of its last judged bar", async ({ page }) => {
   const { pane } = await desk(page, reply("stale"));
+  await pane.getByRole("button", { name: "Ideas", exact: true }).click();
   await pane.getByRole("button", { name: "Scanner", exact: true }).click();
   const list = pane.getByTestId("feed-scanner");
   await expect(list.getByTestId("scanner-when")).toHaveText(/^As of \d{1,2}:\d{2} [AP]M ET$/);
@@ -117,12 +121,14 @@ test("a stale scanner greys its rows with the time of its last judged bar", asyn
 
 test("the Scanner filter is absent while the scanner is switched off, and a refused read leaves it out", async ({ page }) => {
   const { pane } = await desk(page, { state: "off", day: null, monitoring: null, rows: [], message: null, simulated: false });
-  await expect(pane.getByRole("button", { name: "Mine + Market" })).toBeVisible();
+  await pane.getByRole("button", { name: "Ideas", exact: true }).click();
+  await expect(pane.getByRole("button", { name: "Radar", exact: true })).toBeVisible();
   await expect(pane.getByRole("button", { name: "Scanner", exact: true })).toHaveCount(0);
   await page.unroute("**/copilot/scanner");
   await page.route("**/copilot/scanner", route => route.fulfill({ status: 503, json: { detail: "Copilot Lab is off." } }));
   await page.reload();
   await page.getByRole("region", { name: "Chart and feed" }).getByRole("tab", { name: "Feed" }).click();
-  await expect(page.getByRole("button", { name: "Mine + Market" })).toBeVisible();
+  await page.getByRole("button", { name: "Ideas", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Radar", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Scanner", exact: true })).toHaveCount(0);
 });

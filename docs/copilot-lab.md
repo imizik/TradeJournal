@@ -545,7 +545,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
 
 - **Top bar.** Desk, the market phase with the New York clock of the session read ("Live · 11:48 ET", "Pre-market ·
   8:52 ET", "Closed 16:00"), SPY / QQQ / VIX's change, **Realized today** (the trades closed today, New York's day,
-  Webull left out: the session read's `realized_today`) and **Open** (every open position's unrealized P&L now,
+  Webull left out: the session read's `realized_today`; absent until it is not $0) and **Open** (every open position's unrealized P&L now,
   followed or not). Then **Now** (back to today's Main chat; dropped on a phone while already there), **Threads** (the
   thread list's drawer; no count on the button, since the strip counts what needs him), Jump to… (⌘K) and Plan a trade (the same words as ⌘K).
   Then **the account line** while the Robinhood feed is live ([the feed](robinhood-read-feed.md)): one tappable group
@@ -560,8 +560,9 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   live prices move the total, today and open by what they move those positions' P&L. Tapping an account narrows the
   book (and its Orders group) to that account's rows, and to a journal row carrying one of its orders; a journal row
   Robinhood does not show belongs to no account and waits until the filter is cleared. Tapping it again shows every
-  row; the line going unavailable clears it too. Not live: one grey **Accounts unavailable**, or **Accounts as of 10:04 AM** when the read is
-  stale, and no money (on a phone it is one row that swipes sideways, § Phone).
+  row; the line going unavailable clears it too. Not live (signed out, expired, unavailable): one grey **Accounts
+  unavailable**, or **Accounts as of 10:04 AM** when the read is stale, and no money; with the feed switched off, no
+  account line at all (on a phone it is one row that swipes sideways, § Phone).
 - **Needs you** (`NeedsStrip`), **the Needs-you strip**. Only what needs a decision now, in amber; most of the day
   there is none and the strip is absent. Nothing in it is dismissed and there is no Seen: the strip shows the single
   top item with its own answers, and **+N more** opens every other item at once, each with its own answers. The rules
@@ -594,8 +595,11 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   tag); a time stop coming due; Act now's give-back reason from an alert on an earlier day; Close the day and its
   count; and the Seen button.
 - **What's moving** (`components/copilot/MovingStrip.tsx`, `GET /copilot/desk/moving`, `app/engine/desk_moving.py`,
-  since 2026-11-12), under the Needs-you strip and across the book and the centre: one thin row (36 px; collapsed, a
-  24 px "Moving ▸" line, remembered in this browser's `localStorage` `desk.moving.collapsed.v1`) that says where the
+  since 2026-11-12), under the Needs-you strip and across the book and the centre (on a phone, under the book): one thin
+  row (36 px) that says where the action is today. It starts **folded** to a 24 px "Moving ▸" line (since 2026-11-13: it
+  is the market's, not his book's), and opening or folding it is remembered in this browser's `localStorage`
+  `desk.moving.collapsed.v1` ("0" open, "1" folded); folded, it still reads once a minute, so opening it shows today's
+  tiles at once. It says where the
   action is today. Group tiles first: SPY, QQQ, IWM, the sector ETFs (SMH and the eleven SPDRs, biggest gain first),
   then his own groups: Watching (the median of his watched names) and the Research tab's AI-buildout groups (the
   median of their companies; a group with a change for fewer than half its members is left out). Then the movers: the
@@ -742,7 +746,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   own request) when it does not.
 - **Feed** (`components/copilot/DeskFeed.tsx`, `GET /copilot/desk/feed`, `app/engine/desk_feed.py`): one stream of what
   the app already knows today, so there is a reason to open the desk that is not a ping. Its tab carries a grey count of
-  the items new since the Feed was last opened in this browser. Each item is one row: its source (**Alert**, **Plan**,
+  his own items (Mine) new since the Feed was last opened in this browser; Ideas and Market never add to it. Each item is one row: its source (**Alert**, **Plan**,
   **Radar**, **Radar setup**, **News**, **Calendar**, **Copilot note**), its time, its symbol and one or two plain
   sentences. Sources: the phone pings judged today, sent or held (position alerts; plan pings for an entry or
   invalidation reached and a time stop; the position companion's updates as Copilot notes), plan time stops still ahead
@@ -753,9 +757,14 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   through Sunday, and the morning brief's saved lines as Copilot notes. Nothing calls a model. Order: items on his book,
   plans and day first, then the rest, each newest first, then **Coming up**, soonest first; at most 40 rows (8 ahead),
   with the total. A ticker set to not followed is left out of every source, including a headline, Radar event or
-  brief line that names it among others (if that setting cannot be read, only the macro calendar shows). Each source fails on its own and is left out quietly. Filters: **Mine**
-  (the default: his book, plans and day), **Market**, **Mine + Market**; tapping a symbol shows only its story, with
-  **All items** back. Actions: **Ask the copilot** puts the item, quoted, in the box unsent, in the item's plan thread,
+  brief line that names it among others (if that setting cannot be read, only the macro calendar shows). Each source fails on its own and is left out quietly. Four groups
+  (since 2026-11-13; they replaced Mine / Market / Mine + Market / Unusual options / Scanner / Chatter side by side):
+  **Mine** (the default: his book, plans and day); **Ideas**, what he could act on that is not his yet, with a small
+  second row: **Radar** (the default: every Radar event and setup card), **Scanner** (only while the setup scanner is
+  on, § Scanner on the desk) and **Unusual options** (§ Unusual options); **Market**, the rest (headlines and the
+  calendar), with a second row **News & calendar** · **Chatter** only while a chatter source has rows; and **All**
+  (Mine, Radar and Market's news together; never the Scanner, Unusual or Chatter lists). Opening the Feed starts on
+  Mine. Tapping a symbol shows only its story, with **All items** back. Actions: **Ask the copilot** puts the item, quoted, in the box unsent, in the item's plan thread,
   else the symbol's open conversation, else the symbol's desk view (an item with no symbol: today's conversation; a
   phone opens the sheet); **Open in Charts**; **Read at <publisher> ↗** for a headline (a new tab); **Open** for a
   Radar event or the brief; and **Plan it** only on a Radar setup card (it opens the desk's Radar card, whose Plan it
@@ -765,8 +774,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   matters right now? and Review my week are in ⌘K and the thread list, not repeated under the feed. The route reads the journal for his symbols (no
   quote read) and makes at most two news-provider reads (one batched for his symbols, one for the broad tape), each
   cached 120 seconds, plus the earnings cache, which refreshes stale symbols in the background; the screen reads it
-  once a minute. A fourth filter, **Chatter** (r/wallstreetbets buzz and NYT headlines, [§ Chatter](#chatter)), appears
-  only while a chatter source is on and has rows; chatter rows never show under the other three filters or a symbol's
+  once a minute. **Chatter** (r/wallstreetbets buzz and NYT headlines, [§ Chatter](#chatter)), under Market, appears
+  only while a chatter source is on and has rows; chatter rows never show under the other picks or a symbol's
   story and never count toward the tab's new number; what a chatter source did not deliver is said only under it.
 - **Right: the copilot**, always open from 1180 px: today's Main chat or the open thread (its header, decision bar,
   close pass or checklist on top), scoped to its ticker, with **Why is it moving?**, **What changed since I looked?**
@@ -826,8 +835,8 @@ and a symbol whose session was never cached reads "not measured": more rows say 
 symbols he checks. The 30-day total counts every check in the window, today's included. Radar's own quotes are not used
 for a closing price.
 
-**Phone (375 to 440 px).** The same pieces stacked: the strip, the book, then the centre, so the strip and the book's
-first rows are the first screen. The top bar is three short rows: Desk with its buttons (Threads, Jump to…, Plan a
+**Phone (375 to 440 px).** The same pieces stacked: the Needs-you strip, the book, What's moving, then the centre, so
+what needs a decision and the book's first rows are the first screen. The top bar is three short rows: Desk with its buttons (Threads, Jump to…, Plan a
 trade, as icons), the clock and SPY / QQQ / VIX, then Realized today and Open, and the account line as one row that
 swipes sideways (numbers masked). Installed on the home screen it runs full screen: the desk's top clears the notch and the
 status bar, and the sheet's message box clears the home indicator (`env(safe-area-inset-*)`). The copilot is a
@@ -1511,7 +1520,7 @@ and a small P&L-at-expiry line with the stock now (white) and break-even (amber)
   Greeks older than 3 minutes, and the app's hourly ones always, are greyed with their time.
 - **Nothing rather than a wrong number.** A short contract, or a ticker that also holds a short option (a spread or a
   calendar the journal keeps as separate trades), shows a one-line note and no figures. A missing input leaves its
-  figure out and says so ("Greeks unavailable"), never a zero. Stocks get no standing (their P&L and day change only).
+  figure out and says so ("Greeks unavailable", in the chart's standing; the book row's one line leaves it out), never a zero. Stocks get no standing (their P&L and day change only).
 - **What if…** Folded by default under the standing (open or folded is remembered on the browser): a stock-price and
   a date slider (today to expiry) give the position's estimated value and P&L in $ and %, with the P&L across stock
   prices on that date (now, break-even and the plan's entry and stop marked; click or drag it to pick a price). Presets:
@@ -1697,8 +1706,8 @@ shared quote. Never Robinhood, nothing written; a ticker set to Not following an
 ### Unusual options
 
 **Where the volume is piling in, on his own names, without leaving the app.** `GET /copilot/unusual`
-(`app/engine/desk_unusual.py`, `frontend/components/copilot/DeskUnusual.tsx`), shown behind the Feed's **Unusual
-options** filter and as marks in the Chain tab. Read-only: no ping, no count on the strip, nothing to rate, never
+(`app/engine/desk_unusual.py`, `frontend/components/copilot/DeskUnusual.tsx`), shown behind the Feed's **Ideas ›
+Unusual options** pick and as marks in the Chain tab. Read-only: no ping, no count on the strip, nothing to rate, never
 Robinhood.
 
 - **Names:** the underlyings of his open journal trades (Webull out), then his Watching list, at most 12; never a
@@ -1724,8 +1733,8 @@ Robinhood.
 ### Scanner on the desk
 
 **What the setup scanner found today, without leaving the desk.** `GET /copilot/scanner`
-(`app/engine/desk_scanner.py`, `frontend/components/copilot/DeskScanner.tsx`), shown behind the Feed's **Scanner**
-filter while the scanner is switched on. Display only: it reads the candidates and paper events the scanner already
+(`app/engine/desk_scanner.py`, `frontend/components/copilot/DeskScanner.tsx`), shown behind the Feed's **Ideas ›
+Scanner** pick while the scanner is switched on. Display only: it reads the candidates and paper events the scanner already
 saved (as the Scanner page does) and changes nothing about its rules, scoring, schedule or records. Database reads
 only: no provider, no Robinhood, no ping, nothing counted as new; read once a minute while the lab is on.
 
@@ -1864,11 +1873,11 @@ yet). One read a day is under $1 a month; each Refresh adds one. Proof: `backend
 
 ## Chatter
 
-Buzz from r/wallstreetbets and NYT business headlines, behind the desk Feed's own **Chatter** filter
+Buzz from r/wallstreetbets and NYT business headlines, behind the desk Feed's own **Market › Chatter** pick
 (`backend/app/engine/chatter.py`, read through `GET /copilot/desk/feed` as its `chatter` block). Isaac asked for it;
 his own trade audit says unplanned entries lost the money and buzz is where those start, so it is fenced:
 
-- Only behind the **Chatter** filter: never in Mine, Market or Mine + Market, never in a symbol's story, never counted
+- Only behind the **Chatter** pick: never in Mine, Ideas, Market's news or All, never in a symbol's story, never counted
   as new, never on the home view or the Needs-you strip, never a phone or Telegram ping. The filter appears only while
   at least one source is on and has rows; under it, a source that cannot be read or has nothing yet is named in one
   line. While no source has rows nothing about chatter shows anywhere. `chatter.sources` names each source's state: `on`, `stale`, `not set up` or `unavailable`.

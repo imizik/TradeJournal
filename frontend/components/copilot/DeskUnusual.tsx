@@ -104,7 +104,7 @@ export function UnusualList({ reply, onPick }: { reply: UnusualReply | null; onP
                 <span className="flex min-w-0 items-baseline gap-2">
                   <span className="truncate font-mono text-sm font-semibold">{contractLabel(unusualPick(row))}</span>
                   {row.held && <span className="text-[11px] text-emerald-400">you hold {row.symbol}</span>}
-                  <span className="ml-auto whitespace-nowrap text-xs tabular-nums text-orange-300">{ratioText(row)}</span>
+                  <span className="ml-auto whitespace-nowrap text-xs tabular-nums text-foreground">{ratioText(row)}</span>
                 </span>
                 <span className="block text-xs tabular-nums text-muted-foreground">
                   Vol {num(row.volume)} · OI {num(row.open_interest)} · Last {row.last === null ? "—" : row.last.toFixed(2)}

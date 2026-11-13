@@ -53,7 +53,8 @@ export function DayPnl({ session, rows, read }: { session: DeskSession | null; r
   const open = ticked.flatMap(p => p.usd != null ? [p.usd] : []);
   const stale = ticked.some(p => p.stale); // a price in it is no longer live: greyed, as its book row is
   const total = open.reduce((a, b) => a + b, 0);
-  const realized = session?.realized_today ?? null;
+  // Nothing closed today (exactly $0) says nothing: the figure shows once a trade closes.
+  const realized = session?.realized_today ? session.realized_today : null;
   if (realized === null && !(read && open.length)) return null;
   return (
     <span data-testid="desk-pnl" className="flex items-baseline gap-3 whitespace-nowrap text-xs">
