@@ -658,6 +658,9 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   `POST /copilot/desk/robinhood/refresh`, no input) or, signed out, expired or stale, says so; then the book is exactly
   the journal's. Off, nothing changes and no line shows. Not followed tickers stay hidden. Display only: nothing is
   written to the journal. The copilot sees the same snapshot's numbers (§ Owner context), never a Robinhood tool.
+  With the order-history pass on (`ROBINHOOD_FILLS_ENABLED` `shadow` or `true`), working orders and today's fills show
+  on their book rows (`book.orders`) or, with no followed row, in a small **Orders** group (`robinhood.orders`); see
+  [robinhood-order-fills.md § On the desk](robinhood-order-fills.md#on-the-desk).
 - **Earnings and macro days** (`app/engine/desk_events.py`; `components/copilot/EarningsTag.tsx`, `ChartEvents.tsx`).
   Book and Watching rows carry a short tag, **ER Thu** (**ER 11/24** a week or more out, **?** when the date is only
   estimated): grey when the next report is within 7 trading days (weekends and the macro calendar's `market_closed`
