@@ -8,11 +8,15 @@
  * only: nothing here tells the owner to buy, sell or hold.
  */
 
-import { type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import type { DeskThread } from "@/lib/desk";
 import { tickFor, useDeskTicks } from "@/lib/deskTicks";
 import { price as priceText, todayNewYork } from "@/lib/charts";
-import { mixedStructure, optionStanding, worthNow, type ExpiryCurve, type OptionGreeks, type Standing } from "@/lib/optionStanding";
+import {
+  EARNINGS_IV_KEPT, MARK_TOLERANCE, RATE, addDays, dayAfterEarnings, daysLeft, mixedStructure, optionStanding, whatIfAt,
+  whatIfCurve, whatIfModel, whatIfRange, worthNow, type ExpiryCurve, type OptionGreeks, type Standing,
+  type WhatIfModel,
+} from "@/lib/optionStanding";
 import { Flash } from "@/components/copilot/Ticks";
 import { cn } from "@/lib/utils";
 
@@ -77,7 +81,7 @@ function useStanding(row: DeskThread, rows: readonly DeskThread[], fallback: { l
   const live = tickFor(ticks, row.symbol);
   const stock = live ? { last: live.last, at: live.at, live: !live.stale } : fallback ? { ...fallback, live: false } : null;
   const standing = optionStanding(terms, { price: stock?.last, worth: worthNow(book, ticks), day: todayNewYork() });
-  return standing ? { standing, stock } : terms.direction === "long" ? "incomplete" as const : "unknown" as const;
+  return standing ? { standing, stock, terms } : terms.direction === "long" ? "incomplete" as const : "unknown" as const;
 }
 
 const INCOMPLETE = "Break-even and Greeks not shown: the book is missing this contract's side, strike, expiry or size.";
@@ -93,12 +97,15 @@ function distance(s: Standing) {
 /**
  * The selected option's standing under the centre's header. ``rows`` is the desk's book (a short option on the same
  * ticker means a structure the book cannot tell); ``fallback`` the stock's last price when the desk's ticker is not
- * running (the chart's last read).
+ * running (the chart's last read). ``levels`` (the plan's, on the underlying) and ``earnings`` (the next report's date)
+ * feed the folded What if… under it.
  */
-export function OptionStanding({ row, rows, fallback = null }: {
+export function OptionStanding({ row, rows, fallback = null, levels = {}, earnings = null }: {
   row: DeskThread; rows: readonly DeskThread[]; fallback?: { last: number; at: number } | null;
+  levels?: PlanLevels; earnings?: string | null;
 }) {
   const read = useStanding(row, rows, fallback);
+  const [open, setOpen] = useWhatIfOpen();
   if (read === null) return null;
   if (read === "unknown" || read === "incomplete") return <p data-testid="option-standing" className="text-xs text-muted-foreground">{read === "unknown" ? UNKNOWN : INCOMPLETE}</p>;
   const { standing: s, stock } = read;
@@ -106,7 +113,9 @@ export function OptionStanding({ row, rows, fallback = null }: {
   const greeks = greeksLine(s.greeks);
   const missing = [s.decayPerDay === null && "decay", s.perDollar === null && "delta", s.ivPct === null && "IV"].filter((part): part is string => !!part);
   const days = s.daysLeft < 0 ? "Expired" : s.expiryNote ? `${s.expiryNote} · ${s.daysLeft}d` : `${s.daysLeft}d left`;
+  const what = whatIfModel(read.terms, { price: stock?.last, worth: s.worth, day: todayNewYork(), nyMinute: nyMinuteNow() });
   return (
+    <div className="space-y-2">
     <div data-testid="option-standing" className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs tabular-nums">
       <Fig label="Break-even" testId="standing-break-even">
         {s.breakEven === null ? <span className="text-muted-foreground">unavailable (no cost)</span> : <>
@@ -129,6 +138,179 @@ export function OptionStanding({ row, rows, fallback = null }: {
       <span data-testid="standing-greeks" className={cn("text-[11px]", greeks.stale ? "text-muted-foreground/70" : "text-muted-foreground")}>
         {missing.length === 3 ? "Greeks unavailable" : missing.length ? `${greeks.text} · ${missing.join(", ")} unavailable` : greeks.text}
       </span>
+      {what && ("reason" in what
+        ? <span data-testid="what-if-off" className="text-[11px] text-muted-foreground">What if… unavailable: {what.reason}</span>
+        : <button type="button" data-testid="what-if-toggle" aria-expanded={open} onClick={() => setOpen(!open)}
+            className="min-h-11 rounded px-1 text-[11px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground sm:min-h-0">
+            What if…{open ? " ▴" : " ▾"}
+          </button>)}
+    </div>
+    {open && what && !("reason" in what) && (
+      <OptionWhatIf key={`${row.key}:${read.terms.strike}:${read.terms.expiry}`} model={what} symbol={row.symbol ?? ""}
+        breakEven={s.breakEven} levels={levels} earnings={earnings} />
+    )}
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------- what if
+
+/** The plan's levels on the underlying, from the desk chart's read; a plan saves no target today. */
+export type PlanLevels = { entry?: number | null; stop?: number | null; target?: number | null };
+
+const OPEN_KEY = "desk.whatIf.open";
+/** Open or folded, remembered on this browser (read after hydration). */
+function useWhatIfOpen(): [boolean, (next: boolean) => void] {
+  const [open, setOpen] = useState(false);
+  useEffect(() => { try { setOpen(window.localStorage.getItem(OPEN_KEY) === "open"); } catch { /* folded */ } }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+  return [open, (next: boolean) => {
+    setOpen(next);
+    try { window.localStorage.setItem(OPEN_KEY, next ? "open" : "folded"); } catch { /* this view only */ }
+  }];
+}
+
+const nyMinuteFormat = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", hour: "2-digit", minute: "2-digit" });
+function nyMinuteNow() {
+  const parts = nyMinuteFormat.formatToParts(new Date());
+  const part = (type: string) => Number(parts.find(p => p.type === type)?.value ?? 0);
+  return part("hour") * 60 + part("minute");
+}
+const shortDay = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
+
+const CAVEAT = `An estimate, not a quote: Black-Scholes with European exercise, no dividends and a ${(RATE * 100).toFixed(0)}% rate, `
+  + "holding IV where it is. US stock options can be exercised early, so a deep in-the-money option (a put most of all) can "
+  + "be worth a little more than this. Real prices also move with IV, the bid-ask spread and news.";
+
+/**
+ * What if…: drag the stock price and the date (today to expiry) and read the option's estimated value and the P&L there,
+ * with the P&L across stock prices on that date (today's price, break-even and the plan's levels marked). Presets put
+ * the stock at the plan's stop or target, or step past the next earnings with the stock unchanged and IV lower by a
+ * stated share. Estimates from ``whatIfModel`` (lib/optionStanding.ts); nothing here says what to do.
+ */
+function OptionWhatIf({ model: m, symbol, breakEven, levels, earnings }: {
+  model: WhatIfModel; symbol: string; breakEven: number | null; levels: PlanLevels; earnings: string | null;
+}) {
+  const span = Math.max(0, daysLeft(m.expiry, m.day));
+  const marks = [levels.entry, levels.stop, levels.target, breakEven].filter((v): v is number => typeof v === "number" && v > 0);
+  // The range holds still while the stock ticks (the sliders would creep), but widens when the plan's levels arrive.
+  const [anchor] = useState(() => ({ ...m }));
+  const marksKey = marks.join(",");
+  const range = useMemo(() => whatIfRange(anchor, marksKey ? marksKey.split(",").map(Number) : []), [anchor, marksKey]);
+  const [chosen, setChosen] = useState<number | null>(null); // null: follow today's price
+  const [offset, setOffset] = useState(0);
+  const [crush, setCrush] = useState(false);
+  const afterReport = dayAfterEarnings(earnings, m.day, m.expiry);
+  const price = chosen ?? m.price;
+  const day = addDays(m.day, Math.min(offset, span));
+  const crushed = crush && !!afterReport && day >= afterReport;
+  const iv = crushed ? m.iv * EARNINGS_IV_KEPT : m.iv;
+  const at = whatIfAt(m, { price, day, iv });
+  const curve = whatIfCurve(m, { day, iv, lo: range.lo, hi: range.hi });
+  const move = (price - m.price) / m.price * 100;
+  const left = daysLeft(m.expiry, day);
+  const dayText = offset === 0 ? "Today" : left <= 0 ? `${shortDay(day)} · expiry (intrinsic value)` : `${shortDay(day)} · ${left}d before expiry`;
+  const clampPrice = (value: number) => Math.min(range.hi, Math.max(range.lo, value));
+
+  const preset = (button: string, title: string | null, onClick: () => void, testId: string) => (
+    <button key={testId} type="button" data-testid={testId} disabled={!!title} title={title ?? undefined} onClick={onClick}
+      className="min-h-11 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:hover:text-muted-foreground sm:min-h-0 sm:py-0.5">
+      {button}
+    </button>
+  );
+
+  return (
+    <div data-testid="what-if" className="space-y-2 rounded border border-border/60 p-2 text-xs tabular-nums">
+      <div className="flex flex-wrap gap-1.5">
+        {preset(levels.target ? `At my target ${priceText(levels.target)}` : "At my target", levels.target ? null : "Your plan saves an entry and a stop, no target",
+          () => { setChosen(clampPrice(levels.target!)); setCrush(false); }, "what-if-target")}
+        {preset(levels.stop ? `At my stop ${priceText(levels.stop)}` : "At my stop", levels.stop ? null : "No stop saved in a plan for this position",
+          () => { setChosen(clampPrice(levels.stop!)); setCrush(false); }, "what-if-stop")}
+        {preset("If earnings is flat", afterReport ? null : "No earnings report before this expiry",
+          () => { setChosen(null); setOffset(daysLeft(afterReport!, m.day)); setCrush(true); }, "what-if-earnings")}
+        {preset("Reset", null, () => { setChosen(null); setOffset(0); setCrush(false); }, "what-if-reset")}
+      </div>
+      <label className="grid grid-cols-[3.5rem_1fr] items-center gap-x-2 gap-y-0.5 sm:grid-cols-[3.5rem_1fr_11rem]">
+        <span className="text-muted-foreground">{symbol}</span>
+        <input type="range" data-testid="what-if-price" aria-label={`${symbol} price`} min={range.lo} max={range.hi} step={range.step} value={price}
+          onChange={e => setChosen(Number(e.target.value))} className="w-full accent-foreground" />
+        <span className="col-start-2 text-foreground sm:col-start-3">{priceText(price)} <span className="text-muted-foreground">({move >= 0.05 ? "+" : move <= -0.05 ? "−" : ""}{Math.abs(move).toFixed(1)}% from now)</span></span>
+      </label>
+      <label className="grid grid-cols-[3.5rem_1fr] items-center gap-x-2 gap-y-0.5 sm:grid-cols-[3.5rem_1fr_11rem]">
+        <span className="text-muted-foreground">Date</span>
+        <input type="range" data-testid="what-if-date" aria-label="Date" min={0} max={span} step={1} value={Math.min(offset, span)} disabled={span === 0}
+          onChange={e => { const next = Number(e.target.value); setOffset(next); if (afterReport && addDays(m.day, next) < afterReport) setCrush(false); }}
+          className="w-full accent-foreground" />
+        <span data-testid="what-if-day" className="col-start-2 text-foreground sm:col-start-3">{dayText}</span>
+      </label>
+      <p data-testid="what-if-result" className="text-sm text-foreground">
+        Worth about {dollars(at.value)} <span className="text-muted-foreground">({priceText(at.share)} a share)</span>
+        {at.pnl !== null
+          ? <> · P&L <span className={at.pnl >= 0 ? "text-emerald-300" : "text-rose-300"}>{dollars(at.pnl, true)}{at.pnlPct !== null && ` (${pct(at.pnlPct)})`}</span></>
+          : <span className="text-muted-foreground"> · P&L unavailable (no cost)</span>}
+      </p>
+      <WhatIfCurve curve={curve} lo={range.lo} hi={range.hi} now={m.price} chosen={price} breakEven={breakEven} levels={levels}
+        pnl={m.cost !== null} onPick={value => setChosen(clampPrice(value))} />
+      {crushed && <p data-testid="what-if-crush" className="text-[11px] text-amber-200">
+        After the {shortDay(earnings!)} report, IV assumed to fall from {(m.iv * 100).toFixed(0)}% to {(iv * 100).toFixed(0)}% ({Math.round((1 - EARNINGS_IV_KEPT) * 100)}% lower): a plain assumption, not a forecast. The report&apos;s time of day is not published{earnings === m.day ? "; it is today, and if it is already out, today's IV has already dropped and this counts the drop twice" : ""}.
+      </p>}
+      <p data-testid="what-if-basis" className="text-[11px] text-muted-foreground">
+        <span title={CAVEAT} className="cursor-help underline decoration-dotted underline-offset-2">Estimate</span>{" "}
+        {m.ivSource === "mark" && m.check
+          ? <>from the IV today&apos;s mark implies, {(m.iv * 100).toFixed(0)}%: the quoted IV {(m.givenIv * 100).toFixed(0)}% priced it at {priceText(m.check.model)} against the {priceText(m.check.mark)} mark, more than {(MARK_TOLERANCE * 100).toFixed(0)}% off.</>
+          : m.check
+            ? <>from IV {(m.iv * 100).toFixed(0)}%, held steady; it prices today at {priceText(m.check.model)} against the {priceText(m.check.mark)} mark.</>
+            : <>from IV {(m.iv * 100).toFixed(0)}%, held steady; not checked against a mark (none on the book).</>}
+      </p>
+    </div>
+  );
+}
+
+/** P&L (value without a cost) across stock prices on the chosen date: a zero line, today's price (white), break-even at
+ * expiry (amber), the plan's entry (sky) and stop (rose), and the chosen price (a dot). Click or drag to pick a price. */
+function WhatIfCurve({ curve, lo, hi, now, chosen, breakEven, levels, pnl, onPick }: {
+  curve: { price: number; y: number }[]; lo: number; hi: number; now: number; chosen: number; breakEven: number | null;
+  levels: PlanLevels; pnl: boolean; onPick: (price: number) => void;
+}) {
+  const W = 320, H = 72;
+  const box = useRef<SVGSVGElement>(null);
+  const ys = curve.map(p => p.y);
+  const top = Math.max(...ys, 0), bottom = Math.min(...ys, 0);
+  const x = (at: number) => (at - lo) / (hi - lo) * W;
+  const y = (v: number) => top === bottom ? H / 2 : 2 + (top - v) / (top - bottom) * (H - 4);
+  const path = curve.map((p, i) => `${i ? "L" : "M"}${x(p.price).toFixed(1)},${y(p.y).toFixed(1)}`).join("");
+  const near = curve.reduce((best, p) => Math.abs(p.price - chosen) < Math.abs(best.price - chosen) ? p : best, curve[0]);
+  const pick = (e: PointerEvent<SVGSVGElement>) => {
+    const rect = box.current?.getBoundingClientRect();
+    if (rect && rect.width > 0) onPick(lo + (e.clientX - rect.left) / rect.width * (hi - lo));
+  };
+  const marks = [
+    { at: now, color: "hsl(var(--foreground))", label: `now ${priceText(now)}`, dash: undefined },
+    breakEven !== null ? { at: breakEven, color: "#e9a23b", label: `break-even at expiry ${priceText(breakEven)}`, dash: undefined } : null,
+    levels.entry ? { at: levels.entry, color: "#7dd3fc", label: `entry ${priceText(levels.entry)}`, dash: "3 2" } : null,
+    levels.stop ? { at: levels.stop, color: "#fda4af", label: `stop ${priceText(levels.stop)}`, dash: "3 2" } : null,
+    levels.target ? { at: levels.target, color: "#6ee7b7", label: `target ${priceText(levels.target)}`, dash: "3 2" } : null,
+  ].filter((m): m is NonNullable<typeof m> => !!m && m.at >= lo && m.at <= hi);
+  return (
+    <div className="space-y-1">
+      <div className="relative">
+      <svg ref={box} data-testid="what-if-curve" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img"
+        className="h-[72px] w-full cursor-crosshair touch-none overflow-visible"
+        aria-label={`${pnl ? "P&L" : "Value"} on the chosen date from ${priceText(lo)} to ${priceText(hi)}`}
+        onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); pick(e); }}
+        onPointerMove={e => { if (e.buttons) pick(e); }}>
+        <line x1={0} x2={W} y1={y(0)} y2={y(0)} stroke="hsl(var(--muted-foreground))" strokeOpacity={0.4} strokeDasharray="2 2" vectorEffect="non-scaling-stroke" />
+        <path d={path} fill="none" stroke="hsl(var(--muted-foreground))" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+        {marks.map(m => <line key={m.label} x1={x(m.at)} x2={x(m.at)} y1={0} y2={H} stroke={m.color} strokeWidth={1} strokeDasharray={m.dash} vectorEffect="non-scaling-stroke" />)}
+        <line x1={x(chosen)} x2={x(chosen)} y1={0} y2={H} stroke="hsl(var(--foreground))" strokeOpacity={0.25} vectorEffect="non-scaling-stroke" />
+      </svg>
+      {/* The dot in HTML so the stretched viewBox does not squash it. */}
+      <span data-testid="what-if-dot" className="pointer-events-none absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground"
+        style={{ left: `${x(near.price) / W * 100}%`, top: `${y(near.y)}px` }} />
+      </div>
+      <p className="flex flex-wrap gap-x-3 text-[11px] text-muted-foreground">
+        <span>{pnl ? "P&L" : "Value"} on this date, {priceText(lo)}–{priceText(hi)}:</span>
+        {marks.map(m => <span key={m.label} style={{ color: m.color }}>{m.label}</span>)}
+      </p>
     </div>
   );
 }

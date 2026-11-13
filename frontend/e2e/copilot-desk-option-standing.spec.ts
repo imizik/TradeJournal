@@ -125,3 +125,91 @@ test("one leg of a spread shows no numbers, and a stock row has no standing", as
   await expect(standing(page).getByTestId("standing-break-even")).toHaveCount(0);
   await expect(book(page).getByTestId("book-standing")).toHaveCount(0);
 });
+
+test("What if…: folded by default and remembered; presets, sliders and the estimate against today's mark", async ({ page }) => {
+  await open(page, { orcl: 247, orclMark: 4.1 });
+  // After open(): these win over its catch-alls. The plan's entry 252 and stop 240 on ORCL, and a report on Wednesday November 18, inside the 11/20 call's life.
+  await page.route("**/copilot/desk/*/chart*", route => route.fulfill({ json: {
+    symbol: "ORCL", timeframe: "15m", step: 900, as_of: epoch("2026-11-13T16:00:00Z"), live: true, state: "ok", reason: null,
+    bars: Array.from({ length: 40 }, (_, i) => { const time = epoch("2026-11-13T14:30:00Z") + i * 900 - 30 * 900, px = 247 + Math.sin(i / 4);
+      return { time, open: px, high: px + 0.4, low: px - 0.4, close: px, volume: 1000, extended: false }; }),
+    studies: {}, reference: [], reading: { last: 247, at: epoch("2026-11-13T16:00:00Z"), daily: false, prev_close: 249.5, vwap: null, vwap_at: null, rvol: null },
+    levels: [{ role: "entry", price: 252, label: "Entry 252.00" }, { role: "invalidation", price: 240, label: "Invalidation 240.00" }],
+    alerts: [], marks: [], time_stop: null } }));
+  await page.route("**/copilot/desk/events*", route => route.fulfill({ json: { state: "ok", today: "2026-11-13", loading: false,
+    rows: { ORCL: { symbol: "ORCL", date: "2026-11-18", status: null, trading_days: 3, label: "Earnings Wed", tone: "amber", through: ["2026-11-20"] } } } }));
+  await book(page).getByRole("button", { name: "ORCL 11/20/26 250C" }).click();
+  const pane = page.getByTestId("desk-chart");
+  // The plan's levels come with the chart's read: wait for it.
+  await expect(pane.getByTestId("desk-chart-canvas")).toHaveAttribute("data-bars", "40");
+  const toggle = pane.getByTestId("what-if-toggle");
+  await expect(toggle).toHaveText(/What if…/);
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(pane.getByTestId("what-if")).toHaveCount(0);
+
+  await toggle.click();
+  const panel = pane.getByTestId("what-if");
+  await expect(panel).toBeVisible();
+  // Robinhood's 44% prices the call near 4.84 a share against the 4.10 mark: the mark's own IV is used, and said so.
+  await expect(panel.getByTestId("what-if-basis")).toHaveText(/^Estimate from the IV today's mark implies, \d+%: the quoted IV 44% priced it at 4\.8\d against the 4\.10 mark/);
+  // Today at today's price the estimate is the mark: 2 x 410 = $820, P&L 820 − 1,240 = −$420 (−33.9%).
+  await expect(panel.getByTestId("what-if-result")).toHaveText("Worth about $820 (4.10 a share) · P&L −$420 (−33.9%)");
+  await expect(panel.getByTestId("what-if-day")).toHaveText("Today");
+  await expect(panel.getByTestId("what-if-curve")).toBeVisible();
+  await expect(panel).toContainText("entry 252.00");
+  await expect(panel).toContainText("stop 240.00");
+  await expect(panel).toContainText("break-even at expiry 256.20");
+  await expect(panel.getByTestId("what-if-target")).toBeDisabled();
+  await expect(panel.getByTestId("what-if-target")).toHaveAttribute("title", "Your plan saves an entry and a stop, no target");
+
+  // At my stop, today: the stock at 240 prices the call near 1.79 at the mark's 38.7% IV, 2 x 179 = $357, P&L −$883.
+  await panel.getByTestId("what-if-stop").click();
+  await expect(panel).toContainText("240.00 (−2.8% from now)");
+  await expect(panel.getByTestId("what-if-result")).toHaveText("Worth about $357 (1.79 a share) · P&L −$883 (−71.2%)");
+
+  // If earnings is flat: Thursday after the report, the stock back at 247, IV lower by the stated 30%.
+  await panel.getByTestId("what-if-earnings").click();
+  await expect(panel.getByTestId("what-if-day")).toHaveText("Thu, Nov 19 · 1d before expiry");
+  await expect(panel).toContainText("247.00 (0.0% from now)");
+  await expect(panel.getByTestId("what-if-crush")).toHaveText(/^After the Wed, Nov 18 report, IV assumed to fall from \d+% to \d+% \(30% lower\): a plain assumption, not a forecast/);
+  // The flat stock after the report, with IV cut, is still a loss on this call (time and IV both gone).
+  await expect(panel.getByTestId("what-if-result")).toHaveText(/P&L −\$/);
+  // Back before the report: the cut no longer applies.
+  await panel.getByTestId("what-if-date").fill("2");
+  await expect(panel.getByTestId("what-if-day")).toHaveText("Sun, Nov 15 · 5d before expiry");
+  await expect(panel.getByTestId("what-if-crush")).toHaveCount(0);
+
+  // The date slider to expiry: intrinsic value only; at 262.50 that is 12.50 x 200 = $2,500, P&L +$1,260 (+101.6%).
+  await panel.getByTestId("what-if-date").fill("7");
+  await expect(panel.getByTestId("what-if-day")).toHaveText("Fri, Nov 20 · expiry (intrinsic value)");
+  await panel.getByTestId("what-if-price").fill("262.5");
+  await expect(panel.getByTestId("what-if-result")).toHaveText("Worth about $2,500 (12.50 a share) · P&L +$1,260 (+101.6%)");
+  await panel.getByTestId("what-if-price").fill("245");
+  await expect(panel.getByTestId("what-if-result")).toHaveText("Worth about $0 (0.00 a share) · P&L −$1,240 (−100.0%)");
+
+  await panel.getByTestId("what-if-reset").click();
+  await expect(panel.getByTestId("what-if-day")).toHaveText("Today");
+  await expect(panel.getByTestId("what-if-crush")).toHaveCount(0);
+
+  // Remembered open across a reload; folding it leaves only the toggle.
+  await page.reload();
+  await book(page).getByRole("button", { name: "ORCL 11/20/26 250C" }).click();
+  await expect(pane.getByTestId("what-if")).toBeVisible();
+  await pane.getByTestId("what-if-toggle").click();
+  await expect(pane.getByTestId("what-if")).toHaveCount(0);
+});
+
+test("What if… needs an IV: a plain grey line instead, and nothing for one leg of a spread", async ({ page }) => {
+  await open(page, { orcl: 247, orclMark: 4.1 });
+  // The same ORCL call with no IV in its Greeks: one grey line, no toggle.
+  const noIv = structuredClone(THREADS) as { threads: { book: { option: { greeks: { iv: number | null } } } }[] };
+  noIv.threads[0].book.option.greeks.iv = null;
+  await page.route("**/copilot/desk/threads", route => route.fulfill({ json: noIv }));
+  await page.reload();
+  await book(page).getByRole("button", { name: "ORCL 11/20/26 250C" }).click();
+  await expect(page.getByTestId("desk-chart").getByTestId("what-if-off")).toHaveText("What if… unavailable: no IV for this contract");
+  await expect(page.getByTestId("desk-chart").getByTestId("what-if-toggle")).toHaveCount(0);
+  await book(page).getByRole("button", { name: "NBIS 11/20/26 100C" }).click();
+  await expect(page.getByTestId("desk-chart").getByTestId("what-if-toggle")).toHaveCount(0);
+  await expect(page.getByTestId("desk-chart").getByTestId("what-if-off")).toHaveCount(0);
+});
