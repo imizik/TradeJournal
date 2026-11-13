@@ -1301,6 +1301,21 @@ def desk_ticks(symbols: str = ""):
     return desk_ticks.read(symbols, today._now())
 
 
+@router.get("/desk/contract")
+def desk_contract(symbol: str = "", occ: str = "", db: Session = Depends(get_session)):
+    """A held option's own price for the desk chart's Contract view (``app/engine/desk_contract.py``): the contract's
+    latest session of trades as 2-minute candles (one cached chart-feed read), today's recorded marks, the stock's price
+    per slot and the owner's journal fills on it. A ticker set to Not following is never read. Read-only, owner-only,
+    no Robinhood call, refused while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import day_journal, desk_contract
+    hidden = today._section(db, "desk contract hidden", lambda: {"rows": sorted(day_journal.not_following(db))})
+    if hidden.get("state") == "unavailable" or symbol.strip().upper() in set(hidden.get("rows", [])):
+        return {"state": "none", "symbol": symbol.strip().upper(), "reason": None}  # silent: never a hidden ticker's contract
+    return desk_contract.read(db, symbol, occ, today._now())
+
+
 @router.get("/desk/events")
 def desk_events(symbols: str = "", held: str = "", db: Session = Depends(get_session)):
     """Earnings tags for the book's and the Watching list's rows (``app/engine/desk_events.py``): each named symbol's next

@@ -8,6 +8,8 @@ price and change today, and a held option contract's mark, every few seconds in 
   several tabs and the phone share it. A read is kept ``TICK_SECONDS``; one already in flight is waited on, not repeated.
 - **Within the feed's budget.** When the chart feed has made ``BUDGET_HEADROOM`` of its 60 calls in the last minute the
   ticks stop asking until it drops, so a chart or the copilot never runs out because of them.
+- **Marks remembered for the contract chart.** Each held contract's mark is kept once a minute for today, in memory
+  (``marks``), so the desk's Contract view can draw where its trades are sparse. No extra call: it is the read above.
 - **Never a made-up price.** A failed read answers ``unavailable``; a symbol with no positive price is left out, never a
   zero. Each row carries the time it was read (``at``), so the desk can grey a price that is no longer live.
 
@@ -30,6 +32,7 @@ MAX_NAMES = 60  # one request: the book, the Watching list, the chart's symbol a
 MAX_BATCH = 100  # one provider call
 BUDGET_HEADROOM = 45  # of the chart feed's 60 calls a minute
 FLIGHT_WAIT = 3.0  # a request joining a read in flight waits at most this, then answers from what is kept
+MARK_CONTRACTS = 64  # contracts whose marks are remembered for today
 
 _TICKER = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 _OCC = re.compile(r"^[A-Z]{1,6}\d{6}[CP]\d{8}$")
@@ -39,6 +42,7 @@ _kept: dict[str, tuple[float, dict | None]] = {}  # symbol -> (read at, row; Non
 _wanted: dict[str, float] = {}  # symbol -> last asked at
 _flight: threading.Event | None = None
 _issue: tuple[float, str] | None = None  # the newest failed read: (when, what)
+_marks: dict[str, tuple[str, dict[int, float]]] = {}  # OCC symbol -> (New York date, minute start -> mark)
 
 
 def clear() -> None:
@@ -46,6 +50,7 @@ def clear() -> None:
     with _lock:
         _kept.clear()
         _wanted.clear()
+        _marks.clear()
         _flight = None
         _issue = None
 
@@ -97,6 +102,32 @@ def _read(batch: list[str], now: float) -> None:
         for symbol in batch:
             # "No price" is kept as long as a price: an unpriced contract never makes each tab's poll its own call.
             _kept[symbol] = (now, found.get(symbol))
+        for symbol, row in found.items():
+            if _OCC.match(symbol):
+                _remember(symbol, row["last"], now)
+
+
+def _remember(occ: str, mark: float, now: float) -> None:
+    """The minute's newest mark for ``occ`` (today only; the oldest contract is let go past ``MARK_CONTRACTS``). Under
+    ``_lock``."""
+    from app.engine.chart_math import ET
+    day = datetime.fromtimestamp(now, ET).date().isoformat()
+    kept = _marks.get(occ)
+    if kept is None or kept[0] != day:
+        _marks.pop(occ, None)
+        while len(_marks) >= MARK_CONTRACTS:
+            _marks.pop(next(iter(_marks)))
+        kept = _marks[occ] = (day, {})
+    kept[1][int(now) - int(now) % 60] = mark
+
+
+def marks(occ: str, now: float) -> list[tuple[int, float]]:
+    """Today's remembered marks for ``occ``, one per minute, oldest first (empty when no desk quoted it today)."""
+    from app.engine.chart_math import ET
+    day = datetime.fromtimestamp(now, ET).date().isoformat()
+    with _lock:
+        kept = _marks.get(occ)
+        return sorted(kept[1].items()) if kept and kept[0] == day else []
 
 
 def _session(now: float):

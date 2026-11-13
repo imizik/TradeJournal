@@ -1488,6 +1488,32 @@ Proof: `frontend/e2e/option-standing.spec.ts` (calls, puts, 0DTE, missing Greeks
 `frontend/e2e/copilot-desk-option-standing.spec.ts` (the header on a held call and put, live movement, a spread leg),
 `backend/tests/test_copilot_desk.py` and `test_robinhood_book.py` (the terms on each kind of row).
 
+### The contract's own chart
+
+With a held single-leg call or put selected, the centre chart's header offers **Stock / Contract** (remembered per
+contract in the browser). Contract draws the option itself, as Robinhood's position screen does: its price for the
+latest session with trades, his fills as lines at their premium, and at the cursor the price and which it is, his P&L
+in dollars for his size (the book's own formula, `book.tick`) and the stock's price at that moment. The closing
+tickets stay in the position header above it.
+
+- **Where the price comes from.** `GET /copilot/desk/contract?symbol=&occ=` (`backend/app/engine/desk_contract.py`):
+  one Tradier time-and-sales read of the OCC symbol (1-minute trades, the last five calendar days to today's 20:00)
+  through the chart feed, kept 55 s while the market can move. Polygon's option aggregates are end-of-day on the app's
+  plan (a same-day request is refused), so they are not used. Trades become 2-minute candles when they fill at least
+  60% of the slots between the first and last; else a line through the prints, the time axis kept linear.
+- **The mark where trades are sparse.** The live prices remember each held contract's mark (bid/ask midpoint) once a
+  minute in memory (`desk_ticks.marks`, no extra call); today's come back as a dotted line, broken where the desk was
+  not open, and the shared ticker moves its newest point every few seconds. Labelled as the mark, never mixed into the
+  trades.
+- **Fills.** The journal's fills on the contract in its open trades and on the shown day (Webull and a roll's derived
+  price left off), and Robinhood's not-yet-emailed fills from the book's order lines (dashed, "prov."). No Robinhood
+  call is made for this view.
+- **Nothing invented.** No trades and no marks, a refused read, a hidden ticker, a row without a quotable contract, a
+  stock, a Watching name or one leg of a structure: no toggle, the stock chart. One read when the row is selected,
+  then once a minute only while Contract is shown, visible and live.
+
+Proof: `backend/tests/test_desk_contract.py` and `frontend/e2e/copilot-desk-contract.spec.ts`.
+
 ### Ticket
 
 **The Ticket copies; it never sends.** It fills in what the owner types into the Robinhood app by hand. No order is

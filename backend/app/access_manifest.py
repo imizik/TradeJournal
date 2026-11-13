@@ -105,6 +105,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/desk/events',  # earnings tags from the 12-hour earnings cache (one batched background read); no Robinhood, no write
     'GET /copilot/desk/grid',  # the centre's Grid: up to nine names' cached minutes, one batched Alpaca read, budgeted chart-feed reads; no Robinhood, no write
     'GET /copilot/desk/ticks',  # live prices: one batched quote read kept a few seconds; regular session only
+    'GET /copilot/desk/contract',  # a held option's own minute trades (one cached chart-feed read), its recorded marks and journal fills; no Robinhood, no write
     'POST /copilot/desk/robinhood/refresh',  # parameterless: nothing from the request reaches Robinhood
     'GET /copilot/desk/watching',  # the app's own watchlist (the Charts one), levels and setups: database reads only
     'POST /copilot/desk/watching',  # add one checked ticker to the app's own watchlist; never written to Robinhood
