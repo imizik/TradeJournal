@@ -215,8 +215,8 @@ function TapeStream({ symbol }: { symbol: string }) {
       {dropped > 0 && <p className="text-[11px] text-muted-foreground">{dropped.toLocaleString("en-US")} prints in fast bursts were too many to show.</p>}
       <p className="text-[10px] leading-4 text-muted-foreground max-sm:hidden">
         Level 2 is the ARCA-labelled book from moomoo (sizes as the provider reports them), not the whole market. Green
-        or red: the print was at or through that book&apos;s ask or bid as it stood when the print arrived; plain when it
-        fell between them or no book from the second before was there. Bold: at least {BIG_TIMES}× the median print so far. Nothing is saved.
+        or red: the print was at or through the ask or bid of the last book received before it (within a second; the
+        bridge sends the newest book every quarter second); plain when it fell between them or there was no such book. Bold: at least {BIG_TIMES}× the median print so far. Nothing is saved.
       </p>
     </div>
   );
