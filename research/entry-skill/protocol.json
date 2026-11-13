@@ -1,0 +1,59 @@
+{
+  "protocol_id": "entry-skill-20261112-v1",
+  "registered": "2026-11-12",
+  "registered_before": "any outcome of this measure was computed. Already known when it was written: the October 21 audit's totals and its finding that no entry feature separated winners from losers; the October 24 exit study and the November 11 behavior studies on the same trades; the opening lab's direction comparison on 72 opening-hour trades from July 2026. From the extract itself, only inputs were read: ticker counts, the call/put count and the time of day of first entries.",
+  "question": "Measured on the underlying stock, do the owner's option entries move in the trade's direction over the next 30 minutes by more than matched control entries do?",
+  "why_it_might_be_true": "If the entries carry information, the other side is the option market maker and other short-horizon traders, who price the stock's next half hour as close to a coin flip. The claim would be that the owner's read of price action, news and context picks moments, days or names with drift. No mechanism is established; this measures whether there is anything to explain. It would be an inefficiency, not a risk premium, so it would be expected to fade and would need a forward check.",
+  "population": {
+    "trades": "every trade in the extract: closed or expired long option trades opened 2025-07-10 to 2026-10-19, one observation per trade at its first buy_to_open fill",
+    "extract": "the file written on 2026-11-11 by `python -m scripts.exit_counterfactual_study extract`, the one the November 11 studies ran on; bytes sha256 4ada80b1977230773bd0d919cd3ea42f766b8fcc651d5484fee8253de7c33a47. A run on any other file reports extract_is_registered false and must say so",
+    "underlying": "the trade's ticker; SPXW and SPX are scored on SPY",
+    "excluded_and_counted": ["no buy_to_open fill", "first entry outside the regular session", "no minute bars for the underlying on the entry session"]
+  },
+  "prices": "Alpaca SIP one-minute bars, raw (unadjusted), regular session only: 09:30 to 16:00 New York, 13:00 on 2025-11-28 and 2025-12-24. Every comparison is inside one session, so splits do not enter.",
+  "clock": "The entry minute m is the New York minute of the first entry fill (journal times have minute precision). The reference price is the OPEN of the first regular-session bar at minute m+1, m+2 or m+3; none means unscored. The horizon price for h minutes is the CLOSE of the bar at reference minute + h - 1, or the latest bar in the three minutes before it; none means unscored. A horizon that would end after the session close is unscored. Starting one minute after the fill gives up the first seconds on purpose: nothing from the entry minute itself is used.",
+  "measure": "signed move % = side x (horizon price / reference price - 1) x 100, with side +1 for a call and -1 for a put",
+  "horizons": {"primary": 30, "also": [15, 60]},
+  "controls": {
+    "timing": "same underlying, same session, same side, at every other minute of the entry's time-of-day bucket that is at least 5 minutes from m. Buckets: 09:30-10:00, 10:00-11:30, 11:30-14:00, 14:00-close. Asks: within that part of the day, did the exact moment matter?",
+    "day": "same underlying, same minute m, same side, on each of the 10 sessions before and the 10 after the entry session (New York weekdays less NYSE holidays). Asks: was this a better day than neighbouring days for that stock, at exactly that time of day? This is the control that removes the stock's own drift over the period.",
+    "stock": "each other name of the factory's 18-name core universe at the same session and minute, same side. Asks: was this a better stock than the others at that moment? The market's move at that minute cancels.",
+    "scoring": "each control is scored by the same clock and measure as the entry. A baseline needs at least 5 scored controls for a trade at a horizon, else the trade has no edge for it (counted). All controls are deterministic: no random draw."
+  },
+  "edge": "for each baseline and horizon, the trade's signed move minus the mean signed move of its controls",
+  "tests": 3,
+  "uncertainty": "2,000 bootstrap resamples by New York trading day of first entry (seed 20261112), so trades on the same day, including repeats in one stock, are not counted as independent. Bonferroni across the 3 baselines: 98.33% two-sided percentile intervals on the mean edge at 30 minutes.",
+  "expected_precision": "Not computed from the data. Assuming a standard deviation near 0.7 points for a 30-minute signed move, about 1,400 scored trades and day clustering that inflates the error 1.5 to 2 times, the standard error is about 0.03 points, so an edge of about 0.10 points is detectable four times in five at this level. The report replaces this with the realized interval.",
+  "periods": {
+    "exploration": "opened 2025-07-10 to 2026-03-31",
+    "check": "opened 2026-04-01 to 2026-10-19",
+    "independence": "neither period is untouched: the audit and four studies read these trades. This measure was not computed before, but every result is exploratory; agreement between the periods is consistency, not confirmation"
+  },
+  "decisions": {
+    "per_baseline": {
+      "beats chance": "the 98.33% interval on the 30-minute mean edge is above 0, the mean edge is above 0 in each period, and the mean edge is above 0 at 15 and at 60 minutes",
+      "worse than chance": "the 98.33% interval on the 30-minute mean edge is below 0",
+      "no evidence either way": "anything else"
+    },
+    "large_enough_to_matter": "a baseline that beats chance is also marked large enough to matter when its 30-minute mean edge is at least 0.10 points: about a stock round trip plus a margin, and the smallest edge this sample can be expected to detect",
+    "what_a_pass_allows": "eligible for a forward check on new trades under its own protocol, and a reason to study a cheaper way to express the same entries on paper. Not proof of an edge and not a reason to change size",
+    "what_no_pass_means": "on this history the entries show no measurable direction skill on the stock at 30 minutes. It does not rule out skill at other horizons or in contract choice, which this does not test"
+  },
+  "descriptive_only": [
+    "the raw mean signed move and the share above zero at each horizon, for calls and for puts",
+    "each baseline's mean edge by side, by period and at 15 and 60 minutes",
+    "a whole-session timing control (every other minute of the session at least 5 minutes from m), as a check on the bucket choice",
+    "contract cost, for trades closed in their entry session: a two-by-two count of whether the stock moved the trade's way from the reference price to the close of the bar at the final exit minute, against whether the option trade made money, with the mean return on premium in each cell"
+  ],
+  "limits": [
+    "the stock's move, not the option's: nothing here says the entries pay after spread and decay",
+    "first entry only: adds and scale-ins are not scored",
+    "minute timestamps and a next-minute reference: an edge that lives in the first seconds after the fill is invisible",
+    "the day control uses sessions after the entry as well as before; it is a baseline, not a tradable rule",
+    "the 18 comparison names were themselves picked from the journal's names",
+    "the owner chose which trades to take and when; these are associations in seen data"
+  ],
+  "results": "The repository is public. Aggregates and the per-trade file are written outside it and reported to the owner directly; they are not committed.",
+  "prospective": "not registered here; a forward check needs its own protocol id after this run",
+  "one_run": "one historical run under this id. A changed constant is a new protocol id, recorded beside this one"
+}
