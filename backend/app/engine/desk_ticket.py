@@ -26,7 +26,7 @@ from typing import Callable
 
 from sqlmodel import Session, select
 
-from app.engine import copilot_plans
+from app.engine import copilot_plans, play_check
 
 CANDIDATES = 3
 QUOTE_STALE_S = 15 * 60  # a contract whose bid or ask is older than this reads stale
@@ -199,27 +199,43 @@ def underlying(read: dict, now: float) -> dict:
 
 def _live_chain(symbol: str, expiry: date) -> dict:
     """The live read: the stock's price from the quote service and the expiry's chain from the options feed's cache."""
+    from app.engine.chart_math import ET
+    from app.engine.expression_recorder import later_expiration
     from app.engine.options_feed import options_feed
     last, at, issue = copilot_plans._quotes([symbol])
-    out = {"spot": last.get(symbol), "spot_at": at, "spot_issue": issue, "simulated": False, "chain": None, "fetched": None}
+    out = {"spot": last.get(symbol), "spot_at": at, "spot_issue": issue, "simulated": False, "chain": None, "fetched": None,
+           "later": None, "later_fetched": None}
+    today = datetime.now(ET).date()
+
+    def pick(live: list[date]) -> list[date]:  # the contract's expiry, and the Play check's later expiry in the same pass
+        if expiry not in live:
+            return []
+        later = later_expiration(live, expiry, today)
+        return [expiry] + ([later] if later else [])
+
     try:
-        reads, problem = options_feed.chains(symbol, lambda live: [expiry] if expiry in live else [])
+        reads, problem = options_feed.chains(symbol, pick)
     except ValueError:
         return {**out, "issue": f"{symbol} is not an optionable symbol."}
     read = next((r for r in reads if r.value.expiration == expiry), None)
     if read is None:
         return {**out, "issue": problem or f"{expiry:%b} {expiry.day}, {expiry.year} is not a listed {symbol} expiry."}
-    return {**out, "chain": read.value, "fetched": read.fetched, "issue": None}
+    later = next((r for r in reads if r.value.expiration != expiry), None)
+    return {**out, "chain": read.value, "fetched": read.fetched, "issue": None,
+            "later": later and later.value, "later_fetched": later and later.fetched}
 
 
 def _fixture_chain(symbol: str, expiry: date) -> dict:
     """SIMULATED: the copilot fixture's NBIS chain at its fixed price and time (``copilot_fixture``)."""
     from app.ai.copilot_fixture import AT, SESSION, simulated_chains
+    from app.engine.expression_recorder import later_expiration
     at = _epoch(AT)
     out = {"spot": 94.35 if symbol == "NBIS" else None, "spot_at": at, "simulated": True, "chain": None, "fetched": at,
-           "spot_issue": "The fixture has a simulated NBIS chain only."}
-    chain = simulated_chains("NBIS", 94.35, date.fromisoformat(SESSION)).get(expiry) if symbol == "NBIS" else None
-    return {**out, "chain": chain, "issue": None if chain else "The fixture has no simulated chain for this contract."}
+           "spot_issue": "The fixture has a simulated NBIS chain only.", "later": None, "later_fetched": at}
+    chains = simulated_chains("NBIS", 94.35, date.fromisoformat(SESSION)) if symbol == "NBIS" else {}
+    chain = chains.get(expiry)
+    later = later_expiration(list(chains), expiry, date.fromisoformat(SESSION)) if chain else None
+    return {**out, "chain": chain, "later": chains.get(later), "issue": None if chain else "The fixture has no simulated chain for this contract."}
 
 
 def _find(chain, strike: float, kind: str, symbol: str):
@@ -349,7 +365,8 @@ def build(db: Session, investigation_id: str, *, mode: str = "live", now: float 
         named, source = (pick[1], pick[0], kind), "picked"
     if named is None:
         read = (candidates_read or _candidates_reader(mode))(symbol, _horizon_days(db, row, now), row["direction"] or ("long" if kind == "call" else "short"))
-        return {**out, "candidates": _candidates(read, now, mode == "fixture")}
+        found = {**out, "candidates": _candidates(read, now, mode == "fixture")}
+        return {**found, "check": play_check.check(db, found, row, account_id=capture.account_id, now=now)}
 
     strike, expiry, _ = named
     chain = (chain_read or (_fixture_chain if mode == "fixture" else _live_chain))(symbol, expiry)
@@ -364,10 +381,20 @@ def build(db: Session, investigation_id: str, *, mode: str = "live", now: float 
     limit = quote.get("mid") if quote["state"] == "ok" else None
     multiplier = quote.get("multiplier") or (contract.multiplier if contract is not None else None)
     count = size["contracts"] or contracts_for_risk(size["risk_usd"], limit, multiplier)
-    return {**out, "contract": {"strike": strike, "expiry": expiry.isoformat(), "type": kind, "label": label(symbol, strike, expiry, kind),
-                                "source": source, "multiplier": multiplier},
-            "quote": quote, "underlying": stock, "expected_move_pct": move, "limit": limit, "contracts": count,
-            "figures": figures(kind, strike, limit, count, multiplier, stock.get("last"), move)}
+    found = {**out, "contract": {"strike": strike, "expiry": expiry.isoformat(), "type": kind, "label": label(symbol, strike, expiry, kind),
+                                 "source": source, "multiplier": multiplier},
+             "quote": quote, "underlying": stock, "expected_move_pct": move, "limit": limit, "contracts": count,
+             "figures": figures(kind, strike, limit, count, multiplier, stock.get("last"), move)}
+
+    def quote_for(other, its_chain):  # a contract the check prices, judged as this ticket's own quote is
+        fetched = chain.get("later_fetched") if its_chain is chain.get("later") else chain.get("fetched")
+        return contract_quote(other, fetched, now, chain.get("simulated", False))
+
+    simulated = chain.get("simulated", False)
+    return {**found, "check": play_check.check(db, found, row, account_id=capture.account_id,
+                                               now=chain["fetched"] if simulated and chain.get("fetched") else now,
+                                               chain_read=chain if chain.get("chain") is not None else None,
+                                               traded=contract, quote_for=quote_for)}
 
 
 def _candidates_reader(mode: str) -> Callable[[str, int, str], dict]:
