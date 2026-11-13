@@ -4,6 +4,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiUrl } from "@/lib/api";
 import { tickFor, useDeskTicks } from "@/lib/deskTicks";
 import type { TicketPlan } from "@/components/copilot/DeskTicket";
+import type { UnusualRow } from "@/components/copilot/DeskUnusual";
 import { cn } from "@/lib/utils";
 
 /**
@@ -12,7 +13,8 @@ import { cn } from "@/lib/utils";
  * asked again every 15 s while the tab is open and visible in the regular session, never outside it. The price line
  * moves with the desk's shared ticker (``useDeskTicks``). Tapping a contract opens a small row: Check it (Check a call,
  * pre-filled), Plan it (the plan flow) and Put on ticket (a saved plan's ticket, copy to Robinhood). Nothing here
- * places, sends or stages an order.
+ * places, sends or stages an order. Contracts on the desk's unusual-options list (``DeskUnusual``) carry a small mark; a
+ * Feed row picked there (``focus``) opens here on its expiry with the contract selected, the strike window widened to it.
  */
 
 export type ChainSide = "call" | "put";
@@ -41,7 +43,7 @@ const STALE_AFTER_S = 45; // the server's CHAIN_STALE_S: a chain whose last good
 
 /** The chain for ``symbol`` at ``expiry`` (the nearest when null), asked again on the server's cadence while ``on`` and
  * the page is visible; the last good read stays on screen through a failed one, with when it failed. */
-export function useDeskChain(symbol: string | null, expiry: string | null, on: boolean) {
+export function useDeskChain(symbol: string | null, expiry: string | null, on: boolean, strike: number | null = null) {
   const [data, setData] = useState<ChainReply | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [failedAt, setFailedAt] = useState<number | null>(null);
@@ -66,7 +68,7 @@ export function useDeskChain(symbol: string | null, expiry: string | null, on: b
       controller?.abort();
       controller = new AbortController();
       try {
-        const query = new URLSearchParams({ symbol, ...(expiry ? { expiration: expiry } : {}) });
+        const query = new URLSearchParams({ symbol, ...(expiry ? { expiration: expiry } : {}), ...(strike !== null ? { strike: String(strike) } : {}) });
         const response = await fetch(apiUrl(`/copilot/chain?${query}`), { cache: "no-store", signal: controller.signal });
         const body = await response.json().catch(() => null); // always read the body: an unread one never settles
         if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `The chain could not be read (${response.status}).`);
@@ -87,7 +89,7 @@ export function useDeskChain(symbol: string | null, expiry: string | null, on: b
     load();
     document.addEventListener("visibilitychange", onShow);
     return () => { gone = true; controller?.abort(); if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", onShow); };
-  }, [symbol, expiry, on]);
+  }, [symbol, expiry, on, strike]);
   return { data, error, failedAt };
 }
 
@@ -144,20 +146,38 @@ export function ticketPlanFor(plans: TicketPlan[] | null, symbol: string, side: 
   return (plans ?? []).find(p => p.symbol === symbol && p.option_type === side) ?? null;
 }
 
-export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket }: {
+export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, unusual = [], focus = null }: {
   symbol: string | null; plans: TicketPlan[] | null;
   onCheck(text: string): void; onPlan(pick: ChainPick, line: string): void; onTicket(investigationId: string, pick: ChainPick): void;
+  unusual?: UnusualRow[]; focus?: { pick: ChainPick; n: number } | null;
 }) {
   // The expiry he picked belongs to its ticker: a new ticker starts at its nearest, with no extra read of the old date.
-  const [chosen, setChosen] = useState<{ symbol: string | null; date: string } | null>(null);
+  // A Feed pick seeds the first read, so the tab never reads the nearest expiry first.
+  const seeded = focus && focus.pick.symbol === symbol ? focus.pick : null;
+  const [chosen, setChosen] = useState<{ symbol: string | null; date: string } | null>(seeded ? { symbol, date: seeded.expiry } : null);
   const expiry = chosen && chosen.symbol === symbol ? chosen.date : null;
   const setExpiry = (date: string) => setChosen({ symbol, date });
-  const [side, setSide] = useState<ChainSide>("call");
-  const [picked, setPicked] = useState<ChainPick | null>(null);
-  const { data, error, failedAt } = useDeskChain(symbol, expiry, true);
+  const [side, setSide] = useState<ChainSide>(seeded?.side ?? "call");
+  const [picked, setPicked] = useState<ChainPick | null>(seeded);
+  // A Feed row's contract: its expiry, selected, on the side shown, its strike inside the window.
+  useEffect(() => {
+    if (!focus || focus.pick.symbol !== symbol) return;
+    setChosen({ symbol, date: focus.pick.expiry }); // eslint-disable-line react-hooks/set-state-in-effect -- a pick from the Feed
+    setPicked(focus.pick);
+    setSide(focus.pick.side);
+  }, [focus?.n]); // eslint-disable-line react-hooks/exhaustive-deps -- once per pick
+  const focusStrike = focus && focus.pick.symbol === symbol && focus.pick.expiry === expiry ? focus.pick.strike : null;
+  const { data, error, failedAt } = useDeskChain(symbol, expiry, true, focusStrike);
+  const scrolled = useRef<number | null>(null);
   const ticks = useDeskTicks(symbol ? [symbol] : []);
   const live = tickFor(ticks, symbol);
   const { ref, width } = useWidth();
+  // Bring a Feed pick's row into view once its expiry has loaded.
+  useEffect(() => {
+    if (!focus || scrolled.current === focus.n || !data || data.symbol !== symbol || data.expiration !== focus.pick.expiry) return;
+    const row = ref.current?.querySelector(`[data-strike="${focus.pick.strike}"]`);
+    if (row) { scrolled.current = focus.n; row.scrollIntoView({ block: "nearest" }); }
+  }, [focus, data, symbol, ref]);
   const both = width >= 720;
   const cols = both ? (width >= 1040 ? FULL : COMPACT) : (width >= 520 ? FULL : COMPACT);
   const [nowS, setNowS] = useState(() => Date.now() / 1000);
@@ -180,6 +200,7 @@ export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket }: 
   const selected = picked && picked.symbol === symbol && picked.expiry === shown.expiration ? picked : null;
   const lineAfter = price != null ? lineIndex(shown.rows, price) : null;
   const span = 1 + cols.length * sides.length;
+  const marks = new Map(unusual.filter(u => u.symbol === symbol && u.expiration === shown.expiration).map(u => [`${u.side}:${u.strike}`, u]));
 
   return (
     <div data-testid="desk-chain" ref={ref} className="space-y-2">
@@ -224,7 +245,7 @@ export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket }: 
                     {both && <Cells cell={row.call} cols={[...cols].reverse()} itm={price != null && row.strike < price}
                       chosen={selected?.side === "call" && selected.strike === row.strike}
                       onPick={() => setPicked({ symbol, expiry: shown.expiration!, strike: row.strike, side: "call" })} side="call" strike={row.strike} />}
-                    <StrikeCell row={row} sides={sides} />
+                    <StrikeCell row={row} sides={sides} marks={marks} />
                     {sides.slice(both ? 1 : 0).map(s => (
                       <Cells key={s} cell={row[s]} cols={cols} itm={price != null && (s === "call" ? row.strike < price : row.strike > price)}
                         chosen={selected?.side === s && selected.strike === row.strike}
@@ -272,18 +293,20 @@ function PriceLine({ span, symbol, price, stale }: { span: number; symbol: strin
   );
 }
 
-function StrikeCell({ row, sides }: { row: Row; sides: ChainSide[] }) {
+function StrikeCell({ row, sides, marks }: { row: Row; sides: ChainSide[]; marks: Map<string, UnusualRow> }) {
   const held = sides.flatMap(s => row[s]?.held ? [`${row[s]!.held} held ${s}${row[s]!.held === 1 ? "" : "s"}`] : []);
   const planned = sides.some(s => row[s]?.planned);
+  const odd = sides.flatMap(s => { const u = marks.get(`${s}:${row.strike}`); return u ? [`Unusual ${s}: volume ${u.volume.toLocaleString("en-US")} against open interest ${u.open_interest.toLocaleString("en-US")}${u.ratio === null ? "" : ` (${u.ratio}×)`}`] : []; });
   return (
     <td className={cn("whitespace-nowrap border-x px-1.5 py-1 text-center", row.atm && "font-semibold")}>
       <span>{strikeText(row.strike)}</span>
       {row.atm && <span className="ml-1 text-[10px] font-normal text-sky-300" title="At the money: the strike nearest the price">ATM</span>}
-      {(held.length > 0 || planned || row.levels.length > 0) && (
+      {(held.length > 0 || planned || row.levels.length > 0 || odd.length > 0) && (
         <span className="block text-[10px] font-normal leading-tight">
           {held.length > 0 && <span data-testid="chain-held" className="text-emerald-400" title={held.join(", ")}>held</span>}
           {planned && <span data-testid="chain-planned" className="ml-1 text-amber-300" title="The contract a saved plan names">plan</span>}
           {row.levels.map(l => <span key={l} data-testid="chain-level" className="ml-1 text-muted-foreground" title={`Your plan's ${l} price is at this strike`}>{l}</span>)}
+          {odd.length > 0 && <span data-testid="chain-unusual" className="ml-1 text-orange-300" title={odd.join("; ")}>unusual</span>}
         </span>
       )}
     </td>

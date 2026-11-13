@@ -1602,6 +1602,36 @@ Robinhood; `backend/tests/test_desk_chain.py` checks that nothing in it sends an
   as text he edits) and **Put on ticket** (the newest armed saved plan in that ticker on the same side opens its
   ticket with this contract; a stock or sell-side plan has no option ticket and is not offered; with none the button
   is off and says to plan it first). No order path of any kind.
+- **Unusual marks:** a contract on the desk's unusual-options list (§ Unusual options) is marked **unusual** on its
+  strike, with its volume and open interest in the tooltip. A Feed row opens here on its expiry with the contract
+  selected; a strike outside the ten-a-side window widens it (`strike=` on the chain read).
+
+### Unusual options
+
+**Where the volume is piling in, on his own names, without leaving the app.** `GET /copilot/unusual`
+(`app/engine/desk_unusual.py`, `frontend/components/copilot/DeskUnusual.tsx`), shown behind the Feed's **Unusual
+options** filter and as marks in the Chain tab. Read-only: no ping, no count on the strip, nothing to rate, never
+Robinhood.
+
+- **Names:** the underlyings of his open journal trades (Webull out), then his Watching list, at most 12; never a
+  ticker he set to Not following. When that setting cannot be read nothing is shown.
+- **Rules** (stated in the section's info tooltip): a contract whose volume today is at least 3× its open interest
+  (last night's count) and at least 500 contracts (no open interest at all counts); a ticker whose call or put volume
+  so far today, on its nearest two expiries after today, is at least 2× its average full day on the same expiries
+  over its last 20 recorded sessions (the nightly option snapshots, `app/engine/options_recorder.py`) and at least
+  1,000 contracts. Same-day (0DTE) expiries stay out of that comparison on both sides, since the nightly snapshot may
+  not list them. A name with fewer than five recorded sessions, or whose read came back short, gets the contract rule
+  only, and the section says so. The chain has no trade-side data, so no bid/ask lean is shown.
+- **Reads and budget:** each name's nearest three expiries through `options_feed.chains` (the same cache as the Chain
+  tab and the chart: a chain read in the last five minutes costs nothing). A pass starts only while the desk asks
+  (once a minute while the lab is on) and only in the regular session, one name every 30 s: at most 8 option reads a
+  minute (6 once the expiry lists are cached), inside the feed's 24-a-minute pacing. The feed now keeps 20 symbols'
+  chains (was 8) so the pass does not push the chart's names out.
+- **Honest gaps:** a missing volume or open interest is skipped, never read as zero; a name not read yet or whose read
+  failed is named in a grey line; in the session a name read more than 15 minutes ago is greyed. Outside the session
+  the last session's list shows **At the close** with its date and its last read time (a desk closed at 10:05 shows
+  10:05), kept across restarts in `backend/data/desk_unusual.json`.
+  Fixture mode shows invented NBIS contracts, labelled simulated; replay shows none.
 
 **Server time (2026-11-12).** Each desk read (every `GET /copilot/desk/…`, the thread header's
 `GET /charts/journal/positions/{symbol}/context` and `GET /copilot/symbol/{symbol}`) answers with a standard

@@ -5,6 +5,8 @@ import Link from "next/link";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { apiUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import type { ChainPick } from "@/components/copilot/DeskChain";
+import { UnusualList, type UnusualReply } from "@/components/copilot/DeskUnusual";
 
 export type FeedSource = "Alert" | "Plan" | "Radar" | "Radar setup" | "News" | "Calendar" | "Copilot note" | "r/wallstreetbets" | "NYT";
 /** One feed row (``app/engine/desk_feed.py``). ``plan``: "setup" (a Radar setup card's own Plan it) or "own" (his own
@@ -28,7 +30,7 @@ export type DeskFeedBody = { as_of: string; now: number; day: string; items: Fee
 const SEEN_KEY = "desk.feed.seen.v1";
 const READ_MS = 60_000;
 const ACTION = "inline-flex min-h-11 items-center gap-1 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-7";
-const FILTERS = [["mine", "Mine"], ["market", "Market"], ["all", "Mine + Market"]] as const;
+const FILTERS = [["mine", "Mine"], ["market", "Market"], ["all", "Mine + Market"], ["unusual", "Unusual options"]] as const;
 type Filter = (typeof FILTERS)[number][0] | "chatter";
 
 const ny = (at: number, options: Intl.DateTimeFormatOptions) => new Date(at * 1000).toLocaleString("en-US", { timeZone: "America/New_York", ...options });
@@ -105,9 +107,12 @@ export function useFeedNew(data: DeskFeedBody | null, open: boolean): { count: n
  * **Chatter** (r/wallstreetbets buzz, NYT headlines) is a fourth filter that shows only while a chatter source has rows;
  * its rows never show under the other filters, never count as new, and carry only Ask the copilot and their link; what
  * a chatter source did not deliver is said only under that filter.
+ * **Unusual options** (``DeskUnusual``) is its own filter: unusual contracts on his held and watched names; a row selects
+ * the contract in the Chain tab. Never counted as new, never mixed into the other filters.
  */
-export default function DeskFeed({ data, failed, since, onAsk, onPlan }: {
+export default function DeskFeed({ data, failed, since, onAsk, onPlan, unusual = null, onUnusual }: {
   data: DeskFeedBody | null; failed: boolean; since: number | null; onAsk(item: FeedItem): void; onPlan(item: FeedItem): void;
+  unusual?: UnusualReply | null; onUnusual?(pick: ChainPick): void;
 }) {
   const [picked, setFilter] = useState<Filter>("mine");
   const [symbol, setSymbol] = useState<string | null>(null);
@@ -117,7 +122,7 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan }: {
   // Chatter gone (nothing to show this minute): back to Mine for good, so it never reopens without a tap.
   useEffect(() => { if (picked === "chatter" && data && !chatterOn) setFilter("mine"); }, [picked, data, chatterOn]); // eslint-disable-line react-hooks/set-state-in-effect -- follows the feed's own read
   const items = useMemo(() => {
-    if (filter === "chatter" && !symbol) return chatter?.items ?? [];
+    if ((filter === "chatter" || filter === "unusual") && !symbol) return filter === "chatter" ? chatter?.items ?? [] : [];
     const all = (data?.items ?? []).filter(i => !i.chatter);
     if (symbol) return all.filter(i => i.symbol === symbol);
     return all.filter(i => filter === "all" || (filter === "mine") === i.mine);
@@ -135,7 +140,7 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan }: {
           <span className="text-sm"><span className="font-semibold">{symbol}</span><span className="text-muted-foreground"> · its story today</span></span>
         </div>
       ) : (
-        <div role="group" aria-label="Show" className="inline-flex rounded-md border p-0.5">
+        <div role="group" aria-label="Show" className="inline-flex flex-wrap rounded-md border p-0.5">
           {filters.map(([id, label]) => (
             <button key={id} type="button" aria-pressed={filter === id} onClick={() => setFilter(id)}
               className={cn("min-h-11 rounded px-2.5 text-xs sm:min-h-7", filter === id ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}>
@@ -145,6 +150,7 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan }: {
         </div>
       )}
       {filter === "chatter" && !symbol && chatter && <ChatterHead chatter={chatter} />}
+      {filter === "unusual" && !symbol ? <UnusualList reply={unusual} onPick={pick => onUnusual?.(pick)} /> : <>
       {!data && (failed ? <p className="text-xs text-muted-foreground">The feed could not be read right now.</p>
         : <p className="text-xs text-muted-foreground">Reading the feed…</p>)}
       {data && !items.length && (
@@ -164,6 +170,7 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan }: {
         <p className="px-1 text-xs text-muted-foreground">Showing the first {data.items.length} of {data.total}.</p>
       )}
       {chatterNote && filter === "chatter" && <p data-testid="feed-chatter-note" className="px-1 text-xs text-muted-foreground">{chatterNote}</p>}
+      </>}
     </section>
   );
 }

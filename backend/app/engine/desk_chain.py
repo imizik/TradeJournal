@@ -232,8 +232,9 @@ def _fixture_read(symbol: str, expiration: date | None, ttl: int) -> dict:
 
 
 def view(db: Session, symbol: str, expiration: date | None = None, *, mode: str = "live", now: float | None = None,
-         read=None) -> dict:
+         read=None, strike: float | None = None) -> dict:
     """One expiry of ``symbol``'s chain for the desk (nearest expiry when ``expiration`` is not listed or not given).
+    ``strike``: a listed strike outside the window (an unusual contract picked from the Feed) widens it to include it.
     ``mode``: the copilot's evidence (``live``; ``fixture`` reads the simulated NBIS chain; ``replay`` reads none)."""
     symbol = (symbol or "").strip().upper()
     now = time.time() if now is None else now
@@ -278,6 +279,9 @@ def view(db: Session, symbol: str, expiration: date | None = None, *, mode: str 
     strikes = sorted(by_strike)
     at = centre(strikes, by_strike, spot)
     shown = window(strikes, at)
+    if strike is not None and shown and (want := round(strike, 3)) in by_strike and want not in shown:
+        lo, hi = strikes.index(shown[0]), strikes.index(shown[-1])
+        shown = strikes[min(lo, strikes.index(want)): max(hi, strikes.index(want)) + 1]
     levels, named = plan_marks(db, symbol)
     expiry = chain.expiration
     rows = []
