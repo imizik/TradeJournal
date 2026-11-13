@@ -1,0 +1,56 @@
+{
+  "protocol_id": "opening-breakout-20261113-v1",
+  "registered": "2026-11-13",
+  "registered_before": "any outcome of this rule set on this universe was computed. Already known when it was written: the strategy factory's opening range breakout candidates on its 18-name core universe all failed their screen (28 ids), as did its failed-breakout and VWAP-reclaim families; radar-long-history-20261112-v1 (dip retired, gap reversal inconclusive) on the 150 most-traded names; and published work reporting that a 5-minute opening range breakout restricted to 'stocks in play' (unusual opening volume) was profitable before costs. No bar of this universe's opening ranges, relative volumes or trades has been read.",
+  "question": "Does a 5-minute opening range breakout on the day's 'stocks in play' (the most unusual opening volume among liquid US common stocks), traded in the direction of the first five minutes with a tight stop and an exit at the close, make money after realistic retail costs?",
+  "why_it_matters": "The owner wants opening breakout plays. Every opening breakout tested before ran on a fixed list of large names; the published version depends on choosing, each morning, the few stocks whose opening volume is far above their own normal. If it survives costs here, it is worth a forward paper test with recorded quotes; if not, opening breakouts are closed as a strategy for this account.",
+  "sessions": "regular sessions 2024-01-02 to 2026-11-12, New York; half days left out (2024-07-03, 2024-11-29, 2024-12-24, 2025-07-03, 2025-11-28, 2025-12-24)",
+  "data": {
+    "names": "common stocks listed on any of Polygon's reference snapshots of 2024-01-02, 2024-07-01, 2025-01-02, 2025-07-01, 2026-01-02, 2026-06-12 and 2026-11-12 (the radar long-history listing files plus one new snapshot), symbols of capital letters with an optional .X class",
+    "daily": "Alpaca SIP daily bars (open, high, low, close, volume), unadjusted, from 2023-11-01, plus split-adjusted closes to detect splits",
+    "opening": "Alpaca SIP one-minute bars, unadjusted, 09:30-09:34 New York, for every name that is a candidate on that session or within the 20 sessions after it (so each candidate has its own history); fetching a wider set chooses nothing",
+    "session": "Alpaca SIP one-minute bars, unadjusted, 09:35-15:59 New York, for the day's selected names only"
+  },
+  "selection": {
+    "candidate": "on session D, using only bars through D-1: last close at least $5; mean daily share volume over the last 14 sessions at least 1,000,000; average true range over the last 14 sessions (simple mean of true ranges) at least $0.50; no split between D-14 and D (the ratio of unadjusted to split-adjusted close unchanged within 1%)",
+    "opening_range": "the session's 09:30-09:34 one-minute bars: high, low, the first bar's open, the last bar's close and total volume. Direction: long when the range closes above its open, short when below; no trade when equal or when fewer than 3 of the 5 bars exist",
+    "relative_volume": "the opening range's volume over the mean opening-range volume of the same name on its previous 14 sessions; at least 10 of those sessions must have opening bars",
+    "stocks_in_play": "candidates with a direction and relative volume of at least 1, ranked by relative volume (ties by symbol); the top 20"
+  },
+  "trade": {
+    "entry": "a stop order at the range high (long) or low (short), live from the 09:35 bar to the 15:55 bar. The first bar whose high reaches the range high (low reaches the range low) fills it at the worse of the level and that bar's open",
+    "stop": "0.10 x the name's average true range from the fill: below for a long, above for a short",
+    "stop_hit": "from the bar after the fill, the first bar whose low (high) reaches the stop fills at the worse of the stop and that bar's open. In the fill's own bar the stop counts only if that bar closes beyond it (the order of a bar's high and low is unknown); the worst case (any touch in the fill's bar) is reported beside it",
+    "exit": "otherwise the close of the 15:59 bar (the last bar with data if 15:59 is missing)",
+    "costs": "each side: one cent a share plus 2 basis points of the price",
+    "measure": "R = (exit - fill) x direction - both sides' costs, over the risk (0.10 x ATR); one trade per name per session"
+  },
+  "tests": {
+    "count": 2,
+    "both_sides": "every triggered trade",
+    "long_side": "long trades only (what a Roth IRA can hold as shares)",
+    "statistic": "mean R per trade",
+    "uncertainty": "2,000 bootstrap resamples of sessions (seed 20261113), each session's trades kept together; two-sided percentile interval at 97.5% (Bonferroni for two tests)"
+  },
+  "periods": {"exploration": "2024-01-02 to 2025-06-30", "check": "2025-07-01 to 2026-11-12", "independence": "neither period was used to choose these rules, which follow the published design; both are history"},
+  "decisions": {
+    "worth a paper test": "the interval's lower end is above 0, the mean is above 0 in each period, and the mean is still above 0 with costs tripled",
+    "loses money": "the interval's upper end is below 0",
+    "no evidence either way": "anything else",
+    "what_each_allows": "Worth a paper test: a forward paper test on the live desk (selection at 09:35 from live quotes, entries by recorded quotes) before any money; options expressions are a separate later question because their spreads at the open are wider than these costs. Loses money or no evidence: opening range breakouts are closed for this account; no variants are tried on this history"
+  },
+  "descriptive_only": [
+    "trades, share of selected names that triggered, win rate, mean winning and losing R, total R",
+    "short side alone; by year; by relative-volume rank (1-5, 6-10, 11-20); the top 10 only",
+    "costs at zero and tripled; the fill-bar worst case for stops; without the best 1% of sessions",
+    "mean R per session (equal risk per trade) and the share of sessions with a positive total"
+  ],
+  "limits": [
+    "one-minute bars cannot show the order of a bar's high and low; the stop rule in the fill's bar is a stated assumption with its worst case reported",
+    "a stop order at the open may fill worse than a bar's open in a fast market; the cent of slippage a side is an average, not a guarantee",
+    "listing snapshots every six months can miss a name listed and delisted between two snapshots",
+    "shorting needs a borrow and a margin account; the long-side test is the one this owner can trade as shares"
+  ],
+  "results": "Market data only: the aggregate results are committed beside this protocol after the single run; the downloaded bars stay outside the repository.",
+  "one_run": "one historical run under this id. A changed constant is a new protocol id, recorded beside this one"
+}
