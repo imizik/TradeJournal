@@ -130,6 +130,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/brief-scorecard',
     'GET /copilot/desk/{investigation_id}/picture',
     'GET /copilot/desk/{investigation_id}/chart',
+    'GET /copilot/desk/{investigation_id}/news',  # the Feed's headline source (one cached read per symbol), placed on the chart's cached candles; no Robinhood, no bar request
     'GET /copilot/desk/{investigation_id}/timeline',
     'GET /copilot/desk/{investigation_id}/history',
     'GET /copilot/practice',

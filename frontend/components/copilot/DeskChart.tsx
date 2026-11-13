@@ -13,8 +13,9 @@ import { CONTEXT_MAX, copilotLabHref, type DrawnPlan } from "@/lib/copilot";
 import { Flash } from "@/components/copilot/Ticks";
 import { heldReading } from "@/lib/deskTicks";
 import { ChartEventMarks, chartEvents, earningsHeader, eventLogical, nyDayOf } from "@/components/copilot/ChartEvents";
+import { ChartNewsMarks, newsWhen, useChartNews } from "@/components/copilot/ChartNews";
 import { cn } from "@/lib/utils";
-import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type DeskChartMark, type DeskStudySeries, type DeskTimeframe } from "@/lib/desk";
+import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type DeskChartNews, type DeskChartMark, type DeskStudySeries, type DeskTimeframe } from "@/lib/desk";
 
 /*
  * The cockpit centre's chart (docs/copilot-lab.md § The desk): the selected symbol's candles from the desk's chart read
@@ -38,19 +39,19 @@ const COLOR = { fill: "#e9a23b", ping: "#a78bfa", radar: "#60a5fa", entry: "#7db
   alert: "#f4c66bb0", reference: "#9a9aa3a0", pick: "#e4e4e7" };
 
 /** The studies each timeframe offers, in the legend's order; ``levels`` is the previous close and the pre-market high
- * and low. All on by default. */
-export type StudyKey = "vwap" | "ema9" | "ema21" | "sma50" | "sma200" | "volume" | "levels";
+ * and low; ``news`` the symbol's headlines at their candles (``ChartNews``). All on by default. */
+export type StudyKey = "vwap" | "ema9" | "ema21" | "sma50" | "sma200" | "volume" | "levels" | "news";
 const LINES = ["vwap", "ema9", "ema21", "sma50", "sma200"] as const;
 type LineKey = typeof LINES[number];
 export const STUDIES: Record<DeskTimeframe, StudyKey[]> = {
-  "2m": ["vwap", "ema9", "ema21", "volume", "levels"], "15m": ["vwap", "ema9", "ema21", "volume", "levels"], "1D": ["ema21", "sma50", "sma200", "volume"],
+  "2m": ["vwap", "ema9", "ema21", "volume", "levels", "news"], "15m": ["vwap", "ema9", "ema21", "volume", "levels", "news"], "1D": ["ema21", "sma50", "sma200", "volume"],
 };
 /** The Charts workspace's study colours (EMA 21 takes its EMA 20's, the SMAs its EMA 50's and 200's), thin and faded so
  * the plan's lines stay the boldest thing after price. */
 const STUDY: Record<StudyKey, { name: string; color: string }> = {
   vwap: { name: "VWAP", color: "#f5e6a1" }, ema9: { name: "EMA 9", color: "#67d5eb" }, ema21: { name: "EMA 21", color: "#f4c66b" },
   sma50: { name: "SMA 50", color: "#b494f5" }, sma200: { name: "SMA 200", color: "#ee86bd" }, volume: { name: "Vol", color: "#8d8d96" },
-  levels: { name: "Prev close · PM high/low", color: "#9a9aa3" },
+  levels: { name: "Prev close · PM high/low", color: "#9a9aa3" }, news: { name: "News", color: "#7dd3fc" },
 };
 const FADE = "99";
 const STUDY_STORE = "desk.chart.studies.v1";
@@ -419,6 +420,11 @@ export function ReadingLine({ symbol, data, fallback = null, live = null }: {
   );
 }
 
+/** The News toggle's tooltip: why there are none, or from when the markers are complete. */
+const newsTitle = (news: DeskChartNews): string =>
+  news.state !== "ok" ? news.reason ?? "Hide News"
+    : news.complete_from ? `Hide News. Only the newest headlines were read: any before ${newsWhen(news.complete_from, news.as_of)} are not marked.` : "Hide News";
+
 /** The chart for ``id`` (a thread, ``symbol:X`` or ``market``) on ``timeframe``. ``refreshKey`` reads it again. ``onRead``
  * hears each read shown (the reading line); ``actions`` lets the level menu's Plan and Ask reach the desk. */
 export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, actions, live: now = null }: {
@@ -533,6 +539,8 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   const alerts = useMemo(() => listed && listed.key === key ? listed.alerts : data?.alerts ?? [], [listed, key, data]);
   const shownKey = STUDIES[timeframe].map(k => isOn(choices, timeframe, k) ? 1 : 0).join("");
   const pick = menu?.price ?? null;
+  const news = useChartNews(id, timeframe, data, isOn(choices, timeframe, "news"));
+  const headlines = news?.state === "ok" ? news.groups.reduce((n, g) => n + g.count, 0) : 0;
   // The read onto the chart (and onto a chart built again, e.g. after a hot reload, from the last read), with the
   // studies chosen for its timeframe, the alerts and the level the menu is open on.
   useEffect(() => {
@@ -585,7 +593,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     clearPress();
     // Only a first finger or the mouse: a second finger is a pinch.
     if (!event.isPrimary || event.button !== 0 || (menuBox.current && menuBox.current.contains(event.target as Node))) return;
-    if ((event.target as HTMLElement).closest?.('[data-testid="desk-chart-event"]')) return;  // an event chip: its own tooltip
+    if ((event.target as HTMLElement).closest?.('[data-testid="desk-chart-event"], [data-desk-news]')) return;  // an event chip or a headline: its own tooltip
     const spot = at(event.clientX, event.clientY);
     if (!spot) return;
     press.current = { ...spot, clientX: event.clientX, clientY: event.clientY, at: Date.now(),
@@ -681,6 +689,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   const value = (study: StudyKey): string => {
     if (!data || at_i === null) return "";
     if (study === "levels") return "";
+    if (study === "news") return headlines ? String(headlines) : "";
     if (study === "volume") {
       const rvol = data.studies?.rvol?.[at_i];
       const vol = compact.format(data.bars[at_i].volume);
@@ -734,7 +743,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           const on = isOn(choices, timeframe, study);
           return (
             <button key={study} type="button" aria-pressed={on} onClick={() => toggle(study)} data-testid={`desk-study-${study}`}
-              title={`${on ? "Hide" : "Show"} ${STUDY[study].name}`}
+              title={study === "news" && on && news ? newsTitle(news) : `${on ? "Hide" : "Show"} ${STUDY[study].name}`}
               className={`min-h-11 shrink-0 rounded px-1.5 hover:bg-secondary sm:min-h-0 sm:py-0.5 ${on ? "" : "text-muted-foreground/60 line-through"}`}
               style={on ? { color: STUDY[study].color } : undefined}>
               {STUDY[study].name}{on && value(study) ? <span className="text-foreground/80"> {value(study)}</span> : null}
@@ -752,6 +761,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
       <div className="relative" onPointerDownCapture={onPointerDown} onPointerMoveCapture={onPointerMove} onPointerUpCapture={onPointerUp}
         onPointerCancelCapture={clearPress} onContextMenu={(event) => {
           if (menuBox.current?.contains(event.target as Node)) { event.preventDefault(); return; }
+          if ((event.target as HTMLElement).closest?.("[data-desk-news]")) return;  // a headline keeps the browser's menu (copy link)
           const spot = at(event.clientX, event.clientY);
           if (!spot) return;  // the volume pane and the time axis keep the browser's own menu
           event.preventDefault();
@@ -762,10 +772,12 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           data-bars={data?.bars.length ?? 0} data-marks={allMarks.length} data-studies={drawn.join(",")}
           data-volume={data && STUDIES[data.timeframe].includes("volume") && isOn(choices, data.timeframe, "volume") ? "on" : "off"}
           data-reference={data && isOn(choices, data.timeframe, "levels") && STUDIES[data.timeframe].includes("levels") ? (data.reference ?? []).length : 0}
-          data-alerts={alerts.length}
+          data-alerts={alerts.length} data-news={!isOn(choices, timeframe, "news") ? "off" : news?.state === "ok" ? news.groups.length : news?.state ?? "loading"}
           style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
           className="h-[320px] w-full overflow-hidden rounded border sm:h-[420px]" />
         {!unavailable && !switching && <ChartEventMarks chart={chartApi} data={data} />}
+        {!unavailable && !switching && data && <ChartNewsMarks chart={chartApi} news={news} symbol={data.symbol} timeframe={data.timeframe}
+          onAsk={actions ? (text) => actions.ask(data.symbol, text) : undefined} />}
         {hover && hover.marks.length > 0 && !menu && (
           <div role="tooltip" data-testid="desk-chart-tip"
             className="pointer-events-none absolute top-2 z-10 max-w-[min(20rem,85%)] rounded border bg-popover/95 px-2 py-1.5 text-xs shadow"
@@ -821,6 +833,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           {allMarks.map((mark, i) => <li key={i}>{KIND_WORD[mark.kind]} · {mark.text} · {nyWhen(mark.at)}</li>)}
           {data.time_stop && <li>Time stop {stopWhen(data.time_stop.at)} · {data.time_stop.text}</li>}
           {chartEvents(data.events, nyDayOf(data.as_of)).map(e => <li key={e.key}>{e.lines.join(" ")}</li>)}
+          {news?.state === "ok" && news.groups.flatMap(g => g.items.map(item => <li key={item.url}>Headline · {item.source} · {newsWhen(item.at, news.as_of)} · {item.headline}</li>))}
         </ul>
       )}
     </div>
