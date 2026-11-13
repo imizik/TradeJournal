@@ -145,6 +145,17 @@ def test_quiet_day_and_tiny_moves_are_not_big():
     assert desk_news.big_moves(candles(at(9, 30), 5, jump={3: (100, 110)}), 120) == []  # too few candles for a typical
 
 
+def test_a_slow_drift_across_sparse_candles_is_not_a_move():
+    """Thin pre-market tape: three candles 20 minutes apart, each up 0.25%. The 5-minute stretch is by the clock, so
+    no stretch spans them, and a headline beside them is not emphasised (the reviewer's case)."""
+    pre = [{"time": at(7, m), "open": 100 * 1.0025 ** n, "high": 100 * 1.0025 ** (n + 1) + 0.01, "low": 100 * 1.0025 ** n - 0.01,
+            "close": 100 * 1.0025 ** (n + 1), "volume": 100, "extended": True} for n, m in enumerate((0, 20, 40))]
+    bars = pre + candles(at(9, 30), 60, base=100.76)
+    assert desk_news.big_moves(bars, 120) == []
+    out = desk_news.view([news(at(7, 5), "Pre-market note")], bars, 120, 0, symbol="NBIS")
+    assert len(out) == 1 and not out[0]["emphasis"] and out[0]["move"] is None
+
+
 def test_headline_near_a_move_is_emphasised_and_carries_it():
     bars = candles(at(9, 30), 60, jump={30: (100.6, 103.1)})
     rows = [news(at(10, 29), "Why the stock jumped"), news(at(9, 40), "Earlier story")]
@@ -224,6 +235,36 @@ def test_one_provider_read_per_symbol_per_few_minutes(monkeypatch):
     assert [c[0] for c in calls] == ["NBIS", "MU", "NBIS"]
     assert first[0]["headline"] == "Invented" and first[0]["publisher"] == "benzinga"
     desk_news._cache.clear()
+
+
+def test_a_failed_read_is_not_retried_for_a_minute(monkeypatch):
+    desk_news._cache.clear()
+    tick = {"t": 5000.0}
+    monkeypatch.setattr(desk_news._time, "monotonic", lambda: tick["t"])
+    calls = []
+
+    def refused(symbol, start, end):
+        calls.append(symbol)
+        raise RuntimeError("403")
+    for _ in range(2):
+        with pytest.raises(RuntimeError):
+            desk_news.read_headlines("NBIS", at(14, 49), refused)
+    assert calls == ["NBIS"] and not desk_news._inflight
+    tick["t"] += desk_news.FAILED_TTL_S
+    with pytest.raises(RuntimeError):
+        desk_news.read_headlines("NBIS", at(14, 49), refused)
+    assert calls == ["NBIS", "NBIS"]
+    desk_news._cache.clear()
+
+
+def test_a_full_page_says_from_when_the_markers_are_complete():
+    bars = lambda *a: candles(at(9, 30), 60)  # noqa: E731
+    page = desk_news.Page([news(at(11, 0), "Newest"), news(at(10, 0), "Oldest on the page")])
+    page.full = True
+    body = desk_news.build("NBIS", "2m", at(14, 49), set(), bars=bars, headlines=lambda *a: page, since=lambda first: 0)
+    assert body["complete_from"] == at(10, 0)
+    page.full = False
+    assert desk_news.build("NBIS", "2m", at(14, 49), set(), bars=bars, headlines=lambda *a: page, since=lambda first: 0)["complete_from"] is None
 
 
 # ------------------------------------------------------------------ the route

@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 import logging
-import math
 import re
 import statistics
 import threading
@@ -131,7 +130,6 @@ def group(placed: list[dict]) -> list[dict]:
 def big_moves(bars: list[dict], step: int) -> list[dict]:
     """Stretches well beyond their day's typical candle: ``start``/``end`` (epoch), ``pct`` the signed change from the
     stretch's first open to its last close, ``range_pct`` its high-to-low span against that open."""
-    k = max(1, math.ceil(STRETCH_S / step))
     days: dict[date, list[int]] = {}
     for i, b in enumerate(bars):
         days.setdefault(datetime.fromtimestamp(b["time"], ET).date(), []).append(i)
@@ -143,8 +141,11 @@ def big_moves(bars: list[dict], step: int) -> list[dict]:
             continue
         ranges = {i: float(bars[i]["high"]) - float(bars[i]["low"]) for i in idx}
         stretch = {}
-        for n, i in enumerate(idx):
-            start = idx[max(0, n - k + 1)]
+        first = 0
+        for i in idx:  # by the clock, not a count of candles: a thin tape's candles can be many minutes apart
+            while bars[idx[first]]["time"] <= bars[i]["time"] - STRETCH_S:
+                first += 1
+            start = idx[first]
             stretch[i] = (start, float(bars[i]["close"]) - float(bars[start]["open"]))
         typical_range = statistics.median(ranges[i] for i in basis)
         typical_move = statistics.median(abs(stretch[i][1]) for i in basis)
@@ -161,7 +162,7 @@ def big_moves(bars: list[dict], step: int) -> list[dict]:
                     wide_at.add(i)
         runs: list[list[int]] = []
         for i in big:  # neighbouring big candles are one move
-            if runs and idx.index(i) - idx.index(runs[-1][-1]) <= k:
+            if runs and bars[i]["time"] - bars[runs[-1][-1]]["time"] < STRETCH_S + step:
                 runs[-1].append(i)
             else:
                 runs.append([i])
@@ -199,7 +200,8 @@ def view(headlines: list[dict], bars: list[dict], step: int, since: int, hidden:
 # ------------------------------------------------------------------ reads
 
 
-_cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+FAILED_TTL_S = 60  # a failed or refused read is not tried again for this long (each try can wait ~2.5 s)
+_cache: dict[tuple[str, str], tuple[float, list[dict] | None]] = {}
 _cache_lock = threading.Lock()
 _inflight: dict[tuple[str, str], threading.Lock] = {}
 
@@ -214,30 +216,56 @@ def _provider(symbol: str, start: datetime, end: datetime) -> list[dict]:
     return news.fetch_news(symbols=[symbol], start=start, end=end, limit=READ_LIMIT, fast=True, strict=True)
 
 
+class Page(list):
+    """Headline rows; ``full`` when the provider's one page came back full (older headlines may be missing)."""
+    full = False
+
+
+def _fresh(hit: tuple[float, list[dict] | None] | None, clock: float) -> bool:
+    return bool(hit) and clock - hit[0] < (NEWS_TTL_S if hit[1] is not None else FAILED_TTL_S)
+
+
 def read_headlines(symbol: str, now: float, provider=None) -> list[dict]:
-    """The symbol's headlines over ``LOOKBACK_DAYS`` (``premarket_prep._headline`` rows): one provider read per symbol
-    per ``NEWS_TTL_S`` seconds, a second request for the same symbol waiting on the first. Raises when the read fails."""
+    """The symbol's headlines over ``LOOKBACK_DAYS`` (``premarket_prep._headline`` rows, newest first): one provider
+    read per symbol per ``NEWS_TTL_S`` seconds, a second request for the same symbol waiting on the first. Raises when
+    the read fails, and again without asking for ``FAILED_TTL_S`` seconds."""
     from app.engine.premarket_prep import _headline
     start = _window_start(now)
-    key, clock = (symbol, start.date().isoformat()), _time.monotonic()
-    with _cache_lock:
-        hit = _cache.get(key)
-        if hit and clock - hit[0] < NEWS_TTL_S:
-            return hit[1]
-        gate = _inflight.setdefault(key, threading.Lock())
-    with gate:
+    key = (symbol, start.date().isoformat())
+
+    def kept() -> list[dict] | None:
         with _cache_lock:
             hit = _cache.get(key)
-            if hit and _time.monotonic() - hit[0] < NEWS_TTL_S:
-                return hit[1]
+        if not _fresh(hit, _time.monotonic()):
+            return None
+        if hit[1] is None:
+            raise RuntimeError("headline read failed recently")
+        return hit[1]
+
+    found = kept()
+    if found is not None:
+        return found
+    with _cache_lock:
+        gate = _inflight.setdefault(key, threading.Lock())
+    with gate:
+        found = kept()
+        if found is not None:
+            return found
         end = datetime.fromtimestamp(now, ET)
-        found = [h for a in (provider or _provider)(symbol, start, end) if (h := _headline(a, start, end))]
-        with _cache_lock:
-            clock = _time.monotonic()
-            for stale in [k for k, (at, _) in _cache.items() if clock - at >= NEWS_TTL_S]:
-                del _cache[stale]
-            _cache[key] = (clock, found)
-            _inflight.pop(key, None)
+        try:
+            raw = (provider or _provider)(symbol, start, end)
+            found = Page(h for a in raw if (h := _headline(a, start, end)))
+            found.full = len(raw) >= READ_LIMIT
+        except Exception:
+            found = None
+            raise
+        finally:
+            with _cache_lock:
+                clock = _time.monotonic()
+                for stale in [k for k, hit in _cache.items() if not _fresh(hit, clock)]:
+                    del _cache[stale]
+                _cache[key] = (clock, found)
+                _inflight.pop(key, None)
     return found
 
 
@@ -289,5 +317,8 @@ def build(symbol: str | None, timeframe: str, now: float, hidden: set[str] | Non
         log.warning("desk news for %s unavailable: %s", symbol, type(exc).__name__)
         return {**base, "state": "unavailable", "reason": "The headline source could not be read; no marker is not evidence of no news."}
     start = (since or _previous_close)(int(shown[0]["time"]))
-    return {**base, "state": "ok", "source": "Benzinga via Alpaca",
+    # One page, newest first: when it is full, older headlines may be missing; say from when the markers are complete.
+    oldest = min((int(h["_at"].timestamp()) for h in found), default=None)
+    complete_from = oldest if getattr(found, "full", False) and oldest is not None and oldest > start else None
+    return {**base, "state": "ok", "source": "Benzinga via Alpaca", "complete_from": complete_from,
             "groups": view(found, shown, STEP[timeframe], start, hidden, symbol)}

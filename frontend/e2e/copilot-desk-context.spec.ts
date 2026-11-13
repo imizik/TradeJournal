@@ -99,7 +99,7 @@ test("the centre opens on the open thread's chart beside the conversation, and i
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
   await expect(pane.getByRole("img", { name: /NBIS today: 2-minute candles/ })).toBeVisible();
   await page.waitForTimeout(200);
-  expect(reads).toEqual(["GET chart"]); // the timeline waits
+  expect(reads).toEqual(["GET chart", "GET news"]); // the timeline waits; the headlines are read with the chart
 
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
   const timeline = pane.getByRole("list", { name: "Timeline" });
@@ -110,7 +110,7 @@ test("the centre opens on the open thread's chart beside the conversation, and i
   // Today's rows by the New York clock, an earlier one by its day.
   await expect(timeline.getByRole("listitem").first().locator("time")).toHaveText(/^\d{2}:\d{2}$/);
   await expect(timeline.getByRole("listitem").last().locator("time")).toHaveText(/^[A-Z][a-z]{2} \d{1,2}$/);
-  expect(reads).toEqual(["GET chart", "GET timeline"]); // reads only, nothing posted
+  expect(reads).toEqual(["GET chart", "GET news", "GET timeline"]); // reads only, nothing posted
   await pane.screenshot({ path: test.info().outputPath("desk-centre-timeline.png") });
 });
 
@@ -152,7 +152,7 @@ test("the chart draws the plan's lines, the fills, pings, Radar and the time sto
   await expect(pane.getByRole("img", { name: /NBIS the last few months: daily candles/ })).toBeVisible();
   await pane.getByRole("button", { name: "Reset" }).click();
   expect(timeframes).toEqual(["2m", "15m", "1D"]);
-  expect(reads).toEqual(["GET chart", "GET chart", "GET chart"]); // reads only
+  expect(reads).toEqual(["GET chart", "GET news", "GET chart", "GET news", "GET chart"]); // reads only; 1D reads no headlines
 
   // The choice holds for the tab's session: back on the desk, the chart opens on 1D.
   await page.reload();
@@ -207,7 +207,7 @@ test("a symbol opened with no saved conversation charts it by the symbol", async
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
   await expect(pane.getByRole("list", { name: "Timeline" }).getByRole("listitem")).toHaveText([/Bought 5 NBIS stock at 94.20.*the open position/]);
-  expect(reads).toEqual(["GET chart", "GET timeline"]); // reads only, nothing posted
+  expect(reads).toEqual(["GET chart", "GET news", "GET timeline"]); // reads only, nothing posted
 });
 
 test("with no ticker the centre charts the market, and This week sits folded at the foot of the thread list", async ({ page }) => {

@@ -14,7 +14,7 @@ import { Flash } from "@/components/copilot/Ticks";
 import { ChartEventMarks, chartEvents, earningsHeader, eventLogical, nyDayOf } from "@/components/copilot/ChartEvents";
 import { ChartNewsMarks, newsWhen, useChartNews } from "@/components/copilot/ChartNews";
 import { cn } from "@/lib/utils";
-import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type DeskChartMark, type DeskStudySeries, type DeskTimeframe } from "@/lib/desk";
+import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type DeskChartNews, type DeskChartMark, type DeskStudySeries, type DeskTimeframe } from "@/lib/desk";
 
 /*
  * The cockpit centre's chart (docs/copilot-lab.md § The desk): the selected symbol's candles from the desk's chart read
@@ -413,6 +413,11 @@ export function ReadingLine({ data, fallback = null, live = null }: {
   );
 }
 
+/** The News toggle's tooltip: why there are none, or from when the markers are complete. */
+const newsTitle = (news: DeskChartNews): string =>
+  news.state !== "ok" ? news.reason ?? "Hide News"
+    : news.complete_from ? `Hide News. Only the newest headlines were read: any before ${newsWhen(news.complete_from, news.as_of)} are not marked.` : "Hide News";
+
 /** The chart for ``id`` (a thread, ``symbol:X`` or ``market``) on ``timeframe``. ``refreshKey`` reads it again. ``onRead``
  * hears each read shown (the reading line); ``actions`` lets the level menu's Plan and Ask reach the desk. */
 export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, actions, live: now = null }: {
@@ -731,7 +736,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           const on = isOn(choices, timeframe, study);
           return (
             <button key={study} type="button" aria-pressed={on} onClick={() => toggle(study)} data-testid={`desk-study-${study}`}
-              title={study === "news" && on && news && news.state !== "ok" && news.reason ? news.reason : `${on ? "Hide" : "Show"} ${STUDY[study].name}`}
+              title={study === "news" && on && news ? newsTitle(news) : `${on ? "Hide" : "Show"} ${STUDY[study].name}`}
               className={`min-h-11 shrink-0 rounded px-1.5 hover:bg-secondary sm:min-h-0 sm:py-0.5 ${on ? "" : "text-muted-foreground/60 line-through"}`}
               style={on ? { color: STUDY[study].color } : undefined}>
               {STUDY[study].name}{on && value(study) ? <span className="text-foreground/80"> {value(study)}</span> : null}

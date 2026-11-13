@@ -584,7 +584,9 @@ export type DeskNewsItem = { at: number; before: boolean; session: "regular" | "
 export type DeskNewsGroup = { time: number; count: number; items: DeskNewsItem[]; emphasis: boolean;
   move: { start: number; end: number; pct: number; range_pct: number } | null };
 export type DeskChartNews = { symbol: string | null; timeframe: DeskTimeframe; as_of: number; state: "ok" | "none" | "hidden" | "unavailable";
-  reason: string | null; source?: string; groups: DeskNewsGroup[] };
+  reason: string | null; source?: string; groups: DeskNewsGroup[];
+  /** Set when the one page of newest headlines was full: headlines before this time may be missing. */
+  complete_from?: number | null };
 
 export async function getDeskChartNews(id: string, timeframe: DeskTimeframe, signal?: AbortSignal): Promise<DeskChartNews> {
   return deskRead<DeskChartNews>(id, `news?timeframe=${encodeURIComponent(timeframe)}`, signal);
