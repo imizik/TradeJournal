@@ -93,6 +93,8 @@ export type Proposal = { id: string; client_id?: string; outcome?: ProposalOutco
   | { kind: "memory"; memory_kind: "statement" | "thesis" | "preference" | "lesson"; symbol: string | null; text: string; interpretation?: string }
   | { kind: "trade_plan"; symbol: string; direction: "long" | "short"; instrument: "stock" | "calls" | "puts"; contract: string | null;
       thesis: string; entry_trigger: PlanLevel; invalidation: PlanLevel; time_stop: string | null; size_note: string | null;
+      /** The underlying's profit target; absent on a draft without one (and on every card drafted before targets). */
+      target_price?: number;
       last?: number; as_of?: string | number | null }
   | { kind: "practice"; text: string; measure: PracticeMeasure; label: string; target: number | null; why: string });
 /** ``confirmed``: Confirm ran (``note``: what it said; ``text``: the words a memory or practice saved; a plan card's
@@ -100,7 +102,7 @@ export type Proposal = { id: string; client_id?: string; outcome?: ProposalOutco
  * page: restoring one creates nothing. */
 export type ProposalOutcome = { state: "confirmed" | "dismissed"; note?: string; text?: string;
   parts?: Partial<Record<"plan" | "entry" | "invalidation" | "timeStop", { state: "done" | "failed"; text: string }>>;
-  fields?: { thesis: string; contract: string; entry: string; invalidation: string; time_stop: string; size_note: string; horizon?: "" | "day" | "swing" | "long" } };
+  fields?: { thesis: string; contract: string; entry: string; invalidation: string; target?: string; time_stop: string; size_note: string; horizon?: "" | "day" | "swing" | "long" } };
 export type PlanLevel = { condition: "touches" | "crosses" | "closes_beyond"; price: number; interval: string | null };
 
 /** One line per card for the history sent with the next message (never shown): what the card proposed and what the
@@ -659,7 +661,7 @@ export function readDrawn(value: string): DrawnPlan | null {
 }
 /** Sent on the window when a plan card is confirmed (its plan saved), so Charts can label the levels it was drawn from. */
 export const PLAN_CONFIRMED = "tradejournal:plan-confirmed";
-export type PlanConfirmed = { symbol: string; side: "long" | "short"; entry: number; invalidation: number; drawn: DrawnPlan | null };
+export type PlanConfirmed = { symbol: string; side: "long" | "short"; entry: number; invalidation: number; target?: number | null; drawn: DrawnPlan | null };
 
 /** What prompted a plan, carried by a deep link as `origin=<kind>[:<ref>]` (docs/copilot-lab.md § Origin). */
 export type LinkOrigin = { kind: OriginKind; ref: string | null };
@@ -765,6 +767,8 @@ export type PlanBoardLevel = { price: number; condition: string; interval: strin
 export type PlanBoardRow = {
   investigation_id: string; symbol: string; direction: "long" | "short" | null; thesis: string | null; last: number | null;
   entry: PlanBoardLevel | null; invalidation: PlanBoardLevel | null;
+  /** The plan's saved profit target on the underlying (no alert is armed at it); null without one, absent from an older backend. */
+  target?: number | null;
   time_stop: { text: string; due_at: number; state: string } | null;
   position: "in_position" | "closed" | "fill_to_link" | "waiting";
 };
@@ -872,7 +876,7 @@ export const listTimeStops = (investigationId: string, signal?: AbortSignal) =>
  * capture linking suggests it for the trade when the fill arrives. ``clientId`` is minted once per card, so a retried
  * save returns the first plan instead of making a second. */
 export const savePlanCapture = ({ investigation_id, ...body }: { client_id: string; underlying: string; account_id: string; side: CaptureSide;
-  wording: string; note: string; investigation_id: string | null; origin: CaptureOrigin }) =>
+  wording: string; note: string; investigation_id: string | null; origin: CaptureOrigin; target_price?: number | null }) =>
   request<Capture>("/charts/captures", { method: "POST", body: JSON.stringify({
     ...body, client_captured_at: Date.now(), mode: "discretionary", setup_label: "Copilot plan",
     // The investigation rides in the context, so the one-tap link page can open it after linking.

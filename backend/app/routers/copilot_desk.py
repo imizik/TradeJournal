@@ -446,6 +446,9 @@ def _book(row: dict, plan: dict | None, flagged: dict | None) -> dict:
             "days_held": row.get("days_held"), "track": track,
             "state": _book_state(kinds, planned, gave_back, row.get("unrealized_usd")), "planned": planned,
             "stop_pct": level.get("distance_pct") if level and level.get("state") == "armed" else None,
+            # The plan's two exits on the underlying, for the closing ticket (``frontend/lib/closingTicket.ts``): the
+            # invalidation (armed or hit) and the saved target; None without them.
+            "plan_levels": {"stop": level.get("price") if level else None, "target": (plan or {}).get("target")},
             "tick": _tick(row), "option": _option_terms(row)}
 
 

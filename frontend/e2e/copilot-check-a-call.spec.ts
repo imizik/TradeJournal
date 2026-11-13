@@ -66,7 +66,7 @@ test("a pasted call shows what was read, the card, Plan it into the plan flow an
   expect(link.pathname).toBe("/copilot-lab");
   expect(link.searchParams.get("origin")).toBe(`checked_call:${ID}`);
   expect(link.searchParams.get("context")).toBe(
-    "Plan a trade: QQQ 660 put 11/11 (0DTE), from a Discord call I checked (my stop 664). My own entry trigger, invalidation and time stop:");
+    "Plan a trade: QQQ 660 put 11/11 (0DTE), from a Discord call I checked (my stop 664). My own entry trigger, invalidation, target and time stop:");
   for (const word of ["ticket", "buy", "sell", "take it"]) expect((await card.textContent())!.toLowerCase()).not.toContain(word);
 
   await card.getByTestId("call-check-pass").click();

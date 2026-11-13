@@ -35,7 +35,7 @@ import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type 
 
 const ET = "America/New_York";
 const REFRESH_MS = 60_000;
-const COLOR = { fill: "#e9a23b", ping: "#a78bfa", radar: "#60a5fa", entry: "#7db3f0", invalidation: "#fca5a5", stop: "#a1a1aa",
+const COLOR = { fill: "#e9a23b", ping: "#a78bfa", radar: "#60a5fa", entry: "#7db3f0", invalidation: "#fca5a5", target: "#86efac", stop: "#a1a1aa",
   alert: "#f4c66bb0", reference: "#9a9aa3a0", pick: "#e4e4e7" };
 
 /** The studies each timeframe offers, in the legend's order; ``levels`` is the previous close and the pre-market high
@@ -354,11 +354,11 @@ const lastText = (last: number | null) => last === null ? "" : `, last ${last.to
 export function planFromHere(symbol: string, timeframe: DeskTimeframe, last: number | null, level: number, role: "entry" | "invalidation"): string {
   const head = `Plan a trade: ${symbol} from the desk's ${timeframe} chart${lastText(last)}.`;
   if (role === "entry") {
-    const text = `${head} Entry trigger ${level.toFixed(2)} (a level I picked on the chart). Draft the invalidation and the plan around it; argue if it is wrong.`;
+    const text = `${head} Entry trigger ${level.toFixed(2)} (a level I picked on the chart). Draft the invalidation, a target if there is an honest one, and the plan around it; argue if it is wrong.`;
     return copilotLabHref(symbol, text.slice(0, CONTEXT_MAX), { kind: "chart", ref: null });
   }
   const side: DrawnPlan["side"] = last !== null && level > last ? "short" : "long";
-  const text = `${head} Invalidation ${level.toFixed(2)} (a level I picked on the chart), a ${side}. Draft the entry trigger and the plan around it; argue if it is wrong.`;
+  const text = `${head} Invalidation ${level.toFixed(2)} (a level I picked on the chart), a ${side}. Draft the entry trigger, a target if there is an honest one, and the plan around it; argue if it is wrong.`;
   return copilotLabHref(symbol, text.slice(0, CONTEXT_MAX), { kind: "chart", ref: null }, { side, trigger: null, invalidation: cents(level) });
 }
 

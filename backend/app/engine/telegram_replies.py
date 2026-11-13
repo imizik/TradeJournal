@@ -921,6 +921,8 @@ def plan_text(card: dict, now: float | None = None) -> str:
              f"Thesis: {card.get('thesis') or ''}".rstrip(),
              f"Entry: {_level(card['entry_trigger'])}",
              f"Invalidation: {_level(card['invalidation'])}"]
+    if card.get("target_price"):
+        lines.append(f"Target: {card['target_price']:,.2f}")
     if card.get("time_stop"):
         lines.append(f"Time stop: {card['time_stop']}")
     lines.append(f"Horizon: {HORIZON_LABEL[_horizon(card, time.time() if now is None else now)]}")
@@ -1002,13 +1004,16 @@ def confirm_plan(engine, client_id: str, *, quote=None, now: float | None = None
 
         if "plan" in todo:
             side = PLAN_CAPTURE_SIDE.get((card["direction"], card["instrument"]), "")
+            target = card.get("target_price")
             wording = " ".join(filter(None, [f"Entry: {_level(card['entry_trigger'])}.", f"Invalidation: {_level(card['invalidation'])}.",
-                                             stop_text and f"Time stop: {stop_text}.", size and f"Size: {size}."]))[:400]
+                                             target and f"Target: {target:g}.", stop_text and f"Time stop: {stop_text}.",
+                                             size and f"Size: {size}."]))[:400]
             note = " ".join(filter(None, [f"Thesis: {(card.get('thesis') or '').strip()}",
                                           card.get("contract") and f"Contract: {card['contract']}.", "From a Copilot Lab plan card."]))[:500]
             try:  # the desk's savePlanCapture body, then its saveHorizon
                 captures.save(db, captures.build(db, {
                     "client_id": client_id, "underlying": symbol, "account_id": account, "side": side, "wording": wording, "note": note,
+                    "target_price": card.get("target_price"),
                     "client_captured_at": now * 1000, "mode": "discretionary", "setup_label": "Copilot plan", "image": False,
                     "origin": {"kind": "copilot", "ref": thread_id, "text": None},
                     "context": {"state": "unavailable", "reason": "Saved from a Copilot Lab plan card.", "investigation_id": thread_id}}))
@@ -1052,7 +1057,7 @@ def confirm_plan(engine, client_id: str, *, quote=None, now: float | None = None
         fields = investigations.PlanFields(
             thesis=(card.get("thesis") or "")[:300], contract=(card.get("contract") or "")[:80],
             entry=f"{card['entry_trigger']['price']:g}"[:24], invalidation=f"{card['invalidation']['price']:g}"[:24],
-            time_stop=stop_text[:80], size_note=size[:120], horizon=horizon)
+            target=f"{card['target_price']:g}"[:24] if card.get("target_price") else None, time_stop=stop_text[:80], size_note=size[:120], horizon=horizon)
         investigations.set_outcome(thread_id, card["id"], investigations.ProposalOutcome(
             state="confirmed", note=f"{FROM_TELEGRAM_NOTE}.",
             parts={part: investigations.PartResult(**r) for part, r in results.items()}, fields=fields), session=db)

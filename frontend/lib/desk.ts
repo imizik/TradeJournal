@@ -112,6 +112,9 @@ export type DeskBook = {
   /** Robinhood's working orders and today's fills on this contract (``_order_lines`` in copilot_desk.py); absent when
    * there are none or the order-history read is off, signed out or stale. */
   orders?: DeskOrder[];
+  /** The plan's two exits on the underlying (its invalidation and saved target; null without one), for the closing
+   * ticket (``lib/closingTicket.ts``). Absent from an older backend. */
+  plan_levels?: { stop: number | null; target: number | null };
 };
 
 /** One Robinhood order on the desk (docs/robinhood-order-fills.md § On the desk): still working (``working``, with what
@@ -553,7 +556,7 @@ export type DeskChartData = {
   /** The reading line: the newest price (``daily``: a daily candle's, so its time is a date), the previous session's
    * close, and the RTH VWAP and RVol as of the newest regular-session minute. */
   reading: { last: number; at: number; daily: boolean; prev_close: number | null; vwap: number | null; vwap_at: number | null; rvol: number | null } | null;
-  levels: { role: "entry" | "invalidation"; price: number; label: string; id?: string }[];
+  levels: { role: "entry" | "invalidation" | "target"; price: number; label: string; id?: string }[];
   /** The symbol's other armed level alerts; one from a plan is not removable here. */
   alerts: DeskChartAlert[];
   marks: DeskChartMark[];

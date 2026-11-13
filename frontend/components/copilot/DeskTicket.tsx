@@ -5,6 +5,7 @@ import { Check, Copy } from "lucide-react";
 import SetupRecordLines, { premiumLine } from "@/components/copilot/SetupRecordLines";
 import { apiUrl } from "@/lib/api";
 import { getSymbolLoop, type SetupRecord } from "@/lib/copilot";
+import type { ClosingTicket } from "@/lib/closingTicket";
 import { cn } from "@/lib/utils";
 
 /**
@@ -12,7 +13,9 @@ import { cn } from "@/lib/utils";
  * with its own Copy, and Copy all in the order Robinhood's option order screen asks for them. It copies and never sends:
  * this file reads two GET routes and the clipboard, and the MCP account's Send button is drawn disabled with no handler.
  * A ticket opens only from a saved plan (``openTicket`` from a confirmed plan card, a plan thread's header, a book row,
- * or this tab's list of armed plans not yet entered).
+ * or this tab's list of armed plans not yet entered). A closing ticket (``openClosingTicket``, the held option's "Close
+ * at target" / "Close at stop") is filled in the browser from the book row (``lib/closingTicket.ts``): a sell to close
+ * of the contracts held with an estimated limit; it reads nothing and has no Send button at all.
  */
 
 export const TICKET_EVENT = "tradejournal:open-ticket";
@@ -27,6 +30,11 @@ export type TicketPick = { expiry: string; strike: number };
 export function openTicket(investigationId: string, pick?: TicketPick) {
   const handled = !window.dispatchEvent(new CustomEvent(TICKET_EVENT, { detail: { investigationId, pick }, cancelable: true }));
   if (!handled) window.location.assign(`/copilot-lab?ticket=${encodeURIComponent(investigationId)}`);
+}
+
+/** Opens a closing ticket on the desk's Ticket tab. Its buttons live only on the desk, which handles the event. */
+export function openClosingTicket(close: ClosingTicket) {
+  window.dispatchEvent(new CustomEvent(TICKET_EVENT, { detail: { close }, cancelable: true }));
 }
 
 export type TicketPlan = {
@@ -99,8 +107,8 @@ function hasRecord(setup: SetupRecord | null, side: "call" | "put") {
 }
 
 /** What Copy all puts on the clipboard: Robinhood's option order screen, top to bottom. */
-export function copyAllText(t: { symbol: string; type: "call" | "put"; expiry: string; strike: number; limit: string; contracts: string }) {
-  return [t.symbol, `Buy · ${kindWord(t.type)}`, `Expiration ${shortDate(t.expiry)}`, `Strike $${t.strike}`,
+export function copyAllText(t: { symbol: string; type: "call" | "put"; expiry: string; strike: number; limit: string; contracts: string; action?: "Buy" | "Sell" }) {
+  return [t.symbol, `${t.action ?? "Buy"} · ${kindWord(t.type)}`, `Expiration ${shortDate(t.expiry)}`, `Strike $${t.strike}`,
     `Limit price ${t.limit || "(set it)"}`, `Contracts ${t.contracts || "(set it)"}`].join("\n");
 }
 
@@ -147,10 +155,14 @@ function Row({ name, children, copy }: { name: string; children: React.ReactNode
 }
 
 /** The Ticket tab: the open ticket, else the list of saved plans a ticket can open, else what to do with none. */
-export default function DeskTicket({ plans, failed, open, pick = null, onOpen, onClose, onPlaced, onPlan }: {
+export default function DeskTicket({ plans, failed, open, pick = null, close = null, onOpen, onClose, onPlaced, onPlan }: {
   plans: TicketPlan[] | null; failed: boolean; open: string | null; pick?: TicketPick | null; onOpen(investigationId: string): void; onClose(): void;
+  /** A closing ticket from a held option's plan; it takes the tab over an open plan ticket. */
+  close?: ClosingTicket | null;
   onPlaced(symbol: string): void; onPlan(): void;
 }) {
+  // Each click is a fresh ticket (a new mark or stock price re-fills the limit), keyed on what it was priced from.
+  if (close) return <ClosingView key={`${close.symbol}|${close.expiry}|${close.strike}|${close.at}|${close.stock}|${close.mark}`} ticket={close} onClose={onClose} onPlaced={onPlaced} />;
   if (open) return <TicketView key={`${open}|${pick?.expiry ?? ""}|${pick?.strike ?? ""}`} investigationId={open} initialPick={pick} onClose={onClose} onPlaced={onPlaced} />;
   return (
     <div data-testid="desk-ticket" className="space-y-3">
@@ -364,6 +376,67 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
         </div>
       )}
       {foot(true)}
+    </div>
+  );
+}
+
+/**
+ * A closing ticket: a sell to close of the contracts held, with the limit estimated for the stock at the plan's level
+ * and today's mark beside it. Filled in the browser from the book row; it copies and never sends (no Send button).
+ */
+function ClosingView({ ticket: t, onClose, onPlaced }: { ticket: ClosingTicket; onClose(): void; onPlaced(symbol: string): void }) {
+  const [limit, setLimit] = useState(t.estimate.toFixed(2));
+  const [qty, setQty] = useState(String(t.contracts));
+  const limitN = limit.trim() && Number(limit) > 0 ? Number(limit) : null;
+  const qtyN = /^\d+$/.test(qty.trim()) && Number(qty) > 0 ? Number(qty) : null;
+  const label = `${t.symbol} $${t.strike} ${kindWord(t.side)} ${shortDate(t.expiry)}`;
+  const where = t.at === "target" ? "target" : "stop (invalidation)";
+  const all = copyAllText({ symbol: t.symbol, type: t.side, expiry: t.expiry, strike: t.strike, action: "Sell",
+    limit: limitN !== null ? limitN.toFixed(2) : "", contracts: qtyN ? String(qtyN) : "" });
+  const signed = (n: number) => `${n < 0 ? "−" : "+"}${Math.abs(n).toFixed(2)}`;
+  const field = "w-24 rounded border bg-background px-2 py-1.5 text-base tabular-nums sm:text-sm";
+  return (
+    <div data-testid="desk-ticket" data-closing={t.at} className="space-y-3">
+      <div className="space-y-1">
+        <p className="text-sm"><span className="font-semibold">{t.symbol}</span><span className="text-muted-foreground"> · Close at {where}, {t.level.toFixed(2)}</span></p>
+        <p className="text-xs text-muted-foreground">A closing sell of the {t.contracts} contract{t.contracts === 1 ? "" : "s"} you hold, priced for {t.symbol} at your plan&apos;s {t.at}. It copies; it never sends.</p>
+      </div>
+      <div className="rounded-lg border bg-card px-3 py-1.5">
+        <Row name="Account"><span>{t.account}</span></Row>
+        <Row name="Action" copy={<CopyButton text="Sell to close" label="action" />}><span className="font-medium">Sell to close</span></Row>
+        <Row name="Contract" copy={<CopyButton text={label} label="contract" />}><span className="font-mono tabular-nums">{label}</span></Row>
+        <Row name="Quantity" copy={<CopyButton text={qtyN ? String(qtyN) : ""} label="quantity" disabled={!qtyN} />}>
+          <input aria-label="Quantity in contracts" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/[^\d]/g, "").slice(0, 4))} placeholder="set it" className={field} />
+          <span className="block text-xs text-muted-foreground">You hold {t.contracts}.</span>
+        </Row>
+        <Row name="Limit price" copy={<CopyButton text={limitN !== null ? limitN.toFixed(2) : ""} label="limit price" disabled={limitN === null} />}>
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <input aria-label="Limit price per share" inputMode="decimal" value={limit} onChange={e => setLimit(e.target.value.replace(/[^\d.]/g, "").replace(/^(\d{0,6}(?:\.\d{0,2})?).*$/, "$1"))} placeholder="set it" className={field} />
+            <span data-testid="closing-mark" className="text-xs tabular-nums text-muted-foreground">Mark now {t.mark.toFixed(2)}{t.markLive ? "" : " (last read)"}</span>
+          </span>
+          <span data-testid="closing-estimate" className="block text-xs text-amber-300">
+            {t.past
+              ? <>{t.symbol} is already {t.at === "stop" ? "through your stop" : "past your target"} ({t.stock.toFixed(2)}{t.stockAt ? `, ${clock(t.stockAt)}` : ""} against {t.level.toFixed(2)}): the limit starts at today&apos;s mark, not a price for the level. Set your own.</>
+              : <>Estimate, not a quote: if {t.symbol} reaches {t.level.toFixed(2)} (now {t.stock.toFixed(2)}{t.stockAt ? `, ${clock(t.stockAt)}` : ""}), the mark {t.mark.toFixed(2)} {signed(t.delta * (t.level - t.stock))} by its delta {signed(t.delta)}{t.floored ? `, raised to ${t.estimate.toFixed(2)}, its least value there (worth at expiry, or a cent)` : ` ≈ ${t.estimate.toFixed(2)}`}. Time, IV and the spread move it; set your own.</>}
+          </span>
+        </Row>
+        <Row name="When to place it">
+          <span data-testid="closing-when" className="text-xs">
+            {t.past ? `${t.symbol} is already there: placed now, a sell at about today's mark closes it now.`
+              : t.at === "stop" ? `Place it only once ${t.symbol} is at ${t.level.toFixed(2)}. This limit is under today's mark ${t.mark.toFixed(2)}, and a sell limit under the bid fills at once, at about the bid: placed early, it closes the position now, not at your stop.`
+              : `It can wait in Robinhood as a limit: it fills only if the option trades up to it. If ${t.symbol} gets there faster or slower than the estimate assumes, the option may not reach it.`}
+          </span>
+        </Row>
+        <Row name="Proceeds"><span className="tabular-nums">{limitN !== null && qtyN ? `about ${usd(limitN * t.multiplier * qtyN)} at this limit` : "—"}</span></Row>
+      </div>
+      <div className="space-y-2">
+        <CopyButton text={all} label="Copy all for Robinhood" wide />
+        <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {t.symbol}, your {kindWord(t.side).toLowerCase()} position, Sell, then enter each field. Nothing is sent from here.</p>
+      </div>
+      <div className="flex flex-wrap gap-2 border-t pt-3">
+        <button type="button" onClick={() => onPlaced(t.symbol)} className="inline-flex min-h-11 items-center rounded-md border px-3 text-xs font-medium hover:bg-secondary sm:min-h-8">I placed it</button>
+        <button type="button" onClick={onClose} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Not now</button>
+      </div>
     </div>
   );
 }

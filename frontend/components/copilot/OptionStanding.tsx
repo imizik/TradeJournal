@@ -5,7 +5,8 @@
  * days left, value at expiry if the stock stays put against value now, decay a day, the dollar move per $1 in the stock
  * and IV, with a small P&L-at-expiry line. The arithmetic is ``lib/optionStanding.ts``; this only lays it out. The
  * stock-price figures move with the desk's live prices (``lib/deskTicks.ts``); the Greeks are the book read's. Facts
- * only: nothing here tells the owner to buy, sell or hold.
+ * only: nothing here tells the owner to buy, sell or hold. With a plan, "Close at target" / "Close at stop" open the
+ * Ticket as a closing sell to copy (``lib/closingTicket.ts``); they are absent when any input is missing.
  */
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
@@ -17,6 +18,8 @@ import {
   whatIfCurve, whatIfModel, whatIfRange, worthNow, type ExpiryCurve, type OptionGreeks, type Standing,
   type WhatIfModel,
 } from "@/lib/optionStanding";
+import { CLOSING_LABEL, closingTicket, type ClosingAt, type ClosingTicket } from "@/lib/closingTicket";
+import { openClosingTicket } from "@/components/copilot/DeskTicket";
 import { Flash } from "@/components/copilot/Ticks";
 import { cn } from "@/lib/utils";
 
@@ -80,8 +83,35 @@ function useStanding(row: DeskThread, rows: readonly DeskThread[], fallback: { l
   if (mixedStructure(row.symbol, terms, rows.map(r => ({ symbol: r.symbol, option: r.book?.option })))) return "unknown" as const;
   const live = tickFor(ticks, row.symbol);
   const stock = live ? { last: live.last, at: live.at, live: !live.stale } : fallback ? { ...fallback, live: false } : null;
-  const standing = optionStanding(terms, { price: stock?.last, worth: worthNow(book, ticks), day: todayNewYork() });
-  return standing ? { standing, stock, terms } : terms.direction === "long" ? "incomplete" as const : "unknown" as const;
+  const worth = worthNow(book, ticks);
+  const standing = optionStanding(terms, { price: stock?.last, worth, day: todayNewYork() });
+  if (!standing) return terms.direction === "long" ? "incomplete" as const : "unknown" as const;
+  // The plan's exits as closing tickets: each only with every input it needs (``closingTicket``), else no button.
+  const optionTick = book.tick ? tickFor(ticks, book.tick.quote) : null;
+  // Robinhood's label and masked number (a matched row): the journal's account name never leaves the server here.
+  const account = book.account ? `${book.account.label}${book.account.masked ? ` ${book.account.masked}` : ""}` : null;
+  const closing = (["target", "stop"] as ClosingAt[]).flatMap((at): ClosingTicket[] => {
+    const ticket = closingTicket({ symbol: row.symbol, at, terms, levels: book.plan_levels, account, worth,
+      stock: stock ? { last: stock.last, at: stock.at } : null, markLive: !!optionTick && !optionTick.stale });
+    return ticket ? [ticket] : [];
+  });
+  return { standing, stock, terms, closing };
+}
+
+/** "Close at target" and "Close at stop": each opens the desk's Ticket as a closing sell to copy into Robinhood. */
+function CloseButtons({ closing, className }: { closing: ClosingTicket[]; className?: string }) {
+  if (!closing.length) return null;
+  return (
+    <span data-testid="close-from-plan" className={cn("inline-flex flex-wrap gap-1.5", className)}>
+      {closing.map(t => (
+        <button key={t.at} type="button" onClick={() => openClosingTicket(t)}
+          title={`A closing sell of your ${t.contracts} contract${t.contracts === 1 ? "" : "s"} on the Ticket, priced for ${t.symbol} at ${priceText(t.level)}. Nothing is sent.`}
+          className="inline-flex min-h-11 items-center rounded-md border px-2.5 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-7">
+          {CLOSING_LABEL[t.at]}
+        </button>
+      ))}
+    </span>
+  );
 }
 
 const INCOMPLETE = "Break-even and Greeks not shown: the book is missing this contract's side, strike, expiry or size.";
@@ -108,7 +138,7 @@ export function OptionStanding({ row, rows, fallback = null, levels = {}, earnin
   const [open, setOpen] = useWhatIfOpen();
   if (read === null) return null;
   if (read === "unknown" || read === "incomplete") return <p data-testid="option-standing" className="text-xs text-muted-foreground">{read === "unknown" ? UNKNOWN : INCOMPLETE}</p>;
-  const { standing: s, stock } = read;
+  const { standing: s, stock, closing } = read;
   const dim = !!stock && !stock.live;
   const greeks = greeksLine(s.greeks);
   const missing = [s.decayPerDay === null && "decay", s.perDollar === null && "delta", s.ivPct === null && "IV"].filter((part): part is string => !!part);
@@ -144,6 +174,7 @@ export function OptionStanding({ row, rows, fallback = null, levels = {}, earnin
             className="min-h-11 rounded px-1 text-[11px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground sm:min-h-0">
             What if…{open ? " ▴" : " ▾"}
           </button>)}
+      <CloseButtons closing={closing} />
     </div>
     {open && what && !("reason" in what) && (
       <OptionWhatIf key={`${row.key}:${read.terms.strike}:${read.terms.expiry}`} model={what} symbol={row.symbol ?? ""}
@@ -155,7 +186,7 @@ export function OptionStanding({ row, rows, fallback = null, levels = {}, earnin
 
 // --------------------------------------------------------------------------- what if
 
-/** The plan's levels on the underlying, from the desk chart's read; a plan saves no target today. */
+/** The plan's levels on the underlying, from the desk chart's read: entry, invalidation and the optional saved target. */
 export type PlanLevels = { entry?: number | null; stop?: number | null; target?: number | null };
 
 const OPEN_KEY = "desk.whatIf.open";
@@ -221,7 +252,7 @@ function OptionWhatIf({ model: m, symbol, breakEven, levels, earnings }: {
   return (
     <div data-testid="what-if" className="space-y-2 rounded border border-border/60 p-2 text-xs tabular-nums">
       <div className="flex flex-wrap gap-1.5">
-        {preset(levels.target ? `At my target ${priceText(levels.target)}` : "At my target", levels.target ? null : "Your plan saves an entry and a stop, no target",
+        {preset(levels.target ? `At my target ${priceText(levels.target)}` : "At my target", levels.target ? null : "This plan has no target: add one on its plan card",
           () => { setChosen(clampPrice(levels.target!)); setCrush(false); }, "what-if-target")}
         {preset(levels.stop ? `At my stop ${priceText(levels.stop)}` : "At my stop", levels.stop ? null : "No stop saved in a plan for this position",
           () => { setChosen(clampPrice(levels.stop!)); setCrush(false); }, "what-if-stop")}
@@ -321,7 +352,7 @@ export function OptionStandingLine({ row, rows, fallback = null }: {
 }) {
   const read = useStanding(row, rows, fallback);
   if (read === null || read === "unknown" || read === "incomplete") return null;
-  const { standing: s, stock } = read;
+  const { standing: s, stock, closing } = read;
   const parts: string[] = [];
   if (s.breakEven !== null) parts.push(`BE ${priceText(s.breakEven)}${s.toBreakEven ? ` ${s.toBreakEven.past ? "passed" : pct(s.toBreakEven.pct)}` : ""}`);
   if (s.timeValue !== null && s.timeValue >= 0) parts.push(`${dollars(s.timeValue)} time value`);
@@ -330,8 +361,11 @@ export function OptionStandingLine({ row, rows, fallback = null }: {
   if (s.ivPct !== null) parts.push(`IV ${s.ivPct.toFixed(0)}%`);
   if (!s.greeks) parts.push("Greeks unavailable");
   return (
-    <p data-testid="book-standing" className={cn("truncate px-3 pb-1.5 text-[11px] tabular-nums text-muted-foreground", stock && !stock.live && "opacity-70")}>
-      {parts.join(" · ")}
-    </p>
+    <>
+      <p data-testid="book-standing" className={cn("truncate px-3 pb-1.5 text-[11px] tabular-nums text-muted-foreground", stock && !stock.live && "opacity-70")}>
+        {parts.join(" · ")}
+      </p>
+      <CloseButtons closing={closing} className="px-3 pb-2" />
+    </>
   );
 }

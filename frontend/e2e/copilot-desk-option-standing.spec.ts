@@ -160,7 +160,7 @@ test("What if…: folded by default and remembered; presets, sliders and the est
   await expect(panel).toContainText("stop 240.00");
   await expect(panel).toContainText("break-even at expiry 256.20");
   await expect(panel.getByTestId("what-if-target")).toBeDisabled();
-  await expect(panel.getByTestId("what-if-target")).toHaveAttribute("title", "Your plan saves an entry and a stop, no target");
+  await expect(panel.getByTestId("what-if-target")).toHaveAttribute("title", "This plan has no target: add one on its plan card");
 
   // At my stop, today: the stock at 240 prices the call near 1.79 at the mark's 38.7% IV, 2 x 179 = $357, P&L −$883.
   await panel.getByTestId("what-if-stop").click();

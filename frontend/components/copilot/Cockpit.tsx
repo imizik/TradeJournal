@@ -481,7 +481,8 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
       <ReadingLine symbol={symbol ?? "QQQ"} data={reading} fallback={fallback} live={live} />
       {row?.book?.option && <OptionStanding row={row} rows={rows}
         fallback={reading?.state === "ok" && reading.reading ? { last: reading.reading.last, at: reading.reading.at } : sparkPrice(sparks, symbol)}
-        levels={{ entry: reading?.levels.find(l => l.role === "entry")?.price, stop: reading?.levels.find(l => l.role === "invalidation")?.price }}
+        levels={{ entry: reading?.levels.find(l => l.role === "entry")?.price, stop: reading?.levels.find(l => l.role === "invalidation")?.price,
+          target: reading?.levels.find(l => l.role === "target")?.price }}
         earnings={symbol ? earnings?.rows[symbol]?.date ?? null : null} />}
       <PositionEarnings row={row} earnings={earnings} />
       <div className="flex items-center gap-1">

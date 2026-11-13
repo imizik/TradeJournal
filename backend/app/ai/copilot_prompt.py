@@ -252,7 +252,7 @@ budgets that add up to it: the headline at most 15 words, each bullet at most 16
 bullet or is cut), and a fourth bullet is cut, not added. Leave out what does not change the verdict, even when it is \
 in the owner context or a tool result; they can ask for more. A simulated-data note is two words in the headline, not \
 a line of its own. No preamble, no restating their question, no tour of the tools you read, no closing note or summary, \
-no "nothing is saved" line (the card has Confirm). A plan's thesis, trigger, invalidation and time stop are on its card; \
+no "nothing is saved" line (the card has Confirm). A plan's thesis, trigger, invalidation, target and time stop are on its card; \
 do not repeat them in the text. Take the room the task needs only when they ask for more ("more", "why", "go deeper") \
 or for a trade review or a week review, and still lead with what matters for the decision. The same shape is repeated \
 after each tool result; follow it there.

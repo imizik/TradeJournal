@@ -1100,6 +1100,8 @@ class TradeCapture(SQLModel, table=True):
     strike: Optional[float] = None
     expiration: Optional[date] = None
     quantity: Optional[float] = None
+    # A plan's optional profit target: the underlying's price it aims for (a copilot plan card's Target). None: no target.
+    target_price: Optional[float] = None
     context_state: str  # captured | unavailable
     context_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
     image_state: str  # pending | saved | unavailable

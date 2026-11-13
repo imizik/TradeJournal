@@ -642,7 +642,7 @@ def plan_context(check: dict) -> str:
                                       expiry_words(r.get("expiry"), check.get("day"))]))
     levels = "; ".join(f"posted {key} {_fmt(r[key])}" for key in ("entry", "stop", "target") if r.get(key))
     text = f"Plan a trade: {contract}, from a Discord call I checked" + (f" ({levels})" if levels else "") + \
-        ". My own entry trigger, invalidation and time stop:"
+        ". My own entry trigger, invalidation, target and time stop:"
     return re.sub(r"\s+", " ", text).strip()[:CONTEXT_MAX]
 
 

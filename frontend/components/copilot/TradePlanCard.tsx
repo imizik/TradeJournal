@@ -65,8 +65,8 @@ export function sizeContracts(risk: number, pick: { ask_contract: number; ask: n
  * entry's distance from it, and the invalidation's distance from the entry with the move it takes in the underlying.
  * Prices show as given (no rounding); a level missing, not positive or on the wrong side of the entry gets no distance.
  */
-export function planNumbers({ symbol, stock, long, last, entry, stop }: { symbol: string; stock: boolean; long: boolean;
-  last: number | undefined; entry: number; stop: number }): string[] {
+export function planNumbers({ symbol, stock, long, last, entry, stop, target = null }: { symbol: string; stock: boolean; long: boolean;
+  last: number | undefined; entry: number; stop: number; target?: number | null }): string[] {
   const ok = (n: number | undefined): n is number => n !== undefined && Number.isFinite(n) && n > 0;
   const pct = (a: number, b: number) => { const p = (a - b) / b * 100; return `${p < 0 ? "−" : "+"}${Math.abs(p).toFixed(1)}%`; };
   const parts: string[] = [];
@@ -75,6 +75,12 @@ export function planNumbers({ symbol, stock, long, last, entry, stop }: { symbol
   if (ok(entry) && ok(stop) && (long ? stop < entry : stop > entry)) {
     const gap = Math.abs(entry - stop), move = gap.toFixed(gap < 0.1 ? 4 : 2); // cents, as the sizing lines show it
     parts.push(`Stop ${stop}, ${pct(stop, entry)} from entry (${stock ? `${move} a share` : `a ${move} move in ${symbol}`})`);
+  }
+  // The optional target: its distance from the entry and, with a stop on the losing side, the reward in multiples of the risk.
+  if (ok(entry) && target !== null && ok(target) && (long ? target > entry : target < entry)) {
+    const risk = long ? entry - stop : stop - entry;
+    const r = ok(stop) && risk > 0 ? `, ${(Math.abs(target - entry) / risk).toFixed(1)}R` : "";
+    parts.push(`Target ${target}, ${pct(target, entry)} from entry${r}`);
   }
   return parts;
 }
@@ -100,7 +106,8 @@ function FromDrawing({ name, drawn, value }: { name: string; drawn: number | nul
 
 /**
  * The copilot's whole trade plan (propose_plan kind=trade_plan). The owner edits it; Confirm saves it as their pre-trade
- * plan (the capture route) and arms its entry and invalidation alerts (the alerts route, as a watch does). A time stop
+ * plan (the capture route) and arms its entry and invalidation alerts (the alerts route, as a watch does). An optional
+ * target (the underlying's price) is saved with the plan and drawn on the chart; no alert is armed at it. A time stop
  * the server can read as a time ("out by 15:30", "45m", "2 days") is shown before Confirm and saved as a timed ping;
  * other wording stays a note in the plan. Each part reports its own result, and only a failed part is retried.
  * Nothing is saved or armed before Confirm. A saved card comes back as it was left (``plan.outcome``): confirmed shows
@@ -123,6 +130,8 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   const picks = (candidates?.picks ?? []).filter(p => p.label !== plan.contract);
   const [entry, setEntry] = useState(saved?.fields?.entry ?? String(plan.entry_trigger.price));
   const [stop, setStop] = useState(saved?.fields?.invalidation ?? String(plan.invalidation.price));
+  // Optional: blank is no target (a card confirmed before targets existed has none).
+  const [target, setTarget] = useState(saved ? saved.fields?.target ?? "" : plan.target_price != null ? String(plan.target_price) : "");
   const [timeStop, setTimeStop] = useState(saved?.fields?.time_stop ?? plan.time_stop ?? "");
   const [size, setSize] = useState(saved?.fields?.size_note ?? plan.size_note ?? "");
   // The owner's pick; until then the time stop sets it (due today: a day trade), else a swing.
@@ -185,10 +194,14 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   const entryLevel: PlanLevel = { ...plan.entry_trigger, price: Number(entry) };
   const stopLevel: PlanLevel = { ...plan.invalidation, price: Number(stop) };
   const long = plan.direction === "long";
+  const targetPrice = target.trim() ? Number(target) : null;
   const problem = !thesis.trim() ? "Write the thesis in a sentence."
     : ![entryLevel.price, stopLevel.price].every(p => Number.isFinite(p) && p > 0) ? "Entry and invalidation must be positive prices."
     : long && !(stopLevel.price < entryLevel.price) ? "A long plan's invalidation must be below its entry."
     : !long && !(stopLevel.price > entryLevel.price) ? "A short plan's invalidation must be above its entry."
+    : targetPrice !== null && !(Number.isFinite(targetPrice) && targetPrice > 0) ? "The target must be a positive price, or leave it blank."
+    : targetPrice !== null && long && !(targetPrice > entryLevel.price) ? "A long plan's target must be above its entry."
+    : targetPrice !== null && !long && !(targetPrice < entryLevel.price) ? "A short plan's target must be below its entry."
     : setupError ? "Your journal accounts could not be read, so the plan cannot be saved. Reload and try again."
     : setup && !account ? (accounts.length ? "Choose the journal account this plan is for." : "Add a journal account before saving plans.")
     : null;
@@ -203,10 +216,10 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   const horizon = pickedHorizon ?? horizonFor(timed?.due_at);
   const ready = !problem && !!account && (!alertsSupported || !!investigationId) && !reading;
 
-  const numbers = planNumbers({ symbol: plan.symbol, stock: plan.instrument === "stock", long, last: plan.last, entry: entryLevel.price, stop: stopLevel.price });
+  const numbers = planNumbers({ symbol: plan.symbol, stock: plan.instrument === "stock", long, last: plan.last, entry: entryLevel.price, stop: stopLevel.price, target: targetPrice });
   const sizing = sizeIt();
   const sizeText = sizing?.note && !sizeEdited ? sizedNote(sizing.note, size) : size.trim();
-  const wording = [`Entry: ${levelText(entryLevel)}.`, `Invalidation: ${levelText(stopLevel)}.`,
+  const wording = [`Entry: ${levelText(entryLevel)}.`, `Invalidation: ${levelText(stopLevel)}.`, targetPrice !== null && `Target: ${targetPrice}.`,
     timeStop.trim() && `Time stop: ${timeStop.trim()}.`, sizeText && `Size: ${sizeText}.`].filter(Boolean).join(" ").slice(0, 400);
 
   /** What the typed risk buys, in plain lines, and the line Confirm puts in front of the size note (none for zero). */
@@ -256,7 +269,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
       .map(([part, r]) => [part, { state: r.state, text: r.text.slice(0, 500) }]));
     // Within what the investigation stores, so an odd input never stops the conversation from saving.
     onOutcome({ state: "confirmed", parts: ran, fields: { thesis: thesis.trim().slice(0, 300), contract: contract.slice(0, 80),
-      entry: entry.slice(0, PRICE_MAX), invalidation: stop.slice(0, PRICE_MAX), time_stop: timeStop.slice(0, 80), size_note: size.slice(0, SIZE_MAX), horizon } });
+      entry: entry.slice(0, PRICE_MAX), invalidation: stop.slice(0, PRICE_MAX), target: target.trim().slice(0, PRICE_MAX), time_stop: timeStop.slice(0, 80), size_note: size.slice(0, SIZE_MAX), horizon } });
   }
 
   async function run(part: Part): Promise<Result> {
@@ -265,6 +278,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
       let text: string;
       if (part === "plan") {
         await savePlanCapture({ client_id: clientId.current, underlying: plan.symbol, account_id: account, side, wording, note, investigation_id: investigationId,
+          target_price: targetPrice,
           // The lab's own plans point at their investigation.
           origin: !origin || (origin.kind === "copilot" && !origin.ref) ? { kind: "copilot", ref: investigationId, text: origin?.text ?? null } : origin });
         // How often the desk checks in on it after the close, from today on (one save per card and horizon).
@@ -309,7 +323,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
     for (const part of parts.slice(1)) if (results[part].state !== "done") all[part] = await run(part);
     report(all);
     // Charts labels the levels this plan was drawn from, and shows its alerts.
-    const detail: PlanConfirmed = { symbol: plan.symbol, side: plan.direction, entry: entryLevel.price, invalidation: stopLevel.price, drawn };
+    const detail: PlanConfirmed = { symbol: plan.symbol, side: plan.direction, entry: entryLevel.price, invalidation: stopLevel.price, target: targetPrice, drawn };
     window.dispatchEvent(new CustomEvent(PLAN_CONFIRMED, { detail }));
   }
 
@@ -320,7 +334,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
     const elsewhere = investigationId ? await confirmedElsewhere(investigationId, plan.id) : null;
     if (elsewhere) {
       const f = elsewhere.fields;
-      if (f) { setThesis(f.thesis); setContract(f.contract); setEntry(f.entry); setStop(f.invalidation); setTimeStop(f.time_stop); setSize(f.size_note); setHorizon(f.horizon || null); if (f.size_note) setSizeOpen(true); }
+      if (f) { setThesis(f.thesis); setContract(f.contract); setEntry(f.entry); setStop(f.invalidation); setTarget(f.target ?? ""); setTimeStop(f.time_stop); setSize(f.size_note); setHorizon(f.horizon || null); if (f.size_note) setSizeOpen(true); }
       setResults(restored(elsewhere));
       onOutcome(elsewhere);
       return;
@@ -379,6 +393,11 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
           <FromDrawing name="Invalidation" drawn={drawn.invalidation} value={stop} />
         </div>
       )}
+      <label className="block space-y-1">
+        <span className="text-xs text-muted-foreground">Target ({plan.symbol} price, optional)</span>
+        <input value={target} onChange={e => setTarget(e.target.value.slice(0, PRICE_MAX))} inputMode="decimal" placeholder="none"
+          disabled={locked} aria-label="Target" className={cn(field, "min-h-11")} />
+      </label>
       {drawn && drawn.side !== plan.direction && (
         <p role="note" className="text-xs text-amber-300">You drew a {drawn.side}; this draft is a {plan.direction}.</p>
       )}

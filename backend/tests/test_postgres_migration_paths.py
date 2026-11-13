@@ -162,3 +162,23 @@ def test_the_preflight_reports_an_empty_database(clean_database):
     assert "Empty database" in result.stdout, result.stdout
     assert "alembic upgrade head" in result.stdout
     assert result.returncode == 1
+
+
+def test_the_plan_target_column_is_added_nullable_and_leaves_saved_plans_unchanged(clean_database):
+    """d7f3b9e5a1c8 on Postgres: a capture saved before it keeps every value and reads no target after it."""
+    from sqlalchemy import text
+    first = run_alembic("upgrade", "b4e8d2a6c1f3", url=TEST_DATABASE_URL)
+    assert first.returncode == 0, first.stdout + first.stderr
+    row = {"id": "00000000-0000-0000-0000-000000000001", "client_id": "card-old-plan", "received_at": "2026-11-12 14:00:00",
+           "account_id": "00000000-0000-0000-0000-000000000002", "account_label": "Roth", "underlying": "NBIS",
+           "side": "buy_calls", "instrument": "option", "mode": "discretionary", "context_state": "unavailable",
+           "context_json": "{}", "image_state": "unavailable"}
+    with clean_database.begin() as conn:
+        conn.execute(text(f"INSERT INTO trade_capture ({', '.join(row)}) VALUES ({', '.join(':' + k for k in row)})"), row)
+        before = dict(conn.execute(text("SELECT * FROM trade_capture")).mappings().one())
+    result = run_alembic("upgrade", "head", url=TEST_DATABASE_URL)
+    assert result.returncode == 0, result.stdout + result.stderr
+    column = next(c for c in inspect(clean_database).get_columns("trade_capture") if c["name"] == "target_price")
+    assert column["nullable"] is True and column["default"] is None
+    with clean_database.connect() as conn:
+        assert dict(conn.execute(text("SELECT * FROM trade_capture")).mappings().one()) == {**before, "target_price": None}

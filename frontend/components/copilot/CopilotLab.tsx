@@ -11,6 +11,7 @@ import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/componen
 import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
 import DeskGrid from "@/components/copilot/DeskGrid";
 import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
+import type { ClosingTicket } from "@/lib/closingTicket";
 import CopilotPanel, { rememberedThread, type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import DecisionBar from "@/components/copilot/DecisionBar";
 import FillLinkBar, { FillsToLink, useFillLinks } from "@/components/copilot/FillLinkBar";
@@ -156,15 +157,17 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const tickets = useTicketPlans(on);
   const [ticketFor, setTicketFor] = useState<string | null>(null);
   const [ticketPick, setTicketPick] = useState<TicketPick | null>(null); // the Chain tab's Put on ticket
+  const [ticketClose, setTicketClose] = useState<ClosingTicket | null>(null); // a held option's Close at target / stop
   const [checkSeed, setCheckSeed] = useState<{ text: string; n: number } | null>(null); // the Chain tab's Check it
   useEffect(() => { if (centreTab !== "check") setCheckSeed(null); }, [centreTab]); // eslint-disable-line react-hooks/set-state-in-effect -- the Chain's contract fills Check a call once, not on every later visit
   const ticketLinked = useRef(false); // a ?ticket= link on a phone: the Ticket comes into view once the book above it has read
   useEffect(() => {
-    const show = (id: string, pick: TicketPick | null = null) => { setTicketFor(id); setTicketPick(pick); setCentreTab("ticket"); if (sheetLayout()) document.getElementById("desk-centre")?.scrollIntoView({ behavior: "smooth", block: "start" }); };
+    const show = (id: string | null, pick: TicketPick | null = null, close: ClosingTicket | null = null) => { setTicketFor(id); setTicketPick(pick); setTicketClose(close); setCentreTab("ticket"); if (sheetLayout()) document.getElementById("desk-centre")?.scrollIntoView({ behavior: "smooth", block: "start" }); };
     const onTicket = (event: Event) => {
       event.preventDefault();
-      const detail = (event as CustomEvent<{ investigationId: string; pick?: TicketPick }>).detail;
-      show(detail.investigationId, detail.pick ?? null);
+      const detail = (event as CustomEvent<{ investigationId?: string; pick?: TicketPick; close?: ClosingTicket }>).detail;
+      if (detail.close) show(null, null, detail.close);
+      else if (detail.investigationId) show(detail.investigationId, detail.pick ?? null);
     };
     const linked = new URLSearchParams(window.location.search).get("ticket");
     if (linked) { show(linked); ticketLinked.current = true; }
@@ -717,8 +720,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               {centreTab === "check" ? <CheckACall seed={checkSeed} />
                 : centreTab === "grid" ? <DeskGrid held={gridHeld} watched={watched} hidden={gridHidden} sparks={sparks} earnings={events} selected={centreSymbol} onOpen={openFromGrid} />
                 : centreTab === "chain" ? <DeskChain symbol={centreSymbol} plans={tickets.plans} onCheck={chainCheck} onPlan={chainPlan} onTicket={chainTicket} />
-                : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} pick={ticketPick} onOpen={id => { setTicketFor(id); setTicketPick(null); }} onClose={() => { setTicketFor(null); setTicketPick(null); }}
-                onPlaced={symbol => { setTicketFor(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
+                : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} pick={ticketPick} close={ticketClose} onOpen={id => { setTicketFor(id); setTicketPick(null); setTicketClose(null); }} onClose={() => { setTicketFor(null); setTicketPick(null); setTicketClose(null); }}
+                onPlaced={symbol => { setTicketFor(null); setTicketClose(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
                 : centreTab === "chart"
                 ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events} />
                 : <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed} />}

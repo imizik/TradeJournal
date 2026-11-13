@@ -894,8 +894,8 @@ The cockpit's panes in detail:
   read as the option's; a stock shows its last price, P&L % and average cost.
   Under it, the plan ladder (`PlanLadder.tsx`): one scale from the
   invalidation through the entry to 1R and 2R past it (R is the
-  entry-to-invalidation distance; plans have no target, so these only
-  measure), the live price, "3.1% above invalidation", the current R multiple,
+  entry-to-invalidation distance; these only measure, they are not exits; a
+  plan's own optional target is listed in Details with its R multiple), the live price, "3.1% above invalidation", the current R multiple,
   one quiet line with the time stop or expiry, and the rest (alert conditions,
   1R in dollars, entry premium, size, open P&L) behind Details. For an option
   the levels are the underlying's, said in its title. `compact` draws it as
@@ -1478,7 +1478,7 @@ and a small P&L-at-expiry line with the stock now (white) and break-even (amber)
 - **What if…** Folded by default under the standing (open or folded is remembered on the browser): a stock-price and
   a date slider (today to expiry) give the position's estimated value and P&L in $ and %, with the P&L across stock
   prices on that date (now, break-even and the plan's entry and stop marked; click or drag it to pick a price). Presets:
-  at the plan's stop, at its target (greyed: plans save no target today), and "If earnings is flat" (the first weekday
+  at the plan's stop, at its target (from the chart's target line; greyed when the plan has none), and "If earnings is flat" (the first weekday
   after the report from the desk's earnings tags, the stock unchanged, IV assumed 30% lower, stated on screen). Priced
   with Black-Scholes (`whatIfModel` in `lib/optionStanding.ts`: European exercise, no dividends, a 4% rate, IV held
   steady; the caveat sits in a tooltip) from the standing's own IV, checked against today's mark: more than 5% off, it
@@ -1528,6 +1528,23 @@ that nothing in it places or sends anything.
   Robinhood's email as today) and returns to the symbol's chart; **Not now** closes the ticket.
 - **A pick from the Chain tab** (`?expiration=&strike=`, Put on ticket) replaces the contract the plan names, on the
   plan's own side; the plan's own words still show under it.
+- **Closing tickets: Close at target / Close at stop.** A held single long call or put with a plan shows these in the
+  position header (beside the What if…) and under its book row. Each opens the Ticket as a **sell to close** of the
+  contracts held, filled in the browser from the book row (`frontend/lib/closingTicket.ts`): the account holding it
+  (Robinhood's label and masked number, so a position the live feed does not show gets no closing ticket), the contract, the quantity held, and a limit
+  estimated for the stock at that plan level, mark + delta x (level − stock), never below the contract's value at
+  expiry there, rounded to the cent and at least $0.01, labelled **Estimate, not a quote** with the sum shown (and
+  when a floor set it) and today's mark beside it; with the stock already at or past the level (through the stop,
+  beyond the target) the limit is today's mark instead and the ticket says so, never a sell priced above the market.
+  **When to place it** says what a sell limit does: at the target it can wait in Robinhood until the option trades up
+  to it; at the stop the limit is under today's mark and would fill at once, so it says to place it only once the stock
+  is at the stop ("Mark now 4.10", or "(last read)" without a live option tick). Quantity and limit are
+  editable; **Copy all for Robinhood** puts Sell · Call/Put in place of Buy. It reads no route and has no Send button
+  at all. A missing input (no plan level, no target, no mark, no delta or a delta on the wrong side for the contract,
+  no stock price, no account, a fractional size, a short or multi-leg structure) leaves that button out: never a zero
+  or made-up price. Proof: `frontend/e2e/closing-ticket.spec.ts` (the math for calls and puts, the floors, every
+  missing input), `frontend/e2e/copilot-desk-close-from-plan.spec.ts` (the target line, both buttons, the ticket, no
+  request and no Send, a phone), `backend/tests/test_plan_target.py` and `test_desk_ticket.py`.
 
 ### Chain
 
@@ -2833,7 +2850,18 @@ nothing exists until the owner confirms.
     drafted last, the entry's distance from it, and the invalidation's distance
     from the entry with the move it takes (a share, or in the underlying for an
     option plan). It follows an edit; a stop on the wrong side of the entry
-    gets no distance. A plan carries no target, so there is no reward:risk.
+    gets no distance. With a target, its distance from the entry and the
+    reward in multiples of the risk ("Target 103.1, +7.5% from entry, 2.0R").
+  - **Target (optional).** The underlying's price the plan aims for, as the
+    invalidation is one: the copilot may draft it (`target_price` on
+    propose_plan, above a long's entry and below a short's) and the owner
+    edits or clears it; blank is no target. Confirm saves it on the pre-trade
+    plan capture (`trade_capture.target_price`, nullable; plans saved before
+    it have none and read as they did) and in the wording ("Target: 103.1.").
+    No alert is armed at it: it is a green line on the desk chart beside the
+    entry and invalidation, the What if…'s "At my target", the plan ladder's
+    Details and the closing ticket's "Close at target". Telegram's plan card
+    shows and saves it the same way.
   - **Size it for me.** `Risk $` and the size note wait behind a **Size it**
     disclosure, open from the start when a risk is typed or remembered or a
     confirmed card kept a size, and otherwise on tap; folded, its line shows
