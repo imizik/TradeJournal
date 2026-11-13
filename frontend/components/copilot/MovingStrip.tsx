@@ -28,7 +28,10 @@ const COLLAPSED_KEY = "desk.moving.collapsed.v1";
 
 export async function getDeskMoving(signal?: AbortSignal): Promise<DeskMoving> {
   const response = await fetch(apiUrl("/copilot/desk/moving"), { cache: "no-store", signal });
-  if (!response.ok) throw new Error(`Request failed (${response.status}).`);
+  if (!response.ok) {
+    await response.text().catch(() => ""); // read the refusal through, so the request ends (an unread body holds it open)
+    throw new Error(`Request failed (${response.status}).`);
+  }
   return await response.json() as DeskMoving;
 }
 
