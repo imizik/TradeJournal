@@ -1209,6 +1209,24 @@ def desk_events(symbols: str = "", held: str = "", db: Session = Depends(get_ses
     return events.tags(symbols.split(","), events.parse_held(held), day, set(hidden.get("rows", [])))
 
 
+@router.get("/desk/grid")
+def desk_grid(symbols: str = "", timeframe: str = "1m", db: Session = Depends(get_session)):
+    """The centre's Grid (``app/engine/desk_grid.py``): up to nine small intraday charts in one read: each named
+    symbol's session on 1-minute or 5-minute candles after the previous session's last half hour, with today's VWAP and
+    its armed plan and alert levels. Cached minutes first (the grid's own, then any chart's), then one batched Alpaca
+    read, then the chart feed's low-priority reads within its budget. A ticker set to Not following is never read.
+    Read-only, owner-only, refused while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import day_journal, desk_grid
+    hidden = today._section(db, "desk grid hidden", lambda: {"rows": sorted(day_journal.not_following(db))})
+    if hidden.get("state") == "unavailable":
+        return {"state": "unavailable", "rows": {}}  # never a hidden ticker's tile
+    names = desk_grid.names(symbols, set(hidden.get("rows", [])))
+    levels = today._section(db, "desk grid levels", lambda: {"rows": desk_grid.plan_levels(db, names)})
+    return {"state": "ok", **desk_grid.read(names, timeframe, today._now(), levels.get("rows") or {})}
+
+
 # --------------------------------------------------------------------------- the Watching list (app/engine/desk_watch.py)
 
 class WatchAdd(BaseModel):

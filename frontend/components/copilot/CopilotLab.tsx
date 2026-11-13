@@ -9,6 +9,7 @@ import CheckACall from "@/components/copilot/CheckACall";
 import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
 import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
+import DeskGrid from "@/components/copilot/DeskGrid";
 import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
 import CopilotPanel, { rememberedThread, type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import DecisionBar from "@/components/copilot/DecisionBar";
@@ -131,9 +132,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // or the Feed.
   const [picked, setPicked] = useState<string | null>(null);
   const [pickedKey, setPickedKey] = useState<string | null>(null);
-  const [centreTab, setCentreTab] = useState<"chart" | "chain" | "feed" | "check" | "ticket">("chart");
+  const [centreTab, setCentreTab] = useState<"chart" | "grid" | "chain" | "feed" | "check" | "ticket">("chart");
   // The tab survives a link that reopens the desk (a feed item's Ask or Plan it, a checked call's Plan it) for this browser tab.
-  useEffect(() => { try { const kept = window.sessionStorage.getItem(CENTRE_KEY); if (kept === "feed" || kept === "check" || kept === "chain") setCentreTab(kept); } catch { /* chart */ } }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+  useEffect(() => { try { const kept = window.sessionStorage.getItem(CENTRE_KEY); if (kept === "feed" || kept === "check" || kept === "chain" || kept === "grid") setCentreTab(kept); } catch { /* chart */ } }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
   useEffect(() => { try { window.sessionStorage.setItem(CENTRE_KEY, centreTab); } catch { /* this view only */ } }, [centreTab]);
   // The Ticket tab: a saved plan's ticket opens from its card, its thread's header, a book row or the tab's own list
   // (``openTicket``), or from a link (?ticket=) made where the desk was not open.
@@ -520,6 +521,14 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     if (!sheetLayout()) { if (symbol !== talking) openWatched(symbol); }
     else document.getElementById("desk-centre")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [openWatched, talking]);
+  // A Grid tile: the name on the full Chart tab, in place, as its book row or Watching row would open it.
+  const openFromGrid = useCallback((symbol: string) => {
+    const row = followed.find(r => r.symbol === symbol);
+    if (row) select(row);
+    else selectWatched(symbol);
+  }, [followed, select, selectWatched]);
+  const gridHeld = useMemo(() => [...new Set(followed.flatMap(r => r.symbol ? [r.symbol] : []))], [followed]);
+  const gridHidden = useMemo(() => new Set(rows.flatMap(r => r.hidden && r.symbol ? [r.symbol] : [])), [rows]);
   const askWatched = useCallback((symbol: string) => { setPicked(symbol); setPickedKey(null); if (symbol !== talking) openWatched(symbol); setSheet(true); }, [openWatched, talking]);
   const planWatched = useCallback((symbol: string) => go(copilotLabHref(symbol, planContext(), { kind: "copilot", ref: null })), [go]);
   // Ask the copilot (the sheet's button): about the picked position (or watched name) when the copilot is on another ticker.
@@ -676,9 +685,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         )}
         {on && (
           <section id="desk-centre" aria-label="Chart and feed" className={styles.centre}>
-            {/* Chart first, then Feed, Check a call and Ticket. */}
+            {/* Chart first, then the Grid, Chain, Feed, Check a call and Ticket. */}
             <div role="tablist" aria-label="Centre" className="flex gap-1 border-b px-2 pt-1.5">
-              {([["chart", "Chart"], ["chain", "Chain"], ["feed", "Feed"], ["check", "Check a call"], ["ticket", "Ticket"]] as const).map(([id, label]) => (
+              {([["chart", "Chart"], ["grid", "Grid"], ["chain", "Chain"], ["feed", "Feed"], ["check", "Check a call"], ["ticket", "Ticket"]] as const).map(([id, label]) => (
                 <button key={id} type="button" role="tab" aria-selected={centreTab === id} onClick={() => setCentreTab(id)}
                   className={cn("-mb-px min-h-11 border-b-2 px-2.5 text-sm sm:min-h-9", centreTab === id ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
                   {label}
@@ -686,8 +695,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 </button>
               ))}
             </div>
-            <div role="tabpanel" aria-label={centreTab === "chart" ? "Chart" : centreTab === "chain" ? "Chain" : centreTab === "check" ? "Check a call" : centreTab === "ticket" ? "Ticket" : "Feed"} className="p-3">
+            <div role="tabpanel" aria-label={centreTab === "chart" ? "Chart" : centreTab === "grid" ? "Grid" : centreTab === "chain" ? "Chain" : centreTab === "check" ? "Check a call" : centreTab === "ticket" ? "Ticket" : "Feed"} className="p-3">
               {centreTab === "check" ? <CheckACall seed={checkSeed} />
+                : centreTab === "grid" ? <DeskGrid held={gridHeld} watched={watched} hidden={gridHidden} sparks={sparks} earnings={events} selected={centreSymbol} onOpen={openFromGrid} />
                 : centreTab === "chain" ? <DeskChain symbol={centreSymbol} plans={tickets.plans} onCheck={chainCheck} onPlan={chainPlan} onTicket={chainTicket} />
                 : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} pick={ticketPick} onOpen={id => { setTicketFor(id); setTicketPick(null); }} onClose={() => { setTicketFor(null); setTicketPick(null); }}
                 onPlaced={symbol => { setTicketFor(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
