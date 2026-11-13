@@ -310,6 +310,12 @@ def test_a_read_naming_a_ticker_he_does_not_follow_is_not_shown(facts_from, monk
     assert out["state"] == "error" and "ticker you do not follow" in out["message"] and "OLDX" not in out["message"]
 
 
+def test_ordinary_words_are_never_taken_for_a_ticker_he_does_not_follow():
+    hidden = {"OLDX", "ET", "A", "P", "SPY"}
+    assert day_read.hidden_named("Biggest: NBIS at 14:05 ET. A plan first; P&L: -$375.00. OLDX too.", hidden, "as of 17:30 ET") == ["OLDX"]
+    assert day_read.hidden_named("SPY was flat.", hidden) == ["SPY"]
+
+
 def test_a_failed_refresh_never_hides_the_days_good_read(facts_from, turns, monkeypatch):
     first = _read()
     assert first["state"] == "ok"

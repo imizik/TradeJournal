@@ -28,6 +28,9 @@ export function DayRead({ render, onAskMore }: { render(text: string): ReactNode
   const [read, setRead] = useState<Read | null>(null);
   const [reading, setReading] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null); // a Refresh that failed or was refused, beside the read it kept
+  const shown = useRef<Read | null>(null);
+  useEffect(() => { shown.current = read; });
   const [asked, setAsked] = useState(0); // his Refresh taps, each asking once
   // Set by the tap and spent by the ask it starts: an automatic ask (a later day's first, in a tab left open) is never a
   // refresh, so it can never run a second read of a day.
@@ -39,10 +42,18 @@ export function DayRead({ render, onAskMore }: { render(text: string): ReactNode
     setReading(true); setFailed(null); // eslint-disable-line react-hooks/set-state-in-effect -- the ask starts here
     const refresh = tapped.current;
     tapped.current = false;
-    getDayRead(refresh, controller.signal).then(result => { setRead(result); setReading(false); }).catch(error => {
+    setNote(null);
+    // A Refresh that fails or is refused keeps the read on screen (the server keeps it too) and says why beside it.
+    const kept = refresh && shown.current?.state === "ok";
+    getDayRead(refresh, controller.signal).then(result => {
+      setReading(false);
+      if (kept && result.state !== "ok") setNote(result.message ?? "The read failed.");
+      else setRead(result);
+    }).catch(error => {
       if (controller.signal.aborted) return;
       setReading(false);
-      setFailed(error instanceof Error ? error.message : String(error));
+      const why = error instanceof Error ? error.message : String(error);
+      if (kept) setNote(why); else setFailed(why);
     });
     return () => controller.abort();
   }, [closed, asked]);
@@ -70,6 +81,7 @@ export function DayRead({ render, onAskMore }: { render(text: string): ReactNode
             </button>
             {refresh("Refresh")}
           </p>
+          {note && <p data-testid="day-read-note" className="text-xs text-muted-foreground">Refresh: {note}</p>}
         </>
       ) : reading ? (
         <p data-testid="day-read-wait" className="text-sm italic text-muted-foreground">Reading your day…</p>

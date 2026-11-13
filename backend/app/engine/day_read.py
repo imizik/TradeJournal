@@ -266,9 +266,15 @@ def unmatched(text: str, facts_text: str) -> list[str]:
     return bad
 
 
-def hidden_named(text: str, hidden: set[str]) -> list[str]:
-    """Tickers he does not follow that the read names anyway (the owner context block can carry them)."""
-    return sorted(s for s in hidden if re.search(rf"(?<![A-Za-z]){re.escape(s)}(?![A-Za-z])", text))
+TIME_WORDS = frozenset({"ET", "AM", "PM", "EST", "EDT"})
+
+
+def hidden_named(text: str, hidden: set[str], facts_text: str = "") -> list[str]:
+    """Tickers he does not follow that the read names anyway (the owner context block can carry them). A one-letter
+    ticker, a time word (``ET``, ``PM``) and a word the facts themselves use are ordinary words, never counted."""
+    words = set(re.findall(r"[A-Z][A-Z.\-]*", facts_text)) | TIME_WORDS
+    return sorted(s for s in hidden if len(s) > 1 and s not in words
+                  and re.search(rf"(?<![A-Za-z]){re.escape(s)}(?![A-Za-z])", text))
 
 
 # --------------------------------------------------------------------------- the kept read
@@ -370,7 +376,7 @@ async def read(*, refresh: bool = False, now: float | None = None) -> dict:
             **before, "count": before["count"] + 1, "cost_usd": round(before["cost_usd"] + result["cost_usd"], 4)}
         if result["state"] == "ok":
             bad = unmatched(result["text"], facts_text)
-            named = hidden_named(result["text"], found.get("hidden") or set())
+            named = hidden_named(result["text"], found.get("hidden") or set(), facts_text)
             if bad:
                 log.warning("day read quoted figures the facts do not hold: %s", ", ".join(bad))
                 result = {"state": "error", "cost_usd": result["cost_usd"],

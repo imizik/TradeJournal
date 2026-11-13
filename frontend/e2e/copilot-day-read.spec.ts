@@ -105,6 +105,16 @@ test("a tab left open after a Refresh asks the next day's read as an automatic o
   expect(asks).toEqual([{ refresh: false }, { refresh: true }, { refresh: false }]);
 });
 
+test("a Refresh refused for the budget keeps the read on screen and says why", async ({ page }) => {
+  await open(page, asks => asks.at(-1)?.refresh
+    ? { state: "budget", message: "No read of your day: today's copilot budget ($4.00) is spent.", today: { count: 1, refused: 1, cost_usd: 0.04 } }
+    : ok(asks));
+  await expect(page.getByTestId("day-read-text")).toContainText("Biggest: NBIS 100C");
+  await page.getByTestId("day-read-refresh").click();
+  await expect(page.getByTestId("day-read-note")).toHaveText("Refresh: No read of your day: today's copilot budget ($4.00) is spent.");
+  await expect(page.getByTestId("day-read-text")).toContainText("Biggest: NBIS 100C");
+});
+
 test("before the close nothing is asked", async ({ page }) => {
   const asks = await open(page, ok, { at: MIDDAY });
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
