@@ -23,12 +23,15 @@ type Cell = {
   held: number | null; planned: boolean;
 };
 type Row = { strike: number; atm: boolean; levels: string[]; call: Cell | null; put: Cell | null };
-type Expiry = { date: string; days: number; kind: "0dte" | "weekly" | "monthly"; held: boolean };
+/** ``earnings``: the expiry lives through the next report (on or after its date); absent from an older backend. */
+type Expiry = { date: string; days: number; kind: "0dte" | "weekly" | "monthly"; held: boolean; earnings?: boolean };
 export type ChainReply = {
   symbol: string; state: "ok" | "none" | "unavailable"; session: "open" | "closed"; poll_seconds: number | null; expiries: Expiry[];
   expiration: string | null; spot: number | null; spot_at: number | null; spot_issue: string | null; atm_strike: number | null;
   fetched_at: number | null; age_s: number | null; stale: boolean; message: string | null; rows: Row[];
   levels: { role: string; price: number; strike: number | null }[]; simulated: boolean; centred_on?: "price" | "parity";
+  /** The next earnings from the cache (dates only), or null when none is known. */
+  earnings?: { date: string; status: string | null } | null;
 };
 export type ChainPick = { symbol: string; expiry: string; strike: number; side: ChainSide };
 
@@ -185,7 +188,7 @@ export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket }: 
         {price != null && <span data-testid="chain-price" className={cn("text-sm tabular-nums", live?.stale && "text-muted-foreground")}>{price.toFixed(2)}</span>}
         <QuoteAge reply={shown} stale={stale} failedAt={failedAt} error={error} />
       </div>
-      <ExpiryPicker expiries={shown.expiries} chosen={shown.expiration} onPick={e => { setExpiry(e); setPicked(null); }} />
+      <ExpiryPicker expiries={shown.expiries} chosen={shown.expiration} report={shown.earnings ?? null} onPick={e => { setExpiry(e); setPicked(null); }} />
       {!both && shown.rows.length > 0 && (
         <span role="radiogroup" aria-label="Calls or puts" className="inline-flex overflow-hidden rounded-md border">
           {(["call", "put"] as const).map(s => (
@@ -329,23 +332,31 @@ function QuoteAge({ reply, stale, failedAt, error }: { reply: ChainReply; stale:
   );
 }
 
-function ExpiryPicker({ expiries, chosen, onPick }: { expiries: Expiry[]; chosen: string | null; onPick(date: string): void }) {
+function ExpiryPicker({ expiries, chosen, report = null, onPick }: { expiries: Expiry[]; chosen: string | null;
+  report?: ChainReply["earnings"]; onPick(date: string): void }) {
+  const through = report ? ` · includes the ${shortDate(report.date)} earnings report (time of day not published)` : "";
   if (!expiries.length) return null;
-  return (
+  return (<>
     <div role="radiogroup" aria-label="Expiry" className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
       {expiries.map(e => (
         <button key={e.date} type="button" role="radio" aria-checked={e.date === chosen} onClick={() => onPick(e.date)}
-          title={`${e.date} · ${e.days === 0 ? "expires today" : `${e.days} day${e.days === 1 ? "" : "s"}`}${e.kind === "monthly" ? " · monthly" : ""}${e.held ? " · you hold contracts here" : ""}`}
+          title={`${e.date} · ${e.days === 0 ? "expires today" : `${e.days} day${e.days === 1 ? "" : "s"}`}${e.kind === "monthly" ? " · monthly" : ""}${e.held ? " · you hold contracts here" : ""}${e.earnings ? through : ""}`}
           className={cn("inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md border px-2.5 text-xs sm:min-h-8",
             e.date === chosen ? "border-foreground/70 bg-secondary font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}>
           {e.kind === "0dte" ? "0DTE" : chipDate(e)}
           {e.kind !== "0dte" && <span className="text-[10px] text-muted-foreground">{e.days}d</span>}
           {e.kind === "monthly" && <span className="text-[10px] text-muted-foreground">M</span>}
           {e.held && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-label="held" />}
+          {e.earnings && <span data-testid="chain-expiry-earnings" className="rounded border border-sky-300/40 px-0.5 text-[9px] leading-3 text-sky-200" aria-label="includes earnings">ER</span>}
         </button>
       ))}
     </div>
-  );
+    {report && expiries.some(e => e.earnings) && (
+      <p data-testid="chain-earnings-note" className="text-[11px] text-muted-foreground">
+        <span className="text-sky-200">ER</span>: these expiries include the {shortDate(report.date)} earnings report{report.status === "estimated" ? " (date estimated)" : ""}; time of day not published.
+      </p>
+    )}
+  </>);
 }
 
 function Actions({ pick, cell, plans, onCheck, onPlan, onTicket, onClose }: {

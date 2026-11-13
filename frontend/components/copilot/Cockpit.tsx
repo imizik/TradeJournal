@@ -16,9 +16,10 @@ import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
 import { getExposure } from "@/lib/copilot";
 import { DeskChart, ReadingLine, type DeskChartActions } from "@/components/copilot/DeskChart";
 import { DeskTimeline } from "@/components/copilot/Inspector";
+import { EarningsTag, PositionEarnings } from "@/components/copilot/EarningsTag";
 import {
   DESK_MARKET, DESK_TIMEFRAMES, daysTo, deskSymbolThread, getDeskSparks, liveOn, money, nyDay, readLook, saveLook, signedPct, sinceLines,
-  type DeskBookState, type DeskChartData, type DeskLive, type DeskLook, type DeskTimeframe, type DeskNeed, type DeskSession, type DeskSparks, type DeskThread, type DeskThreadRef,
+  type DeskBookState, type DeskChartData, type DeskEvents, type DeskLive, type DeskLook, type DeskTimeframe, type DeskNeed, type DeskSession, type DeskSparks, type DeskThread, type DeskThreadRef,
 } from "@/lib/desk";
 import { staleSince, tickFor, tickedBook, useDeskTicks } from "@/lib/deskTicks";
 import { Flash, PricesAsOf } from "@/components/copilot/Ticks";
@@ -255,8 +256,10 @@ const left = (expiry: string | null, day: string) => {
  * Selecting a row (``onSelect``) drives the centre and the copilot; its eye stops following the ticker (``onFollow``),
  * and those sit behind "N not followed" at the bottom.
  */
-export function Book({ rows, sparks, selected, selectedKey = null, day, read, updating = false, live = null, onRefreshLive, onSelect, onFollow, children }: {
+export function Book({ rows, sparks, selected, selectedKey = null, day, read, updating = false, live = null, earnings = null, onRefreshLive, onSelect, onFollow, children }: {
   rows: DeskThread[]; sparks: DeskSparks | null; selected: string | null; selectedKey?: string | null; day: string; read: boolean;
+  /** Earnings tags (``useDeskEvents``), by symbol. */
+  earnings?: DeskEvents | null;
   /** The rows are the desk's last read, kept for its remount, with the fresh read on the way: P&L dimmed, "Updating". */
   updating?: boolean;
   live?: DeskLive | null; onRefreshLive?(): void;
@@ -322,6 +325,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                       {book && left(book.expiry, day) && state !== EXPIRES_TODAY && <span className="tabular-nums">{left(book.expiry, day)}</span>}
                       {book?.live === "new" ? <span data-testid="book-state" className="rounded border border-sky-300/40 px-1 text-sky-300">New · not in the journal yet</span>
                         : state && <span data-testid="book-state" className={cn("rounded border px-1", state.className)}>{state.label}</span>}
+                      <EarningsTag tag={row.symbol ? earnings?.rows[row.symbol] : undefined} day={day} />
                       {book?.live === "not_on_robinhood" && <span data-testid="book-not-live" className="rounded border px-1">Not on Robinhood</span>}
                     </span>
                   </span>
@@ -468,10 +472,12 @@ function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
  * stock against SPY today, time held: P&L, the distance to the stop and expiry are the row's) and, folded, what touched
  * the thread. No symbol: QQQ with the owner's fills and pings.
  */
-export function CentreChart({ symbol, thread, row, sparks, actions, rows = [] }: {
+export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], earnings = null }: {
   symbol: string | null; thread: DeskThreadRef | null; row: DeskThread | null; sparks: DeskSparks | null; actions?: DeskChartActions;
   /** The desk's rows, so a held option's standing can tell a lone long option from one leg of a structure. */
   rows?: DeskThread[];
+  /** Earnings tags (``useDeskEvents``): a held option's header says when a report falls inside its life. */
+  earnings?: DeskEvents | null;
 }) {
   const ref = useMemo(() => thread ?? (symbol ? deskSymbolThread(symbol) : null), [thread, symbol]);
   const [timeline, setTimeline] = useState(false);
@@ -495,6 +501,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [] }:
       <ReadingLine data={reading} fallback={fallback} live={live} />
       {row?.book?.option && <OptionStanding row={row} rows={rows}
         fallback={reading?.state === "ok" && reading.reading ? { last: reading.reading.last, at: reading.reading.at } : sparkPrice(sparks, symbol)} />}
+      <PositionEarnings row={row} earnings={earnings} />
       <div className="flex items-center gap-1">
         <div role="group" aria-label="Timeframe" className="flex gap-1">
           {DESK_TIMEFRAMES.map(item => (

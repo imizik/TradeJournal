@@ -1192,6 +1192,23 @@ def desk_ticks(symbols: str = ""):
     return desk_ticks.read(symbols, today._now())
 
 
+@router.get("/desk/events")
+def desk_events(symbols: str = "", held: str = "", db: Session = Depends(get_session)):
+    """Earnings tags for the book's and the Watching list's rows (``app/engine/desk_events.py``): each named symbol's next
+    report from the earnings cache (12 hours; stale ones refresh in one batched background read, so ``loading`` says to
+    read again), tagged grey within 7 trading days and amber when a held option (``held``: ``SYMBOL:YYYY-MM-DD`` pairs)
+    expires on or after it. A symbol with no known date, a fund and a ticker set to Not following get no row. Read-only,
+    owner-only, refused while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import day_journal, desk_events as events
+    day = datetime.fromtimestamp(today._now(), ET).date()
+    hidden = today._section(db, "desk events hidden", lambda: {"rows": sorted(day_journal.not_following(db))})
+    if hidden.get("state") == "unavailable":
+        return {"state": "unavailable", "today": day.isoformat(), "rows": {}, "loading": False}  # never a hidden ticker's tag
+    return events.tags(symbols.split(","), events.parse_held(held), day, set(hidden.get("rows", [])))
+
+
 # --------------------------------------------------------------------------- the Watching list (app/engine/desk_watch.py)
 
 class WatchAdd(BaseModel):
