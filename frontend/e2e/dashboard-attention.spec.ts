@@ -74,7 +74,7 @@ test("attention rules: each trigger, its non-trigger twin, priority order and st
   expect(byId["earnings:far"].title).toBe("MU earnings 10/14, before expiry");
   expect(byId["earnings:far"].href).toBe("/charts?symbol=MU");
   expect(byId["job:trade_rebuild"].detail).toBe("boom");
-  expect(byId["job:trade_rebuild"].href).toBe("/?sync=open&job=trade_rebuild");
+  expect(byId["job:trade_rebuild"].href).toBe("/dashboard?sync=open&job=trade_rebuild");
   expect(byId["no-basis:basis"].href).toBe("/trades/basis#fills");
   expect(byId["alert:recent"].title).toBe("SPY crossed 700.00");
   expect(byId["alert:recent"].when).toBe("30m ago");

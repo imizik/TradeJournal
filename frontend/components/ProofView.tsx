@@ -191,7 +191,7 @@ const points = (v: number | null) => v == null ? "—" : `${v > 0 ? "+" : ""}${v
 function PlanningProofCard() {
   const { body, error } = useJson<PlanProof>("/analytics/plan-proof");
   const late = body?.groups.find((g) => g.key === "late")?.trades ?? 0;
-  return <DashboardCard title="Do planned trades do better?" action={<Link href="/" className={dashboardLink}>Dashboard →</Link>}>
+  return <DashboardCard title="Do planned trades do better?" action={<Link href="/dashboard" className={dashboardLink}>Dashboard →</Link>}>
     {body ? <div className="space-y-3">
       <p className="text-xs text-muted-foreground">A secondary read, not a third proof.</p>
       <VerdictBlock testId="proof-planning-verdict" verdict={body.verdict.verdict} reason={body.verdict.reason} rule={body.verdict.rule}

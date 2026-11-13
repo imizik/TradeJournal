@@ -241,7 +241,7 @@ test("an unknown route shows the in-app not-found page", async ({ page }) => {
     await page.setViewportSize(size);
     await page.goto("/no-such-page");
     await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Back to Dashboard" })).toHaveAttribute("href", "/");
+    await expect(page.getByRole("link", { name: "Back home" })).toHaveAttribute("href", "/");
     await page.screenshot({ path: test.info().outputPath(`not-found-${name}.png`) });
   }
 });

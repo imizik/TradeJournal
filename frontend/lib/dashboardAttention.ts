@@ -163,7 +163,7 @@ export function buildAttention(input: AttentionInputs): AttentionResult {
   if (gmail == null) unavailable.push("Gmail import status");
   else if (gmail.status === "down" || gmail.status === "degraded") {
     items.push({ id: "gmail", priority: "data", title: gmail.status === "down" ? "New fills are not arriving" : "Fill import is degraded",
-      detail: gmail.message, when: "Now", href: "/?sync=open", sortKey: gmail.status === "down" ? "0" : "1" });
+      detail: gmail.message, when: "Now", href: "/dashboard?sync=open", sortKey: gmail.status === "down" ? "0" : "1" });
   }
 
   if (input.jobs == null) unavailable.push("Sync job status");
@@ -173,7 +173,7 @@ export function buildAttention(input: AttentionInputs): AttentionResult {
     items.push({ id: `job:${job.job_type}`, priority: "data", title: `${job.label} failed`,
       detail: job.error_summary || job.message || "The last run ended with an error.", when: at ? ago(now, Date.parse(at)) : "Last run",
       // Newest failure first; Gmail ("0"/"1") still leads the data tier.
-      href: `/?sync=open&job=${encodeURIComponent(job.job_type)}`, sortKey: `2${String(1e13 - (at ? Date.parse(at) : 0)).padStart(14, "0")}` });
+      href: `/dashboard?sync=open&job=${encodeURIComponent(job.job_type)}`, sortKey: `2${String(1e13 - (at ? Date.parse(at) : 0)).padStart(14, "0")}` });
   }
 
   if (input.alerts == null) unavailable.push("Price alerts");

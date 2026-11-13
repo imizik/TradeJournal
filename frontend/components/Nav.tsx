@@ -44,7 +44,7 @@ export const openNavMenu = () => opener?.();
 
 type NavItem = { href: string; label: string; icon: typeof Bot };
 
-/** The three pages always in view. */
+/** The three pages always in view (two while the desk is home: Desk and Charts, see ``withDesk``). */
 const PRIMARY: NavItem[] = [
   { href: "/today", label: "Today", icon: Sun }, // owner-only: what matters right now
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -92,14 +92,14 @@ const isCurrent = (pathname: string, href: string) => pathname === href || (href
  * click can still close it until the next page. */
 const NAV_GROUPS_KEY = "tradejournal.nav.groups.v1";
 type NavGroups = { isOpen: (name: string) => boolean; toggle: (name: string) => void };
-function useNavGroups(pathname: string): NavGroups {
+function useNavGroups(pathname: string, copilot: boolean): NavGroups {
   const [remembered, setRemembered] = useState<Record<string, boolean>>({});
   const [closedHere, setClosedHere] = useState<string | null>(null);
   useEffect(() => {
     try { setRemembered(JSON.parse(localStorage.getItem(NAV_GROUPS_KEY) ?? "{}") ?? {}); } catch { /* all folded */ }
   }, []);
   useEffect(() => setClosedHere(null), [pathname]);
-  const isOpen = (name: string) => !!remembered[name] || (closedHere !== `${pathname}|${name}` && !!GROUPS.find(group => group.name === name)?.items.some(item => isCurrent(pathname, item.href)));
+  const isOpen = (name: string) => !!remembered[name] || (closedHere !== `${pathname}|${name}` && !!navGroups(copilot).find(group => group.name === name)?.items.some(item => isCurrent(pathname, item.href)));
   const toggle = (name: string) => {
     const open = !isOpen(name);
     const next = { ...remembered, [name]: open };
@@ -168,12 +168,17 @@ function SyncTrigger({ open, running, onToggle, compact = false }: { open: boole
   );
 }
 
-/** While the Copilot Lab is on, the desk is home: it takes Today's place, first in the menu and on the phone's tab bar
- * (Today forwards there). */
+/** While the Copilot Lab is on, the desk is home (`/` lands there): it takes Today's place, first in the menu and on the
+ * phone's tab bar (Today forwards there), and the Dashboard leaves the bar for More → Journal at `/dashboard`. */
 const DESK = { href: "/copilot-lab", label: "Desk", icon: MessagesSquare };
+const DASHBOARD: NavItem = { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard };
 function withDesk<T extends { href: string }>(items: T[], copilot: boolean): T[] {
   if (!copilot) return items;
-  return items.map(item => (item.href === "/today" ? { ...item, ...DESK } : item));
+  return items.filter(item => item.href !== "/").map(item => (item.href === "/today" ? { ...item, ...DESK } : item));
+}
+/** The folded groups; while the desk is home the Dashboard heads Journal. */
+function navGroups(copilot: boolean) {
+  return copilot ? GROUPS.map(group => group.name === "Journal" ? { ...group, items: [DASHBOARD, ...group.items] } : group) : GROUPS;
 }
 
 /** Which pages this viewer may open: the owner sees all; an assistant sees the practice pages and, with journal access, the journal. */
@@ -183,7 +188,8 @@ function shownHref(href: string, owner: boolean, enabled: boolean, journal: bool
   return owner || ["/", "/charts", "/daily", ...(journal ? ["/trades", "/fills", "/analytics"] : [])].includes(href);
 }
 
-/** The phone tab bar's pages; everything else is under More. The owner gets Today (or Desk), Dashboard, Charts and Trades, with Daily Review under More; an assistant keeps Daily Review. */
+/** The phone tab bar's pages; everything else is under More. The owner gets Today, Dashboard, Charts and Trades (while
+ * the desk is home: Desk, Charts and Trades), with Daily Review under More; an assistant keeps Daily Review. */
 const TABS = [
   { href: "/today", label: "Today", icon: Sun },
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -266,7 +272,7 @@ function NavLinks({ pathname, groups, onNavigate, rail = false }: { pathname: st
       {withDesk(PRIMARY, copilot).filter(shown).map(item => <NavLink key={item.href} item={item} pathname={pathname} onNavigate={onNavigate} rail={rail} />)}
     </ul>
     {groups && <ul className="mt-3 space-y-1">
-      {GROUPS.map(({ name, items }) => {
+      {navGroups(copilot).map(({ name, items }) => {
         const visible = items.filter(shown);
         if (!visible.length) return null;
         const open = groups.isOpen(name);
@@ -320,7 +326,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
   // The desk folds the rail into its bar's Menu button; the full sidebar still shows when this device asked for it.
   const deskMenu = pathname === "/copilot-lab" && !wide;
   const rail = chartsRoute && !wide && !deskMenu;
-  const groups = useNavGroups(pathname);
+  const groups = useNavGroups(pathname, copilot);
   useEffect(() => {
     setFolded(deskMenu);
     opener = () => setMenuOpen(true);

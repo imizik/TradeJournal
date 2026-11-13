@@ -536,6 +536,12 @@ screen of #733): one screen that says in a few seconds what is going on and puts
 `CopilotLab.module.css`). From reads the desk already makes (`GET /copilot/desk/session`, `GET /copilot/desk/threads`)
 plus one small one for the book's sparklines (`GET /copilot/desk/sparks`):
 
+The desk is the owner's home while the lab is on (2026-11-12): opening the app at `/` (the installed phone app's start
+URL too) lands here, Desk leads the sidebar and the phone's tab bar, and Today and the Dashboard leave the bar. Today
+already forwards here; the Dashboard stays one tap away at `/dashboard` under More → Journal for the journal tables,
+all-time and weekly closed P&L and performance. Assistant and sample viewers, and the owner while the lab is off, keep
+the Dashboard at `/` as before.
+
 - **Top bar.** Desk, the market phase with the New York clock of the session read ("Live · 11:48 ET", "Pre-market ·
   8:52 ET", "Closed 16:00"), SPY / QQQ / VIX's change, **Realized today** (the trades closed today, New York's day,
   Webull left out: the session read's `realized_today`) and **Open** (every open position's unrealized P&L now,

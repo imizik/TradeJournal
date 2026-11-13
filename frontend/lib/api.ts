@@ -967,6 +967,8 @@ async function buildApiError(path: string, res: Response): Promise<Error> {
 }
 
 return {
+  /** Whether the owner's Copilot Lab is on (its desk is then the owner's home); a failed read counts as off. */
+  copilotOn: () => get<{ enabled: boolean }>("/copilot/status").then(status => status.enabled === true, () => false),
   practiceRuns: () => get<{ runs: { id: string; day: string }[] }>("/practice/runs"),
   decisions: () => get<{ decisions: DecisionRecord[] }>("/decisions"),
   decision: (id: string) => get<DecisionRecord>(`/decisions/${encodeURIComponent(id)}`),
