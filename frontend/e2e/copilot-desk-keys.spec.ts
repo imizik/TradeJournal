@@ -965,7 +965,7 @@ for (const width of [1440, 375] as const) {
 
 test("Chatter counts not updated: chips grey with their time, never zero", async ({ page }) => {
   const stale = { ...CHATTER, sources: { "r/wallstreetbets": "stale", NYT: "not set up" },
-    buzz: CHATTER.buzz.map(b => ({ ...b, stale: true })), items: CHATTER.items.slice(0, 2) };
+    buzz: CHATTER.buzz.map(b => ({ ...b, stale: true })), items: CHATTER.items.slice(0, 2).map(i => ({ ...i, stale: true })) };
   await lab(page, { showThreads: false, feed: { ...FEED, chatter: stale } });
   const centre = page.getByRole("region", { name: "Chart and feed" });
   await centre.getByRole("tab", { name: "Feed" }).click();
@@ -974,6 +974,7 @@ test("Chatter counts not updated: chips grey with their time, never zero", async
   await expect(feed.getByTestId("buzz-chip").nth(0)).toHaveAttribute("data-stale", "true");
   await expect(feed.getByTestId("buzz-chip")).toHaveText(["NBIS 6.5×", "RKLB 41, none before"]);
   await expect(feed.getByTestId("buzz-note")).toContainText("As of 11:00, not updated since.");
+  await expect(feed.getByTestId("feed-item").first().locator("[data-stale]")).toHaveText(/^NBIS: 312 mentions/);
   await expect(feed.getByTestId("feed-chatter-note")).toHaveCount(0);
 });
 

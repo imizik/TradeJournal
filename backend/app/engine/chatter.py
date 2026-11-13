@@ -22,6 +22,7 @@ from datetime import date, datetime, time as dtime
 from email.utils import parsedate_to_datetime
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import re
@@ -106,7 +107,7 @@ def _int(value) -> int | None:
         number = float(value)
     except (TypeError, ValueError):
         return None
-    return int(number) if number >= 0 else None
+    return int(number) if math.isfinite(number) and number >= 0 else None
 
 
 def parse_apewisdom(body: dict, known: frozenset[str]) -> list[dict]:
@@ -136,14 +137,14 @@ def read_apewisdom(client: httpx.Client) -> dict:
     return body
 
 
-def buzz(rows: list[dict], held: set[str] = frozenset()) -> list[dict]:
+def buzz(rows: list[dict], held: set[str] = frozenset(), blocked: set[str] = frozenset()) -> list[dict]:
     """Tickers named at least ``MIN_MENTIONS`` times in the last 24 hours and at least ``BUZZ_MULTIPLE``× the 24 hours
     before, or not counted then; highest multiple first (one not counted before ranks by its count, as if it had one).
-    At most ``MAX_BUZZ``."""
+    Tickers he does not follow are left out before the cut. At most ``MAX_BUZZ``."""
     out = []
     for row in rows:
         count, before = row["mentions"], row.get("before")
-        if count < MIN_MENTIONS:
+        if count < MIN_MENTIONS or row["symbol"] in blocked:
             continue
         multiple = round(count / before, 1) if before else None
         if multiple is not None and multiple < BUZZ_MULTIPLE:
@@ -318,9 +319,7 @@ def view(held: set[str], blocked: set[str], now: float, root: Path | None = None
         stale = wsb_state == "unavailable" or now - as_of >= STALE_SECONDS
         if stale and wsb_state == "on":
             wsb_state = "stale"
-        for row in buzz(wsb.get("rows") or [], held):
-            if hidden([row["symbol"]]):
-                continue
+        for row in buzz(wsb.get("rows") or [], held, blocked):
             row.update(as_of=int(as_of), stale=stale)
             chips.append(row)
             symbol, count = row["symbol"], row["count"]
@@ -338,7 +337,7 @@ def view(held: set[str], blocked: set[str], now: float, root: Path | None = None
             detail = " ".join(p for p in (f"Not updated since {_clock(as_of, now)}." if stale else "", rank) if p) or None
             search = f"https://www.reddit.com/r/{SUBREDDIT}/search/?q={quote(symbol)}&restrict_sr=1&sort=new"
             items.append(_item(WSB_NAME, f"buzz:{symbol}", int(as_of), text, symbol=symbol, detail=detail, href=None,
-                               publisher=WSB_NAME, url=search, buzz=True))
+                               publisher=WSB_NAME, url=search, buzz=True, stale=stale))
     for row in (nyt.get("items") or []):
         if row["at"] < now - NYT_KEEP_HOURS * 3600 or hidden([], row["title"], row["summary"]):
             continue

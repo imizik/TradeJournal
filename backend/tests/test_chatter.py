@@ -57,6 +57,10 @@ def test_parsing_keeps_known_tickers_as_counts_only():
         {"symbol": "AAPL", "mentions": 9, "before": 1, "rank": 6, "rank_before": 40, "upvotes": 40},
     ]
     assert chatter.parse_apewisdom({"results": None}, KNOWN) == [] and chatter.parse_apewisdom({}, KNOWN) == []
+    odd = {"results": [{"ticker": "SPY", "mentions": "1e400"}, {"ticker": "MU", "mentions": 1e400},
+                        {"ticker": "NBIS", "mentions": -3}, {"ticker": "AAPL", "mentions": 12, "mentions_24h_ago": "nan"}]}
+    assert chatter.parse_apewisdom(odd, KNOWN) == [  # one odd count is skipped, never fails the pass
+        {"symbol": "AAPL", "mentions": 12, "before": None, "rank": None, "rank_before": None, "upvotes": None}]
 
 
 def test_buzz_is_the_last_24h_against_the_24h_before_with_the_rank_change():
@@ -77,6 +81,8 @@ def test_buzz_needs_ten_mentions_and_twice_the_day_before_and_keeps_five():
     assert chatter.buzz([{**row, "symbol": "MU", "mentions": 10, "before": 0}])[0]["multiple"] is None  # none before
     many = [{**row, "symbol": f"T{i}", "mentions": 100 + i, "before": 10} for i in range(8)]
     assert [r["symbol"] for r in chatter.buzz(many)] == ["T7", "T6", "T5", "T4", "T3"]
+    # Tickers he does not follow leave their places to the next ones.
+    assert [r["symbol"] for r in chatter.buzz(many, blocked={"T7", "T6"})] == ["T5", "T4", "T3", "T2", "T1"]
 
 
 def test_read_apewisdom_is_one_call_to_its_wallstreetbets_page_with_no_key():
@@ -199,6 +205,7 @@ def test_fresh_counts_are_on_old_ones_grey_with_their_time_and_never_zero(flags,
     later = NOW + 3600  # an hour on with no new read: stale, its time said
     stale = chatter.view(set(), set(), later)
     assert stale["sources"]["r/wallstreetbets"] == "stale" and all(b["stale"] for b in stale["buzz"])
+    assert all(i["stale"] for i in stale["items"]) and not any(i["stale"] for i in fresh["items"])
     assert stale["items"][1]["detail"] == "Not updated since 10:50. Rank 3, was 14."
     weekend = chatter.view(set(), set(), datetime(2026, 11, 14, 12, 0, tzinfo=ET).timestamp())
     assert weekend["items"][1]["detail"].startswith("Not updated since Wed 10:50.")

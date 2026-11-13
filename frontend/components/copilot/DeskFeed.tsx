@@ -17,6 +17,8 @@ export type FeedItem = {
   setup: { id: string; event_id: string; words: string; levels_line: string; contract_line: string | null; record: string | null;
     paper_record: string | null; plan_state: string; investigation_id: string | null } | null;
   plan: "setup" | "own" | null; mine: boolean; upcoming: boolean; chatter?: boolean;
+  /** A chatter buzz row whose counts are not current: shown grey. */
+  stale?: boolean;
 };
 /** One buzz chip (``app/engine/chatter.py`` ``buzz``): ApeWisdom's r/wallstreetbets mentions in the last 24h against
  * the 24h before (``multiple`` null when none were counted then) and the rank change. ``stale``: counts not updated
@@ -182,8 +184,9 @@ function chatterWhy(chatter: DeskChatter | null): string | null {
   if (!chatter) return null;
   const sources = Object.entries(chatter.sources).filter(([, state]) => state !== "not set up");
   const has = new Set(chatter.items.map(i => i.source as string));
+  // r/wallstreetbets read fine but with nothing at 2× its day before: no buzz, not "nothing read".
   const parts = sources.flatMap(([name, state]) => state === "unavailable" ? [`${name} could not be read`]
-    : !has.has(name) ? [`nothing from ${name} yet`] : []); // "stale": its chips say so, grey with their time
+    : has.has(name) ? [] : name === "r/wallstreetbets" ? [`no buzz on ${name} right now`] : [`nothing from ${name} yet`]);
   if (!parts.length) return null;
   const said = parts.join("; ");
   return `${said.startsWith("r/") ? said[0] : said[0].toUpperCase()}${said.slice(1)}.`; // "r/wallstreetbets" keeps its r/
@@ -236,7 +239,7 @@ function FeedRow({ item, day, fresh, ahead, onSymbol, onAsk, onPlan }: {
             className="ml-auto inline-flex min-h-11 items-center font-semibold text-foreground hover:underline sm:min-h-0">{item.symbol}</button>
         )}
       </p>
-      <p className="mt-1 line-clamp-3 break-words text-sm text-foreground">{item.text}</p>
+      <p data-stale={item.stale || undefined} className={cn("mt-1 line-clamp-3 break-words text-sm", item.stale ? "text-muted-foreground" : "text-foreground")}>{item.text}</p>
       {item.publisher && !chatter && <p className="text-xs text-muted-foreground">{item.publisher}</p>}
       {item.detail && <p className="line-clamp-2 break-words text-xs text-muted-foreground">{item.detail}</p>}
       {item.setup && (
