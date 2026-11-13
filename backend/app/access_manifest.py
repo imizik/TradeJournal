@@ -101,6 +101,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/desk/threads',
     'GET /copilot/desk/session',
     'GET /copilot/desk/sparks',
+    'GET /copilot/desk/moving',  # day changes from Radar's file and one batched quote read; no Robinhood, no write
     'GET /copilot/desk/ticks',  # live prices: one batched quote read kept a few seconds; regular session only
     'POST /copilot/desk/robinhood/refresh',  # parameterless: nothing from the request reaches Robinhood
     'GET /copilot/desk/watching',  # the app's own watchlist (the Charts one), levels and setups: database reads only
