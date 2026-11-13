@@ -124,8 +124,15 @@ class Conflict extends Error {
 
 async function fetchSettings(): Promise<ServerCopy> {
   const response = await fetch(apiUrl("/charts/settings"), { cache: "no-store", signal: AbortSignal.timeout(5000) });
-  if (!response.ok) throw new Error("Chart settings are unavailable.");
+  // A refused read is read to its end too, so the connection is free again.
+  if (!response.ok) { await response.text().catch(() => ""); throw new Error("Chart settings are unavailable."); }
   return response.json();
+}
+
+/** The server's chart settings as the workspace would read them, for a page that only shows the levels and drawings
+ * (the desk's Grid); null when they cannot be read. Nothing is saved. */
+export async function readChartSettings(): Promise<SharedSettings | null> {
+  try { const server = await fetchSettings(); return server.data ? fromServer(server.data) : shared(DEFAULT_SETTINGS); } catch { return null; }
 }
 
 async function saveSettings(baseRevision: number, data: SharedSettings): Promise<ServerCopy> {
@@ -165,7 +172,11 @@ function writeLocal(settings: ChartSettings, meta: Meta): boolean {
  * before the server kept them), saved there shortly after each change, and
  * refreshed when the page regains focus or every 30 seconds while visible.
  */
-export function useChartSettings(initialSymbol?: string) {
+export function useChartSettings(initialSymbol?: string, { borrowed = false }: {
+  /** Another page (the desk) shows and edits the shared settings: it keeps the symbol and recent list this browser
+   * stored for Charts, so Charts opens where it was left. */
+  borrowed?: boolean;
+} = {}) {
   const { owner, grants } = useAppAccess();
   const localOnly = !owner;
   const allowedSymbols = (grants.symbols ?? []).join(",");
@@ -185,6 +196,11 @@ export function useChartSettings(initialSymbol?: string) {
   const saving = useRef(false);
   const edits = useRef(0);
   const pending = useRef<number | undefined>(undefined);
+  const own = useCallback((next: ChartSettings): ChartSettings => {
+    if (!borrowed) return next;
+    const kept = readLocal().settings;
+    return kept ? { ...next, symbol: kept.symbol, recent: kept.recent } : next;
+  }, [borrowed]);
 
   const push = useCallback(async function push() {
     if (localOnly) return;
@@ -211,7 +227,7 @@ export function useChartSettings(initialSymbol?: string) {
       } else saved = "offline";
     }
     saving.current = false;
-    setStored(writeLocal(latest.current, { revision: revision.current, base: confirmed.current }));
+    setStored(writeLocal(own(latest.current), { revision: revision.current, base: confirmed.current }));
     const stillDirty = acknowledged && !same(shared(latest.current), confirmed.current);
     setSync(stillDirty ? "saving" : saved);
     // Undo may have returned to the old confirmed copy while this save was in
@@ -221,7 +237,7 @@ export function useChartSettings(initialSymbol?: string) {
       window.clearTimeout(pending.current);
       pending.current = window.setTimeout(() => void push(), 400);
     }
-  }, [localOnly]);
+  }, [localOnly, own]);
 
   useEffect(() => {
     let alive = true;
@@ -267,14 +283,14 @@ export function useChartSettings(initialSymbol?: string) {
     latest.current = settings;
     if (!ready) return;
     edits.current += 1;
-    setStored(writeLocal(settings, { revision: revision.current, base: confirmed.current }));
+    setStored(writeLocal(own(settings), { revision: revision.current, base: confirmed.current }));
     window.clearTimeout(pending.current);
     if (localOnly || same(shared(settings), confirmed.current)) return;
     setSync((state) => state === "saved" ? "saving" : state);
     // A change made while a save is in flight waits for it, then saves on top.
     const attempt = () => { if (saving.current) pending.current = window.setTimeout(attempt, 250); else void push(); };
     pending.current = window.setTimeout(attempt, 400);
-  }, [settings, ready, push, localOnly]);
+  }, [settings, ready, push, localOnly, own]);
 
   useEffect(() => {
     if (!ready || localOnly) return;

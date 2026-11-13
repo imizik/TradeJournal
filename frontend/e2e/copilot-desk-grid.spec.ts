@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { fakeChartSettings } from "./fixtures/chartSettings";
 
 // The centre's Grid (docs/copilot-lab.md § The desk): 4, 6 or 9 small live charts filled with the followed held names,
 // then the Watching list; a hidden ticker never in a slot; pins kept per device; one batched bars read for every tile;
@@ -91,6 +92,21 @@ async function open(page: Page, { width = 1440, height = 900, pins }: { width?: 
 }
 
 const tiles = (page: Page) => page.getByTestId("grid-tile");
+
+test("his Charts levels and drawings show thin on their tiles, read from the shared chart settings and never saved", async ({ page, context }) => {
+  const store = await fakeChartSettings(context, { revision: 3, data: {
+    levels: { MU: [{ id: "mu-level", price: 210.5, label: "Breakout" }], NVDA: [{ id: "nv-hidden", price: 190, label: "Old", hidden: true }] },
+    drawings: { MU: [{ id: "mu-trend", kind: "trend", points: [{ time: OPEN + 600, price: 209 }, { time: OPEN + 3000, price: 211 }], color: "#67d5eb", width: 3, drawn_on: "2026-11-13" },
+      { id: "mu-note", kind: "note", points: [{ time: OPEN + 600, price: 210 }], color: "#e2e8f0", width: 1, drawn_on: "2026-11-13", text: "Watch" }] },
+  } });
+  await open(page);
+  const tile = (symbol: string) => tiles(page).filter({ has: page.getByRole("button", { name: `Open ${symbol} on the chart` }) }).getByTestId("grid-chart");
+  await expect(tile("MU")).toHaveAttribute("data-drawings", "2"); // the level and the trend line; a note is left off a tile
+  await expect(tile("NVDA")).toHaveAttribute("data-drawings", "0"); // a hidden level stays hidden, as in Charts
+  await expect(tile("ORCL")).toHaveAttribute("data-drawings", "0");
+  await tiles(page).nth(1).screenshot({ path: test.info().outputPath("grid-tile-drawings.png") });
+  expect(store.saves).toEqual([]);
+});
 const names = (page: Page) => tiles(page).evaluateAll(nodes => nodes.map(n => n.getAttribute("data-symbol")));
 
 test("slots: held first, then Watching in order; a hidden ticker never; one batched read for every tile", async ({ page }) => {

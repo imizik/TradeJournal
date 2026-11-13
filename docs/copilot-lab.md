@@ -694,7 +694,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   call) and **Ticket** (see [Ticket](#ticket); no tab shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
   position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's
   fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D, with studies (VWAP, EMAs, SMAs,
-  volume), the symbol's alerts and a level menu to act from the chart, a reading line under the symbol and
+  volume), his Charts levels and drawings (with a pencil to draw), the symbol's alerts and a level menu to act from
+  the chart, a reading line under the symbol and
   **Open in Charts →**; then, for a held
   position, two tiles the book row does not carry: vs SPY today (the stock's change today less SPY's, from the sparks
   read) and Held (its P&L, distance to the stop and expiry are the row's, beside it); and **Timeline ▾** folded under it. The sparks read takes at most 12 symbols (the centre's first), plus up to 30 watched names (Watching, above), and
@@ -709,7 +710,9 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   following never fills a slot, pinned or not, and the route drops it too. Each tile: ticker, last price and day change
   (the shared ticker, else the sparks read), the earnings tag, and today's candles (pre-market to now, extended ones
   faded) after the previous session's last 30 minutes (grey), with today's RTH VWAP and the symbol's armed plan and alert
-  levels within 4% as thin lines. No studies, zoom or crosshair: a click opens the name on the Chart tab in place, as its
+  levels within 4% as thin lines, and his Charts levels and drawings one pixel wide (no notes, no price tags; read
+  from the shared chart settings, `GET /charts/settings`, when the Grid opens and when the browser tab shows again;
+  nothing is saved from a tile). No studies, zoom or crosshair: a click opens the name on the Chart tab in place, as its
   book or Watching row would. One read for every tile when the names or timeframe change, then at most once a minute
   while the Grid shows, the session is on and the browser tab is visible; between reads the ticker moves each tile's
   last candle and starts the next. Bars older than 150 s on a live day (their re-read failed or waited for the feed's
@@ -971,8 +974,10 @@ The cockpit's panes in detail:
     as-of (and VWAP's and RVol's own time when they are the regular session's and the price is after hours). A part
     with nothing behind it is left out. The tiles below are unchanged (none repeats a figure the line shows).
   - **Alerts and the level menu.** The symbol's other armed level alerts come with the read (`alerts`; the plan's own
-    are its entry and invalidation lines) as thin dotted lines and a chip each above the chart; a chip removes a plain
-    alert (`DELETE /charts/alerts/{id}`) with **Undo** (sets it again); a plan's alert shows without a remove. A tap
+    are its entry and invalidation lines) as thin dotted lines. The bell in the chart's header (with the count) opens
+    their list (`DeskAlerts.tsx`, the same rows Charts' Alerts panel shows): **Move** arms one at a price he types
+    (the existing `POST /charts/alerts/{id}/rearm`, which side judged from the last price) and **Remove** deletes a
+    plain alert (`DELETE /charts/alerts/{id}`), each with **Undo**; a plan's alert shows without either. A tap
     on the price scale, a long-press (half a second, a finger held still) or a right-click on the candles opens a
     small menu at that price, with a dashed line at it while open: **Alert when price crosses here** (the existing
     `POST /charts/alerts`, crosses, regular hours, labelled "From the desk", which side from the last price; the
@@ -981,6 +986,24 @@ The cockpit's panes in detail:
     compares with; nothing is saved), and **Ask the copilot about this level** (the copilot on the symbol, its own
     conversation when it has one, with the level, where price is against it and when in the question's context line,
     unsent). A short tap or a swipe opens nothing. Dragging a plan's line is not built.
+  - **Drawings.** His Charts levels and drawings (horizontal levels, rays, trend lines, zones, notes; hidden ones and
+    hidden groups stay hidden) draw on the desk chart from the same shared chart settings (`useChartSettings`,
+    `GET`/`PUT /charts/settings` with its revision merge), on Charts' drawing layer (`lib/drawings.ts`); placing,
+    selecting and dragging are Charts' own gestures, shared in `lib/drawingGestures.ts`. Nothing to edit shows until
+    the **pencil** in the header: a draw bar (`DeskDraw.tsx`) with **Line** (a Charts level), **Trend line** and
+    **Zone**, **Delete** for the selected one, **Undo** and **Done**; Delete, Backspace and Cmd/Ctrl+Z (Shift to redo)
+    work as in Charts, Esc drops the tool, then the selection, then the bar. On a phone the bar has the line and Delete
+    only, and a deleted line's message offers Undo. What he draws, moves or deletes here is saved where Charts reads
+    it, so each shows the other's. A right-click or long-press on a drawn line (pencil or not) opens the level menu at
+    the line's price — a zone's edge nearest the price, a trend line's value at the last candle — with **Delete**
+    added; its alert is tied to the line as Charts ties one (`source_kind` level or drawing, `source_id` the line's),
+    so Charts' menu on that line lists it, and **Plan from here… → Invalidation** on a level, ray or zone sends
+    Charts' "Plan this" message (`lib/drawPlan.ts`). A trend line's alert is a horizontal one at that price: it does
+    not follow the slope. A trend line with an anchor off the candles shown (drawn on an earlier day) gets no line
+    price: its menu works at the price pressed, since before the first candle the desk's axis counts clock time as
+    candles and would make one up. A line held for its menu stops dragging (unsaved), as in Charts. The desk keeps the
+    symbol and recent list this browser stored for Charts (`useChartSettings(…, { borrowed: true })`). Known gap: the desk's read carries no split record, so a drawing made before a split draws
+    at its saved prices here (Charts moves it).
   - **Cost.** The studies add no provider request: 2m and 15m read today's minutes through the same cached feed read
     (with C2.4's RVol baseline from disk), the warm-up from disk (kept in memory once all its sessions are there), the
     previous close from memory; 1D takes today's minutes for the reading line only from the feed's cache (any age;

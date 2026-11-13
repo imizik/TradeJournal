@@ -260,7 +260,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   private readonly renderer: Renderer = { draw: (target) => this.draw(target) };
   private readonly views: readonly IPrimitivePaneView[] = [{ zOrder: () => "top", renderer: () => this.renderer }];
 
-  constructor(readonly timeline: Timeline) {}
+  /** `quiet`: no price-axis tags and no arrows for lines out of view (the desk Grid's small tiles). */
+  constructor(readonly timeline: Timeline, private readonly quiet = false) {}
 
   attached({ series, chart, requestUpdate }: SeriesAttachedParameter<Time>) {
     this.series = series;
@@ -399,7 +400,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
 
   paneViews() { return this.views; }
 
-  priceAxisViews() { return this.axis; }
+  priceAxisViews() { return this.quiet ? [] : this.axis; }
 
   /** The levels priced out of view that keep a tag, with their arrow's direction ("↑400.00"); browser tests read it. */
   edgeTags(): string[] {
@@ -513,7 +514,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
         if (!a) continue;
         const selected = item.id === this.selected;
         const edge = item.kind === "level" || item.kind === "ray" ? this.offscreen(item.id) : null;
-        if (edge?.nearest) arrow(edge.side, edge.height, item.kind === "level" ? levelColor(item, selected) : item.color);
+        if (edge?.nearest && !this.quiet) arrow(edge.side, edge.height, item.kind === "level" ? levelColor(item, selected) : item.color);
         context.setLineDash([]);
         if (item.kind === "level") {
           if (a.y < -2 || a.y * v > bitmapSize.height + 2 * v) continue;
