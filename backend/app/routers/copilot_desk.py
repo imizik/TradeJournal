@@ -738,6 +738,11 @@ def threads(db: Session, now: float) -> dict:
     hidden = checks.get("hidden", set())
     for row in act + near + draft + new + watch:
         row["hidden"] = bool(row["symbol"]) and row["symbol"] in hidden
+    # Robinhood's working orders and today's fills, on their book rows; display only (no call, no write).
+    if live.get("view", {}).get("joined"):
+        lines = today._section(db, "desk robinhood orders", lambda: {"state": "ok", "rows": _order_lines(found, act + watch, now, hidden)})
+        if lines.get("rows"):
+            live["view"]["orders"] = lines["rows"]
     if _after_close(now):
         touched = today._section(db, "desk touched", lambda: _touched(db, now, day))
         happened = None
@@ -865,6 +870,43 @@ def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict) -> li
                        "option": _live_terms(live, as_of)}
         new.append(row)
     return new
+
+
+def _order_lines(found: dict, rows: list[dict], now: float, hidden: set[str] = frozenset()) -> list[dict]:
+    """Robinhood's orders on the book (``robinhood_fills.Poller.desk``: the order-history pass's last good read, held in
+    memory): each working order, and each order with a fill today, goes on its contract's followed book row
+    (``book.orders``), in its own account first, else on a row no account is known for. The rest are returned for the
+    book's small "Orders" group (a contract with no position yet, or one the fill closed). A ticker set to Not following
+    stays hidden here too. Nothing when that pass is off or its read is stale. Display only: no Robinhood call, no write, and no Robinhood id leaves the server."""
+    from app.engine import robinhood_book as rb
+    from app.engine import robinhood_fills
+    orders = [o for o in robinhood_fills.poller.desk(now) or [] if o["symbol"] not in hidden]
+    if not orders:
+        return []
+    keys = {}
+    for p in found["positions"]:
+        option = p.get("option") or {}
+        keys[f"trade:{p['trade_id']}"] = rb.contract_key(p["symbol"], p["instrument"], option.get("side"), option.get("strike"), option.get("expiry"))
+    book = [r for r in rows if r.get("book") is not None]
+    spare = []
+    orders.sort(key=lambda o: (not o["working"], -(o["filled_at"] or o["placed_at"] or 0)))
+    for o in orders:
+        live = {"symbol": o["symbol"], "instrument": o["instrument"], "side": o["option_type"], "strike": o["strike"], "expiry": o["expiry"]}
+        key = rb.contract_key(o["symbol"], o["instrument"], o["option_type"], o["strike"], o["expiry"])
+        masked, contract = rb.mask(o["last4"]), rb.label(live)
+        same = [r for r in book if key is not None and keys.get(r["key"]) == key or r["key"] == f"robinhood:{masked}:{contract}"]
+        pick = next((r for r in same if (r["book"].get("account") or {}).get("masked") == masked), None) \
+            or next((r for r in same if not r["book"].get("account")), None)
+        line = {"contract": contract, "symbol": o["symbol"], "instrument": o["instrument"],
+                "action": robinhood_fills.OPTION_ACTIONS.get(o["action"], o["action"]), "working": o["working"],
+                "quantity": o["quantity"], "filled": o["filled"], "price_kind": o["price_kind"], "limit": o["limit"],
+                "avg": o["avg"], "placed_at": o["placed_at"], "filled_at": o["filled_at"],
+                "account": {"label": o["account"], "masked": masked}, "pairing": o.get("pairing") if o["filled"] else None}
+        if pick is not None:
+            pick["book"].setdefault("orders", []).append(line)
+        else:
+            spare.append(line)
+    return spare
 
 
 def _live_tick(tick: dict | None, live: dict) -> dict | None:

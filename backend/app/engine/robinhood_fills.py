@@ -29,7 +29,7 @@ import threading
 import time
 import uuid
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
 
@@ -80,8 +80,8 @@ def _dec(value) -> Decimal | None:
     return out if out.is_finite() else None
 
 
-def _et(value) -> datetime | None:
-    """A Robinhood UTC timestamp as the journal's New York wall clock (naive)."""
+def _aware(value) -> datetime | None:
+    """A Robinhood UTC timestamp, zone-aware; a time with no zone is not trusted as UTC."""
     if not isinstance(value, str) or not value.strip():
         return None
     raw = value.strip().replace("Z", "+00:00")
@@ -90,9 +90,13 @@ def _et(value) -> datetime | None:
         moment = datetime.fromisoformat(raw)
     except ValueError:
         return None
-    if moment.tzinfo is None:
-        return None  # a time with no zone is not trusted as UTC
-    return moment.astimezone(ET).replace(tzinfo=None)
+    return moment if moment.tzinfo is not None else None
+
+
+def _et(value) -> datetime | None:
+    """A Robinhood UTC timestamp as the journal's New York wall clock (naive)."""
+    moment = _aware(value)
+    return moment.astimezone(ET).replace(tzinfo=None) if moment else None
 
 
 def _date(value) -> date | None:
@@ -177,6 +181,84 @@ def equity_executions(data: dict, last4: str) -> list[Execution]:
     return out
 
 
+# --------------------------------------------------------------------------- the desk's order lines (display only)
+
+WORKING_STATES = frozenset({"queued", "unconfirmed", "confirmed", "partially_filled"})
+OPTION_ACTIONS = {"buy_to_open": "Buy to open", "sell_to_close": "Sell to close", "sell_to_open": "Sell to open",
+                  "buy_to_close": "Buy to close", "buy": "Buy", "sell": "Sell"}
+
+
+def _epoch(value) -> int | None:
+    moment = _aware(value)
+    return int(moment.timestamp()) if moment else None
+
+
+def _filled(executions) -> tuple[float, float | None, int | None]:
+    """(quantity filled, its volume-weighted price a share, the last execution's time) from an order's or a leg's
+    executions; an execution without its quantity, price and time does not count."""
+    qty, value, last = 0.0, 0.0, None
+    for e in executions if isinstance(executions, list) else []:
+        if not isinstance(e, dict):
+            continue
+        q, p, at = rb._num(e.get("quantity")), rb._num(e.get("price")), _epoch(e.get("timestamp"))
+        if not q or q <= 0 or p is None or p < 0 or at is None:
+            continue
+        qty, value, last = qty + q, value + q * p, max(last or 0, at)
+    return qty, (round(value / qty, 4) if qty else None), last
+
+
+def _price_kind(order: dict, legs: int = 1) -> tuple[str, float | None]:
+    if legs > 1:  # a roll's price is the whole order's net credit or debit, never one leg's premium
+        return "net", rb._num(order.get("price"))
+    if order.get("trigger") == "stop" and rb._num(order.get("stop_price")) is not None:
+        return "stop", rb._num(order.get("stop_price"))
+    if order.get("type") == "market":
+        return "market", None
+    return "limit", rb._num(order.get("price"))
+
+
+def desk_orders(data: dict, account: dict, kind: str) -> list[dict]:
+    """The desk's lines from one orders reply (no call of its own): every order still working, and every order with an
+    execution, one entry per leg. Which of these the desk shows (working, filled today) is ``Poller.desk``'s call.
+    ``account`` is ``robinhood_book._accounts``' row: only its label and last four are kept."""
+    out = []
+    for order in rb._list(data, "orders", "results"):
+        order_id, state = order.get("id"), order.get("state")
+        if not isinstance(order_id, str) or not order_id or not isinstance(state, str):
+            continue
+        legs_n = len(order.get("legs")) if kind == "option" and isinstance(order.get("legs"), list) else 1
+        how, price = _price_kind(order, legs_n)
+        base = {"order_id": order_id[:64], "last4": account["last4"], "account": account["label"], "state": state[:24],
+                "working": state in WORKING_STATES, "price_kind": how, "limit": price, "placed_at": _epoch(order.get("created_at"))}
+        if kind == "option":
+            symbol = order.get("chain_symbol").strip().upper() if isinstance(order.get("chain_symbol"), str) else ""
+            legs = [leg for leg in order.get("legs") or [] if isinstance(leg, dict)] if isinstance(order.get("legs"), list) else []
+            if not TICKER.fullmatch(symbol) or not legs:
+                continue
+            for leg in legs:
+                side = OPTION_SIDES.get((leg.get("side"), leg.get("position_effect")))
+                option = leg.get("option_type") if leg.get("option_type") in ("call", "put") else None
+                strike, expiry = rb._num(leg.get("strike_price")), _date(leg.get("expiration_date"))
+                if side is None or option is None or strike is None or expiry is None:
+                    continue
+                ratio = rb._num(leg.get("ratio_quantity")) or 1
+                total = rb._num(order.get("quantity"))
+                filled, avg, at = _filled(leg.get("executions"))
+                out.append({**base, "instrument": "option", "symbol": symbol, "action": side, "option_type": option,
+                            "strike": strike, "expiry": expiry.isoformat(), "quantity": total * ratio if total else None,
+                            "filled": filled, "avg": avg, "filled_at": at, "legs": len(legs)})
+        else:
+            symbol = order.get("symbol").strip().upper() if isinstance(order.get("symbol"), str) else ""
+            side = order.get("side") if order.get("side") in ("buy", "sell") else None
+            if not TICKER.fullmatch(symbol) or side is None:
+                continue
+            filled, avg, at = _filled(order.get("executions"))
+            out.append({**base, "instrument": "stock", "symbol": symbol, "action": side, "option_type": None, "strike": None,
+                        "expiry": None, "quantity": rb._num(order.get("quantity")), "filled": filled, "avg": avg,
+                        "filled_at": at, "legs": 1})
+    return [o for o in out if o["working"] or o["filled"] > 0]
+
+
 # --------------------------------------------------------------------------- the read
 
 @dataclass
@@ -186,6 +268,9 @@ class Read:
     complete: set[tuple[str, str]]  # (last4, instrument) whose whole window was read
     account_types: dict[str, str]  # last4 -> the journal's account type
     calls: int
+    orders: list[dict] = field(default_factory=list)  # the desk's lines (``desk_orders``), from the same replies
+    tried: set[tuple[str, str]] = field(default_factory=set)  # (last4, instrument) this pass asked for
+    seen: set[str] = field(default_factory=set)  # every order id a reply showed, in any state (kept or not)
 
 
 def read_orders(reader: rh.Reader, now: float) -> Read:
@@ -194,19 +279,22 @@ def read_orders(reader: rh.Reader, now: float) -> Read:
     since = datetime.fromtimestamp(now, UTC) - LOOKBACK
     stamp = since.strftime("%Y-%m-%dT%H:%M:%SZ")
     accounts = rb._accounts(reader.get_accounts())
-    executions, complete, types = [], set(), {}
+    executions, complete, types, orders, tried, seen_ids = [], set(), {}, [], set(), set()
     for account in accounts:
         last4 = account["last4"]
         types[last4] = ACCOUNT_TYPES.get(account["type"], account["type"] or "individual")
         for kind, call, parse in (("option", reader.get_option_orders, option_executions),
                                   ("stock", reader.get_equity_orders, equity_executions)):
             cursor, seen, whole = None, set(), False
+            tried.add((last4, kind))
             try:
                 for _ in range(MAX_PAGES):
                     data = call(account["number"], stamp, cursor)
                     if not any(isinstance(data.get(k), list) for k in ("orders", "results")):
                         raise rh.ReadError("shape", "orders reply")
                     executions += parse(data, last4)
+                    orders += desk_orders(data, account, kind)
+                    seen_ids |= {o["id"][:64] for o in rb._list(data, "orders", "results") if isinstance(o.get("id"), str)}
                     cursor = rb._next(data)
                     if not cursor or cursor in seen:
                         whole = True
@@ -218,7 +306,8 @@ def read_orders(reader: rh.Reader, now: float) -> Read:
                 log.warning("Robinhood %s orders read failed for an account (%s)", kind, exc.kind)
             if whole:
                 complete.add((last4, kind))
-    return Read(since=since, executions=executions, complete=complete, account_types=types, calls=reader.calls)
+    return Read(since=since, executions=executions, complete=complete, account_types=types, calls=reader.calls, orders=orders,
+                tried=tried, seen=seen_ids)
 
 
 # --------------------------------------------------------------------------- recording (idempotent by execution id)
@@ -727,6 +816,36 @@ def view(session: Session, days: int = 7) -> dict:
             "days": days, "counts": dict(counts), "rows": items}
 
 
+def desk_pairing(session: Session, orders: list[dict]) -> dict[str, str]:
+    """Each filled order's standing against the journal, from this pass's reconciliation (read only): ``matched`` (the
+    journal has its fill: its email, a manual entry, or a recurring buy written from the order history), ``differs``
+    (a mismatch), ``roll`` (a two-leg order, left to its email and not paired here), ``recurring`` (a recurring buy
+    Robinhood never emails, not written while the switch is ``shadow``) or ``provisional`` (anything else: its email is
+    not in yet). Read after the pass is committed."""
+    ids = sorted({o["order_id"] for o in orders if o["filled"] > 0})
+    if not ids:
+        return {}
+    rows = {r.order_id: r for r in session.exec(select(RobinhoodReconciliation).where(
+        col(RobinhoodReconciliation.key).in_([f"order:{i}" for i in ids]))).all()}
+    legs = {o["order_id"]: o["legs"] for o in orders}
+    out = {}
+    for order_id in ids:
+        row = rows.get(order_id)
+        if legs.get(order_id, 1) > 1:
+            out[order_id] = "roll"
+        elif row is None:
+            out[order_id] = "provisional"
+        elif row.outcome == "mismatch":
+            out[order_id] = "differs"
+        elif row.outcome == "matched" or row.action == "wrote_fill":
+            out[order_id] = "matched"
+        elif row.action == "would_write_fill":  # a recurring buy in shadow: no email will come for it
+            out[order_id] = "recurring"
+        else:
+            out[order_id] = "provisional"
+    return out
+
+
 # --------------------------------------------------------------------------- the poller
 
 class Poller:
@@ -740,9 +859,24 @@ class Poller:
         self._mode = mode_fn
         self._lock = threading.Lock()
         self._status: dict = {"at": None, "state": "not run", "new_executions": 0, "written": 0, "calls": 0}
+        self._desk: dict | None = None  # the last good pass's order lines (``desk_orders``) and their pairing
 
     def status(self) -> dict:
         return dict(self._status)
+
+    def desk(self, now: float | None = None) -> list[dict] | None:
+        """The desk's order lines from the last good pass, in memory: every order still working, and every order with
+        a fill today (New York). None when there is nothing current to show: the switch off, the feed off or signed
+        out, no pass yet, or the last good pass older than three refreshes. No call and no write: the pass that
+        already reads the order history once a minute (fifteen outside market hours) is the only read."""
+        view = self._desk
+        now = self._now() if now is None else now
+        # Stale against the interval the last pass was taken at (a quiet pass at 9:24 is not stale at 9:28).
+        if view is None or now - view["at"] > rb.STALE_REFRESHES * rb.ttl(view["at"]):
+            return None
+        day = datetime.fromtimestamp(now, ET).date()
+        return [dict(o) for o in view["orders"]
+                if o["working"] or o["filled_at"] is not None and datetime.fromtimestamp(o["filled_at"], ET).date() == day]
 
     def _engine_(self):
         if self._engine is None:
@@ -755,10 +889,12 @@ class Poller:
         feed = self._feed or rb.feed
         if current == "off":
             self._status |= {"state": "off"}
+            self._desk = None
             return self.status()
         sign = feed.signer()
         if sign is None:
             self._status |= {"state": "feed off or signed out", "at": int(self._now())}
+            self._desk = None
             return self.status()
         if not self._lock.acquire(blocking=False):
             return self.status()
@@ -778,6 +914,20 @@ class Poller:
                 except Exception:
                     session.rollback()
                     raise
+                try:  # the desk's marks, read after the pass is committed: a failure here never costs the pass
+                    pairing = desk_pairing(session, got.orders)
+                except Exception as exc:  # noqa: BLE001 - the lines then read provisional
+                    log.warning("Robinhood desk order marks unavailable (%s)", type(exc).__name__)
+                    session.rollback()
+                    pairing = {}
+            lines = [{**o, "pairing": pairing.get(o["order_id"]), "read_at": now} for o in got.orders]
+            if self._desk is not None:
+                # An account and kind this pass asked for but could not read whole keeps its last lines (a working
+                # order does not vanish, as if cancelled, because one page failed), except an order this pass saw in
+                # any state (its new state wins: a cancelled one is gone) and a line not read for three intervals.
+                lines += [o for o in self._desk["orders"] if (o["last4"], o["instrument"]) in got.tried - got.complete
+                          and o["order_id"] not in got.seen and now - o["read_at"] <= rb.STALE_REFRESHES * rb.ttl(o["read_at"])]
+            self._desk = {"at": now, "orders": lines}
             self._status = {"at": int(now), "state": "ok", "mode": current, "new_executions": new, "written": result.written,
                             "calls": got.calls, "outcomes": result.outcomes,
                             "complete": len(got.complete) == 2 * len(got.account_types)}
@@ -806,7 +956,18 @@ class Poller:
                 await asyncio.to_thread(self.run_once)
             except Exception as error:  # the type only: a message could carry a row's values
                 log.warning("Robinhood order history pass failed (%s)", type(error).__name__)
-            await asyncio.sleep(rb.ttl(self._now()))
+            await asyncio.sleep(pause(self._now()))
+
+
+def pause(now: float) -> float:
+    """Seconds to the next pass: the feed's interval, but never past the 9:25 switch to market hours, so the open is
+    read within a minute (a quiet interval begun at 9:24 would otherwise wait until 9:39)."""
+    wait = rb.ttl(now)
+    moment = datetime.fromtimestamp(now, ET)
+    open_at = moment.replace(hour=9, minute=25, second=0, microsecond=0)
+    if moment.weekday() < 5 and moment < open_at:
+        wait = min(wait, max(1.0, (open_at - moment).total_seconds()))
+    return wait
 
 
 poller = Poller()

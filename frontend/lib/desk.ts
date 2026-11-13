@@ -109,6 +109,23 @@ export type DeskBook = {
   /** A held option's terms for its standing (``_option_terms`` / ``_live_terms`` in copilot_desk.py; ``optionStanding`` in
    * optionStanding.ts): contract, side, size, cost a contract and the Greeks with their source and time. Null for a stock. */
   option?: OptionTerms | null;
+  /** Robinhood's working orders and today's fills on this contract (``_order_lines`` in copilot_desk.py); absent when
+   * there are none or the order-history read is off, signed out or stale. */
+  orders?: DeskOrder[];
+};
+
+/** One Robinhood order on the desk (docs/robinhood-order-fills.md § On the desk): still working (``working``, with what
+ * has ``filled`` so far), or filled today. Prices are a share's (an option's premium as quoted). ``pairing`` says whether
+ * the journal has the fill yet: ``provisional`` until its email arrives and matches, then ``matched``; ``differs`` when
+ * the email disagrees; ``roll`` for a two-leg order (left to its email); ``recurring`` for a recurring buy Robinhood
+ * never emails. Display only: the app never places, changes or
+ * cancels an order. */
+export type DeskOrder = {
+  contract: string; symbol: string; instrument: "option" | "stock"; action: string; working: boolean;
+  /** ``net``: a roll's price, the whole order's credit or debit (not one leg's). */
+  quantity: number | null; filled: number; price_kind: "limit" | "market" | "stop" | "net"; limit: number | null; avg: number | null;
+  placed_at: number | null; filled_at: number | null; account: { label: string; masked: string };
+  pairing: "provisional" | "matched" | "differs" | "roll" | "recurring" | null;
 };
 
 /** The Robinhood feed's state on the desk (docs/robinhood-read-feed.md). ``ok`` (with ``joined``) drives the book;
@@ -117,6 +134,8 @@ export type DeskLiveAccount = { label: string; masked: string; total_value: numb
 export type DeskLive = {
   state: "off" | "signed_out" | "expired" | "loading" | "unavailable" | "stale" | "ok";
   as_of?: number; issue?: string | null; joined?: boolean; accounts?: DeskLiveAccount[];
+  /** Orders with no followed book row to sit on (no position yet, or the fill closed it): the book's "Orders" group. */
+  orders?: DeskOrder[];
 };
 export const liveOn = (live: DeskLive | null | undefined) => live?.state === "ok" && live.joined === true;
 

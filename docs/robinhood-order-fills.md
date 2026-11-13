@@ -87,6 +87,24 @@ each pass does nothing. The desk's "New · not in the journal yet" marker reads 
 in yet** while a bought position's order is waiting for its email, and goes away, as before, once its fill is in the
 journal by either route.
 
+## On the desk
+
+The same pass also hands the desk its order lines, from the replies it already reads (no extra call): every order
+still working (queued, unconfirmed, confirmed or partly filled) and every order with a fill today (New York). They are
+held in memory, so one read serves every tab and the phone; the desk reads them, never Robinhood. A working order is a
+compact line on its contract's book row (**Working: Sell 2 @ 4.50 · 1/2 filled · Roth IRA · 9m**); a fill is
+**Filled: Buy 2 @ 1.93, 10:42**, marked **provisional** until this pass pairs it with its email (then the mark
+goes; **email differs** for a mismatch; **roll** for a two-leg order, which is left to its email, and whose price
+reads as the whole order's **net**; **recurring · no email** for a recurring buy in shadow). An order whose contract
+has no followed row (no position yet, or the fill closed it) sits in a small **Orders** group at the top of the book;
+a ticker set to Not following stays hidden here too. Cancelled, rejected, failed and expired orders with no fill are
+not shown, and nothing older than today's fills is listed. An account whose orders did not read whole in a pass keeps
+its last lines (a working order never vanishes because one read failed). The pass after a quiet-hours pass never
+waits past 9:25, so the open is read within a minute. Nothing shows when this switch is off, the feed is off, signed
+out or stale, or the last good pass is three of its own intervals old. Display only, whatever the switch says: no fill, trade or journal
+row is written for a line, and the desk has no button that places, changes or cancels an order. An order created
+before the four-day read window (an old good-till-cancelled order) is not seen.
+
 ## Shadow first: what to look at
 
 Run `shadow` for a week of normal trading, then open **Fills** and read the **Robinhood order history** section (or
