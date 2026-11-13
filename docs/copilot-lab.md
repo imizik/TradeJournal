@@ -1502,7 +1502,7 @@ tickets stay in the position header above it.
   plan (a same-day request is refused), so they are not used. Trades become 2-minute candles when they fill at least
   60% of the slots between the first and last; else a line through the prints, the time axis kept linear.
 - **The mark where trades are sparse.** The live prices remember each held contract's mark (bid/ask midpoint) once a
-  minute in memory (`desk_ticks.marks`, no extra call); today's come back as a dotted line, broken where the desk was
+  minute in memory (`desk_ticks.marks`, no extra call; its last trade when it has no bid/ask, as the book does); today's come back as a dotted line, broken where the desk was
   not open, and the shared ticker moves its newest point every few seconds. Labelled as the mark, never mixed into the
   trades.
 - **Fills.** The journal's fills on the contract in its open trades and on the shown day (Webull and a roll's derived

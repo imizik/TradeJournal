@@ -138,7 +138,7 @@ test("a held call: Contract shows its trades, his fills and P&L at the cursor, a
   await expect(page.getByTestId("desk-contract-readout")).toContainText("ORCL 11/20/26 250C · Mark 4.10");
   await expect(page.getByTestId("desk-contract-readout")).toContainText("−$420 on 2 contracts");
   await expect(page.getByTestId("desk-contract-legend")).toContainText("trades");
-  await expect(page.getByTestId("desk-contract-legend")).toContainText("mark (bid/ask mid) while the desk was open");
+  await expect(page.getByTestId("desk-contract-legend")).toContainText("mark (bid/ask mid, else last) while the desk was open");
   await expect(page.getByTestId("desk-contract-legend")).toContainText("your fills");
   // The closing tickets stay in the position header above the chart.
   await expect(page.getByTestId("desk-chart").getByTestId("close-from-plan").getByRole("button")).toHaveText(["Close at target", "Close at stop"]);

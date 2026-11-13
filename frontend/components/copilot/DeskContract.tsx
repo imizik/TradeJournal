@@ -306,7 +306,7 @@ export function ContractChart({ held, data }: { held: HeldContract; data: DeskCo
             style={hover.x > hover.width / 2 ? { right: `${Math.max(8, hover.width - hover.x + 12)}px` } : { left: `${hover.x + 12}px` }}>
             <p className="text-muted-foreground">{nyWhen(hover.time)}</p>
             <p><span className="text-foreground">{premium(at.price)}</span>{" "}
-              <span className="text-muted-foreground">{at.kind === "trade" ? "trade" : "mark (bid/ask mid)"}{at.time + step <= hover.time ? `, ${nyWhen(at.time)}` : ""}</span></p>
+              <span className="text-muted-foreground">{at.kind === "trade" ? "trade" : "mark"}{at.time + step <= hover.time ? `, ${nyWhen(at.time)}` : ""}</span></p>
             <p data-testid="desk-contract-tip-pnl" className={pnlAt(held, at.price) > 0 ? "text-emerald-300" : pnlAt(held, at.price) < 0 ? "text-rose-300" : undefined}>
               {usd(pnlAt(held, at.price))} on {size}</p>
             {stockAt && hover.time - stockAt.time <= 10 * 60 && <p data-testid="desk-contract-tip-stock" className="text-muted-foreground">{held.symbol} <span className="text-foreground">{stockAt.price.toFixed(2)}</span></p>}
@@ -316,7 +316,7 @@ export function ContractChart({ held, data }: { held: HeldContract; data: DeskCo
       </div>
       <p aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" data-testid="desk-contract-legend">
         <span><span style={{ color: COLOR.trade }}>{style === "candles" ? "▮" : "—•"}</span> trades</span>
-        {marks.length > 0 && <span><span style={{ color: COLOR.mark }}>┈</span> mark (bid/ask mid) while the desk was open</span>}
+        {marks.length > 0 && <span><span style={{ color: COLOR.mark }}>┈</span> mark (bid/ask mid, else last) while the desk was open</span>}
         {fills.length > 0 && <span><span style={{ color: COLOR.fill }}>▲▼</span> your fills{fills.some(f => f.provisional) ? " (dashed: Robinhood, provisional)" : ""}</span>}
         {far.length > 0 && <span>{far.map(f => `${f.side === "buy" ? "Buy" : "Sell"} ${premium(f.price)}`).join(", ")} off the chart</span>}
       </p>
