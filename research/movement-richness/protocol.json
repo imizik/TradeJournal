@@ -1,0 +1,51 @@
+{
+  "protocol_id": "movement-richness-20261113-v1",
+  "registered": "2026-11-13",
+  "registered_before": "any outcome of this comparison was computed. Already known when it was written: movement-price-20261113-v1's decision (paid for more movement than he got) and its descriptive splits by hold, days to expiry, side and period, reported to the owner and kept outside the repository. No measure of richness at entry, and no split of movement by it, has been computed or looked at.",
+  "question": "Did trades whose options, at entry, priced in much more movement than the stock had recently been making lose more to movement than trades whose options priced in little?",
+  "why_it_matters": "The movement price study found the options priced in more movement than followed, on average. If the excess at entry (knowable before the trade) also ranks which trades lost most, a pre-trade readout comparing an option's priced movement with the stock's recent movement is worth building. If it does not, the cost is general to buying these options and the readout would add little beyond the expected move the app already shows.",
+  "population": {
+    "trades": "every trade scored by movement-price-20261113-v1 with no earnings report between first entry day and expiration (its primary population)",
+    "inputs": {
+      "extract": "the registered extract, sha256 4ada80b1977230773bd0d919cd3ea42f766b8fcc651d5484fee8253de7c33a47",
+      "fill_join": "the instrument study's fill join, sha256 ecea7c6511f111300d58aff6ec7f99d56f9e700c0de1bcef261bbf4f378a55e3",
+      "outcome": "movement-price-20261113-v1's per-trade rows (movement-price/trades.jsonl), sha256 f77e8363a9b78814526691f51d7e26f786e3f5f3af68d0a1a634b025684b76bc",
+      "minute_bars": "the same cached Alpaca SIP bars: the 21 sessions before the first entry day"
+    },
+    "excluded_and_counted": [
+      "no first entry fill, or one without an underlying price",
+      "fewer than 10 usable sessions of minute bars among the 20 before the first entry day",
+      "an entry price no Black-Scholes volatility reproduces, or no trading time left before the expiry close",
+      "a stock that did not move in its profile sessions"
+    ]
+  },
+  "richness": {
+    "definition": "at the trade's first entry fill: the priced variance to expiry (s0 squared, from the fill price, its underlying price, the strike, a 3.72% rate and the time to the expiry close, by Black-Scholes, as in movement-price-20261113-v1) divided by the typical-day units left to the expiry close on the stock's variance clock, all over the stock's average whole-day variance (overnight plus 5-minute buckets) across the usable profile sessions. 1 means the option priced the stock's recent movement; 2 means twice its recent variance",
+    "known_at_entry": "uses only the entry fill and bars from sessions before the entry day"
+  },
+  "groups": "thirds of the trades by richness (ties by trade id; the middle third takes any remainder), fixed once on all trades",
+  "measure": "gap = movement per dollar of premium in the upper third minus the lower third (each a sum of movement over a sum of premium), in percent of premium",
+  "tests": 1,
+  "uncertainty": "2,000 bootstrap resamples by New York trading day of first entry (seed 20261114), groups held fixed; 95% two-sided percentile interval on the gap",
+  "periods": {"exploration": "opened 2025-07-10 to 2026-03-31", "check": "opened 2026-04-01 to 2026-10-19", "independence": "neither period is untouched; every result is exploratory"},
+  "decisions": {
+    "richer options lost more to movement": "the 95% interval of the gap is below 0 and the gap is below 0 in each period (each period's gap uses the full-sample thirds)",
+    "richer options lost less to movement": "the 95% interval is above 0 and the gap is above 0 in each period",
+    "no evidence either way": "anything else",
+    "expected": "implied and realized volatility are both persistent, so the first outcome is likely; its size is the useful part",
+    "what_each_allows": "Lost more: build a pre-trade readout of an option's priced movement against the stock's recent movement, and use richness as the first contract-choice variable in any paper test. Lost less or no evidence: the movement cost is general to these purchases; do not build the readout on this evidence"
+  },
+  "descriptive_only": [
+    "per third: trades, median richness, movement, option P&L, each per dollar of premium, and the movement ratio",
+    "the same per period, and per third split by same session versus held past the entry session",
+    "each third's richness range, and the share of trades with richness above 1"
+  ],
+  "limits": [
+    "the same trades produced the movement price result; richness is new, the outcome is not",
+    "the entry price includes the spread, which raises richness more for cheap and wide contracts",
+    "20 sessions is a short window; an earnings gap inside it lowers richness",
+    "dollars per premium are dominated by large positions"
+  ],
+  "results": "The repository is public. Aggregates and per-trade rows are written outside it and reported to the owner directly; they are not committed.",
+  "one_run": "one historical run under this id. A changed constant is a new protocol id, recorded beside this one"
+}
