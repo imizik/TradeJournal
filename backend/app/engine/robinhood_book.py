@@ -38,6 +38,8 @@ CHUNK = 20  # quotes above 20 drop their closes
 MARKET_TTL, QUIET_TTL = 60, 15 * 60
 FORCE_GAP_SECONDS = 15
 STALE_REFRESHES = 3
+# What the desk's account line shows of each account (docs/robinhood-read-feed.md); never the number, only its last four.
+ACCOUNT_FIELDS = ("label", "masked", "total_value", "day_change", "day_change_pct", "options_value", "cash", "buying_power", "open_pnl")
 
 
 @dataclass(frozen=True)
@@ -120,8 +122,44 @@ def _accounts(data: dict) -> list[dict]:
 
 def _portfolio(data: dict) -> dict:
     power = data.get("buying_power")
-    return {"total_value": _num(data.get("total_value")), "cash": _num(data.get("cash")),
+    return {"total_value": _num(data.get("total_value")), "options_value": _num(data.get("options_value")), "cash": _num(data.get("cash")),
             "buying_power": _num(power.get("buying_power")) if isinstance(power, dict) else _num(power)}
+
+
+NO_VALUES = {"total_value": None, "options_value": None, "cash": None, "buying_power": None}
+
+
+def _opened_on(opened_at: str | None) -> str | None:
+    """The New York date an ISO time falls on (``2026-11-13T14:05:00Z`` -> ``2026-11-13``); None when it does not parse."""
+    try:
+        moment = datetime.fromisoformat(opened_at.replace("Z", "+00:00")) if opened_at else None
+    except ValueError:
+        return None
+    return moment.astimezone(ET).date().isoformat() if moment is not None and moment.tzinfo else None
+
+
+def _totals(account: dict, positions: list[dict], day: str) -> dict:
+    """An account's open P&L (Robinhood's unrealized P&L of its positions, summed) and today's change: no figure the
+    portfolio read gives says so, so it is each open position's move since yesterday's close (an option opened today:
+    since its cost), summed, and in percent of the value at the start of the day (total value less the change). Trades
+    closed today are not in it, and a stock bought today counts from yesterday's close too (its position carries no open
+    date). Any position with a figure missing, or positions that did not read, make the figure
+    unknown (None), never a partial sum or zero."""
+    rows = [p for p in positions if p["last4"] == account["last4"]]
+    known = account["complete"]
+    pnl = [p["usd"] for p in rows]
+    moves = []
+    for p in rows:
+        today = p["instrument"] == "option" and p["opened_on"] == day
+        basis = p["avg_cost"] if today else p["prev_close"]
+        sign = -1 if p["direction"] == "short" else 1
+        moves.append(None if p["mark"] is None or basis is None else sign * (p["mark"] - basis) * p["quantity"])  # a contract's or a share's
+    open_pnl = _round(sum(pnl)) if known and None not in pnl else None
+    change = _round(sum(moves)) if known and None not in moves else None
+    total = account["values"]["total_value"]
+    start = total - change if total is not None and change is not None else None
+    return {"open_pnl": open_pnl, "day_change": change,
+            "day_change_pct": _round(100 * change / start, 2) if start is not None and start > 0 else None}
 
 
 def _paged(read, account: str) -> list[dict]:
@@ -168,6 +206,7 @@ def _option_row(account: dict, p: dict, inst: dict | None, quote: dict | None) -
         "day_change_pct": _round(100 * (mark_share - prev) / prev, 1) if mark_share is not None and prev else None,
         "greeks": {k: _num(q.get(k)) for k in ("delta", "gamma", "theta", "vega")} | {"iv": _num(q.get("implied_volatility"))},
         "usd": _round(usd), "pct": _round(pct, 1), "opened_at": _text(p.get("opened_at"), 40),
+        "prev_close": prev * multiplier if prev and multiplier else None, "opened_on": _opened_on(_text(p.get("opened_at"), 40)),
     }
 
 
@@ -195,6 +234,7 @@ def _stock_row(account: dict, p: dict, quote: dict | None) -> dict | None:
         "avg_cost": _round(avg), "mark": _round(last), "bid": None, "ask": None,
         "day_change_pct": _round(100 * (last - prev) / prev, 1) if last is not None and prev else None, "greeks": None,
         "usd": _round(usd), "pct": _round(100 * sign * (last - avg) / avg, 1) if last is not None and avg else None, "opened_at": None,
+        "prev_close": prev or None, "opened_on": None,
     }
 
 
@@ -209,7 +249,7 @@ def read_snapshot(reader: rh.Reader, picks: tuple[str, ...], now: float) -> dict
         except rh.ReadError as exc:
             if exc.kind == "expired":
                 raise
-            a["values"] = {"total_value": None, "cash": None, "buying_power": None}
+            a["values"] = dict(NO_VALUES)
         a["complete"] = True
         options, stocks = [], []
         for read, out in ((reader.get_option_positions, options), (reader.get_equity_positions, stocks)):
@@ -256,12 +296,13 @@ def read_snapshot(reader: rh.Reader, picks: tuple[str, ...], now: float) -> dict
     positions += [row for a, p in held_stocks
                   if (row := _stock_row(a, p, stock_quotes.get((_text(p.get("symbol"), 12) or "").upper()))) is not None]
     holding = {r["last4"] for r in positions}
+    day = datetime.fromtimestamp(now, ET).date().isoformat()
     shown = [a for a in accounts if a["label"].lower() in picks or a["last4"] in picks or a["type"] in picks
              or a["last4"] in holding or (a["values"]["total_value"] or 0) > 0]
     return {
         "at": now,
-        "accounts": [{"label": a["label"], "masked": mask(a["last4"]), "last4": a["last4"], **a["values"], "complete": a["complete"]}
-                     for a in shown],
+        "accounts": [{"label": a["label"], "masked": mask(a["last4"]), "last4": a["last4"], **a["values"], **_totals(a, positions, day),
+                      "complete": a["complete"]} for a in shown],
         "complete": all(a["complete"] for a in accounts),
         "positions": positions,
         "calls": reader.calls,
@@ -363,8 +404,9 @@ class Feed:
             return {"state": "loading" if self._issue is None else "unavailable"}, None
         age = now - snap["at"]
         state = "stale" if age > STALE_REFRESHES * ttl(now) else "ok"
-        summary = {"state": state, "as_of": int(snap["at"]), "issue": self._issue,
-                   "accounts": [{k: a[k] for k in ("label", "masked", "total_value", "cash", "buying_power")} for a in snap["accounts"]]}
+        summary = {"state": state, "as_of": int(snap["at"]), "issue": self._issue}
+        if state == "ok":  # a stale snapshot's money is not shown: the desk says its age instead
+            summary["accounts"] = [{k: a.get(k) for k in ACCOUNT_FIELDS} for a in snap["accounts"]]
         return summary, snap if state == "ok" else None
 
     def view(self, kick: bool = True) -> dict:

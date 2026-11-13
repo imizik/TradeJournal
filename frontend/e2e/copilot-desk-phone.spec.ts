@@ -98,10 +98,14 @@ for (const width of [375, 393, 440]) {
     expect(await top(page, "needs-you")).toBeLessThan(260);
     const third = await page.getByTestId("desk-book").locator("li").nth(2).evaluate(el => el.getBoundingClientRect().bottom);
     expect(third).toBeLessThanOrEqual(tabBar);
-    // The accounts fold behind one button on a phone; the numbers stay masked.
-    await expect(page.getByTestId("desk-accounts")).toBeHidden();
-    await page.getByTestId("desk-accounts-toggle").click();
-    await expect(page.getByTestId("desk-accounts")).toContainText("Roth IRA ••8267 $18,898");
+    // The accounts are one row that swipes sideways inside itself (the page does not); the numbers stay masked.
+    const line = page.getByTestId("desk-accounts");
+    await expect(line.getByTestId("desk-account").first()).toContainText("Roth IRA••8267$18,898");
+    const boxes = await line.getByTestId("desk-account").evaluateAll(els => els.map(el => el.getBoundingClientRect().top));
+    expect(new Set(boxes.map(Math.round)).size).toBe(1); // one row
+    expect(await line.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
+    await line.evaluate(el => { el.scrollLeft = el.scrollWidth; });
+    await expect(line.getByTestId("desk-account").last()).toBeInViewport();
     expect(await sideways(page)).toBeLessThanOrEqual(0);
     // A five-figure P&L stays in its own column, clear of the hide button.
     const amd = page.getByTestId("desk-book").getByRole("listitem").filter({ hasText: "AMD" });

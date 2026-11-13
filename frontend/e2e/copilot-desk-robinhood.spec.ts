@@ -67,8 +67,8 @@ for (const width of [1440, 375]) {
     await page.setViewportSize({ width, height: 900 });
     const reads = await open(page, desk(LIVE));
     const chips = page.getByTestId("desk-accounts");
-    await expect(chips).toContainText("Roth IRA ••8267 $9,860");
-    await expect(chips).toContainText("MCP ••7884 $0");
+    await expect(chips).toContainText("Roth IRA••8267$9,860");
+    await expect(chips).toContainText("MCP••7884$0");
     const shelf = page.getByTestId("desk-book");
     await expect(shelf.getByRole("heading", { level: 2 })).toHaveText("Your book · 4 followed");
     await expect(shelf.getByTestId("book-live")).toHaveText(/^live from Robinhood · as of \d/);
@@ -96,7 +96,7 @@ for (const width of [1440, 375]) {
   });
 }
 
-test("not live: no chips, no tags, the journal's book as before, one quiet line", async ({ page }) => {
+test("not live: no account figures, no tags, the journal's book as before, one quiet line", async ({ page }) => {
   const journal = LIVE_ROWS.slice(0, 2).map(r => {
     const { account: _a, live: _l, quantity: _q, mark: _m, ...rest } = (r as unknown as { book: Record<string, unknown> }).book; // eslint-disable-line @typescript-eslint/no-unused-vars
     return { ...r, book: rest };
@@ -105,7 +105,8 @@ test("not live: no chips, no tags, the journal's book as before, one quiet line"
     [{ state: "expired" }, /^Robinhood sign-in expired · from the journal$/], [{ state: "signed_out" }, /^Robinhood signed out/]] as const) {
     await page.unrouteAll();
     await open(page, desk(robinhood, journal));
-    await expect(page.getByTestId("desk-accounts")).toHaveCount(0);
+    // No money on the account line: its age when stale, else one grey word.
+    await expect(page.getByTestId("desk-accounts")).toHaveText(robinhood.state === "stale" ? /^Accounts as of \d/ : "Accounts unavailable");
     await expect(page.getByTestId("book-account")).toHaveCount(0);
     await expect(page.getByTestId("book-live")).toHaveText(words);
   }
