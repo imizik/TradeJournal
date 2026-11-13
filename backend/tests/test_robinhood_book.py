@@ -388,3 +388,114 @@ def test_the_book_tag_follows_robinhoods_pnl_a_give_back_under_water_is_not_givi
     [row] = [r for r in read(desk)["threads"] if r["key"] == f"trade:{trade}"]
     assert row["book"]["live"] == "matched" and row["book"]["usd"] < 0
     assert row["book"]["state"] == "on_plan" and row["book"]["planned"] is True
+
+
+# --------------------------------------------------------------------------- Robinhood's orders on the book
+
+DAY = "2026-10-21"  # the desk clock's day (14:49 New York)
+
+
+@pytest.fixture
+def orders(engine, live, clock, monkeypatch):  # noqa: F811
+    """The order-history pass in shadow, as production runs it, on the desk's clock and the feed's sign-in."""
+    from app.engine import robinhood_fills as rf
+    poller = rf.Poller(engine, live, now=lambda: clock["t"], mode_fn=lambda: "shadow")
+    monkeypatch.setattr(rf, "poller", poller)
+    return poller
+
+
+def nbis_close(order_id, executions, **kw):
+    from tests.robinhood_fake import option_order
+    return option_order(order_id, "NBIS", executions, side="sell", effect="close", strike="100.0000", expiry="2026-10-23", **kw)
+
+
+def test_a_working_order_and_a_fresh_fill_sit_on_their_book_row(desk, engine, quotes, live, orders, fake):  # noqa: F811
+    from tests.robinhood_fake import execution
+    from tests.test_robinhood_fills import utc
+    trade = planned_nbis(engine)
+    fake.option_orders["333338267"] = [
+        nbis_close("w1", [], quantity="2.00000", state="confirmed", created_at=utc(14, 40, day=DAY)) | {"price": "4.50000000"},
+        nbis_close("f1", [execution("f1a", "4.30000000", "1.00000", utc(14, 42, day=DAY))], created_at=utc(14, 41, day=DAY)),
+        nbis_close("gone", [], quantity="1.00000", state="cancelled", created_at=utc(14, 30, day=DAY))]
+    orders.run_once()
+    calls = len(fake.calls)
+    body = read(desk)
+    [row] = [r for r in body["threads"] if r["key"] == f"trade:{trade}"]
+    working, filled = row["book"]["orders"]
+    assert working == {"contract": "NBIS 10/23/26 100C", "symbol": "NBIS", "instrument": "option", "action": "Sell to close",
+                       "working": True, "quantity": 2.0, "filled": 0.0, "price_kind": "limit", "limit": 4.5, "avg": None,
+                       "placed_at": int(utc_epoch(14, 40)), "filled_at": None,
+                       "account": {"label": "Roth IRA", "masked": "••8267"}, "pairing": None}
+    assert (filled["working"], filled["filled"], filled["avg"], filled["filled_at"], filled["pairing"]) == (
+        False, 1.0, 4.3, int(utc_epoch(14, 42)), "provisional")
+    assert "orders" not in body["robinhood"]  # nothing left over: no empty group
+    assert len(fake.calls) == calls  # the desk read made no Robinhood call
+    text = json.dumps(body)
+    assert "w1" not in text and "f1a" not in text and "333338267" not in text  # no Robinhood id or account number
+
+
+def utc_epoch(hh, mm):
+    from tests.test_robinhood_fills import epoch
+    return epoch(hh, mm, day=DAY)
+
+
+def test_an_order_with_no_position_or_on_a_hidden_ticker_goes_to_the_orders_group(desk, engine, quotes, live, orders, fake):  # noqa: F811
+    from app.models import DayJournalEntry
+    from tests.robinhood_fake import equity_order, execution, option_order
+    from tests.test_copilot_plans import WED
+    from tests.test_robinhood_fills import utc
+    fake.option_orders["444447884"] = [option_order("n1", "APLD", [], strike="30.0000", kind="put", expiry="2026-11-27",
+                                                    quantity="1.00000", state="queued", created_at=utc(14, 45, day=DAY))]
+    fake.equity_orders["333338267"] = [equity_order("s1", "RKLB", [execution("s1a", "55.10", "3", utc(14, 44, day=DAY))], side="sell")]
+    fake.option_orders["333338267"] = [nbis_close("h1", [], quantity="1.00000", state="queued", created_at=utc(14, 46, day=DAY))]
+    with Session(engine) as db:
+        db.add(DayJournalEntry(day=WED, operation_id="f-1", kind="follow", symbol="NBIS", text="Not following",
+                               created_at=T0 + timedelta(minutes=1)))
+        db.commit()
+    orders.run_once()
+    body = read(desk)
+    group = body["robinhood"]["orders"]
+    assert [(o["contract"], o["action"], o["working"], o["account"]["masked"]) for o in group] == [
+        ("NBIS 10/23/26 100C", "Sell to close", True, "••8267"),  # its row is not followed: shown here instead
+        ("APLD 11/27/26 30P", "Buy to open", True, "••7884"),
+        ("RKLB stock", "Sell", False, "••8267")]
+    assert group[2]["price_kind"] == "market" and group[2]["avg"] == 55.1 and group[2]["pairing"] == "provisional"
+    assert not any(r.get("book", {}).get("orders") for r in body["threads"])
+
+
+def test_robinhood_off_or_the_pass_off_shows_no_orders(desk, engine, quotes, live, orders, fake, monkeypatch):  # noqa: F811
+    from tests.test_robinhood_fills import utc
+    trade = planned_nbis(engine)
+    fake.option_orders["333338267"] = [nbis_close("w1", [], quantity="1.00000", state="queued", created_at=utc(14, 40, day=DAY))]
+    orders.run_once()
+    assert [r for r in read(desk)["threads"] if r["key"] == f"trade:{trade}"][0]["book"]["orders"]
+    monkeypatch.setattr(rb, "feed", rb.Feed(settings_fn=lambda: rb.Settings(False, None, ())))  # Robinhood off
+    body = read(desk)
+    [row] = [r for r in body["threads"] if r["key"] == f"trade:{trade}"]
+    assert "orders" not in row["book"] and body["robinhood"] == {"state": "off"}
+    monkeypatch.setattr(rb, "feed", live)
+    orders._mode = lambda: "off"  # the order-history pass switched off: nothing to show
+    orders.run_once()
+    body = read(desk)
+    assert "orders" not in [r for r in body["threads"] if r["key"] == f"trade:{trade}"][0]["book"] and "orders" not in body["robinhood"]
+
+
+def test_reading_the_orders_on_the_desk_writes_nothing(desk, engine, quotes, live, orders, fake):  # noqa: F811
+    from app.models import RobinhoodExecution, RobinhoodReconciliation
+    from tests.robinhood_fake import execution
+    from tests.test_robinhood_fills import utc
+    planned_nbis(engine)
+    fake.option_orders["333338267"] = [nbis_close("f1", [execution("f1a", "4.30000000", "1.00000", utc(14, 42, day=DAY))])]
+    orders.run_once()
+
+    def state():
+        with Session(engine) as db:
+            return ([(f.id, f.contracts, f.price) for f in db.exec(select(Fill)).all()],
+                    [(t.id, t.status, t.contracts, t.realized_pnl) for t in db.exec(select(Trade)).all()],
+                    [(r.key, r.outcome, r.updated_at) for r in db.exec(select(RobinhoodReconciliation)).all()],
+                    len(db.exec(select(RobinhoodExecution)).all()))
+
+    before = state()
+    for _ in range(5):
+        read(desk)
+    assert state() == before

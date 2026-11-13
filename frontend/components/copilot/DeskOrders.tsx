@@ -1,0 +1,76 @@
+"use client";
+
+/**
+ * Robinhood's orders on the book (docs/robinhood-order-fills.md § On the desk): a working order's line ("Working · Sell
+ * 2 @ 4.50 limit · 1/2 filled · Roth IRA · 9m") and a fresh fill's ("Filled · Buy 2 @ 1.93, 10:42 AM", marked
+ * provisional until its email arrives and matches). Read only: there is no button here that places, changes or cancels
+ * an order, and none may be added.
+ */
+
+import type { DeskOrder } from "@/lib/desk";
+import { cn } from "@/lib/utils";
+
+const ET = "America/New_York";
+const clock = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" });
+const count = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 4 });
+const price = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+
+/** "now", "9m", "2h", "3d" since the order was placed. */
+export function age(placedAt: number | null, now = Date.now() / 1000): string | null {
+  if (placedAt == null) return null;
+  const minutes = Math.max(0, Math.floor((now - placedAt) / 60));
+  return minutes < 1 ? "now" : minutes < 60 ? `${minutes}m` : minutes < 24 * 60 ? `${Math.floor(minutes / 60)}h` : `${Math.floor(minutes / 1440)}d`;
+}
+
+/** The short side word: an option's "Sell to close" reads "Sell" on its own contract's row (the row says what it is). */
+const verb = (o: DeskOrder, short: boolean) => short ? o.action.split(" ")[0] : o.action;
+
+export function orderText(o: DeskOrder, short: boolean, now?: number): string {
+  if (!o.working) return `Filled · ${verb(o, short)} ${count(o.filled)}${o.avg != null ? ` @ ${price(o.avg)}` : ""}${o.filled_at ? `, ${clock(o.filled_at)}` : ""}`;
+  const terms = o.price_kind === "market" ? "market" : o.limit != null ? `@ ${price(o.limit)} ${o.price_kind}` : o.price_kind;
+  const filled = o.filled > 0 ? `${count(o.filled)}${o.quantity != null ? `/${count(o.quantity)}` : ""} filled` : null;
+  const placed = age(o.placed_at, now);
+  return ["Working", `${verb(o, short)}${o.quantity != null ? ` ${count(o.quantity)}` : ""} ${terms}`, filled, o.account.label, placed]
+    .filter(Boolean).join(" · ");
+}
+
+const MARK: Record<string, { label: string; title: string; className: string }> = {
+  provisional: { label: "provisional", title: "From Robinhood's order history; the journal has it once the fill email arrives and matches",
+    className: "border-amber-300/40 text-amber-300" },
+  differs: { label: "email differs", title: "The fill email does not agree with Robinhood's order: see Fills → Robinhood order history",
+    className: "border-rose-300/40 text-rose-300" },
+  roll: { label: "roll", title: "A two-leg order: the journal takes it from its email", className: "" },
+};
+
+function Line({ order, short, withContract }: { order: DeskOrder; short: boolean; withContract?: boolean }) {
+  const mark = order.pairing ? MARK[order.pairing] : undefined;
+  return (
+    <span data-testid="book-order" data-working={order.working ? "true" : "false"}
+      title={`${order.contract} · ${order.account.label} ${order.account.masked}`}
+      className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-[11px] tabular-nums">
+      {withContract && <span className="font-medium text-foreground">{order.contract}</span>}
+      <span className={cn("min-w-0", order.working ? "text-sky-300" : "text-foreground/80")}>{orderText(order, short)}</span>
+      {mark && <span data-testid="book-order-mark" title={mark.title} className={cn("rounded border px-1", mark.className)}>{mark.label}</span>}
+    </span>
+  );
+}
+
+/** The orders on one book row, under its tags. */
+export function OrderLines({ orders }: { orders?: DeskOrder[] }) {
+  if (!orders?.length) return null;
+  return <span className="mt-0.5 flex flex-col gap-0.5">{orders.map((o, i) => <Line key={`${o.action}:${o.placed_at}:${i}`} order={o} short />)}</span>;
+}
+
+/** Orders with no followed row to sit on (no position yet, or the fill closed it), at the top of the book. Nothing at
+ * all when there are none: no empty heading. */
+export function OrdersGroup({ orders }: { orders?: DeskOrder[] }) {
+  if (!orders?.length) return null;
+  return (
+    <div data-testid="book-orders" className="border-t px-3 py-1.5">
+      <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Orders</h3>
+      <ul className="mt-0.5 flex flex-col gap-0.5">
+        {orders.map((o, i) => <li key={`${o.contract}:${o.action}:${o.placed_at}:${i}`}><Line order={o} short={false} withContract /></li>)}
+      </ul>
+    </div>
+  );
+}

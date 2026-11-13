@@ -24,6 +24,7 @@ import {
 import { staleSince, tickFor, tickedBook, useDeskTicks } from "@/lib/deskTicks";
 import { Flash, PricesAsOf } from "@/components/copilot/Ticks";
 import { OptionStanding, OptionStandingLine } from "@/components/copilot/OptionStanding";
+import { OrderLines, OrdersGroup } from "@/components/copilot/DeskOrders";
 import { cn } from "@/lib/utils";
 
 export const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
@@ -271,8 +272,9 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
   const shown = held.filter(r => !r.hidden);
   // Live from Robinhood: options first; a stock without a plan (a long-term holding) waits behind "N stock positions".
   const isLive = liveOn(live);
-  const folded = isLive ? shown.filter(r => r.instrument === "stock" && !r.book?.planned) : [];
-  const followed = isLive ? [...shown.filter(r => r.instrument !== "stock"), ...shown.filter(r => r.instrument === "stock" && r.book?.planned),
+  // A stock with a Robinhood order working or filled today stays out in the open.
+  const folded = isLive ? shown.filter(r => r.instrument === "stock" && !r.book?.planned && !r.book?.orders?.length) : [];
+  const followed = isLive ? [...shown.filter(r => r.instrument !== "stock"), ...shown.filter(r => r.instrument === "stock" && !folded.includes(r)),
     ...(stocksOpen ? folded : [])] : shown;
   // The account tag only when the book spans accounts: one account is the top bar's chip, not a word on every row.
   const mixed = new Set(followed.flatMap(r => r.book?.account ? [r.book.account.masked] : [])).size > 1;
@@ -293,6 +295,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
         <PricesAsOf at={staleSince(ticks, followed.map(r => r.book?.tick?.quote))} />
         {updating && <span role="status" data-testid="book-updating" className="text-[11px] text-muted-foreground">Updating…</span>}
       </div>
+      {isLive && <OrdersGroup orders={live?.orders} />}
       {followed.length ? (
         <ul>
           {followed.map(row => {
@@ -328,6 +331,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                       <EarningsTag tag={row.symbol ? earnings?.rows[row.symbol] : undefined} day={day} />
                       {book?.live === "not_on_robinhood" && <span data-testid="book-not-live" className="rounded border px-1">Not on Robinhood</span>}
                     </span>
+                    {isLive && <OrderLines orders={book?.orders} />}
                   </span>
                   <Spark points={points} label={`${row.symbol} today`} />
                   <span data-testid="book-pnl" className={cn("whitespace-nowrap text-right text-sm tabular-nums", tone(pnl.usd), (updating || pnl.stale) && "opacity-50")}>

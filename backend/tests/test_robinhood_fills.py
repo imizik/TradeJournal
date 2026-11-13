@@ -723,3 +723,121 @@ def test_the_desk_says_a_new_position_s_fill_was_seen_on_robinhood(desk):
     desk.at(10, 8).poll()
     with Session(desk.engine) as s:
         assert rf.provisional(s, datetime(2026, 11, 12, 10, 8)) == set()  # in by email: the plain join takes over
+
+
+# --------------------------------------------------------------------------- the desk's order lines (display only)
+
+def lines(desk):
+    """The desk's lines as ``Poller.desk`` gives them, keyed by order id: (working, state, filled, avg, pairing)."""
+    return {o["order_id"]: (o["working"], o["state"], o["filled"], o["avg"], o["pairing"]) for o in desk.poller.desk() or []}
+
+
+def test_working_orders_show_and_cancelled_rejected_expired_ones_do_not(desk):
+    for order_id, state in (("q", "queued"), ("c", "confirmed"), ("u", "unconfirmed"), ("x", "cancelled"),
+                            ("r", "rejected"), ("e", "expired"), ("f", "failed")):
+        desk.option(option_order(order_id, "MU", [], quantity="2.00000", state=state, created_at=utc(10, 0)))
+    desk.option(option_order("cp", "MU", [execution("cp1", "1.90000000", "1.00000", utc(10, 2))], quantity="3.00000",
+                             state="cancelled"))  # partly filled, then cancelled: its fill happened, it is not working
+    desk.at(10, 5).poll()
+    assert lines(desk) == {"q": (True, "queued", 0.0, None, None), "c": (True, "confirmed", 0.0, None, None),
+                           "u": (True, "unconfirmed", 0.0, None, None), "cp": (False, "cancelled", 1.0, 1.9, "provisional")}
+    [queued] = [o for o in desk.poller.desk() if o["order_id"] == "q"]
+    assert {k: queued[k] for k in ("symbol", "action", "option_type", "strike", "expiry", "quantity", "price_kind", "limit",
+                                   "account", "last4", "placed_at")} == {
+        "symbol": "MU", "action": "buy_to_open", "option_type": "call", "strike": 835.0, "expiry": "2026-11-13",
+        "quantity": 2.0, "price_kind": "limit", "limit": 1.0, "account": "Roth IRA", "last4": "8267",
+        "placed_at": int(epoch(10, 0))}
+
+
+def test_a_partial_fill_is_working_with_what_has_filled_and_its_average(desk):
+    desk.option(option_order("p", "MU", [execution("p1", "1.90000000", "1.00000", utc(10, 1)),
+                                         execution("p2", "1.96000000", "1.00000", utc(10, 3))],
+                             quantity="3.00000", state="partially_filled"))
+    desk.at(10, 4).poll()
+    [line] = desk.poller.desk()
+    assert (line["working"], line["quantity"], line["filled"], line["avg"], line["filled_at"], line["pairing"]) == (
+        True, 3.0, 2.0, 1.93, int(epoch(10, 3)), "provisional")
+    assert desk.fills() == []  # a working order is never a fill
+
+
+def test_a_fresh_fill_is_provisional_until_its_email_matches_then_plain(desk):
+    desk.option(mu_buy("o1", "2.00000", "1.93000000", 10, 42))
+    desk.at(10, 43).poll()
+    [line] = desk.poller.desk()
+    assert (line["working"], line["filled"], line["avg"], line["filled_at"], line["pairing"]) == (
+        False, 2.0, 1.93, int(epoch(10, 42, ) + 12), "provisional")
+    desk.at(10, 45).emails(email("m1", "MU", "buy_to_open", 2, 193, 10, 42, **MU))
+    desk.at(10, 46).poll()
+    assert lines(desk)["o1"][4] == "matched"
+    # An email that disagrees is shown as such, never quietly matched.
+    desk.option(mu_buy("o2", "1.00000", "2.00000000", 11, 0))
+    desk.at(11, 2).emails(email("m2", "MU", "buy_to_open", 1, 250, 11, 0, **MU))
+    desk.at(11, 31).poll()
+    assert lines(desk)["o2"][4] == "differs"
+
+
+def test_a_roll_is_shown_as_a_roll_and_yesterdays_fills_are_not_shown(desk):
+    desk.option(option_order("roll", "CRWV", [], legs=[
+        {"side": "sell", "position_effect": "close", "option_type": "call", "strike_price": "70", "expiration_date": "2026-11-21",
+         "ratio_quantity": 1, "executions": [execution("r1", "1.0", "1", utc(13, 0))]},
+        {"side": "buy", "position_effect": "open", "option_type": "call", "strike_price": "75", "expiration_date": "2026-11-28",
+         "ratio_quantity": 1, "executions": [execution("r2", "1.5", "1", utc(13, 0))]}], quantity="1.00000"))
+    desk.option(mu_buy("old", "1.00000", "1.50000000", 15, 0, ) | {"legs": [
+        {**mu_buy("old", "1.00000", "1.50000000", 15, 0)["legs"][0],
+         "executions": [execution("x-old", "1.50000000", "1.00000", utc(15, 0, day="2026-11-11"))]}]})
+    desk.at(13, 5).poll()
+    got = desk.poller.desk()
+    assert [(o["order_id"], o["action"], o["strike"], o["pairing"]) for o in got] == [
+        ("roll", "sell_to_close", 70.0, "roll"), ("roll", "buy_to_open", 75.0, "roll")]
+
+
+def test_the_desk_lines_write_nothing_whatever_the_switch_says(desk, engine):
+    """The lines come from memory: reading them writes no fill, trade or reconciliation row, and makes no call."""
+    for current in ("shadow", "on"):
+        desk.mode = current
+        desk.option(mu_buy(f"o-{current}", "2.00000", "1.93000000", 10, 0))
+        desk.option(option_order(f"w-{current}", "MU", [], quantity="1.00000", state="queued", created_at=utc(10, 1)))
+        desk.at(10, 5).poll()
+
+        def snapshot():
+            with Session(engine) as s:
+                return (desk.fills(), desk.trades(), sorted((r.key, r.outcome, r.updated_at) for r in s.exec(select(RobinhoodReconciliation)).all()),
+                        len(s.exec(select(RobinhoodExecution)).all()))
+
+        before, calls = snapshot(), len(desk.fake.calls)
+        for _ in range(50):
+            assert desk.poller.desk()
+        assert snapshot() == before and len(desk.fake.calls) == calls
+        assert desk.fills() == [] and desk.trades() == []  # an option execution never becomes a fill
+
+
+def test_the_lines_add_no_robinhood_call_to_the_pass(desk):
+    """The lines are parsed from the order-history replies the pass already reads: the same calls, in the same order,
+    as a pass with no desk at all (one ``get_accounts``, then each account's option and stock orders)."""
+    desk.option(mu_buy("o1", "2.00000", "1.93000000", 10, 0))
+    desk.option(option_order("w", "MU", [], quantity="1.00000", state="queued", created_at=utc(10, 1)))
+    desk.at(10, 5).poll()
+    names = [name for name, _args in desk.fake.calls]
+    accounts = len(desk.fake.accounts)
+    assert names == ["get_accounts"] + ["get_option_orders", "get_equity_orders"] * accounts
+    assert len(desk.poller.desk()) == 2 and len(desk.fake.calls) == 1 + 2 * accounts
+
+
+def test_off_signed_out_or_stale_shows_nothing(desk):
+    desk.option(option_order("w", "MU", [], quantity="1.00000", state="queued", created_at=utc(10, 1)))
+    assert desk.poller.desk() is None  # no pass yet
+    desk.at(10, 5).poll()
+    assert desk.poller.desk()
+    desk.clock += rb.STALE_REFRESHES * rb.ttl(desk.clock) + 1  # the last good read is three refreshes old
+    assert desk.poller.desk() is None
+    desk.at(10, 6).poll()
+    assert desk.poller.desk()
+    desk.fake.fail.update({"get_accounts"})  # a failed read keeps the last good lines until they are stale
+    desk.at(10, 7).poller.run_once()
+    assert desk.poller.desk()
+    desk.feed._settings = lambda: rb.Settings(enabled=False, token_file=None, accounts=())  # Robinhood off
+    desk.at(10, 8).poll()
+    assert desk.poller.desk() is None
+    desk.mode = "off"
+    desk.poll()
+    assert desk.poller.desk() is None

@@ -87,6 +87,21 @@ each pass does nothing. The desk's "New · not in the journal yet" marker reads 
 in yet** while a bought position's order is waiting for its email, and goes away, as before, once its fill is in the
 journal by either route.
 
+## On the desk
+
+The same pass also hands the desk its order lines, from the replies it already reads (no extra call): every order
+still working (queued, unconfirmed, confirmed or partly filled) and every order with a fill today (New York). They are
+held in memory, so one read serves every tab and the phone; the desk reads them, never Robinhood. A working order is a
+compact line on its contract's book row (**Working · Sell 2 @ 4.50 limit · 1/2 filled · Roth IRA · 9m**); a fill is
+**Filled · Buy 2 @ 1.93, 10:42 AM**, marked **provisional** until this pass pairs it with its email (then the mark
+goes; **email differs** for a mismatch; **roll** for a two-leg order, which is left to its email). An order whose
+contract has no followed row (no position yet, a ticker not followed, or the fill closed it) sits in a small
+**Orders** group at the top of the book. Cancelled, rejected, failed and expired orders with no fill are not shown, and
+nothing older than today's fills is listed. Nothing shows when this switch is off, the feed is off, signed out or
+stale, or the last good pass is three refreshes old. Display only, whatever the switch says: no fill, trade or journal
+row is written for a line, and the desk has no button that places, changes or cancels an order. An order created
+before the four-day read window (an old good-till-cancelled order) is not seen.
+
 ## Shadow first: what to look at
 
 Run `shadow` for a week of normal trading, then open **Fills** and read the **Robinhood order history** section (or
