@@ -19,9 +19,9 @@ Sources, each read on its own (``today._section``): one that fails reads ``unava
 - ``calendar``: this week's earnings for those symbols (the earnings cache only; a cold symbol refreshes in the
   background) and FOMC, CPI and jobs reports today through Sunday (``app/data/macro_calendar.json``).
 - ``brief``: today's morning brief, its saved lines (**Copilot note**).
-- ``chatter`` (``app/engine/chatter.py``): r/wallstreetbets buzz and NYT headlines, returned apart from ``items`` for the
-  screen's own Chatter filter only: never ranked with the rest, never counted as new, never Plan it. ``chatter.sources``
-  names each source's state (``on``, ``not set up``, ``unavailable``).
+- ``chatter`` (``app/engine/chatter.py``): r/wallstreetbets buzz (ApeWisdom's counts) and NYT headlines, returned
+  apart from ``items`` for the screen's own Chatter filter only: never ranked with the rest, never counted as new, never
+  Plan it. ``chatter.sources`` names each source's state (``on``, ``stale``, ``not set up``, ``unavailable``).
 
 Rank: items that touch the owner's book or plans (``mine``) first, then the rest, each newest first; then what is still
 ahead (``upcoming``), soonest first. A symbol the owner set to not followed is left out everywhere: an item about it,
@@ -328,27 +328,14 @@ def _calendar(symbols: list[str], day: date, now: float) -> dict:
     return {"state": "ok", "rows": rows}
 
 
-def _spike_trades(db: Session, now: float) -> list[tuple[str, float, float | None]]:
-    """His closed trades entered in chatter's history window (Webull left out): ticker, entry time, realized P&L."""
-    from app.ai.copilot_book import _not_webull
-    from app.engine.chatter import HISTORY_DAYS
-    from app.models import Account, Trade
-    since = datetime.fromtimestamp(now - HISTORY_DAYS * 86400, UTC).replace(tzinfo=None)
-    rows = db.exec(select(Trade.ticker, Trade.opened_at, Trade.realized_pnl).join(Account, Account.id == Trade.account_id)
-                   .where(Trade.status != "open", Trade.opened_at >= since).where(_not_webull())).all()
-    return [(t.upper(), _utc_epoch(at), None if pnl is None else float(pnl)) for t, at, pnl in rows if t and at]
-
-
-def _chatter(db: Session, now: float, held: set[str], blocked: set[str]) -> dict:
+def _chatter(now: float, held: set[str], blocked: set[str]) -> dict:
     from app.engine import chatter
-    if not (chatter.reddit_enabled() or chatter.nyt_enabled()):
+    if not (chatter.wsb_enabled() or chatter.nyt_enabled()):
         return chatter.off()  # nothing set up: nothing read
     try:
-        trades = [t for t in _spike_trades(db, now) if t[0] not in blocked] if chatter.reddit_enabled() else []
-        return chatter.view(trades, held, blocked, now)
+        return chatter.view(held, blocked, now)
     except Exception as exc:  # chatter failing leaves the feed alone
         log.warning("feed chatter unavailable: %s", type(exc).__name__)
-        db.rollback()
         return chatter.off()
 
 
@@ -437,7 +424,7 @@ def build(db: Session, now: float) -> dict:
     shown = [i for i in ranked if not i["upcoming"]][: MAX_ITEMS - len(ahead)] + ahead
     states = {name: part["state"] for name, part in parts.items()}
     if hidden["state"] == "ok":
-        chatter = _chatter(db, now, book.get("held", set()), blocked)
+        chatter = _chatter(now, book.get("held", set()), blocked)
     else:  # not knowing what is hidden, chatter (which names tickers) stays out
         from app.engine.chatter import off
         chatter = off()

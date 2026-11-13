@@ -901,20 +901,19 @@ for (const width of [1440, 375] as const) {
   });
 }
 
-// The Feed's chatter block (app/engine/chatter.py): buzz and rising posts from r/wallstreetbets and NYT headlines.
+// The Feed's chatter block (app/engine/chatter.py): r/wallstreetbets buzz from ApeWisdom's counts and NYT headlines.
+const COUNTED = epoch("2026-10-23T15:00:00Z");
 const CHATTER = {
   sources: { "r/wallstreetbets": "on", NYT: "unavailable" },
-  buzz: [{ symbol: "NBIS", count: 9, usual: 1.5, multiple: 6.2, history: true, held: true },
-    { symbol: "RKLB", count: 4, usual: 0, multiple: null, history: true, held: false }],
-  record: "Your entries during a mention spike: 12 closed trades, 5 up, net −$1,240.",
+  buzz: [{ symbol: "NBIS", count: 312, before: 48, multiple: 6.5, rank: 3, rank_before: 14, climbed: 11, held: true, as_of: COUNTED, stale: false },
+    { symbol: "RKLB", count: 41, before: null, multiple: null, rank: 5, rank_before: null, climbed: null, held: false, as_of: COUNTED, stale: false }],
   items: [
-    item({ id: "r/wallstreetbets:buzz:NBIS", source: "r/wallstreetbets", at: epoch("2026-10-23T15:00:00Z"), symbol: "NBIS",
-      text: "NBIS mentioned 6.2× its usual rate in the last hour",
-      detail: "9 posts in the last hour; usually 1.5 at this hour. Your entries during a mention spike: 12 closed trades, 5 up, net −$1,240.",
+    item({ id: "r/wallstreetbets:buzz:NBIS", source: "r/wallstreetbets", at: COUNTED, symbol: "NBIS",
+      text: "NBIS: 312 mentions in the last 24h, 6.5× the 24h before (48)", detail: "Rank 3, was 14.",
       publisher: "r/wallstreetbets", url: "https://www.reddit.com/r/wallstreetbets/search/?q=NBIS&restrict_sr=1&sort=new", chatter: true }),
-    item({ id: "r/wallstreetbets:post:rise1", source: "r/wallstreetbets", at: epoch("2026-10-23T14:40:00Z"), symbol: "NBIS",
-      text: "NBIS 105c 11/14, all in before the compute deal", detail: "1,240 points · 341 comments", publisher: "r/wallstreetbets",
-      url: "https://www.reddit.com/r/wallstreetbets/comments/rise1/x/", chatter: true }),
+    item({ id: "r/wallstreetbets:buzz:RKLB", source: "r/wallstreetbets", at: COUNTED, symbol: "RKLB",
+      text: "RKLB: 41 mentions in the last 24h, none counted the 24h before", detail: "Rank 5, not ranked the day before.",
+      publisher: "r/wallstreetbets", url: "https://www.reddit.com/r/wallstreetbets/search/?q=RKLB&restrict_sr=1&sort=new", chatter: true }),
     item({ id: "nyt:1", source: "NYT", at: epoch("2026-10-23T13:10:00Z"), text: "Chipmakers brace for new export rules",
       detail: "A draft rule would widen limits on advanced chip sales.", publisher: "NYT",
       url: "https://www.nytimes.com/2026/10/23/business/chips.html", chatter: true }),
@@ -922,7 +921,7 @@ const CHATTER = {
 };
 
 for (const width of [1440, 375] as const) {
-  test(`Chatter: its own filter only, buzz chips outlined when held, his spike record, only Ask and the link, at ${width} px`, async ({ page }) => {
+  test(`Chatter: its own filter only, buzz chips outlined when held, whose counts they are, only Ask and the link, at ${width} px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width < 768 ? 812 : 900 });
     const { chats } = await lab(page, { showThreads: false, feed: { ...FEED, chatter: CHATTER } });
     // The tab's new count is the feed's own items only: chatter never counts.
@@ -939,30 +938,47 @@ for (const width of [1440, 375] as const) {
     await feed.getByRole("button", { name: "Chatter" }).click();
     await expect(rows.getByTestId("feed-source")).toHaveText(["r/wallstreetbets", "r/wallstreetbets", "NYT"]);
     const chips = feed.getByTestId("buzz-chip");
-    await expect(chips).toHaveText(["NBIS 6.2×", "RKLB 4, usually none"]);
+    await expect(chips).toHaveText(["NBIS 6.5×", "RKLB 41, none before"]);
     await expect(chips.nth(0)).toHaveAttribute("data-held", "true");
     await expect(chips.nth(1)).not.toHaveAttribute("data-held", "true");
-    await expect(rows.nth(0)).toContainText("Your entries during a mention spike: 12 closed trades, 5 up, net −$1,240.");
+    await expect(chips.nth(0)).not.toHaveAttribute("data-stale", "true");
+    await expect(feed.getByTestId("buzz-note")).toHaveText(
+      "Last 24h vs the 24h before. Counts from ApeWisdom, a third party; may stop in 2027 if Reddit closes its access.");
+    await expect(rows.nth(0)).toContainText("Rank 3, was 14.");
     await expect(rows.locator('[aria-label="new"]')).toHaveCount(0); // chatter is never "new"
     await expect(feed.getByTestId("feed-chatter-note")).toHaveText("NYT could not be read.");
     // Only Ask the copilot and the outbound link: no Plan it, no Open in Charts, no symbol story.
     await expect(rows.getByRole("button", { name: "Plan it" })).toHaveCount(0);
     await expect(rows.getByRole("link", { name: "Open in Charts" })).toHaveCount(0);
     await expect(rows.getByRole("button", { name: "NBIS", exact: true })).toHaveCount(0);
-    await expect(rows.nth(1).getByRole("link", { name: /Open on Reddit/ })).toHaveAttribute("href", "https://www.reddit.com/r/wallstreetbets/comments/rise1/x/");
-    await expect(rows.nth(1).getByRole("link", { name: /Open on Reddit/ })).toHaveAttribute("target", "_blank");
+    await expect(rows.nth(0).getByRole("link", { name: /Open on Reddit/ })).toHaveAttribute("href", "https://www.reddit.com/r/wallstreetbets/search/?q=NBIS&restrict_sr=1&sort=new");
+    await expect(rows.nth(0).getByRole("link", { name: /Open on Reddit/ })).toHaveAttribute("target", "_blank");
     await expect(rows.nth(2).getByRole("link", { name: /Read at NYT/ })).toHaveAttribute("href", "https://www.nytimes.com/2026/10/23/business/chips.html");
     if (width >= 768) await page.screenshot({ path: test.info().outputPath(`desk-chatter-${width}.png`) });
     else await page.screenshot({ path: test.info().outputPath(`desk-chatter-${width}.png`), fullPage: true });
-    // Ask quotes the post as posted, unsent.
-    await rows.nth(1).getByRole("button", { name: "Ask the copilot" }).click();
-    await expect(conversation(page).getByLabel("Message")).toHaveValue(/^About this r\/wallstreetbets item \(10:40, NBIS\), quoted as posted: "NBIS 105c 11\/14, all in before the compute deal"\./);
+    // Ask quotes the row as shown, unsent.
+    await rows.nth(0).getByRole("button", { name: "Ask the copilot" }).click();
+    await expect(conversation(page).getByLabel("Message")).toHaveValue(/^About this r\/wallstreetbets item \(11:00, NBIS\), quoted as posted: "NBIS: 312 mentions in the last 24h, 6\.5× the 24h before \(48\)"\./);
     expect(chats).toEqual([]);
   });
 }
 
+test("Chatter counts not updated: chips grey with their time, never zero", async ({ page }) => {
+  const stale = { ...CHATTER, sources: { "r/wallstreetbets": "stale", NYT: "not set up" },
+    buzz: CHATTER.buzz.map(b => ({ ...b, stale: true })), items: CHATTER.items.slice(0, 2) };
+  await lab(page, { showThreads: false, feed: { ...FEED, chatter: stale } });
+  const centre = page.getByRole("region", { name: "Chart and feed" });
+  await centre.getByRole("tab", { name: "Feed" }).click();
+  const feed = centre.getByTestId("desk-feed");
+  await feed.getByRole("button", { name: "Chatter" }).click();
+  await expect(feed.getByTestId("buzz-chip").nth(0)).toHaveAttribute("data-stale", "true");
+  await expect(feed.getByTestId("buzz-chip")).toHaveText(["NBIS 6.5×", "RKLB 41, none before"]);
+  await expect(feed.getByTestId("buzz-note")).toContainText("As of 11:00, not updated since.");
+  await expect(feed.getByTestId("feed-chatter-note")).toHaveCount(0);
+});
+
 test("Chatter that is on but has nothing yet: no filter, and nothing about it outside its filter", async ({ page }) => {
-  await lab(page, { showThreads: false, feed: { ...FEED, chatter: { ...CHATTER, sources: { "r/wallstreetbets": "on", NYT: "not set up" }, buzz: [], record: null, items: [] } } });
+  await lab(page, { showThreads: false, feed: { ...FEED, chatter: { ...CHATTER, sources: { "r/wallstreetbets": "on", NYT: "not set up" }, buzz: [], items: [] } } });
   const centre = page.getByRole("region", { name: "Chart and feed" });
   await centre.getByRole("tab", { name: "Feed" }).click();
   const feed = centre.getByTestId("desk-feed");

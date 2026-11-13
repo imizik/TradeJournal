@@ -1734,34 +1734,34 @@ his own trade audit says unplanned entries lost the money and buzz is where thos
 - Only behind the **Chatter** filter: never in Mine, Market or Mine + Market, never in a symbol's story, never counted
   as new, never on the home view or the Needs-you strip, never a phone or Telegram ping. The filter appears only while
   at least one source is on and has rows; under it, a source that cannot be read or has nothing yet is named in one
-  line. While no source has rows nothing about chatter shows anywhere. `chatter.sources` names each source's state: `on`, `not set up` or `unavailable`.
+  line. While no source has rows nothing about chatter shows anywhere. `chatter.sources` names each source's state: `on`, `stale`, `not set up` or `unavailable`.
 - A chatter row's only actions are **Ask the copilot** (the row, quoted, in the box unsent) and the outbound link,
-  which opens Reddit or the NYT in his own browser. No Plan it, no Open in Charts, no countdowns, no hype relayed as a
+  which opens the subreddit's search or the NYT in his own browser. No Plan it, no Open in Charts, no countdowns, no hype relayed as a
   headline. Facts and counts; nothing tells him to buy, sell or hold.
-- Third-party text (post titles, headlines, summaries) is data shown as data. None of it enters the copilot's owner
+- Third-party text (headlines, summaries) and counts are data shown as data. None of it enters the copilot's owner
   context, no model reads it in the background, and a ticker set to not followed is left out here too.
 
-**r/wallstreetbets.** Every 15 minutes on market days, 06:00–20:00 New York, the reader takes the subreddit's hot,
-rising and new listings (three calls, 100 posts each) through Reddit's official API with the app's own credentials
-(application-only OAuth, the user-agent Reddit's rules ask for; it waits for the window to reset if Reddit's
-remaining-calls header runs low). It never loads reddit.com pages or the unauthenticated JSON endpoints. Ticker mentions
-are counted in post titles against the app's known symbols (Radar's universe, his traded tickers, SPY/QQQ/SMH), each
-post once, by when it was posted; all-caps words that are not tickers (the brief scorecard's list plus the
-subreddit's own: YOLO, DD, CALLS, ALL, ON...) count only written as a cashtag (`$ON`). Thirty days of mentions are kept
-in `backend/data/chatter/reddit.json` (no table). Only an error's type is logged or saved (an HTTP error's text could
-hold a request URL with the NYT key), and a failed read waits the full 15 minutes even when its state cannot be saved.
-Rows:
+**r/wallstreetbets.** Reddit no longer gives self-service API access, so the counts come from ApeWisdom
+(apewisdom.io), a free third-party site that counts ticker mentions on Reddit; no key and no account. Every 15 minutes
+on market days, 06:00–20:00 New York, the reader makes one call to its public wallstreetbets page
+(`https://apewisdom.io/api/v1.0/filter/wallstreetbets/page/1`, the top 100 tickers by mentions): per ticker, its mentions
+in the last 24 hours, its mentions in the 24 hours before, its rank and its rank then. Only the app's known symbols
+(Radar's universe, his traded tickers, SPY/QQQ/SMH) are kept, as numbers (no company names, no post text), in
+`backend/data/chatter/wsb.json` (no table); each pass replaces the last. ApeWisdom states no rate limit or terms for its
+API; one call per 15 minutes is the whole load. It could stop if Reddit closes its access in 2027, and the screen says
+so. Only an error's type is logged or saved (an HTTP error's text could hold a request URL with the NYT key), and a
+failed read waits the full 15 minutes even when its state cannot be saved. Rows:
 
-- **Buzz**: a ticker named in at least 3 posts in the last hour and at least 3× its usual rate, where usual is the same
-  New York hour on up to 5 recent weekdays the reader covered ("NBIS mentioned 6.2× its usual rate in the last hour";
-  "usually none at this hour" when it was never named then). Until 3 such days exist, the raw count and "No usual yet."
-  Beside it, when the journal can compute one, his own record on entries made while the entered ticker was buzz (one
-  total across every ticker in the 30 days kept, not-followed tickers left out; Webull left out): "Your entries during a
-  mention spike: 12 closed trades, 5 up, net −$1,240." At most five; the same tickers show as chips
-  (ticker and multiple) at the top of the filter, outlined when he holds the name. Its link is the subreddit's search
-  for the ticker.
-- **Rising posts**: the top five rising posts (not pinned, not marked NSFW): title, points, comments, and a link to
-  the post.
+- **Buzz**: a ticker named at least 10 times in the last 24 hours and at least 2× the 24 hours before ("NBIS: 312
+  mentions in the last 24h, 6.5× the 24h before (48)"), or not counted the day before ("none counted the 24h before",
+  ranked by its count). Detail: its rank change ("Rank 3, was 14."). At most five, highest multiple first; the same
+  tickers show as chips (ticker and multiple) at the top of the filter, outlined when he holds the name, with one line
+  under them: "Last 24h vs the 24h before. Counts from ApeWisdom, a third party; may stop in 2027 if Reddit closes its
+  access." Its link is the subreddit's search for the ticker, in his own browser.
+- **Stale or missing**: counts older than 45 minutes (no read since, a failed read, after hours, a weekend) stay on
+  screen grey with their time ("As of Fri 19:45, not updated since."; `chatter.sources` reads `stale`, or `unavailable`
+  after a failed read); older than four days they are not shown. With no counts at all nothing shows. A count is never
+  shown as zero.
 
 **NYT.** Every 15 minutes, 06:00–22:00 New York, every day: the public Business and Economy RSS feeds, or the official
 Top Stories API (business section) when `NYT_API_KEY` is set. Headline, the feed's own summary, time and link, at most
@@ -1773,23 +1773,14 @@ Both are off until set up; while off nothing is read and nothing is spent. Setti
 They go in the server's private backend settings file (`/etc/tradejournal/backend.env` on the VPS), then the API is
 restarted.
 
-**r/wallstreetbets** (free):
+**r/wallstreetbets** (free, no account needed): add this line to the settings file and restart the API.
 
-1. Sign in to Reddit in a browser and open https://www.reddit.com/prefs/apps.
-2. Choose **create another app...** (or **create app**). Name: `tradejournal-chatter`. Pick **script**. Redirect URI:
-   `http://localhost:8080` (required by the form, never used). Choose **create app**.
-3. The app's box now shows two values: the short string under the app's name ("personal use script") is the
-   **client id**; the longer one labelled **secret** is the **client secret**.
-4. Add these lines to the settings file, with your own values:
+```
+CHATTER_WSB_SOURCE=apewisdom
+```
 
-   ```
-   CHATTER_REDDIT_ENABLED=true
-   REDDIT_CLIENT_ID=<the client id>
-   REDDIT_CLIENT_SECRET=<the secret>
-   REDDIT_USERNAME=<your Reddit username, without u/>
-   ```
-
-   The username only goes into the polite name the app gives itself when it calls Reddit, as Reddit's rules ask.
+The old Reddit lines (`CHATTER_REDDIT_ENABLED`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USERNAME`) no longer
+do anything and can be deleted.
 
 **NYT headlines** (free, no account needed):
 
@@ -1798,7 +1789,7 @@ restarted.
    **Top Stories API**, save, copy the key) and add `NYT_API_KEY=<the key>`. With a key the reader uses the API instead
    of the RSS feeds.
 
-To switch either off again, set its `CHATTER_..._ENABLED` line to `false` (or delete it) and restart the API.
+To switch either off again, delete its line (or set `CHATTER_NYT_ENABLED=false`) and restart the API.
 
 ## Check a call
 

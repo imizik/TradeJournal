@@ -1,13 +1,12 @@
 """Chatter (docs/copilot-lab.md § Chatter): r/wallstreetbets buzz and NYT business headlines for the desk Feed's own
 Chatter filter. Both are off until configured; a source that is off makes no network call and costs nothing.
 
-- **r/wallstreetbets** (``CHATTER_REDDIT_ENABLED=true`` with ``REDDIT_CLIENT_ID`` and ``REDDIT_CLIENT_SECRET``): Reddit's
-  official API with the app's own credentials (application-only OAuth, the user-agent Reddit asks for), every
-  ``PASS_SECONDS`` on market days between ``READ_FROM`` and ``REDDIT_UNTIL`` New York. Each pass reads the subreddit's
-  hot, rising and new listings (three calls, far inside Reddit's limit; the remaining-calls header is respected) and
-  keeps, per post with a known ticker in its title, the post's time and those tickers, for ``HISTORY_DAYS``. Mentions
-  are counted by post time, each post once: "the last hour" against the same hour on up to ``USUAL_DAYS`` recent
-  market days the reader covered. Fewer than ``MIN_USUAL_DAYS`` covered days: the raw count, "no usual yet".
+- **r/wallstreetbets** (``CHATTER_WSB_SOURCE=apewisdom``): ApeWisdom's free public API (apewisdom.io, a third party
+  that counts ticker mentions on Reddit; no key), one call per pass every ``PASS_SECONDS`` on market days between
+  ``READ_FROM`` and ``WSB_UNTIL`` New York: the subreddit's top 100 tickers by mentions in the last 24 hours, each with
+  its mentions the 24 hours before, its rank and its rank then. Only the app's known tickers are kept, as counts.
+  Buzz is a ticker named at least ``MIN_MENTIONS`` times in the last 24 hours and at least ``BUZZ_MULTIPLE``× the 24
+  hours before (or not counted then). Counts older than ``STALE_SECONDS`` show grey with their time, never as zero.
 - **NYT** (``CHATTER_NYT_ENABLED=true``): its public business and economy RSS feeds, or its official Top Stories API when
   ``NYT_API_KEY`` is set: headline, the feed's own summary, time and link, every ``PASS_SECONDS`` from ``READ_FROM`` to
   ``NYT_UNTIL``. No article page is ever fetched.
@@ -19,14 +18,13 @@ Third-party text is data shown as data: it never reaches a model's context and n
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, time as dtime, timedelta
+from datetime import date, datetime, time as dtime
 from email.utils import parsedate_to_datetime
 import json
 import logging
 import os
 from pathlib import Path
 import re
-import threading
 import time as _time
 from urllib.parse import quote
 import xml.etree.ElementTree as ET_XML
@@ -39,62 +37,34 @@ log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[2] / "data" / "chatter"
 SUBREDDIT = "wallstreetbets"
-REDDIT_NAME = f"r/{SUBREDDIT}"
+WSB_NAME = f"r/{SUBREDDIT}"
 NYT_NAME = "NYT"
 PASS_SECONDS = 15 * 60
 READ_FROM = dtime(6, 0)
-REDDIT_UNTIL = dtime(20, 0)
+WSB_UNTIL = dtime(20, 0)
 NYT_UNTIL = dtime(22, 0)
-HISTORY_DAYS = 30
-USUAL_DAYS = 5
-MIN_USUAL_DAYS = 3
-LOOKBACK_DAYS = 14  # calendar days searched for USUAL_DAYS covered market days
-SPIKE_MULTIPLE = 3.0
-SPIKE_MIN = 3  # mentions in the hour before a ticker is buzz at all
+MIN_MENTIONS = 10  # mentions in the last 24 hours before a ticker is buzz at all
+BUZZ_MULTIPLE = 2.0  # against the 24 hours before
 MAX_BUZZ = 5
-MAX_POSTS = 5
+STALE_SECONDS = 45 * 60  # counts older than this show grey with their time
+KEEP_SECONDS = 4 * 86400  # counts older than this (a long weekend and more) are not shown at all
 MAX_NYT = 8
 NYT_KEEP_HOURS = 36
-RATE_FLOOR = 5  # calls left in Reddit's window below which a pass waits for the reset
 TIMEOUT = 15
 
-REDDIT_TOKEN_URL = "https://www.reddit.com/api/v1/access_token"
-REDDIT_API = "https://oauth.reddit.com"
+APEWISDOM_URL = f"https://apewisdom.io/api/v1.0/filter/{SUBREDDIT}/page/1"
 NYT_FEEDS = ("https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
              "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml")
 NYT_API = "https://api.nytimes.com/svc/topstories/v2/business.json"
-
-# All-caps words that are not tickers in a post title, even where a known symbol shares the letters. One of them still
-# counts written as a cashtag ("$ON", "$ALL").
-STOP = frozenset({
-    "A", "I", "AI", "AM", "PM", "ET", "CPI", "PPI", "PCE", "GDP", "PMI", "NFP", "FOMC", "EPS", "IV", "DTE", "ATM", "OTM",
-    "ITM", "VWAP", "ORB", "ETF", "USD", "US", "MA", "EMA", "SMA", "RSI", "ATH", "YTD", "HOD", "LOD", "IPO", "CEO", "OK",
-    "PT",  # the morning brief scorecard's list (brief_scorecard.STOP), then the subreddit's own words
-    "YOLO", "DD", "WSB", "FD", "FDS", "IMO", "LOL", "LMAO", "TLDR", "WTF", "OMG", "RIP", "FOMO", "HODL", "APE", "APES",
-    "MOON", "GAIN", "GAINS", "LOSS", "LOSSES", "BUY", "SELL", "HOLD", "CALL", "CALLS", "PUT", "PUTS", "ALL", "NOW", "ONE",
-    "IT", "BE", "SO", "GO", "ON", "OR", "ARE", "CAN", "FOR", "NEW", "BIG", "HAS", "OUT", "RUN", "TWO", "WAY", "REAL",
-    "LOVE", "GOOD", "BEST", "FAST", "FUN", "HOT", "LOW", "HIGH", "OPEN", "EDIT", "USA", "SEC", "FED", "IRS", "NYSE",
-    "OTC", "AH", "EOD", "DOW", "CFO", "YOY", "QOQ", "AMA", "BRO", "MAN", "NEXT", "PLAY", "LIFE", "WORK", "CASH", "SAFE",
-    "ANY", "KEY", "VERY", "WELL", "EVER", "MOST", "PEAK", "TRUE", "NICE", "DUDE", "TECH", "UP", "AT", "BY", "DO",
-    "AN", "AS", "HE", "ME", "MY", "NO", "OF", "TO", "WE", "IS", "IN", "IF", "OUR", "THE", "AND", "BUT", "NOT", "YOU",
-    "WHO", "WHY", "HOW", "WHAT", "JUST", "LIKE", "THIS", "THAT", "WITH", "FROM", "INTO", "OVER", "BACK", "TIME", "WEEK",
-    "YEAR", "DAY", "DAYS", "MOVE", "PUMP", "DUMP", "BEAR", "BULL", "RED", "GREEN", "UK", "EU", "CNBC", "LLC", "INC",
-})
-TOKEN = re.compile(r"(?<![\w&.$])(\$?)([A-Z]{1,6})(?![\w&]|\.[A-Za-z])")
-CASHTAG = re.compile(r"(?<![\w$])\$([a-z][a-z]{0,5})\b")
-
-_lock = threading.Lock()
-_token: dict = {}  # Reddit's application-only token and when it lapses
-_rate: dict = {}  # Reddit's remaining calls and when its window resets
+TICKER = re.compile(r"[A-Z][A-Z.]{0,5}")
 
 
 def _on(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() == "true"
 
 
-def reddit_enabled() -> bool:
-    return (_on("CHATTER_REDDIT_ENABLED") and bool(os.environ.get("REDDIT_CLIENT_ID", "").strip())
-            and bool(os.environ.get("REDDIT_CLIENT_SECRET", "").strip()))
+def wsb_enabled() -> bool:
+    return os.environ.get("CHATTER_WSB_SOURCE", "").strip().lower() == "apewisdom"
 
 
 def nyt_enabled() -> bool:
@@ -102,7 +72,7 @@ def nyt_enabled() -> bool:
 
 
 def enabled() -> bool:
-    return (reddit_enabled() or nyt_enabled()) and os.environ.get("TJ_DOT_TRIAL_ENABLED") != "true"
+    return (wsb_enabled() or nyt_enabled()) and os.environ.get("TJ_DOT_TRIAL_ENABLED") != "true"
 
 
 # --------------------------------------------------------------------------- the saved state
@@ -126,177 +96,64 @@ def save(name: str, state: dict, root: Path | None = None) -> None:
     spare.replace(path)
 
 
-# --------------------------------------------------------------------------- mentions
+# --------------------------------------------------------------------------- r/wallstreetbets through ApeWisdom
 
-def mentions(title: str, known: frozenset[str]) -> list[str]:
-    """The distinct known tickers a post title names, in first-seen order: a whole uppercase token not on ``STOP``, or
-    any cashtag ("$ON", "$nvda")."""
-    seen: dict[str, None] = {}
-    text = title or ""
-    for match in TOKEN.finditer(text):
-        dollar, symbol = match.groups()
-        if symbol in known and (dollar or symbol not in STOP):
-            seen.setdefault(symbol, None)
-    for match in CASHTAG.finditer(text):
-        symbol = match.group(1).upper()
-        if symbol in known:
-            seen.setdefault(symbol, None)
-    return list(seen)
-
-
-def record_pass(state: dict, listings: dict[str, list[dict]], known: frozenset[str], now: float) -> dict:
-    """``state`` with one pass's listings folded in: each post with a known ticker kept once by id (its time and
-    tickers), the pass's time, and the rising posts to show; anything older than ``HISTORY_DAYS`` dropped."""
-    keep_from = now - HISTORY_DAYS * 86400
-    seen = {k: v for k, v in (state.get("mentions") or {}).items() if v[0] >= keep_from}
-    for posts in listings.values():
-        for post in posts:
-            if post.get("stickied") or not post.get("id"):
-                continue
-            created = float(post.get("created_utc") or 0)
-            if created < keep_from or post["id"] in seen:
-                continue
-            if found := mentions(post.get("title", ""), known):
-                seen[post["id"]] = [created, found]
-    passes = [p for p in state.get("passes") or [] if p >= keep_from] + [now]
-    rising = []
-    for post in listings.get("rising", []):
-        if post.get("stickied") or post.get("over_18") or not post.get("permalink"):
-            continue
-        rising.append({"id": post["id"], "title": " ".join(str(post.get("title", "")).split())[:300],
-                       "score": int(post.get("score") or 0), "comments": int(post.get("num_comments") or 0),
-                       "created": float(post.get("created_utc") or now),
-                       "url": "https://www.reddit.com" + str(post["permalink"]),
-                       "symbols": mentions(post.get("title", ""), known)})
-        if len(rising) >= MAX_POSTS:
-            break
-    return {**state, "mentions": seen, "passes": passes, "posts": rising}
-
-
-def _by_symbol(state: dict) -> dict[str, list[float]]:
-    out: dict[str, list[float]] = {}
-    for created, symbols in (state.get("mentions") or {}).values():
-        for symbol in symbols:
-            out.setdefault(symbol, []).append(created)
-    return out
-
-
-def _count(times: list[float], start: float, end: float) -> int:
-    return sum(1 for t in times if start <= t < end)
-
-
-def _usual_windows(state: dict, now: float) -> list[tuple[float, float]]:
-    """The same New York hour on up to ``USUAL_DAYS`` earlier weekdays the reader covered (a pass within the hour or
-    the hour after it, since a later pass still sees an hour's new posts)."""
-    passes = state.get("passes") or []
-    moment = datetime.fromtimestamp(now, ET)
-    windows = []
-    for back in range(1, LOOKBACK_DAYS + 1):
-        day = moment.date() - timedelta(days=back)
-        if day.weekday() >= 5:
-            continue
-        end = datetime.combine(day, moment.time(), ET).timestamp()
-        if any(end - 3600 <= p < end + 3600 for p in passes):
-            windows.append((end - 3600, end))
-        if len(windows) >= USUAL_DAYS:
-            break
-    return windows
-
-
-def buzz(state: dict, now: float, held: set[str] = frozenset()) -> list[dict]:
-    """Tickers named in at least ``SPIKE_MIN`` posts in the last hour. With enough history only those at
-    ``SPIKE_MULTIPLE``× their usual or more (or usually unnamed at this hour), highest multiple first; without it the raw counts
-    ("no usual yet"), most named first. At most ``MAX_BUZZ``."""
-    by_symbol = _by_symbol(state)
-    windows = _usual_windows(state, now)
-    history = len(windows) >= MIN_USUAL_DAYS
-    rows = []
-    for symbol, times in by_symbol.items():
-        count = _count(times, now - 3600, now)
-        if count < SPIKE_MIN:
-            continue
-        usual = sum(_count(times, a, b) for a, b in windows) / len(windows) if history else None
-        multiple = count / usual if usual else None
-        if history and usual and multiple < SPIKE_MULTIPLE:
-            continue
-        rows.append({"symbol": symbol, "count": count, "usual": None if usual is None else round(usual, 2),
-                     "multiple": None if multiple is None else round(multiple, 1), "history": history,
-                     "held": symbol in held})
-    # Highest multiple first; a ticker usually never named at this hour ranks by its count, as if its usual were one.
-    rows.sort(key=lambda r: (-(r["multiple"] or (r["count"] if r["history"] else 0)), -r["count"], r["symbol"]))
-    return rows[:MAX_BUZZ]
-
-
-def spiking(state: dict, by_symbol: dict[str, list[float]], symbol: str, at: float) -> bool:
-    """Was ``symbol`` buzz at ``at`` (the rule ``buzz`` uses), with enough history to say so?"""
-    times = by_symbol.get(symbol) or []
-    count = _count(times, at - 3600, at)
-    if count < SPIKE_MIN:
-        return False
-    windows = _usual_windows(state, at)
-    if len(windows) < MIN_USUAL_DAYS:
-        return False
-    usual = sum(_count(times, a, b) for a, b in windows) / len(windows)
-    return not usual or count / usual >= SPIKE_MULTIPLE
-
-
-def spike_record(state: dict, trades: list[tuple[str, float, float | None]]) -> str | None:
-    """His closed trades (ticker, entry time, realized P&L) entered while that ticker was buzz, as one line of counts;
-    None when there are none to count."""
-    by_symbol = _by_symbol(state)
-    hits = [pnl for symbol, at, pnl in trades if pnl is not None and spiking(state, by_symbol, symbol, at)]
-    if not hits:
+def _int(value) -> int | None:
+    """A count or rank as ApeWisdom sends it (a number, or a numeric string in its own docs); None when absent."""
+    if value is None or isinstance(value, bool):
         return None
-    up = sum(1 for p in hits if p > 0)
-    net = sum(hits)
-    sign = "−" if net < 0 else "+"
-    return (f"Your entries during a mention spike: {len(hits)} closed trade{'s' if len(hits) != 1 else ''}, {up} up, "
-            f"net {sign}${abs(net):,.0f}.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return int(number) if number >= 0 else None
 
 
-# --------------------------------------------------------------------------- Reddit
+def parse_apewisdom(body: dict, known: frozenset[str]) -> list[dict]:
+    """ApeWisdom's ``results`` as counts: each known ticker's mentions in the last 24 hours and the 24 hours before,
+    its rank and its rank then (None where ApeWisdom has none), upvotes. Its company names are not kept."""
+    rows = []
+    for result in body.get("results") or []:
+        if not isinstance(result, dict):
+            continue
+        symbol = str(result.get("ticker") or "").strip().upper()
+        mentions = _int(result.get("mentions"))
+        if not TICKER.fullmatch(symbol) or symbol not in known or mentions is None:
+            continue
+        rows.append({"symbol": symbol, "mentions": mentions, "before": _int(result.get("mentions_24h_ago")),
+                     "rank": _int(result.get("rank")), "rank_before": _int(result.get("rank_24h_ago")),
+                     "upvotes": _int(result.get("upvotes"))})
+    return rows
 
-def _user_agent() -> str:
-    who = re.sub(r"[^\w-]", "", os.environ.get("REDDIT_USERNAME", "").strip().removeprefix("u/")) or "tradejournal"
-    return f"server:tradejournal.chatter:v1 (by /u/{who})"
 
-
-def _reddit_token(client: httpx.Client, now: float) -> str:
-    with _lock:
-        if _token.get("value") and _token.get("until", 0) > now + 60:
-            return _token["value"]
-    response = client.post(REDDIT_TOKEN_URL, data={"grant_type": "client_credentials"},
-                           auth=(os.environ["REDDIT_CLIENT_ID"].strip(), os.environ["REDDIT_CLIENT_SECRET"].strip()),
-                           headers={"User-Agent": _user_agent()})
+def read_apewisdom(client: httpx.Client) -> dict:
+    """One pass, one call: the subreddit's first page (its top 100 tickers by mentions)."""
+    response = client.get(APEWISDOM_URL, headers={"User-Agent": "tradejournal-chatter/1", "Accept": "application/json"})
     response.raise_for_status()
     body = response.json()
-    with _lock:
-        _token.update(value=body["access_token"], until=now + float(body.get("expires_in") or 3600))
-    return body["access_token"]
+    if not isinstance(body, dict) or not isinstance(body.get("results"), list):
+        raise ValueError("ApeWisdom reply without results")
+    return body
 
 
-def read_reddit(client: httpx.Client, now: float) -> dict[str, list[dict]]:
-    """One pass: the subreddit's hot, rising and new listings (100 posts each) as plain post dicts."""
-    with _lock:
-        if _rate.get("remaining", RATE_FLOOR) < RATE_FLOOR and now < _rate.get("reset_at", 0):
-            raise RuntimeError("Reddit rate limit: waiting for the window to reset")
-    token = _reddit_token(client, now)
-    out = {}
-    for kind in ("hot", "rising", "new"):
-        response = client.get(f"{REDDIT_API}/r/{SUBREDDIT}/{kind}", params={"limit": 100, "raw_json": 1},
-                              headers={"Authorization": f"bearer {token}", "User-Agent": _user_agent()})
-        try:
-            with _lock:
-                _rate.update(remaining=float(response.headers["x-ratelimit-remaining"]),
-                             reset_at=now + float(response.headers["x-ratelimit-reset"]))
-        except (KeyError, ValueError):
-            pass
-        if response.status_code == 401:
-            with _lock:
-                _token.clear()
-        response.raise_for_status()
-        out[kind] = [c.get("data") or {} for c in (response.json().get("data") or {}).get("children") or []]
-    return out
+def buzz(rows: list[dict], held: set[str] = frozenset()) -> list[dict]:
+    """Tickers named at least ``MIN_MENTIONS`` times in the last 24 hours and at least ``BUZZ_MULTIPLE``× the 24 hours
+    before, or not counted then; highest multiple first (one not counted before ranks by its count, as if it had one).
+    At most ``MAX_BUZZ``."""
+    out = []
+    for row in rows:
+        count, before = row["mentions"], row.get("before")
+        if count < MIN_MENTIONS:
+            continue
+        multiple = round(count / before, 1) if before else None
+        if multiple is not None and multiple < BUZZ_MULTIPLE:
+            continue
+        rank, rank_before = row.get("rank"), row.get("rank_before")
+        out.append({"symbol": row["symbol"], "count": count, "before": before,
+                    "multiple": multiple, "rank": rank, "rank_before": rank_before,
+                    "climbed": rank_before - rank if rank and rank_before else None, "held": row["symbol"] in held})
+    out.sort(key=lambda r: (-(r["multiple"] or r["count"]), -r["count"], r["symbol"]))
+    return out[:MAX_BUZZ]
 
 
 # --------------------------------------------------------------------------- NYT
@@ -385,13 +242,10 @@ class Chatter:
 
     def run_once(self) -> None:
         now = self.clock()
-        if reddit_enabled() and self._due("reddit", REDDIT_UNTIL, now, True):
-            self._read("reddit", lambda client: self._reddit(client, now), now)
+        if wsb_enabled() and self._due("wsb", WSB_UNTIL, now, True):
+            self._read("wsb", lambda client: {"rows": parse_apewisdom(read_apewisdom(client), _known(self.engine))}, now)
         if nyt_enabled() and self._due("nyt", NYT_UNTIL, now, False):
             self._read("nyt", lambda client: {**load("nyt", self.root), "items": read_nyt(client)}, now)
-
-    def _reddit(self, client: httpx.Client, now: float) -> dict:
-        return record_pass(load("reddit", self.root), read_reddit(client, now), _known(self.engine), now)
 
     def _read(self, name: str, read, now: float) -> None:
         try:
@@ -441,46 +295,50 @@ def _times(n: float, word: str) -> str:
     return f"{said} {word}{'' if n == 1 else 's'}"
 
 
-def view(trades: list[tuple[str, float, float | None]], held: set[str], blocked: set[str], now: float,
-         root: Path | None = None) -> dict:
-    """What the Feed's Chatter filter shows: each source's state, the buzz chips, one line of his record on spike
-    entries, and the rows (buzz, rising posts, headlines). Saved files only: no network, no model."""
+def _clock(at: float, now: float) -> str:
+    moment, today = datetime.fromtimestamp(at, ET), datetime.fromtimestamp(now, ET).date()
+    return moment.strftime("%H:%M") if moment.date() == today else moment.strftime("%a %H:%M")
+
+
+def view(held: set[str], blocked: set[str], now: float, root: Path | None = None) -> dict:
+    """What the Feed's Chatter filter shows: each source's state, the buzz chips and the rows (buzz, headlines). Saved
+    files only: no network, no model. Counts older than ``STALE_SECONDS`` (or kept after a failed read) are marked
+    stale with their time; older than ``KEEP_SECONDS`` they are not shown."""
     from app.engine.desk_feed import _item, _trim
-    reddit_state, reddit = _state("reddit", reddit_enabled(), root)
+    wsb_state, wsb = _state("wsb", wsb_enabled(), root)
     nyt_state, nyt = _state("nyt", nyt_enabled(), root)
     named = re.compile(r"\b(?:" + "|".join(re.escape(s) for s in sorted(blocked)) + r")\b") if blocked else None
 
     def hidden(symbols, *texts) -> bool:
         return bool(set(symbols) & blocked) or bool(named and any(named.search(t or "") for t in texts))
 
-    chips, items, record = [], [], None
-    if reddit:
-        record = spike_record(reddit, trades)
-        for row in buzz(reddit, now, held):
+    chips, items = [], []
+    as_of = wsb.get("ok_at") or 0
+    if wsb_state != "not set up" and as_of and now - as_of < KEEP_SECONDS:
+        stale = wsb_state == "unavailable" or now - as_of >= STALE_SECONDS
+        if stale and wsb_state == "on":
+            wsb_state = "stale"
+        for row in buzz(wsb.get("rows") or [], held):
             if hidden([row["symbol"]]):
                 continue
+            row.update(as_of=int(as_of), stale=stale)
             chips.append(row)
             symbol, count = row["symbol"], row["count"]
-            if not row["history"]:
-                text, detail = f"{symbol} mentioned in {_times(count, 'post')} in the last hour", "No usual yet."
-            elif row["multiple"] is None:
-                text, detail = f"{symbol} mentioned in {_times(count, 'post')} in the last hour", "Usually none at this hour."
+            said = _times(count, "mention")
+            if row["multiple"] is None:
+                text = f"{symbol}: {said} in the last 24h, none counted the 24h before"
             else:
-                text = f"{symbol} mentioned {row['multiple']:g}× its usual rate in the last hour"
-                detail = f"{_times(count, 'post')} in the last hour; usually {row['usual']:g} at this hour."
-            if record:
-                detail = f"{detail} {record}"
+                text = f"{symbol}: {said} in the last 24h, {row['multiple']:g}× the 24h before ({row['before']:,})"
+            if row["rank"] and row["rank_before"]:
+                rank = f"Rank {row['rank']}, was {row['rank_before']}."
+            elif row["rank"]:
+                rank = f"Rank {row['rank']}, not ranked the day before."
+            else:
+                rank = ""
+            detail = " ".join(p for p in (f"Not updated since {_clock(as_of, now)}." if stale else "", rank) if p) or None
             search = f"https://www.reddit.com/r/{SUBREDDIT}/search/?q={quote(symbol)}&restrict_sr=1&sort=new"
-            items.append(_item(REDDIT_NAME, f"buzz:{symbol}", int(now), text, symbol=symbol, detail=detail, href=None,
-                               publisher=REDDIT_NAME, url=search, buzz=True))
-        for post in reddit.get("posts") or []:
-            if hidden(post.get("symbols") or [], post["title"]):
-                continue
-            detail = f"{_times(post['score'], 'point')} · {_times(post['comments'], 'comment')}"
-            symbols = post.get("symbols") or []
-            items.append(_item(REDDIT_NAME, f"post:{post['id']}", int(post["created"]), _trim(post["title"], 200),
-                               symbol=symbols[0] if symbols else None, detail=detail, href=None,
-                               publisher=REDDIT_NAME, url=post["url"], buzz=False))
+            items.append(_item(WSB_NAME, f"buzz:{symbol}", int(as_of), text, symbol=symbol, detail=detail, href=None,
+                               publisher=WSB_NAME, url=search, buzz=True))
     for row in (nyt.get("items") or []):
         if row["at"] < now - NYT_KEEP_HOURS * 3600 or hidden([], row["title"], row["summary"]):
             continue
@@ -493,12 +351,11 @@ def view(trades: list[tuple[str, float, float | None]], held: set[str], blocked:
     for item in items:
         item.update(plan=None, mine=False, upcoming=False, chatter=True)
         item.pop("buzz")
-    return {"sources": {REDDIT_NAME: reddit_state, NYT_NAME: nyt_state}, "buzz": chips, "record": record,
-            "items": items}
+    return {"sources": {WSB_NAME: wsb_state, NYT_NAME: nyt_state}, "buzz": chips, "items": items}
 
 
 def off(reason: str = "unavailable") -> dict:
     """The view when it could not be built: each source that is set up reads ``reason``."""
-    return {"sources": {REDDIT_NAME: reason if reddit_enabled() else "not set up",
+    return {"sources": {WSB_NAME: reason if wsb_enabled() else "not set up",
                         NYT_NAME: reason if nyt_enabled() else "not set up"},
-            "buzz": [], "record": None, "items": []}
+            "buzz": [], "items": []}
