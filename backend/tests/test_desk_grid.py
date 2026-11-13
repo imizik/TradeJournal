@@ -183,3 +183,46 @@ def test_before_four_in_the_morning_the_tiles_show_the_last_session_and_are_not_
     assert day == date(2026, 10, 20) and live is False
     saturday = int(datetime(2026, 10, 24, 16, 0, tzinfo=UTC).timestamp())
     assert desk_grid.shown_day(saturday)[0] == date(2026, 10, 23)
+
+
+# ---------------------------------------------------------------------------------------------------- the review's cases
+
+
+def test_a_read_made_during_the_day_is_not_kept_as_the_finished_session(rig):
+    rig.tradier_minutes["NBIS"] = [minute(OPEN + 60 * i, 90.0) for i in range(5)]
+    grid(rig, "NBIS")  # 14:49: the day so far
+    assert rig.tradier == ["NBIS"]
+    kept = desk_grid._minutes["NBIS"]
+    desk_grid._minutes["NBIS"] = (float(rig.clock["t"]), *kept[1:])  # read at 14:49 on the test's clock
+    rig.clock["t"] = int(datetime(2026, 10, 22, 1, 0, tzinfo=UTC).timestamp())  # 21:00 New York: the session is over
+    rig.patch.setattr(desk_grid, "_tradier", lambda symbol, day, now, live: rig.tradier.append(symbol) or [minute(OPEN, 91.0)])
+    body = grid(rig, "NBIS")
+    assert body["live"] is False and rig.tradier == ["NBIS", "NBIS"]  # read again: 14:49's minutes stop short
+
+
+def test_old_minutes_on_a_live_day_are_marked_stale_with_their_time(rig):
+    rig.tradier_minutes["NBIS"] = [minute(OPEN, 90.0)]
+    first = grid(rig, "NBIS")["rows"]["NBIS"]
+    assert first["stale"] is False and first["read_at"]
+    kept = desk_grid._minutes["NBIS"]
+    desk_grid._minutes["NBIS"] = (kept[0] - desk_grid.STALE_SECONDS - 5, *kept[1:])
+    rig.calls = desk_grid.TRADIER_HEADROOM  # the re-read cannot happen
+    row = grid(rig, "NBIS")["rows"]["NBIS"]
+    assert row["state"] == "ok" and row["stale"] is True
+
+
+def test_a_missing_tail_is_looked_for_on_its_own_but_not_every_read(rig):
+    rig.peek["NBIS"] = ([minute(OPEN, 90.0)], datetime.now().timestamp())  # today's minutes in hand
+    alpaca_on(rig, {"NBIS": tail_bars([80.0] * 30)})
+    body = grid(rig, "NBIS")
+    assert len(rig.alpaca) == 1 and len([b for b in body["rows"]["NBIS"]["bars"] if b["prior"]]) == 30
+    alpaca_on(rig, {})
+    grid(rig, "MU")  # no tail anywhere for MU: looked for once
+    grid(rig, "MU")
+    assert len(rig.alpaca) == 2
+
+
+def test_an_empty_batched_answer_is_not_kept_as_the_day(rig):
+    alpaca_on(rig, {"NBIS": []})
+    rig.tradier_minutes["NBIS"] = [minute(OPEN, 90.0)]
+    assert grid(rig, "NBIS")["rows"]["NBIS"]["source"] == "tradier"

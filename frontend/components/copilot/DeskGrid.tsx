@@ -34,12 +34,15 @@ import { cn } from "@/lib/utils";
 const REFRESH_MS = 60_000;
 const PENDING_MS = 5_000;
 const PENDING_TRIES = 3;
+const SHUT_MS = 15 * 60_000; // a finished session: look again now and then, so the Grid moves to the next one
+const STALE_SECONDS = 150; // a live tile's minutes older than this are marked with their time, never shown as now
 const LEVEL_REACH = 0.04; // a level within 4% of the price stays in the tile's view; a farther one is left off its scale
 const UP = "#2bc9a4", DOWN = "#ee617a", PRIOR = "#5b5b63";
 const LEVEL_COLOR: Record<GridLevel["role"], string> = { entry: "#7db3f0", invalidation: "#fca5a5", alert: "#f4c66bb0" };
 const HEIGHT: Record<GridLayout["size"], string> = { 4: "h-28 sm:h-52", 6: "h-28 sm:h-40", 9: "h-28 sm:h-32" };
 const COLUMNS: Record<GridLayout["size"], string> = { 4: "grid-cols-2", 6: "grid-cols-2 sm:grid-cols-3", 9: "grid-cols-2 sm:grid-cols-3" };
 
+const clock = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
 const price = (value: number) => value.toFixed(value >= 1 ? 2 : 4);
 const tone = (value: number | null | undefined) => value == null || value === 0 ? "text-muted-foreground" : value > 0 ? "text-emerald-300" : "text-rose-300";
 
@@ -47,6 +50,7 @@ type Live = { last: number; at: number; stale: boolean } | null;
 
 /** A newer read's tile, except that a pending or failed one keeps the tile already shown for the same session. */
 function merge(prev: GridRead | null, next: GridRead): GridRead {
+  if (next.state !== "ok" && prev) return prev; // the server could not check who is followed: keep what shows
   if (!prev || prev.timeframe !== next.timeframe || prev.day !== next.day) return next;
   const rows = { ...prev.rows, ...next.rows };
   for (const [symbol, row] of Object.entries(next.rows)) {
@@ -73,7 +77,10 @@ export default function DeskGrid({ held, watched, hidden, sparks, earnings, sele
   useEffect(() => { setLayout(readGridLayout()); setReady(true); }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
   const change = (next: GridLayout) => { setLayout(next); saveGridLayout(next); };
 
-  const slots = useMemo(() => gridSlots(layout, held, watched, hidden), [layout, held, watched, hidden]);
+  // A name the server left out of a read is not followed (its list covers tickers with no row here): never in a slot.
+  const [dropped, setDropped] = useState<ReadonlySet<string>>(new Set());
+  const unseen = useMemo(() => new Set([...hidden, ...dropped]), [hidden, dropped]);
+  const slots = useMemo(() => gridSlots(layout, held, watched, unseen), [layout, held, watched, unseen]);
   const symbols = useMemo(() => slots.filter((s): s is string => !!s), [slots]);
   const key = `${symbols.join(",")}|${layout.timeframe}`;
 
@@ -92,10 +99,14 @@ export default function DeskGrid({ held, watched, hidden, sparks, earnings, sele
         const merged = merge(shown.current, found);
         shown.current = merged;
         setRead(merged);
-        setFailed(false);
-        const pending = Object.values(found.rows).some(r => r.state === "pending");
+        setFailed(found.state !== "ok");
+        if (found.state === "ok") {
+          const left = symbols.filter(s => !(s in found.rows));
+          if (left.length) setDropped(prev => new Set([...prev, ...left]));
+        }
+        const pending = Object.values(found.rows ?? {}).some(r => r.state === "pending");
         if (pending && pendingTries++ < PENDING_TRIES) next(PENDING_MS);
-        else if (found.live) next(REFRESH_MS);
+        else next(found.state === "ok" && !found.live ? SHUT_MS : REFRESH_MS);
       }).catch(() => {
         if (controller.signal.aborted) return;
         setFailed(true);
@@ -144,7 +155,7 @@ export default function DeskGrid({ held, watched, hidden, sparks, earnings, sele
             {editing === slot ? (
               <PinForm slot={slot} onPin={name => { change(pinTo(layout, slot, name)); setEditing(null); }} onCancel={() => setEditing(null)} heightClass={HEIGHT[layout.size]} />
             ) : symbol ? (
-              <Tile symbol={symbol} tile={data?.rows[symbol]} step={data?.step ?? 60} live={!!data?.live}
+              <Tile symbol={symbol} tile={data?.rows[symbol]} step={data?.step ?? 60} live={!!data?.live} asOf={data?.as_of ?? null}
                 tick={tickFor(ticks, symbol)} spark={sparks?.rows[symbol] ?? null} tag={earnings?.rows[symbol]} day={day}
                 pinned={layout.pins[slot] === symbol} heightClass={HEIGHT[layout.size]}
                 onOpen={() => onOpen(symbol)} onPin={() => change(pinTo(layout, slot, layout.pins[slot] === symbol ? null : symbol))}
@@ -189,8 +200,8 @@ function PinForm({ slot, onPin, onCancel, heightClass }: { slot: number; onPin(n
   );
 }
 
-const Tile = memo(function Tile({ symbol, tile, step, live, tick, spark, tag, day, pinned, heightClass, onOpen, onPin, onReplace }: {
-  symbol: string; tile: GridTile | undefined; step: number; live: boolean; tick: (Live & { change_pct: number | null }) | null;
+const Tile = memo(function Tile({ symbol, tile, step, live, asOf, tick, spark, tag, day, pinned, heightClass, onOpen, onPin, onReplace }: {
+  symbol: string; tile: GridTile | undefined; step: number; live: boolean; asOf: number | null; tick: (Live & { change_pct: number | null }) | null;
   spark: DeskSparks["rows"][string] | null; tag: DeskEvents["rows"][string] | undefined; day: string; pinned: boolean; heightClass: string;
   onOpen(): void; onPin(): void; onReplace(): void;
 }) {
@@ -198,6 +209,9 @@ const Tile = memo(function Tile({ symbol, tile, step, live, tick, spark, tag, da
   const last = ticked?.last ?? (tile?.last ?? spark?.last ?? null);
   const change = ticked?.change_pct ?? spark?.change_pct ?? tile?.change_pct ?? null;
   const bars = tile?.state === "ok" ? tile.bars : null;
+  // Bars from an older read (this one failed or waited): greyed with their time, and the ticker does not extend them,
+  // so a gap never looks like a live chart.
+  const old = !!bars && live && (tile!.stale || (tile!.read_at != null && asOf != null && asOf - tile!.read_at > STALE_SECONDS));
   return (
     <div className="flex flex-col">
       {/* On a phone the price and change wrap under the ticker and its buttons; one line from sm up. */}
@@ -218,7 +232,8 @@ const Tile = memo(function Tile({ symbol, tile, step, live, tick, spark, tag, da
         </span>
       </div>
       <button type="button" onClick={onOpen} aria-label={`Open ${symbol} on the chart`} className={cn("relative block w-full cursor-pointer", heightClass)}>
-        {bars ? <TileChart bars={bars} levels={tile!.levels} step={step} live={live} tick={ticked} />
+        {bars && old && tile!.read_at != null && <span data-testid="grid-stale" className="absolute left-1.5 top-1 z-10 rounded bg-background/80 px-1 text-[10px] text-muted-foreground">bars {clock.format(tile!.read_at * 1000)}</span>}
+        {bars ? <div className={cn("absolute inset-0", old && "opacity-50")}><TileChart bars={bars} levels={tile!.levels} step={step} live={live && !old} tick={ticked} /></div>
           : <span className="flex h-full items-center justify-center text-xs text-muted-foreground">
               {tile?.state === "unavailable" ? "No bars for this session" : "Loading bars…"}
             </span>}

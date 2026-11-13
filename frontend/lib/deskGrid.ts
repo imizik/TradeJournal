@@ -76,7 +76,9 @@ export type GridBar = { time: number; open: number; high: number; low: number; c
   vwap: number | null; prior: boolean };
 export type GridLevel = { price: number; role: "entry" | "invalidation" | "alert"; label: string | null };
 export type GridTile = { state: "ok" | "pending" | "unavailable"; bars: GridBar[]; last: number | null; change_pct: number | null;
-  levels: GridLevel[]; source: string | null };
+  levels: GridLevel[]; source: string | null;
+  /** When the server read these minutes; ``stale``: older than a refresh or two on a live day (its re-read failed). */
+  read_at: number | null; stale: boolean };
 /** ``live``: the bars can still change, so the Grid reads again in a minute. ``day``: the session shown (New York). */
 export type GridRead = { state: "ok" | "unavailable"; as_of: number; day: string; timeframe: GridTimeframe; step: number; live: boolean;
   rows: Record<string, GridTile> };

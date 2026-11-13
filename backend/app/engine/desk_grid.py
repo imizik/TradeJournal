@@ -45,6 +45,8 @@ BUDGET_SECONDS = 6.0
 TRADIER_HEADROOM = 30  # of the chart feed's 60 calls a minute: above this the grid asks Tradier for nothing
 ALPACA_BACKOFF_SECONDS = 600
 ALPACA_PAGES = 3
+TAIL_RETRY_SECONDS = 600
+STALE_SECONDS = 150  # a live tile's minutes older than this (its re-read failed or waited) are marked stale  # a previous session's tail no source had is asked again after this long
 
 _TICKER = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 
@@ -52,6 +54,7 @@ _lock = threading.Lock()
 _minutes: dict[str, tuple[float, date, list[dict], str]] = {}  # symbol -> (read at, its day, raw minutes, source)
 _tails: dict[tuple[str, date], list[dict]] = {}  # (symbol, the session's date) -> its raw minutes; a completed session
 _alpaca_off_until = 0.0
+_tail_tried: dict[tuple[str, date], float] = {}  # (symbol, the session's date) -> when a read last looked for its tail
 _filling: set[str] = set()  # symbols a background read is filling now: a second request does not start another
 
 
@@ -60,6 +63,7 @@ def clear() -> None:
     with _lock:
         _minutes.clear()
         _tails.clear()
+        _tail_tried.clear()
         _filling.clear()
         _alpaca_off_until = 0.0
 
@@ -129,9 +133,14 @@ def _kept(symbol: str, day: date, now: float, live: bool) -> list[dict] | None:
         found = _minutes.get(symbol)
     if found is None or found[1] != day:
         return None
-    if live and time.time() - found[0] > KEEP_SECONDS:
-        return None
-    return found[2]
+    if live:
+        return found[2] if time.time() - found[0] <= KEEP_SECONDS else None
+    # A finished day: only minutes read after it ended are the whole day (one read at 15:00 stops short).
+    return found[2] if found[0] >= _day_end(day) else None
+
+
+def _day_end(day: date) -> float:
+    return datetime.combine(day, wall_time(20), ET).timestamp()
 
 
 def _keep(symbol: str, day: date, minutes: list[dict], source: str) -> None:
@@ -151,8 +160,7 @@ def _chart_cache(symbol: str, day: date, live: bool) -> list[dict] | None:
     minutes, read_at = held
     if live:
         return minutes if time.time() - read_at <= CHART_CACHE_SECONDS else None
-    finished = datetime.combine(day, wall_time(20), ET).timestamp()
-    return minutes if read_at >= finished else None
+    return minutes if read_at >= _day_end(day) else None
 
 
 def _alpaca(symbols: list[str], start: datetime, end: datetime) -> dict[str, list[dict]] | None:
@@ -248,9 +256,9 @@ def _fill(todo: list[str], tails: list[str], day: date, prior: tuple[date, dict 
                             _tails[(symbol, prior_day)] = tail
                 if symbol in todo:
                     on_day = [m for m in minutes if datetime.fromtimestamp(m["time"], ET).date() == day]
-                    if on_day or not live:
+                    if on_day:  # none: the chart feed may have them (and an empty answer is never kept as the day)
                         _keep(symbol, day, on_day, "alpaca")
-            todo = [s for s in todo if s not in got]
+                        todo = [s for s in todo if s != symbol]
 
         def one(symbol: str) -> None:
             if abandon.is_set():  # the request gave up: do not start a read nobody waits for
@@ -332,7 +340,8 @@ def read(symbols: list[str], timeframe: str, now: float, levels: dict[str, list[
         for symbol in symbols:
             with _lock:
                 held = (symbol, prior[0]) in _tails
-            if held or window is None:
+                tried = _tail_tried.get((symbol, prior[0]), 0.0)
+            if held or window is None or time.time() - tried < TAIL_RETRY_SECONDS:
                 continue
             stored = _stored_tail(symbol, day)
             if stored and datetime.fromtimestamp(stored[0]["time"], ET).date() == prior[0]:
@@ -342,8 +351,9 @@ def read(symbols: list[str], timeframe: str, now: float, levels: dict[str, list[
                 tails.append(symbol)
     with _lock:
         todo = [s for s in todo if s not in _filling]
-        # A missing tail alone is not worth a read while the day's minutes are all in hand: it rides the next one.
-        tails = [s for s in tails if s not in _filling] if todo else []
+        tails = [s for s in tails if s not in _filling]
+        for symbol in tails:  # one look per ``TAIL_RETRY_SECONDS``, found or not
+            _tail_tried[(symbol, prior[0])] = time.time()
         _filling.update({*todo, *tails})
     if todo or tails:
         abandon = threading.Event()
@@ -362,17 +372,22 @@ def read(symbols: list[str], timeframe: str, now: float, levels: dict[str, list[
             with _lock:
                 pending = symbol in _filling
             rows[symbol] = {"state": "pending" if pending else "unavailable", "bars": [], "last": None,
-                            "change_pct": None, "levels": (levels or {}).get(symbol, []), "source": None}
+                            "change_pct": None, "levels": (levels or {}).get(symbol, []), "source": None, "read_at": None,
+                            "stale": False}
             continue
         bars = tile(symbol, minutes, tail, timeframe, day, hours, prior, now)
         today_bars = [b for b in bars if not b["prior"]]
-        rows[symbol] = {"state": "ok" if today_bars else "unavailable", "bars": bars,
+        # Minutes older than a refresh or two while the day is live: shown, but marked with their time, never as now.
+        stale = live and time.time() - found[0] > STALE_SECONDS
+        rows[symbol] = {"state": "ok" if today_bars else "unavailable", "bars": bars, "read_at": int(found[0]), "stale": stale,
                         "last": today_bars[-1]["close"] if today_bars else None,
                         "change_pct": _change(symbol, day, now) if day == datetime.fromtimestamp(now, ET).date() else None,
                         "levels": (levels or {}).get(symbol, []), "source": found[3]}
     with _lock:
         while len(_tails) > 256:
             _tails.pop(next(iter(_tails)))
+        while len(_tail_tried) > 256:
+            _tail_tried.pop(next(iter(_tail_tried)))
     return {**base, "rows": rows}
 
 

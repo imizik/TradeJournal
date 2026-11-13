@@ -697,7 +697,10 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   levels within 4% as thin lines. No studies, zoom or crosshair: a click opens the name on the Chart tab in place, as its
   book or Watching row would. One read for every tile when the names or timeframe change, then at most once a minute
   while the Grid shows, the session is on and the browser tab is visible; between reads the ticker moves each tile's
-  last candle and starts the next. Server order for a symbol's minutes: the grid's own 55-second cache (a timeframe
+  last candle and starts the next. Bars older than 150 s on a live day (their re-read failed or waited for the feed's
+  budget) show greyed with their read time ("bars 10:50 AM") and the ticker does not extend them; a finished session's
+  minutes count as the day only when read after 20:00, and the Grid looks again every 15 minutes outside the session so
+  it moves to the next one. A name the server leaves out (Not following with no row here) leaves its slot. Server order for a symbol's minutes: the grid's own 55-second cache (a timeframe
   switch or a second desk costs nothing), a chart's cached minutes under a minute old, one batched Alpaca read for the
   rest (SIP, ten-minute back-off on refusal), then the chart feed's low-priority read per symbol only while the feed has
   made fewer than 30 of its 60 calls in the minute. The previous session's tail comes from stored sessions on disk, else

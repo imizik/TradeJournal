@@ -71,9 +71,11 @@ async function open(page: Page, { width = 1440, height = 900, pins }: { width?: 
     const url = new URL(route.request().url());
     seen.grid.push(url);
     const step = url.searchParams.get("timeframe") === "5m" ? 300 : 60;
-    const names = (url.searchParams.get("symbols") ?? "").split(",").filter(Boolean);
+    // GONE is set to Not following on the server only (no row here): the read leaves it out.
+    const names = (url.searchParams.get("symbols") ?? "").split(",").filter(s => s && s !== "GONE");
     return route.fulfill({ json: { state: "ok", as_of: epoch("2026-11-13T16:00:00Z"), day: "2026-11-13", timeframe: url.searchParams.get("timeframe"), step, live: true,
       rows: Object.fromEntries(names.map(s => [s, { state: "ok", bars: bars(s, step), last: BASE[s] ?? 50, change_pct: null, source: "alpaca",
+        read_at: epoch("2026-11-13T16:00:00Z") - (s === "AMD" ? 600 : 0), stale: s === "AMD",
         levels: s === "MU" ? [{ price: 211, role: "entry", label: null }, { price: 207, role: "invalidation", label: null }] : [] }])) } });
   });
   await page.route("**/copilot/investigations?*", route => route.fulfill({ json: { investigations: [] } }));
@@ -104,6 +106,9 @@ test("slots: held first, then Watching in order; a hidden ticker never; one batc
   await expect(nvda.getByTestId("grid-last")).toHaveText("191.50");
   await expect(nvda.getByTestId("grid-change")).toHaveText("+1.21%");
   await expect(nvda.getByTestId("earnings-tag")).toHaveText("ER Wed");
+  // AMD's re-read failed on the server: its bars show greyed with their time, never as now.
+  await expect(tiles(page).nth(4).getByTestId("grid-stale")).toHaveText("bars 10:50 AM");
+  await expect(nvda.getByTestId("grid-stale")).toHaveCount(0);
 
   await page.getByRole("group", { name: "Charts in the grid" }).getByRole("button", { name: "9" }).click();
   await expect.poll(() => names(page)).toEqual(["ORCL", "MU", "NVDA", "RKLB", "AMD", "PLTR", "HOOD", "TSLA", "MSFT"]);
@@ -120,7 +125,7 @@ test("slots: held first, then Watching in order; a hidden ticker never; one batc
 
 test("pins: a pinned name keeps its slot, the rest fill around it, and a hidden pin never shows", async ({ page }) => {
   // IREN pinned to slot 1 (not followed: skipped), TSLA pinned to slot 3.
-  await open(page, { pins: [null, "IREN", null, "TSLA", null, null, null, null, null] });
+  await open(page, { pins: [null, "IREN", null, "TSLA", "GONE", null, null, null, null] });
   await expect.poll(() => names(page)).toEqual(["ORCL", "MU", "NVDA", "TSLA", "RKLB", "AMD"]);
   await expect(tiles(page).nth(3)).toHaveAttribute("data-pinned", "true");
   // Put SMCI in the first slot by hand, then unpin TSLA: the slots fill themselves again.
