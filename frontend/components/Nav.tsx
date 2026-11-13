@@ -86,7 +86,8 @@ const QUIET: NavItem[] = [
   { href: "/deploys", label: "Deploys", icon: Rocket },
 ];
 
-const isCurrent = (pathname: string, href: string) => pathname === href || (href !== "/" && pathname.startsWith(href));
+// The Dashboard's own address counts as the "/" Dashboard while the lab is off (both show the same page).
+const isCurrent = (pathname: string, href: string) => pathname === href || (href === "/" && pathname === "/dashboard") || (href !== "/" && pathname.startsWith(href));
 
 /** Which groups are open, on this device only. The current page's group opens by itself without being remembered, and a
  * click can still close it until the next page. */
@@ -389,7 +390,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
       {/* Phone: the pages used most are one tap away at the bottom; More opens the full menu. */}
       <nav aria-label="Main tabs" className="fixed inset-x-0 bottom-0 z-40 flex border-t bg-card pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:hidden">
         {withDesk(TABS, copilot).filter(({ href }) => shownHref(href, access.owner, enabled, journalOn, access.grants.market_decision_write) && !(href === "/daily" && access.owner)).map(({ href, label, icon: Icon }) => {
-          const active = pathname === href || (href !== "/" && pathname.startsWith(href));
+          const active = isCurrent(pathname, href);
           return (
             <Link key={href} href={href} aria-current={active ? "page" : undefined}
               className={cn("relative flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors", active ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
