@@ -1,0 +1,44 @@
+{
+  "protocol_id": "instrument-20261113-v1",
+  "registered": "2026-11-13",
+  "registered_before": "any outcome of this comparison was computed. Already known when it was written: the trades' total P&L (+$12,722 on $1.09M of premium, 95% day-resampled range -$8,654 to +$34,700); entry-skill-20261112-v1 and entry-horizon-20261112-v1 (no direction edge on the stock at 30 minutes or 1 to 5 sessions); hold-limit-20261112-v1 and the other exit studies. From production, only inputs were read for this study: how many fills have a delta, an underlying price and an implied volatility, and the sign of put and call deltas.",
+  "question": "Did the owner's choice to trade options, instead of an equal-delta stock position opened and closed at the same moments, add or cost money?",
+  "why_it_matters": "With no direction edge, any profit has to come from the instrument: options gain when the stock moves a lot in either direction and lose to time decay and the spread. If the options beat the stock replay, the owner was paid for the size of moves, which is a different and more promising pattern than direction. If they lost to it, the contracts cost money and a cheaper way to hold the same view is the lesson.",
+  "population": {
+    "trades": "every trade in the extract: closed or expired long option trades opened 2025-07-10 to 2026-10-19",
+    "extract": "the file written on 2026-11-11 by `python -m scripts.exit_counterfactual_study extract` (sha256 4ada80b1977230773bd0d919cd3ea42f766b8fcc651d5484fee8253de7c33a47), joined by fill id to one read-only production read of each fill's delta_at_fill and underlying_price_at_fill. The join file's hash is recorded",
+    "excluded_and_counted": ["a fill side other than buy_to_open or sell_to_close, or fills that do not allocate first-in-first-out", "an entry fill without a delta or an underlying price", "an exit fill without an underlying price", "an expired trade whose underlying has no raw daily close on the expiration date", "a hold that spans a share split of the underlying (CRWD 2026-07-02, CVNA 2026-05-08, HON 2026-06-29, NFLX 2025-11-17, NOW 2025-12-18)"]
+  },
+  "option_pnl": "the trade's own P&L from its actual fills, first in first out (the earlier studies' accounting); an expired remainder is worth 0",
+  "stock_replay": {
+    "entry": "each buy_to_open fill opens a stock lot of delta_at_fill x 100 x contracts shares (negative for a put, a short position) at that fill's underlying_price_at_fill",
+    "exit": "each sell_to_close fill closes, first in first out, the same share of each option lot's contracts and of its stock lot, at that exit fill's underlying_price_at_fill",
+    "expiry": "shares still open after the last exit close at the underlying's raw daily close on the expiration date",
+    "cost": "1 basis point of the traded stock value on each side",
+    "shares": "fractional shares are allowed; the delta is held fixed for the life of each lot, so the replay holds the exposure the option had at entry",
+    "note": "a short stock position is not available in the owner's Roth IRA and a delta-equivalent stock position needs far more capital than the option. The replay is a measuring stick, not an alternative the owner could have traded"
+  },
+  "measure": "per trade: instrument difference = option P&L minus stock replay P&L, in dollars",
+  "tests": 1,
+  "uncertainty": "2,000 bootstrap resamples by New York trading day of first entry (seed 20261113), every scored day in the resampling; 95% two-sided percentile interval on the total instrument difference",
+  "periods": {"exploration": "opened 2025-07-10 to 2026-03-31", "check": "opened 2026-04-01 to 2026-10-19", "independence": "neither period is untouched; every result is exploratory"},
+  "decisions": {
+    "options added value": "the 95% interval of the total difference is above 0 and the total is above 0 in each period",
+    "options cost money": "the 95% interval of the total difference is below 0",
+    "no evidence either way": "anything else",
+    "what_each_allows": "Added value: the size of moves after entry, not their direction, is worth a forward test with recorded bid and ask. Cost money: the contracts lost money against holding the same exposure in stock; a cheaper way to express a view is the lesson, and option choice is the first thing to change in any paper test. No evidence: the instrument neither saved nor sank the results on this history"
+  },
+  "descriptive_only": [
+    "total option P&L, total stock replay P&L (direction at the entry delta) and their difference, with the count of trades where each won",
+    "the difference by days to expiration at first entry (0-1, 2-7, 8 or more), by side, by period, and same-session versus held past the entry session",
+    "the difference per dollar of premium"
+  ],
+  "limits": [
+    "deltas and underlying prices are the journal's enrichment at the fill minute: delta is a model value backed out of the fill price, and an underlying price is a minute value, not the exact print",
+    "the option side is the actual fills, spread included; the stock side assumes 1 basis point a side. A difference therefore includes the option spread, time decay, the change in implied volatility and the gain from large moves, and does not separate them",
+    "fixing the delta at entry ignores how a stock position would have been adjusted; the replay is the simplest equal-exposure benchmark",
+    "seen data, and dollars are dominated by position size"
+  ],
+  "results": "The repository is public. Aggregates and per-trade rows are written outside it and reported to the owner directly; they are not committed.",
+  "one_run": "one historical run under this id. A changed constant is a new protocol id, recorded beside this one"
+}
