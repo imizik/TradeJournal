@@ -120,6 +120,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // The account line's tap: the book narrowed to one account (its masked number), until tapped again.
   const [pickedAccount, setAccount] = useState<string | null>(null);
   const account = activeAccount(live, pickedAccount);
+  // The line went unavailable (or the account left it): the pick ends, so its return does not narrow the book unasked.
+  if (pickedAccount !== null && account === null) setAccount(null);
   // The thread list's armed plans (a level reached today is a strip item) and which of its sources read.
   const [plans, setPlans] = useState<DeskPlan[]>([]);
   const [sections, setSections] = useState<DeskThreads["sections"] | null>(null);

@@ -132,7 +132,7 @@ export type DeskOrder = {
  * anything else leaves the book exactly as the journal has it. Account numbers only ever arrive masked. */
 export type DeskLiveAccount = {
   label: string; masked: string; total_value: number | null; cash: number | null; buying_power: number | null;
-  /** The account line's figures (``robinhood_book._totals``); null when Robinhood did not give what they need. */
+  /** The account line's figures, summed on the server from the feed's positions; null when a figure they need is unknown. */
   options_value?: number | null; open_pnl?: number | null; day_change?: number | null; day_change_pct?: number | null;
 };
 export type DeskLive = {

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * The desk's account line (docs/robinhood-read-feed.md § On the desk): in the top bar, one tappable figure group per
+ * The desk's account line (docs/copilot-lab.md § The desk, top bar): in the top bar, one tappable figure group per
  * Robinhood account — its label and number masked to the last four, total value, today's change in dollars and percent,
  * options value, cash and buying power, and the open P&L of its positions. Tapping an account narrows the book to its
  * rows; tapping it again shows every row. A phone gets the same line as one row that swipes sideways.
@@ -26,12 +26,14 @@ export function activeAccount(live: DeskLive | null | undefined, picked: string 
   return picked && liveOn(live) && live?.accounts?.some(a => a.masked === picked) ? picked : null;
 }
 
-/** The book's rows and Robinhood orders for one account; every other row is left as it is (``masked`` null: all). */
+/** The book's rows and Robinhood orders for one account: its positions, and a journal row carrying one of its orders
+ * (an order with no row of its own account sits on one); a journal row Robinhood does not show is in no account. Every
+ * other row is left as it is (``masked`` null: all). */
 export function forAccount(rows: DeskThread[], live: DeskLive | null, masked: string | null): { rows: DeskThread[]; live: DeskLive | null } {
   if (!masked) return { rows, live };
   const held = new Set(positionRows(rows));
   return {
-    rows: rows.filter(r => !held.has(r) || r.book?.account?.masked === masked),
+    rows: rows.filter(r => !held.has(r) || r.book?.account?.masked === masked || !!r.book?.orders?.some(o => o.account.masked === masked)),
     live: live && { ...live, orders: live.orders?.filter(o => o.account.masked === masked) },
   };
 }

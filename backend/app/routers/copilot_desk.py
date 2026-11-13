@@ -802,8 +802,11 @@ def _marks_ahead(db: Session):
 # --------------------------------------------------------------------------- the live book from Robinhood
 
 def _robinhood() -> dict:
-    from app.engine.robinhood_book import feed
+    from app.engine import robinhood_fills
+    from app.engine.robinhood_book import feed, unsure_today
     view, snapshot = feed.snapshot()
+    if snapshot is not None and view.get("accounts"):
+        unsure_today(view["accounts"], snapshot, robinhood_fills.poller.desk())  # today's change unknown, never wrong
     return {"state": "ok", "view": view, "snapshot": snapshot}
 
 
@@ -1120,7 +1123,7 @@ async def desk_read_route(body: ReadAsk):
 @router.post("/desk/robinhood/refresh")
 def desk_robinhood_refresh():
     """Reads Robinhood now (docs/robinhood-read-feed.md): parameterless, at most once every 15 seconds, one read at a
-    time; returns the feed's state and account chips. Owner-only, refused while the lab is off; nothing is written."""
+    time; returns the feed's state and account line. Owner-only, refused while the lab is off; nothing is written."""
     if not copilot.settings().enabled:
         raise HTTPException(503, "Copilot Lab is off.")
     from app.engine.robinhood_book import feed

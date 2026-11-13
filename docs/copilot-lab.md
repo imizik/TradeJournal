@@ -552,11 +552,15 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   per account (Roth IRA, MCP; Individual only while it holds something), its label and number masked to the last four,
   total value, today's change in dollars and percent, options value, cash, buying power and **open** (its positions'
   unrealized P&L). Today's change is not a figure Robinhood's portfolio read gives: it is each open position's move
-  since yesterday's close (an option opened today, since its cost), summed, so trades closed today are not in it (they
-  are in Realized today) and a stock bought today counts from yesterday's close; when any position lacks a figure it is
-  left off, never shown as $0. Between Robinhood reads the live prices move the total, today and open by what they move
-  those positions' P&L. Tapping an account narrows the book (and its Orders group) to that account's rows; tapping it
-  again shows every row. Not live: one grey **Accounts unavailable**, or **Accounts as of 10:04 AM** when the read is
+  since yesterday's close (an option opened in today's session, since its cost; a weekend read is Friday's session),
+  summed, so trades closed today are not in it (they are in Realized today). When Robinhood's order history shows an
+  opening fill today on a position held from before, that account's change is left off (the new contracts or shares
+  would count from yesterday's close); with the order history switched off it cannot be told. Whenever any position
+  lacks a figure (an option's open date included) the figure is left off, never shown as $0. Between Robinhood reads the
+  live prices move the total, today and open by what they move those positions' P&L. Tapping an account narrows the
+  book (and its Orders group) to that account's rows, and to a journal row carrying one of its orders; a journal row
+  Robinhood does not show belongs to no account and waits until the filter is cleared. Tapping it again shows every
+  row; the line going unavailable clears it too. Not live: one grey **Accounts unavailable**, or **Accounts as of 10:04 AM** when the read is
   stale, and no money (on a phone it is one row that swipes sideways, § Phone).
 - **Needs you** (`NeedsStrip`), **the Needs-you strip**. Only what needs a decision now, in amber; most of the day
   there is none and the strip is absent. Nothing in it is dismissed and there is no Seen: the strip shows the single

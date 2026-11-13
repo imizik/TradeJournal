@@ -23,7 +23,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.engine import robinhood_read as rh
 from app.engine.chart_math import ET
@@ -138,20 +138,31 @@ def _opened_on(opened_at: str | None) -> str | None:
     return moment.astimezone(ET).date().isoformat() if moment is not None and moment.tzinfo else None
 
 
-def _totals(account: dict, positions: list[dict], day: str) -> dict:
+def session_day(now: float) -> str:
+    """The New York date of the session a read's "today" belongs to: a weekend read is Friday's (holidays are not
+    rolled back)."""
+    day = datetime.fromtimestamp(now, ET).date()
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day.isoformat()
+
+
+def _totals(account: dict, rows: list[dict], day: str) -> dict:
     """An account's open P&L (Robinhood's unrealized P&L of its positions, summed) and today's change: no figure the
-    portfolio read gives says so, so it is each open position's move since yesterday's close (an option opened today:
-    since its cost), summed, and in percent of the value at the start of the day (total value less the change). Trades
-    closed today are not in it, and a stock bought today counts from yesterday's close too (its position carries no open
-    date). Any position with a figure missing, or positions that did not read, make the figure
-    unknown (None), never a partial sum or zero."""
-    rows = [p for p in positions if p["last4"] == account["last4"]]
-    known = account["complete"]
+    portfolio read gives says so, so it is each open position's move since yesterday's close (an option opened in
+    today's session: since its cost), summed, and in percent of the value at the start of the day (total value less the
+    change). Trades closed today are not in it. A position bought today on top of one held from before counts from
+    yesterday's close here; ``unsure_today`` makes that account's change unknown when today's fills show it. Any
+    position with a figure missing (an option's open date included), positions that did not read, or a held position
+    the book could not show, make the figure unknown (None), never a partial sum or zero."""
+    known = account["complete"] and account.get("whole", True)
     pnl = [p["usd"] for p in rows]
     moves = []
     for p in rows:
-        today = p["instrument"] == "option" and p["opened_on"] == day
-        basis = p["avg_cost"] if today else p["prev_close"]
+        if p["instrument"] == "option":
+            basis = None if p["opened_on"] is None else p["avg_cost"] if p["opened_on"] == day else p["prev_close"]
+        else:
+            basis = p["prev_close"]
         sign = -1 if p["direction"] == "short" else 1
         moves.append(None if p["mark"] is None or basis is None else sign * (p["mark"] - basis) * p["quantity"])  # a contract's or a share's
     open_pnl = _round(sum(pnl)) if known and None not in pnl else None
@@ -291,17 +302,22 @@ def read_snapshot(reader: rh.Reader, picks: tuple[str, ...], now: float) -> dict
             if exc.kind == "expired":
                 raise
 
-    positions = [row for a, p in held_options
-                 if (row := _option_row(a, p, instruments.get(p.get("option_id")), quotes.get(p.get("option_id")))) is not None]
-    positions += [row for a, p in held_stocks
-                  if (row := _stock_row(a, p, stock_quotes.get((_text(p.get("symbol"), 12) or "").upper()))) is not None]
+    built = [(a, _option_row(a, p, instruments.get(p.get("option_id")), quotes.get(p.get("option_id")))) for a, p in held_options]
+    built += [(a, _stock_row(a, p, stock_quotes.get((_text(p.get("symbol"), 12) or "").upper()))) for a, p in held_stocks]
+    positions, owned = [], {}
+    for a, row in built:
+        if row is None:
+            a["whole"] = False  # held, but the book cannot show it: the account's sums would be partial
+            continue
+        positions.append(row)
+        owned.setdefault(id(a), []).append(row)  # by the account itself, not its last four (two could share them)
     holding = {r["last4"] for r in positions}
-    day = datetime.fromtimestamp(now, ET).date().isoformat()
+    day = session_day(now)
     shown = [a for a in accounts if a["label"].lower() in picks or a["last4"] in picks or a["type"] in picks
              or a["last4"] in holding or (a["values"]["total_value"] or 0) > 0]
     return {
         "at": now,
-        "accounts": [{"label": a["label"], "masked": mask(a["last4"]), "last4": a["last4"], **a["values"], **_totals(a, positions, day),
+        "accounts": [{"label": a["label"], "masked": mask(a["last4"]), "last4": a["last4"], **a["values"], **_totals(a, owned.get(id(a), []), day),
                       "complete": a["complete"]} for a in shown],
         "complete": all(a["complete"] for a in accounts),
         "positions": positions,
@@ -462,6 +478,34 @@ def match(journal: list[dict], snapshot: dict) -> tuple[dict[str, dict], set[str
                 matched[row["trade_id"]] = live[pick]
     missing = {r["trade_id"] for r in journal if r["trade_id"] not in matched} if snapshot.get("complete") else set()
     return matched, missing, [p for i, p in enumerate(live) if i not in used]
+
+
+OPENING = {"buy_to_open", "sell_to_open"}
+
+
+def unsure_today(accounts: list[dict], snapshot: dict, fills: list[dict] | None) -> None:
+    """Leaves today's change unknown (in place, on the desk's account entries) for an account whose fills today, from
+    the order history's desk lines already in memory (``robinhood_fills.Poller.desk``; no call), show an opening fill on
+    a position the snapshot holds that it did not open in today's session: those contracts or shares count from
+    yesterday's close in ``_totals``, which would be wrong. ``fills`` None (that switch off): left as computed."""
+    if not fills:
+        return
+    day = session_day(snapshot["at"])
+    held = {(p["last4"], contract_key(p["symbol"], p["instrument"], p["side"], p["strike"], p["expiry"])): p
+            for p in snapshot["positions"]}
+    unsure = set()
+    for o in fills:
+        if not o.get("filled") or o.get("filled_at") is None or datetime.fromtimestamp(o["filled_at"], ET).date().isoformat() != day:
+            continue
+        p = held.get((o.get("last4"), contract_key(o.get("symbol"), o.get("instrument"), o.get("option_type"), o.get("strike"), o.get("expiry"))))
+        if p is None or p["instrument"] == "option" and p["opened_on"] == day:
+            continue
+        opening = o.get("action") in OPENING if p["instrument"] == "option" else o.get("action") == ("sell" if p["direction"] == "short" else "buy")
+        if opening:
+            unsure.add(mask(p["last4"]))
+    for a in accounts:
+        if a.get("masked") in unsure:
+            a["day_change"] = a["day_change_pct"] = None
 
 
 def account_tag(live: dict) -> dict:

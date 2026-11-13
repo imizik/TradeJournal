@@ -17,7 +17,9 @@ never writes to his Robinhood watchlists: every tool that would (`create_watchli
 `follow_watchlist`, `unfollow_watchlist`) is refused like any other write. From the position reads the desk gets, for each account shown: its label and number
 masked to the last four (`••8267`), total value, options value, cash and buying power, plus two figures summed from
 its positions (`robinhood_book._totals`): open P&L and today's change (each position's move since yesterday's close,
-an option opened today since its cost; unknown when any position lacks a figure; a stale read shows no account money); and each open position: options with strike,
+an option opened in today's session since its cost; unknown when any position lacks a figure or, from the order
+history's fills already held, an opening fill today added to a position held from before; a stale read shows no
+account money); and each open position: options with strike,
 call or put, expiry, quantity, Robinhood's average price, mark, bid, ask, the day's change and the Greeks; stocks with
 quantity, average cost and quote; each with unrealized P&L in dollars and percent from Robinhood's own average price and
 mark. A missing or odd field shows as unavailable, never as zero.
