@@ -875,9 +875,19 @@ def test_an_account_whose_orders_did_not_read_keeps_its_last_lines(desk):
     desk.fake.equity_orders[ROTH] = []  # the stock order is gone (cancelled): a whole read says so
     desk.at(10, 6).poll()
     assert [o["order_id"] for o in desk.poller.desk()] == ["w"]  # kept, not shown as vanished
+    desk.at(10, 20).poll()  # still unread: a line not read for three intervals is no longer carried
+    assert desk.poller.desk() == []
     desk.fake.fail.clear()
-    desk.fake.option_orders[ROTH] = []
-    desk.at(10, 7).poll()
+    desk.at(10, 21).poll()
+    assert [o["order_id"] for o in desk.poller.desk()] == ["w"]
+
+    # Page 1 shows it cancelled, page 2 fails: the cancelled order is gone, not carried back as working.
+    desk.fake.order_page = 1
+    desk.fake.option_orders[ROTH] = [option_order("w", "MU", [], quantity="1.00000", state="cancelled", created_at=utc(10, 1)),
+                                     option_order("v", "MU", [], quantity="1.00000", state="queued", created_at=utc(9, 50))]
+    real = desk.fake.tool_get_option_orders
+    desk.fake.tool_get_option_orders = lambda args: real(args) if not args.get("cursor") else {"unexpected": True}  # page 2 unreadable
+    desk.at(10, 22).poll()
     assert desk.poller.desk() == []
 
 

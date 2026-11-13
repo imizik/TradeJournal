@@ -269,6 +269,8 @@ class Read:
     account_types: dict[str, str]  # last4 -> the journal's account type
     calls: int
     orders: list[dict] = field(default_factory=list)  # the desk's lines (``desk_orders``), from the same replies
+    tried: set[tuple[str, str]] = field(default_factory=set)  # (last4, instrument) this pass asked for
+    seen: set[str] = field(default_factory=set)  # every order id a reply showed, in any state (kept or not)
 
 
 def read_orders(reader: rh.Reader, now: float) -> Read:
@@ -277,13 +279,14 @@ def read_orders(reader: rh.Reader, now: float) -> Read:
     since = datetime.fromtimestamp(now, UTC) - LOOKBACK
     stamp = since.strftime("%Y-%m-%dT%H:%M:%SZ")
     accounts = rb._accounts(reader.get_accounts())
-    executions, complete, types, orders = [], set(), {}, []
+    executions, complete, types, orders, tried, seen_ids = [], set(), {}, [], set(), set()
     for account in accounts:
         last4 = account["last4"]
         types[last4] = ACCOUNT_TYPES.get(account["type"], account["type"] or "individual")
         for kind, call, parse in (("option", reader.get_option_orders, option_executions),
                                   ("stock", reader.get_equity_orders, equity_executions)):
             cursor, seen, whole = None, set(), False
+            tried.add((last4, kind))
             try:
                 for _ in range(MAX_PAGES):
                     data = call(account["number"], stamp, cursor)
@@ -291,6 +294,7 @@ def read_orders(reader: rh.Reader, now: float) -> Read:
                         raise rh.ReadError("shape", "orders reply")
                     executions += parse(data, last4)
                     orders += desk_orders(data, account, kind)
+                    seen_ids |= {o["id"][:64] for o in rb._list(data, "orders", "results") if isinstance(o.get("id"), str)}
                     cursor = rb._next(data)
                     if not cursor or cursor in seen:
                         whole = True
@@ -302,7 +306,8 @@ def read_orders(reader: rh.Reader, now: float) -> Read:
                 log.warning("Robinhood %s orders read failed for an account (%s)", kind, exc.kind)
             if whole:
                 complete.add((last4, kind))
-    return Read(since=since, executions=executions, complete=complete, account_types=types, calls=reader.calls, orders=orders)
+    return Read(since=since, executions=executions, complete=complete, account_types=types, calls=reader.calls, orders=orders,
+                tried=tried, seen=seen_ids)
 
 
 # --------------------------------------------------------------------------- recording (idempotent by execution id)
@@ -915,13 +920,13 @@ class Poller:
                     log.warning("Robinhood desk order marks unavailable (%s)", type(exc).__name__)
                     session.rollback()
                     pairing = {}
-            lines = [{**o, "pairing": pairing.get(o["order_id"])} for o in got.orders]
+            lines = [{**o, "pairing": pairing.get(o["order_id"]), "read_at": now} for o in got.orders]
             if self._desk is not None:
-                # An account and kind this pass could not read whole keeps its last good lines (a working order does
-                # not vanish, as if cancelled, because one read failed); what this pass did read of it comes first.
-                seen = {o["order_id"] for o in lines}
-                lines += [o for o in self._desk["orders"] if (o["last4"], o["instrument"]) not in got.complete
-                          and o["order_id"] not in seen]
+                # An account and kind this pass asked for but could not read whole keeps its last lines (a working
+                # order does not vanish, as if cancelled, because one page failed), except an order this pass saw in
+                # any state (its new state wins: a cancelled one is gone) and a line not read for three intervals.
+                lines += [o for o in self._desk["orders"] if (o["last4"], o["instrument"]) in got.tried - got.complete
+                          and o["order_id"] not in got.seen and now - o["read_at"] <= rb.STALE_REFRESHES * rb.ttl(o["read_at"])]
             self._desk = {"at": now, "orders": lines}
             self._status = {"at": int(now), "state": "ok", "mode": current, "new_executions": new, "written": result.written,
                             "calls": got.calls, "outcomes": result.outcomes,
