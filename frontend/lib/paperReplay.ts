@@ -42,7 +42,7 @@ export type ReplayView = {
  *  ``multiplier`` 100 and ``stock`` the stock's price beside it. */
 export type ReplayQuote = {
   label: string; quantity: number; close: number; half_spread: number; bid: number; ask: number; bar: number; spread_bps: number;
-  instrument?: "stock" | "option"; multiplier?: number; stock?: number; half_from?: "range" | "floor"; low?: number; high?: number;
+  instrument?: "stock" | "option"; multiplier?: number; stock?: number; half_from?: "range" | "floor" | "min"; low?: number; high?: number;
   buying_power: number; buying_power_after?: number; fills_now: boolean; per_share?: number; cash?: number; pnl?: number;
   limit?: number; reserve?: number; expires_at?: number;
 };
@@ -86,7 +86,7 @@ export async function orderReplay(runId: string, at: number, ask: ReplayAsk, key
 }
 /** What the option picker offers at the replay clock: the candidate expirations, and for a picked type and expiration
  *  the strikes around the stock's price whose contracts traded that day, each with its last trade by the clock. */
-export type ReplayContract = { strike: number; occ: string; label: string; last: { price: number; at: number } | null };
+export type ReplayContract = { strike: number; occ: string; label: string; last: { price: number; at: number } };
 export type ReplayOptions = {
   symbol: string; day: string; at: number; off: string | null; rule: string; price: number | null; step: number | null;
   expiries: string[]; option_type: "call" | "put" | null; expiry: string | null; contracts: ReplayContract[] | null;

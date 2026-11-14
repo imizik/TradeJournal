@@ -2145,7 +2145,8 @@ Paper trading on a past day, any time (nights and weekends included): "Replay" o
   (Tradier time and sales on the OCC symbol, the Contract chart's read) are read lazily: only when he picks a type and an
   expiration, one contract at a time as a background chart-feed read (its single-flight, four places and 60-a-minute
   budget), at most 12 new reads a minute (the rest wait, labelled), kept in memory since a past day never changes. Only
-  contracts that traded that day are offered; each shows its last trade by the clock, never one after it. A market order
+  contracts that have traded by the replay clock are offered, each with its last trade by then; one that trades only
+  later that day is not offered, so the picker gives no hint about the rest of the day. A market order
   fills at the contract's trade bar for the minute just ended: its close plus an assumed half-spread (half that minute's
   high−low range rounded up to the cent, at least 1¢ and 0.5% of the price) to buy, less it to sell, ×100 a contract; the
   confirm shows the bar, its range and the rule ("est. spread ±$0.06, from half that minute's range"). A minute the
@@ -2158,7 +2159,7 @@ Paper trading on a past day, any time (nights and weekends included): "Replay" o
   "Close automatically" on, the touch sells at the next bar's open less the half-spread, off it is only recorded. At the
   replayed close working orders lapse and everything is sold at the last close; Back to live sells at the clock's price.
   The run's clock never goes back. For an option: a limit is a premium and fills only on a minute the contract traded
-  (that minute's range sets its half-spread); stop and target are stock prices, judged on the stock's bars, and an
+  (with the half-spread known at that minute's open: the previous traded minute's); stop and target are stock prices, judged on the stock's bars, and an
   automatic exit sells at the open of the contract's next traded minute; at the replayed close an option expiring that
   day settles at intrinsic value from the stock's last bar, any other sells at its last trade less the half-spread.
 - **Its own runs.** Each replay is a `paper_run` with `kind` `replay` and `replay_day` (migration `7f3b276ac082`), on the

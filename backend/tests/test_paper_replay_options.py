@@ -115,8 +115,9 @@ def test_the_picker_offers_only_contracts_that_traded_that_day_reading_each_once
     assert by[100]["last"] == {"price": 2.35, "at": at(5)} and by[100]["label"] == "NBIS $100 Call 11/20/26"
     again = paper_replay.options("2026-11-13", "NBIS", at(5), "call", "2026-11-20", None, NOW)
     assert again["contracts"] == picked["contracts"] and len(market.reads) == 6  # kept: a past day never changes
+    # At 09:33:00 the $101 call's only trade (the 09:33 bar) is still the future: not offered, no hint it trades later.
     early = paper_replay.options("2026-11-13", "NBIS", at(3), "call", "2026-11-20", 101, NOW)
-    assert early["contracts"][0]["last"] is None and len(market.reads) == 6  # traded at 09:33, not yet by 09:33:00
+    assert early["contracts"] == [] and early["missing"] == [101] and len(market.reads) == 6
 
 
 def test_contract_reads_stay_within_their_budget_one_at_a_time(db, market, monkeypatch):  # noqa: F811
@@ -158,7 +159,8 @@ def test_an_option_limit_fills_only_on_a_minute_the_contract_traded(db):  # noqa
     r = run(db)
     placed = buy(db, r, at(5), order_type="limit", limit_price=2.20)
     assert placed["working"]["reserve"] == 440.0 and placed["account"]["buying_power"] == 9560.0
-    # 09:35 (low 2.45) and 09:36 (low 2.58) are too high; 09:37–09:39 had no trade; 09:40's low 2.10 + 0.10 reaches 2.20.
+    # 09:35 (low 2.45) and 09:36 (low 2.58) are too high; 09:37–09:39 had no trade; 09:40's low 2.10 plus the half-spread
+    # known at its open (0.02, from the 09:36 minute's 2.58–2.62 range) reaches 2.20.
     assert step(db, r, at(10))["orders"] != []
     stepped = step(db, r, at(11))
     [filled] = stepped["happened"]
@@ -171,12 +173,13 @@ def test_stop_and_target_are_stock_levels_and_the_auto_exit_sells_at_the_contrac
         buy(db, run(db), at(5), stop=105.0)  # a stock level, not the premium
     r = run(db)
     buy(db, r, at(5), stop=100.0, target=110.0, auto=True)
-    # The stock's 09:37 bar dips to 99.5: the stop. The contract next trades at 09:40, opening 2.25, less half its range 0.10.
+    # The stock's 09:37 bar dips to 99.5: the stop. The contract next trades at 09:40, opening 2.25, less the half-spread
+    # known at that open: 0.02 from its previous traded minute (09:36, 2.58–2.62), never 09:40's own later low.
     stepped = step(db, r, at(11))
-    assert [(h["kind"], h["price"], h["at"]) for h in stepped["happened"]] == [("stop", 2.15, at(10))]
+    assert [(h["kind"], h["price"], h["at"]) for h in stepped["happened"]] == [("stop", 2.23, at(10))]
     [trade] = stepped["closed"]
     assert trade["verdict"]["kind"] == "stop" and trade["verdict"]["auto"] is True
-    assert trade["realized"] == round((2.15 - 2.41) * 200, 2) == -52.0
+    assert trade["realized"] == round((2.23 - 2.41) * 200, 2) == -36.0
 
 
 def test_at_the_close_a_0dte_call_settles_at_intrinsic_and_a_later_expiry_sells_at_its_last_trade(db):  # noqa: F811

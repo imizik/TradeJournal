@@ -203,9 +203,9 @@ export function ReplayPractice() {
 /** The confirm line: what the replayed bar says and the assumed spread, so the price is never mistaken for a quote. */
 function quoteWords(q: ReplayQuote, buying: boolean) {
   if (q.instrument === "option") {
-    const from = q.half_from === "floor"
-      ? `the 0.5% floor (that minute's ${px(q.low ?? q.close)}–${px(q.high ?? q.close)} range was narrower)`
-      : `half that minute's ${px(q.low ?? q.close)}–${px(q.high ?? q.close)} range`;
+    const range = `${px(q.low ?? q.close)}–${px(q.high ?? q.close)}`;
+    const from = q.half_from === "range" ? `half that minute's ${range} range`
+      : `the ${q.half_from === "min" ? "1¢ minimum" : "0.5% floor"} (that minute's ${range} range was narrower)`;
     return `The contract's ${replayTime(q.bar)} trade bar closed at ${px(q.close)}; ${buying ? "buying pays" : "selling takes"} that `
       + `${buying ? "plus" : "less"} ${px(q.half_spread)} = ${px(buying ? q.ask : q.bid)} a share, ×${q.multiplier ?? 100} a contract. `
       + `Trades carry no bid or ask: est. spread ±$${px(q.half_spread)}, from ${from}.${q.stock != null ? ` The stock was ${px(q.stock)}.` : ""}`;
@@ -286,13 +286,13 @@ function OptionPicker({ day, symbol, at, picked, onPick }: {
                   <button key={c.occ} type="button" role="radio" aria-checked={on} data-testid="replay-contract"
                     onClick={() => onPick({ option_type: kind, expiry: strikes.expiry!, strike: c.strike, label: c.label })}
                     className={cn("min-h-11 rounded-md border px-2 tabular-nums sm:min-h-8", on ? "border-amber-400/70 bg-amber-400/10 text-amber-100" : "text-foreground hover:bg-secondary")}>
-                    ${c.strike}<span className="ml-1 text-muted-foreground">{c.last ? px(c.last.price) : "no trade yet"}</span>
+                    ${c.strike}<span className="ml-1 text-muted-foreground">{px(c.last.price)}</span>
                   </button>
                 );
               })}
             </div>
-          ) : !checking && <p data-testid="replay-no-contracts" className="text-amber-300">No {kind} near {px(strikes.price ?? 0)} for {expiryShort(strikes.expiry!)} traded that day.</p>}
-          {strikes.missing.length > 0 && <p className="text-muted-foreground">Not offered, no trades that day: {strikes.missing.map(m => `$${m}`).join(", ")}.</p>}
+          ) : !checking && <p data-testid="replay-no-contracts" className="text-amber-300">No {kind} near {px(strikes.price ?? 0)} for {expiryShort(strikes.expiry!)} has traded by {replayTime(strikes.at)}.</p>}
+          {strikes.missing.length > 0 && <p className="text-muted-foreground">Not offered, no trade by {replayTime(strikes.at)}: {strikes.missing.map(m => `$${m}`).join(", ")}.</p>}
           {strikes.waiting.length > 0 && (
             <p className="text-amber-300">Not checked yet: {strikes.waiting.map(m => `$${m}`).join(", ")}. {strikes.waiting_reason}{" "}
               <button type="button" onClick={() => void load({ option_type: kind, expiry: strikes.expiry! })} className="underline">Check again</button>

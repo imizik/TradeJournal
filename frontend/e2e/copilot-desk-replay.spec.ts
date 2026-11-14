@@ -72,7 +72,7 @@ async function open(page: Page, width: number, run: Partial<typeof RUN> & { opti
     if (!ask.get("expiry")) return route.fulfill({ json: base });
     return route.fulfill({ json: { ...base, option_type: ask.get("option_type"), expiry: ask.get("expiry"),
       contracts: [{ strike: 100, occ: "NBIS261120C00100000", label: CALL, last: { price: 2.35, at: OPEN_AT + 60 } },
-        { strike: 101, occ: "NBIS261120C00101000", label: "NBIS $101 Call 11/20/26", last: null }],
+        { strike: 101, occ: "NBIS261120C00101000", label: "NBIS $101 Call 11/20/26", last: { price: 1.92, at: OPEN_AT + 60 } }],
       missing: [98, 99, 102, 103] } });
   });
   const view = (at: number, extra = {}) => ({ run: { ...RUN, ...run }, at, ended: false, score: stats(0, 0), account: ACCOUNT, positions: [], orders: [], closed: [], happened: [], ...extra });
@@ -186,8 +186,8 @@ for (const width of [1440, 375]) {
     await expect(page.getByTestId("replay-contract")).toHaveCount(2);
     expect(picks[1].get("option_type")).toBe("call");
     expect(picks[1].get("at")).toBe(String(OPEN_AT + 60));
-    await expect(page.getByTestId("replay-option-picker")).toContainText("Not offered, no trades that day: $98, $99, $102, $103.");
-    await expect(page.getByTestId("replay-contract").last()).toContainText("no trade yet");
+    await expect(page.getByTestId("replay-option-picker")).toContainText("Not offered, no trade by 9:31 AM: $98, $99, $102, $103.");
+    await expect(page.getByTestId("replay-contract").last()).toContainText("1.92");
     await page.getByTestId("replay-contract").first().click();
     await page.getByLabel("Replay quantity").fill("2");
     await page.getByTestId("replay-review").click();

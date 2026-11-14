@@ -10,12 +10,16 @@ on a past day, and each contract's own one-minute trades that price its replayed
   makes (``desk_contract``), through the shared chart feed as a background (``low``) read: its single-flight, its four
   places and its 60-calls-a-minute budget. Checked lazily, only when he picks a type and an expiration (or names a
   strike), one contract at a time, at most ``PROBES_PER_MINUTE`` new reads a minute; beyond that the rest wait,
-  labelled, never a burst. A past day never changes, so each answer (trades or none) is kept in memory.
+  labelled, never a burst. A past day never changes, so each answer is kept in memory (the whole day), but only the
+  trades that ended by the replay clock decide what is offered or shown: a contract that has not traded yet by then
+  is not offered, so nothing about the rest of the day leaks.
 - **Older days.** Tradier keeps about the last 20 days of 1-minute history; on an older day options are off with that
   reason, and shares still replay.
 - **The assumed spread.** Prints carry no bid or ask, so a replayed option fill pays the minute's close plus an assumed
   half-spread (``half_spread``): half that minute's high−low range, rounded up to the cent, at least 1¢ and at least
-  ``FLOOR_PCT`` of the price. Never a made-up price: a minute in which the contract did not trade is no price.
+  ``FLOOR_PCT`` of the price. A fill at a minute's open (an automatic exit) or during it (a limit) uses the previous
+  traded minute's range, the one already known then (``half_before``). Never a made-up price: a minute in which the
+  contract did not trade is no price.
 
 Pure reads: nothing is written. Never Robinhood.
 """
@@ -40,7 +44,8 @@ KEPT = 400  # contract-days of trades kept in memory
 
 _kept: OrderedDict[tuple[str, date], list[dict]] = OrderedDict()
 _reads: deque[float] = deque()
-_lock = threading.Lock()  # one contract read at a time
+_lock = threading.Lock()  # the kept answers and the read budget (never held across a read)
+_reading = threading.Lock()  # one contract read at a time
 
 
 class OptionsOff(Exception):
@@ -150,14 +155,19 @@ def trades(occ: str, day: date) -> list[dict]:
     read is refused or over this module's budget (nothing is kept then, so a later pick tries again)."""
     from app.engine.chart_feed import ChartFeedError, _rows, chart_feed
     from app.engine.chart_math import normalize_bars
-    with _lock:  # one read at a time: picks queue here, never a burst
+    with _lock:
         found = _kept.get((occ, day))
         if found is not None:
             _kept.move_to_end((occ, day))
             return found
-        if _budget_left(time.time()) <= 0:
-            raise OptionsOff("Checked enough contracts for this minute (it keeps the chart data allowance): try again in a minute.", 503)
-        _reads.append(time.time())
+    with _reading:  # one read at a time: picks queue here, never a burst
+        with _lock:
+            found = _kept.get((occ, day))  # read by the pick ahead of this one
+            if found is not None:
+                return found
+            if _budget_left(time.time()) <= 0:
+                raise OptionsOff("Checked enough contracts for this minute (it keeps the chart data allowance): try again in a minute.", 503)
+            _reads.append(time.time())
         try:
             data, _fetched, issue = chart_feed.read("/v1/markets/timesales", _params(occ, day), 0, keep=False, low=True)
         except ChartFeedError as exc:
@@ -166,9 +176,10 @@ def trades(occ: str, day: date) -> list[dict]:
             raise OptionsOff(f"The contract's trades could not be read: {issue}", 503)
         found = [b for b in normalize_bars(_rows(data, "series", "data"))
                  if b["volume"] > 0 and datetime.fromtimestamp(b["time"], ET).date() == day]
-        _kept[(occ, day)] = found
-        while len(_kept) > KEPT:
-            _kept.popitem(last=False)
+        with _lock:
+            _kept[(occ, day)] = found
+            while len(_kept) > KEPT:
+                _kept.popitem(last=False)
         return found
 
 
@@ -179,11 +190,19 @@ def last_trade(found: list[dict], at: float) -> dict | None:
 
 
 def half_spread(bar: dict) -> tuple[float, str]:
-    """The assumed half-spread around a replayed option minute and where it came from: half the bar's high−low range,
-    rounded up to the cent, at least 1¢ and at least ``FLOOR_PCT`` of the close."""
+    """The assumed half-spread around a replayed option minute and where it came from (``range``, ``floor`` for
+    ``FLOOR_PCT`` of the close, ``min`` for 1¢): half the bar's high−low range, rounded up to the cent, at least both."""
     span = math.ceil(round((float(bar["high"]) - float(bar["low"])) / 2 * 100, 6)) / 100
-    floor = max(MIN_HALF, math.ceil(round(float(bar["close"]) * FLOOR_PCT * 100, 6)) / 100)
-    return (span, "range") if span >= floor else (floor, "floor")
+    pct = math.ceil(round(float(bar["close"]) * FLOOR_PCT * 100, 6)) / 100
+    floor, source = (pct, "floor") if pct >= MIN_HALF else (MIN_HALF, "min")
+    return (span, "range") if span >= floor else (floor, source)
+
+
+def half_before(by_minute: dict[int, dict], minute: int) -> float:
+    """The half-spread known at the open of ``minute``: the contract's previous traded minute's (``half_spread``), else
+    the 1¢ minimum."""
+    earlier = [t for t in by_minute if t < minute]
+    return half_spread(by_minute[max(earlier)])[0] if earlier else MIN_HALF
 
 
 def quote_at(found: list[dict], at: float, label: str) -> dict:
