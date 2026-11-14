@@ -15,11 +15,13 @@ import { cn } from "@/lib/utils";
 const ET = "America/New_York";
 const SHOWN = 3; // the newest few under a row; the rest are one "N earlier" word away
 
-/** "10:42" today, "11/12 10:42" on an earlier day (New York). */
+/** "10:42" today, "11/12 10:42" on an earlier day (New York); outside 9:00-4:59 the clock keeps its AM/PM ("8:17 PM"). */
 export function noteTime(at: number | null, now = Date.now() / 1000): string {
   if (at == null) return "";
   const day = (s: number) => new Date(s * 1000).toLocaleDateString("en-US", { timeZone: ET, month: "numeric", day: "numeric" });
-  const clock = new Date(at * 1000).toLocaleTimeString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/, "");
+  const full = new Date(at * 1000).toLocaleTimeString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" });
+  const hour = Number(new Date(at * 1000).toLocaleString("en-US", { timeZone: ET, hour: "numeric", hour12: false }));
+  const clock = hour >= 9 && hour < 17 ? full.replace(/\s?[AP]M$/, "") : full;
   return day(at) === day(now) ? clock : `${day(at)} ${clock}`;
 }
 
