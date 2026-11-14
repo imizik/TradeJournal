@@ -206,9 +206,12 @@ def read_state(symbol: str, need: frozenset | tuple = ()) -> dict:
 def _held(db, symbol: str) -> list[dict]:
     """His open positions in ``symbol`` as the desk's book has them: each journal position with its open contracts
     (Robinhood's quantity, P&L and mark when the snapshot the desk already holds matches it) and each one only Robinhood
-    shows. ``trade_id`` is the journal's trade (None for one only Robinhood shows); ``account`` stays on the server (it
-    only keeps two accounts' legs from reading as one spread). ``mark`` and ``usd`` are a contract's mark (the premium x
-    100) and the unrealized P&L in dollars, None when the snapshot does not have it: never a quote read here."""
+    shows. ``trade_id`` is the journal's trade (None for one only Robinhood shows); ``account`` stays on the server: it
+    only says which legs share an account, so they can read as one spread. Both kinds of row carry the same key, the
+    account's label as the copilot's book words it (``copilot_book._label``), and only when that label names exactly one
+    account; otherwise (an account the journal does not know, two accounts with the same label) it is None and the leg
+    never pairs. ``mark`` and ``usd`` are a contract's mark (the premium x 100) and the unrealized P&L in dollars, None
+    when the snapshot does not have it: never a quote read here."""
     from sqlmodel import select
     from app.ai import copilot_book
     from app.engine import chart_journal
@@ -218,6 +221,12 @@ def _held(db, symbol: str) -> list[dict]:
                                             .where(copilot_book._not_webull())).all()}
     live = copilot_book.live_or_unavailable(db)  # the desk's last snapshot, kick=False: never a Robinhood read
     matched = live["matched"] if live and live.get("state") == "ok" else {}
+    named: dict[str, set] = {}
+    for account in db.exec(select(Account).where(copilot_book._not_webull())).all():
+        named.setdefault(copilot_book._label(account.name), set()).add(account.id)
+
+    def key(label: str | None) -> str | None:
+        return label if label and label != copilot_book.OTHER_ACCOUNT and len(named.get(label, ())) == 1 else None
     out = []
     for p in chart_journal.positions(db, symbol) if trades else []:
         trade = trades.get(p["trade_id"])
@@ -231,14 +240,14 @@ def _held(db, symbol: str) -> list[dict]:
                     "expiry": trade.expiration.isoformat() if option and trade.expiration else None,
                     "quantity": numbers.get("quantity") if numbers.get("quantity") is not None else p["open"],
                     "usd": numbers.get("unrealized_usd"), "mark": numbers.get("mark") if numbers else None,
-                    "account": p.get("last4")})
+                    "account": key(copilot_book._label(p.get("account")))})
     for row in (live or {}).get("new", []):
         if row.get("symbol") != symbol:
             continue
         option = row.get("option") or {}
         out.append({"trade_id": None, "instrument": row["instrument"], "direction": row["direction"], "side": option.get("side"),
                     "strike": option.get("strike"), "expiry": option.get("expiry"), "quantity": row.get("quantity"),
-                    "usd": row.get("unrealized_usd"), "mark": row.get("mark"), "account": row.get("account")})
+                    "usd": row.get("unrealized_usd"), "mark": row.get("mark"), "account": key(row.get("account"))})
     return out
 
 
@@ -299,9 +308,11 @@ def _structures(held: list[dict]) -> list[dict]:
     bought leg first in a spread."""
     groups: dict[tuple, list[dict]] = {}
     out = []
-    for p in held:
+    for i, p in enumerate(held):
         if p["instrument"] == "option" and p.get("side") in OPTION_TYPES and p.get("strike") and p.get("expiry"):
-            groups.setdefault((p["side"], p["expiry"], p.get("account")), []).append(p)
+            # A leg whose account cannot be told apart from another's pairs with nothing.
+            account = p.get("account") if p.get("account") is not None else ("unknown", i)
+            groups.setdefault((p["side"], p["expiry"], account), []).append(p)
         else:
             out.append({"legs": [p], "spread": False})
     for legs in groups.values():
@@ -352,6 +363,16 @@ def _holding(desk: dict, request: dict, symbol: str) -> dict:
     if request["action"] != "note" and not one["spread"] and one["legs"][0]["direction"] != "long":
         raise ToolInputError(f"his {symbol} {_structure_words(one)} is a short leg: the desk's closing ticket is for a long "
                              "call or put or a vertical spread, so say so")
+    if request["action"] != "note" and not one["spread"]:
+        # A long leg beside a short one of the same type and expiry that did not pair (another size, or accounts the book
+        # cannot tell apart) may be half of a spread: selling it alone would leave the short leg open.
+        leg = one["legs"][0]
+        beside = [p for p in held if p is not leg and p["instrument"] == "option" and p["direction"] == "short"
+                  and p.get("side") == leg["side"] and p.get("expiry") == leg["expiry"]]
+        if beside:
+            raise ToolInputError(f"his {symbol} {_structure_words(one)} sits beside a short {_words(beside[0])} the book cannot "
+                                 "pair with it for sure, so selling it alone could leave the short leg open: say so and ask "
+                                 "the owner to close it by hand")
     return one
 
 
@@ -545,8 +566,12 @@ def saved(rest: dict) -> dict:
         if found["direction"] not in ("long", "short"):
             raise ToolInputError("direction is long or short")
         out["direction"] = found["direction"]
+    allowed = {"plan_stop": set(found), "alert": {"last", "as_of"}, "draw": {"last", "as_of"}, "ticket": {"investigation_id"},
+               "plan_idea": {"direction"}}.get(out["action"], set())
+    if set(found) - allowed:
+        raise ToolInputError(f"unexpected fields for {out['action']}: {sorted(set(found) - allowed)}")
     if out["action"] in HELD:
-        out.update(_saved_held(out["action"], kept))
+        out.update(_saved_held(out["action"], kept, out))
     elif out["action"] == "plan_idea":
         if set(kept) != set(IDEA_FIELDS) or "direction" not in out:
             raise ToolInputError("a plan card keeps its setup card")
@@ -574,7 +599,7 @@ def _money_or_none(value: Any, name: str) -> float | None:
     return round(float(value), 2)
 
 
-def _saved_held(action: str, kept: dict) -> dict:
+def _saved_held(action: str, kept: dict, request: dict) -> dict:
     """A stored close, trim or note card's position, checked: its legs, its contract words and, for a close or trim, the
     contracts held, sold and left (sold + left = held) and its money (null when it had none)."""
     legs = kept.get("legs")
@@ -602,6 +627,8 @@ def _saved_held(action: str, kept: dict) -> dict:
     contract = kept.get("contract")
     if not isinstance(contract, str) or not 0 < len(contract) <= 60:
         raise ToolInputError("contract is a few words")
+    if action != "note" and contract != _structure_words({"legs": clean, "spread": len(clean) == 2}):
+        raise ToolInputError("a position card's contract is its legs in words")
     out: dict[str, Any] = {"legs": clean, "contract": contract}
     if action == "note":
         if set(kept) - {"legs", "contract"}:
@@ -613,8 +640,10 @@ def _saved_held(action: str, kept: dict) -> dict:
     held, sold, left = counts
     if sold < 1 or sold + left != held or (action == "close" and left != 0):
         raise ToolInputError("the contracts sold and left add up to the contracts held")
+    if action == "trim" and sold != trim_count(held, request.get("quantity"), request.get("half", False)):
+        raise ToolInputError("a trim sells what its request asked of the contracts held")
     out.update(held=held, contracts=sold, remains=left, mark=_money_or_none(kept.get("mark"), "mark"),
                proceeds=_money_or_none(kept.get("proceeds"), "proceeds"), usd=_money_or_none(kept.get("usd"), "usd"))
-    if (out["mark"] is None) != (out["proceeds"] is None):
-        raise ToolInputError("proceeds go with a mark")
+    if out["proceeds"] != proceeds(out["mark"], sold):
+        raise ToolInputError("proceeds are the mark times the contracts sold")
     return out

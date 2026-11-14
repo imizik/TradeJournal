@@ -151,6 +151,11 @@ def test_what_has_no_closing_ticket_is_refused():
     assert "is shares" in refused(Desk([leg(instrument="stock", quantity=100)]), action="trim", half=True)
     assert "short leg" in refused(Desk([leg(direction="short", side="put", strike=30)]), action="close")
     assert "whole number" in refused(Desk([leg(quantity=2.5)]), action="close")
+    # A long leg beside a short one it cannot pair with for sure (an account the book cannot tell apart) is not sold alone.
+    split = [leg(T1, strike=100, quantity=2), leg(T2, strike=105, direction="short", quantity=2, account=None)]
+    assert "could leave the short leg open" in refused(Desk(split), action="close", strike=100)
+    assert "could leave the short leg open" in refused(Desk(split), action="trim", strike=100, half=True)
+    assert card(Desk(split), action="note", strike=100, text="x")["legs"][0]["trade_id"] == T1  # a note is no exit
     # Unequal legs are not one spread: two positions, so it asks.
     uneven = [leg(T1, strike=100, quantity=2), leg(T2, strike=110, direction="short", quantity=1)]
     assert "ask the owner which one" in refused(Desk(uneven), action="close")
@@ -226,8 +231,23 @@ def test_held_reads_the_journals_open_positions_without_a_quote_or_robinhood(db,
     _rebuild_trades(db, "test")
     held = copilot_actions._held(db, "NVDA")
     assert held == [{"trade_id": str(trade_of(db, entry).id), "instrument": "option", "direction": "long", "side": "call",
-                     "strike": 900.0, "expiry": "2099-01-15", "quantity": 2, "usd": None, "mark": None, "account": "8267"}]
+                     "strike": 900.0, "expiry": "2099-01-15", "quantity": 2, "usd": None, "mark": None, "account": "Roth"}]
     assert trade_of(db, put).status != "open"
+
+
+def test_a_journal_leg_and_a_robinhood_only_leg_in_one_account_read_as_one_spread(db, monkeypatch):  # noqa: F811
+    from app.ai import copilot_book
+    entry = fill(db, "NVDA", "buy_to_open", 2, 310, "2026-09-15T09:44", **CALL)  # the Roth's long 900 call
+    _rebuild_trades(db, "test")
+    short = {"symbol": "NVDA", "instrument": "option", "direction": "short", "option": {"side": "call", "strike": 950.0, "expiry": "2099-01-15"},
+             "quantity": 2.0, "unrealized_usd": -40.0, "mark": 120.0}
+    for account, pairs in (("Roth", True), (copilot_book.OTHER_ACCOUNT, False), ("Individual", False)):
+        monkeypatch.setattr(copilot_book, "live_or_unavailable", lambda db, a=account: {"state": "ok", "as_of": None, "matched": {},
+                            "new": [{**short, "account": a}]})
+        held = copilot_actions._held(db, "NVDA")
+        spreads = [f for f in copilot_actions._structures(held) if f["spread"]]
+        assert bool(spreads) is pairs, account
+    assert held[0]["trade_id"] == str(trade_of(db, entry).id)
 
 
 def test_held_takes_the_snapshots_numbers_and_its_new_rows(db, monkeypatch):  # noqa: F811
@@ -310,6 +330,10 @@ def test_the_fixture_reads_each_request_and_keeps_a_notes_words_whole():
     ("Close my NBIS calls", {"proceeds": "1230"}),
     ("Note on NBIS: took profit", {"held": 4}),  # a note keeps no money
     ("Note on NBIS: took profit", {"legs": [{**leg(None), "account": None}]}),
+    ("Sell half my NBIS", {"contracts": 3, "remains": 1}),  # half of 4 is 2
+    ("Sell half my NBIS", {"proceeds": -9999.0}),  # proceeds are mark x contracts
+    ("Sell half my NBIS", {"contract": "Roth IRA 8267 anything"}),  # the contract is its legs in words
+    ("Sell half my NBIS", {"alert_id": "33333333-3333-4333-8333-333333333333"}),  # a plan stop's fields
     ("Plan the IREN Radar setup", {"event_id": "../x"}),
     ("Plan the IREN Radar setup", {"words": None}),
 ])

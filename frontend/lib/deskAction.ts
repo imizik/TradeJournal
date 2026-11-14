@@ -72,9 +72,10 @@ export function actionLine(card: DeskAction): string {
   }
 }
 
-/** Dollars, signed when asked: "+$420", "−$63", "$1,230". */
+/** Dollars, signed when asked: "+$420", "−$63", "$1,230"; cents under $10 ("$4.50"), never one decimal. */
 export function dollars(value: number, signed = false): string {
-  const text = `$${Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: Math.abs(value) < 10 ? 2 : 0, maximumFractionDigits: 2 })}`;
+  const cents = Math.abs(value) < 10;
+  const text = `$${Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 })}`;
   return value < 0 ? `−${text}` : signed && value > 0 ? `+${text}` : text;
 }
 
@@ -242,6 +243,13 @@ export function ticketFromBook(card: Extract<DeskAction, { action: "close" | "tr
   const ticket = closeNowTicket({ symbol: card.symbol, legs, account, contracts: card.contracts });
   if (!ticket) throw new Error(`The desk has no mark for your ${card.symbol} ${card.contract} right now, so no ticket was opened. Try again in a minute.`);
   return ticket;
+}
+
+/** Brings the desk's centre forward where the copilot covers it (a phone's sheet, the sheet layout below 1180 px), with
+ * nothing else changed: the ticket a card just opened is in view. */
+export function revealCentre() {
+  const detail: DeskView & { was: DeskView } = { reveal: true, was: {} };
+  window.dispatchEvent(new CustomEvent(DESK_VIEW_EVENT, { detail, cancelable: true }));
 }
 
 /** What a close or trim card says once its ticket is open. */

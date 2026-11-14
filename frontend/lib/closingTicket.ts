@@ -92,7 +92,7 @@ export function closingTicket({ symbol, at, terms, levels, account, stock, worth
 /**
  * A closing ticket at the mark now, for the copilot's close and trim cards (``lib/deskAction.ts``): a sell to close of a
  * held long call or put, or the closing spread of a held vertical (sell the bought leg, buy back the sold leg), for all
- * of it or part. ``mark`` and ``shortMark`` are a share's premium now, from the book row's own value (``worthNow``);
+ * of it or part. ``mark`` and ``shortMark`` are a share's premium now to the cent, from the book row's own value;
  * ``net`` is the bought leg's less the sold leg's (positive: closing brings money in; negative: a held credit spread costs
  * money to close). ``limit`` is ``net`` as a limit price, to the cent and at least $0.01; ``proceeds`` the signed dollars
  * at that limit. Pure arithmetic: nothing here places, sends or reads anything.
@@ -138,11 +138,12 @@ export function trimCount(held: number, ask: { quantity?: number | null; half?: 
 /** One held leg as the book row has it: its terms and what the whole leg is worth now (``worthNow``). */
 export type HeldLeg = { terms: OptionTerms | null | undefined; worth: number | null; markLive: boolean };
 
-/** A share's premium now: the leg's worth over its size. */
+/** A share's premium now, to the cent (as a quote shows it, so a spread's net is the difference the ticket prints): the
+ * leg's worth over its size. */
 function markOf(leg: HeldLeg): number | null {
   const t = leg.terms;
   if (!t || !finite(leg.worth) || leg.worth < 0 || !finite(t.quantity) || t.quantity <= 0 || !finite(t.multiplier) || t.multiplier <= 0) return null;
-  return Math.round(leg.worth / (t.quantity * t.multiplier) * 10000) / 10000;
+  return Math.round(leg.worth / (t.quantity * t.multiplier) * 100) / 100;
 }
 
 /**
@@ -165,7 +166,7 @@ export function closeNowTicket({ symbol, legs, account, contracts }: {
   const mark = markOf(long);
   const shortMark = short ? markOf(short) : null;
   if (mark === null || (short && shortMark === null)) return null;
-  const net = Math.round((mark - (shortMark ?? 0)) * 10000) / 10000;
+  const net = Math.round((mark - (shortMark ?? 0)) * 100) / 100;
   const limit = Math.max(0.01, Math.round(Math.abs(net) * 100) / 100);
   const credit = net >= 0;
   return { at: "now", symbol, side: t.side, expiry: t.expiry, strike: t.strike, shortStrike: short ? s!.strike : null,

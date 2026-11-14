@@ -235,6 +235,9 @@ test("on a phone a trim card fits and its ticket comes into view", async ({ page
   expect(box!.width).toBeLessThanOrEqual(393);
   await trim.getByRole("button", { name: "Open ticket" }).click();
   await expect(ticket(page)).toBeInViewport();
+  // The copilot's sheet gave way: the ticket is what a tap at its centre reaches, not hidden under the conversation.
+  await expect.poll(() => ticket(page).evaluate((el) => { const r = el.getBoundingClientRect();
+    return el.contains(document.elementFromPoint(r.left + r.width / 2, Math.min(r.top + 40, window.innerHeight - 1))); })).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(393);
 });
 
@@ -262,6 +265,10 @@ test("close now: a single call at its mark, part of it, and what is left", () =>
   expect(closeNowTicket({ symbol: "NBIS", legs: [heldLeg({ direction: "short" }, 1260)], account: null, contracts: 1 })).toBeNull();
   // A cheap option never prices at zero: a $1 position of 3 is 0.0033 a share, limit 0.01.
   expect(closeNowTicket({ symbol: "NBIS", legs: [heldLeg({}, 1)], account: null, contracts: 3 })!.limit).toBe(0.01);
+  // Marks are to the cent, so a spread's net is the difference the ticket prints: 0.035 → 0.04, 0.0125 → 0.01, net 0.03.
+  const cheap = closeNowTicket({ symbol: "IREN", legs: [heldLeg({ strike: 40, quantity: 2 }, 7), heldLeg({ strike: 45, direction: "short", quantity: 2 }, 2.5)],
+    account: null, contracts: 2 })!;
+  expect([cheap.mark, cheap.shortMark, cheap.net, cheap.limit, cheap.proceeds]).toEqual([0.04, 0.01, 0.03, 0.03, 6]);
 });
 
 test("close now: a debit spread closes for a credit, a credit spread for a debit", () => {

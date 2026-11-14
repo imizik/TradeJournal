@@ -15,7 +15,7 @@ import { CHART_SETTINGS_SAVED, readChartSettings, useChartSettings } from "@/lib
 import { applyEdit, MAX_LEVELS } from "@/lib/drawings";
 import type { Proposal, ProposalOutcome } from "@/lib/copilot";
 import { freshQuote } from "@/lib/copilot";
-import { DESK_CHANGED_EVENT, DESK_GO_EVENT, DESK_POSITION_EVENT, DESK_VIEW_EVENT, Stale, actionLine, actionVerb, applyShow, arrived, heldFacts,
+import { DESK_CHANGED_EVENT, DESK_GO_EVENT, DESK_POSITION_EVENT, DESK_VIEW_EVENT, Stale, actionLine, actionVerb, applyShow, arrived, heldFacts, revealCentre,
   rowForLeg, runAction, showOnDesk, staleByAge, staleByPrice, ticketDone, ticketFromBook, undoFor, undoShow, type CentreTab, type DeskAction,
   type DeskView, type Done, type PositionDetail } from "@/lib/deskAction";
 import type { DeskThread } from "@/lib/desk";
@@ -132,6 +132,7 @@ export default function DeskActionCard({ proposal, onOutcome }: { proposal: Desk
       try {
         const ticket = ticketFromBook(card, detail.rows, peekDeskTicks());
         openClosingTicket(ticket);
+        revealCentre(); // on a phone the copilot's sheet gives way to the ticket
         finish({ text: ticketDone(ticket), symbol: card.symbol });
       } catch (failure) {
         setNote(failure instanceof Error ? failure.message : "No ticket was opened. Try again.");
