@@ -117,7 +117,8 @@ export default function DeskHealthDot() {
             {failed ? "Could not check just now; the next minute asks again." : "What feeds the desk. Tap one for what it affects."}
           </p>
           <ul>
-            {(rows ?? []).map(row => <Source key={row.id} row={row} open={picked === row.id} onPick={() => setPicked(picked === row.id ? null : row.id)} />)}
+            {/* Without the server's rows the Tape's own still shows. */}
+            {(rows ?? [level2Row(tape)]).map(row => <Source key={row.id} row={row} open={picked === row.id} onPick={() => setPicked(picked === row.id ? null : row.id)} />)}
           </ul>
         </div>
       )}
