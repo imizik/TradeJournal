@@ -140,8 +140,8 @@ test("a held call: Contract shows its trades, his fills and P&L at the cursor, a
   await expect(page.getByTestId("desk-contract-legend")).toContainText("trades");
   await expect(page.getByTestId("desk-contract-legend")).toContainText("mark (bid/ask mid, else last) while the desk was open");
   await expect(page.getByTestId("desk-contract-legend")).toContainText("your fills");
-  // The closing tickets stay in the position header above the chart.
-  await expect(page.getByTestId("desk-chart").getByTestId("close-from-plan").getByRole("button")).toHaveText(["Close at target", "Close at stop"]);
+  // The closing tickets (and Roll) stay in the position header above the chart.
+  await expect(page.getByTestId("desk-chart").getByTestId("close-from-plan").getByRole("button")).toHaveText(["Close at target", "Close at stop", "Roll"]);
   // At the cursor: the price and which it is, his P&L for 2 contracts, and ORCL then.
   const box = (await canvas.boundingBox())!;
   await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5);

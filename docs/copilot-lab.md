@@ -1654,7 +1654,31 @@ that nothing in it places or sends anything.
   says so. **Copy all** puts the legs, then the net limit as a debit or credit, then the quantity on the clipboard;
   there is no Send button. The Play check reads the plan's parts as for any ticket, says in grey that the habit rules
   (written for one long option) are not run on a spread, and works out holding overnight for the spread as a whole.
-  Straddles, strangles, condors, butterflies, rolls and calendars are still refused.
+  Straddles, strangles, condors, butterflies and calendars are still refused, and a plan's words naming a roll are not
+  a plan ticket (a held position rolls from its own Roll, below).
+- **Roll** (`GET /copilot/roll`, `app/engine/desk_roll.py`, `frontend/components/copilot/DeskRoll.tsx`,
+  `frontend/lib/rollTicket.ts`). A held single long call or put in whole contracts shows **Roll** beside its closing
+  buttons (the standing under the chart and the book row), and a closing ticket offers **Roll it instead**. It opens
+  the Ticket in roll mode: leg 1 is the contract held, **sell to close**, all of it by default (fewer if he types
+  fewer; never more than held, and the rest is said to be kept); leg 2 he picks in the Chain shown under it, opened on
+  the held expiry and side (**Roll to this**; the other side or the held contract itself says why not), **buy to open**,
+  the same count by default. The route takes the held contract's terms as the book row shows them (strike, expiry,
+  contracts held, cost a contract) and reads both expiries' chains in one paced options-feed pass; Robinhood is never
+  called. The ticket shows each leg's bid, ask and mid with its time; what closing brings in (mid, bid) and the new
+  contract costs (mid, ask); the net at the mid (the default limit, with a Debit/Credit switch) and at the natural price
+  (sell at the bid, buy at the ask); the dollars at the limit he types; the new contract's break-even at expiry at its
+  mid, and the whole trade's (the money still in it spread over the new contracts, or "ahead" when he has taken out more
+  than he put in); days added; money in the trade (the rolled contracts' cost basis, then that plus the roll's net) and
+  at risk from here (what his contracts are worth now, then what the new ones cost); and one line, "Roll NBIS 100C
+  Nov 21 → 105C Dec 19: pay $1.40 a share more ($140.00), break-even 110.40, 28 more days." A stale or missing leg is
+  grey with its time and gives no net number; a wide one (10%) gives one marked **rough**. **Copy all** puts Robinhood's
+  roll screen on the clipboard (the close leg, the open leg, the net limit as a debit or credit, the quantity); with a
+  different count on each leg Robinhood's roll cannot take it, so the ticket says so and copies two orders in order
+  (sell to close first, then buy to open), each with its own limit. No Send button. The plan stays with the old
+  contract's trade: it says to plan the new contract after the roll fills. Short options, spreads and other
+  multi-leg positions get no Roll (their standing says Roll covers a single long call or put only).
+  Proof: `backend/tests/test_desk_roll.py` (every money case, the quotes, the refusals, one feed pass, no send),
+  `frontend/e2e/roll-ticket.spec.ts` (the same cases in the browser's math), `frontend/e2e/copilot-desk-roll.spec.ts`.
 - **Closing tickets: Close at target / Close at stop.** A held single long call or put with a plan shows these in the
   position's standing under the chart (beside the What if…) and under its book row. Each opens the Ticket as a **sell to close** of the
   contracts held, filled in the browser from the book row (`frontend/lib/closingTicket.ts`): the account holding it
