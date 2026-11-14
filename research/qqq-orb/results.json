@@ -1,0 +1,189 @@
+{
+  "protocol_id": "qqq-orb-20261114-v1",
+  "test": {
+    "trades": 2690,
+    "mean_r": 0.0897,
+    "median_r": -1.0198,
+    "win_rate": 0.244,
+    "interval_r": [
+      -0.0198,
+      0.2019
+    ],
+    "periods_r": {
+      "first": 0.1549,
+      "second": 0.0436,
+      "third": 0.0594
+    },
+    "mean_r_extra_cent": 0.0326,
+    "decision": "no evidence either way"
+  },
+  "descriptive": {
+    "sessions": 2712,
+    "early_closes_left_out": 21,
+    "missing_bars": 2,
+    "doji": 19,
+    "no_room": 0,
+    "no_fill_quote": 1,
+    "exits": {
+      "target": 65,
+      "stop": 2004,
+      "stop at level": 0,
+      "close": 621,
+      "close from bar": 0
+    },
+    "long_side": {
+      "trades": 1363,
+      "mean_r": 0.0901,
+      "median_r": -1.0204,
+      "win_rate": 0.257
+    },
+    "short_side": {
+      "trades": 1327,
+      "mean_r": 0.0893,
+      "median_r": -1.0192,
+      "win_rate": 0.231
+    },
+    "by_year": {
+      "2016": {
+        "trades": 245,
+        "mean_r": 0.3503,
+        "median_r": -1.0333,
+        "win_rate": 0.261
+      },
+      "2017": {
+        "trades": 243,
+        "mean_r": -0.0823,
+        "median_r": -1.0318,
+        "win_rate": 0.235
+      },
+      "2018": {
+        "trades": 246,
+        "mean_r": 0.2559,
+        "median_r": -1.0189,
+        "win_rate": 0.244
+      },
+      "2019": {
+        "trades": 248,
+        "mean_r": 0.0941,
+        "median_r": -1.0256,
+        "win_rate": 0.238
+      },
+      "2020": {
+        "trades": 248,
+        "mean_r": 0.0198,
+        "median_r": -1.0325,
+        "win_rate": 0.218
+      },
+      "2021": {
+        "trades": 251,
+        "mean_r": 0.097,
+        "median_r": -1.037,
+        "win_rate": 0.259
+      },
+      "2022": {
+        "trades": 250,
+        "mean_r": 0.0881,
+        "median_r": -1.0114,
+        "win_rate": 0.248
+      },
+      "2023": {
+        "trades": 247,
+        "mean_r": -0.0355,
+        "median_r": -1.0198,
+        "win_rate": 0.215
+      },
+      "2024": {
+        "trades": 249,
+        "mean_r": 0.0075,
+        "median_r": -1.0234,
+        "win_rate": 0.221
+      },
+      "2025": {
+        "trades": 245,
+        "mean_r": 0.1649,
+        "median_r": -1.0001,
+        "win_rate": 0.261
+      },
+      "2026": {
+        "trades": 218,
+        "mean_r": 0.0198,
+        "median_r": -0.9974,
+        "win_rate": 0.294
+      }
+    },
+    "without_best_1pct_months": {
+      "trades": 2667,
+      "mean_r": 0.0768,
+      "median_r": -1.0199,
+      "win_rate": 0.243
+    },
+    "paper_version_on_bars": {
+      "trades": 2691,
+      "mean_r": 0.1541,
+      "median_r": -1.0,
+      "win_rate": 0.244
+    },
+    "tape_without_target": {
+      "trades": 2690,
+      "mean_r": 0.1014,
+      "median_r": -1.0202,
+      "win_rate": 0.242
+    },
+    "entry_spread_r": {
+      "mean": 0.0362,
+      "median": 0.025
+    },
+    "by_risk_fifth": [
+      {
+        "risk_cents": [
+          3.0,
+          24.0
+        ],
+        "trades": 538,
+        "mean_r": 0.1326,
+        "median_r": -1.0526,
+        "win_rate": 0.203
+      },
+      {
+        "risk_cents": [
+          24.0,
+          48.0
+        ],
+        "trades": 538,
+        "mean_r": 0.119,
+        "median_r": -1.0263,
+        "win_rate": 0.225
+      },
+      {
+        "risk_cents": [
+          48.0,
+          81.0
+        ],
+        "trades": 538,
+        "mean_r": 0.0839,
+        "median_r": -1.0189,
+        "win_rate": 0.229
+      },
+      {
+        "risk_cents": [
+          81.0,
+          127.5
+        ],
+        "trades": 538,
+        "mean_r": 0.0961,
+        "median_r": -1.0136,
+        "win_rate": 0.257
+      },
+      {
+        "risk_cents": [
+          127.5,
+          604.3
+        ],
+        "trades": 538,
+        "mean_r": 0.0166,
+        "median_r": -1.0048,
+        "win_rate": 0.309
+      }
+    ]
+  }
+}
