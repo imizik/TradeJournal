@@ -48,7 +48,7 @@ def trade(db, ticker="NBIS", pnl=-10.0, opened=datetime(2026, 11, 13, 9, 33), cl
 
 
 def test_the_plan_names_the_day_ticker_and_contract_and_nothing_about_how_it_went(db, window):  # noqa: F811
-    call = trade(db, option=True, entry=2.5, exit_=1.5, pnl=-200.0, qty=2)
+    call = trade(db, option=True, entry=250.0, exit_=150.0, pnl=-200.0, qty=2)  # the journal's option prices: a contract
     plan = replay_redo.plan(db, str(call.id), NOW)
     assert (plan["day"], plan["symbol"], plan["instrument"]) == ("2026-11-13", "NBIS", "option")
     assert plan["contract"] == {"option_type": "call", "expiry": "2026-11-20", "strike": 100.0, "label": "NBIS $100 Call 11/20/26"}
@@ -134,7 +134,8 @@ def test_the_note_is_built_from_the_facts(db):  # noqa: F811
     assert replay_redo.note(real, side()) == "Same entry, exit and size within 5 minutes; only the prices differed."
     assert replay_redo.note(real, side(entry={"at": 1000.0 + 25 * 60}, exit={"at": 9000.0 - 65 * 60})) == "Entered 25 min later, exited 1 h 5 min earlier."
     assert replay_redo.note(real, side(instrument="stock", quantity=50.0)) == "Traded shares instead of the option."
-    assert replay_redo.note(real, side(quantity=5.0, trades=2), 1) == "2 trades instead of one, bigger size (5 vs 2 contracts). 1 still open."
+    assert replay_redo.note(real, side(quantity=5.0, trades=2), 1) == "Bigger size (5 vs 2 contracts). 1 still open."
+    assert replay_redo.note(real, side(instrument="mixed", quantity=None, trades=2)) == "Traded shares and options."
     assert replay_redo.note({**real, "overnight": True}, side()) == "Sold the same day (the real one was held overnight)."
 
 
@@ -176,3 +177,27 @@ def test_the_routes_are_owner_only_and_work_end_to_end(db, monkeypatch):  # noqa
         out = client.get("/copilot/paper/replay/redo/compare", params={"run_id": started["run"]["id"]}).json()
         assert out["difference"] == 75.0 and out["redo"] is None
         assert client.get("/copilot/paper/replay/redo", params={"trade_id": "nope"}).status_code == 400
+
+
+def test_an_option_compares_a_share_to_a_share_and_size_is_the_most_held_at_once(db):  # noqa: F811
+    """The journal keeps an option's prices a contract; the paper book a share. Size on both sides is the most held at
+    once (the journal's ``contracts``), so buy 2, sell 1, buy 1, sell 2 is 2, not 3."""
+    real = trade(db, option=True, entry=330.0, exit_=210.0, pnl=-240.0, qty=2,
+                 opened=datetime(2026, 11, 13, 9, 50), closed=datetime(2026, 11, 13, 10, 20))
+    side = replay_redo._real(real)
+    assert side["entry"]["price"] == 3.3 and side["exit"]["price"] == 2.1 and side["quantity"] == 2.0
+    pos = lambda opened, qty, exits, per=-3.3, instrument="option": {  # noqa: E731
+        "opened_at": opened, "quantity": qty, "per_share": per, "instrument": instrument, "label": "x", "realized": 0.0,
+        "exits": [{"at": at, "quantity": q, "per_share": 2.1} for at, q in exits]}
+    a, b = pos(100.0, 2, [(200.0, 1), (400.0, 1)]), pos(300.0, 1, [(400.0, 1)])
+    redo = replay_redo._redo([a, b])
+    assert redo["quantity"] == 2.0 and redo["entry"]["price"] == 3.3 and redo["exit"]["price"] == 2.1
+    mixed = replay_redo._redo([a, pos(150.0, 100, [(250.0, 100)], per=-150.0, instrument="stock")])
+    assert mixed["instrument"] == "mixed" and mixed["quantity"] is None and mixed["entry"]["price"] is None
+
+
+def test_an_entry_outside_the_session_says_why_the_redo_starts_at_the_open(db):  # noqa: F811
+    early = trade(db, opened=datetime(2026, 11, 13, 9, 20), closed=datetime(2026, 11, 13, 9, 45))
+    assert replay_redo.plan(db, str(early.id), NOW)["before_reason"] == "Your first entry was before the open, so the redo starts at the open."
+    late = trade(db, opened=datetime(2026, 11, 13, 18, 0), closed=datetime(2026, 11, 13, 18, 30))
+    assert replay_redo.plan(db, str(late.id), NOW)["before_reason"].startswith("Your first entry was too late in the session")

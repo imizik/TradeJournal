@@ -556,6 +556,7 @@ function RunBook({ view, at, onView, pause, log }: { view: ReplayView; at: numbe
 const heldFor = (m: number) => m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}` : `${m} min`;
 const unitOf = (s: RedoSide) => s.instrument === "option" ? (s.quantity === 1 ? "contract" : "contracts")
   : s.instrument === "stock" ? (s.quantity === 1 ? "share" : "shares") : "";
+const sizeOf = (s: RedoSide) => s.quantity == null ? "shares and options" : `${s.quantity.toLocaleString("en-US")} ${unitOf(s)}`;
 
 /** The redo beside the real trade: entry, exit, size, time held and P&L for each, the difference (redo less real) and
  *  one plain line of what changed, built by the server from those facts. */
@@ -567,7 +568,7 @@ export function RedoCompareCard({ data }: { data: RedoCompare }) {
   const rows: [string, string, string][] = [
     ["Entry", `${price(real.entry.price)} · ${replayTime(real.entry.at)}`, redo ? `${price(redo.entry.price)} · ${replayTime(redo.entry.at)}` : "—"],
     ["Exit", realExit, redo ? `${price(redo.exit.price)} · ${replayTime(redo.exit.at)}` : "—"],
-    ["Size", `${real.quantity.toLocaleString("en-US")} ${unitOf(real)}`, redo ? `${redo.quantity.toLocaleString("en-US")} ${unitOf(redo)}${redo.trades > 1 ? ` · ${redo.trades} trades` : ""}` : "skipped"],
+    ["Most held", sizeOf(real), redo ? `${sizeOf(redo)}${redo.trades > 1 ? ` · ${redo.trades} trades` : ""}` : "skipped"],
     ["Held", heldFor(real.held_minutes), redo ? heldFor(redo.held_minutes) : "—"],
   ];
   const diff = data.difference;
@@ -596,6 +597,7 @@ export function RedoCompareCard({ data }: { data: RedoCompare }) {
           : <>The redo did <span className={cn("font-medium", toneOf(diff))}><span className="tabular-nums">{usd(diff)}</span> {diff > 0 ? "better" : "worse"}</span> than the real trade.</>}
       </p>
       <p data-testid="redo-note" className="text-foreground/90">{data.note}</p>
+      {(real.instrument === "option" || redo?.instrument === "option") && <p className="text-[11px] text-muted-foreground">Option prices are a share (×100 a contract). Most held is the most open at once.</p>}
       {real.overnight && !real.expired && <p className="text-[11px] text-muted-foreground">The real trade was held past the day; the redo ends at the replayed close.</p>}
     </section>
   );

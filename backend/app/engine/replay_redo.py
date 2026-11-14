@@ -81,6 +81,11 @@ def plan(db: Session, trade_id, now: float) -> dict:
     entry = _ny_epoch(trade.opened_at)
     before = entry - BEFORE_MINUTES * 60
     before_at = None if before < hours[0] or before >= hours[1] - 60 else int(before) - int(before) % 60
+    before_reason = None
+    if before_at is None:
+        where = ("before the open" if entry < hours[0] else "within 15 minutes of the open" if before < hours[0]
+                 else "too late in the session to start before it")
+        before_reason = f"Your first entry was {where}, so the redo starts at the open."
     contract, shares_reason = None, None
     if trade.instrument_type == "option":
         off = ro.off_reason(day, now)
@@ -99,8 +104,7 @@ def plan(db: Session, trade_id, now: float) -> dict:
     return {"trade_id": str(trade.id), "day": day.isoformat(), "symbol": symbol, "label": _label(trade),
             "instrument": "option" if trade.instrument_type == "option" else "stock", "contract": contract,
             "shares_reason": shares_reason, "open_at": hours[0], "close_at": hours[1], "before_at": before_at,
-            "before_reason": None if before_at is not None else
-            f"Your first entry was within {BEFORE_MINUTES} minutes of the open, so the redo starts at the open."}
+            "before_reason": before_reason}
 
 
 def start(db: Session, body: dict, now: float) -> dict:
@@ -124,14 +128,17 @@ def start(db: Session, body: dict, now: float) -> dict:
 # --- the comparison --------------------------------------------------------------------------------------------------
 
 def _real(trade: Trade) -> dict:
+    """The journal row as one side. An option's journal prices are dollars a contract (docs/agent/domain-rules.md):
+    shown a share, as the paper book's are. ``quantity`` is the most held at once, the journal's ``contracts``."""
     opened, closed = _ny_epoch(trade.opened_at), _ny_epoch(trade.closed_at)
+    per = 100.0 if trade.instrument_type == "option" else 1.0
     exit_price = trade.avg_exit_premium
     if exit_price is None and trade.status == "expired":
         exit_price = 0.0
     held = trade.hold_duration_mins if trade.hold_duration_mins is not None else round((closed - opened) / 60)
     return {"label": _label(trade), "instrument": "option" if trade.instrument_type == "option" else "stock",
-            "quantity": float(trade.contracts), "entry": {"price": float(trade.avg_entry_premium), "at": opened},
-            "exit": {"price": None if exit_price is None else float(exit_price), "at": closed},
+            "quantity": float(trade.contracts), "entry": {"price": round(float(trade.avg_entry_premium) / per, 4), "at": opened},
+            "exit": {"price": None if exit_price is None else round(float(exit_price) / per, 4), "at": closed},
             "pnl": None if trade.realized_pnl is None else round(float(trade.realized_pnl), 2), "held_minutes": int(held),
             "expired": trade.status == "expired",
             "overnight": _ny_day(trade.closed_at) != _ny_day(trade.opened_at), "closed_day": _ny_day(trade.closed_at).isoformat()}
@@ -142,19 +149,31 @@ def _weighted(pairs: list[tuple[float, float]]) -> float | None:
     return None if total <= 0 else round(sum(p * q for p, q in pairs) / total, 4)
 
 
+def _most_held(closed: list[dict]) -> float:
+    """The most held at once across the redo's positions, as the journal sizes a trade (its ``contracts``)."""
+    steps = sorted([(p["opened_at"], 1, p["quantity"]) for p in closed] + [(x["at"], 0, -x["quantity"]) for p in closed for x in p["exits"]])
+    held = most = 0.0
+    for _, _, qty in steps:  # at one moment an exit counts before an entry
+        held += qty
+        most = max(most, held)
+    return float(most)
+
+
 def _redo(closed: list[dict]) -> dict | None:
-    """The redo run's closed trades as one side: size-weighted entry and exit prices, first entry, last exit, total P&L."""
+    """The redo run's closed trades as one side: size-weighted entry and exit prices a share, first entry, last exit,
+    the most held at once and total P&L. Shares and options together have no one price or size: those read None."""
     if not closed:
         return None
     exits = [x for p in closed for x in p["exits"]]
     first, last = min(p["opened_at"] for p in closed), max(x["at"] for x in exits)
     kinds = {p["instrument"] for p in closed}
     labels = {p["label"] for p in closed}
+    mixed = len(kinds) > 1
     return {"label": next(iter(labels)) if len(labels) == 1 else f"{len(closed)} trades",
-            "instrument": next(iter(kinds)) if len(kinds) == 1 else "mixed", "trades": len(closed),
-            "quantity": float(sum(p["quantity"] for p in closed)),
-            "entry": {"price": _weighted([(abs(p["per_share"]), p["quantity"]) for p in closed]), "at": first},
-            "exit": {"price": _weighted([(abs(x["per_share"]), x["quantity"]) for x in exits]), "at": last},
+            "instrument": "mixed" if mixed else next(iter(kinds)), "trades": len(closed),
+            "quantity": None if mixed else _most_held(closed),
+            "entry": {"price": None if mixed else _weighted([(abs(p["per_share"]), p["quantity"]) for p in closed]), "at": first},
+            "exit": {"price": None if mixed else _weighted([(abs(x["per_share"]), x["quantity"]) for x in exits]), "at": last},
             "pnl": round(sum(p["realized"] for p in closed), 2), "held_minutes": int(round((last - first) / 60))}
 
 
@@ -169,16 +188,13 @@ def _unit(instrument: str, qty: float) -> str:
 
 
 def note(real: dict, redo: dict | None, left_open: int = 0) -> str:
-    """One plain line of what changed, from the facts only: skipped it; shares instead of the option; several trades;
-    entered or exited earlier or later (5 minutes or more apart); smaller or bigger size. At most three parts."""
+    """One plain line of what changed, from the facts only: skipped it; shares instead of the option; entered or exited earlier or later (5 minutes or more apart); smaller or bigger size. At most three parts."""
     if redo is None:
         return "You skipped it: no trade in the redo." + (f" {left_open} still open." if left_open else "")
     parts: list[str] = []
     if redo["instrument"] != real["instrument"]:
         parts.append("traded shares instead of the option" if redo["instrument"] == "stock"
                      else "traded an option instead of shares" if redo["instrument"] == "option" else "traded shares and options")
-    if redo["trades"] > 1:
-        parts.append(f"{redo['trades']} trades instead of one")
     entered = (redo["entry"]["at"] - real["entry"]["at"]) / 60
     if abs(entered) >= SAME_MINUTES:
         parts.append(f"entered {_span(entered)} {'later' if entered > 0 else 'earlier'}")
@@ -188,7 +204,7 @@ def note(real: dict, redo: dict | None, left_open: int = 0) -> str:
         exited = (redo["exit"]["at"] - real["exit"]["at"]) / 60
         if abs(exited) >= SAME_MINUTES:
             parts.append(f"exited {_span(exited)} {'later' if exited > 0 else 'earlier'}")
-    if redo["instrument"] == real["instrument"] and abs(redo["quantity"] - real["quantity"]) > 1e-9:
+    if redo["instrument"] == real["instrument"] and redo["quantity"] is not None and abs(redo["quantity"] - real["quantity"]) > 1e-9:
         unit = _unit(real["instrument"], real["quantity"])
         parts.append(f"{'smaller' if redo['quantity'] < real['quantity'] else 'bigger'} size "
                      f"({redo['quantity']:g} vs {real['quantity']:g} {unit})")

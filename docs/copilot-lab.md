@@ -2191,11 +2191,12 @@ owner-only).
   and `redo_of` in the run view and the replay scorecard, for a later "redos vs originals" line. The `trade` row, fills
   and FIFO are only read.
 - **The comparison** (`GET /copilot/paper/replay/redo/compare?run_id=`), shown when he presses End redo and compare
-  (what is open sells at the clock, as leaving does) or the replayed day closes: entry, exit, size, time held and P&L for
-  the real trade (its journal row) and the redo (its closed trades, size-weighted when several), the difference (redo
-  less real; skipping counts as $0), and one line of what changed built from those facts: skipped it, shares instead of
-  the option, entered or exited earlier or later (5 minutes or more apart), smaller or bigger size, sold the same day
-  when the real one was held overnight. No AI.
+  (what is open sells at the clock, as leaving does) or the replayed day closes: entry, exit, most held at once, time
+  held and P&L for the real trade (its journal row; an option's per-contract prices shown a share, as the paper book's
+  are) and the redo (its closed trades, prices size-weighted; shares and options together have no one price or size),
+  the difference (redo less real; skipping counts as $0), and one line of what changed built from those facts: skipped
+  it, shares instead of the option, entered or exited earlier or later (5 minutes or more apart), smaller or bigger
+  size, sold the same day when the real one was held overnight. No AI.
 
 Proof: `backend/tests/test_replay_redo.py`, `frontend/e2e/copilot-desk-redo.spec.ts`.
 

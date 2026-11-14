@@ -137,7 +137,9 @@ export type RedoPlan = {
   open_at: number; close_at: number; before_at: number | null; before_reason: string | null;
 };
 export type RedoSide = {
-  label: string; instrument: "stock" | "option" | "mixed"; quantity: number; pnl: number | null; held_minutes: number;
+  /** Prices are a share (an option's too); ``quantity`` is the most held at once. A redo mixing shares and options has
+   *  no one price or size: null. */
+  label: string; instrument: "stock" | "option" | "mixed"; quantity: number | null; pnl: number | null; held_minutes: number;
   entry: { price: number | null; at: number }; exit: { price: number | null; at: number };
 };
 /** The real trade beside the redo: ``redo`` null when he skipped it; ``difference`` is redo less real. */
