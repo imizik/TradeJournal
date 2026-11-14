@@ -80,7 +80,7 @@ async function open(page: Page, body: unknown) {
 }
 
 test("an alert that fired today: a row under Mine, counted as new, and Show on chart marks it there", async ({ page }) => {
-  await open(page, feed([ALERT, MARKET], ALERT.at as number));
+  await open(page, feed([ALERT, MARKET], epoch("2026-11-13T15:46:00Z")));
   const centre = page.getByRole("region", { name: "Chart and feed" });
   await expect(page.getByTestId("feed-new")).toHaveText("1 new"); // his alert; the market's headline never counts
   await centre.getByRole("tab", { name: "Feed" }).click();
@@ -99,6 +99,7 @@ test("an alert that fired today: a row under Mine, counted as new, and Show on c
   await expect(centre.getByRole("tab", { name: "Chart" })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator("[data-marks]")).toHaveAttribute("data-marks", "1");
   await expect(page.getByTestId("desk-chart-marks")).toContainText("TradingView · ORB break long · 5m at 94.12 · 10:46 AM ET");
+  await expect(page.getByLabel("Legend")).toContainText("TradingView");
 });
 
 test("a day with no alert yet: one grey line with the last one's time, and nothing when there has never been one", async ({ page }) => {

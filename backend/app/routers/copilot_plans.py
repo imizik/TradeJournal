@@ -198,7 +198,7 @@ def desk_chart(investigation_id: str, timeframe: Literal["2m", "15m", "1D"] = "2
 def _tradingview_marks(db: Session, symbol: str, now: float, mode: str) -> dict:
     """Today's TradingView alerts on ``symbol`` as chart marks (stored rows only); none on a ticker he does not follow."""
     from app.engine import desk_feed
-    if symbol in day_journal.quiet(db):
+    if symbol in day_journal.not_following(db):  # strict: an unreadable setting marks nothing
         return {"state": "ok", "rows": []}
     rows = [{"kind": "tradingview", "at": a["at"], "symbol": symbol, "text": desk_feed.tradingview_words(a)}
             for a in desk_feed.tradingview_today(db, now, mode, symbol=symbol)]
