@@ -1,0 +1,51 @@
+{
+  "protocol_id": "qqq-overnight-20261114-v1",
+  "registered": "2026-11-14",
+  "registered_before": "any overnight or intraday QQQ return was computed here. The QQQ one-minute bars for 2016-2026 were downloaded for the QQQ opening range breakout (#813, result #814), which used only 09:30 to 15:59 inside each session; nothing joining one session's close to the next open was computed. Already known from published work, not from this data: Cooper, Cliff and Gulen (2008, 'Return differences between trading and non-trading hours') and Kelly and Clark (2011) report that US index returns since the 1990s came almost entirely overnight; later work (Lou, Polk and Skouras 2019) finds the same in individual stocks. This is the first overnight test in this repository's records.",
+  "question": "Does holding QQQ only overnight (bought near the close, sold at the next open) make money after real quote fills from 2016 to 2026, and does it earn more than holding QQQ only during the session?",
+  "why_it_matters": "The owner wants a mechanical daily QQQ trade. QQQ trades a cent wide, so two fills a day cost little. A pass would mean the market's gains came mostly while it was closed, so a paper overnight book on the desk could keep most of a buy-and-hold return with no day-session exposure. A pass would not show skill: it is a way of holding the index, and it carries the index's crash risk at every open.",
+  "sessions": "every regular QQQ session from 2016-01-04 to 2026-11-12 as the entry day, each held to the next session's open (the last exit is 2026-11-13). Entry days that are early closes (13:00), from the 21-date list in the QQQ opening range breakout script, are left out because 15:59 is after hours there. Weekends and holidays are held through, as a real overnight book would.",
+  "data": "Alpaca SIP one-minute bars for QQQ, unadjusted (QQQ did not split in these years), minutes 09:30 to 15:59 New York time; SIP quotes for QQQ read only at the two moments the rules below ask about. Market data only.",
+  "rules": {
+    "entry": "a market buy sent at 15:59:00 on the entry day reaches the market one second later and fills at the ask in effect then. With no valid quote, the hold is counted but left out of the mean",
+    "exit": "a market sell sent at 09:30:00 on the next session reaches the market one second later and fills at the bid in effect then; with no valid quote, at the open of the next session's first minute bar",
+    "valid_quote": "the top-5 study's rule: bid and ask both above zero, ask at or above bid, at most 60 seconds old",
+    "measure": "net return a hold in basis points = (exit fill minus entry fill) over the entry fill, x 10,000. The spread is inside the fills; no commission (the owner's broker charges none). Dividends are left out",
+    "stress": "an extra cent a share on each side",
+    "missing_bars": "a hold whose entry day lacks the 09:30 or 15:59 bar, or whose exit day lacks the 09:30 bar, is skipped and counted"
+  },
+  "test": {
+    "statistic": "mean net return a hold in basis points, over all holds with an entry quote",
+    "comparison": "the mean intraday return on the same entry days on bars with no costs (the 09:30 bar's open to the 15:59 bar's close)",
+    "uncertainty": "2,000 bootstrap resamples of calendar months (seed 20261114), each month's holds kept together; two-sided percentile interval at 95%"
+  },
+  "periods": {
+    "first": "2016-01-04 to 2019-12-31",
+    "second": "2020-01-01 to 2022-12-31",
+    "third": "2023-01-01 to 2026-11-12"
+  },
+  "decisions": {
+    "worth a paper test": "the interval's lower end is above 0, the mean is above 0 in each of the three periods, the mean with the extra cent is above 0, and the net mean is above the comparison's mean",
+    "loses money": "the interval's upper end is below 0",
+    "no evidence either way": "anything else",
+    "what_each_allows": "Worth a paper test: a QQQ overnight paper book on the desk with these exact rules before any money. Otherwise the QQQ overnight hold is closed with no variants (other entry or exit times, symbols, days of the week or filters) on any history"
+  },
+  "descriptive_only": [
+    "entry sessions, holds, early closes left out, holds with missing bars or no entry quote; exits by type",
+    "by year, overnight and intraday; by entry weekday; without the best 1% of months",
+    "the same holds on bars with no costs (15:59 bar close to the next 09:30 bar open), over the holds with an entry quote",
+    "entry spread in basis points",
+    "growth of $1: overnight net, with the extra cent, on bars, intraday on bars, and buy-and-hold on bars from the first 09:30 open to the last 15:59 close. Buy-and-hold also includes the early-close sessions, the nights after them and the last session (2026-11-13), so it is not exactly the overnight and intraday lines multiplied together"
+  ],
+  "limits": [
+    "fills assume the displayed best quote one second after the order; real routing can differ, and the quote just after 09:30 can be wider than later in the day",
+    "the 15:59 order is not the closing auction and the 09:30 order is not the opening auction",
+    "the overnight hold also carries the session's last 59 seconds and the closing auction, which the intraday comparison (ending at the 15:59 bar's close) does not",
+    "the extra cent is about 2 basis points a side at QQQ's 2016 price and about 0.35 at 2026's, so the stress is harsher in the first period",
+    "dividends are left out of every line; a holder at the close before an ex-dividend date is owed the dividend, so the overnight hold is understated by about four quarterly dividends a year",
+    "the comparison has no costs while the overnight hold pays the spread, which favours the comparison",
+    "buying the index overnight is market exposure: a pass says when the gains came, not that there is an edge apart from owning the index"
+  ],
+  "results": "Market data only: the aggregate results are committed beside this protocol after the single run; the downloaded data stays outside the repository.",
+  "one_run": "one historical run under this id. A changed constant is a new protocol id, recorded beside this one"
+}
