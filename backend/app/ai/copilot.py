@@ -425,6 +425,15 @@ class FakeAdapter:
                 yield "text", piece
             yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
             return
+        if prompt.startswith("Paper review:"):  # the paper_review job (engine/paper_review.py): no tools, the facts in the message
+            from app.engine import paper_review
+            text = paper_review.fake_answer(prompt)
+            for piece in re.findall(r"\S+\s*", text):
+                if self.delay_s:
+                    await asyncio.sleep(self.delay_s)
+                yield "text", piece
+            yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+            return
         if prompt.startswith("Day read:"):  # the day_read job (engine/day_read.py): no tools, the facts in the message
             from app.engine import day_read
             text = day_read.fake_answer(prompt)
@@ -568,6 +577,11 @@ class FakeAdapter:
                 yield "text", piece
             yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
             return
+        if isinstance(last["content"], str) and allow_tools and "paper" in lower:
+            yield "progress", "Reading your paper book."
+            yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_paper_book", "input": {}}],
+                                 "tool_use", _zero_usage(), self.model)
+            return
         if isinstance(last["content"], str) and allow_tools and any(w in lower for w in ("helping", "proof", "are the alerts", "are my plans", "are the plans")):
             scope = "symbol" if symbol and f" {symbol.lower()}" in f" {lower}" and "week" not in lower else "week"
             args = {"scope": scope, **({"symbol": symbol} if scope == "symbol" else {})}
@@ -670,6 +684,28 @@ class FakeAdapter:
         if vix.get("state") == "ok":
             parts.append(f"VIX {vix['last']} ({vix['change_pct']:+.1f}%)")
         return f" Backdrop (Radar pass {radar.get('pass_at')}): {', '.join(parts)}."
+
+    @staticmethod
+    def _paper(data: dict) -> str:
+        """A scripted read of the paper book: the account, each open position with its price time, the closed trades and
+        how each ended, and the score beside the real trades, copied from the tool, nothing judged."""
+        if data.get("state") != "ok":
+            return scripted("Unclear", "No paper book to read.", f"{data.get('reason') or 'Nothing came back'}.")
+        acct, score = data.get("account") or {}, data.get("score") or {}
+        paper, real = score.get("paper") or {}, score.get("real") or {}
+        value = acct.get("value")
+        lines = [f"- Account: value {value if isinstance(value, str) else f'${value:,.2f}'}, cash ${acct.get('cash', 0):,.2f}"
+                 + (f" (prices as of {acct['prices_at']})" if acct.get("prices_at") else "") + "."]
+        for p in data.get("open") or []:
+            lines.append(f"- Open {p['label']} x{p['quantity']}: " + (f"{p['pnl']:+,.2f} $ at the {p['price_at']} price" if "pnl" in p
+                                                                       else p.get("price", "no price")) + ".")
+        for c in data.get("closed") or []:
+            lines.append(f"- Closed {c['label']}: {c['realized']:+,.2f} $; {c.get('ended') or 'no verdict'}.")
+        lines.append(f"- Score since {score.get('since')}: paper {paper.get('pnl', 0):+,.2f} $ over {paper.get('trades')} closed "
+                     f"(win rate {paper.get('win_rate')}%), real {real.get('pnl', 0):+,.2f} $ over {real.get('trades')}.")
+        return scripted("Unclear", "Your paper book as it stands; the scripted model does not judge it.",
+                        "**Paper book**\n" + "\n".join(lines), "more paper trades close.",
+                        against="a handful of closed paper trades is not a sample.")
 
     @staticmethod
     def _proof(data: dict) -> str:
@@ -1047,6 +1083,8 @@ class FakeAdapter:
                             "nothing is remembered until you do.")
         if "get_radar_today" in results:
             return FakeAdapter._radar(results["get_radar_today"])
+        if "get_paper_book" in results:
+            return FakeAdapter._paper(results["get_paper_book"])
         if "get_proof" in results:
             return FakeAdapter._proof(results["get_proof"])
         if "get_symbol_profile" in results:
@@ -1269,6 +1307,12 @@ def _summary(name: str, data: dict) -> str:
         vix = data.get("vol_indexes") or {}
         return (f"VIX curve {vix.get('curve', '?')} · {data.get('symbol')} ATM IV {near.get('atm_iv_pct')}% · skew {near.get('skew_25d')} · "
                 f"P/C vol {near.get('put_call_volume')}")[:160]
+    if name == "get_paper_book":
+        if data.get("state") != "ok":
+            return (data.get("reason") or "unavailable")[:160]
+        paper = (data.get("score") or {}).get("paper") or {}
+        return (f"{len(data.get('open') or [])} open · {paper.get('trades', 0)} closed on paper · "
+                f"paper P&L {paper.get('pnl', 0):+,.2f}")[:160]
     if name == "get_proof":
         if data.get("state") != "ok":
             return (data.get("reason") or "unavailable")[:160]

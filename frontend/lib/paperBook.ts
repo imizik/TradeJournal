@@ -31,7 +31,11 @@ export type PaperBook = {
   score?: { paper: PaperStats; real: PaperStats };
   earlier: { number: number; started_at: number; ended_at: number; starting_cash: number; realized: number; trades: number; left_open: number }[];
   market_open: boolean;
+  /** The newest Friday paper review (backend engine/paper_review.py), shown until the next one. */
+  review?: PaperReview | null;
 };
+/** The copilot's weekly paper review: ``day`` the Friday it was written, ``monday`` its week. */
+export type PaperReview = { day: string; monday: string; at: number; text: string };
 
 /** What the Paper button opens: shares, one call or put, or a vertical (the leg bought and the leg sold). */
 export type PaperOrder =

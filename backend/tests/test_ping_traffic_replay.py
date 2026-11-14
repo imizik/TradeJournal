@@ -59,6 +59,9 @@ def traffic():
     # One duplicate give-back on the same anchor inside the quiet window.
     add("15:31", "giveback", "duplicate-giveback", "symbol:SYNTH-late-giveback")
     add("16:30", "evening_review", "evening-review")
+    # The Friday paper review has its own budget of one: a second one that day is held, nothing else is spent.
+    for i, hhmm in enumerate(("16:45", "16:50")):
+        add(hhmm, "paper_review", f"paper-review-{i}")
     return sorted(events, key=lambda event: event["now"])
 
 
@@ -133,6 +136,7 @@ def test_gap_day_budgets_quiet_window_and_retry_ledger(replay):
         assert (first.id, first.action, first.reason, first.append) == (retried.id, retried.action, retried.reason, retried.append)
     spent = Counter(policy.canonical(row.kind) for row in rows if row.decision == "sent")
     assert spent["companion_update"] == policy.budget("companion_update")
+    assert spent["paper_review"] == 1 and spent["radar_event"] == policy.budget("radar_event")
     for kind in policy.BUDGETS:
         assert spent[kind] <= policy.budget(kind)
     preopen = [row for row in rows if row.decided_at < utc(at("09:30")) and row.decision == "sent"]

@@ -251,7 +251,7 @@ function Score({ paper, real, since }: { paper: PaperStats; real: PaperStats; si
 }
 
 /** The Paper section under the book: one panel, folded to its account line and score line until Progress is opened. */
-export default function DeskPaper({ book, failed, symbol }: { book: PaperBook | null; failed: boolean; symbol: string | null }) {
+export default function DeskPaper({ book, failed, symbol, top = null }: { book: PaperBook | null; failed: boolean; symbol: string | null; top?: React.ReactNode }) {
   const [progress, setProgress] = useState(false);
   const [closing, setClosing] = useState<{ id: string; trim: boolean } | null>(null);
   const [cash, setCash] = useState("10000");
@@ -299,6 +299,7 @@ export default function DeskPaper({ book, failed, symbol }: { book: PaperBook | 
   const closed = book.closed ?? [];
   return frame(
     <div className="pb-2">
+      {top}
       <p data-testid="paper-account" className="flex flex-wrap gap-x-3 gap-y-0.5 px-3 pb-1.5 text-xs tabular-nums">
         <span data-testid="paper-value"><span className="text-muted-foreground">Value </span>{value ? <span className={cn(value.stale && "text-muted-foreground")}>{usd(value.value)}</span>
           : <span className="text-muted-foreground">needs a live price for {acct.unpriced} open</span>}</span>

@@ -408,8 +408,9 @@ def small(cfg):
     return dataclasses.replace(cfg, max_rounds=1, max_tool_calls=0, max_tokens=MAX_TOKENS, turn_budget_usd=READ_BUDGET_USD)
 
 
-async def _run(day: str, facts_text: str, cfg, at: float) -> dict:
-    """One small recorded turn: ``{"state": "ok", "text", "cost_usd"}`` or ``{"state": "error", "message"}``."""
+async def _run(day: str, facts_text: str, cfg, at: float, *, question: str | None = None, kind: str = KIND) -> dict:
+    """One small recorded turn: ``{"state": "ok", "text", "cost_usd"}`` or ``{"state": "error", "message"}``. ``question``
+    and ``kind``: another no-tool read on the same pattern (the Friday paper review, ``engine/paper_review.py``)."""
     from app.ai import copilot, copilot_spend
     turn_cfg = small(cfg)
     try:
@@ -421,9 +422,9 @@ async def _run(day: str, facts_text: str, cfg, at: float) -> dict:
     errors: list[str] = []
     cost = 0.0
     try:
-        question = QUESTION.format(day=day, pack=facts_text)
-        turn = copilot_spend.recorded_turn([{"role": "user", "content": question}], None, turn_cfg, adapter, evidence,
-                                           datetime.fromtimestamp(at, ET), kind=KIND, source="desk")
+        asked = question or QUESTION.format(day=day, pack=facts_text)
+        turn = copilot_spend.recorded_turn([{"role": "user", "content": asked}], None, turn_cfg, adapter, evidence,
+                                           datetime.fromtimestamp(at, ET), kind=kind, source="desk")
         async with contextlib.aclosing(turn) as events:
             async for event in events:
                 if event.get("type") == "text":

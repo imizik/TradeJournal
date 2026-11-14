@@ -547,15 +547,16 @@ def _position_view(p: dict, marks: dict | None) -> dict:
     return out
 
 
-def view(db: Session, now: float) -> dict:
-    """The paper account, its open positions (with the desk's newest prices), closed trades and the scorecard."""
+def view(db: Session, now: float, settle_expired: bool = True) -> dict:
+    """The paper account, its open positions (with the desk's newest prices), closed trades and the scorecard.
+    ``settle_expired=False`` (the copilot's read) writes nothing: an expired option still open is shown as it stands."""
     run = current_run(db)
     runs = list(db.exec(select(PaperRun).order_by(col(PaperRun.started_at), col(PaperRun.id))).all())
     if run is None:
         return {"run": None, "default_cash": DEFAULT_CASH, "earlier": [], "market_open": _market_open(now)}
     events = _events(db, run)
     positions = fold(events)
-    if settle(db, run, positions, now):
+    if settle_expired and settle(db, run, positions, now):
         events = _events(db, run)
         positions = fold(events)
     book = account(run, positions)

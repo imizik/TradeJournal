@@ -84,7 +84,13 @@ DAY_READ_SHAPE = (
     "it changes the picture), under 110 words in all. Every dollar figure exactly as the facts write it. No Verdict line, "
     "markdown, bullets or closing note.]"
 )
-SHAPES = (ANSWER_SHAPE, TELEGRAM_SHAPE, PREP_SHAPE, COMPANION_SHAPE, WEEK_SHAPE, CHECK_SHAPE, DESK_READ_SHAPE, DAY_READ_SHAPE)
+PAPER_REVIEW_SHAPE = (
+    "[Answer shape: the paper review: four to six short plain lines, Week, Worked, Stops and targets, Next week (and one "
+    "more only when it changes the picture), under 120 words in all. Every dollar figure exactly as the facts write it; "
+    "paper and real kept apart. No Verdict line, markdown, bullets or closing note.]"
+)
+SHAPES = (ANSWER_SHAPE, TELEGRAM_SHAPE, PREP_SHAPE, COMPANION_SHAPE, WEEK_SHAPE, CHECK_SHAPE, DESK_READ_SHAPE, DAY_READ_SHAPE,
+          PAPER_REVIEW_SHAPE)
 
 
 def without_shape(content: str) -> str:

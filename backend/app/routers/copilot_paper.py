@@ -1,8 +1,9 @@
 """The owner's own paper book on the desk (``engine/paper_book.py``, docs/copilot-lab.md § Paper).
 
 ``GET /copilot/paper``: the paper account, its open positions at the desk's newest prices, closed trades and the
-scorecard beside his real closed trades over the same dates. One of the desk's minute reads; it settles an expired
-option at its close and otherwise only reads.
+scorecard beside his real closed trades over the same dates, and ``review``: the newest Friday paper review
+(``engine/paper_review.py``), shown until the next one. One of the desk's minute reads; it settles an expired option at
+its close and otherwise only reads.
 ``POST /copilot/paper/runs``: start the paper account (``starting_cash``, default $10,000), or with ``reset`` a new run;
 every older run keeps its history.
 ``POST /copilot/paper/orders``: open (``action: open``) or close/trim (``action: close``) a paper position at the live
@@ -21,7 +22,7 @@ from sqlmodel import Session
 
 from app.ai import copilot
 from app.database import get_session
-from app.engine import paper_book
+from app.engine import paper_book, paper_review
 
 router = APIRouter()
 
@@ -62,7 +63,7 @@ class OrderAsk(BaseModel):
 @router.get("/paper")
 def paper(db: Session = Depends(get_session)):
     _settings()
-    return paper_book.view(db, time.time())
+    return {**paper_book.view(db, time.time()), "review": paper_review.latest()}
 
 
 @router.post("/paper/runs")
