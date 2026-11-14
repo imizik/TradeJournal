@@ -8,10 +8,10 @@ import {
 import { Pause, Play, SkipForward } from "lucide-react";
 import { PaperRefused, orderKey, type PaperPosition, type PaperStats } from "@/lib/paperBook";
 import {
-  REPLAY_EVENT, SPEEDS, autoReplay, cancelReplay, msPerBar, orderReplay, previewReplay, replayBadge, replayBars, replayDate,
-  replayHome, replaySymbols, replayTime, shownBars, startReplay, stepReplay,
-  type ReplayAsk, type ReplayBar, type ReplayHappening, type ReplayHome, type ReplayQuote, type ReplayScore, type ReplayTrade,
-  type ReplayView, type Speed,
+  REPLAY_EVENT, SPEEDS, autoReplay, cancelReplay, expiryShort, msPerBar, orderReplay, previewReplay, replayBadge, replayBars, replayDate,
+  replayHome, replayOptions, replaySymbols, replayTime, shownBars, startReplay, stepReplay,
+  type ReplayAsk, type ReplayBar, type ReplayHappening, type ReplayHome, type ReplayOptions, type ReplayQuote, type ReplayScore,
+  type ReplayTrade, type ReplayView, type Speed,
 } from "@/lib/paperReplay";
 import { cn } from "@/lib/utils";
 
@@ -19,8 +19,9 @@ import { cn } from "@/lib/utils";
  * Replay on the desk (docs/copilot-lab.md § Paper replay): pick a past trading day and a ticker, and the day plays
  * forward from 9:30 ET a bar at a time (play, pause, 1×/5×/20×/60×, one bar), with the paper ticket priced from the
  * replayed bars. Only bars that ended by the replay clock are drawn; nothing else of the live desk shows while it runs,
- * and leaving puts the live desk back exactly as it was (it stays mounted underneath). Shares only: options are refused
- * with the reason. Replay trades are their own runs, scored apart from live paper and real trades.
+ * and leaving puts the live desk back exactly as it was (it stays mounted underneath). Shares, or one call or put that
+ * traded that day priced from its own trade bars (on a day older than the contracts' minute history, options are off
+ * with the reason). Replay trades are their own runs, scored apart from live paper and real trades.
  */
 
 const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
@@ -34,18 +35,22 @@ const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${usd(n)}`;
 const toneOf = (n: number | null | undefined) => n == null || n === 0 ? "text-muted-foreground" : n > 0 ? "text-emerald-300" : "text-rose-300";
 const px = (n: number) => n.toFixed(2);
 const words = (e: unknown) => e instanceof Error ? e.message : "Not filled.";
+/** What a row names: the ticker for shares, the contract ("NBIS $100 Call 11/21/26") for an option. */
+const named = (x: { instrument?: string; symbol: string; label: string }) => x.instrument === "option" ? x.label : x.symbol;
 
 /** "10:42 AM ET — Limit filled: bought 10 NBIS at 99.10." */
 function happeningText(h: ReplayHappening): string {
   const when = `${replayTime(h.at)} ET`;
   const qty = h.quantity != null ? `${h.quantity.toLocaleString("en-US")} ` : "";
   const pnl = h.pnl != null ? ` (${signed(h.pnl)})` : "";
+  const name = named(h);
   switch (h.kind) {
-    case "limit": return `${when}: limit filled, ${h.side === "close" ? "sold" : "bought"} ${qty}${h.symbol} at ${px(h.price)}${pnl}.`;
-    case "stop": case "target": return `${when}: auto exit at the ${h.kind}, sold ${qty}${h.symbol} at ${px(h.price)}${pnl}.`;
+    case "limit": return `${when}: limit filled, ${h.side === "close" ? "sold" : "bought"} ${qty}${name} at ${px(h.price)}${pnl}.`;
+    case "stop": case "target": return `${when}: auto exit at the ${h.kind}, sold ${qty}${name} at ${px(h.price)}${pnl}.`;
     case "touch": return `${when}: ${h.symbol} touched your ${h.level} ${px(h.price)}. Close automatically is off, so nothing was sold.`;
-    case "flat": return `${when}: the day closed, sold ${qty}${h.symbol} at ${px(h.price)}${pnl}.`;
-    case "left": return `${when}: you left the replay, sold ${qty}${h.symbol} at ${px(h.price)}${pnl}.`;
+    case "flat": return `${when}: the day closed, sold ${qty}${name} at ${px(h.price)}${pnl}.`;
+    case "left": return `${when}: you left the replay, sold ${qty}${name} at ${px(h.price)}${pnl}.`;
+    case "expired": return `${when}: ${qty}${name} expired, settled at ${px(h.price)} from ${h.symbol}'s ${h.stock != null ? px(h.stock) : ""} close${pnl}.`;
   }
 }
 
@@ -126,7 +131,8 @@ export function ReplayChart({ symbol, bars, positions, closed, orders }: {
       if (pos.stop != null) add(pos.stop, "#fca5a5", "stop");
       if (pos.target != null) add(pos.target, "#86efac", "target");
     }
-    for (const o of orders) if (o.symbol === symbol) add(o.limit, "#fcd34d", `limit ${o.side === "close" ? "sell" : "buy"}`, true);
+    // An option's limit is a premium, not a stock price: only share limits are drawn on the stock's chart.
+    for (const o of orders) if (o.symbol === symbol && o.instrument === "stock") add(o.limit, "#fcd34d", `limit ${o.side === "close" ? "sell" : "buy"}`, true);
   }, [bars, positions, closed, orders, symbol]);
 
   return <div ref={host} data-testid="replay-chart" role="img" aria-label={`${symbol} replayed one-minute candles up to the replay clock`}
@@ -154,7 +160,7 @@ function TradeRows({ trades, days = true }: { trades: ReplayTrade[]; days?: bool
         <li key={t.id} data-testid="replay-trade" className="space-y-0.5 py-1.5 text-xs">
           <div className="flex flex-wrap items-baseline gap-x-2">
             {days && <span className="text-muted-foreground">{replayDate(t.day)}</span>}
-            <span className="font-medium text-foreground">{t.quantity.toLocaleString("en-US")} {t.symbol}</span>
+            <span className="font-medium text-foreground" data-testid="replay-trade-name">{t.quantity.toLocaleString("en-US")} {named(t)}</span>
             <span className="tabular-nums text-muted-foreground">in {px(Math.abs(t.per_share))} · {replayTime(t.opened_at)}</span>
             <span className={cn("ml-auto tabular-nums", toneOf(t.realized))}>{signed(t.realized)}</span>
           </div>
@@ -196,14 +202,123 @@ export function ReplayPractice() {
 
 /** The confirm line: what the replayed bar says and the assumed spread, so the price is never mistaken for a quote. */
 function quoteWords(q: ReplayQuote, buying: boolean) {
+  if (q.instrument === "option") {
+    const range = `${px(q.low ?? q.close)}–${px(q.high ?? q.close)}`;
+    const from = q.half_from === "range" ? `half that minute's ${range} range`
+      : `the ${q.half_from === "min" ? "1¢ minimum" : "0.5% floor"} (that minute's ${range} range was narrower)`;
+    return `The contract's ${replayTime(q.bar)} trade bar closed at ${px(q.close)}; ${buying ? "buying pays" : "selling takes"} that `
+      + `${buying ? "plus" : "less"} ${px(q.half_spread)} = ${px(buying ? q.ask : q.bid)} a share, ×${q.multiplier ?? 100} a contract. `
+      + `Trades carry no bid or ask: est. spread ±$${px(q.half_spread)}, from ${from}.${q.stock != null ? ` The stock was ${px(q.stock)}.` : ""}`;
+  }
   const bps = (q.spread_bps / 100).toFixed(2).replace(/0$/, "");
   return `The ${replayTime(q.bar)} bar closed at ${px(q.close)}; ${buying ? "buying pays" : "selling takes"} that ${buying ? "plus" : "less"} a `
     + `${px(q.half_spread)} half-spread = ${px(buying ? q.ask : q.bid)}. Replayed bars carry no bid or ask, so the spread is assumed: ${bps}% of the price, each half rounded up to the cent.`;
 }
 
+type Picked = { option_type: "call" | "put"; expiry: string; strike: number; label: string };
+
+/** The replay ticket's option picker: a call or a put, an expiration, then the strikes around the stock's price at the
+ *  clock whose contracts traded that day (each with its last trade by the clock), or a strike he names. Each contract
+ *  is checked once, when he picks; contracts with no trades that day are not offered. */
+function OptionPicker({ day, symbol, at, picked, onPick }: {
+  day: string; symbol: string; at: number; picked: Picked | null; onPick(p: Picked | null): void;
+}) {
+  const [kind, setKind] = useState<"call" | "put">(picked?.option_type ?? "call");
+  const [expiry, setExpiry] = useState<string | null>(picked?.expiry ?? null);
+  const [found, setFound] = useState<ReplayOptions | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [typed, setTyped] = useState("");
+
+  const load = useCallback(async (ask: { option_type?: "call" | "put"; expiry?: string; strike?: number }) => {
+    setChecking(true); setError(null);
+    try {
+      const next = await replayOptions({ day, symbol, at, ...ask });
+      setFound(prev => ask.strike != null && prev?.contracts && next.contracts
+        ? { ...next, contracts: [...prev.contracts.filter(c => c.strike !== ask.strike), ...next.contracts].sort((a, b) => a.strike - b.strike),
+          missing: [...new Set([...prev.missing, ...next.missing])].sort((a, b) => a - b) }
+        : next);
+    } catch (e) { setError(words(e)); } finally { setChecking(false); }
+  }, [day, symbol, at]);
+  // The expirations once, when the picker opens (at the clock then): no contract is read until he picks an expiration.
+  const opened = useRef(at);
+  useEffect(() => {
+    const controller = new AbortController();
+    replayOptions({ day, symbol, at: opened.current }, controller.signal).then(setFound)
+      .catch(e => { if (!controller.signal.aborted) setError(words(e)); });
+    return () => controller.abort();
+  }, [day, symbol]);
+
+  const pick = (k: "call" | "put", e: string) => { setKind(k); setExpiry(e); onPick(null); void load({ option_type: k, expiry: e }); };
+  const strikes = found?.option_type === kind && found.expiry === expiry ? found : null;
+  return (
+    <div data-testid="replay-option-picker" className="space-y-1.5 rounded-md border p-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <div role="radiogroup" aria-label="Call or put" className="inline-flex rounded-md border">
+          {(["call", "put"] as const).map(k => (
+            <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => expiry ? pick(k, expiry) : setKind(k)}
+              className={cn("min-h-11 px-3 first:rounded-l-md last:rounded-r-md sm:min-h-8", kind === k ? "bg-amber-400/15 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>
+              {k === "call" ? "Call" : "Put"}
+            </button>
+          ))}
+        </div>
+        {found?.price != null && <span className="tabular-nums text-muted-foreground">{symbol} {px(found.price)} at {replayTime(found.at)}</span>}
+      </div>
+      {found && found.expiries.length > 0 && (
+        <div role="radiogroup" aria-label="Expiration" className="flex flex-wrap gap-1.5">
+          {found.expiries.map(e => (
+            <button key={e} type="button" role="radio" aria-checked={expiry === e} data-testid="replay-expiry" onClick={() => pick(kind, e)}
+              className={cn("min-h-11 rounded-md border px-2 sm:min-h-8", expiry === e ? "border-amber-400/70 bg-amber-400/10 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>
+              {expiryShort(e)}{e === day ? " · 0DTE" : ""}
+            </button>
+          ))}
+        </div>
+      )}
+      {found && !expiry && <p className="text-muted-foreground">Pick an expiration: the strikes near {px(found.price ?? 0)} are checked for trades that day.</p>}
+      {checking && <p className="text-muted-foreground" role="status">Checking which contracts traded that day…</p>}
+      {strikes?.contracts && (
+        <>
+          {strikes.contracts.length > 0 ? (
+            <div role="radiogroup" aria-label="Contract" className="flex flex-wrap gap-1.5">
+              {strikes.contracts.map(c => {
+                const on = picked?.strike === c.strike && picked.expiry === strikes.expiry && picked.option_type === strikes.option_type;
+                return (
+                  <button key={c.occ} type="button" role="radio" aria-checked={on} data-testid="replay-contract"
+                    onClick={() => onPick({ option_type: kind, expiry: strikes.expiry!, strike: c.strike, label: c.label })}
+                    className={cn("min-h-11 rounded-md border px-2 tabular-nums sm:min-h-8", on ? "border-amber-400/70 bg-amber-400/10 text-amber-100" : "text-foreground hover:bg-secondary")}>
+                    ${c.strike}<span className="ml-1 text-muted-foreground">{px(c.last.price)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : !checking && <p data-testid="replay-no-contracts" className="text-amber-300">No {kind} near {px(strikes.price ?? 0)} for {expiryShort(strikes.expiry!)} has traded by {replayTime(strikes.at)}.</p>}
+          {strikes.missing.length > 0 && <p className="text-muted-foreground">Not offered, no trade by {replayTime(strikes.at)}: {strikes.missing.map(m => `$${m}`).join(", ")}.</p>}
+          {strikes.waiting.length > 0 && (
+            <p className="text-amber-300">Not checked yet: {strikes.waiting.map(m => `$${m}`).join(", ")}. {strikes.waiting_reason}{" "}
+              <button type="button" onClick={() => void load({ option_type: kind, expiry: strikes.expiry! })} className="underline">Check again</button>
+            </p>
+          )}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <label className="flex items-center gap-1.5 text-muted-foreground">Other strike $
+              <input aria-label="Replay option strike" inputMode="decimal" value={typed} onChange={e => setTyped(e.target.value.replace(/[^\d.]/g, ""))} className={cn(INPUT, "w-20")} />
+            </label>
+            <button type="button" disabled={checking || !(Number(typed) > 0)} onClick={() => void load({ option_type: kind, expiry: strikes.expiry!, strike: Number(typed) })} className={BUTTON}>Check</button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">Last trade by {replayTime(strikes.at)} ET; nothing after the clock is used. Review prices it again at the clock.</p>
+        </>
+      )}
+      {error && <p role="alert" className="text-amber-300">{error}</p>}
+    </div>
+  );
+}
+
 function Ticket({ view, at, symbol, options, onView, pause }: {
   view: ReplayView; at: number; symbol: string; options: string; onView(view: ReplayView): void; pause(): void;
 }) {
+  const off = view.run.options_off ?? null;
+  const [what, setWhat] = useState<"stock" | "option">("stock");
+  const [picked, setPicked] = useState<Picked | null>(null);
+  const option = what === "option" && !off;
   const [qty, setQty] = useState("10");
   const [type, setType] = useState<"market" | "limit">("market");
   const [limit, setLimit] = useState("");
@@ -223,8 +338,11 @@ function Ticket({ view, at, symbol, options, onView, pause }: {
   const limitN = Number(limit);
   const level = (text: string) => text.trim() ? Number(text) : null;
   const ask = (): ReplayAsk => ({ action: "open", order_type: type, limit_price: type === "limit" ? limitN : null, quantity: qtyN, symbol,
-    instrument: "stock", note: note.trim() || null, stop: level(stop), target: level(target), auto });
-  const valid = Number.isInteger(qtyN) && qtyN > 0 && (type === "market" || limitN > 0);
+    ...(option && picked ? { instrument: "option" as const, option_type: picked.option_type, expiry: picked.expiry, strike: picked.strike } : { instrument: "stock" as const }),
+    note: note.trim() || null, stop: level(stop), target: level(target), auto });
+  const valid = Number.isInteger(qtyN) && qtyN > 0 && (type === "market" || limitN > 0) && (!option || !!picked);
+  const name = option && picked ? picked.label : symbol;
+  const choose = (next: "stock" | "option") => { setWhat(next); setPreview(null); setLimit(""); if (next === "option" && qty === "10") setQty("1"); if (next === "stock" && qty === "1") setQty("10"); };
 
   const review = async () => {
     pause();
@@ -240,8 +358,8 @@ function Ticket({ view, at, symbol, options, onView, pause }: {
     try {
       const reply = await orderReplay(view.run.id, at, ask(), key);
       onView(reply);
-      setDone(reply.filled ? `Paper (replay): bought ${qtyN} ${symbol} at ${px(-(reply.filled.per_share ?? 0))}, ${replayTime(reply.filled.at)} ET.`
-        : reply.working ? `Paper limit working: buy ${qtyN} at ${px(limitN)} or better until the replayed close or your cancel.` : "Already sent.");
+      setDone(reply.filled ? `Paper (replay): bought ${qtyN} ${name} at ${px(-(reply.filled.per_share ?? 0))}, ${replayTime(reply.filled.at)} ET.`
+        : reply.working ? `Paper limit working: buy ${qtyN} ${name} at ${px(limitN)} or better until the replayed close or your cancel.` : "Already sent.");
       setPreview(null);
     } catch (e) { setError(words(e)); } finally { setBusy(false); }
   };
@@ -251,12 +369,16 @@ function Ticket({ view, at, symbol, options, onView, pause }: {
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-200">Paper · replay · not real money</p>
         <div role="radiogroup" aria-label="What to trade" className="ml-auto inline-flex rounded-md border text-xs">
-          <button type="button" role="radio" aria-checked className="min-h-11 rounded-l-md bg-amber-400/15 px-3 text-amber-100 sm:min-h-8">{symbol} shares</button>
-          <button type="button" role="radio" aria-checked={false} disabled title={options} data-testid="replay-options-off"
-            className="min-h-11 rounded-r-md px-3 text-muted-foreground disabled:cursor-not-allowed disabled:opacity-45 sm:min-h-8">Option</button>
+          <button type="button" role="radio" aria-checked={!option} onClick={() => choose("stock")}
+            className={cn("min-h-11 rounded-l-md px-3 sm:min-h-8", !option ? "bg-amber-400/15 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>{symbol} shares</button>
+          <button type="button" role="radio" aria-checked={option} disabled={!!off} title={off ?? undefined} data-testid={off ? "replay-options-off" : "replay-option"}
+            onClick={() => choose("option")}
+            className={cn("min-h-11 rounded-r-md px-3 disabled:cursor-not-allowed disabled:opacity-45 sm:min-h-8", option ? "bg-amber-400/15 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>Option</button>
         </div>
       </div>
-      <p className="text-[11px] text-muted-foreground" data-testid="replay-options-reason">{options}</p>
+      {off ? <p className="text-[11px] text-muted-foreground" data-testid="replay-options-reason">{off}</p>
+        : option && <p className="text-[11px] text-muted-foreground" data-testid="replay-options-reason">{options}</p>}
+      {option && <OptionPicker day={view.run.day} symbol={symbol} at={at} picked={picked} onPick={p => { setPicked(p); setPreview(null); setLimit(""); }} />}
       <div className="flex flex-wrap items-center gap-2">
         <div role="radiogroup" aria-label="Order type" className="inline-flex rounded-md border text-xs">
           {(["market", "limit"] as const).map(t => (
@@ -266,7 +388,7 @@ function Ticket({ view, at, symbol, options, onView, pause }: {
             </button>
           ))}
         </div>
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Shares
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">{option ? "Contracts" : "Shares"}
           <input aria-label="Replay quantity" inputMode="numeric" value={qty} onChange={e => { setQty(e.target.value.replace(/[^\d]/g, "")); setPreview(null); }} className={cn(INPUT, "w-20")} />
         </label>
         {type === "limit" && (
@@ -276,10 +398,10 @@ function Ticket({ view, at, symbol, options, onView, pause }: {
         )}
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Stop
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">{option ? `Stop (${symbol} $)` : "Stop"}
           <input aria-label="Replay stop" inputMode="decimal" placeholder="$" value={stop} onChange={e => { setStop(e.target.value.replace(/[^\d.]/g, "")); setPreview(null); }} className={cn(INPUT, "w-20")} />
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Target
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">{option ? `Target (${symbol} $)` : "Target"}
           <input aria-label="Replay target" inputMode="decimal" placeholder="$" value={target} onChange={e => { setTarget(e.target.value.replace(/[^\d.]/g, "")); setPreview(null); }} className={cn(INPUT, "w-20")} />
         </label>
         <label className="flex min-h-11 items-center gap-1.5 text-xs text-muted-foreground sm:min-h-0">
@@ -290,12 +412,15 @@ function Ticket({ view, at, symbol, options, onView, pause }: {
       {preview && (
         <div data-testid="replay-confirm" className="space-y-1 rounded-md bg-amber-400/5 p-2 text-xs">
           {preview.fills_now ? (
-            <p className="text-sm tabular-nums text-foreground">Buy {preview.quantity.toLocaleString("en-US")} {symbol} at {px(-(preview.per_share ?? 0))}: costs {usd(preview.cash ?? 0)}.</p>
+            <p className="text-sm tabular-nums text-foreground">Buy {preview.quantity.toLocaleString("en-US")} {name} at {px(-(preview.per_share ?? 0))}: costs {usd(preview.cash ?? 0)}.</p>
           ) : (
-            <p className="text-sm tabular-nums text-foreground">Buy limit {preview.quantity.toLocaleString("en-US")} {symbol} at {px(preview.limit ?? limitN)}: holds {usd(preview.reserve ?? 0)} until it fills.</p>
+            <p className="text-sm tabular-nums text-foreground">Buy limit {preview.quantity.toLocaleString("en-US")} {name} at {px(preview.limit ?? limitN)}: holds {usd(preview.reserve ?? 0)} until it fills.</p>
           )}
           <p className="text-muted-foreground">{quoteWords(preview, true)}</p>
-          {!preview.fills_now && <p className="text-muted-foreground">It fills on a later bar whose low plus the half-spread reaches your limit: at the limit, or at that bar&apos;s open plus the half-spread when lower. A day order: until the replayed close or your cancel.</p>}
+          {!preview.fills_now && <p className="text-muted-foreground">{preview.instrument === "option"
+            ? "It fills on a later minute the contract trades whose low plus that minute's half-spread reaches your limit: at the limit, or at that minute's open plus the half-spread when lower. A minute without a trade fills nothing. A day order: until the replayed close or your cancel."
+            : <>It fills on a later bar whose low plus the half-spread reaches your limit: at the limit, or at that bar&apos;s open plus the half-spread when lower. A day order: until the replayed close or your cancel.</>}</p>}
+          {preview.instrument === "option" && (stop.trim() || target.trim()) && <p className="text-muted-foreground">Stop and target are {symbol} prices, judged on the stock&apos;s bars; an automatic exit sells at the contract&apos;s next traded minute.</p>}
           {preview.buying_power_after != null && <p className="text-muted-foreground">Paper buying power after: {preview.buying_power_after < 0 ? "−" : ""}{usd(preview.buying_power_after)}.</p>}
         </div>
       )}
@@ -340,7 +465,7 @@ function Position({ p, view, at, onView, pause }: { p: PaperPosition; view: Repl
   return (
     <li data-testid="replay-position" className="space-y-1 py-2 text-xs">
       <div className="flex flex-wrap items-baseline gap-x-2">
-        <span className="text-sm font-medium text-foreground">{p.remaining.toLocaleString("en-US")} {p.symbol}</span>
+        <span className="text-sm font-medium text-foreground">{p.remaining.toLocaleString("en-US")} {named(p)}</span>
         <span className="tabular-nums text-muted-foreground">in {px(Math.abs(p.per_share))}{mark ? ` · now ${px(mark.per_share)}` : ""}</span>
         <span className={cn("ml-auto tabular-nums", toneOf(mark?.pnl))}>{mark ? signed(mark.pnl) : "—"}</span>
       </div>
@@ -351,13 +476,13 @@ function Position({ p, view, at, onView, pause }: { p: PaperPosition; view: Repl
           <label className="flex min-h-11 items-center gap-1.5 sm:min-h-0">
             <input type="checkbox" checked={!!p.auto} onChange={e => toggle(e.target.checked)} aria-label={`Close ${p.symbol} automatically at stop/target`} />Close automatically
           </label>
-          {p.exiting && <span className="text-amber-200">selling at the next bar&apos;s open</span>}
+          {p.exiting && <span className="text-amber-200">{p.instrument === "option" ? "selling at the contract's next traded minute" : <>selling at the next bar&apos;s open</>}</span>}
         </div>
       )}
       {p.note && <p className="text-foreground/80">“{p.note}”</p>}
       {selling ? (
         <div data-testid="replay-sell-confirm" className="space-y-1 rounded-md bg-amber-400/5 p-2">
-          <p className="text-sm tabular-nums text-foreground">Sell {selling.quantity.toLocaleString("en-US")} {p.symbol} at {px(selling.bid)}: {selling.pnl != null ? `${selling.pnl >= 0 ? "makes" : "loses"} ${usd(selling.pnl)}` : ""}.</p>
+          <p className="text-sm tabular-nums text-foreground">Sell {selling.quantity.toLocaleString("en-US")} {named(p)} at {px(selling.bid)}: {selling.pnl != null ? `${selling.pnl >= 0 ? "makes" : "loses"} ${usd(selling.pnl)}` : ""}.</p>
           <p className="text-muted-foreground">{quoteWords(selling, false)}</p>
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" data-testid="replay-sell" disabled={busy} onClick={() => send("market")} className={cn(BUTTON, AMBER)}>Sell on paper</button>
@@ -389,7 +514,7 @@ function RunBook({ view, at, onView, pause, log }: { view: ReplayView; at: numbe
         <ul className="space-y-1">
           {view.orders.map(o => (
             <li key={o.id} data-testid="replay-order" className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-foreground">{o.side === "close" ? "Sell" : "Buy"} limit {o.quantity.toLocaleString("en-US")} {o.symbol} at {px(o.limit)}</span>
+              <span className="text-foreground">{o.side === "close" ? "Sell" : "Buy"} limit {o.quantity.toLocaleString("en-US")} {named(o)} at {px(o.limit)}</span>
               <span className="text-muted-foreground">working</span>
               <button type="button" onClick={() => cancel(o.id)} className={QUIET}>Cancel</button>
             </li>

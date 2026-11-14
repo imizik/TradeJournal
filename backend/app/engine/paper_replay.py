@@ -8,18 +8,24 @@ time, nights and weekends included.
 - **The replay clock.** The client plays the day; every request names the replay moment ``at`` (epoch seconds, inside
   the day's regular session). Only bars that ended by ``at`` are used: nothing after the clock prices a fill. A run's
   clock never goes back: a request before the newest thing it recorded is refused.
-- **Fills: shares only.** A market order fills at the newest completed regular-session 1-minute bar's close, plus an
+- **Fills: shares.** A market order fills at the newest completed regular-session 1-minute bar's close, plus an
   assumed half-spread to buy and less one to sell (``half_spread``: the spread assumed ``SPREAD_BPS`` of the price wide,
-  each half rounded up to whole cents, at least 2¢), stamped one second before the clock. A bar older than ``STALE_SECONDS`` is no price: refused. Options
-  are not replayed: the app keeps no past option chain to pick a contract from and no past option quotes, so they are
-  refused with that reason, never a made-up option price.
+  each half rounded up to whole cents, at least 2¢), stamped one second before the clock. A bar older than ``STALE_SECONDS`` is no price: refused.
+- **Fills: one call or put** (``replay_options``). The ticket offers only contracts whose own trades came back for the
+  day. A market order fills at the contract's trade bar for the minute just ended, its close plus the assumed
+  half-spread (``replay_options.half_spread``: half that minute's range, at least 1¢ and 0.5% of the price) to buy and
+  less it to sell, ×100 a contract. A minute the contract did not trade is no price: refused with its last trade's
+  time. Spreads are not replayed. On a day older than Tradier's minute history options are off with the reason.
 - **Limit orders, stop and target** (``paper_book``'s rules, on the replayed bars, one bar at a time). A limit is a day
   order: a buy fills on the first bar whose low plus the half-spread reaches it, at the bar's open plus the half-spread
   when that is already at or under the limit, else at the limit; a sell the other way round. A position's stop and
   target are judged on completed bars after its fill's minute; a bar touching both is the stop. With "Close
   automatically" on, the touch triggers a sale of all that is left at the next bar's open less the half-spread; off, the
   touch is only recorded. At the close every working order lapses and every open position is sold at the last bar's
-  close (``flat``); leaving early sells at the clock's price.
+  close (``flat``); leaving early sells at the clock's price. An option's limit fills only on a minute the contract
+  traded; its stop and target are stock levels, judged on the stock's bars, and an automatic exit sells at the open of
+  the contract's next traded minute. At the close an option expiring that day settles at intrinsic value from the
+  stock's last regular bar; any other sells at its last trade less the half-spread.
 - **Its own runs.** Each replay is a ``PaperRun`` with ``kind`` ``replay`` and ``replay_day``, so it never mixes with the
   live paper run (``paper_book.current_run`` reads live runs only) or real trades. The events and their fold are the
   paper book's own (``PaperEvent``; ``fold``, ``orders``, ``switches``, ``account``, ``stats``, ``verdict``).
@@ -32,13 +38,14 @@ import json
 import logging
 import math
 import re
+import time
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
-from app.engine import paper_book as pb
+from app.engine import paper_book as pb, replay_options as ro
 from app.engine.chart_math import ET, session_windows
 from app.models import PaperEvent, PaperRun
 
@@ -52,8 +59,9 @@ STALE_SECONDS = 120  # the newest bar ended at most this long before the clock (
 SCORE_SHOWN = 50
 KEPT_DAYS = 16  # symbol-days of bars kept in memory
 _kept: dict[tuple[str, date], list[dict]] = {}
-OPTIONS_REFUSED = ("Options are not replayed yet: the app keeps no past option chain to pick a contract from and no past "
-                   "option quotes for that minute, so there is no honest option price. Shares only.")
+OPTIONS_RULE = ("Options: only contracts that traded that day, each priced from its own trade bar for the minute just "
+                "ended plus an assumed half-spread (half that minute's range, at least 1¢ and 0.5% of the price), ×100 a "
+                "contract. A minute it did not trade is no price.")
 
 
 class ReplayError(pb.PaperError):
@@ -206,9 +214,41 @@ def quote_at(session: list[dict], at: float, symbol: str) -> dict:
             "bar": bar["time"], "at": bar["time"] + 59}
 
 
-def _leg(symbol: str, action: str, q: dict) -> dict:
-    return {symbol: {"action": action, "bid": q["bid"], "ask": q["ask"], "price": q["ask"] if action == "buy" else q["bid"],
+def _leg(quote: str, action: str, q: dict) -> dict:
+    return {quote: {"action": action, "bid": q["bid"], "ask": q["ask"], "price": q["ask"] if action == "buy" else q["bid"],
                      "bid_at": q["at"], "ask_at": q["at"], "close": q["close"], "half_spread": q["half_spread"], "bar": q["bar"]}}
+
+
+def _quote(spec: dict) -> str:
+    """The name a position's one leg is priced under: the ticker for shares, the OCC symbol for a call or put."""
+    return spec["legs"][0]["quote"]
+
+
+def _option(spec: dict) -> bool:
+    return spec.get("instrument") == "option"
+
+
+def _trades(day: date, occ: str) -> list[dict]:
+    """The contract's trade bars on the replayed day (``replay_options.trades``), refused with the reason."""
+    try:
+        return ro.trades(occ, day)
+    except ro.OptionsOff as exc:
+        raise ReplayError(str(exc), exc.status) from None
+
+
+def _option_quote(found: list[dict], at: float, label: str) -> dict:
+    try:
+        return ro.quote_at(found, at, label)
+    except ro.OptionsOff as exc:
+        raise ReplayError(str(exc), exc.status) from None
+
+
+def _option_q(bar: dict, price: float, half: float | None = None) -> dict:
+    """A contract bar's assumed bid and ask around ``price`` (its open or its close); ``half`` when it is the one
+    known at the minute's open, else the bar's own."""
+    half, source = (half, "before") if half is not None else ro.half_spread(bar)
+    return {"close": price, "half_spread": half, "half_from": source, "bid": round(max(price - half, 0.0), 4),
+            "ask": round(price + half, 4), "bar": bar["time"], "at": bar["time"]}
 
 
 # --- runs -------------------------------------------------------------------------------------------------------------
@@ -300,10 +340,10 @@ def _clock(run: PaperRun, book: _Book, at, hours: tuple[int, int]) -> float:
 
 # --- the pass over the bars ------------------------------------------------------------------------------------------
 
-def _limit_fill(order: dict, bar: dict, closing: bool) -> float | None:
-    """The per-share price a working share limit fills at on ``bar``, or None: a buy once the assumed ask reaches the
-    limit (the open's ask when the bar opened through it), a sell once the assumed bid does."""
-    half = half_spread(float(bar["open"]))
+def _limit_fill(order: dict, bar: dict, closing: bool, half: float) -> float | None:
+    """The per-share price a working limit fills at on ``bar`` (the stock's for shares, the contract's trade bar for an
+    option), or None: a buy once the assumed ask reaches the limit (the open's ask when the bar opened through it), a
+    sell once the assumed bid does."""
     if not closing:  # buying shares
         if bar["low"] + half > order["limit"] + pb.EPS:
             return None
@@ -313,16 +353,21 @@ def _limit_fill(order: dict, bar: dict, closing: bool) -> float | None:
     return round(max(bar["open"] - half, order["limit"]), 4)
 
 
-def _fill_limit(book: _Book, order: dict, bar: dict) -> dict | None:
+def _fill_limit(book: _Book, order: dict, bar: dict, stock_bar: dict, half: float | None = None) -> dict | None:
+    """Fill a working limit on ``bar`` (the contract's trade bar for an option, else the stock's) when it reaches it;
+    ``stock_bar`` is the stock's bar for that minute (the stock's price kept with the fill). An option's ``half`` is
+    the one known as the minute opens (``replay_options.half_before``)."""
     closing = order["side"] == "close"
-    per = _limit_fill(order, bar, closing)
+    option = _option(order)
+    half = half if half is not None else half_spread(float(bar["open"]))
+    per = _limit_fill(order, bar, closing, half)
     if per is None:
         return None
     at = bar["time"] + 59  # during the bar: its stop and target are judged from the next bar
-    q = {"bid": per if closing else round(per - 2 * half_spread(per), 4), "ask": per if not closing else round(per + 2 * half_spread(per), 4),
-         "close": float(bar["close"]), "half_spread": half_spread(per), "bar": bar["time"], "at": at}
-    legs = _leg(order["symbol"], "sell" if closing else "buy", q)
-    stock = per
+    q = {"bid": per if closing else round(max(per - 2 * half, 0.0), 4), "ask": per if not closing else round(per + 2 * half, 4),
+         "close": float(bar["close"]), "half_spread": half, "bar": bar["time"], "at": at}
+    legs = _leg(_quote(order), "sell" if closing else "buy", q)
+    stock = float(stock_bar["close"]) if option else per
     if closing:
         position = next((p for p in book.positions() if p["id"] == order["position"]), None)
         if position is None or position["status"] != "open":
@@ -343,8 +388,8 @@ def _fill_limit(book: _Book, order: dict, bar: dict) -> dict | None:
         return None
     if not closing and order.get("auto"):
         book.store(position_id, "auto", f"auto:fill:{order['id']}", at, {"on": True})
-    return {"kind": "limit", "symbol": order["symbol"], "label": order["label"], "side": order["side"], "quantity": qty,
-            "price": per, "at": at, "limit": order["limit"]}
+    return {"kind": "limit", "symbol": order["symbol"], "label": order["label"], "instrument": order["instrument"],
+            "side": order["side"], "quantity": qty, "price": per, "at": at, "limit": order["limit"]}
 
 
 def _hit(position: dict, bar: dict, only: str | None = None) -> str | None:
@@ -364,28 +409,31 @@ def _first_bar(stamp: float) -> int:
     return (int(stamp) // 60 + 1) * 60
 
 
-def _sell_all(book: _Book, position: dict, per: float, at: float, key: str, extra: dict, q: dict) -> dict | None:
+def _sell_all(book: _Book, position: dict, per: float, at: float, key: str, extra: dict, q: dict, stock: float) -> dict | None:
     current = next((p for p in book.positions() if p["id"] == position["id"]), None)
     if current is None or current["status"] != "open":
         return None
     qty = current["remaining"]
     cash = round(per * current["multiplier"] * qty, 2)
-    data = {"quantity": qty, "per_share": per, "cash": cash, "legs_filled": _leg(current["symbol"], "sell", q),
-            "stock": per, **extra}
+    data = {"quantity": qty, "per_share": per, "cash": cash, "legs_filled": _leg(_quote(current), "sell", q),
+            "stock": stock, **extra}
     if not book.store(uuid.UUID(current["id"]), "close", key, at, data):
         return None
     for order in book.working():  # a closing limit for a position now closed ends with it
         if order["side"] == "close" and order["position"] == current["id"]:
             book.store(uuid.UUID(order["id"]), "cancel", f"end:{order['id']}", at, {"reason": "The position closed before it filled."})
     return {"kind": extra.get("auto") or ("flat" if extra.get("flat") else "left"), "symbol": current["symbol"],
-            "label": current["label"], "side": "close", "quantity": qty, "price": per, "at": at,
+            "label": current["label"], "instrument": current["instrument"], "side": "close", "quantity": qty, "price": per, "at": at,
             "pnl": round(cash + current["basis_left"], 2)}
 
 
-def _pass(book: _Book, session: list[dict], hours: tuple[int, int], at: float, symbol: str) -> list[dict]:
+def _pass(book: _Book, session: list[dict], hours: tuple[int, int], at: float, symbol: str,
+          contracts: dict[str, dict[int, dict]] | None = None) -> list[dict]:
     """Every completed regular-session bar of ``symbol`` up to ``at``, oldest first: a triggered automatic exit sells at
     the bar's open; then each working limit is checked against the bar; then each open position's stop and target.
-    Only ``symbol``'s orders and positions are judged against its bars."""
+    Only ``symbol``'s orders and positions are judged against its bars. An option's exit and limit use its own trade
+    bar for that minute (``contracts``: OCC symbol → minute → bar), and wait for a minute it traded."""
+    contracts = contracts or {}
     out: list[dict] = []
     for bar in session:
         if bar["time"] + 60 > at:
@@ -405,16 +453,28 @@ def _pass(book: _Book, session: list[dict], hours: tuple[int, int], at: float, s
             if (position is None or position["status"] != "open" or not switch or not switch["on"]
                     or switch["id"] != trigger["auto_id"] or key in book.keys or trigger["condition_at"] > bar["time"]):
                 continue
-            q = {"close": float(bar["open"]), "half_spread": half_spread(float(bar["open"])), "bar": bar["time"], "at": bar["time"]}
-            q.update(bid=round(q["close"] - q["half_spread"], 4), ask=round(q["close"] + q["half_spread"], 4))
+            if _option(position):  # the contract's open in the first minute it trades from here
+                by_minute = contracts.get(_quote(position), {})
+                traded = by_minute.get(bar["time"])
+                if traded is None:
+                    continue
+                q = _option_q(traded, float(traded["open"]), ro.half_before(by_minute, bar["time"]))
+            else:
+                q = {"close": float(bar["open"]), "half_spread": half_spread(float(bar["open"])), "bar": bar["time"], "at": bar["time"]}
+                q.update(bid=round(q["close"] - q["half_spread"], 4), ask=round(q["close"] + q["half_spread"], 4))
             found = _sell_all(book, position, q["bid"], bar["time"], key,
-                              {"auto": trigger["level"], "reference": trigger["reference"], "condition_at": trigger["condition_at"]}, q)
+                              {"auto": trigger["level"], "reference": trigger["reference"], "condition_at": trigger["condition_at"]},
+                              q, float(bar["open"]))
             if found:
                 out.append(found)
-        # 2. Working limits placed before this bar began.
+        # 2. Working limits placed before this bar began (an option's on its own trade bar for the minute, if any).
         for order in book.working():
-            if order["symbol"] == symbol and order["placed_at"] <= bar["time"] and order["instrument"] == "stock":
-                found = _fill_limit(book, order, bar)
+            if order["symbol"] != symbol or order["placed_at"] > bar["time"] or order["instrument"] not in ("stock", "option"):
+                continue
+            by_minute = contracts.get(_quote(order), {}) if _option(order) else {}
+            filled_on = by_minute.get(bar["time"]) if _option(order) else bar
+            if filled_on is not None:
+                found = _fill_limit(book, order, filled_on, bar, ro.half_before(by_minute, bar["time"]) if _option(order) else None)
                 if found:
                     out.append(found)
         # 3. Stop and target on completed bars after each position's fill (or its switch).
@@ -456,17 +516,26 @@ def _symbols(book: _Book) -> set[str]:
     return {p["symbol"] for p in book.positions() if p["status"] == "open"} | {o["symbol"] for o in book.working()}
 
 
-def _advance(db: Session, run: PaperRun, book: _Book, at: float, also: str | None = None) -> tuple[list[dict], dict[str, list[dict]], tuple[int, int] | None]:
+def _contracts(book: _Book, day: date) -> dict[str, dict[int, dict]]:
+    """The trade bars of every contract with an open position or a working order, by minute (kept since its order)."""
+    occs = {_quote(p) for p in book.positions() if p["status"] == "open" and _option(p)}
+    occs |= {_quote(o) for o in book.working() if _option(o)}
+    return {occ: {b["time"]: b for b in _trades(day, occ)} for occ in sorted(occs)}
+
+
+def _advance(db: Session, run: PaperRun, book: _Book, at: float, also: str | None = None
+             ) -> tuple[list[dict], dict[str, list[dict]], tuple[int, int] | None, dict[str, dict[int, dict]]]:
     """Work each symbol with an open position or a working order (and ``also``) bar by bar up to ``at``, before anything
     new is recorded at ``at``, so nothing he does at the clock undoes what the bars before it already did."""
     symbols = _symbols(book) | ({also} if also else set())
     if not symbols:
-        return [], {}, regular(run.replay_day)
+        return [], {}, regular(run.replay_day), {}
     sessions, hours = _load(db, run, symbols)
+    contracts = _contracts(book, run.replay_day)
     found = []
     for symbol in sorted(symbols):
-        found += _pass(book, sessions[symbol], hours, at, symbol)
-    return found, sessions, hours
+        found += _pass(book, sessions[symbol], hours, at, symbol, contracts)
+    return found, sessions, hours, contracts
 
 
 def step(db: Session, body: dict, now: float) -> dict:
@@ -478,18 +547,22 @@ def step(db: Session, body: dict, now: float) -> dict:
     if hours is None:
         raise ReplayError("The replayed day has no regular session.", 409)
     at = _clock(run, book, body.get("at"), hours)
-    found, sessions, hours = _advance(db, run, book, at)
+    found, sessions, hours, contracts = _advance(db, run, book, at)
     if sessions and (at >= hours[1] or body.get("end")):
         reason = "flat" if at >= hours[1] else "left"
         for symbol in sorted(sessions):
-            found += _flatten_symbol(book, sessions[symbol], at, reason, symbol)
+            found += _flatten_symbol(book, sessions[symbol], at, reason, symbol, contracts, run.replay_day)
     db.commit()
     return {"happened": found, **view(db, run, at)}
 
 
-def _flatten_symbol(book: _Book, session: list[dict], at: float, reason: str, symbol: str) -> list[dict]:
+def _flatten_symbol(book: _Book, session: list[dict], at: float, reason: str, symbol: str,
+                    contracts: dict[str, dict[int, dict]] | None = None, day: date | None = None) -> list[dict]:
     """End the replay of ``symbol`` at ``at``: its working orders lapse at the close (or end when he leaves) and each
-    open position sells at the newest completed bar's close less the half-spread."""
+    open position sells at the newest completed bar's close less the half-spread. An option sells at its last trade
+    by ``at`` less its half-spread; at the close, one expiring that day settles at intrinsic value from the stock's
+    last bar instead."""
+    contracts = contracts or {}
     out = []
     for order in book.working():
         if order["symbol"] == symbol:
@@ -502,18 +575,52 @@ def _flatten_symbol(book: _Book, session: list[dict], at: float, reason: str, sy
     q = {"close": close, "half_spread": half_spread(close), "bar": bar["time"], "at": bar["time"] + 59}
     q.update(bid=round(close - q["half_spread"], 4), ask=round(close + q["half_spread"], 4))
     for position in [p for p in book.positions() if p["status"] == "open" and p["symbol"] == symbol]:
-        found = _sell_all(book, position, q["bid"], min(at, bar["time"] + 59), f"{reason}:{position['id']}", {reason: True}, q)
+        if not _option(position):
+            found = _sell_all(book, position, q["bid"], min(at, bar["time"] + 59), f"{reason}:{position['id']}", {reason: True},
+                              q, close)
+        elif reason == "flat" and day is not None and position["expiry"] == day.isoformat():
+            found = _expire(book, position, close, min(at, bar["time"] + 59))
+        else:
+            traded = ro.last_trade(list(contracts.get(_quote(position), {}).values()), at)
+            if traded is None:  # never traded by now: nothing honest to sell at, it stays open
+                continue
+            oq = _option_q(traded, float(traded["close"]))
+            found = _sell_all(book, position, oq["bid"], min(at, max(traded["time"] + 59, position["opened_at"])),
+                              f"{reason}:{position['id']}", {reason: True}, oq, close)
         if found:
             out.append(found)
     return out
 
 
+def _expire(book: _Book, position: dict, stock: float, at: float) -> dict | None:
+    """An option expiring on the replayed day settles at the close at intrinsic value from the stock's last bar."""
+    value = round(pb.intrinsic(position["option_type"], position["legs"][0]["strike"], stock), 4)
+    qty = position["remaining"]
+    cash = round(value * position["multiplier"] * qty, 2)
+    data = {"quantity": qty, "per_share": value, "cash": cash, "stock": stock, "day": position["expiry"]}
+    if not book.store(uuid.UUID(position["id"]), "expire", f"expire:{position['id']}", at, data):
+        return None
+    for order in book.working():  # a closing limit for it ends with it
+        if order["side"] == "close" and order["position"] == position["id"]:
+            book.store(uuid.UUID(order["id"]), "cancel", f"end:{order['id']}", at, {"reason": "The option expired."})
+    return {"kind": "expired", "symbol": position["symbol"], "label": position["label"], "instrument": "option",
+            "side": "close", "quantity": qty, "price": value, "at": at, "stock": stock,
+            "pnl": round(cash + position["basis_left"], 2)}
+
+
 # --- orders at the replay clock --------------------------------------------------------------------------------------
 
-def _spec(body: dict, day: date) -> dict:
-    if body.get("instrument") not in (None, "stock"):
-        raise ReplayError(OPTIONS_REFUSED, 409)
-    return pb.contract({**body, "instrument": "stock"}, day)
+def _spec(body: dict, day: date, now: float) -> dict:
+    """Shares, or one call or put on a day whose contracts' trades can be read; spreads are not replayed."""
+    instrument = body.get("instrument") or "stock"
+    if instrument == "stock":
+        return pb.contract({**body, "instrument": "stock"}, day)
+    if instrument != "option":
+        raise ReplayError("Replay trades shares or one call or put; spreads are not replayed.", 409)
+    off = ro.off_reason(day, now)
+    if off:
+        raise ReplayError(off, 409)
+    return pb.contract(body, day)
 
 
 def order(db: Session, body: dict, now: float) -> dict:
@@ -540,7 +647,7 @@ def order(db: Session, body: dict, now: float) -> dict:
             raise ReplayError("That paper position is not open.", 409)
         spec = {k: position[k] for k in pb.SPEC_KEYS}
     else:
-        spec = _spec(body, run.replay_day)
+        spec = _spec(body, run.replay_day, now)
         position = None
     session = _regular_bars(session_bars(spec["symbol"], run.replay_day)[0], hours)
     happened = [] if preview else _advance(db, run, book, at, also=spec["symbol"])[0]
@@ -551,7 +658,17 @@ def order(db: Session, body: dict, now: float) -> dict:
             if position is None or position["status"] != "open":
                 db.commit()
                 return {"filled": None, "happened": happened, "closed_meanwhile": True, **view(db, run, at)}
-    q = quote_at(session, at, spec["symbol"])
+    option = _option(spec)
+    if option:  # the contract's own trade for the minute just ended; the stock's price beside it
+        stock_bar = last_bar(session, at)
+        if stock_bar is None:
+            raise ReplayError("The first minute is still forming: step one bar to get a price.", 409)
+        stock_now = float(stock_bar["close"])
+        q = _option_quote(_trades(run.replay_day, _quote(spec)), at, spec["label"])
+    else:
+        q = quote_at(session, at, spec["symbol"])
+        stock_now = q["close"]
+    mult = spec["multiplier"]
     working = book.working()
     acct = pb.account(run, positions, working)
     limit = pb._money(body.get("limit_price")) if body.get("order_type") == "limit" else None
@@ -567,22 +684,25 @@ def order(db: Session, body: dict, now: float) -> dict:
         qty = pb._quantity(body.get("quantity"))
     marketable = limit is None or (limit >= q["ask"] - pb.EPS if not closing else limit <= q["bid"] + pb.EPS)
     per = (q["bid"] if closing else -q["ask"]) if marketable else None
-    shown = {"label": spec["label"], "quantity": qty, "close": q["close"], "half_spread": q["half_spread"], "bid": q["bid"],
-             "ask": q["ask"], "bar": q["bar"], "spread_bps": SPREAD_BPS, "buying_power": acct["buying_power"]}
+    shown = {"label": spec["label"], "instrument": spec["instrument"], "multiplier": mult, "quantity": qty, "close": q["close"],
+             "half_spread": q["half_spread"], "bid": q["bid"], "ask": q["ask"], "bar": q["bar"], "spread_bps": SPREAD_BPS,
+             "stock": stock_now, "buying_power": acct["buying_power"]}
+    if option:
+        shown.update(half_from=q["half_from"], low=q["low"], high=q["high"])
     if not closing:
-        stop, target = pb._levels(body, spec["bias"], q["close"])
-        reserve = round((limit if limit is not None else q["ask"]) * qty, 2)
+        stop, target = pb._levels(body, spec["bias"], stock_now)
+        reserve = round((limit if limit is not None else q["ask"]) * mult * qty, 2)
         if reserve > acct["buying_power"] + 0.005:
             raise ReplayError(f"Not enough paper buying power: this needs {pb.usd(reserve)} and you have {pb.usd(acct['buying_power'])}.", 409)
         shown["buying_power_after"] = round(acct["buying_power"] - reserve, 2)
     if marketable:
-        cash = round(per * qty, 2)
+        cash = round(per * mult * qty, 2)
         shown.update(per_share=per, cash=cash, fills_now=True)
         if closing:
             basis = position["basis_left"] if qty == position["remaining"] else round(position["cash"] * qty / position["quantity"], 2)
             shown["pnl"] = round(cash + basis, 2)
     else:
-        shown.update(limit=limit, fills_now=False, reserve=0.0 if closing else round(limit * qty, 2), expires_at=hours[1])
+        shown.update(limit=limit, fills_now=False, reserve=0.0 if closing else round(limit * mult * qty, 2), expires_at=hours[1])
     if preview:
         return {"preview": shown}
     key = pb._key(body)
@@ -598,15 +718,15 @@ def order(db: Session, body: dict, now: float) -> dict:
         book.store(order_id, "order", key, at, data)
         db.commit()
         return {"filled": None, "working": {**shown, "id": str(order_id)}, "happened": happened, **view(db, run, at)}
-    legs = _leg(spec["symbol"], "sell" if closing else "buy", q)
+    legs = _leg(_quote(spec), "sell" if closing else "buy", q)
     if closing:
-        data = {"quantity": qty, "per_share": per, "cash": shown["cash"], "legs_filled": legs, "stock": q["close"]}
+        data = {"quantity": qty, "per_share": per, "cash": shown["cash"], "legs_filled": legs, "stock": stock_now}
         if limit is not None:
             data["limit"] = limit
         book.store(uuid.UUID(position["id"]), "close", key, q["at"], data)
     else:
         position_id = uuid.uuid4()
-        data = {**spec, "quantity": qty, "per_share": per, "cash": shown["cash"], "legs_filled": legs, "stock": q["close"],
+        data = {**spec, "quantity": qty, "per_share": per, "cash": shown["cash"], "legs_filled": legs, "stock": stock_now,
                 "note": pb._note(body), "stop": stop, "target": target}
         if limit is not None:
             data["limit"] = limit
@@ -666,13 +786,17 @@ def view(db: Session, run: PaperRun, at: float) -> dict:
     open_ = [p for p in positions if p["status"] == "open"]
     marks: dict[str, dict] = {}
     hours = regular(run.replay_day)
-    for symbol in sorted({p["symbol"] for p in open_}):
+    for symbol in sorted({p["symbol"] for p in open_ if not _option(p)}):
         try:
             bar = last_bar(_regular_bars(session_bars(symbol, run.replay_day)[0], hours), at) if hours else None
         except ReplayError:
             bar = None
         if bar is not None:
             marks[symbol] = {"last": float(bar["close"]), "at": bar["time"] + 60}
+    for occ in sorted({_quote(p) for p in open_ if _option(p)}):  # an option at its last trade by the clock (kept: no read)
+        traded = ro.last_trade(ro.cached(occ, run.replay_day) or [], at)
+        if traded is not None:
+            marks[occ] = {"last": float(traded["close"]), "at": traded["time"] + 60}
     switches = pb.switches(book.events)
     triggered = {str(e.position_id) for e in book.events if e.kind == "trigger"}
     touched = {}
@@ -698,6 +822,7 @@ def view(db: Session, run: PaperRun, at: float) -> dict:
 def _run_view(run: PaperRun, positions: list[dict]) -> dict:
     hours = regular(run.replay_day)
     return {"id": str(run.id), "day": run.replay_day.isoformat(), "starting_cash": run.starting_cash,
+            "options_off": ro.off_reason(run.replay_day, time.time()),
             "started_at": _epoch(run.started_at), "open_at": hours[0] if hours else None, "close_at": hours[1] if hours else None,
             "symbols": sorted({p["symbol"] for p in positions}),
             "realized": round(sum(p["realized"] for p in positions), 2),
@@ -740,3 +865,73 @@ def ticker(value) -> str:
     if not TICKER.match(symbol):
         raise ReplayError("Name a ticker.")
     return symbol
+
+
+# --- the option picker ------------------------------------------------------------------------------------------------
+
+def options(day_text, symbol_text, at, option_type: str | None, expiry_text: str | None, strike, now: float) -> dict:
+    """What the replay ticket's option picker offers at the replay clock ``at``: the candidate expirations and, once he
+    picks a type and an expiration, the strikes around the stock's price at the clock whose contracts traded that day
+    (or the one strike he named), each with its last trade by the clock. Only trades that ended by the clock decide:
+    one that has not traded by then is not offered (``missing``), never a hint about the rest of the day. Contracts are
+    checked nearest the price first,
+    the kept ones without a read; when the reads for this minute are spent the rest are listed as ``waiting``. ``off``
+    says why options cannot be replayed on the day (shares still can)."""
+    day = _past_day(day_text, now)
+    symbol = ticker(symbol_text)
+    if isinstance(at, bool) or not isinstance(at, (int, float)):
+        raise ReplayError("Name the replay moment.")
+    found, hours = session_bars(symbol, day)
+    if not hours[0] <= at <= hours[1]:
+        raise ReplayError("That moment is outside the replayed day's regular session.")
+    out = {"symbol": symbol, "day": day.isoformat(), "at": at, "off": ro.off_reason(day, now), "rule": OPTIONS_RULE,
+           "price": None, "step": None, "expiries": [], "option_type": None, "expiry": None, "contracts": None,
+           "missing": [], "waiting": [], "waiting_reason": None}
+    if out["off"]:
+        return out
+    done = [b for b in found if b["time"] + 60 <= at]  # premarket counts: the price he would have seen at 9:30
+    if not done:
+        out["off"] = "No price for the stock yet: step one bar first."
+        return out
+    price = float(done[-1]["close"])
+    out.update(price=price, step=ro.strike_step(symbol, price), expiries=ro.expiries(symbol, day))
+    if option_type is None and expiry_text is None:
+        return out
+    if option_type not in ("call", "put"):
+        raise ReplayError("Pick a call or a put.")
+    try:
+        expiry = date.fromisoformat(str(expiry_text))
+    except ValueError:
+        raise ReplayError("Name the expiration as YYYY-MM-DD.") from None
+    if not day <= expiry <= day + timedelta(days=400):
+        raise ReplayError("Pick an expiration from the replayed day on.")
+    wanted = [pb._money(strike)] if strike is not None else ro.strikes(symbol, price)
+    out.update(option_type=option_type, expiry=expiry.isoformat())
+    named = []
+    for at_strike in wanted:
+        spec = pb.contract({"symbol": symbol, "instrument": "option", "option_type": option_type, "expiry": expiry.isoformat(),
+                            "strike": at_strike}, day)
+        named.append((at_strike, spec))
+    # The kept ones first (no read), then the rest nearest the price first, one at a time.
+    named.sort(key=lambda sp: (ro.cached(_quote(sp[1]), day) is None, abs(sp[0] - price)))
+    offered = []
+    for at_strike, spec in named:
+        if out["waiting_reason"]:
+            out["waiting"].append(at_strike)
+            continue
+        try:
+            trades = ro.trades(_quote(spec), day)
+        except ro.OptionsOff as exc:
+            out["waiting_reason"] = str(exc)
+            out["waiting"].append(at_strike)
+            continue
+        last = ro.last_trade(trades, at)
+        if last is None:
+            out["missing"].append(at_strike)
+            continue
+        offered.append({"strike": at_strike, "occ": _quote(spec), "label": spec["label"],
+                        "last": {"price": float(last["close"]), "at": last["time"] + 60}})
+    out["contracts"] = sorted(offered, key=lambda c: c["strike"])
+    out["missing"].sort()
+    out["waiting"].sort()
+    return out

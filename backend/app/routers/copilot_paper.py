@@ -134,8 +134,10 @@ def auto(body: AutoAsk, db: Session = Depends(get_session)):
 # ``GET /copilot/paper/replay/bars?day=&symbol=``: that day's minute bars from the Charts history store (refused with the
 # reason when they cannot be read). ``POST /copilot/paper/replay/runs``: start a replay run on a day. ``.../step``: bring
 # a run to the replay clock (limits, stop and target worked bar by bar; at the close, or with ``end``, everything sold).
-# ``.../orders``, ``.../orders/cancel``, ``.../auto``: the paper book's own orders at the replay clock, shares only.
-# Never Tradier or Robinhood; writes only replay runs' paper rows.
+# ``.../orders``, ``.../orders/cancel``, ``.../auto``: the paper book's own orders at the replay clock, shares or one
+# call or put. ``GET .../options``: the option picker (candidate expirations; the strikes whose contracts traded that
+# day). Shares never read Tradier; an option's own trades are read once each through the chart feed
+# (``engine/replay_options.py``). Never Robinhood; writes only replay runs' paper rows.
 
 def _replay(call):
     _settings()
@@ -148,7 +150,7 @@ def _replay(call):
 @router.get("/paper/replay")
 def replay_home(with_days: bool = False, db: Session = Depends(get_session)):
     def call():
-        found = {**paper_replay.scorecard(db), "spread_bps": paper_replay.SPREAD_BPS, "options": paper_replay.OPTIONS_REFUSED}
+        found = {**paper_replay.scorecard(db), "spread_bps": paper_replay.SPREAD_BPS, "options": paper_replay.OPTIONS_RULE}
         if with_days:  # the market calendar: only when he opens replay, never on the desk's own read
             found["days"] = paper_replay.days(time.time())
         return found
@@ -173,6 +175,15 @@ def replay_bars(day: str = Query(..., max_length=10), symbol: str = Query(..., m
         return {"symbol": name, "day": found.isoformat(), "open_at": hours[0], "close_at": hours[1],
                 "bars": [{k: b[k] for k in keep} for b in bars]}
     return _replay(call)
+
+
+@router.get("/paper/replay/options")
+def replay_options(day: str = Query(..., max_length=10), symbol: str = Query(..., max_length=12), at: float = Query(...),
+                   option_type: str | None = Query(None, max_length=4), expiry: str | None = Query(None, max_length=10),
+                   strike: float | None = None):
+    """The replay ticket's option picker at the replay clock: candidate expirations, and for a type and an expiration
+    the strikes whose contracts traded that day, each read once (Tradier time and sales through the chart feed)."""
+    return _replay(lambda: paper_replay.options(day, symbol, at, option_type, expiry, strike, time.time()))
 
 
 class ReplayStart(BaseModel):

@@ -138,7 +138,8 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/paper/replay/bars',  # a past day's minute bars from the Charts history store (Alpaca SIP); never Tradier or Robinhood
     'POST /copilot/paper/replay/runs',  # start a practice run on a past day: replay paper rows only
     'POST /copilot/paper/replay/step',  # bring a replay run to its clock (limits, stop and target on past bars): replay paper rows only
-    'POST /copilot/paper/replay/orders',  # a share paper fill priced from a past bar plus an assumed spread: replay paper rows only; never an order, never Robinhood
+    'GET /copilot/paper/replay/options',  # the replay option picker: each candidate contract's past-day trades read once through the chart feed (Tradier); nothing written, never Robinhood
+    'POST /copilot/paper/replay/orders',  # a share or option paper fill priced from a past bar plus an assumed spread: replay paper rows only; never an order, never Robinhood
     'POST /copilot/paper/replay/orders/cancel',  # cancel a working replay limit: replay paper rows only
     'POST /copilot/paper/replay/auto',  # a replay position's close-automatically switch: replay paper rows only
     'GET /copilot/tickets',
