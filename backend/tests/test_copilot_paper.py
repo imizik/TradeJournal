@@ -90,6 +90,10 @@ def seed(db):
     t = at(13, 10)
     _order(db, t, {"MU": q("MU", 90.0, 90.1, t, last=90.05)}, symbol="MU", instrument="stock", quantity=10)
     _order(db, t, {"AMD": q("AMD", 150.0, 150.1, t, last=150.05)}, symbol="AMD", instrument="stock", quantity=1)
+    t = at(13, 10, 1)  # a day limit to buy below the ask: it works until the close
+    db.state.quotes = {CALL: q(CALL, 3.3, 3.4, t), "NBIS": q("NBIS", 98, 98.1, t, last=98.05)}
+    paper_book.place_limit(db, {"action": "open", "symbol": "NBIS", "instrument": "option", "option_type": "call", "expiry": "2026-11-20",
+                                "strike": 100, "quantity": 1, "limit_price": 2.0, "order_key": uuid.uuid4().hex}, t)
     db.state.marks = {"MU": {"last": 91.0, "at": int(at(13, 10, 5))}}
     db.state.closes = {("NBIS", date(2026, 11, 6)): 104.0}
     for ticker, pnl, closed in (("NBIS", -120.0, "2026-11-12T13:00"), ("OLDX", -60.0, "2026-11-12T14:00"), ("NBIS", 500.0, "2026-11-06T13:00")):
@@ -139,7 +143,11 @@ def test_it_reads_the_book_with_each_prices_time_and_writes_nothing(db):
     assert "CRWV" not in str(out) and out["not_followed_left_out"].startswith("1 paper position")
     assert out["score"]["paper"]["trades"] == 3 and out["score"]["paper"]["pnl"] == 148.5  # 19.00 + 140.00 − 10.50
     assert out["score"]["real"]["trades"] == 3 and out["score"]["real"]["pnl"] == 320.0  # since Nov 5, Webull left out
-    assert out["working_orders"].startswith("none")
+    # The day limit is past its close at 16:50: shown as ended, and the copilot's read did not record the lapse.
+    [order] = out["working_orders"]
+    assert (order["label"], order["limit"], order["quantity"]) == ("NBIS $100 Call 11/20/26", 2.0, 1)
+    assert order["ends"].startswith("ended at the close")
+    assert copilot_paper_book.compact(view, {"CRWV", "OLDX", "NBIS"}, FRIDAY)["working_orders"] == "none working"
     only = copilot_paper_book.compact(view, {"CRWV", "OLDX"}, FRIDAY, symbol="MU")
     assert [r["label"] for r in only["open"]] == ["MU shares"] and only["closed"] == [] and "whole run" in only["score"]["note"]
     # The desk's own read does settle it: the copilot's read left that to it.

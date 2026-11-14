@@ -101,7 +101,7 @@ def test_a_call_fills_at_the_ask_times_one_hundred_and_closes_at_the_bid(db, mar
     filled = buy_call(db, note="  reclaim of 98\n on volume ", stop=95, target=105)["filled"]
     assert filled["cash"] == -680.00 and filled["label"] == "NBIS $100 Call 11/20/26"
     book = paper_book.view(db, NOW + 30)
-    assert book["account"] == {"cash": 9320.0, "collateral": 0.0, "buying_power": 9320.0, "equity": None, "pnl": None, "unpriced": 1, "prices_at": None}
+    assert book["account"] == {"cash": 9320.0, "collateral": 0.0, "reserved": 0.0, "buying_power": 9320.0, "equity": None, "pnl": None, "unpriced": 1, "prices_at": None}
     [held] = book["positions"]
     assert held["note"] == "reclaim of 98 on volume" and held["mark"] is None  # no price yet: never a zero
     # The desk's ticked mark moves the live P&L: 4.00 × 100 × 2 − 680 = +120.
@@ -295,7 +295,7 @@ def test_the_routes_are_owner_only_batched_and_refuse_simulated_evidence(db, mar
 
 
 def test_paper_never_reaches_robinhood_or_the_real_books():
-    for path in ("app/engine/paper_book.py", "app/routers/copilot_paper.py"):
+    for path in ("app/engine/paper_book.py", "app/engine/paper_runner.py", "app/routers/copilot_paper.py"):
         text = (Path(__file__).resolve().parents[1] / path).read_text()
         assert "robinhood_read" not in text and "import robinhood" not in text
         assert "shadow_book" not in text and "Fill" not in text.replace("Fills", "")

@@ -1,12 +1,12 @@
 """``get_paper_book``: the copilot's read of the owner's own paper book (docs/copilot-lab.md § Paper).
 
 A compact view of ``paper_book.view`` and nothing else: no new math. The account (cash, buying power, value and P&L
-at the desk's newest prices), open paper positions with their P&L and the time of the price behind it, working orders
-when the book has any, the latest closed paper trades with his note and how each ended against his stop and target,
+at the desk's newest prices), open paper positions with their P&L and the time of the price behind it, his working
+day limit orders, the latest closed paper trades with his note and how each ended against his stop and target,
 and the scorecard beside his real closed trades over the same dates.
 
-Read only: it never places, closes or changes a paper order, and it does not settle an expired option (the desk's own
-minute read does that); one still open past its expiration says so. Prices come from the desk's kept ticks
+Read only: it never places, closes or changes a paper order, and it neither settles an expired option nor ends a day
+order past its close (the desk's own minute read does both); each says so. Prices come from the desk's kept ticks
 (``desk_ticks.kept_rows``: no quote read, no Robinhood call). A position without a price says so and is never zero; a
 price carries its time. Tickers the owner does not follow are left out of the lists (their trades stay in the totals).
 """
@@ -22,7 +22,7 @@ MAX_OPEN = 8
 MAX_CLOSED = 8
 NOTE_CHARS = 120
 LIMIT = 5800  # under copilot_tools.MAX_RESULT_CHARS, so the answer is never cut mid-JSON
-NO_ORDERS = "none: a paper order fills at once at the live quote, so nothing waits"
+NO_ORDERS = "none working"
 
 
 def _now_iso(now: float) -> str:
@@ -50,6 +50,8 @@ def _open_row(p: dict, now: float, today: date) -> dict:
         row["note"] = note
     if p.get("expiry") and date.fromisoformat(p["expiry"]) < today:
         row["past_expiry"] = f"expired {p['expiry']}; it settles at the close on the desk's next read"
+    if p.get("auto"):
+        row["auto_exit"] = "on: it closes at the next fresh bid once the stock touches his stop or target"
     mark = p.get("mark")
     if mark is None:
         row["price"] = "none: the desk has no price for it yet, so its P&L is unknown"
@@ -72,13 +74,23 @@ def _closed_row(c: dict) -> dict:
     return row
 
 
-def _orders(view: dict) -> list[dict] | str:
-    """Working orders, when the book keeps any (a later paper order type); otherwise the plain reason there are none."""
-    found = view.get("orders")
-    if not isinstance(found, list) or not found:
+def _orders(view: dict, now: float, hidden: set[str], symbol: str | None) -> list[dict] | str:
+    """His working paper limit orders (day orders: each ends at the close), or the plain reason there are none."""
+    from app.engine.paper_book import clock
+    found = [o for o in view.get("orders") or [] if o.get("symbol") not in hidden and symbol in (None, o.get("symbol"))]
+    if not found:
         return NO_ORDERS
-    keep = ("label", "symbol", "action", "quantity", "limit", "status", "placed_at", "expires_at")
-    return [{k: o.get(k) for k in keep if o.get(k) is not None} for o in found[:MAX_OPEN] if isinstance(o, dict)]
+    out = []
+    for o in found[:MAX_OPEN]:
+        row = {k: o[k] for k in ("side", "label", "symbol", "quantity", "limit", "stop", "target") if o.get(k) is not None}
+        row["placed"] = clock(o["placed_at"]) if o.get("placed_at") else None
+        if o.get("expires_at"):
+            row["ends"] = (f"ended at the close ({clock(o['expires_at'])}); the desk's next read records it"
+                           if now >= o["expires_at"] else f"at the close, {clock(o['expires_at'])}")
+        if note := _note(o.get("note")):
+            row["note"] = note
+        out.append(row)
+    return out
 
 
 def compact(view: dict, hidden: set[str], now: float, symbol: str | None = None) -> dict:
@@ -112,7 +124,7 @@ def compact(view: dict, hidden: set[str], now: float, symbol: str | None = None)
     out["open"] = [_open_row(p, now, today) for p in positions[:MAX_OPEN]]
     if len(positions) > MAX_OPEN:
         out["open_more"] = len(positions) - MAX_OPEN
-    out["working_orders"] = _orders(view)
+    out["working_orders"] = _orders(view, now, hidden, symbol)
     out["closed"] = [_closed_row(c) for c in closed[:MAX_CLOSED]]  # newest first
     if len(closed) > MAX_CLOSED:
         out["closed_more"] = len(closed) - MAX_CLOSED

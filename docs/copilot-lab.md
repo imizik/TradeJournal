@@ -2028,6 +2028,33 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   fixture or replay evidence. Each confirm carries one key, so a retried Fill on paper records one fill; orders on a
   run go one at a time (its row is locked until the fill is stored), and a close of more than is left counts only for
   what was left, so two closes racing never make cash.
+- **Market or Limit, as on Robinhood.** Every Paper action (and Close or Trim) offers Market (the fill above) or Limit
+  with a price, prefilled with the price now. A limit is a day order: placed from 4:00 AM ET until the close on a
+  trading day (with the market closed the Paper button offers Limit only), it works until a fresh quote crosses it, the
+  close or his Cancel, whichever is first. A buy (or any order that pays: a debit, buying back a credit spread) fills when
+  the natural price paid is at or below the limit, at the ask; a sell (or one taking in a credit) when the natural price
+  is at or above it, at the bid. A quote either of whose sides is older than two minutes, or from before the open,
+  never fills; the order keeps
+  working and shows that quote's time. An opening limit holds its most-to-pay (a credit spread: its width less the limit
+  credit) out of buying power while it works ("Held for orders"); a closing one holds its quantity, so Close cannot sell
+  it twice. A marketable limit is checked once when placed (one quote read, as a market order makes); after that the
+  paper runner checks working orders once a minute in the regular session (`backend/app/engine/paper_runner.py`, in the
+  API process while the lab is on with live evidence), all of them in one quote read through the chart feed. Working
+  orders sit under the account line with their last check and Cancel (`POST /copilot/paper/orders/cancel`).
+- **Close automatically at stop/target** (`POST /copilot/paper/auto`): a per-position switch, off by default so whether
+  he kept his stop still means something. On, the first completed regular-session 1-minute bar of the underlying after
+  the switch that touches the stop or the target (both in one bar: the stop; the setup scanner's rule) triggers a sell
+  of all that is left at the next bid both of whose sides moved after that bar; its grade says "auto". Off, a touch
+  closes nothing: each level's first touch is recorded once and pinged. Bars are the desk chart's own cached minute read
+  (`chart_feed.today_minutes`), one per watched stock per minute. Known limit: the session's last minute is not judged
+  (its bar completes after the close), and an expired contract waiting to settle is not watched.
+- **PAPER pings.** One Telegram message per paper event: a limit filled, an automatic exit, or a stop or target touched
+  with the switch off (a touch noticed more than 10 minutes after its bar is recorded without one). Each title starts
+  "PAPER ·" and each text "Paper, not real money." They go through the notification policy as kind `paper`, with a
+  budget of 6 a day of its own (`PING_BUDGET_PAPER`), so they never spend Radar's or the position alerts'; a ticker he
+  does not follow stays silent; only in the regular session. A tap opens the desk on the ticker.
+- **Chart marks.** His paper entries and exits are marks on the desk chart for that ticker (`kind` `paper`, at the
+  stock's price when each filled), drawn like his fills but pale and lettered "P", with "paper" in the legend.
 - **The account** (`POST /copilot/paper/runs`): he names the starting cash (default $10,000). Cash is the start plus
   every fill's cash; options use the ×100 multiplier; a credit spread holds its width as collateral, as Robinhood does,
   so buying power is the cash less it and falls by the spread's most-to-lose. An order he cannot pay for is refused with
@@ -2046,16 +2073,17 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   closed paper trade with its note and how it ended against his stop and target (stock prices: took the target, out at
   the stop and how far past it, out before either, held to expiry).
 - **Stored apart and append-only.** `paper_run` (one row per run) and `paper_event` (each fill: open, close or expire;
-  a position is their fold), additive migration `a7c3e9f1b5d2`. Nothing here writes fills, trades, accounts, real P&L,
-  notifications or the shadow and scanner books, calls Robinhood or places an order anywhere. `GET /copilot/paper` is
+  a position is their fold; and the orders' and switches' own facts: `order`, its fill or one `cancel`/`lapse`, `auto`,
+  `touch`, `trigger`), additive migration `a7c3e9f1b5d2`, no new table. Nothing here writes fills, trades, accounts, real P&L,
+  the shadow and scanner books, calls Robinhood or places an order anywhere. `GET /copilot/paper` is
   one of the desk's minute reads.
 - **The copilot reads it** (`get_paper_book`, `backend/app/ai/copilot_paper_book.py`; Isaac's yes on 2026-11-14): a
   compact view of `paper_book.view` and no new math: the account (cash, buying power, value and P&L at the desk's newest
   prices, with their time), open paper positions with P&L and the time of the price behind it (a position with no price
-  says so, never zero; one past its expiration says it settles on the desk's next read), working orders when the book
-  keeps any, the eight newest closed paper trades with his note and how each ended against his stop and target, and the
+  says so, never zero; one past its expiration says it settles on the desk's next read; the close-at-stop/target switch
+  when on), his working day limit orders (one past its close says it ended), the eight newest closed paper trades with his note and how each ended against his stop and target, and the
   scorecard beside his real trades. `symbol` narrows the lists to one ticker. It never places, closes or changes a paper
-  order and does not settle an expiry (`view(settle_expired=False)`): it writes nothing. Prices are the desk's kept
+  order, and neither settles an expiry nor ends a lapsed day order (`view(settle_expired=False)`): it writes nothing. Prices are the desk's kept
   ticks (`desk_ticks.kept_rows`): no quote read and no Robinhood call. Tickers he does not follow are left out of the
   lists and stay in the totals. Desk and Telegram turns get it; it is book context, never offered to research jobs;
   replay says it is unavailable, the fixture serves a simulated book. Paper actions from the copilot, if ever wanted,
@@ -2076,7 +2104,7 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   position alerts'; sent at most once (the kept file says `sending` before the send; a send that may have landed is
   `unknown`, never resent; one not sent within two hours is `expired`).
 
-Proof: `backend/tests/test_paper_book.py`, `backend/tests/test_copilot_paper.py`, `frontend/e2e/copilot-desk-paper.spec.ts`,
+Proof: `backend/tests/test_paper_book.py`, `backend/tests/test_paper_orders.py`, `backend/tests/test_copilot_paper.py`, `frontend/e2e/copilot-desk-paper.spec.ts`,
 `frontend/e2e/copilot-desk-paper-review.spec.ts`.
 
 ## Chatter
@@ -3606,8 +3634,8 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   with the automatic week review and Watch your day), `radar_setup` 4 (Radar
   single pings that carry a [setup card](radar.md#setup-cards-off-by-default),
   ranked just above `radar_event`), `radar_event` 4 (Radar's other single
-  pings), `radar_digest` 2, `thesis_watch` 2, `research` 1, `paper_review` 1
-  (the Friday [paper review](#paper)). Before 09:30
+  pings), `radar_digest` 2, `thesis_watch` 2, `research` 1, `paper` 6 (his
+  [paper book](#paper)'s PAPER pings) and `paper_review` 1 (the Friday [paper review](#paper)), ranked last. Before 09:30
   New York these kinds together also have `PING_PREOPEN_ALLOWANCE` (default 2)
   pings, so pre-open headlines cannot spend the day. While the
   [morning brief](#pre-market-prep) is on and not yet decided today, one of them

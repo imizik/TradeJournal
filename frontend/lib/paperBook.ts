@@ -10,24 +10,35 @@ export const PAPER_EVENT = "tradejournal:paper-changed";
 
 export type PaperLeg = { quote: string; action: "buy" | "sell"; strike: number | null };
 export type PaperMark = { per_share: number; value: number; pnl: number; pct: number | null; at: number } | null;
-export type PaperVerdict = { kind: "target" | "stop" | "early" | "expiry" | "none" | "unknown"; text: string };
+/** ``auto``: the switch closed it at the stop or target, not his own hand. */
+export type PaperVerdict = { kind: "target" | "stop" | "early" | "expiry" | "none" | "unknown"; text: string; auto?: boolean };
 export type PaperPosition = {
   id: string; symbol: string; instrument: "stock" | "option" | "spread"; option_type: "call" | "put" | null; expiry: string | null;
   label: string; bias: "long" | "short"; credit: boolean; width: number | null; multiplier: number; quantity: number; remaining: number;
   per_share: number; cash: number; basis: number; stock: number | null; note: string | null; stop: number | null; target: number | null;
   opened_at: number; status: "open" | "closed" | "expired"; closed_at: number | null; realized: number; legs: PaperLeg[];
   awaiting_close: boolean; mark?: PaperMark; verdict?: PaperVerdict;
+  /** Open positions: the "Close automatically at stop/target" switch, when each level was touched, an automatic exit
+   *  waiting for a fresh bid, and how many a working sell limit holds. */
+  auto?: boolean; touched?: { stop?: number; target?: number }; exiting?: boolean; held?: number;
   exits?: { kind: "close" | "expire"; at: number; quantity: number; per_share: number; cash: number; pnl: number; stock: number | null }[];
 };
 export type PaperStats = {
   trades: number; pnl: number; win_rate: number | null; avg_win: number | null; avg_loss: number | null; largest_loss: number | null;
   curve: { day: string; pnl: number }[]; open_pnl?: number | null;
 };
+/** A working day limit order: ``check`` is the minute's last look (its quote's time, the natural price then, or why
+ *  it could not fill on it). */
+export type PaperWorkingOrder = {
+  id: string; side: "open" | "close"; symbol: string; instrument: "stock" | "option" | "spread"; label: string; multiplier: number;
+  quantity: number; limit: number; pays: boolean; reserve: number; placed_at: number; expires_at: number; position: string | null;
+  check: { at: number; quoted_at: number | null; natural: number | null; issue: string | null } | null;
+};
 export type PaperBook = {
   run: null | { id: string; number: number; starting_cash: number; started_at: number };
   default_cash?: number;
-  account?: { cash: number; collateral: number; buying_power: number; equity: number | null; pnl: number | null; unpriced: number; prices_at: number | null };
-  positions?: PaperPosition[]; closed?: PaperPosition[];
+  account?: { cash: number; collateral: number; reserved?: number; buying_power: number; equity: number | null; pnl: number | null; unpriced: number; prices_at: number | null };
+  positions?: PaperPosition[]; closed?: PaperPosition[]; orders?: PaperWorkingOrder[];
   score?: { paper: PaperStats; real: PaperStats };
   earlier: { number: number; started_at: number; ended_at: number; starting_cash: number; realized: number; trades: number; left_open: number }[];
   market_open: boolean;
@@ -86,6 +97,31 @@ export async function fillClose(positionId: string, quantity: number, key: strin
   changed();
   return reply.filled;
 }
+
+/** A day limit order: it works until a fresh quote crosses it, the close or a cancel; ``filled`` when it crossed at once. */
+export type PaperPlaced = { working: (PaperWorkingOrder & { buying_power_after: number }) | null; filled: PaperFill | null; duplicate?: boolean };
+export async function placeLimitOpen(order: PaperOrder, quantity: number, limit: number, levels: Levels, key: string) {
+  const reply = await post<PaperPlaced>("/copilot/paper/orders", { action: "open", order_type: "limit", limit_price: limit, ...order, quantity, ...levels, order_key: key });
+  changed();
+  return reply;
+}
+export async function placeLimitClose(positionId: string, quantity: number, limit: number, key: string) {
+  const reply = await post<PaperPlaced>("/copilot/paper/orders", { action: "close", order_type: "limit", limit_price: limit, position_id: positionId, quantity, order_key: key });
+  changed();
+  return reply;
+}
+export async function cancelPaperOrder(orderId: string) {
+  await post<{ canceled: string }>("/copilot/paper/orders/cancel", { order_id: orderId });
+  changed();
+}
+export async function setPaperAuto(positionId: string, on: boolean) {
+  await post<{ auto: boolean }>("/copilot/paper/auto", { position_id: positionId, on, order_key: orderKey() });
+  changed();
+}
+
+/** Whether a spread takes in a credit to open: a call spread buying the higher strike, a put spread buying the lower. */
+export const isCredit = (order: PaperOrder) => order.instrument === "spread"
+  && (order.option_type === "call" ? order.long_strike > order.short_strike : order.long_strike < order.short_strike);
 
 /** A paper position's P&L at the desk's live prices (each leg's tick; a spread is the bought leg less the sold), by the
  *  server's own formula: worth × multiplier × held, plus the opening cash left (negative for a debit). The server's

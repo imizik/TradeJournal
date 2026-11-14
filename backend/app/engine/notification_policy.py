@@ -3,7 +3,7 @@
 Every copilot-side sender (open-trade alerts, plan nudges and link pings, plan
 time stops, a confirmed plan's entry and invalidation alerts, pre-market prep,
 the automatic week review, Watch your day, the evening review, fill-time pattern interrupts, Radar alerts, thesis watch, research results, the
-position companion, the Friday paper review) keeps its own outbox, its own at-most-once delivery and its
+position companion, his paper book's minute, the Friday paper review) keeps its own outbox, its own at-most-once delivery and its
 own expiry. Right before it hands a message to ``ntfy`` it asks this module one
 question, ``decide``: **send now, merge, or hold**. ``ntfy.py`` stays a
 transport. Jo's senders (Codex) are not gated here.
@@ -45,7 +45,8 @@ The policy, in the order it is applied:
   share it), ``prep`` 1 (shared with ``week_review`` and ``day_replay``),
   ``radar_setup`` 4 (Radar single pings that carry a setup card), ``radar_event`` 4 (Radar's other single
   pings), ``radar_digest`` 2, ``thesis_watch``
-  2, ``research`` 1 and ``paper_review`` 1 (the Friday paper review). One kind spending its budget never takes another's: on
+  2, ``research`` 1, ``paper`` 6 (his paper book's limit fills, automatic exits and stop or target touches,
+  only in the regular session) and ``paper_review`` 1 (the Friday paper review). One kind spending its budget never takes another's: on
   October 29, 2026 the old shared pool was gone by 09:50 on prep, thesis watch,
   research and nudges, and every Radar ping and the evening review were held.
   Before 09:30 New York these kinds together also have ``PING_PREOPEN_ALLOWANCE``
@@ -63,7 +64,7 @@ The policy, in the order it is applied:
   90-minute last-day and the day-before-expiry alerts ranked with it) > ``entry``
   > ``hold_hour`` > ``interrupt`` > ``companion_update`` > ``nudge`` / ``link`` / ``companion_adopt`` > ``prep`` (and ``week_review``,
   ``day_replay``) > ``evening_review`` > ``radar_setup`` > ``radar_event`` > ``radar_digest`` >
-  ``thesis_watch`` > ``research`` > ``paper_review``.
+  ``thesis_watch`` > ``research`` > ``paper`` > ``paper_review``.
 
 Every decision is one ``PhonePing`` row (``sent``, ``merged``, ``suppressed``,
 ``over_cap``, ``not_followed``), so the owner can see what was held back (the Dashboard Plans
@@ -108,7 +109,7 @@ from app.models import CaptureLink, Fill, PhonePing, Trade, TradeFill
 log = logging.getLogger(__name__)
 
 PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "interrupt", "companion_update", "nudge", "prep", "evening_review",
-            "radar_setup", "radar_event", "radar_digest", "thesis_watch", "research", "paper_review")
+            "radar_setup", "radar_event", "radar_digest", "thesis_watch", "research", "paper", "paper_review")
 ALIASES = {"expiry_first": "time_stop", "expiry_eve": "time_stop", "wrong_way": "hold_hour", "link": "nudge", "no_plan": "nudge",
            "companion_adopt": "nudge",
            "week_review": "prep", "day_replay": "prep"}
@@ -116,12 +117,12 @@ NEVER_QUIET = 2  # ranks 0-1 (last-day final, invalidation) are never held by th
 NEVER_HELD = ("evening_review",)  # never held by the quiet window: it reports what was held
 # Each kind's own daily budget (PING_BUDGET_<KIND>); before the open it also shares the
 # pre-open allowance. The noun names the budget in a held ping's reason.
-BUDGETS = {"interrupt": 4, "companion_update": 12, "nudge": 2, "prep": 1, "radar_setup": 4, "radar_event": 4, "radar_digest": 2, "thesis_watch": 2, "research": 1,
+BUDGETS = {"interrupt": 4, "companion_update": 12, "nudge": 2, "prep": 1, "radar_setup": 4, "radar_event": 4, "radar_digest": 2, "thesis_watch": 2, "research": 1, "paper": 6,
            "paper_review": 1}
 BUDGET_NAMES = {"interrupt": ("pattern interrupts'", "message"), "companion_update": ("the position companion's", "update"), "nudge": ("plan nudges'", "ping"), "prep": ("the prep and review pings'", "ping"),
                 "radar_setup": ("Radar's", "setup ping"), "radar_event": ("Radar's", "single ping"),
                 "radar_digest": ("Radar's", "digest"), "thesis_watch": ("thesis watch's", "ping"), "research": ("research's", "ping"),
-                "paper_review": ("the paper review's", "ping")}
+                "paper": ("paper trading's", "ping"), "paper_review": ("the paper review's", "ping")}
 PREOPEN = 9 * 60 + 30  # New York; budgeted pings decided before it also count against PING_PREOPEN_ALLOWANCE
 HELD = ("merged", "suppressed", "over_cap", "not_followed")
 RUN_SECONDS = 30
@@ -375,7 +376,7 @@ def _label(kind: str) -> str:
             "no_plan": "plan nudge", "link": "plan link", "prep": "pre-market prep", "week_review": "week review", "day_replay": "Watch your day",
             "evening_review": "evening review", "expiry_eve": "day-before-expiry", "radar_digest": "Radar digest",
             "radar_setup": "Radar setup", "radar_event": "Radar", "thesis_watch": "thesis watch", "research": "research", "companion_adopt": "adopted position",
-            "companion_update": "companion update", "paper_review": "paper review"}.get(kind, kind)
+            "companion_update": "companion update", "paper": "paper", "paper_review": "paper review"}.get(kind, kind)
 
 
 def delivered(db: Session, ticket: Ticket, now: float) -> None:

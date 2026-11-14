@@ -10,9 +10,23 @@ whether he is right.
 - **What it trades.** Shares (bought, then sold), a long call or put, and a two-leg vertical (debit or credit) as the
   desk's ticket builds one. Options carry the ×100 multiplier. A credit spread holds its width as collateral, as
   Robinhood does, so buying power falls by its most-to-lose.
+- **Limit orders (day orders).** Placed from 4:00 AM New York to the close on a trading day, a limit works until a fresh
+  quote crosses it or until the day's close or his cancel, whichever is first: a buy (or any order that pays) fills when
+  the natural price paid is at or below the limit, at the ask; a sell (or any order that receives) when the natural price
+  taken in is at or above it, at the bid. An opening limit holds its most-to-pay (a credit spread: its width less the
+  limit credit) out of buying power while it works; a closing one holds its quantity, so a second close cannot sell it
+  twice. ``minute_pass`` checks the working orders once a minute in the regular session with one quote read through the
+  chart feed; a quote whose sides are older than ``FRESH_SECONDS`` never fills, and the order shows the last check's
+  quote time (``_checks``, kept in memory).
+- **Stop and target.** Stock prices. By default they are only recorded and graded after the exit; a touch (the first
+  completed regular-session 1-minute bar of the underlying past the level, the setup scanner's rule) is recorded once
+  per level (``touch``) for a ping. The session's final minute is not judged (it completes after the close). With the position's switch on (``auto``), the first such bar after the switch
+  triggers (``trigger``; a bar touching both is the stop) a sell of all that is left at the next fresh bid, and the
+  exit's grade says "auto".
 - **Expiry.** An option or spread still open after its expiration's close settles at intrinsic value from the
   underlying's regular-session close (``_close_for``: the stored close, else one daily-history read through the feed).
-- **Append-only.** Every fill is a ``PaperEvent``; a position is their fold, so nothing is ever edited. A position's
+- **Append-only.** Every fill is a ``PaperEvent``; a position is their fold, so nothing is ever edited. An order's life
+  (``order``, then its fill or one ``cancel``/``lapse`` keyed ``end:<order>``), the switch and the touches are events too. A position's
   P&L at a moment is the sum of its cash flows plus what it is worth then.
 - **Progress.** Closed paper trades (win rate, average winner and loser, largest loss, P&L by day, each trade's note and
   how it ended against his stop and target) beside his real closed trades over the same dates, read from the journal's
@@ -34,6 +48,7 @@ from sqlmodel import Session, col, select
 from app.engine import desk_ticket
 from app.engine import scanner_rules as rules
 from app.engine.chart_math import ET
+from app.engine.level_alerts import LATENESS
 from app.engine.occ import occ_symbol
 from app.engine.setup_scanner import _fresh
 from app.models import Account, PaperEvent, PaperRun, Trade
@@ -48,6 +63,11 @@ FRESH_SECONDS = rules.MAX_DELAY_SECONDS  # both sides of a fill's quote were upd
 SETTLE_AFTER_SECONDS = 15 * 60  # an expiry settles this long after its close, once the close is known
 NOTE_CHARS = 280
 CLOSED_SHOWN = 50
+POSITION_KINDS = ("open", "close", "expire")  # the events a position folds; orders, switches and touches are their own
+SPEC_KEYS = ("symbol", "instrument", "option_type", "expiry", "multiplier", "label", "bias", "credit", "width", "legs")
+LATE_PING_SECONDS = 10 * 60  # a touch noticed later than this after its bar is recorded without a ping
+EPS = 1e-9
+_checks: dict[str, dict] = {}  # order id -> the last check: when, the quote's time, the natural price or what stopped it
 _TICKER = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 _KEY = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 
@@ -187,10 +207,12 @@ def _name(quote_symbol: str, spec: dict) -> str:
     return f"the ${leg['strike']:g} {spec['option_type']}"
 
 
-def price(spec: dict, quotes: dict, now: float, closing: bool) -> dict:
+def price(spec: dict, quotes: dict, now: float, closing: bool, since: float | None = None) -> dict:
     """One unit's cash per share at the live quote, signed (+ money in, − money out): each leg bought at its ask, each
     sold at its bid (a closing order reverses the legs). Refuses a leg with no quote, no usable bid and ask, or a quote
-    either of whose sides is older than ``FRESH_SECONDS``."""
+    either of whose sides is older than ``FRESH_SECONDS`` (or than ``since``, when that is later: an automatic exit's
+    trigger)."""
+    cutoff = max(now - FRESH_SECONDS, since or 0.0)
     cash, legs, times = 0.0, {}, []
     for leg in spec["legs"]:
         action = leg["action"] if not closing else ("sell" if leg["action"] == "buy" else "buy")
@@ -200,7 +222,7 @@ def price(spec: dict, quotes: dict, now: float, closing: bool) -> dict:
         bid, ask = quote.bid, quote.ask
         if bid is None or ask is None or bid < 0 or ask < bid or (action == "buy" and not ask > 0):
             raise PaperError(f"{name.capitalize() if name.startswith('the') else name} has no usable bid and ask right now, so no paper fill.", 409)
-        if not _fresh(quote, now - FRESH_SECONDS):
+        if not _fresh(quote, cutoff):
             stamps = [t / 1000 for t in (quote.bid_date, quote.ask_date) if isinstance(t, (int, float))]
             when = clock(min(stamps)) if stamps else "an unknown time"
             raise PaperError(f"The quote for {name} is from {when}, not live: no paper fill on a stale price.", 409)
@@ -258,6 +280,8 @@ def fold(events: list[PaperEvent]) -> list[dict]:
     ``applied`` is the cash the fold actually used, the only cash the account counts."""
     out: dict[uuid.UUID, dict] = {}
     for event in events:
+        if event.kind not in POSITION_KINDS:
+            continue
         data = json.loads(event.data_json)
         if event.kind == "open":
             out[event.position_id] = {**data, "id": str(event.position_id), "opened_at": _epoch(event.effective_at),
@@ -282,13 +306,55 @@ def fold(events: list[PaperEvent]) -> list[dict]:
     return list(out.values())
 
 
-def account(run: PaperRun, positions: list[dict]) -> dict:
-    """Cash is the start plus every fill's cash the fold applied; a credit spread's width is held as collateral, so
-    buying power is the cash less it."""
+def account(run: PaperRun, positions: list[dict], working: list[dict] = ()) -> dict:
+    """Cash is the start plus every fill's cash the fold applied; a credit spread's width is held as collateral, and a
+    working opening limit holds its most-to-pay, so buying power is the cash less both."""
     cash = round(run.starting_cash + sum(p["applied"] for p in positions), 2)
     collateral = round(sum(p["width"] * p["multiplier"] * p["remaining"] for p in positions
                            if p["status"] == "open" and p["credit"]), 2)
-    return {"cash": cash, "collateral": collateral, "buying_power": round(cash - collateral, 2)}
+    reserved = round(sum(o["reserve"] for o in working if o["status"] == "working" and o["side"] == "open"), 2)
+    return {"cash": cash, "collateral": collateral, "reserved": reserved, "buying_power": round(cash - collateral - reserved, 2)}
+
+
+def orders(events: list[PaperEvent]) -> list[dict]:
+    """Each limit order from its events, oldest first: ``working`` until its fill (an event carrying its ``order_id``)
+    or its one ``cancel``/``lapse``. Placed orders first, then what ended them in the order they were recorded (a fill is
+    stamped with its quote's time, which may be a moment before the order)."""
+    out: dict[str, dict] = {}
+    for event in events:
+        if event.kind == "order":
+            out[str(event.position_id)] = {**json.loads(event.data_json), "id": str(event.position_id),
+                                           "placed_at": _epoch(event.effective_at), "status": "working", "ended_at": None,
+                                           "reason": None, "filled": None}
+    for event in sorted(events, key=lambda e: (e.recorded_at, str(e.id))):
+        if event.kind in ("order", "auto", "touch", "trigger", "expire"):
+            continue
+        data = json.loads(event.data_json)
+        found = out.get(str(event.position_id) if event.kind in ("cancel", "lapse") else str(data.get("order_id") or ""))
+        if found is None or found["status"] != "working":
+            continue
+        found["ended_at"] = _epoch(event.effective_at)
+        if event.kind in ("cancel", "lapse"):
+            found["status"], found["reason"] = ("canceled" if event.kind == "cancel" else "expired"), data.get("reason")
+        else:
+            found["status"] = "filled"
+            found["filled"] = {k: data.get(k) for k in ("quantity", "per_share", "cash")}
+    return list(out.values())
+
+
+def switches(events: list[PaperEvent]) -> dict[str, dict]:
+    """Each position's "Close automatically at stop/target" switch: its newest setting (off when never set), the event
+    that set it and when."""
+    out: dict[str, dict] = {}
+    for event in sorted((e for e in events if e.kind == "auto"), key=lambda e: (e.effective_at, e.recorded_at, str(e.id))):
+        out[str(event.position_id)] = {"on": bool(json.loads(event.data_json).get("on")), "id": str(event.id),
+                                       "at": _epoch(event.effective_at)}
+    return out
+
+
+def _held(working: list[dict], position_id: str) -> int:
+    """How many of a position a working closing limit holds."""
+    return sum(o["quantity"] for o in working if o["status"] == "working" and o["side"] == "close" and o["position"] == position_id)
 
 
 def _store(db: Session, run: PaperRun, position_id: uuid.UUID, kind: str, key: str, at: float, data: dict) -> bool:
@@ -351,7 +417,7 @@ def open_order(db: Session, body: dict, now: float, preview: bool = False) -> di
     stop, target = _levels(body, spec["bias"], stock)
     cash = round(per * spec["multiplier"] * qty, 2)
     events = _events(db, run)
-    book = account(run, fold(events))
+    book = account(run, fold(events), orders(events))
     held = round(spec["width"] * spec["multiplier"] * qty, 2) if spec["credit"] else 0.0
     need = round(held - cash, 2)  # a debit: what it costs; a credit spread: the width held less the credit taken in
     if need > book["buying_power"] + 0.005:
@@ -378,27 +444,454 @@ def close_order(db: Session, body: dict, now: float, preview: bool = False) -> d
         position_id = uuid.UUID(str(body.get("position_id")))
     except ValueError:
         raise PaperError("Name the paper position.") from None
-    position = next((p for p in fold(_events(db, run)) if p["id"] == str(position_id)), None)
+    events = _events(db, run)
+    position = next((p for p in fold(events) if p["id"] == str(position_id)), None)
     if position is None or position["status"] != "open":
         raise PaperError("That paper position is not open.", 409)
-    qty = position["remaining"] if body.get("quantity") is None else _quantity(body.get("quantity"), position["remaining"])
+    held = _held(orders(events), position["id"])
+    free = position["remaining"] - held
+    if free <= 0:
+        raise PaperError(f"All {position['remaining']:,} are held for a working limit order: cancel it to sell another way.", 409)
+    qty = free if body.get("quantity") is None else _quantity(body.get("quantity"), free)
     key = None if preview else _key(body)
     if not _market_open(now):
         raise PaperError("The market is closed: paper orders fill only in the regular session, on a live quote.", 409)
     quotes = _live_quotes([leg["quote"] for leg in position["legs"]] + [position["symbol"]])
     fill = price(position, quotes, now, closing=True)
+    if position["instrument"] == "spread" and position["credit"] and fill["per_share"] >= 0:
+        raise PaperError("Buying this credit spread back pays nothing at the natural price right now: the quotes are off. No paper fill.", 409)
     cash = round(fill["per_share"] * position["multiplier"] * qty, 2)
     basis = position["basis_left"] if qty == position["remaining"] else round(position["cash"] * qty / position["quantity"], 2)
     stock = _stock_price(position, quotes)
     data = {"quantity": qty, "per_share": fill["per_share"], "cash": cash, "legs_filled": fill["legs"], "stock": stock}
     result = {"label": position["label"], "quantity": qty, "per_share": fill["per_share"], "cash": cash,
               "quoted_at": fill["quoted_at"], "legs": fill["legs"], "stock": stock, "pnl": round(cash + basis, 2),
-              "all": qty == position["remaining"]}
+              "all": qty == position["remaining"], "held": held}
     if preview:
         return {"preview": result}
     if not _store(db, run, position_id, "close", key, fill["quoted_at"], data):
         return {"filled": None, "duplicate": True}
     return {"filled": result}
+
+
+# --- limit orders (day orders) ---------------------------------------------------------------------------------------
+
+def _window(now: float) -> tuple[str, tuple[int, int] | None]:
+    """The New York phase now (pre, regular, post or closed) and today's regular session in epoch seconds."""
+    from app.engine import desk_sparks
+    _day, phase, _hours, regular = desk_sparks._session(now)
+    return phase, regular
+
+
+def _px(value: float) -> str:
+    return f"{value:,.2f}" if abs(value) >= 1 or round(value, 2) == value else f"{value:.4f}".rstrip("0")
+
+
+def _pays(spec: dict, closing: bool) -> bool:
+    """Whether the order pays (buying, opening a debit, buying back a credit spread) rather than takes money in."""
+    return spec["credit"] if closing else not spec["credit"]
+
+
+def _side_words(spec: dict, closing: bool) -> str:
+    if spec["instrument"] == "spread":
+        return "Close" if closing else "Open"
+    return "Sell" if closing else "Buy"
+
+
+def place_limit(db: Session, body: dict, now: float, preview: bool = False) -> dict:
+    """Place a day limit order (``action`` open, or close for an open position): it works until a fresh quote crosses
+    the limit, the day's close or his cancel. Placed from 4:00 AM New York until the close on a trading day; checked at
+    once when the market is open, then once a minute (``minute_pass``)."""
+    run = current_run(db, lock=not preview)
+    if run is None:
+        raise PaperError("Start a paper account first.", 409)
+    limit = _money(body.get("limit_price"))
+    if limit is None:
+        raise PaperError("Name the limit price.")
+    phase, regular = _window(now)
+    if regular is None or phase not in ("pre", "regular") or now >= regular[1]:
+        raise PaperError("A paper limit is a day order: place it from 4:00 AM ET until the close on a trading day.", 409)
+    expires = float(regular[1])
+    events = _events(db, run)
+    positions = fold(events)
+    working = [o for o in orders(events) if o["status"] == "working"]
+    book = account(run, positions, working)
+    closing = body.get("action") == "close"
+    if closing:
+        try:
+            position_id = uuid.UUID(str(body.get("position_id")))
+        except ValueError:
+            raise PaperError("Name the paper position.") from None
+        position = next((p for p in positions if p["id"] == str(position_id)), None)
+        if position is None or position["status"] != "open":
+            raise PaperError("That paper position is not open.", 409)
+        free = position["remaining"] - _held(working, position["id"])
+        if free <= 0:
+            raise PaperError(f"All {position['remaining']:,} are already held for a working limit order.", 409)
+        qty = free if body.get("quantity") is None else _quantity(body.get("quantity"), free)
+        spec = {k: position[k] for k in SPEC_KEYS}
+        extra = {"position": position["id"]}
+    else:
+        spec = contract(body, _ny_day(now))
+        qty = _quantity(body.get("quantity"))
+        stock = _marks([spec["symbol"]]).get(spec["symbol"], {}).get("last")
+        stop, target = _levels(body, spec["bias"], stock if isinstance(stock, (int, float)) and stock > 0 else None)
+        extra = {"note": _note(body), "stop": stop, "target": target}
+    if spec["instrument"] == "spread" and limit >= spec["width"]:
+        raise PaperError(f"A {limit:g} limit on a {spec['width']:g}-wide spread can never be a real market.")
+    pays = _pays(spec, closing)
+    reserve = 0.0 if closing else round((limit if pays else spec["width"] - limit) * spec["multiplier"] * qty, 2)
+    if reserve > book["buying_power"] + 0.005:
+        raise PaperError(f"Not enough paper buying power: this limit holds {usd(reserve)} and you have {usd(book['buying_power'])}.", 409)
+    data = {**spec, **extra, "side": "close" if closing else "open", "pays": pays, "limit": limit, "quantity": qty,
+            "reserve": reserve, "expires_at": expires}
+    shown = {"label": spec["label"], "quantity": qty, "limit": limit, "pays": pays, "reserve": reserve, "expires_at": expires,
+             "buying_power": book["buying_power"], "buying_power_after": round(book["buying_power"] - reserve, 2)}
+    if preview:
+        return {"preview": shown}
+    key = _key(body)
+    order_id = uuid.uuid4()
+    if not _store(db, run, order_id, "order", key, now, data):
+        return {"working": None, "filled": None, "duplicate": True}
+    filled = None
+    if _market_open(now):
+        try:  # marketable now: one quote read, as a market order makes
+            found = _execute(db, now, only=str(order_id))
+            filled = found[0]["filled"] if found else None
+        except Exception:  # noqa: BLE001 -- the order stands and is checked again within the minute
+            log.exception("paper limit: the first check failed")
+    return {"working": None if filled else {**shown, "id": str(order_id)}, "filled": filled}
+
+
+def cancel_order(db: Session, body: dict, now: float) -> dict:
+    run = current_run(db, lock=True)
+    if run is None:
+        raise PaperError("Start a paper account first.", 409)
+    order_id = str(body.get("order_id") or "")
+    found = next((o for o in orders(_events(db, run)) if o["id"] == order_id), None)
+    if found is None or found["status"] != "working":
+        db.rollback()
+        raise PaperError("That paper order is no longer working." if found else "No such paper order.", 409 if found else 404)
+    _store(db, run, uuid.UUID(order_id), "cancel", f"end:{order_id}", now, {"reason": "You canceled it."})
+    _checks.pop(order_id, None)
+    return {"canceled": order_id}
+
+
+def set_auto(db: Session, body: dict, now: float) -> dict:
+    """Turn a position's "Close automatically at stop/target" switch on or off (an ``auto`` event; the newest wins)."""
+    run = current_run(db, lock=True)
+    if run is None:
+        raise PaperError("Start a paper account first.", 409)
+    position_id = str(body.get("position_id") or "")
+    events = _events(db, run)
+    position = next((p for p in fold(events) if p["id"] == position_id), None)
+    if position is None or position["status"] != "open":
+        db.rollback()
+        raise PaperError("That paper position is not open.", 409)
+    if position.get("stop") is None and position.get("target") is None:
+        db.rollback()
+        raise PaperError("This position has no stop or target to close at.", 409)
+    on = body.get("on") is True
+    current = switches(events).get(position_id)
+    if bool(current and current["on"]) == on:
+        db.rollback()
+        return {"auto": on}
+    _store(db, run, uuid.UUID(position_id), "auto", f"auto:{_key(body)}", now, {"on": on})
+    return {"auto": on}
+
+
+def _tidy(db: Session, run: PaperRun, now: float) -> None:
+    """End each working order whose day is over (``lapse`` at the close) or whose position closed (``cancel``)."""
+    def due(events: list[PaperEvent]) -> list[tuple[dict, str, float, str]]:
+        positions = {p["id"]: p for p in fold(events)}
+        out = []
+        for o in orders(events):
+            if o["status"] != "working":
+                continue
+            if now >= o["expires_at"]:
+                out.append((o, "lapse", o["expires_at"], "A day order ends at the close."))
+            elif o["side"] == "close" and positions.get(o["position"], {}).get("status") != "open":
+                out.append((o, "cancel", now, "The position closed before it filled."))
+        return out
+    if not due(_events(db, run)):
+        return
+    locked = current_run(db, lock=True)
+    ending = due(_events(db, locked)) if locked is not None and locked.id == run.id else []
+    if not ending:
+        db.rollback()
+        return
+    for order, kind, at, reason in ending:
+        _store(db, locked, uuid.UUID(order["id"]), kind, f"end:{order['id']}", at, {"reason": reason})
+        _checks.pop(order["id"], None)
+
+
+def _quote_time(spec: dict, quotes: dict) -> float | None:
+    stamps = [t / 1000 for leg in spec["legs"] for q in [quotes.get(leg["quote"])] if q is not None
+              for t in (q.bid_date, q.ask_date) if isinstance(t, (int, float))]
+    return min(stamps) if stamps else None
+
+
+def _did(spec: dict, qty: int, per: float, legs: dict, at: float, closing: bool) -> str:
+    """"Bought 2 × NBIS $100 Call 11/20/26 at 3.40 (the ask), Nov 13 10:42 AM ET"."""
+    if spec["instrument"] == "spread":
+        verb, how = ("Closed" if closing else "Opened"), f"{_px(abs(per))} net {'credit' if per > 0 else 'debit'}"
+    else:
+        one = next(iter(legs.values()))
+        verb = "Bought" if one["action"] == "buy" else "Sold"
+        how = f"{_px(one['price'])} (the {'ask' if one['action'] == 'buy' else 'bid'})"
+    what = f"{qty:,} {spec['symbol']} shares" if spec["instrument"] == "stock" else f"{qty:,} × {spec['label']}"
+    return f"{verb} {what} at {how}, {clock(at)}"
+
+
+def _try_limit(db: Session, order: dict, quotes: dict, now: float, floor: float | None = None) -> dict | None:
+    closing = order["side"] == "close"
+    try:
+        fill = price(order, quotes, now, closing=closing, since=floor)
+    except PaperError as exc:
+        _checks[order["id"]] = {"at": now, "quoted_at": _quote_time(order, quotes), "natural": None, "issue": str(exc)}
+        return None
+    per = fill["per_share"]
+    crossed = -per <= order["limit"] + EPS if order["pays"] else per >= order["limit"] - EPS
+    issue = None
+    if order["instrument"] == "spread" and (abs(per) >= order["width"] or (not closing and (per >= 0) == order["pays"])
+                                            or (closing and order["pays"] and per >= 0)):
+        issue = "The spread's quotes are off right now (no real market at the natural price)."
+    _checks[order["id"]] = {"at": now, "quoted_at": fill["quoted_at"], "natural": round(abs(per), 4), "issue": issue}
+    if not crossed or issue:
+        return None
+    run = current_run(db, lock=True)
+    events = _events(db, run)
+    state = next((o for o in orders(events) if o["id"] == order["id"]), None)
+    if state is None or state["status"] != "working":
+        db.rollback()
+        return None
+    stock = _stock_price(order, quotes)
+    pnl = None
+    if closing:
+        position = next((p for p in fold(events) if p["id"] == order["position"]), None)
+        if position is None or position["status"] != "open":
+            db.rollback()
+            return None  # ``_tidy`` ends it
+        qty = min(order["quantity"], position["remaining"])
+        cash = round(per * position["multiplier"] * qty, 2)
+        basis = position["basis_left"] if qty == position["remaining"] else round(position["cash"] * qty / position["quantity"], 2)
+        pnl = round(cash + basis, 2)
+        data = {"quantity": qty, "per_share": per, "cash": cash, "legs_filled": fill["legs"], "stock": stock,
+                "order_id": order["id"], "limit": order["limit"]}
+        kind, position_id = "close", uuid.UUID(position["id"])
+    else:
+        qty = order["quantity"]
+        cash = round(per * order["multiplier"] * qty, 2)
+        data = {**{k: order[k] for k in SPEC_KEYS}, "quantity": qty, "per_share": per, "cash": cash, "legs_filled": fill["legs"],
+                "stock": stock, "note": order.get("note"), "stop": order.get("stop"), "target": order.get("target"),
+                "order_id": order["id"], "limit": order["limit"]}
+        kind, position_id = "open", uuid.UUID(order["id"])
+    key = f"fill:{order['id']}"
+    if not _store(db, run, position_id, kind, key, fill["quoted_at"], data):
+        return None
+    _checks.pop(order["id"], None)
+    did = _did(order, qty, per, fill["legs"], fill["quoted_at"], closing)
+    money = f"{'Took in' if cash >= 0 else 'Cost'} {usd(abs(cash))}" + ("" if pnl is None else f"; {'made' if pnl >= 0 else 'lost'} {usd(abs(pnl))}")
+    return {"source": key, "symbol": order["symbol"], "title": f"PAPER · {order['symbol']} limit filled",
+            "body": f"Paper, not real money. {did}; your limit {_px(order['limit'])}. {money}.",
+            "filled": {"label": order["label"], "quantity": qty, "per_share": per, "cash": cash, "quoted_at": fill["quoted_at"],
+                       "legs": fill["legs"], "stock": stock, "pnl": pnl, "position_id": str(position_id), "limit": order["limit"]}}
+
+
+def _pending_exits(events: list[PaperEvent], positions: dict[str, dict]) -> list[tuple[dict, dict]]:
+    """Each open position whose switch is still on with a trigger from that switch and no automatic exit yet."""
+    keys = {e.order_key for e in events}
+    sw = switches(events)
+    out = []
+    for event in events:
+        if event.kind != "trigger":
+            continue
+        trigger = json.loads(event.data_json)
+        position = positions.get(str(event.position_id))
+        switch = sw.get(str(event.position_id))
+        if (position is None or position["status"] != "open" or not switch or not switch["on"]
+                or switch["id"] != trigger["auto_id"] or f"autoexit:{position['id']}:{trigger['auto_id']}" in keys):
+            continue
+        out.append((position, trigger))
+    return out
+
+
+def _try_exit(db: Session, position: dict, trigger: dict, quotes: dict, now: float, floor: float | None = None) -> dict | None:
+    """Sell all that is left of a triggered position at the first quote both of whose sides moved after the trigger's bar."""
+    try:
+        fill = price(position, quotes, now, closing=True, since=max(trigger["condition_at"], floor or 0.0))
+    except PaperError:
+        return None
+    per = fill["per_share"]
+    if position["instrument"] == "spread" and (abs(per) >= position["width"] or (position["credit"] and per >= 0)):
+        return None  # crossed legs: no real market to buy a credit spread back at
+    run = current_run(db, lock=True)
+    events = _events(db, run)
+    current = next((p for p in fold(events) if p["id"] == position["id"]), None)
+    switch = switches(events).get(position["id"])
+    if current is None or current["status"] != "open" or not switch or not switch["on"] or switch["id"] != trigger["auto_id"]:
+        db.rollback()
+        return None
+    qty = current["remaining"]
+    cash = round(per * current["multiplier"] * qty, 2)
+    pnl = round(cash + current["basis_left"], 2)
+    stock = _stock_price(current, quotes)
+    key = f"autoexit:{current['id']}:{trigger['auto_id']}"
+    data = {"quantity": qty, "per_share": per, "cash": cash, "legs_filled": fill["legs"], "stock": stock,
+            "auto": trigger["level"], "reference": trigger["reference"], "condition_at": trigger["condition_at"]}
+    if not _store(db, run, uuid.UUID(current["id"]), "close", key, fill["quoted_at"], data):
+        return None
+    _tidy(db, run, now)
+    level = trigger["level"]
+    return {"source": key, "symbol": current["symbol"], "title": f"PAPER · {current['symbol']} auto exit at the {level}",
+            "body": (f"Paper, not real money. {_touched_words(current, trigger)} "
+                     f"{_did(current, qty, per, fill['legs'], fill['quoted_at'], True)}: {'made' if pnl >= 0 else 'lost'} {usd(abs(pnl))}."),
+            "filled": {"label": current["label"], "quantity": qty, "per_share": per, "cash": cash, "pnl": pnl, "auto": level}}
+
+
+def _execute(db: Session, now: float, only: str | None = None) -> list[dict]:
+    """Check each working limit (or ``only`` that one) and each triggered automatic exit against one quote read."""
+    run = current_run(db)
+    if run is None or not _market_open(now):
+        return []
+    events = _events(db, run)
+    positions = {p["id"]: p for p in fold(events)}
+    working = [o for o in orders(events) if o["status"] == "working" and (only is None or o["id"] == only)]
+    exits = [] if only else _pending_exits(events, positions)
+    if not working and not exits:
+        return []
+    symbols = {leg["quote"] for spec in [*working, *(p for p, _ in exits)] for leg in spec["legs"]}
+    symbols |= {spec["symbol"] for spec in [*working, *(p for p, _ in exits)]}
+    try:
+        quotes = _live_quotes(sorted(symbols))
+    except PaperError as exc:
+        for o in working:
+            _checks[o["id"]] = {"at": now, "quoted_at": None, "natural": None, "issue": str(exc)}
+        return []
+    _phase, regular = _window(now)
+    floor = float(regular[0]) if regular else None  # a quote from before the open never fills an order working at it
+    out = [found for o in working if (found := _try_limit(db, o, quotes, now, floor))]
+    out += [found for position, trigger in exits if (found := _try_exit(db, position, trigger, quotes, now, floor))]
+    return out
+
+
+# --- stop and target touches -----------------------------------------------------------------------------------------
+
+def _touch(position: dict, bars: list[dict], start: float, now: float, only: str | None = None) -> dict | None:
+    """The first completed bar after ``start``'s minute past the stop or the target (both: the stop), the setup
+    scanner's rule (``scanner_rules.exit_condition``); ``only`` looks at one level."""
+    long = position["bias"] == "long"
+    stop = position.get("stop") if only in (None, "stop") else None
+    target = position.get("target") if only in (None, "target") else None
+    if stop is None and target is None:
+        return None
+    inf = float("inf")
+    found = rules.exit_condition(position["bias"], stop if stop is not None else (-inf if long else inf),
+                                 target if target is not None else (inf if long else -inf), bars, start, inf, inf, now, LATENESS)
+    if found is None or found["bar_start"] is None:
+        return None
+    bar = next(b for b in bars if b["time"] == found["bar_start"])
+    return {"level": found["reason"], "reference": found["reference"], "condition_at": found["condition_at"],
+            "bar_start": found["bar_start"], "low": bar["low"], "high": bar["high"]}
+
+
+def _touched_words(position: dict, touch: dict) -> str:
+    """"NBIS touched your stop 95 (the 10:41 AM ET bar's low 94.80).\""""
+    past = touch["low"] if (touch["level"] == "stop") == (position["bias"] == "long") else touch["high"]
+    word = "low" if past == touch["low"] else "high"
+    when = datetime.fromtimestamp(touch["bar_start"], ET).strftime("%I:%M %p").lstrip("0")
+    return f"{position['symbol']} touched your {touch['level']} {_px(touch['reference'])} (the {when} ET bar's {word} {_px(past)})."
+
+
+def _watch(db: Session, run: PaperRun, events: list[PaperEvent], now: float, minutes_for, opens_at: float) -> list[dict]:
+    """Each open position with a stop or target against today's regular-session minute bars of its stock: with the
+    switch on, the first touch after the switch is a ``trigger``; with it off, each level's first touch is a ``touch``
+    (a ping unless noticed more than ``LATE_PING_SECONDS`` after its bar)."""
+    today = _ny_day(now).isoformat()
+    watched = [p for p in fold(events) if p["status"] == "open" and (p.get("stop") is not None or p.get("target") is not None)
+               and not (p.get("expiry") and p["expiry"] < today)]  # an expired contract waits to settle, never pinged
+    if not watched:
+        return []
+    keys = {e.order_key for e in events}
+    sw = switches(events)
+    bars_of: dict[str, list[dict] | None] = {}
+    out = []
+    for position in watched:
+        symbol = position["symbol"]
+        if symbol not in bars_of:
+            try:
+                bars_of[symbol] = [b for b in minutes_for(symbol, now) if b["time"] >= opens_at]
+            except Exception as exc:  # noqa: BLE001 -- no bars this minute: the next pass looks again
+                log.warning("paper watch: no minute bars for %s: %s", symbol, type(exc).__name__)
+                bars_of[symbol] = None
+        bars = bars_of[symbol]
+        if not bars:
+            continue
+        switch = sw.get(position["id"])
+        if switch and switch["on"]:
+            key = f"trigger:{position['id']}:{switch['id']}"
+            found = None if key in keys else _touch(position, bars, max(position["opened_at"], switch["at"]), now)
+            if found is not None:
+                _store(db, run, uuid.UUID(position["id"]), "trigger", key, found["condition_at"],
+                       {**found, "auto_id": switch["id"], "noticed_at": now})
+            continue
+        for level in ("stop", "target"):
+            key = f"touch:{position['id']}:{level}"
+            if position.get(level) is None or key in keys:
+                continue
+            found = _touch(position, bars, position["opened_at"], now, only=level)
+            if found is None:
+                continue
+            late = now - found["condition_at"] > LATE_PING_SECONDS
+            if _store(db, run, uuid.UUID(position["id"]), "touch", key, found["condition_at"],
+                      {**found, "noticed_at": now, "late": late}) and not late:
+                out.append({"source": key, "symbol": symbol, "title": f"PAPER · {symbol} touched your {level}",
+                            "body": (f"Paper, not real money. {_touched_words(position, found)} Nothing was closed: "
+                                     f"Close automatically is off for {position['label']}.")})
+    return out
+
+
+def minute_pass(db: Session, now: float, minutes_for) -> list[dict]:
+    """The paper runner's minute (regular session only): end what is over, look for stop and target touches, then check
+    the working limits and triggered exits against one quote read. Returns what to ping, each once (its event's key)."""
+    run = current_run(db)
+    if run is None:
+        return []
+    _tidy(db, run, now)
+    phase, regular = _window(now)
+    if phase != "regular" or regular is None or not _market_open(now):
+        return []
+    out = _watch(db, run, _events(db, run), now, minutes_for, regular[0])
+    return out + _execute(db, now)
+
+
+def chart_marks(db: Session, symbol: str, since: float) -> list[dict]:
+    """The current run's paper entries and exits in ``symbol`` from ``since``, as the desk chart's marks (``kind``
+    paper), each at the stock's price when it filled."""
+    run = current_run(db)
+    if run is None:
+        return []
+    out = []
+    for p in fold(_events(db, run)):
+        if p["symbol"] != symbol:
+            continue
+        opened_side = "sell" if p["credit"] else "buy"
+        rows = [("open", p["opened_at"], p["quantity"], p["per_share"], p.get("stock"), p.get("limit"))]
+        rows += [(e["kind"], e["at"], e["quantity"], e["per_share"], e.get("stock"), e.get("auto")) for e in p["exits"]]
+        for kind, at, qty, per, stock, extra in rows:
+            if at < since:
+                continue
+            what = f"{qty:,} {symbol} shares" if p["instrument"] == "stock" else f"{qty:,} × {p['label']}"
+            if kind == "open":
+                verb, side = ("Opened" if p["instrument"] == "spread" else "Bought"), opened_side
+            elif kind == "expire":
+                verb, side = "Settled at expiry", ("buy" if opened_side == "sell" else "sell")
+            else:
+                verb, side = ("Closed" if p["instrument"] == "spread" else "Sold"), ("buy" if opened_side == "sell" else "sell")
+            auto = f" (auto at the {extra})" if kind == "close" and extra else ""
+            text = f"Paper: {verb} {what} at {_px(abs(per))}{auto}" + (f" · {symbol} {_px(stock)}" if stock and p["instrument"] != "stock" else "")
+            out.append({"kind": "paper", "at": int(at), "price": stock, "side": side, "text": text})
+    return out
 
 
 # --- expiry ----------------------------------------------------------------------------------------------------------
@@ -490,6 +983,11 @@ def verdict(position: dict) -> dict:
         return {"kind": "expiry", "text": f"Held to expiry; settled on the {last['stock']:g} close"}
     stop, target = position.get("stop"), position.get("target")
     stock = position["exits"][-1].get("stock") if position["exits"] else None
+    auto = position["exits"][-1].get("auto") if position["exits"] else None
+    if auto in ("stop", "target"):
+        level = stop if auto == "stop" else target
+        sold = f"; out with the stock at {stock:g}" if stock is not None else ""
+        return {"kind": auto, "auto": True, "text": f"Auto exit at the {auto}: the stock touched {level:g}{sold}"}
     if stop is None and target is None:
         return {"kind": "none", "text": "No stop or target set"}
     if stock is None:
@@ -531,7 +1029,13 @@ def real_trades(db: Session, since: datetime) -> dict:
     return stats(results, [(closed.date(), float(pnl)) for pnl, closed in rows])
 
 
-def _position_view(p: dict, marks: dict | None) -> dict:
+def _order_view(o: dict) -> dict:
+    keep = ("id", "side", "symbol", "instrument", "label", "multiplier", "quantity", "limit", "pays", "reserve", "placed_at",
+            "expires_at", "position", "note", "stop", "target")
+    return {**{k: o.get(k) for k in keep}, "check": _checks.get(o["id"])}
+
+
+def _position_view(p: dict, marks: dict | None, extra: dict | None = None) -> dict:
     keep = ("id", "symbol", "instrument", "option_type", "expiry", "label", "bias", "credit", "width", "multiplier",
             "quantity", "remaining", "per_share", "cash", "stock", "note", "stop", "target", "opened_at", "status",
             "closed_at", "realized")
@@ -541,6 +1045,7 @@ def _position_view(p: dict, marks: dict | None) -> dict:
     out["awaiting_close"] = bool(p.get("awaiting_close"))
     if marks is not None:
         out["mark"] = worth(p, marks)
+        out.update(extra or {})
     else:
         out["exits"] = [{k: e.get(k) for k in ("kind", "at", "quantity", "per_share", "cash", "pnl", "stock")} for e in p["exits"]]
         out["verdict"] = verdict(p)
@@ -549,20 +1054,36 @@ def _position_view(p: dict, marks: dict | None) -> dict:
 
 def view(db: Session, now: float, settle_expired: bool = True) -> dict:
     """The paper account, its open positions (with the desk's newest prices), closed trades and the scorecard.
-    ``settle_expired=False`` (the copilot's read) writes nothing: an expired option still open is shown as it stands."""
+    ``settle_expired=False`` (the copilot's read) writes nothing: an expired option still open, and a day order past its
+    close, are shown as they stand until the desk's own read settles or ends them."""
     run = current_run(db)
     runs = list(db.exec(select(PaperRun).order_by(col(PaperRun.started_at), col(PaperRun.id))).all())
     if run is None:
         return {"run": None, "default_cash": DEFAULT_CASH, "earlier": [], "market_open": _market_open(now)}
+    if settle_expired:
+        _tidy(db, run, now)
     events = _events(db, run)
     positions = fold(events)
     if settle_expired and settle(db, run, positions, now):
         events = _events(db, run)
         positions = fold(events)
-    book = account(run, positions)
+    working = [o for o in orders(events) if o["status"] == "working"]
+    book = account(run, positions, working)
     open_ = [p for p in positions if p["status"] == "open"]
     marks = _marks(sorted({leg["quote"] for p in open_ for leg in p["legs"]}))
-    shown = [_position_view(p, marks) for p in reversed(open_)]
+    sw = switches(events)
+    keys = {e.order_key: e for e in events}
+    exiting = {p["id"] for p, _ in _pending_exits(events, {p["id"]: p for p in positions})}
+
+    def extra(p: dict) -> dict:
+        touched = {}
+        for level in ("stop", "target"):
+            found = keys.get(f"touch:{p['id']}:{level}")
+            if found is not None:
+                touched[level] = _epoch(found.effective_at)
+        return {"auto": bool(sw.get(p["id"], {}).get("on")), "touched": touched, "exiting": p["id"] in exiting,
+                "held": _held(working, p["id"])}
+    shown = [_position_view(p, marks, extra(p)) for p in reversed(open_)]
     priced = [s["mark"] for s in shown if s["mark"] is not None]
     equity = round(book["cash"] + sum(m["value"] for m in priced), 2) if len(priced) == len(shown) else None
     closed = [p for p in positions if p["status"] != "open"]
@@ -582,6 +1103,7 @@ def view(db: Session, now: float, settle_expired: bool = True) -> dict:
         "account": {**book, "equity": equity, "pnl": None if equity is None else round(equity - run.starting_cash, 2),
                     "unpriced": len(shown) - len(priced), "prices_at": min((m["at"] for m in priced), default=None)},
         "positions": shown,
+        "orders": [_order_view(o) for o in reversed(working)],
         "closed": [_position_view(p, None) for p in sorted(closed, key=lambda p: p["closed_at"], reverse=True)[:CLOSED_SHOWN]],
         "score": {"paper": paper, "real": real_trades(db, run.started_at)},
         "earlier": list(reversed(earlier)), "market_open": _market_open(now), "fresh_seconds": FRESH_SECONDS,
