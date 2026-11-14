@@ -11,6 +11,7 @@ import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
 import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
 import DeskPaper, { usePaperBook } from "@/components/copilot/DeskPaper";
+import DeskOvernight from "@/components/copilot/DeskOvernight";
 import PaperReviewCard from "@/components/copilot/PaperReview";
 import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
 import DeskRoll from "@/components/copilot/DeskRoll";
@@ -870,6 +871,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               live={booked.live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} />
             {/* His own paper book: paper positions, Close and Trim, and the scorecard beside his real trades. Never real money. */}
             <DeskPaper book={paper.book} failed={paper.failed} symbol={centreSymbol} top={<PaperReviewCard review={paper.book?.review} onAsk={actions.ask} />} />
+            {/* The QQQ overnight paper book: the one rule that passed its registered test, recorded live. Hidden until switched on. */}
+            <DeskOvernight on={on} />
             {/* Before the open and after the close the day's block (the brief, the day report) comes straight after the
                 book; in the session it waits under Watching. */}
             {dayPhase !== null && lower}

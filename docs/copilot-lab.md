@@ -2149,6 +2149,25 @@ failed read waits the full 15 minutes even when its state cannot be saved. Rows:
 Top Stories API (business section) when `NYT_API_KEY` is set. Headline, the feed's own summary, time and link, at most
 eight from the last 36 hours, tagged **NYT**. No article page is ever fetched and no subscription login is used.
 
+
+### QQQ overnight paper book
+
+The one market rule that passed its registered test ([result](../research/notes/qqq-overnight-2026-11-14.md)),
+recorded live with the test's own fills before any money (`backend/app/engine/overnight_book.py`). On each full session
+(the market calendar's close at 16:00; none on early closes) the first monitor pass at or after 15:59:00 buys QQQ at the
+ask of a fresh quote; the first pass at or after 09:30:00 in the next regular session sells it at the bid. Fresh means
+bid and ask both updated within 60 seconds. A 15:59 it tried on a calendar-confirmed full session with no fresh quote
+before 16:00 records the night as missed; a 15:59 it never saw (switched on or restarted later) leaves no row. An exit
+that cannot fill asks again once a minute through that session, never sells after hours, and no new night starts until
+it is sold. Normally one to three quote requests at 15:59 and one at the open, its own SQLite file (`OVERNIGHT_BOOK_PATH`), no migration, no messages, nothing
+placed. Run by the level alert monitor when `OVERNIGHT_BOOK_ENABLED=true` (the owner's switch; off by default).
+
+The desk shows it under the Paper section (`frontend/components/copilot/DeskOvernight.tsx`, read through
+`GET /copilot/desk/overnight` on the desk's minute request): holding or flat, the running nights, average in basis
+points and dollars on $10,000 a night, missed nights, the last five nights (a sale after 09:35 is marked late) and the
+backtest's +4.2 bp a night beside it. Hidden while switched off and empty; a failed read says so instead of showing old
+rows.
+
 ### Switching chatter on
 
 Both are off until set up; while off nothing is read and nothing is spent. Setting these on the server is Isaac's call.

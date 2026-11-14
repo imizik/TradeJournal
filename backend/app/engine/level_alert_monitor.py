@@ -33,7 +33,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import expression_recorder, fill_interrupts, level_alerts, notification_policy, phone, ping_images, practice_goal
+from app.engine import expression_recorder, fill_interrupts, level_alerts, notification_policy, overnight_book, phone, ping_images, practice_goal
 from app.engine.chart_feed import ChartFeedError
 from app.engine.chart_math import ET, chart_bars, normalize_bars, session_windows
 from app.models import LevelAlert, LevelAlertEvent
@@ -67,7 +67,7 @@ class LevelAlertMonitor:
     def __init__(self, engine, stream=None, *, feed=None, calendar=None, splits=None,
                  clock: Callable[[], float] = time.time, sweep_seconds: float = SWEEP_SECONDS, paper=None, scanner=None,
                  positions=None, nudges=None, time_stops=None, prep=None, week_review=None, day_replay=None, evening_review=None,
-                 follow_ups=None, interrupts=None, expressions=None, paper_review=None):
+                 follow_ups=None, interrupts=None, expressions=None, paper_review=None, overnight=None):
         self.engine = engine
         self.paper = paper  # Practice paper plans (A2), judged on the same pass and the same feed
         self.scanner = scanner  # Paper S1 and/or stock-only awareness; each retains its own enable flag.
@@ -83,6 +83,12 @@ class LevelAlertMonitor:
             except Exception:  # an unusable EXPRESSION_RECORDER_PATH turns off this stage, not the monitor
                 log.exception("Expression recorder could not open its file; it stays off")
         self.expressions = expressions  # Alternative expressions quoted at each option fill, when EXPRESSION_RECORDER_ENABLED
+        if overnight is None and overnight_book.enabled():
+            try:
+                overnight = overnight_book.OvernightBook(calendar, clock=clock)
+            except Exception:  # an unusable OVERNIGHT_BOOK_PATH turns off this stage, not the monitor
+                log.exception("Overnight book could not open its file; it stays off")
+        self.overnight = overnight  # The QQQ overnight paper book, when OVERNIGHT_BOOK_ENABLED
         self.follow_ups = follow_ups  # notification_policy.FollowUps: what the owner did after each ping
         self.prep = prep  # The copilot's pre-market prep ping, when PREMARKET_PREP_ENABLED
         self.week_review = week_review  # The automatic week review ping, when WEEK_REVIEW_AUTO_ENABLED
@@ -221,6 +227,8 @@ class LevelAlertMonitor:
                                                         if self.expressions is not None:
                                                             await asyncio.to_thread(self.expressions.run)
                                                     finally:
+                                                        if self.overnight is not None:
+                                                            await asyncio.to_thread(self.overnight.run)  # never raises
                                                         if self.follow_ups is not None:
                                                             await asyncio.to_thread(self.follow_ups.run)
 
