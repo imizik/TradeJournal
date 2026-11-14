@@ -12,7 +12,7 @@ import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/componen
 import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
 import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
 import { useDeskActionHost } from "@/components/copilot/DeskActionCard";
-import type { ClosingTicket } from "@/lib/closingTicket";
+import type { AnyClosingTicket } from "@/lib/closingTicket";
 import CopilotPanel, { rememberedThread, type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import DecisionBar from "@/components/copilot/DecisionBar";
 import FillLinkBar, { FillsToLink, useFillLinks } from "@/components/copilot/FillLinkBar";
@@ -223,15 +223,15 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const tickets = useTicketPlans(on);
   const [ticketFor, setTicketFor] = useState<string | null>(null);
   const [ticketPick, setTicketPick] = useState<TicketPick | null>(null); // the Chain tab's Put on ticket
-  const [ticketClose, setTicketClose] = useState<ClosingTicket | null>(null); // a held option's Close at target / stop
+  const [ticketClose, setTicketClose] = useState<AnyClosingTicket | null>(null); // a held option's Close at target / stop, or a copilot close card
   const [checkSeed, setCheckSeed] = useState<{ text: string; n: number } | null>(null); // the Chain tab's Check it
   useEffect(() => { if (centreTab !== "check") setCheckSeed(null); }, [centreTab]); // eslint-disable-line react-hooks/set-state-in-effect -- the Chain's contract fills Check a call once, not on every later visit
   const ticketLinked = useRef(false); // a ?ticket= link on a phone: the Ticket comes into view once the book above it has read
   useEffect(() => {
-    const show = (id: string | null, pick: TicketPick | null = null, close: ClosingTicket | null = null) => { setTicketFor(id); setTicketPick(pick); setTicketClose(close); setCentreTab("ticket"); showCentre(); };
+    const show = (id: string | null, pick: TicketPick | null = null, close: AnyClosingTicket | null = null) => { setTicketFor(id); setTicketPick(pick); setTicketClose(close); setCentreTab("ticket"); showCentre(); };
     const onTicket = (event: Event) => {
       event.preventDefault();
-      const detail = (event as CustomEvent<{ investigationId?: string; pick?: TicketPick; close?: ClosingTicket }>).detail;
+      const detail = (event as CustomEvent<{ investigationId?: string; pick?: TicketPick; close?: AnyClosingTicket }>).detail;
       if (detail.close) show(null, null, detail.close);
       else if (detail.investigationId) show(detail.investigationId, detail.pick ?? null);
     };
@@ -315,7 +315,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const planTrade = useCallback(() => go(PLAN_HREF), [go]);
   const [refresh, setRefresh] = useState(0);
   // The copilot's desk action cards: a view card moves the centre (Undo puts it back); a tap that changed a list reads again.
-  useDeskActionHost({ picked, tab: centreTab, setPicked, setPickedKey, setTab: setCentreTab, setRefresh, setSheet });
+  useDeskActionHost({ picked, tab: centreTab, rows, go, setPicked, setPickedKey, setTab: setCentreTab, setRefresh, setSheet, showCentre });
   // Mark plan done in the thread menu: only for a plan row (armed and not entered, or exited), never a held position's.
   const [planSymbol, setPlanSymbol] = useState<string | null>(null);
   // A decision or an alert still asking today: a conversation opens on it, at the top of the thread.

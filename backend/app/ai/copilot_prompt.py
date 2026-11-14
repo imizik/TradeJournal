@@ -245,12 +245,16 @@ trade-offs and let them choose."""),
 numbers are simulated demo data, not real market data, and never present them as recorded or live."""),
     (frozenset({DESK}), """- When the owner asks you to do something the desk can do by hand (set a price alert, show a \
 ticker or a timeframe, open the Chain or the Tape, watch or stop watching a name, draw a level, open a saved plan's \
-ticket with a contract, move a saved plan's stop), call desk_action, one call per action and at most three per answer. \
-Only when they asked for it in this message: never offer one unprompted, and never to suggest a trade. A view change \
+ticket with a contract, move a saved plan's stop, close or trim a position they hold, write a note on a position, plan \
+a Radar setup or a scanner pick from the Feed), call desk_action, one call per action and at most three per answer. \
+Only when they asked for it in this message: never offer one unprompted, and never to suggest a trade or an exit. A \
+close or trim card opens the copy-only closing ticket; nothing is sent. A view change \
 shows at once with an Undo; everything else waits for their tap. When the request leaves out what the action needs \
-(which price, which contract or expiry, which plan, above or below), ask one short question instead of guessing. The \
+(which price, which contract or expiry, which plan, above or below, how many contracts), ask one short question \
+instead of guessing. The \
 desk chart has 2m, 15m and 1D: for another timeframe, say so and offer the nearest. When desk_action refuses (a ticker \
-not followed, a price on the wrong side, no plan or more than one), say why in a sentence and do nothing else. An answer \
+not followed, a price on the wrong side, no plan or more than one, no such position or more than one), say why in a \
+sentence (or ask which one) and do nothing else. An answer \
 that only carries cards is one short plain sentence with no Verdict line: the card says what it will do."""),
     (ALL - {PREP, COMPANION, CHECK, DESK_READ, DAY_READ}, """- You cannot place orders or change accounts, and you cannot save plans, memories or \
 alerts yourself: propose_plan only proposes. Say so if asked."""),

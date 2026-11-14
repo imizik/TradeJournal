@@ -75,11 +75,11 @@ class FixtureEvidence:
         return {"symbol": symbol, "state": "ok", "as_of": AT, "items": [],
                 "note": "Fixture mode does not read the owner's saved research (simulated)."}
 
-    def desk_state(self, symbol: str) -> dict:
+    def desk_state(self, symbol: str, need: frozenset = frozenset()) -> dict:
         """The desk is the owner's own app state, not market data: a fixture turn reads it from this server's database (a
         sandbox's or a test's), so a desk action card works end to end there. Only the prices are simulated."""
         from app.ai import copilot_actions
-        return copilot_actions.read_state(symbol)
+        return copilot_actions.read_state(symbol, need)
 
     def get_quotes(self, symbols: list[str]) -> dict:
         prices = {"NBIS": 94.35, "CRWV": 131.20, "APLD": 27.85, "SPY": 671.10, "QQQ": 598.40}
@@ -540,12 +540,16 @@ def desk_requests(prompt: str, symbol: str, today) -> list[dict] | str | None:
     from datetime import date
     # Only a message that opens with a request (a line starting "alert me", "show me", "watch", "mark", ...), so a question
     # that merely mentions watching or a stop is never read as one.
-    if not re.search(r"(?m)^\s*(?:please\s+|can you\s+)?(alert me|set an alert|ping me|show me|pull up|open the|switch to|"
-                     r"stop watching|unwatch|watch|mark|draw|build the|move my stop)\b", prompt.lower()):
+    opened = re.search(r"(?m)^\s*(?:please\s+|can you\s+)?(alert me|set an alert|ping me|show me|pull up|open the|switch to|"
+                     r"stop watching|unwatch|watch|mark|draw|build the|move my stop|close my|close out|sell half|sell \d+|"
+                     r"take \d+ off|trim|note on|plan the|plan that)\b.*$", prompt, re.I)
+    if not opened:
         return None
     lower = " ".join(prompt.lower().split())
     named = re.findall(r"\b[A-Z]{2,5}\b", prompt)  # a ticker the request names wins over the desk's selected one
     symbol = named[0] if named else symbol
+    if held := _held_request(opened.group(0).strip(), symbol, today):
+        return held
     out: list[dict] = []
     asked = re.search(r"\b(alert me|set an alert|ping me)\b", lower)
     if asked and (m := re.search(rf"\b(loses|below|under|breaks below|drops below)\s+{_NUM}", lower)):
@@ -596,6 +600,42 @@ def desk_requests(prompt: str, symbol: str, today) -> list[dict] | str | None:
     if re.search(r"\bstop\b", lower) and (m := re.search(rf"\bto\s+{_NUM}", lower)) and "watching" not in lower:
         out.append({"action": "plan_stop", "symbol": symbol, "price": float(m.group(1))})
     return out[:3] or None
+
+
+def _held_request(line: str, symbol: str, today) -> list[dict] | str | None:
+    """SIMULATED: a request line about a position he holds (close it, trim it, note on it) or a Feed idea to plan. One
+    card; a note's words are everything after the colon, so nothing in them is read as another request."""
+    import re
+    from datetime import date
+    line = re.sub(r"^(?:please\s+|can you\s+)", "", line, flags=re.I)
+    lower = " ".join(line.lower().split())
+    if m := re.match(r"note on [^:]*:\s*(.+)", line, re.I):
+        return [{"action": "note", "symbol": symbol, "text": " ".join(m.group(1).split())}]
+    if lower.startswith(("plan the", "plan that")):
+        if "radar" in lower or "scanner" in lower or "setup" in lower or "pick" in lower:
+            out: dict = {"action": "plan_idea", "symbol": symbol}
+            if m := re.search(r"\b(long|short)\b", lower):
+                out["direction"] = m.group(1)
+            return [out]
+        return None
+    contract: dict = {}
+    if m := re.search(r"\b(calls?|puts?)\b", lower):
+        contract["option_type"] = "put" if m.group(1).startswith("p") else "call"
+    if m := re.search(r"\b(\d+(?:\.\d+)?)\s*(c|p|calls?|puts?)\b", lower):
+        contract.update(strike=float(m.group(1)), option_type="put" if m.group(2).startswith("p") else "call")
+    if when := re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\.?\s+(\d{1,2})\b", lower):
+        month, day = _MONTHS[when.group(1)], int(when.group(2))
+        expiry = date(today.year, month, day)
+        contract["expiry"] = (expiry if expiry >= today else date(today.year + 1, month, day)).isoformat()
+    if lower.startswith(("close my", "close out")):
+        return [{"action": "close", "symbol": symbol, **contract}]
+    if re.match(r"(sell|trim) half\b", lower):
+        return [{"action": "trim", "symbol": symbol, "half": True, **contract}]
+    if m := re.match(r"(?:sell|take|trim) (\d+)\b", lower):
+        return [{"action": "trim", "symbol": symbol, "quantity": int(m.group(1)), **contract}]
+    if lower.startswith("trim"):
+        return f"How many {symbol} contracts: a number, or half?"
+    return None
 
 
 def desk_answer(outcomes: list[tuple[dict, str | None]]) -> str:
