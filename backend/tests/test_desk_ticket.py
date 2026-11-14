@@ -363,6 +363,10 @@ def test_nothing_in_the_ticket_places_or_sends_anything():
     closing = REPO / "frontend/lib/closingTicket.ts"
     sources += [closing.read_text(), (REPO / "frontend/components/copilot/OptionStanding.tsx").read_text()]
     assert "fetch(" not in closing.read_text() and "apiUrl" not in closing.read_text()
+    # A vertical spread's ticket: its arithmetic, copy block and plain line are in this file, which reads nothing either.
+    spread = REPO / "frontend/lib/spreadTicket.ts"
+    sources.append(spread.read_text())
+    assert "fetch(" not in spread.read_text() and "apiUrl" not in spread.read_text()
     forbidden = ("robinhood_trading", "place_option_order", "place_equity_order", "review_option_order", "order_tool",
                  "requests.post", "httpx", "urllib", "method: \"POST\"", "method: 'POST'", "ntfy", "telegram")
     for text in sources:

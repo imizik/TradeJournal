@@ -1585,7 +1585,8 @@ that nothing in it places or sends anything.
   no ticket icon: a held row is not a new order). With none, the tab says so and offers **Plan a trade**.
 - **Contract:** the capture's own strike and expiry, else the plan's "Contract: …" words when they state one strike,
   one type and one date plainly ("NBIS 11/14 105C", "Nov 14 '26 105C"; a year only as "'26" or four digits, so
-  "Nov 21 30 calls" is the 30 strike); a spread, a strike range or anything vaguer is not guessed, and the plan's own
+  "Nov 21 30 calls" is the 30 strike); a strike range or anything vaguer is not guessed (a vertical spread stated
+  plainly is read as one, see Vertical spreads below), and the plan's own
   words show under the contract. Then the tab
   offers three real contracts from the option-candidates read (the expiry first at or after the horizon: a pending
   time stop's day, else the symbol's horizon) with the premium a contract, spread, break-even move and the expiry's
@@ -1609,6 +1610,23 @@ that nothing in it places or sends anything.
   Robinhood's email as today) and returns to the symbol's chart; **Not now** closes the ticket.
 - **A pick from the Chain tab** (`?expiration=&strike=`, Put on ticket) replaces the contract the plan names, on the
   plan's own side; the plan's own words still show under it.
+- **Vertical spreads** (two legs, same expiry and type: call or put, debit or credit). On the Chain tab, **Make it a
+  spread** makes the picked contract the leg bought and the next contract tapped on the same side the leg sold; the row
+  shows both legs, the net at the mid and at the natural price, and per spread the most it can lose and make. **Put on
+  ticket** (`?expiration=&strike=&short_strike=&option_type=`) opens the newest armed plan in the ticker on the
+  spread's direction (a bullish spread on a long-call plan, a bearish one on a long-put plan); **Plan it** puts the
+  spread's words in the plan ("NBIS 12/19/26 100/110C debit spread"), and a plan whose contract words name one vertical
+  plainly opens on it (`desk_ticket.read_spread`: one strike pair, one type, one date; a debit unless the words say
+  credit). The ticket shows each leg's bid, ask and mid with its time; the net debit or credit at the mid (the default
+  limit) and at the natural price (buy at the ask, sell at the bid); the width; and, following the limit and count he
+  types, the most he can lose and make, break-even at expiry (a call spread's lower strike plus the net, a put
+  spread's higher strike less it) and the spread's worth and profit at expiry at the plan's entry, target and stop.
+  A stale or missing leg is grey with its time and gives no net number; a wide leg (the Chain tab's 10%) gives one
+  marked **rough**; a limit at or over the width gives no figures and says why. A spread against the plan's direction
+  says so. **Copy all** puts the legs, then the net limit as a debit or credit, then the quantity on the clipboard;
+  there is no Send button. The Play check reads the plan's parts as for any ticket, says in grey that the habit rules
+  (written for one long option) are not run on a spread, and works out holding overnight for the spread as a whole.
+  Straddles, strangles, condors, butterflies, rolls and calendars are still refused.
 - **Closing tickets: Close at target / Close at stop.** A held single long call or put with a plan shows these in the
   position header (beside the What if…) and under its book row. Each opens the Ticket as a **sell to close** of the
   contracts held, filled in the browser from the book row (`frontend/lib/closingTicket.ts`): the account holding it

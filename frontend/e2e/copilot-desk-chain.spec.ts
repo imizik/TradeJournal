@@ -55,7 +55,7 @@ const TICKET = {
   underlying: { state: "ok", last: 95, as_of: now - 10 }, expected_move_pct: 6, limit: 2.5, contracts: 2,
 };
 
-async function lab(page: Page, plans: object[] = []) {
+async function lab(page: Page, plans: object[] = [], ticket: object = TICKET) {
   const chainReads: string[] = [];
   const methods: string[] = [];
   const tickets: string[] = [];
@@ -76,7 +76,7 @@ async function lab(page: Page, plans: object[] = []) {
     methods.push(route.request().method());
     const url = new URL(route.request().url());
     tickets.push(`${url.pathname.split("/").pop()}${url.search}`);
-    return route.fulfill({ json: TICKET });
+    return route.fulfill({ json: ticket });
   });
   await page.goto(`/copilot-lab?investigation=${INV}`);
   await expect(page.getByText("The group is bid; size small.")).toBeVisible();
@@ -209,4 +209,93 @@ test("an Unusual options row in the Feed selects its contract in the Chain tab, 
   await expect(tab.getByRole("radiogroup", { name: "Expiry" }).getByRole("radio", { checked: true })).toContainText("Nov 13");
   await expect(tab.getByTestId("chain-actions")).toHaveCount(0);
   expect(methods.filter(m => m.startsWith("POST"))).toEqual([]);
+});
+
+// --- Make it a spread ------------------------------------------------------------------------------------------------
+
+// Invented: the 100/110 call debit spread as the server prices it (desk_ticket's spread ticket), 2 spreads at the 2.20 mid.
+const leg = (strike: number, bid: number, ask: number) => ({
+  role: strike === 100 ? "long" : "short", action: strike === 100 ? "buy" : "sell", strike, label: `NBIS $${strike} Call 11/13/26`,
+  quote: { state: "ok", as_of: now - 30, bid, ask, mid: Math.round((bid + ask) * 50) / 100, spread: ask - bid, spread_pct: 6, multiplier: 100 }, wide: false,
+});
+const SPREAD_TICKET = {
+  ...TICKET, contract: null, quote: null, limit: 2.2, contracts: 2, target: 101,
+  spread: { kind: "call", expiry: "2026-11-13", type: "debit", width: 10, long: 100, short: 110, label: "NBIS $100/$110 Call Debit Spread 11/13/26",
+    source: "picked", multiplier: 100, legs: [leg(100, 3.1, 3.3), leg(110, 0.97, 1.03)], net_mid: 2.2, net_natural: 2.33, rough: [] as string[],
+    bullish: true, against_plan: null },
+  check: { play: { lines: [{ part: "stop", ok: true, text: "out at 92.3" }, { part: "size", ok: true, text: "2 contracts" }], missing: [], fill: null },
+    habits: { state: "spread", fired: [], size: null, footer: "", reason: "Your habit checks read single options; a spread is not checked against them." },
+    overnight: { state: "missing", show: false, reason: "No theta in the chain." } },
+};
+
+test("Make it a spread: the next call tapped is the leg sold, with the net, and Put on ticket carries both legs", async ({ page }) => {
+  const { pane, methods, tickets } = await lab(page, [STOCK_PLAN, PLAN], SPREAD_TICKET);
+  const tab = pane.getByTestId("desk-chain");
+  await tab.getByRole("button", { name: "92.5 call" }).click();
+  await tab.getByTestId("chain-actions").getByRole("button", { name: "Make it a spread" }).click();
+  await expect(tab.getByTestId("chain-spread-building")).toContainText("Now tap the call to sell");
+  await tab.getByRole("button", { name: "97.5 call" }).click();
+  const spread = tab.getByTestId("chain-spread");
+  await expect(spread).toContainText("NBIS $92.5/$97.5 Call Debit Spread 11/13/26");
+  await expect(spread).toContainText("Buy NBIS $92.5 Call 11/13/26");
+  await expect(spread).toContainText("Sell NBIS $97.5 Call 11/13/26");
+  // 5.00 − 2.50 = 2.50 at the mid; 5.10 − 2.40 = 2.70 at the natural price. Per spread: risk $250 to make $250.
+  await expect(tab.getByTestId("chain-spread-net")).toContainText("Net debit 2.50 at the mid · 2.70 at the natural price · width 5");
+  await expect(tab.getByTestId("chain-spread-net")).toContainText("risk $250 to make $250, break-even 95.00");
+  await spread.getByRole("button", { name: "Put on ticket" }).click();
+  expect(tickets).toEqual([`${INV}?expiration=2026-11-13&strike=92.5&short_strike=97.5&option_type=call`]);
+  const ticket = pane.getByTestId("desk-ticket");
+  await expect(ticket).toHaveAttribute("data-spread", "debit");
+  await expect(ticket).toContainText("NBIS $100/$110 Call Debit Spread 11/13/26");
+  await expect(ticket.getByTestId("spread-leg-quote")).toHaveText([/Bid 3\.10 · Ask 3\.30 · Mid 3\.20/, /Bid 0\.97 · Ask 1\.03 · Mid 1\.00/]);
+  await expect(ticket.getByTestId("spread-net")).toContainText("2.20 debit at the mid · 2.33 debit at the natural price");
+  // 2 spreads at 2.20: $440 at risk, the 7.80 left of the 10 width x 200 = $1,560 to make, break-even 102.20.
+  await expect(ticket.getByTestId("spread-max-loss")).toContainText("$440.00");
+  await expect(ticket.getByTestId("spread-max-gain")).toContainText("$1,560.00");
+  await expect(ticket.getByTestId("spread-sentence")).toHaveText("Pay $2.20 a share for the 100/110 call spread (2 of them), risk $440.00 to make $1,560.00, breakeven 102.20.");
+  await expect(ticket.getByTestId("spread-levels")).toContainText("At your target 101: worth 1.00 at expiry, −$240.00");
+  await expect(ticket.getByTestId("play-habits")).toContainText("a spread is not checked against them");
+  // He edits: 3 spreads at 2.50 is $750 at risk and $2,250 to make; everything follows.
+  await ticket.getByRole("textbox", { name: "Quantity in spreads" }).fill("3");
+  await ticket.getByRole("textbox", { name: "Net limit price per share, debit" }).fill("2.50");
+  await expect(ticket.getByTestId("spread-max-loss")).toContainText("$750.00");
+  await expect(ticket.getByTestId("spread-max-gain")).toContainText("$2,250.00");
+  await expect(ticket.getByTestId("spread-sentence")).toContainText("breakeven 102.50");
+  // At or over the width: no figures, and why.
+  await ticket.getByRole("textbox", { name: "Net limit price per share, debit" }).fill("10");
+  await expect(ticket.getByTestId("spread-warning")).toContainText("can never be worth more than you pay");
+  await expect(ticket.getByText("Send to Robinhood")).toHaveCount(0);
+  expect([...new Set(methods)]).toEqual(["GET"]);
+});
+
+test("a wide leg makes the chain's spread rough; Plan it carries the spread's words", async ({ page }) => {
+  const { pane } = await lab(page);
+  const tab = pane.getByTestId("desk-chain");
+  await tab.getByRole("button", { name: "95 call" }).click();
+  await tab.getByTestId("chain-actions").getByRole("button", { name: "Make it a spread" }).click();
+  await tab.getByRole("button", { name: "105 call" }).click(); // the wide 105 (50% of its mark)
+  await expect(tab.getByTestId("chain-spread")).toContainText("Rough: the $105 leg's market is wide.");
+  await expect(tab.getByTestId("chain-spread-net")).toContainText("Net debit 2.10 at the mid");
+  await expect(tab.getByTestId("chain-spread")).toContainText("there is no armed NBIS long (call) plan for this bullish spread yet");
+  await tab.getByTestId("chain-spread").getByRole("button", { name: "Plan it" }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get("context"))
+    .toBe("Plan a trade: NBIS $95/$105 Call Debit Spread 11/13/26. Contract: NBIS 11/13/26 95/105C debit spread. My entry trigger, invalidation and time stop:");
+});
+
+test("a spread ticket with a stale leg shows it grey with its time, no net price, and says rough", async ({ page }) => {
+  const stale = { ...SPREAD_TICKET, limit: null, contracts: null, spread: { ...SPREAD_TICKET.spread, net_mid: null, net_natural: null,
+    rough: ["the $110 leg has a stale quote"],
+    legs: [leg(100, 3.1, 3.3), { ...leg(110, 0, 0), quote: { state: "stale", as_of: now - 3600, reason: "The latest bid and ask are too old to price an order from.", multiplier: 100 } }] } };
+  const { pane } = await lab(page, [PLAN], stale);
+  const tab = pane.getByTestId("desk-chain");
+  await tab.getByRole("button", { name: "100 call" }).click();
+  await tab.getByTestId("chain-actions").getByRole("button", { name: "Make it a spread" }).click();
+  await tab.getByRole("button", { name: "102.5 call" }).click();
+  await tab.getByTestId("chain-spread").getByRole("button", { name: "Put on ticket" }).click();
+  const ticket = pane.getByTestId("desk-ticket");
+  await expect(ticket.getByTestId("spread-leg-quote").nth(1)).toContainText("Quote stale (last");
+  await expect(ticket.getByTestId("spread-net")).toContainText("No net price: the $110 leg has a stale quote.");
+  await expect(ticket.getByTestId("spread-rough")).toContainText("Rough: the $110 leg has a stale quote.");
+  await expect(ticket.getByRole("textbox", { name: "Net limit price per share, debit" })).toHaveValue("");
+  await expect(ticket.getByRole("button", { name: "Read the quotes again" })).toBeVisible();
 });

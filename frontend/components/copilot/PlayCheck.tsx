@@ -23,7 +23,8 @@ type AltRow = {
 };
 export type PlayCheckData = {
   play: { lines: PlayLine[]; missing: string[]; fill: string | null };
-  habits: { state: "ok" | "quiet" | "error"; fired: Habit[]; size: { median: number; multiple: number; tail: string } | null; footer: string } | null;
+  /** ``spread``: a vertical's ticket; the after-fill rules read single options, so they are not run (``reason`` says so). */
+  habits: { state: "ok" | "quiet" | "error" | "spread"; fired: Habit[]; size: { median: number; multiple: number; tail: string } | null; footer: string; reason?: string | null } | null;
   overnight: ({ state: "ok"; show: boolean; until: number; until_source: string; expires_first: boolean; trading_days: number;
     hold_days: number; greeks_as_of: string | null; expected_move_pct: number | null; basis: string; rows: AltRow[] }
     | { state: "stale" | "missing"; show: boolean; as_of?: number | null; reason?: string }) | null;
@@ -46,8 +47,10 @@ export function sizeLine(size: { median: number; multiple: number; tail: string 
   return `Size: ${usd0(paid)} is ${(paid / size.median).toFixed(1)}× your median (${usd0(size.median)}); ${size.tail}`;
 }
 
-export default function PlayCheck({ check, investigationId, symbol, contracts, paid }: {
+export default function PlayCheck({ check, investigationId, symbol, contracts, paid, unit = "contracts" }: {
   check: PlayCheckData; investigationId: string; symbol: string; contracts: number | null; paid: number | null;
+  /** What the count counts: a vertical's ticket counts spreads. */
+  unit?: "contracts" | "spreads";
 }) {
   const [open, setOpen] = useState(false);
   const { play, habits, overnight } = check;
@@ -82,6 +85,7 @@ export default function PlayCheck({ check, investigationId, symbol, contracts, p
 
       {habits && habits.state !== "quiet" && (
         habits.state === "error" ? <p data-testid="play-habits" className="text-muted-foreground">Your habits could not be read just now.</p>
+        : habits.state === "spread" ? <p data-testid="play-habits" className="leading-5 text-muted-foreground"><span className={cn(SECTION, "mr-2")}>Your habits</span>{habits.reason}</p>
         : fired.length === 0 ? (
           <p data-testid="play-habits" className="leading-5"><span className={cn(SECTION, "mr-2")}>Your habits</span><span className="text-muted-foreground">none of your flagged habits</span></p>
         ) : (
@@ -105,14 +109,16 @@ export default function PlayCheck({ check, investigationId, symbol, contracts, p
           If you held it to the next close
         </button>
       )}
-      {night && showNight && <Overnight night={night} symbol={symbol} count={count} counted={!!contracts && contracts > 0} />}
+      {night && showNight && <Overnight night={night} symbol={symbol} count={count} counted={!!contracts && contracts > 0} unit={unit} />}
     </div>
   );
 }
 
-function Overnight({ night, symbol, count, counted }: {
+function Overnight({ night, symbol, count, counted, unit = "contracts" }: {
   night: Extract<NonNullable<PlayCheckData["overnight"]>, { state: "ok" }>; symbol: string; count: number; counted: boolean;
+  unit?: "contracts" | "spreads";
 }) {
+  const one = unit === "spreads" ? "spread" : "contract";
   const mine = night.rows.find(r => r.name === "as_traded");
   const others = night.rows.filter(r => r.name !== "as_traded");
   const by = night.show ? `${night.until_source === "time stop" ? "your time stop" : `your ${night.until_source}`}, ${when(night.until)}` : `the next close, ${when(night.until)}`;
@@ -121,12 +127,14 @@ function Overnight({ night, symbol, count, counted }: {
   return (
     <div data-testid="play-overnight" className="space-y-1">
       <p className={SECTION}>Holding overnight</p>
-      <p className="text-muted-foreground">To {by}: {night.trading_days} trading day{night.trading_days === 1 ? "" : "s"}{night.expires_first ? "; the contract expires first" : ""}. {counted ? `For your ${count} contract${count === 1 ? "" : "s"}` : "For 1 contract"}.</p>
+      <p className="text-muted-foreground">To {by}: {night.trading_days} trading day{night.trading_days === 1 ? "" : "s"}{night.expires_first ? `; the ${one} expires first` : ""}. {counted ? `For your ${count} ${one}${count === 1 ? "" : "s"}` : `For 1 ${one}`}.</p>
       {mine && mine.state === "ok" ? (
         <>
-          <p>Time decay: {mine.decay_day != null ? `${usd(mine.decay_day * count)} a day${mine.decay_pct != null ? ` (${mine.decay_pct}% of the premium)` : ""}` : "no theta in the chain"}<span className="text-muted-foreground">{greeks}</span></p>
+          <p>Time decay: {mine.decay_day == null ? "no theta in the chain"
+            : mine.decay_day < 0 ? `works for you, +${usd(-mine.decay_day * count)} a day` // a credit spread: time is on its side
+            : `${usd(mine.decay_day * count)} a day${mine.decay_pct != null ? ` (${mine.decay_pct}% of the premium)` : ""}`}<span className="text-muted-foreground">{greeks}</span></p>
           <p>
-            {mine.hold_cost != null && <>If {symbol} does not move: −{usd(mine.hold_cost * count)}{mine.hold_cost_pct != null ? ` (${mine.hold_cost_pct}%)` : ""} by then. </>}
+            {mine.hold_cost != null && <>If {symbol} does not move: {mine.hold_cost < 0 ? "+" : "−"}{usd(Math.abs(mine.hold_cost) * count)}{mine.hold_cost_pct != null ? ` (${Math.abs(mine.hold_cost_pct)}%)` : ""} by then. </>}
             {mine.breakeven != null ? <>Break-even then: {symbol} {mine.breakeven.toFixed(2)}{mine.breakeven_move_pct != null ? ` (${signedPct(mine.breakeven_move_pct)})` : ""}</> : "No break-even inside the range searched"}
             <span className="text-muted-foreground">{expected}</span>
           </p>

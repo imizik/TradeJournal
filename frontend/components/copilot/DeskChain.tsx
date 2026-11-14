@@ -6,6 +6,7 @@ import { tickFor, useDeskTicks } from "@/lib/deskTicks";
 import { useDeskWalls, wallsLine, type DeskWalls } from "@/lib/deskWalls";
 import type { TicketPlan } from "@/components/copilot/DeskTicket";
 import type { UnusualRow } from "@/components/copilot/DeskUnusual";
+import { isBullish, spreadFigures, spreadLabel, spreadNet, spreadWords } from "@/lib/spreadTicket";
 import { cn } from "@/lib/utils";
 
 /**
@@ -16,6 +17,9 @@ import { cn } from "@/lib/utils";
  * pre-filled), Plan it (the plan flow) and Put on ticket (a saved plan's ticket, copy to Robinhood). Nothing here
  * places, sends or stages an order. Contracts on the desk's unusual-options list (``DeskUnusual``) carry a small mark; a
  * Feed row picked there (``focus``) opens here on its expiry with the contract selected, the strike window widened to it.
+ * Make it a spread turns a picked contract into the long leg of a same-expiry vertical: the next contract tapped on the
+ * same side is the leg sold, and the row shows the net debit or credit at the mid and the natural price, the most it can
+ * lose and make, and Plan it / Put on ticket for the spread as one (``lib/spreadTicket.ts``).
  * Above the strikes, the shown expiry's walls in one line (the Charts strike ladder's read, ``lib/deskWalls.ts``, once a
  * minute), with the wall and max-pain strikes marked; a read that is not current is grey with its time.
  */
@@ -38,7 +42,8 @@ export type ChainReply = {
   /** The next earnings from the cache (dates only), or null when none is known. */
   earnings?: { date: string; status: string | null } | null;
 };
-export type ChainPick = { symbol: string; expiry: string; strike: number; side: ChainSide };
+/** A contract he picked; with ``short`` it is the long leg of a vertical that sells ``short`` (same side and expiry). */
+export type ChainPick = { symbol: string; expiry: string; strike: number; side: ChainSide; short?: number };
 
 const RETRY_MS = [5_000, 15_000, 30_000, 60_000];
 const CLOSED_RECHECK_MS = 60_000; // outside the session: a quiet look each minute (the server keeps its read five minutes)
@@ -149,6 +154,12 @@ export function ticketPlanFor(plans: TicketPlan[] | null, symbol: string, side: 
   return (plans ?? []).find(p => p.symbol === symbol && p.option_type === side) ?? null;
 }
 
+/** The saved plan a spread's ticket opens on: the newest armed plan in this ticker on the spread's own direction (a
+ *  bullish spread on a long-call plan, a bearish one on a long-put plan). */
+export function spreadPlanFor(plans: TicketPlan[] | null, symbol: string, bullish: boolean): TicketPlan | null {
+  return ticketPlanFor(plans, symbol, bullish ? "call" : "put");
+}
+
 export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, unusual = [], focus = null }: {
   symbol: string | null; plans: TicketPlan[] | null;
   onCheck(text: string): void; onPlan(pick: ChainPick, line: string): void; onTicket(investigationId: string, pick: ChainPick): void;
@@ -162,6 +173,7 @@ export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, un
   const setExpiry = (date: string) => setChosen({ symbol, date });
   const [side, setSide] = useState<ChainSide>(seeded?.side ?? "call");
   const [picked, setPicked] = useState<ChainPick | null>(seeded);
+  const [spreadFrom, setSpreadFrom] = useState<ChainPick | null>(null); // Make it a spread: the long leg, waiting for the leg sold
   // A Feed row's contract: its expiry, selected, on the side shown, its strike inside the window.
   useEffect(() => {
     if (!focus || focus.pick.symbol !== symbol) return;
@@ -204,6 +216,15 @@ export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, un
   const stale = !shown.simulated && shown.session === "open" && (shown.stale || (readAge !== null && readAge > STALE_AFTER_S));
   const sides: ChainSide[] = both ? ["call", "put"] : [side];
   const selected = picked && picked.symbol === symbol && picked.expiry === shown.expiration ? picked : null;
+  const long = spreadFrom && spreadFrom.symbol === symbol && spreadFrom.expiry === shown.expiration ? spreadFrom : null;
+  // A tap while a spread is being made: the same side, another strike, is the leg sold; anything else starts over.
+  const pick = (side: ChainSide, strike: number) => {
+    const next = { symbol, expiry: shown.expiration!, strike, side };
+    if (long && side === long.side && strike !== long.strike) { setPicked(next); return; }
+    setSpreadFrom(null); setPicked(next);
+  };
+  const isChosen = (side: ChainSide, strike: number) => (selected?.side === side && selected.strike === strike) || (long?.side === side && long.strike === strike);
+  const cellAt = (side: ChainSide, strike: number) => shown.rows.find(r => r.strike === strike)?.[side] ?? null;
   const lineAfter = price != null ? lineIndex(shown.rows, price) : null;
   const span = 1 + cols.length * sides.length;
   const marks = new Map(unusual.filter(u => u.symbol === symbol && u.expiration === shown.expiration).map(u => [`${u.side}:${u.strike}`, u]));
@@ -218,7 +239,7 @@ export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, un
         {price != null && <span data-testid="chain-price" className={cn("text-sm tabular-nums", live?.stale && "text-muted-foreground")}>{price.toFixed(2)}</span>}
         <QuoteAge reply={shown} stale={stale} failedAt={failedAt} error={error} />
       </div>
-      <ExpiryPicker expiries={shown.expiries} chosen={shown.expiration} report={shown.earnings ?? null} onPick={e => { setExpiry(e); setPicked(null); }} />
+      <ExpiryPicker expiries={shown.expiries} chosen={shown.expiration} report={shown.earnings ?? null} onPick={e => { setExpiry(e); setPicked(null); setSpreadFrom(null); }} />
       {!both && shown.rows.length > 0 && (
         <span role="radiogroup" aria-label="Calls or puts" className="inline-flex overflow-hidden rounded-md border">
           {(["call", "put"] as const).map(s => (
@@ -253,18 +274,22 @@ export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, un
                   {lineAfter === i && <PriceLine span={span} symbol={symbol} price={price!} stale={!!live?.stale} />}
                   <tr className={cn("border-b last:border-b-0", row.atm && "bg-sky-400/5")} data-strike={row.strike}>
                     {both && <Cells cell={row.call} cols={[...cols].reverse()} itm={price != null && row.strike < price}
-                      chosen={selected?.side === "call" && selected.strike === row.strike}
-                      onPick={() => setPicked({ symbol, expiry: shown.expiration!, strike: row.strike, side: "call" })} side="call" strike={row.strike} />}
+                      chosen={isChosen("call", row.strike)}
+                      onPick={() => pick("call", row.strike)} side="call" strike={row.strike} />}
                     <StrikeCell row={row} sides={sides} marks={marks} walls={strikeWalls.get(row.strike)} />
                     {sides.slice(both ? 1 : 0).map(s => (
                       <Cells key={s} cell={row[s]} cols={cols} itm={price != null && (s === "call" ? row.strike < price : row.strike > price)}
-                        chosen={selected?.side === s && selected.strike === row.strike}
-                        onPick={() => setPicked({ symbol, expiry: shown.expiration!, strike: row.strike, side: s })} side={s} strike={row.strike} />
+                        chosen={isChosen(s, row.strike)}
+                        onPick={() => pick(s, row.strike)} side={s} strike={row.strike} />
                     ))}
                   </tr>
                   {selected && selected.strike === row.strike && sides.includes(selected.side) && (
                     <tr><td colSpan={span} className="border-b bg-muted/30 p-0">
-                      <Actions pick={selected} cell={row[selected.side]} plans={plans} onCheck={onCheck} onPlan={onPlan} onTicket={onTicket} onClose={() => setPicked(null)} />
+                      {long && selected.side === long.side && selected.strike !== long.strike
+                        ? <SpreadActions long={long} short={selected} longCell={cellAt(long.side, long.strike)} shortCell={row[selected.side]} plans={plans}
+                            spot={price ?? null} onPlan={onPlan} onTicket={onTicket} onBack={() => { setPicked(long); setSpreadFrom(null); }} onClose={() => { setPicked(null); setSpreadFrom(null); }} />
+                        : <Actions pick={selected} cell={row[selected.side]} plans={plans} onCheck={onCheck} onPlan={onPlan} onTicket={onTicket}
+                            building={!!long} onSpread={() => setSpreadFrom(selected)} onBack={() => setSpreadFrom(null)} onClose={() => { setPicked(null); setSpreadFrom(null); }} />}
                     </td></tr>
                   )}
                 </Fragment>
@@ -425,9 +450,11 @@ function ExpiryPicker({ expiries, chosen, report = null, onPick }: { expiries: E
   </>);
 }
 
-function Actions({ pick, cell, plans, onCheck, onPlan, onTicket, onClose }: {
+function Actions({ pick, cell, plans, onCheck, onPlan, onTicket, onClose, building = false, onSpread, onBack }: {
   pick: ChainPick; cell: Cell | null; plans: TicketPlan[] | null;
   onCheck(text: string): void; onPlan(pick: ChainPick, line: string): void; onTicket(investigationId: string, pick: ChainPick): void; onClose(): void;
+  /** Make it a spread was tapped on this contract: it is the long leg, waiting for the leg sold. */
+  building?: boolean; onSpread(): void; onBack(): void;
 }) {
   const label = contractLabel(pick);
   const plan = ticketPlanFor(plans, pick.symbol, pick.side);
@@ -448,15 +475,83 @@ function Actions({ pick, cell, plans, onCheck, onPlan, onTicket, onClose }: {
         )}
       </div>
       {cell?.wide && cell.spread_note && <p className="text-xs text-amber-300">{cell.spread_note}. A limit near the mark may not fill quickly.</p>}
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className={button} onClick={() => onCheck(callText(pick))}>Check it</button>
-        <button type="button" className={button} onClick={() => onPlan(pick, line)}>Plan it</button>
-        <button type="button" className={button} disabled={!plan} onClick={() => plan && onTicket(plan.investigation_id, pick)}>Put on ticket</button>
-        <button type="button" onClick={onClose} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Close</button>
-      </div>
+      {building ? (
+        <div data-testid="chain-spread-building" className="flex flex-wrap items-center gap-2">
+          <p className="text-xs">Buy this one. Now tap the {pick.side} to <span className="font-semibold">sell</span> in the same expiry: a {pick.side === "call" ? "higher" : "lower"} strike makes a debit spread, a {pick.side === "call" ? "lower" : "higher"} one a credit spread.</p>
+          <button type="button" onClick={onBack} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Back to one contract</button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={button} onClick={() => onCheck(callText(pick))}>Check it</button>
+          <button type="button" className={button} onClick={() => onPlan(pick, line)}>Plan it</button>
+          <button type="button" className={button} disabled={!plan} onClick={() => plan && onTicket(plan.investigation_id, pick)}>Put on ticket</button>
+          <button type="button" className={button} onClick={onSpread}>Make it a spread</button>
+          <button type="button" onClick={onClose} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Close</button>
+        </div>
+      )}
       <p className="text-[11px] text-muted-foreground">
         {plan ? `Put on ticket opens your saved ${pick.symbol} plan's ticket with this contract, to copy into Robinhood. Nothing is sent from here.`
           : `A ticket opens from a saved plan: there is no armed ${pick.symbol} ${pick.side} plan yet, so Plan it first.`}
+      </p>
+    </div>
+  );
+}
+
+/** The row under a spread's leg sold: both legs' quotes, the net at the mid and the natural price, the width, and per
+ *  spread at the mid the most it can lose and make and its break-even. A leg not quoted now gives no net number; a wide
+ *  one gives a rough one. Plan it and Put on ticket carry the spread as one (both legs). */
+function SpreadActions({ long, short, longCell, shortCell, plans, spot, onPlan, onTicket, onBack, onClose }: {
+  long: ChainPick; short: ChainPick; longCell: Cell | null; shortCell: Cell | null; plans: TicketPlan[] | null; spot: number | null;
+  onPlan(pick: ChainPick, line: string): void; onTicket(investigationId: string, pick: ChainPick): void; onBack(): void; onClose(): void;
+}) {
+  const kind = long.side;
+  const label = spreadLabel(long.symbol, kind, long.strike, short.strike, long.expiry);
+  const ok = (c: Cell | null) => !!c && c.state === "ok" && c.bid != null && c.ask != null;
+  const net = ok(longCell) && ok(shortCell) ? spreadNet(kind, long.strike, short.strike, longCell!, shortCell!) : null;
+  const width = Math.abs(short.strike - long.strike);
+  const f = spreadFigures(kind, long.strike, short.strike, net && net.mid > 0 && net.mid < width ? net.mid : null, 1, longCell?.multiplier ?? 100, spot);
+  const rough = [[long, longCell], [short, shortCell]].flatMap(([p, c]) => {
+    const leg = `the $${strikeText((p as ChainPick).strike)} leg`, cell = c as Cell | null;
+    return !cell || cell.state === "missing" ? [`${leg} has no usable quote`] : cell.state === "stale" ? [`${leg}'s quote is from ${clock(cell.quoted_at)}, not live`]
+      : cell.wide ? [`${leg}'s market is wide`] : [];
+  });
+  const bullish = isBullish(kind, long.strike, short.strike);
+  const plan = spreadPlanFor(plans, long.symbol, bullish);
+  const pick: ChainPick = { ...long, short: short.strike };
+  const words = spreadWords(long.symbol, kind, long.strike, short.strike, long.expiry);
+  const line = `${label}${net && !rough.length ? ` (net ${f.type} ${net.mid.toFixed(2)} at the mid, from the chain)` : ""}. Contract: ${words}. My entry trigger, invalidation and time stop:`;
+  const button = "inline-flex min-h-11 items-center rounded-md border px-3 text-xs font-medium hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-45 sm:min-h-8";
+  const leg = (action: string, p: ChainPick, c: Cell | null) => (
+    <span className={cn("block text-xs tabular-nums", !ok(c) || c!.state !== "ok" ? "text-muted-foreground/80" : "text-muted-foreground")}>
+      <span className="font-medium text-foreground">{action}</span> {contractLabel(p)} · {!c || c.state === "missing" ? "no usable bid and ask"
+        : <>Bid {quote(c, c.bid)} · Ask {quote(c, c.ask)}{c.state === "stale" ? ` · quote from ${clock(c.quoted_at)}, not live` : ""}</>}
+    </span>
+  );
+  return (
+    <div data-testid="chain-spread" data-spread={f.type} className="space-y-2 px-3 py-2.5 font-sans">
+      <div className="space-y-0.5">
+        <span className="font-mono text-sm font-semibold">{label}</span>
+        {leg("Buy", long, longCell)}
+        {leg("Sell", short, shortCell)}
+      </div>
+      <p data-testid="chain-spread-net" className="text-xs tabular-nums">
+        {net && !rough.some(r => !r.endsWith("wide")) ? <>
+          Net {f.type} {net.mid.toFixed(2)} at the mid · {net.natural > 0 ? `${net.natural.toFixed(2)} at the natural price` : `no ${f.type} at the natural price`} · width {strikeText(width)}
+          {f.maxLoss !== null && f.maxGain !== null && <> · per spread at the mid: risk ${f.maxLoss.toFixed(0)} to make ${f.maxGain.toFixed(0)}, break-even {f.breakeven!.toFixed(2)}</>}
+          {f.warning && <span className="text-amber-300"> · {f.warning}</span>}
+        </> : <span className="text-muted-foreground">No net price: {rough[0] ?? "a leg has no quote"}. Width {strikeText(width)}.</span>}
+        {rough.length > 0 && net && <span className="ml-1 rounded border border-amber-300/50 px-1 text-[10px] uppercase tracking-wide text-amber-300">rough</span>}
+      </p>
+      {rough.length > 0 && <p className="text-xs text-amber-300">Rough: {rough.join("; ")}.</p>}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={button} onClick={() => onPlan(pick, line)}>Plan it</button>
+        <button type="button" className={button} disabled={!plan} onClick={() => plan && onTicket(plan.investigation_id, pick)}>Put on ticket</button>
+        <button type="button" onClick={onBack} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Back to one contract</button>
+        <button type="button" onClick={onClose} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Close</button>
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        {plan ? `Put on ticket opens your saved ${long.symbol} plan's ticket with this spread, both legs and the net price, to copy into Robinhood. Nothing is sent from here.`
+          : `A ticket opens from a saved plan: there is no armed ${long.symbol} ${bullish ? "long (call)" : "short (put)"} plan for this ${bullish ? "bullish" : "bearish"} spread yet, so Plan it first.`}
       </p>
     </div>
   );

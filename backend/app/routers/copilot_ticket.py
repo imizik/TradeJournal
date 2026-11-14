@@ -2,7 +2,8 @@
 
 ``GET /copilot/tickets``: the saved plans a ticket can open (armed, not yet entered), newest first.
 ``GET /copilot/tickets/{investigation_id}``: that plan's ticket; ``expiration`` and ``strike`` name the candidate the
-owner picked when the plan names no contract. 404 without a saved plan, 409 once its position is open.
+owner picked when the plan names no contract; with ``short_strike`` (and ``option_type``) the pick is the long leg of a
+same-expiry vertical spread that sells ``short_strike``. 404 without a saved plan, 409 once its position is open.
 
 There is no write here and nothing that places, sends or stages an order; the ticket's fields are copied into
 Robinhood by hand. Owner-only like every ``/copilot`` route; refuses while the lab is off.
@@ -18,6 +19,7 @@ freshness read. Database reads only; the scanner's rules, scoring and records ar
 """
 from datetime import date
 import time
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlmodel import Session
@@ -44,11 +46,13 @@ def tickets(db: Session = Depends(get_session)):
 
 @router.get("/tickets/{investigation_id}")
 def ticket(investigation_id: str, expiration: date | None = None, strike: float | None = Query(None, gt=0, lt=100000),
+           short_strike: float | None = Query(None, gt=0, lt=100000), option_type: Literal["call", "put"] | None = None,
            db: Session = Depends(get_session)):
     found = _settings()
     pick = (expiration, strike) if expiration is not None and strike is not None else None
     try:
-        return desk_ticket.build(db, investigation_id, mode=getattr(found, "evidence", "live"), pick=pick)
+        return desk_ticket.build(db, investigation_id, mode=getattr(found, "evidence", "live"), pick=pick,
+                                 short_strike=short_strike if pick else None, pick_kind=option_type if pick else None)
     except desk_ticket.TicketError as exc:
         raise HTTPException(404 if exc.code == "no_plan" else 409, str(exc)) from None
 
