@@ -55,7 +55,8 @@ def test_a_practice_proposal_is_validated_and_labelled():
 def test_a_bad_practice_is_refused(change):
     with pytest.raises(copilot_tools.ToolInputError):
         copilot_tools.validate("propose_plan", {**GOOD, **change})
-    assert "practice" in copilot_tools.TOOLS[-1]["input_schema"]["properties"]["kind"]["enum"]
+    propose = next(t for t in copilot_tools.TOOLS if t["name"] == "propose_plan")
+    assert "practice" in propose["input_schema"]["properties"]["kind"]["enum"]
 
 
 def test_proposing_writes_nothing(db):  # noqa: F811
