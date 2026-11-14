@@ -609,8 +609,8 @@ def test_investigation_cards_are_capped_and_old_records_read_as_before(monkeypat
     from app.engine import copilot_investigations as investigations
     monkeypatch.setenv("COPILOT_ENABLED", "true")
     with TestClient(app) as client:
-        five = [{**WATCH_CARD, "id": f"toolu_{i}"} for i in range(5)]
-        assert client.post("/copilot/investigations", json={"title": "x", "transcript": _with_cards(*five)}).status_code == 422
+        eight = [{**WATCH_CARD, "id": f"toolu_{i}"} for i in range(8)]  # two proposals, a practice card and three desk actions fit
+        assert client.post("/copilot/investigations", json={"title": "x", "transcript": _with_cards(*eight)}).status_code == 422
         twice = client.post("/copilot/investigations", json={"title": "x", "transcript": _with_cards(WATCH_CARD, WATCH_CARD)})
         assert twice.status_code == 422
         across = client.post("/copilot/investigations", json={"title": "x", "transcript": _with_cards(WATCH_CARD) + _with_cards(WATCH_CARD)})
@@ -1063,7 +1063,7 @@ def test_investigation_changes_fit_whole_at_every_cap():
     saved = _changes_world()
     # Every market tool that can carry an as_of (propose_plan has none; the owner context rows are the book, left out
     # below), on the longest symbol a ticker can be.
-    tools = [t["name"] for t in copilot_tools.TOOLS if t["name"] != "propose_plan" and t["name"] not in copilot_tools.NOT_CURRENT_TOOLS]
+    tools = [t["name"] for t in copilot_tools.TOOLS if t["name"] not in copilot_tools.CARD_TOOLS and t["name"] not in copilot_tools.NOT_CURRENT_TOOLS]
     symbol = "ABCDEFGHIJ"
     inv.update(saved["id"], inv.InvestigationFields(
         title="T" * 120, symbol=symbol, conclusion="C" * 280, findings={"summary": "S" * 2000},

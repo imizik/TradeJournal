@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { actionLine } from "@/lib/deskAction";
 import { confirmedElsewhere, createWatch, enqueueRevisit, freshQuote, operationId, practiceLine, saveMemory, savePractice, type PlanLevel, type Proposal, type ProposalOutcome } from "@/lib/copilot";
 
 const CONDITION: Record<string, string> = { touches: "touches", crosses: "crosses", closes_beyond: "closes beyond" };
@@ -18,6 +19,7 @@ export function proposalText(proposal: Proposal): string {
     : `Research again in ${proposal.horizon_days} day${proposal.horizon_days === 1 ? "" : "s"}: ${proposal.question}`;
   if (proposal.kind === "trade_plan") return `${proposal.symbol} ${proposal.direction} ${proposal.instrument}`;
   if (proposal.kind === "practice") return practiceTarget(proposal);
+  if (proposal.kind === "desk_action") return actionLine(proposal);
   return `${proposal.symbol} ${levelText(proposal)}`;
 }
 
@@ -31,7 +33,7 @@ export const levelText = (level: Pick<PlanLevel, "condition" | "price" | "interv
  * (``proposal.outcome``): confirmed shows what Confirm said, dismissed stays hidden. ``onOutcome`` reports a Confirm or
  * Dismiss so the investigation keeps it. */
 export default function ProposalCard({ proposal, investigationId, alertsSupported, onDone, onOutcome }: {
-  proposal: Exclude<Proposal, { kind: "trade_plan" }>; investigationId: string | null; alertsSupported: boolean; onDone(): void;
+  proposal: Exclude<Proposal, { kind: "trade_plan" | "desk_action" }>; investigationId: string | null; alertsSupported: boolean; onDone(): void;
   onOutcome(outcome: ProposalOutcome): void;
 }) {
   const saved = proposal.outcome;

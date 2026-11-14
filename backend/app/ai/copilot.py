@@ -447,6 +447,22 @@ class FakeAdapter:
                 yield "text", piece
             yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
             return
+        if any(t.get("name") == "desk_action" for t in tools or ()):  # a desk turn: a request the desk can do (simulated reading)
+            from app.ai import copilot_fixture
+            from app.engine.chart_math import ET
+            asked = copilot_fixture.desk_requests(prompt, symbol, datetime.now(ET).date())
+            if asked is not None:
+                if isinstance(asked, list) and allow_tools and isinstance(last["content"], str):
+                    yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_{i}", "name": "desk_action", "input": a}
+                                          for i, a in enumerate(asked)], "tool_use", _zero_usage(), self.model)
+                    return
+                text = asked if isinstance(asked, str) else copilot_fixture.desk_answer(_desk_outcomes(messages))
+                for piece in re.findall(r"\S+\s*", text):
+                    if self.delay_s:
+                        await asyncio.sleep(self.delay_s)
+                    yield "text", piece
+                yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+                return
         changed = re.search(r"investigation ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", prompt)
         if changed and "what changed" in lower:
             if isinstance(last["content"], str) and allow_tools:
@@ -1123,6 +1139,20 @@ def _results(messages: list[dict]) -> dict:
     return out
 
 
+def _desk_outcomes(messages: list[dict]) -> list[tuple[dict, str | None]]:
+    """The fake adapter's desk_action results this turn: each call's input and, when it was refused, the reason."""
+    calls = {b["id"]: b["input"] for m in messages if m["role"] == "assistant" and isinstance(m["content"], list)
+             for b in m["content"] if b.get("type") == "tool_use" and b.get("name") == "desk_action"}
+    out = []
+    for m in messages:
+        if m["role"] == "user" and isinstance(m["content"], list):
+            for b in m["content"]:
+                if b.get("type") == "tool_result" and b.get("tool_use_id") in calls:
+                    text = result_text(b)
+                    out.append((calls[b["tool_use_id"]], text.removeprefix("Invalid input: ") if b.get("is_error") else None))
+    return out
+
+
 def result_text(result: dict) -> str:
     """A tool result's text: its content string, or the text block ahead of the images a trade review attaches."""
     content = result["content"]
@@ -1156,6 +1186,9 @@ def _summary(name: str, data: dict) -> str:
     if name == "get_symbol_events":
         nxt = data.get("next_earnings") or {}
         return f"next earnings {nxt.get('date', 'unknown')}"
+    if name == "desk_action":
+        from app.ai import copilot_actions
+        return copilot_actions.summary(data)
     if name == "propose_plan":
         p = data.get("proposal") or {}
         if p.get("kind") == "memory":
@@ -1381,7 +1414,7 @@ async def _run_tool(evidence, block: dict, cfg: Settings, turn: dict | None = No
     started = time.monotonic()
     name = block.get("name", "")
     event = {"type": "tool", "id": block.get("id"), "name": name}
-    claimed = False
+    claimed = acted = False
     try:
         args = copilot_tools.validate(name, block.get("input"))
         offered = (turn or {}).get("offered")
@@ -1391,11 +1424,18 @@ async def _run_tool(evidence, block: dict, cfg: Settings, turn: dict | None = No
             if turn.get("practice"):
                 raise copilot_tools.ToolInputError("one practice proposal per answer")
             turn["practice"] = claimed = True  # set before the first await, so calls gathered in one round see it
+        if name == "desk_action" and turn is not None:
+            if turn.get("actions", 0) >= copilot_tools.DESK_ACTIONS_PER_ANSWER:
+                raise copilot_tools.ToolInputError(f"at most {copilot_tools.DESK_ACTIONS_PER_ANSWER} desk actions per answer")
+            turn["actions"] = turn.get("actions", 0) + 1  # held before the first await, as the practice slot is
+            acted = True
         event["input"] = args
         data, event["timing"] = await _timed(cfg.tool_timeout_s, copilot_tools.call, evidence, name, args)
         prov = copilot_tools.provenance(name, data, evidence.label)
         if name == "propose_plan":
             event["proposal"] = {"id": block["id"], **data["proposal"]}
+        if name == "desk_action":
+            event["proposal"] = {"id": block["id"], "kind": "desk_action", **data["action"]}
         if name == "get_level_history" and (card := level_history_card(data)):
             event["history"] = card
         if name == "get_option_candidates" and (picks := option_candidates_card(data)):
@@ -1425,6 +1465,8 @@ async def _run_tool(evidence, block: dict, cfg: Settings, turn: dict | None = No
         event.update(status="error", summary="unavailable")
     if claimed and event.get("status") != "ok":
         turn["practice"] = False  # a practice that failed after validation leaves the answer's one slot free
+    if acted and event.get("status") != "ok":
+        turn["actions"] -= 1  # a refused action is no card: its slot is free again
     event["ms"] = round((time.monotonic() - started) * 1000)
     return result, event
 
@@ -1472,7 +1514,7 @@ CARRY_ITEMS = 6
 CARRY_ITEM_CHARS = 2500
 CARRY_SLOTS = 64
 CARRY_ID = r"^[0-9a-f]{32}$"
-NOT_CARRIED = frozenset({"propose_plan", "owner_context"})  # a card is not evidence; the pack is rebuilt every turn
+NOT_CARRIED = copilot_tools.CARD_TOOLS | {"owner_context"}  # a card is not evidence; the pack is rebuilt every turn
 CARRY_END = "[End of earlier evidence]"
 _CARRY: dict[str, tuple[float, str, list[dict]]] = {}
 _CARRY_LOCK = threading.Lock()  # turns keep and read their carry on worker threads

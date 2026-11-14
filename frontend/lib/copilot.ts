@@ -2,6 +2,7 @@ import { apiUrl } from "./api";
 import { deskGet } from "./deskMinute";
 import type { AlertsPayload } from "./alerts";
 import type { Capture, CaptureOrigin, CaptureSide, OriginKind } from "./captures";
+import type { DeskAction } from "./deskAction";
 import type { PlanPosition } from "@/components/dashboard/PlansCard";
 
 export type CopilotStatus =
@@ -97,7 +98,10 @@ export type Proposal = { id: string; client_id?: string; outcome?: ProposalOutco
       /** The underlying's profit target; absent on a draft without one (and on every card drafted before targets). */
       target_price?: number;
       last?: number; as_of?: string | number | null }
-  | { kind: "practice"; text: string; measure: PracticeMeasure; label: string; target: number | null; why: string });
+  | { kind: "practice"; text: string; measure: PracticeMeasure; label: string; target: number | null; why: string }
+  /** A desk action (desk_action, ``lib/deskAction.ts``): what the owner asked the desk to do, done only by their tap
+   * (a view change applies itself when it arrives). */
+  | ({ kind: "desk_action" } & DeskAction));
 /** ``confirmed``: Confirm ran (``note``: what it said; ``text``: the words a memory or practice saved; a plan card's
  * part results and fields as confirmed). ``dismissed``: the card stays hidden. Only a record of what happened on the
  * page: restoring one creates nothing. */
@@ -118,6 +122,9 @@ export function cardLine(card: Proposal): string {
     : card.kind === "watch" ? `${card.symbol} ${card.condition} ${card.price}${card.interval ? ` ${card.interval}` : ""}`
     : card.kind === "memory" ? `${card.memory_kind}${card.symbol ? ` ${card.symbol}` : ""} "${words(card.outcome?.text || card.text)}"`
     : card.kind === "practice" ? `"${words(card.outcome?.text || card.label)}"`
+    : card.kind === "desk_action" ? `${card.action} ${card.symbol}${"price" in card ? ` ${card.price}` : ""}${"side" in card ? ` ${card.side}` : ""}`
+      + `${card.action === "show" && card.timeframe ? ` ${card.timeframe}` : ""}${card.action === "show" && card.tab !== "chart" ? ` ${card.tab}` : ""}`
+      + `${card.action === "ticket" ? ` ${card.strike} ${card.option_type} ${card.expiry}` : ""}`
     : `"${words(card.question)}" in ${card.horizon_days}d`;
   return `[card ${card.kind} ${what}: ${card.outcome?.state ?? "waiting"}]`;
 }
@@ -255,7 +262,7 @@ export function rememberSpeakRate(rate: number) {
   try { if (rate === 1) window.localStorage.removeItem(SPEAK_RATE_KEY); else window.localStorage.setItem(SPEAK_RATE_KEY, String(rate)); } catch { /* per-browser convenience only */ }
 }
 
-const CARD_NAME: Record<Proposal["kind"], string> = { trade_plan: "plan", watch: "watch", revisit: "revisit", memory: "memory", practice: "practice" };
+const CARD_NAME: Record<Proposal["kind"], string> = { trade_plan: "plan", watch: "watch", revisit: "revisit", memory: "memory", practice: "practice", desk_action: "desk" };
 const SCALE: Record<string, string> = { k: "thousand", K: "thousand", M: "million", B: "billion" };
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SIGN: Record<string, string> = { "+": "plus ", "-": "minus ", "−": "minus " };
@@ -563,7 +570,7 @@ export async function confirmedElsewhere(id: string, proposalId: string): Promis
   } catch { return null; /* Confirm's own saves still replay on the card's client id */ }
 }
 /** Cards kept per answer, as the server caps them. */
-export const MAX_SAVED_PROPOSALS = 4;
+export const MAX_SAVED_PROPOSALS = 7; // the server's MAX_PROPOSALS: two proposals, a practice card and three desk actions
 
 // --------------------------------------------------------------------------- screenshots
 
@@ -599,7 +606,7 @@ export function toSaved(messages: LabMessage[]): Pick<InvestigationFields, "tran
       ...(m.role === "assistant" && savedMetrics(m) ? { metrics: savedMetrics(m) } : {}),
       // A card from the stream still carries its event type, which is not part of the proposal.
       ...(m.proposals?.length ? { proposals: m.proposals.slice(0, MAX_SAVED_PROPOSALS).map(card => Object.fromEntries(Object.entries(card).filter(([key]) => key !== "type")) as Proposal) } : {}) })),
-    evidence: messages.flatMap((m, i) => (m.tools ?? []).filter(t => t.status === "ok" && t.provenance && t.name !== "propose_plan")
+    evidence: messages.flatMap((m, i) => (m.tools ?? []).filter(t => t.status === "ok" && t.provenance && t.name !== "propose_plan" && t.name !== "desk_action")
       .map(t => ({ tool: t.name, as_of: t.provenance!.as_of, kind: t.provenance!.kind, message: i }))),
   };
 }

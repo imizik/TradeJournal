@@ -243,6 +243,15 @@ prices in), and on a hold of days name theta per day. Never recommend a specific
 trade-offs and let them choose."""),
     (ALL, """- If the context line or a tool result marks the data as SIMULATED, say plainly in your answer that the \
 numbers are simulated demo data, not real market data, and never present them as recorded or live."""),
+    (frozenset({DESK}), """- When the owner asks you to do something the desk can do by hand (set a price alert, show a \
+ticker or a timeframe, open the Chain or the Tape, watch or stop watching a name, draw a level, open a saved plan's \
+ticket with a contract, move a saved plan's stop), call desk_action, one call per action and at most three per answer. \
+Only when they asked for it in this message: never offer one unprompted, and never to suggest a trade. A view change \
+shows at once with an Undo; everything else waits for their tap. When the request leaves out what the action needs \
+(which price, which contract or expiry, which plan, above or below), ask one short question instead of guessing. The \
+desk chart has 2m, 15m and 1D: for another timeframe, say so and offer the nearest. When desk_action refuses (a ticker \
+not followed, a price on the wrong side, no plan or more than one), say why in a sentence and do nothing else. An answer \
+that only carries cards is one short plain sentence with no Verdict line: the card says what it will do."""),
     (ALL - {PREP, COMPANION, CHECK, DESK_READ, DAY_READ}, """- You cannot place orders or change accounts, and you cannot save plans, memories or \
 alerts yourself: propose_plan only proposes. Say so if asked."""),
     (frozenset({PREP, COMPANION, CHECK, DESK_READ, DAY_READ}), """- You cannot place orders or change accounts, and you cannot save plans, memories \
@@ -386,9 +395,10 @@ CHECK_TOOLS = ("get_call_facts", "get_quotes", "get_chart_context", "get_level_h
 DESK_READ_TOOLS = ("get_group_comparison", "get_symbol_news", "get_symbol_events", "get_quotes", "get_chart_context",
                    "get_market_regime", "get_radar_today")
 JOB_ONLY = frozenset({"get_call_facts"})  # offered to its own job alone, never in "every tool"
+DESK_ONLY = frozenset({"desk_action"})  # acts on the desk page, so only a desk turn gets it (never the phone chat)
 TOOL_NAMES = {DESK: None, TELEGRAM: None, PREP: frozenset(PREP_TOOLS), COMPANION: frozenset(COMPANION_TOOLS),
               WEEK_REVIEW: frozenset(WEEK_TOOLS), CHECK: frozenset(CHECK_TOOLS), DESK_READ: frozenset(DESK_READ_TOOLS),
-              DAY_READ: frozenset()}  # the day read: no tools, the day's facts are in its message  # None: every tool but JOB_ONLY
+              DAY_READ: frozenset()}  # the day read: no tools, the day's facts are in its message  # None: every tool but JOB_ONLY (and DESK_ONLY off the desk)
 
 
 def job_for(kind: str | None, source: str | None) -> str:
@@ -415,7 +425,9 @@ def system_prompt(job: str) -> str:
 def tools(job: str) -> list[dict]:
     """The tools a job is offered, in ``copilot_tools.TOOLS`` order (a stable prefix for the cache)."""
     names = TOOL_NAMES[job]
-    return [t for t in copilot_tools.TOOLS if (t["name"] not in JOB_ONLY if names is None else t["name"] in names)]
+    if names is None:
+        names = copilot_tools.TOOL_NAMES - JOB_ONLY - (frozenset() if job == DESK else DESK_ONLY)
+    return [t for t in copilot_tools.TOOLS if t["name"] in names]
 
 
 def shape(job: str) -> str:
