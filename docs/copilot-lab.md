@@ -1849,9 +1849,10 @@ the minute's reads only inside the one request) and the hidden page's zero.
 ### Data health
 
 One dot at the left of the desk's buttons says whether every source behind the desk is live, so a quiet desk on a bad
-morning can be told from a dead feed. Green with "All live" in grey when every running source is live; amber naming
-what is behind ("Robinhood down", "2 sources behind"); grey when one cannot be told ("Prices unknown", or "Health
-unknown" when the read itself failed): unknown is never green. A phone shows the dot alone. A tap lists each source with
+morning can be told from a dead feed. A green dot alone when every running source is live ("All live" is its name and
+tooltip); amber naming what is behind ("Robinhood down", "2 sources behind"); a grey dot alone when one cannot be told
+("Prices unknown", or "Health unknown" when the read itself failed): unknown is never green. Words show only when
+something is amber, so the top bar never jumps. A phone shows the dot alone. A tap lists each source with
 its state and last good time in plain words; a tap on a source says what it affects and, where one exists, the fix
 already in the app (Gmail's Reconnect; the Robinhood sign-in steps in docs/robinhood-read-feed.md). No new fix flow. It
 reads again a few seconds after the desk opens or comes back into view, once the desk's own first reads have landed.

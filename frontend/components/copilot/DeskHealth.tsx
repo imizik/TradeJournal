@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * Is everything behind the desk live? (docs/copilot-lab.md § Data health) One dot in the desk's top bar: green with "All
- * live" in grey when every running source is live, amber when one is stale or down (it names it), grey when one cannot
- * be told. A tap opens the list: each source, its state and last good time in plain words; a tap on a source says what
+ * Is everything behind the desk live? (docs/copilot-lab.md § Data health) One dot in the desk's top bar: green alone
+ * when every running source is live ("All live" is its name and tooltip), amber naming what is stale or down, grey alone
+ * when one cannot be told. A tap opens the list: each source, its state and last good time in plain words; a tap on a source says what
  * it affects and, where one already exists, the fix.
  *
  * The server's rows (``GET /copilot/desk/health``) ride the desk's minute request (``deskMinute``): no poll of its own.
@@ -116,11 +116,12 @@ export default function DeskHealthDot() {
   return (
     <div ref={box} className="relative">
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="dialog" data-testid="desk-health"
-        data-tone={said.tone} aria-label={`Data health: ${said.text}`} title="Is every source behind the desk live?"
+        data-tone={said.tone} aria-label={`Data health: ${said.text}`} title={`${said.text} · is every source behind the desk live?`}
         className={cn("inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md px-2 text-xs sm:min-h-8",
           said.tone === "bad" ? "text-amber-300" : "text-muted-foreground", open ? "bg-secondary" : "hover:bg-secondary")}>
         <span aria-hidden className={cn("h-2 w-2 shrink-0 rounded-full", dot)} />
-        <span className="hidden whitespace-nowrap sm:inline">{said.text}</span>
+        {/* Words only when something is behind: a dot that never changes width keeps the top bar from jumping. */}
+        {said.tone === "bad" && <span data-testid="desk-health-words" className="hidden whitespace-nowrap sm:inline">{said.text}</span>}
       </button>
       {open && (
         <div role="dialog" aria-label="Data health" data-testid="desk-health-list"

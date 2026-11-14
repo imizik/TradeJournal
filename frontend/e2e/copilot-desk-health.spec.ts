@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// The desk's data health (docs/copilot-lab.md § Data health): one dot in the top bar, green with "All live" when every
-// running source is live, amber naming what is behind, grey when it cannot tell. A tap lists each source with its last
+// The desk's data health (docs/copilot-lab.md § Data health): one dot in the top bar, green alone ("All live" as its name)
+// when every running source is live, amber naming what is behind, grey alone when it cannot tell. A tap lists each source with its last
 // good time; a tap on one says what it affects and the existing fix. It rides the minute's one request (no poll of its
 // own). Level 2 is the Tape's session: off with none. Every route is stubbed; every number is invented.
 const ON = {
@@ -80,8 +80,8 @@ test("all live: one quiet green dot; the list names every source, Level 2 off wi
   await open(page, health(LIVE));
   const dot = page.getByTestId("desk-health");
   await expect(dot).toHaveAttribute("data-tone", "ok");
-  await expect(dot).toHaveText("All live");
   await expect(dot).toHaveAccessibleName("Data health: All live");
+  await expect(dot).toHaveText(""); // quiet: the dot alone
   await dot.click();
   const list = page.getByTestId("desk-health-list");
   await expect(list.getByRole("listitem")).toHaveCount(8);
@@ -101,6 +101,7 @@ test("a source down: the dot turns amber and names it; a tap says what it affect
   const dot = page.getByTestId("desk-health");
   await expect(dot).toHaveAttribute("data-tone", "bad");
   await expect(dot).toHaveText("2 sources behind");
+  await expect(dot).toHaveAccessibleName("Data health: 2 sources behind");
   await dot.click();
   const rh = page.getByTestId("health-robinhood");
   await expect(rh).toHaveAttribute("data-state", "down");
@@ -121,22 +122,23 @@ test("unknown is never green: a source that cannot be told and a failed read bot
   const sources = LIVE.map(r => r.id === "prices" ? row("prices", "Prices", "unknown", "No price read yet") : r);
   await open(page, health(sources));
   await expect(page.getByTestId("desk-health")).toHaveAttribute("data-tone", "unknown");
-  await expect(page.getByTestId("desk-health")).toHaveText("Prices unknown");
+  await expect(page.getByTestId("desk-health")).toHaveAccessibleName("Data health: Prices unknown");
+  await expect(page.getByTestId("desk-health")).toHaveText("");
 });
 
 test("a failed health read says unknown, not all live", async ({ page }) => {
   await open(page, { detail: "boom" }, { status: 500 });
   await expect(page.getByTestId("desk-health")).toHaveAttribute("data-tone", "unknown");
-  await expect(page.getByTestId("desk-health")).toHaveText("Health unknown");
+  await expect(page.getByTestId("desk-health")).toHaveAccessibleName("Data health: Health unknown");
 });
 
 test("a failed read after a good one: grey, and the old rows are not shown as live", async ({ page }) => {
   const { answer } = await open(page, health(LIVE));
-  await expect(page.getByTestId("desk-health")).toHaveText("All live");
+  await expect(page.getByTestId("desk-health")).toHaveAccessibleName("Data health: All live");
   answer.status = 500;
   answer.body = { detail: "boom" };
   await page.clock.runFor(61_000);
-  await expect(page.getByTestId("desk-health")).toHaveText("Health unknown");
+  await expect(page.getByTestId("desk-health")).toHaveAccessibleName("Data health: Health unknown");
   await page.getByTestId("desk-health").click();
   const list = page.getByTestId("desk-health-list");
   await expect(list).toContainText("Could not check just now");
@@ -146,7 +148,7 @@ test("a failed read after a good one: grey, and the old rows are not shown as li
 
 test("it rides the minute's one request: a change shows on the next beat with no read of its own", async ({ page }) => {
   const { seen, answer } = await open(page, health(LIVE));
-  await expect(page.getByTestId("desk-health")).toHaveText("All live");
+  await expect(page.getByTestId("desk-health")).toHaveAccessibleName("Data health: All live");
   await page.clock.runFor(10_000); // the one settle read a few seconds after opening (cold load, not the idle rate)
   await expect.poll(() => seen.filter(p => p === "/copilot/desk/health").length).toBe(2);
   const before = seen.filter(p => p === "/copilot/desk/health").length;
@@ -162,7 +164,7 @@ test("a phone: the dot alone in the header; a tap opens the list on screen", asy
   const dot = page.getByTestId("desk-health");
   await expect(dot).toBeVisible();
   await expect(dot).toHaveAccessibleName("Data health: Chatter behind");
-  await expect(dot.getByText("Chatter behind")).toBeHidden(); // the words are for wider screens
+  await expect(dot.getByTestId("desk-health-words")).toBeHidden(); // the words are for wider screens
   await dot.click();
   const list = page.getByTestId("desk-health-list");
   await expect(list).toBeInViewport({ ratio: 1 });
