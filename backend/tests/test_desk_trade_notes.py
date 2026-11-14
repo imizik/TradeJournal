@@ -162,27 +162,27 @@ def test_a_planned_trades_thesis_lists_a_desk_note_once(db):  # noqa: F811
 def test_the_migration_only_adds_nullable_columns_and_keeps_every_note(tmp_path):
     path = tmp_path / "notes.sqlite"
     _alembic(path, "upgrade", "c5e9a3d7f1b4")
-    db = sa_create_engine(f"sqlite:///{path}")
+    store = sa_create_engine(f"sqlite:///{path}")
     capture_row = {"id": "0" * 31 + "1", "client_id": "plan-old", "received_at": "2026-11-12 14:00:00", "account_id": "0" * 31 + "2",
                    "account_label": "Roth", "underlying": "NBIS", "side": "buy_calls", "instrument": "option", "mode": "discretionary",
                    "context_state": "unavailable", "context_json": "{}", "image_state": "unavailable"}
     note_row = {"id": "0" * 31 + "3", "capture_id": "0" * 31 + "1", "kind": "note", "text": "old", "created_at": "2026-11-12 15:00:00"}
-    with db.begin() as conn:
+    with store.begin() as conn:
         for table, row in (("trade_capture", capture_row), ("trade_capture_note", note_row)):
             conn.execute(text(f"INSERT INTO {table} ({', '.join(row)}) VALUES ({', '.join(':' + k for k in row)})"), row)
         before = dict(conn.execute(text("SELECT * FROM trade_capture_note")).mappings().one())
     _alembic(path, "upgrade", "e2c6a8f4b1d9")
-    columns = {c["name"]: c for c in inspect(db).get_columns("trade_capture_note")}
+    columns = {c["name"]: c for c in inspect(store).get_columns("trade_capture_note")}
     assert columns["capture_id"]["nullable"] and columns["account_id"]["nullable"] and columns["source_key"]["nullable"]
-    with db.begin() as conn:
+    with store.begin() as conn:
         assert dict(conn.execute(text("SELECT * FROM trade_capture_note")).mappings().one()) == {**before, "account_id": None, "source_key": None}
         conn.execute(text("INSERT INTO trade_capture_note (id, capture_id, kind, text, created_at, source_key) "
                           "VALUES (:id, NULL, 'note', 'desk', '2026-11-13 15:00:00', 'k1')"), {"id": "0" * 31 + "4"})
     _alembic(path, "downgrade", "c5e9a3d7f1b4")  # a note with no plan cannot stay; every plan's note does
-    with db.connect() as conn:
+    with store.connect() as conn:
         assert [dict(r) for r in conn.execute(text("SELECT * FROM trade_capture_note")).mappings()] == [before]
     _alembic(path, "upgrade", "head")
-    db.dispose()
+    store.dispose()
 
 
 def test_a_fill_line_never_takes_the_same_contract_in_another_account(db, desk):  # noqa: F811

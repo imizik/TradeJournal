@@ -53,7 +53,8 @@ export function useDeskNotes(trades: string[], fills: string[]): DeskNotesState 
   return useMemo(() => ({ data, open, setOpen, save }), [data, open, save]);
 }
 
-/** The small Note control: a pen, beside the row's eye. */
+/** The small Note control: a pen, beside the row's eye. Its name ("Note on this position") leaves out the ticker, which
+ * the row's own button carries, so a search for the row by name finds the row alone. */
 export function NoteButton({ notes, id, label, className }: { notes: DeskNotesState; id: string; label: string; className?: string }) {
   const open = notes.open === id;
   return (

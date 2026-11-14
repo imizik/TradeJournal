@@ -327,7 +327,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                 </button>
                 {/* The pen and the eye: side by side on a phone, stacked in one column beside the narrow book. */}
                 <span className="flex shrink-0 sm:flex-col-reverse">
-                  {rowTrade(row) && <NoteButton notes={notes} id={row.key} label={`${row.symbol} ${full}`} className="sm:flex-1" />}
+                  {rowTrade(row) && <NoteButton notes={notes} id={row.key} label="this position" className="sm:flex-1" />}
                   {row.symbol && (
                     <button type="button" onClick={() => follow(row.symbol!, false)} aria-label={`Hide ${row.symbol}: not following`}
                       title="Not following: hide this ticker from the desk and every count (Show again undoes it)"
@@ -338,7 +338,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                 </span>
               </li>
               <NoteLines notes={notes} id={row.key} trade={rowTrade(row)} target={rowTrade(row) ? { trade_id: rowTrade(row)! } : null}
-                label={`${row.symbol} ${full}`} className={cn("px-3 pb-1.5", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")} as="li" />
+                label="this position" className={cn("px-3 pb-1.5", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")} as="li" />
               {on && book?.option && <li className="bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]"><OptionStandingLine row={row} rows={held} fallback={sparkPrice(sparks, row.symbol)} /></li>}
             </Fragment>);
           })}

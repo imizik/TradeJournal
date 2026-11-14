@@ -68,20 +68,21 @@ for (const width of [1440, 375]) {
     await page.setViewportSize({ width, height: 900 });
     const posts = await open(page);
     const shelf = page.getByTestId("desk-book");
+    const pen = shelf.locator("li", { has: page.getByRole("button", { name: "NBIS 10/30/26 100C" }) }).getByRole("button", { name: "Note on this position" });
     // The saved note is one grey line under its row, with its day and time (an earlier day).
     const saved = shelf.getByTestId("desk-notes").first().getByTestId("desk-note");
     await expect(saved).toHaveCount(1);
     await expect(saved).toContainText("10/22 10:10");
     await expect(saved).toContainText("Why I'm in: base held at 92");
     // Esc closes the line without saving.
-    await shelf.getByRole("button", { name: "Note on NBIS 10/30/26 100C" }).click();
+    await pen.click();
     const input = shelf.getByTestId("desk-note-input");
     await input.fill("never mind");
     await input.press("Escape");
     await expect(input).toHaveCount(0);
     expect(posts).toHaveLength(0);
     // Typing "j" and "k" types: the desk's keys do not fire in the line. Enter saves; the note stacks, newest last.
-    await shelf.getByRole("button", { name: "Note on NBIS 10/30/26 100C" }).click();
+    await pen.click();
     await shelf.getByTestId("desk-note-input").pressSequentially("Trim jk at 4.40");
     await expect(shelf.getByTestId("desk-note-input")).toHaveValue("Trim jk at 4.40");
     await shelf.getByTestId("desk-note-input").press("Enter");
@@ -94,7 +95,7 @@ for (const width of [1440, 375]) {
     // The Orders group: the closing fill takes a note on its trade; a working order and a fill not in the journal take none.
     const group = shelf.getByTestId("book-orders");
     await expect(group.getByTestId("desk-note-button")).toHaveCount(1);
-    await group.getByRole("button", { name: "Note on MU 11/13/26 835C fill" }).click();
+    await group.getByRole("listitem").filter({ hasText: "MU 11/13/26 835C" }).getByRole("button", { name: "Note on this fill" }).click();
     await group.getByTestId("desk-note-input").fill("Why I left: lost VWAP");
     await group.getByTestId("desk-note-input").press("Enter");
     expect(posts[1].postDataJSON()).toEqual({ trade_id: CLOSED, text: "Why I left: lost VWAP" });
@@ -109,7 +110,7 @@ test("a failed save keeps the words and says why", async ({ page }) => {
   await page.route("**/copilot/desk/notes", route => route.request().method() === "POST"
     ? route.fulfill({ status: 422, json: { detail: "Write a note of 1 to 300 characters." } }) : route.fallback());
   const shelf = page.getByTestId("desk-book");
-  await shelf.getByRole("button", { name: "Note on NBIS 10/30/26 100C" }).click();
+  await shelf.getByRole("button", { name: "Note on this position" }).click();
   await shelf.getByTestId("desk-note-input").fill("x");
   await shelf.getByTestId("desk-note-input").press("Enter");
   await expect(shelf.getByRole("alert")).toHaveText("Write a note of 1 to 300 characters.");

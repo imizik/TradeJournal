@@ -86,9 +86,9 @@ export function OrdersGroup({ orders, notes }: { orders?: DeskOrder[]; notes?: D
             <li key={`${o.contract}:${o.action}:${o.placed_at}:${i}`}>
               <span className="flex min-w-0 items-center gap-1">
                 <span className="min-w-0 flex-1"><Line order={o} short={false} withContract /></span>
-                {trade && notes && <NoteButton notes={notes} id={id} label={`${o.contract} fill`} className="h-6 w-6 self-start rounded" />}
+                {trade && notes && <NoteButton notes={notes} id={id} label="this fill" className="h-6 w-6 self-start rounded" />}
               </span>
-              {notes && <NoteLines notes={notes} id={id} trade={first ? trade : null} target={trade ? { trade_id: trade } : null} label={`${o.contract} fill`}
+              {notes && <NoteLines notes={notes} id={id} trade={first ? trade : null} target={trade ? { trade_id: trade } : null} label="this fill"
                 className="mb-1 mt-0.5" />}
             </li>
           );
