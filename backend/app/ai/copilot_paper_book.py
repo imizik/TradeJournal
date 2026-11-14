@@ -56,11 +56,12 @@ def _rules(results: list[dict] | None) -> dict | None:
 
 
 def _split(split: dict | None) -> dict | None:
-    if not split:
+    """The followed-versus-broken split, or None when no checked trade closed and no real checklist was copied."""
+    if not split or not (sum(split[k]["trades"] for k in ("followed", "broken", "unclear")) or split.get("checklists")):
         return None
     keep = {k: split[k] for k in ("followed", "broken", "unclear") if split.get(k)}
     keep["by_rule"] = [{"rule": r["text"], "followed": r["followed"], "broken": r["broken"]} for r in split.get("by_rule") or []]
-    for k in ("unrecorded", "matched", "open", "unmatched"):
+    for k in ("unrecorded", "checklists", "matched", "open", "unmatched"):
         if split.get(k):
             keep[k] = split[k]
     return keep

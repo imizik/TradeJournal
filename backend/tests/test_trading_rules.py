@@ -68,7 +68,9 @@ def test_the_list_keeps_his_words_ids_and_one_check_each(db):  # noqa: F811
     assert trading_rules.current(db) == edited
     for bad, why in [([{"text": "x"}] * 9, "Keep it to 8"), ([{"text": "x", "check": {"kind": "vibes"}}], "one of"),
                      ([{"text": "x", "check": {"kind": "max_open", "n": 0}}], "needs N"),
-                     ([{"text": "x", "check": {"kind": "min_dte", "n": 2.5}}], "whole number")]:
+                     ([{"text": "x", "check": {"kind": "min_dte", "n": 2.5}}], "whole number"),
+                     ([{"text": "x", "check": {"kind": "min_dte", "n": 0}}], "needs N"),  # a blank N, never "at least 0 days"
+                     ([{"text": "x", "check": {"kind": "max_open", "n": None}}], "needs N")]:
         with pytest.raises(trading_rules.RulesError, match=why):
             trading_rules.save(db, bad, NOW)
 
@@ -237,5 +239,7 @@ def test_routes_are_owner_only_and_the_copilot_read_carries_the_results(db, mark
     book = client.get("/copilot/paper").json()
     assert book["my_rules"] == [stop_rule, tick] and book["positions"][0]["rules_outcome"] == "broken"
     out = copilot_paper_book.compact(paper_book.view(db, NOW + 1, settle_expired=False), set(), NOW + 1)
+    assert "paper_by_my_rules" not in out["score"]  # nothing checked has closed yet: no empty split for the copilot
+    assert out["score"]["real_by_my_rules"]["checklists"] == 1 and out["score"]["real_by_my_rules"]["unmatched"] == 1
     assert out["open"][0]["my_rules"] == {"outcome": "broken", "broken": ["Stop first: No stop set."]}
     assert copilot_paper_book.compact(paper_book.view(db, NOW + 1, settle_expired=False), {"NBIS"}, NOW + 1)["open"] == []

@@ -46,7 +46,7 @@ CHECKS: dict[str, dict] = {
     "stop_set": {"words": "Stop set before entry"},
     "no_open_minutes": {"words": "No entry in the first {n} minutes after the open", "min": 1, "max": 390, "whole": True},
     "max_open": {"words": "At most {n} open positions", "min": 1, "max": 50, "whole": True},
-    "min_dte": {"words": "Option at least {n} days to expiry", "min": 0, "max": 3650, "whole": True},
+    "min_dte": {"words": "Option at least {n} days to expiry", "min": 1, "max": 3650, "whole": True},
 }
 STATUSES = ("pass", "fail", "na", "unknown", "ask")
 
@@ -259,7 +259,7 @@ def real_context(db: Session, last4: str | None, now: float) -> dict:
     from app.engine.desk_value_line import session_day
     from app.models import Account, DeskAccountValue, Trade
     out: dict = {"account_value": None, "open_count": None}
-    if not last4 or not re.fullmatch(r"\d{4}", str(last4)):
+    if not last4 or not re.fullmatch(r"[0-9]{4}", str(last4)):
         out["account_words"] = "Can't check: this account has no number to find on the desk's account line."
     else:
         row = db.exec(select(DeskAccountValue).where(DeskAccountValue.masked == f"••{last4}",
@@ -270,7 +270,9 @@ def real_context(db: Session, last4: str | None, now: float) -> dict:
             out["account_words"] = "Can't check: the desk's account line has no value for this account today."
         else:
             out["account_value"] = row.total_value
-            out["account_words"] = f"{row.label} ••{last4} at {_usd(row.total_value)} ({_clock(row.at)})"
+            when = _clock(row.at) if row.day == datetime.fromtimestamp(now, ET).date().isoformat() \
+                else datetime.fromtimestamp(row.at, ET).strftime("%b %-d, %-I:%M %p ET")  # a weekend reads Friday's, dated
+            out["account_words"] = f"{row.label} ••{last4} at {_usd(row.total_value)} ({when})"
     webull = select(Account.id).where(Account.broker == "webull")
     count = db.exec(select(Trade.id).where(Trade.status == "open").where(col(Trade.account_id).not_in(webull))).all()
     out["open_count"] = len(count)

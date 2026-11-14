@@ -2109,11 +2109,11 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   The paper confirm (every Paper button, Paper it included) and the Ticket's Copy all show the checklist
   (`POST /copilot/rules/check`, read only, once after a pause when the order changes, never on a timer): each automatic
   check passed, broken with the reason, not applying (shares have no expiry) or "can't check" with why (no size yet, no
-  account value, before the open, the calendar unread; never a pass). Unticked tick-boxes count as not followed. A
+  account value, before the open or after the close, not a trading day; never a pass). Unticked tick-boxes count as not followed. A
   broken rule says so in one line and never disables the order. Size is the most the entry can lose (a debit's cost, a
   credit spread's width less its credit), against the paper cash on paper and, for a real order, against the account's
-  newest value on the desk's account line today (`desk_account_value`, the readings the desk already keeps; else can't
-  check). Open positions are paper positions plus working paper buys, or the journal's open trades for a real order (a
+  newest value on the desk's account line for the session (`desk_account_value`, the readings the desk already keeps;
+  on a weekend Friday's, dated; else can't check). Each copied checklist keeps that reading with the masked last four. Open positions are paper positions plus working paper buys, or the journal's open trades for a real order (a
   fill not yet emailed is not counted). Paper keeps the checklist in the open fill's data (`rules`), evaluated at the
   fill (a limit at its fill, with the answers and the rules as they stood when he placed it). A real order keeps it when
   he taps Copy all (`POST /copilot/rules/ticket`, a `ticket` record keyed to the saved plan), and it is matched to a

@@ -15,7 +15,7 @@ refused outside the regular session, on a stale quote, or without the buying pow
 
 His own trading rules (``engine/trading_rules.py``): ``GET /copilot/rules`` his list and the automatic checks it may use;
 ``PUT /copilot/rules`` saves the list (up to 8). ``POST /copilot/rules/check``: the checklist for an entry he is about
-to make (``side`` paper or real), before he answers its tick-boxes; database reads only. ``POST /copilot/rules/ticket``:
+to make (``side`` paper or real), before he answers its tick-boxes; database reads and the market calendar only, no quote. ``POST /copilot/rules/ticket``:
 keeps a real order's checklist when he copies it from the Ticket, keyed to its saved plan. An opening paper order
 carries his tick-box answers (``rule_answers``) and is checked at its fill. A broken rule never refuses an order.
 

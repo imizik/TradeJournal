@@ -124,7 +124,7 @@ export function RulesEditor({ rules, onDone }: { rules: Rule[]; onDone(): void }
     setBusy(true); setError(null);
     try {
       await saveRules(drafts.map(d => ({ ...(d.id ? { id: d.id } : {}), text: d.text,
-        check: d.kind ? { kind: d.kind, ...(CHECK_WORDS[d.kind].n ? { n: Number(d.n) } : {}) } : null })) as Rule[]);
+        check: d.kind ? { kind: d.kind, ...(CHECK_WORDS[d.kind].n ? { n: d.n.trim() ? Number(d.n) : null } : {})  /* a blank N is refused, never read as 0 */ } : null })) as Rule[]);
       onDone();
     } catch (e) { setError(e instanceof Error ? e.message : "Not saved."); } finally { setBusy(false); }
   };

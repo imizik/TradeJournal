@@ -135,7 +135,7 @@ DOMAIN_ROUTES = frozenset({
     'POST /copilot/paper/auto',  # a paper position's close-automatically switch: paper tables only
     'GET /copilot/rules',  # his own trading rules: the rules table only
     'PUT /copilot/rules',  # save his own trading rules: the rules table only
-    'POST /copilot/rules/check',  # an entry's checklist: his rules, the paper book, the journal's open trades and the desk's account line, read only; no quote, no Robinhood
+    'POST /copilot/rules/check',  # an entry's checklist: his rules, the paper book, the journal's open trades, the desk's account line and the market calendar, read only; no quote, no Robinhood
     'POST /copilot/rules/ticket',  # keep a copied real order's checklist: the rules table only; never an order, never Robinhood
     'GET /copilot/paper/replay',  # replay days and the replay scorecard: replay runs' paper rows; the market calendar
     'GET /copilot/paper/replay/day',  # tickers to suggest for a past day: his fills, watchlist and follow settings, read only
