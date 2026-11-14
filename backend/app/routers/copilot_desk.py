@@ -1790,6 +1790,17 @@ def _now() -> float:
     return time.time()
 
 
+@router.get("/desk/momentum")
+def desk_momentum():
+    """The QQQ intraday momentum paper book (``app/engine/intraday_momentum_book.py``): whether it holds now, the
+    recorded days and running result beside the registered exam. Read from its own file; no provider call, no Robinhood
+    call, never an order. Read-only, owner-only, refused while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import intraday_momentum_book
+    return intraday_momentum_book.read(today._now())
+
+
 @router.get("/desk/overnight")
 def desk_overnight():
     """The QQQ overnight paper book (``app/engine/overnight_book.py``): its state, recorded nights and running result

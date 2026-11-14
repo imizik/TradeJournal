@@ -12,6 +12,7 @@ import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/componen
 import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
 import DeskPaper, { usePaperBook } from "@/components/copilot/DeskPaper";
 import DeskOvernight from "@/components/copilot/DeskOvernight";
+import DeskMomentum from "@/components/copilot/DeskMomentum";
 import DeskReplay, { ReplayPractice } from "@/components/copilot/DeskReplay";
 import PaperReviewCard from "@/components/copilot/PaperReview";
 import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
@@ -878,6 +879,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
             <DeskPaper book={paper.book} failed={paper.failed} symbol={centreSymbol} top={<PaperReviewCard review={paper.book?.review} onAsk={actions.ask} />} />
             {/* The QQQ overnight paper book: the one rule that passed its registered test, recorded live. Hidden until switched on. */}
             <DeskOvernight on={on} />
+            {/* The QQQ intraday momentum paper book: the rule that passed its registered exam, recorded live at 1x. Hidden until switched on. */}
+            <DeskMomentum on={on} />
             {/* Replay practice: past days paper traded on the desk, scored apart from live paper. */}
             <ReplayPractice />
             {/* Before the open and after the close the day's block (the brief, the day report) comes straight after the

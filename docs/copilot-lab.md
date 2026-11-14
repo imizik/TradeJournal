@@ -2231,6 +2231,27 @@ points and dollars on $10,000 a night, missed nights, the last five nights (a sa
 backtest's +4.2 bp a night beside it. Hidden while switched off and empty; a failed read says so instead of showing old
 rows.
 
+
+### QQQ intraday momentum paper book
+
+The intraday rule that passed its registered exam ([result](../research/notes/qqq-intraday-momentum-2026-11-14.md)),
+with the exam's chosen settings, recorded live at 1x before any money (`backend/app/engine/intraday_momentum_book.py`).
+On each full session (the calendar's 16:00 close; none on early closes or without the calendar) it checks QQQ on the hour
+from 10:00 to 15:00. The noise band is max/min(the 09:30 open, the previous session's official close from the Tradier quote) x (1 +/- 1.25 x the average move from
+the open to that hour over the previous 60 sessions). Flat, it goes long above max(upper band, VWAP) and short below
+min(lower band, VWAP); held, it closes when the price crosses back through that level, and only the opposite side can
+open at that check. Anything open closes at 15:59. Decisions use the close of the minute before the check from the chart
+feed's QQQ timesales; fills are a fresh Tradier quote (the ask to buy, the bid to sell). A check not reached within five
+minutes is recorded as missed; a position left open by an outage closes at the next session's first pass, marked late.
+The 60-session history starts from `intraday_momentum_seed.json` (the study's SIP bars, to 2026-11-13) and each finished
+session adds its own moves. Its own SQLite file (`INTRADAY_MOMENTUM_BOOK_PATH`), no migration, no messages, nothing placed.
+Run by the level alert monitor when `INTRADAY_MOMENTUM_BOOK_ENABLED=true` (the owner's switch; off by default).
+
+The desk shows it under the overnight book (`frontend/components/copilot/DeskMomentum.tsx`, `GET /copilot/desk/momentum`
+on the minute request): long, short or flat now, finished days (a checked day with no trade counts as 0, as in the exam),
+the average in basis points and dollars on $10,000, missed checks, the last five days and the exam's +4.4 bp a day.
+Hidden while switched off and empty; a failed read says so instead of showing old rows.
+
 ### Switching chatter on
 
 Both are off until set up; while off nothing is read and nothing is spent. Setting these on the server is Isaac's call.
