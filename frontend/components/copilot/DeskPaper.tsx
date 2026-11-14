@@ -4,9 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { useDeskTicks } from "@/lib/deskTicks";
 import {
-  PAPER_EVENT, PaperRefused, cancelPaperOrder, fillClose, fillOpen, isCredit, orderKey, paperPnl, paperSymbols, paperValue, placeLimitClose,
+  PAPER_EVENT, PAPER_SOURCES, PaperRefused, SOURCE_WORD, cancelPaperOrder, orderWords, fillClose, fillOpen, isCredit, orderKey, paperPnl, paperSymbols, paperValue, placeLimitClose,
   placeLimitOpen, previewClose, previewOpen, setPaperAuto, startPaper,
-  type PaperBook, type PaperFill, type PaperOrder, type PaperPosition, type PaperStats, type PaperWorkingOrder,
+  type PaperBook, type PaperFill, type PaperOrder, type PaperPosition, type PaperSource, type PaperStats, type PaperWorkingOrder,
 } from "@/lib/paperBook";
 import { cn } from "@/lib/utils";
 
@@ -91,9 +91,14 @@ function limitWords(limit: number, spread: boolean, pays: boolean, closing: bool
  * The Paper button: one tap reads a live quote and shows what the order would fill at. Market fills on paper at the
  * quote read then (the ask to buy, the bid to sell); Limit places a day order that fills once a fresh quote reaches its
  * price, until the close or a cancel. A note, a stop and a target (stock prices) can ride with it.
+ *
+ * On an idea (Paper it on a copilot plan, a Radar setup or a scanner pick) ``source`` and ``ideaId`` record whose idea it
+ * was, and the confirm opens prefilled from it; an idea without enough to place an order (``order`` null) shows the
+ * button disabled with ``why``.
  */
-export function PaperButton({ order, quantity = 1, note = null, stop = null, target = null, label = "Paper trade it" }: {
+export function PaperButton({ order, quantity = 1, note = null, stop = null, target = null, label = "Paper trade it", source = "mine", ideaId = null, why = null }: {
   order: PaperOrder | null; quantity?: number | null; note?: string | null; stop?: number | null; target?: number | null; label?: string;
+  source?: PaperSource; ideaId?: string | null; why?: string | null;
 }) {
   const multiplier = order?.instrument === "stock" ? 1 : 100;
   const [open, setOpen] = useState(false);
@@ -131,7 +136,9 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
   };
   const levels = () => {
     const level = (text: string) => text.trim() ? Number(text) : null;
-    return { note: words.trim() || null, stop: level(stopText), target: level(targetText) };
+    return { note: words.trim() || null, stop: level(stopText), target: level(targetText),
+      // The idea's id as the book keeps it (letters, digits and _ . : -, at most 64), or none.
+      ...(source !== "mine" ? { source, idea_id: ideaId?.replace(/[^A-Za-z0-9_.:-]/g, "").slice(0, 64) || null } : {}) };
   };
   const fill = async () => {
     if (!order || !valid) return;
@@ -159,10 +166,18 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
   };
 
   if (!open) {
-    return (
-      <button type="button" data-testid="paper-button" disabled={!order}
-        onClick={() => { const n = quantity && quantity > 0 ? quantity : 1; setQty(String(n)); setType("market"); check(n); }} title="Fill this on paper at the live quote, or place a paper limit: no money, nothing sent"
+    const button = (
+      <button type="button" data-testid="paper-button" data-source={source} disabled={!order} aria-describedby={!order && why ? `paper-why-${ideaId ?? source}` : undefined}
+        onClick={() => { const n = quantity && quantity > 0 ? quantity : 1; setQty(String(n)); setType("market"); check(n); }}
+        title={!order && why ? why : "Fill this on paper at the live quote, or place a paper limit: no money, nothing sent"}
         className={cn(BUTTON, "border-amber-400/60 text-amber-200")}>{label}</button>
+    );
+    if (order || !why) return button;
+    return (
+      <span className="inline-flex flex-wrap items-center gap-x-2">
+        {button}
+        <span id={`paper-why-${ideaId ?? source}`} data-testid="paper-why" className="text-[11px] text-muted-foreground">{why}</span>
+      </span>
     );
   }
   const cost = preview ? Math.round(preview.per_share * multiplier * (valid ? qtyN : preview.quantity) * 100) / 100 : null;
@@ -171,7 +186,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
   const form = preview || closedNow;
   return (
     <div data-testid="paper-confirm" className="w-full space-y-2 rounded-md border border-dashed border-amber-400/50 p-2.5">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-200">Paper · not real money</p>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-200">Paper · not real money{source !== "mine" && <span data-testid="paper-idea" className="ml-1 font-normal normal-case tracking-normal text-muted-foreground">· {SOURCE_WORD[source]}&apos;s idea{order ? `: ${orderWords(order)}` : ""}</span>}</p>
       {busy && !form && <p className="text-xs text-muted-foreground">Reading a live quote…</p>}
       {form && !done && (
         <>
@@ -365,6 +380,31 @@ function Levels({ p }: { p: PaperPosition }) {
   );
 }
 
+/** Whose idea a paper position was, when it was not his own ticket: a small tag after its label. */
+function SourceTag({ source }: { source?: PaperSource }) {
+  if (!source || source === "mine") return null;
+  return <span data-testid="paper-source" className="ml-1.5 rounded border border-border px-1 align-middle text-[10px] uppercase tracking-wide text-muted-foreground">{SOURCE_WORD[source]}</span>;
+}
+
+/** Closed paper P&L by whose idea it was, one compact line: "Mine +$84.50 50%/2 · Copilot …" (win rate / closed trades).
+ *  Only once a paper trade has closed. */
+function BySource({ rows }: { rows?: PaperStats["by_source"] }) {
+  const shown = PAPER_SOURCES.map(s => rows?.find(r => r.source === s)).filter((r): r is NonNullable<typeof r> => !!r);
+  if (!shown.some(r => r.trades > 0)) return null;
+  return (
+    <p data-testid="paper-by-source" aria-label="Closed paper P&L by whose idea" title="Closed paper P&L, win rate and trades by whose idea it was"
+      className="flex flex-wrap gap-x-2.5 px-3 pt-0.5 text-[11px] tabular-nums">
+      {shown.map(r => (
+        <span key={r.source} data-testid="paper-by-source-cell" data-source={r.source} className="whitespace-nowrap">
+          <span className="text-muted-foreground">{SOURCE_WORD[r.source]} </span>
+          {r.trades === 0 ? <span className="text-muted-foreground">—</span> : <>
+            <span className={toneOf(r.pnl)}>{signed(r.pnl)}</span><span className="text-muted-foreground"> {r.win_rate}%/{r.trades}</span></>}
+        </span>
+      ))}
+    </p>
+  );
+}
+
 /** Both sides' closed P&L by day, one small chart: paper solid, real dashed, a zero line. */
 function Curve({ paper, real }: { paper: PaperStats["curve"]; real: PaperStats["curve"] }) {
   const days = [...new Set([...paper, ...real].map(p => p.day))].sort();
@@ -481,7 +521,7 @@ export default function DeskPaper({ book, failed, symbol, top = null }: { book: 
             return (
               <li key={p.id} data-testid="paper-position" className="border-t border-border/60">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5">
-                  <span className="min-w-0 flex-1 text-sm sm:truncate"><span className="font-semibold">{p.label}</span> <span className="text-xs text-muted-foreground">×{p.remaining.toLocaleString("en-US")}</span></span>
+                  <span className="min-w-0 flex-1 text-sm sm:truncate"><span className="font-semibold">{p.label}</span> <span className="text-xs text-muted-foreground">×{p.remaining.toLocaleString("en-US")}</span><SourceTag source={p.source} /></span>
                   {pnl ? (
                     <span data-testid="paper-pnl" className={cn("text-sm tabular-nums", pnl.stale ? "text-muted-foreground" : toneOf(pnl.pnl))} title={pnl.stale ? `Price from ${at(pnl.at)}, not live` : undefined}>
                       {signed(pnl.pnl)}{pnl.pct != null && <span className="ml-1 text-xs">{pnl.pct > 0 ? "+" : pnl.pct < 0 ? "−" : ""}{Math.abs(pnl.pct)}%</span>}
@@ -508,6 +548,7 @@ export default function DeskPaper({ book, failed, symbol, top = null }: { book: 
           <span className={toneOf(score.real.pnl)}>{signed(score.real.pnl)}</span><span className="text-muted-foreground"> · {score.real.win_rate}% of {score.real.trades}</span></>}</span>
         <span className="text-muted-foreground">closed, since {day(book.run.started_at)}</span>
       </p>
+      <BySource rows={score.paper.by_source} />
       {progress && (
         <div data-testid="paper-progress" className="space-y-3 px-3 pt-2">
           <Score paper={score.paper} real={score.real} since={book.run.started_at} />
@@ -519,7 +560,7 @@ export default function DeskPaper({ book, failed, symbol, top = null }: { book: 
                 {closed.map(c => (
                   <li key={c.id} data-testid="paper-closed" className="py-1.5 text-xs">
                     <div className="flex items-baseline gap-2">
-                      <span className="min-w-0 flex-1 truncate"><span className="font-medium">{c.label}</span> ×{c.quantity} · {day(c.opened_at)}–{day(c.closed_at!)}</span>
+                      <span className="min-w-0 flex-1 truncate"><span className="font-medium">{c.label}</span> ×{c.quantity} · {day(c.opened_at)}–{day(c.closed_at!)}<SourceTag source={c.source} /></span>
                       <span className={cn("tabular-nums", toneOf(c.realized))}>{signed(c.realized)}</span>
                     </div>
                     <p className={cn("text-[11px]", c.verdict?.kind === "stop" || c.verdict?.kind === "target" ? "text-foreground/80" : "text-muted-foreground")}>{c.verdict?.auto && <span data-testid="paper-auto-tag" className="mr-1 rounded border border-amber-400/50 px-1 text-[10px] uppercase tracking-wide text-amber-200">auto</span>}{c.verdict?.text}{c.note ? ` · “${c.note}”` : ""}</p>

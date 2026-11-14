@@ -23,6 +23,7 @@ from urllib.parse import urlencode
 
 from sqlmodel import Session, col, select
 
+from app.engine import paper_book
 from app.engine.chart_math import ET
 
 log = logging.getLogger(__name__)
@@ -100,6 +101,7 @@ def row_view(candidate, state: dict, *, new: bool, radar: dict | None) -> dict:
         "stop": candidate.stop, "target": candidate.target, "vwap": _number(facts.get("vwap")),
         "range_high": _number(facts.get("opening_range_high")), "range_low": _number(facts.get("opening_range_low")),
         "flags": json.loads(candidate.flags_json or "[]"), "contract_line": _contract_line(contract),
+        "contract": paper_book.idea_contract(contract),
         "status": status_of(candidate, state),
         "pnl": exit_.get("pnl") if exit_ else None, "exit_reason": exit_.get("reason") if exit_ else None,
         "new": new, "radar": radar,
@@ -150,10 +152,10 @@ def _fixture(db: Session, now: float) -> dict:
                   "symbols_selected": 12}
     invented = [
         {"id": "fixture-nbis", "symbol": "NBIS", "setup": "orb", "direction": "long", "trigger": 94.12, "stop": 93.18,
-         "target": 96.0, "vwap": 93.6, "range_high": 94.05, "range_low": 92.9, "contract_line": "11-21 95C · Δ0.46",
+         "target": 96.0, "vwap": 93.6, "range_high": 94.05, "range_low": 92.9, "contract_line": "11-21 95C · Δ0.46", "contract": {"option_type": "call", "expiry": "2026-11-21", "strike": 95.0},
          "status": "open", "pnl": None, "exit_reason": None, "new": False},
         {"id": "fixture-crwv", "symbol": "CRWV", "setup": "fade", "direction": "short", "trigger": 52.4, "stop": 53.15,
-         "target": 51.3, "vwap": 51.8, "range_high": 53.0, "range_low": 51.6, "contract_line": "11-21 52P · Δ0.41",
+         "target": 51.3, "vwap": 51.8, "range_high": 53.0, "range_low": 51.6, "contract_line": "11-21 52P · Δ0.41", "contract": {"option_type": "put", "expiry": "2026-11-21", "strike": 52.0},
          "status": "exit", "pnl": 42.0, "exit_reason": "target", "new": True, "minutes": 25},
     ]
     try:

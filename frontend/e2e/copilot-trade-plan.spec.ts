@@ -692,3 +692,31 @@ test("a plan drafted without a target saves none and reads as before", async ({ 
   expect(capture.target_price).toBeNull();
   expect(capture.wording).not.toContain("Target");
 });
+
+test("Paper it opens the paper confirm prefilled from the plan and records it as the copilot's idea", async ({ page }) => {
+  const server: Server = { alerts: [], posts: [] };
+  const orders: Record<string, unknown>[] = [];
+  await lab(page, server);
+  await page.route("**/copilot/paper/orders", (route) => {
+    const body = route.request().postDataJSON();
+    orders.push(body);
+    const fill = { label: "NBIS $100 Call 11/21/26", quantity: body.quantity, per_share: -3.4, cash: -340 * body.quantity, quoted_at: Date.now() / 1000 - 2,
+      stock: 94.35, legs: { NBIS261121C00100000: { action: "buy", bid: 3.3, ask: 3.4, price: 3.4 } }, buying_power: 10000, need_each: 340 };
+    return route.fulfill({ json: body.preview ? { preview: fill } : { filled: { ...fill, position_id: "p-1" } } });
+  });
+  await aboutNbis(page);
+  const card = await askForPlan(page);
+  await card.getByTestId("paper-button").click();
+  const confirm = card.getByTestId("paper-confirm");
+  await expect(confirm.getByTestId("paper-idea")).toHaveText("· Copilot's idea: NBIS $100 Call 11/21/26");
+  // He sees the fill price before anything is placed: one preview, no order yet.
+  await expect(confirm.getByTestId("paper-preview")).toContainText("Buy 1 × NBIS $100 Call 11/21/26 at 3.40 (the ask");
+  expect(orders.map((o) => o.preview)).toEqual([true]);
+  await expect(confirm.getByLabel("Paper stop (stock price)")).toHaveValue("92.3");
+  await expect(confirm.getByLabel("Paper note")).toHaveValue(/^Copilot: NBIS reclaims the level overhead/);
+  await confirm.getByTestId("paper-fill").click();
+  await expect(confirm.getByTestId("paper-done")).toContainText("Paper: Buy 1 × NBIS $100 Call 11/21/26");
+  expect(orders[1]).toMatchObject({ action: "open", instrument: "option", symbol: "NBIS", option_type: "call", expiry: "2026-11-21", strike: 100,
+    quantity: 1, stop: 92.3, target: null, source: "copilot", idea_id: expect.stringMatching(/^[A-Za-z0-9_.:-]{1,64}$/) });
+  expect(server.posts).toEqual([]); // paper only: no plan, alert or capture was saved
+});

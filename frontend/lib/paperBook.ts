@@ -8,6 +8,10 @@ import { tickFor, type DeskTicks } from "@/lib/deskTicks";
 
 export const PAPER_EVENT = "tradejournal:paper-changed";
 
+/** Whose idea a paper order was: his own ticket, or Paper it on the copilot's, Radar's or the scanner's idea. */
+export type PaperSource = "mine" | "copilot" | "radar" | "scanner";
+export const PAPER_SOURCES: readonly PaperSource[] = ["mine", "copilot", "radar", "scanner"];
+export const SOURCE_WORD: Record<PaperSource, string> = { mine: "Mine", copilot: "Copilot", radar: "Radar", scanner: "Scanner" };
 export type PaperLeg = { quote: string; action: "buy" | "sell"; strike: number | null };
 export type PaperMark = { per_share: number; value: number; pnl: number; pct: number | null; at: number } | null;
 /** ``auto``: the switch closed it at the stop or target, not his own hand. */
@@ -18,6 +22,8 @@ export type PaperPosition = {
   per_share: number; cash: number; basis: number; stock: number | null; note: string | null; stop: number | null; target: number | null;
   opened_at: number; status: "open" | "closed" | "expired"; closed_at: number | null; realized: number; legs: PaperLeg[];
   awaiting_close: boolean; mark?: PaperMark; verdict?: PaperVerdict;
+  /** Whose idea it was (``mine`` for one recorded before sources) and the idea's id, if any. */
+  source?: PaperSource; idea_id?: string | null;
   /** Open positions: the "Close automatically at stop/target" switch, when each level was touched, an automatic exit
    *  waiting for a fresh bid, and how many a working sell limit holds. */
   auto?: boolean; touched?: { stop?: number; target?: number }; exiting?: boolean; held?: number;
@@ -26,12 +32,15 @@ export type PaperPosition = {
 export type PaperStats = {
   trades: number; pnl: number; win_rate: number | null; avg_win: number | null; avg_loss: number | null; largest_loss: number | null;
   curve: { day: string; pnl: number }[]; open_pnl?: number | null;
+  /** Paper only: closed trades split by whose idea they were, in ``PAPER_SOURCES`` order. */
+  by_source?: { source: PaperSource; trades: number; pnl: number; win_rate: number | null }[];
 };
 /** A working day limit order: ``check`` is the minute's last look (its quote's time, the natural price then, or why
  *  it could not fill on it). */
 export type PaperWorkingOrder = {
   id: string; side: "open" | "close"; symbol: string; instrument: "stock" | "option" | "spread"; label: string; multiplier: number;
   quantity: number; limit: number; pays: boolean; reserve: number; placed_at: number; expires_at: number; position: string | null;
+  source?: PaperSource;
   check: { at: number; quoted_at: number | null; natural: number | null; issue: string | null } | null;
 };
 export type PaperBook = {
@@ -80,7 +89,7 @@ export async function startPaper(startingCash: number, reset = false): Promise<P
   return book;
 }
 
-type Levels = { note?: string | null; stop?: number | null; target?: number | null };
+type Levels = { note?: string | null; stop?: number | null; target?: number | null; source?: PaperSource; idea_id?: string | null };
 export function previewOpen(order: PaperOrder, quantity: number) {
   return post<{ preview: PaperFill }>("/copilot/paper/orders", { action: "open", preview: true, ...order, quantity }).then(r => r.preview);
 }
@@ -153,4 +162,73 @@ export function paperValue(book: PaperBook, ticks: DeskTicks, now = Date.now() /
     return { value, at: each.length ? Math.min(...each.map(e => e.pnl!.at)) : null, stale: each.some(e => e.pnl!.stale) };
   }
   return acct.equity == null ? null : { value: acct.equity, at: acct.prices_at, stale: true };
+}
+
+/** An idea's candidate contract (Radar's or the scanner's, ``paper_book.idea_contract``) as a paper order, or null. */
+export function contractOrder(symbol: string, contract: { option_type: "call" | "put"; expiry: string; strike: number } | null | undefined): PaperOrder | null {
+  return contract ? { instrument: "option", symbol, option_type: contract.option_type, expiry: contract.expiry, strike: contract.strike } : null;
+}
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const iso = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+/** The expiry a contract's words name ("2026-11-20", "11/20/26", "11/20", "Nov 20 '26", "Nov 20, 2026", "Nov 20"); a
+ *  date with no year is its next one from ``today`` (YYYY-MM-DD, New York). With the words it was read from, or null when
+ *  none (or not a real date). */
+function expiryIn(text: string, today: string): { date: string; words: string } | null {
+  const [ty, tm, td] = today.split("-").map(Number);
+  const fill = (m: number, d: number, y: number | null) => {
+    const year = y == null ? (m < tm || (m === tm && d < td) ? ty + 1 : ty) : y < 100 ? 2000 + y : y;
+    const date = new Date(Date.UTC(year, m - 1, d));
+    return date.getUTCMonth() === m - 1 && date.getUTCDate() === d ? iso(year, m, d) : null;
+  };
+  const found = (hit: RegExpMatchArray, date: string | null) => date ? { date, words: hit[0] } : null;
+  let hit = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  if (hit) return found(hit, fill(Number(hit[2]), Number(hit[3]), Number(hit[1])));
+  hit = text.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?\b/);
+  if (hit) return found(hit, fill(Number(hit[1]), Number(hit[2]), hit[3] ? Number(hit[3]) : null));
+  // A year after the day only as '26 or 2026 (a bare "Nov 20 95 call" names the strike, not 2095).
+  hit = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s*(?:['’](\d{2})|(20\d{2}))\b)?/i);
+  if (hit) { const year = hit[3] ?? hit[4]; return found(hit, fill(MONTHS.indexOf(hit[1].toLowerCase()) + 1, Number(hit[2]), year ? Number(year) : null)); }
+  return null;
+}
+
+/**
+ * A copilot plan's contract words as a paper order: one call or put, by strike ("95C", "$100 call") and expiry ("Nov 20
+ * '26", "11/20"); the plan's own instrument decides call or put. Strict on purpose: words that could name a different
+ * contract (a spread "95/100", a count "2 calls", any other number left over such as "at 100" or a delta) are refused
+ * with the reason, so the button is never enabled on a guess. Returns the order, or why there is not enough to place one.
+ */
+export function planOrder(symbol: string, instrument: "stock" | "calls" | "puts", direction: "long" | "short", contract: string,
+  today: string): { order: PaperOrder; why?: undefined } | { order: null; why: string } {
+  if (instrument === "stock") {
+    return direction === "long" ? { order: { instrument: "stock", symbol } }
+      : { order: null, why: "Paper buys shares; it cannot short them." };
+  }
+  const words = contract.trim();
+  if (!words) return { order: null, why: "No contract named: pick one from the Contract list to paper it." };
+  const unclear = { order: null, why: `"${words}" does not name one strike and an expiry plainly: pick a contract from the Contract list to paper it.` } as const;
+  const expiry = expiryIn(words, today);
+  if (!expiry) return unclear;
+  const rest = words.replace(expiry.words, " ");
+  if (expiryIn(rest, today)) return unclear; // two dates ("Nov 21 5/10 C"): one may be a spread's strikes
+  if (/\d\s*[cp]?\s*\/\s*\$?\d/i.test(rest)) return { order: null, why: `"${words}" names a spread: paper it from the Ticket or the Chain.` };
+  // One strike, written "95C", "95 C", "$95 call" or "95 put" (a plural "2 calls" is a count, not a strike).
+  const strikes = [...rest.matchAll(/(?<![\w.$])\$?(\d+(?:\.\d+)?)\s*(c|p|call|put)\b/gi)];
+  if (strikes.length !== 1) return unclear;
+  const [hit] = strikes;
+  if (/\d/.test(rest.replace(hit[0], " "))) return unclear; // another number could be the strike
+  const kind = hit[2].toLowerCase().startsWith("c") ? "call" : "put";
+  const want = instrument === "calls" ? "call" : "put";
+  if (kind !== want) return { order: null, why: `${words} is a ${kind}, but this plan buys ${instrument}.` };
+  return { order: { instrument: "option", symbol, option_type: kind, expiry: expiry.date, strike: Number(hit[1]) } };
+}
+
+/** An order in his words for the confirm: "NBIS $100 Call 11/20/26", "NBIS 100/110 call spread 12/18/26", "NBIS shares". */
+export function orderWords(order: PaperOrder): string {
+  if (order.instrument === "stock") return `${order.symbol} shares`;
+  const [y, m, d] = order.expiry.split("-").map(Number);
+  const day = `${m}/${d}/${String(y % 100).padStart(2, "0")}`;
+  if (order.instrument === "option") return `${order.symbol} $${order.strike} ${order.option_type === "call" ? "Call" : "Put"} ${day}`;
+  return `${order.symbol} ${order.long_strike}/${order.short_strike} ${order.option_type} spread ${day}`;
 }

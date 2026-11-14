@@ -21,6 +21,7 @@ import { DESK_CHANGED_EVENT, DESK_GO_EVENT, DESK_POSITION_EVENT, DESK_VIEW_EVENT
 import type { DeskThread } from "@/lib/desk";
 import { peekDeskTicks } from "@/lib/deskTicks";
 import { openClosingTicket } from "@/components/copilot/DeskTicket";
+import { PaperButton } from "@/components/copilot/DeskPaper";
 import { cn } from "@/lib/utils";
 
 export type DeskActionProposal = Extract<Proposal, { kind: "desk_action" }>;
@@ -170,6 +171,13 @@ export default function DeskActionCard({ proposal, onOutcome }: { proposal: Desk
         : <button type="button" onClick={() => void tap()} className={cn(BUTTON, "border text-muted-foreground hover:text-foreground")}>Show again</button>)}
       {phase === "done" && shown && (
         <button type="button" onClick={() => reveal(shown)} className={cn(BUTTON, "border text-muted-foreground hover:text-foreground")}>Show it</button>
+      )}
+      {/* A ticket card names a contract: Paper it opens the paper confirm on it, recorded as the copilot's idea. */}
+      {card.action === "ticket" && (
+        <PaperButton key={id} label="Paper it" source="copilot" ideaId={id} note={`Copilot: ${actionLine(card).replace(/^Open ticket: /, "")}`}
+          order={card.short_strike != null
+            ? { instrument: "spread", symbol: card.symbol, option_type: card.option_type, expiry: card.expiry, long_strike: card.strike, short_strike: card.short_strike }
+            : { instrument: "option", symbol: card.symbol, option_type: card.option_type, expiry: card.expiry, strike: card.strike }} />
       )}
       {(phase === "open" || phase === "failed" || phase === "stale") && (
         <button type="button" aria-label="Dismiss" title="Dismiss" onClick={() => { setPhase("dismissed"); onOutcome({ state: "dismissed" }); }}

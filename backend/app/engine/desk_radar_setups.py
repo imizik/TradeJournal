@@ -9,6 +9,7 @@ import json
 
 from sqlmodel import Session, select
 
+from app.engine import paper_book
 from app.engine.radar_setup_plan import setup_words
 from app.models import RadarSetup, TradeCapture
 
@@ -65,6 +66,8 @@ def view(db: Session, row: RadarSetup, *, last: dict | None = None) -> dict:
         "invalidation": row.invalidation, "side": side,
         "levels_line": f"In near {row.entry:.2f} · out {side} {row.invalidation:.2f} ({radar_setup._signed(move)}%)",
         "contract_line": _contract_text(row.symbol, contract),
+        # The candidate contract as the desk's Paper it names it (type, expiration, strike), or None.
+        "contract": paper_book.idea_contract(contract),
         "record": row.record_text, "paper_record": radar_setup.paper_record(db, row.kind, row.direction),
         "paper": paper, "plan_state": row.plan_state, "plan_note": row.plan_note,
         "investigation_id": row.investigation_id, "last": last, "distance_pct": distance,

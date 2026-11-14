@@ -197,3 +197,21 @@ test("on a phone the card fits and Show it closes the sheet onto the chart", asy
   await alert.getByRole("button", { name: "Show it" }).click();
   await expect(page.getByTestId("desk-chart")).toBeInViewport();
 });
+
+test("Paper it on a spread ticket card opens the paper confirm on both legs as the copilot's idea", async ({ page }) => {
+  const orders: Record<string, unknown>[] = [];
+  await page.route("**/copilot/paper/orders", route => {
+    orders.push(route.request().postDataJSON());
+    return route.fulfill({ json: { preview: { label: "NBIS 100/110 Call Debit Spread 12/18/26", quantity: 1, per_share: -3.1, cash: -310,
+      quoted_at: Date.now() / 1000 - 2, stock: 101.2, buying_power: 10000, need_each: 310,
+      legs: { NBIS261218C00100000: { action: "buy", bid: 6.0, ask: 6.2, price: 6.2 }, NBIS261218C00110000: { action: "sell", bid: 3.1, ask: 3.3, price: 3.1 } } } } });
+  });
+  await desk(page, [{ ...TICKET, short_strike: 110 }]);
+  const card = actionCard(page, "ticket");
+  await card.getByTestId("paper-button").click();
+  await expect(card.getByTestId("paper-idea")).toHaveText("· Copilot's idea: NBIS 100/110 call spread 12/18/26");
+  await expect(card.getByTestId("paper-preview")).toContainText("Open 1 × NBIS 100/110 Call Debit Spread 12/18/26 at 3.10 net debit");
+  expect(orders).toEqual([expect.objectContaining({ preview: true, instrument: "spread", symbol: "NBIS", option_type: "call", expiry: "2026-12-18",
+    long_strike: 100, short_strike: 110 })]);
+  await expect(card.getByLabel("Paper note")).toHaveValue("Copilot: NBIS 100/110 call debit spread Dec 18");
+});

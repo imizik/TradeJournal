@@ -28,6 +28,9 @@ whether he is right.
 - **Append-only.** Every fill is a ``PaperEvent``; a position is their fold, so nothing is ever edited. An order's life
   (``order``, then its fill or one ``cancel``/``lapse`` keyed ``end:<order>``), the switch and the touches are events too. A position's
   P&L at a moment is the sum of its cash flows plus what it is worth then.
+- **Whose idea.** Each order records where it came from (``source``): ``mine`` (his own ticket, the default), or
+  ``copilot``, ``radar`` or ``scanner`` when he tapped Paper it on one of their ideas, with the idea's id where there is
+  one (``idea_id``). Fields in the event data, nothing else changes; a position recorded before them is his own.
 - **Progress.** Closed paper trades (win rate, average winner and loser, largest loss, P&L by day, each trade's note and
   how it ended against his stop and target) beside his real closed trades over the same dates, read from the journal's
   ``trade`` table and never written.
@@ -70,6 +73,8 @@ EPS = 1e-9
 _checks: dict[str, dict] = {}  # order id -> the last check: when, the quote's time, the natural price or what stopped it
 _TICKER = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 _KEY = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+SOURCES = ("mine", "copilot", "radar", "scanner")  # whose idea a paper order was: his own ticket, or Paper it on an idea
+_IDEA = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 
 
 class PaperError(Exception):
@@ -387,6 +392,30 @@ def _levels(body: dict, bias: str, stock: float | None) -> tuple[float | None, f
     return stop, target
 
 
+def _source(body: dict) -> dict:
+    """Whose idea the order was (``mine`` when unnamed) and the idea's id, if any."""
+    source = body.get("source") or "mine"
+    if source not in SOURCES:
+        raise PaperError(f"A paper order's source is one of {', '.join(SOURCES)}.")
+    idea = body.get("idea_id")
+    if idea is not None and (source == "mine" or not isinstance(idea, str) or not _IDEA.match(idea)):
+        raise PaperError("That idea's id cannot be recorded.")
+    return {"source": source, "idea_id": idea}
+
+
+def idea_contract(contract: dict | None) -> dict | None:
+    """An idea's candidate contract (Radar's or the scanner's saved quote) as the desk's Paper it names it: its type,
+    expiration and strike, or None when it does not name one."""
+    if not isinstance(contract, dict) or contract.get("option_type") not in ("call", "put"):
+        return None
+    try:
+        expiry = date.fromisoformat(str(contract.get("expiration") or contract.get("expiry")))
+        strike = float(contract["strike"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return {"option_type": contract["option_type"], "expiry": expiry.isoformat(), "strike": strike} if strike > 0 else None
+
+
 def _note(body: dict) -> str | None:
     text = " ".join(str(body.get("note") or "").split())[:NOTE_CHARS]
     return text or None
@@ -400,6 +429,7 @@ def open_order(db: Session, body: dict, now: float, preview: bool = False) -> di
     spec = contract(body, _ny_day(now))
     qty = _quantity(body.get("quantity"))
     note = _note(body)
+    origin = _source(body)
     key = None if preview else _key(body)
     if not _market_open(now):
         raise PaperError("The market is closed: paper orders fill only in the regular session, on a live quote.", 409)
@@ -423,7 +453,7 @@ def open_order(db: Session, body: dict, now: float, preview: bool = False) -> di
     if need > book["buying_power"] + 0.005:
         raise PaperError(f"Not enough paper buying power: this needs {usd(need)} and you have {usd(book['buying_power'])}.", 409)
     data = {**spec, "quantity": qty, "per_share": per, "cash": cash, "legs_filled": fill["legs"], "stock": stock,
-            "note": note, "stop": stop, "target": target}
+            "note": note, "stop": stop, "target": target, **origin}
     result = {"label": spec["label"], "quantity": qty, "per_share": per, "cash": cash, "quoted_at": fill["quoted_at"],
               "legs": fill["legs"], "stock": stock, "buying_power_after": round(book["buying_power"] - need, 2),
               "buying_power": book["buying_power"], "need_each": round(need / qty, 4)}
@@ -536,7 +566,7 @@ def place_limit(db: Session, body: dict, now: float, preview: bool = False) -> d
         qty = _quantity(body.get("quantity"))
         stock = _marks([spec["symbol"]]).get(spec["symbol"], {}).get("last")
         stop, target = _levels(body, spec["bias"], stock if isinstance(stock, (int, float)) and stock > 0 else None)
-        extra = {"note": _note(body), "stop": stop, "target": target}
+        extra = {"note": _note(body), "stop": stop, "target": target, **_source(body)}
     if spec["instrument"] == "spread" and limit >= spec["width"]:
         raise PaperError(f"A {limit:g} limit on a {spec['width']:g}-wide spread can never be a real market.")
     pays = _pays(spec, closing)
@@ -684,6 +714,7 @@ def _try_limit(db: Session, order: dict, quotes: dict, now: float, floor: float 
         cash = round(per * order["multiplier"] * qty, 2)
         data = {**{k: order[k] for k in SPEC_KEYS}, "quantity": qty, "per_share": per, "cash": cash, "legs_filled": fill["legs"],
                 "stock": stock, "note": order.get("note"), "stop": order.get("stop"), "target": order.get("target"),
+                "source": order.get("source") or "mine", "idea_id": order.get("idea_id"),
                 "order_id": order["id"], "limit": order["limit"]}
         kind, position_id = "open", uuid.UUID(order["id"])
     key = f"fill:{order['id']}"
@@ -1017,6 +1048,18 @@ def stats(results: list[float], realized: list[tuple[date, float]]) -> dict:
             "largest_loss": round(min(losses), 2) if losses else None, "curve": curve}
 
 
+def by_source(closed: list[dict]) -> list[dict]:
+    """Closed paper trades split by whose idea they were: P&L, trade count and win rate for each source, in ``SOURCES``
+    order (a source with no closed trade shows zero trades and no win rate)."""
+    out = []
+    for source in SOURCES:
+        mine = [p["realized"] for p in closed if (p.get("source") or "mine") == source]
+        wins = sum(1 for r in mine if r > 0)
+        out.append({"source": source, "trades": len(mine), "pnl": round(sum(mine), 2),
+                    "win_rate": round(wins / len(mine) * 100, 1) if mine else None})
+    return out
+
+
 def real_trades(db: Session, since: datetime) -> dict:
     """His real closed trades (the journal's ``trade`` rows; Webull left out) from ``since`` (UTC): read only."""
     start = since.replace(tzinfo=UTC).astimezone(ET).replace(tzinfo=None)  # trade times are naive New York
@@ -1031,15 +1074,16 @@ def real_trades(db: Session, since: datetime) -> dict:
 
 def _order_view(o: dict) -> dict:
     keep = ("id", "side", "symbol", "instrument", "label", "multiplier", "quantity", "limit", "pays", "reserve", "placed_at",
-            "expires_at", "position", "note", "stop", "target")
-    return {**{k: o.get(k) for k in keep}, "check": _checks.get(o["id"])}
+            "expires_at", "position", "note", "stop", "target", "idea_id")
+    return {**{k: o.get(k) for k in keep}, "source": o.get("source") or "mine", "check": _checks.get(o["id"])}
 
 
 def _position_view(p: dict, marks: dict | None, extra: dict | None = None) -> dict:
     keep = ("id", "symbol", "instrument", "option_type", "expiry", "label", "bias", "credit", "width", "multiplier",
             "quantity", "remaining", "per_share", "cash", "stock", "note", "stop", "target", "opened_at", "status",
-            "closed_at", "realized")
+            "closed_at", "realized", "idea_id")
     out = {k: p.get(k) for k in keep}
+    out["source"] = p.get("source") or "mine"  # recorded before sources: his own ticket
     out["legs"] = [{"quote": leg["quote"], "action": leg["action"], "strike": leg["strike"]} for leg in p["legs"]]
     out["basis"] = p["basis_left"]
     out["awaiting_close"] = bool(p.get("awaiting_close"))
@@ -1090,6 +1134,7 @@ def view(db: Session, now: float, settle_expired: bool = True) -> dict:
     # As the journal's trades: a position counts once it is fully closed, on its close day (a trim waits for the rest).
     paper = stats([p["realized"] for p in closed], [(_ny_day(p["closed_at"]), p["realized"]) for p in closed])
     paper["open_pnl"] = round(sum(m["pnl"] for m in priced), 2) if priced else None
+    paper["by_source"] = by_source(closed)
     number = next(i for i, r in enumerate(runs, 1) if r.id == run.id)
     earlier = []
     for i, older in enumerate(runs[:number - 1], 1):

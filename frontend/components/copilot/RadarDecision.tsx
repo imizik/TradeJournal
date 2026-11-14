@@ -9,6 +9,8 @@ import { radarChoice, type RadarChoice } from "@/lib/desk";
 import { planContext } from "@/components/copilot/PlanATrade";
 import { UNDO_MS } from "@/components/copilot/DecisionBar";
 import { signedDollars } from "@/components/ProofView";
+import { PaperButton } from "@/components/copilot/DeskPaper";
+import { contractOrder } from "@/lib/paperBook";
 
 const KIND: Record<string, string> = { relative_to_spy: "vs SPY", relative_to_sector: "vs sector", dip_turn: "Dip turning up", gap_reversal: "Gap reversal" };
 const BUTTON = "min-h-11 w-full rounded px-4 text-sm font-medium sm:w-auto sm:min-h-9";
@@ -22,6 +24,8 @@ type RadarEvent = { event_id: string; session_date: string; kind: string; direct
 export type RadarSetupCard = {
   id: string; event_id: string; session_date: string; kind: string; direction: "up" | "down"; symbol: string; words: string;
   entry: number; invalidation: number; side: "below" | "above"; levels_line: string; contract_line: string | null;
+  /** The candidate contract as Paper it names it, or null when there is no liquid one. */
+  contract?: { option_type: "call" | "put"; expiry: string; strike: number } | null;
   record: string | null; paper_record: string | null; plan_state: "none" | "planned" | "refused"; plan_note: string | null;
   investigation_id: string | null; last: { price: number; at: string | null } | null; distance_pct: number | null;
   paper: { state: string; pnl?: number | null; exit_reason?: string | null; note?: string | null };
@@ -50,7 +54,7 @@ function paperWords(setup: RadarSetupCard): string | null {
 }
 
 /** The setup card on the desk's Radar card: what the ping showed, its paper result and its plan. */
-function SetupBlock({ setup, reply }: { setup: RadarSetupCard; reply: string | null }) {
+function SetupBlock({ setup, reply, paper: paperIt }: { setup: RadarSetupCard; reply: string | null; paper: boolean }) {
   const distance = distanceWords(setup);
   const paper = paperWords(setup);
   return (
@@ -62,6 +66,7 @@ function SetupBlock({ setup, reply }: { setup: RadarSetupCard; reply: string | n
       {setup.record && <p className="text-xs text-muted-foreground">{setup.record}</p>}
       {setup.paper_record && <p className="text-xs text-muted-foreground">{setup.paper_record}</p>}
       {paper && <p data-testid="radar-setup-paper" className="text-xs text-muted-foreground">{paper}</p>}
+      {paperIt && <div className="pt-1"><RadarPaperIt setup={setup} /></div>}
       {setup.plan_state === "planned" && setup.investigation_id ? (
         <p data-testid="radar-setup-planned" className="text-xs text-foreground">
           Planned{reply ? `: ${reply.replace(/^Planned [^:]+: /, "")}` : "."}{" "}
@@ -197,7 +202,7 @@ export default function RadarDecision({ eventId, symbol, fill }: { eventId: stri
         <Link href={`/radar?event=${encodeURIComponent(event.event_id)}`} className="ml-auto underline-offset-2 hover:text-foreground hover:underline">Open in Radar</Link>
       </p>
       <p className="mt-1 text-sm text-foreground">{summary}.</p>
-      {setup && <SetupBlock setup={setup} reply={reply} />}
+      {setup && <SetupBlock setup={setup} reply={reply} paper={today} />}
       {detail.plans.planned && !(setup && setup.plan_state === "planned") && <p className="mt-1 text-xs text-muted-foreground">A plan names this hit{detail.plans.traded ? ", and it was traded" : ""}.</p>}
       {pending ? (
         <p role="status" className="mt-3 flex min-h-11 items-center gap-3 text-sm text-muted-foreground">
@@ -228,4 +233,12 @@ export default function RadarDecision({ eventId, symbol, fill }: { eventId: stri
       {error && <p role="status" className="mt-2 text-xs text-primary">Not saved: {error}. Tap again to retry.</p>}
     </section>
   );
+}
+
+/** Paper it on a Radar setup card: its candidate contract on paper, the invalidation as the stop, recorded as Radar's idea.
+ *  A card with no liquid contract says so instead. */
+export function RadarPaperIt({ setup }: { setup: Pick<RadarSetupCard, "id" | "symbol" | "words" | "levels_line" | "invalidation" | "contract"> }) {
+  const order = contractOrder(setup.symbol, setup.contract);
+  return <PaperButton key={setup.id} order={order} why={order ? null : "No liquid contract on this card to paper."} source="radar" ideaId={setup.id}
+    label="Paper it" stop={setup.invalidation} note={`Radar: ${setup.symbol} ${setup.words}. ${setup.levels_line}`} />;
 }
