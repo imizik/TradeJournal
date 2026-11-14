@@ -38,7 +38,8 @@ export function usePaperBook(on: boolean): { book: PaperBook | null; failed: boo
     if (!on) return;
     const controller = new AbortController();
     const load = () => deskGet("/copilot/paper", controller.signal)
-      .then(async r => { if (!r.ok) throw new Error(String(r.status)); setBook(await r.json()); setFailed(false); })
+      // Read the body even when refused: an unread one keeps the request open (and the page never idle).
+      .then(async r => { const body = await r.json().catch(() => null); if (!r.ok || !body) throw new Error(String(r.status)); setBook(body); setFailed(false); })
       .catch(() => { if (!controller.signal.aborted) setFailed(true); });
     load();
     const stop = everyDeskMinute(load);
