@@ -19,12 +19,16 @@ export type ReplayRunInfo = {
   /** Why options cannot be replayed on this day (Tradier's minute history is too short, or Tradier is not connected);
    *  null when they can. Shares still replay. */
   options_off?: string | null;
+  /** A redo's original real trade (``replay_redo``); null for a plain replay. */
+  redo_of?: string | null;
 };
 /** A closed replay trade: the paper position with the day replayed. ``verdict.kind`` adds flat (sold at the replayed
  *  close) and left (sold when he left the replay). */
-export type ReplayTrade = Omit<PaperPosition, "verdict"> & { day: string; run_id: string; verdict?: { kind: string; text: string; auto?: boolean } };
+export type ReplayTrade = Omit<PaperPosition, "verdict"> & { day: string; run_id: string; verdict?: { kind: string; text: string; auto?: boolean };
+  /** A redo's trade: ``source`` "redo" and the real trade it redoes. */
+  redo_of?: string };
 export type ReplayScore = { score: PaperStats; runs: ReplayRunInfo[]; trades: ReplayTrade[] };
-export type ReplayHome = ReplayScore & { days?: ReplayDay[]; spread_bps: number; options: string };
+export type ReplayHome = ReplayScore & { days?: ReplayDay[]; spread_bps: number; options: string; worst?: RedoWorst[] };
 /** What the bars did while the clock ran: a limit filled, an automatic exit at the stop or target, a level touched with
  *  the switch off, or everything sold at the close (flat) or on leaving (left). */
 export type ReplayHappening = {
@@ -118,3 +122,36 @@ export const expiryShort = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocal
 export const replayDate = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
 /** "REPLAY · Thu Nov 13 · 10:42 AM ET": on every replay screen, so it is never taken for live. */
 export const replayBadge = (day: string, at: number) => `REPLAY · ${replayDate(day)} · ${replayTime(at)} ET`;
+
+// --- redo a real trade (backend ``app/engine/replay_redo.py``) ---------------------------------------------------------
+
+/** Where a closed real trade's "Redo in replay" goes: the desk, which opens Replay on that trade. */
+export const redoHref = (tradeId: string) => `/copilot-lab?${new URLSearchParams({ redo: tradeId })}`;
+/** One of his biggest real losses on a day Replay offers ("Redo my worst"). */
+export type RedoWorst = { trade_id: string; day: string; symbol: string; label: string; instrument: "stock" | "option"; pnl: number; opened_at: number };
+/** What a redo needs: the day, ticker and contract to preselect (or shares with the reason), and where it can start.
+ *  Nothing about how the real trade went. */
+export type RedoPlan = {
+  trade_id: string; day: string; symbol: string; label: string; instrument: "stock" | "option";
+  contract: { option_type: "call" | "put"; expiry: string; strike: number; label: string } | null; shares_reason: string | null;
+  open_at: number; close_at: number; before_at: number | null; before_reason: string | null;
+};
+export type RedoSide = {
+  label: string; instrument: "stock" | "option" | "mixed"; quantity: number; pnl: number | null; held_minutes: number;
+  entry: { price: number | null; at: number }; exit: { price: number | null; at: number };
+};
+/** The real trade beside the redo: ``redo`` null when he skipped it; ``difference`` is redo less real. */
+export type RedoCompare = {
+  run_id: string; trade_id: string; day: string; start: "open" | "before";
+  real: RedoSide & { expired: boolean; overnight: boolean; closed_day: string }; redo: (RedoSide & { trades: number }) | null;
+  left_open: number; difference: number | null; note: string;
+};
+export const redoPlan = (tradeId: string, signal?: AbortSignal) =>
+  call<RedoPlan>(`/copilot/paper/replay/redo?${new URLSearchParams({ trade_id: tradeId })}`, undefined, signal);
+export async function startRedo(tradeId: string, start: "open" | "before") {
+  const view = await call<ReplayView & { redo: RedoPlan & { start: "open" | "before"; start_at: number } }>("/copilot/paper/replay/redo", { trade_id: tradeId, start });
+  changed();
+  return view;
+}
+export const redoCompare = (runId: string, signal?: AbortSignal) =>
+  call<RedoCompare>(`/copilot/paper/replay/redo/compare?${new URLSearchParams({ run_id: runId })}`, undefined, signal);
