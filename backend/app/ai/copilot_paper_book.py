@@ -39,6 +39,33 @@ def _stats(s: dict) -> dict:
     return {k: s.get(k) for k in ("trades", "pnl", "win_rate", "avg_win", "avg_loss", "largest_loss")}
 
 
+def _rules(results: list[dict] | None) -> dict | None:
+    """His own rules at the entry, compact: followed, broken or unclear, and which were broken or could not be checked."""
+    from app.engine.trading_rules import outcome
+    found = outcome(results)
+    if found is None:
+        return None
+    out: dict = {"outcome": found}
+    broken = [f"{r['text']}: {r['reason']}" for r in results if r["status"] == "fail"]
+    unchecked = [f"{r['text']}: {r['reason']}" for r in results if r["status"] in ("unknown", "ask")]
+    if broken:
+        out["broken"] = broken
+    if unchecked:
+        out["cant_check"] = unchecked
+    return out
+
+
+def _split(split: dict | None) -> dict | None:
+    if not split:
+        return None
+    keep = {k: split[k] for k in ("followed", "broken", "unclear") if split.get(k)}
+    keep["by_rule"] = [{"rule": r["text"], "followed": r["followed"], "broken": r["broken"]} for r in split.get("by_rule") or []]
+    for k in ("unrecorded", "matched", "open", "unmatched"):
+        if split.get(k):
+            keep[k] = split[k]
+    return keep
+
+
 def _open_row(p: dict, now: float, today: date) -> dict:
     from app.engine.paper_book import clock
     row = {"label": p["label"], "symbol": p["symbol"], "quantity": p["remaining"], "opened": clock(p["opened_at"]),
@@ -48,6 +75,8 @@ def _open_row(p: dict, now: float, today: date) -> dict:
             row[key] = p[key]
     if note := _note(p.get("note")):
         row["note"] = note
+    if rules := _rules(p.get("rules")):
+        row["my_rules"] = rules
     if p.get("expiry") and date.fromisoformat(p["expiry"]) < today:
         row["past_expiry"] = f"expired {p['expiry']}; it settles at the close on the desk's next read"
     if p.get("auto"):
@@ -73,6 +102,8 @@ def _closed_row(c: dict) -> dict:
             row[key] = c[key]
     if note := _note(c.get("note")):
         row["note"] = note
+    if rules := _rules(c.get("rules")):
+        row["my_rules"] = rules
     return row
 
 
@@ -139,6 +170,14 @@ def compact(view: dict, hidden: set[str], now: float, symbol: str | None = None)
                     "real": _stats(score["real"]),
                     "note": "Closed trades only. Real is his journal's closed trades over the same dates (Webull left out); "
                             "a paper position counts once fully closed, on its close day."}
+    if paper_rules := _split(score["paper"].get("rules")):
+        out["score"]["paper_by_my_rules"] = paper_rules
+    if real_rules := _split(score.get("real_rules")):
+        out["score"]["real_by_my_rules"] = real_rules
+    if paper_rules or real_rules:
+        out["score"]["note"] += (" by_my_rules splits closed trades by his own written rules at entry: followed (all kept), broken "
+                                 "(any broken), unclear (one could not be checked); real ones count only when the copied "
+                                 "ticket's plan links to the closed trade (unmatched ones are counted, never guessed).")
     if symbol is not None:
         out["score"]["note"] += " The score is the whole run, not just this ticker."
     return _fit(out)

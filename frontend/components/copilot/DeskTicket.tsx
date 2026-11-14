@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { PaperButton } from "@/components/copilot/DeskPaper";
+import { RealRules } from "@/components/copilot/DeskRules";
 import PlayCheck, { type PlayCheckData } from "@/components/copilot/PlayCheck";
 import SetupRecordLines, { premiumLine } from "@/components/copilot/SetupRecordLines";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
@@ -150,9 +151,9 @@ async function copyText(text: string): Promise<void> {
   if (!ok) throw new Error("copy refused");
 }
 
-export function CopyButton({ text, label, disabled = false, wide = false }: { text: string; label: string; disabled?: boolean; wide?: boolean }) {
+export function CopyButton({ text, label, disabled = false, wide = false, onCopy }: { text: string; label: string; disabled?: boolean; wide?: boolean; onCopy?(): void }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
-  const copy = () => copyText(text).then(() => setState("copied"), () => setState("failed"))
+  const copy = () => copyText(text).then(() => { setState("copied"); onCopy?.(); }, () => setState("failed"))
     .finally(() => setTimeout(() => setState("idle"), 1800));
   return (
     <button type="button" onClick={copy} disabled={disabled} aria-label={wide ? label : `Copy ${label}`}
@@ -293,7 +294,7 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
 
   if (ticket.spread) {
     return <SpreadView ticket={ticket} spread={ticket.spread} head={head} switcher={switcher} foot={foot(true)} limit={limit} setLimit={setLimit}
-      qty={qty} setQty={setQty} nowS={nowS} onReread={() => setReload(r => r + 1)} />;
+      qty={qty} setQty={setQty} nowS={nowS} onReread={() => setReload(r => r + 1)} last4={chosen?.last4 ?? null} />;
   }
 
   // No contract named: two or three real contracts to choose from; nothing is chosen for him.
@@ -389,20 +390,23 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
         </Row>
       </div>
       {ticket.check && <PlayCheck check={ticket.check} investigationId={ticket.investigation_id} symbol={ticket.symbol} contracts={qtyN} paid={f.cost} />}
-      {chosen?.kind === "mcp" ? (
-        <div className="space-y-2">
-          <div className="flex flex-wrap gap-2">
-            <button type="button" disabled aria-disabled="true" title="Sending is off" className="inline-flex min-h-11 cursor-not-allowed items-center rounded-md border px-3 text-xs opacity-45 sm:min-h-8">Send to Robinhood for your approval</button>
-            <CopyButton text={all} label="Copy all for Robinhood" wide />
+      <RealRules investigationId={ticket.investigation_id} symbol={ticket.symbol}
+        entry={{ side: "real", instrument: "option", expiry: k.expiry, size: f.cost, stop: ticket.invalidation, last4: chosen?.last4 ?? null }}>
+        {onCopy => chosen?.kind === "mcp" ? (
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-2">
+              <button type="button" disabled aria-disabled="true" title="Sending is off" className="inline-flex min-h-11 cursor-not-allowed items-center rounded-md border px-3 text-xs opacity-45 sm:min-h-8">Send to Robinhood for your approval</button>
+              <CopyButton text={all} label="Copy all for Robinhood" wide onCopy={onCopy} />
+            </div>
+            <p className="text-xs text-muted-foreground">Sending is off: Robinhood has not given your account the approvals setting, and the MCP account is empty. Copy the fields and place it yourself in Robinhood.</p>
           </div>
-          <p className="text-xs text-muted-foreground">Sending is off: Robinhood has not given your account the approvals setting, and the MCP account is empty. Copy the fields and place it yourself in Robinhood.</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          <CopyButton text={all} label="Copy all for Robinhood" wide />
-          <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {ticket.symbol}, Trade, Trade options, then enter each field. Nothing is sent from here.</p>
-        </div>
-      )}
+        ) : (
+          <div className="space-y-2">
+            <CopyButton text={all} label="Copy all for Robinhood" wide onCopy={onCopy} />
+            <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {ticket.symbol}, Trade, Trade options, then enter each field. Nothing is sent from here.</p>
+          </div>
+        )}
+      </RealRules>
       <PaperButton order={{ instrument: "option", symbol: ticket.symbol, option_type: k.type, expiry: k.expiry, strike: k.strike }} quantity={qtyN}
         note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} />
       {foot(true)}
@@ -427,8 +431,8 @@ const ROLE_WORD = { entry: "entry", target: "target", stop: "stop" } as const;
  * make, break-even, and the spread's worth at expiry at his plan's levels. Copy all puts the legs, then the net limit
  * price as a debit or credit, then the quantity on the clipboard. It copies; there is no Send button.
  */
-function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, qty, setQty, nowS, onReread }: {
-  ticket: Ticket; spread: Spread; head: React.ReactNode; switcher: React.ReactNode; foot: React.ReactNode;
+function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, qty, setQty, nowS, onReread, last4 = null }: {
+  ticket: Ticket; spread: Spread; head: React.ReactNode; switcher: React.ReactNode; foot: React.ReactNode; last4?: string | null;
   limit: string; setLimit(v: string): void; qty: string; setQty(v: string): void; nowS: number; onReread(): void;
 }) {
   const limitN = limit.trim() && Number(limit) > 0 ? Number(limit) : null;
@@ -518,10 +522,12 @@ function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, 
       {!fresh && (
         <button type="button" onClick={onReread} className="text-xs text-foreground underline underline-offset-2">Read the quotes again</button>
       )}
+      <RealRules investigationId={ticket.investigation_id} symbol={ticket.symbol}
+        entry={{ side: "real", instrument: "spread", expiry: s.expiry, size: f.warning ? null : f.maxLoss, stop: ticket.invalidation, last4 }}>{onCopy => (
       <div className="space-y-2">
-        <CopyButton text={all} label="Copy all for Robinhood" wide />
+        <CopyButton text={all} label="Copy all for Robinhood" wide onCopy={onCopy} />
         <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {ticket.symbol}, Trade, Trade options, pick both legs (Buy the ${s.long}, Sell the ${s.short}, {shortDate(s.expiry)}), then the limit as a {s.type} and the quantity. Nothing is sent from here.</p>
-      </div>
+      </div>)}</RealRules>
       <PaperButton order={{ instrument: "spread", symbol: ticket.symbol, option_type: s.kind, expiry: s.expiry, long_strike: s.long, short_strike: s.short }} quantity={qtyN}
         note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} />
       {foot}

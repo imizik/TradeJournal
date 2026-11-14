@@ -31,6 +31,10 @@ whether he is right.
 - **Whose idea.** Each order records where it came from (``source``): ``mine`` (his own ticket, the default), or
   ``copilot``, ``radar`` or ``scanner`` when he tapped Paper it on one of their ideas, with the idea's id where there is
   one (``idea_id``). Fields in the event data, nothing else changes; a position recorded before them is his own.
+- **His rules.** Each entry is checked against his own rules (``trading_rules``) as it fills: a market order at the fill,
+  a limit order at its fill with the answers and the rules as they stood when he placed it. The checklist rides in the
+  open fill's data (``rules``); a rule broken never blocks the order. The scorecard splits closed trades by followed
+  versus broken.
 - **Progress.** Closed paper trades (win rate, average winner and loser, largest loss, P&L by day, each trade's note and
   how it ended against his stop and target) beside his real closed trades over the same dates, read from the journal's
   ``trade`` table and never written.
@@ -48,7 +52,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
-from app.engine import desk_ticket
+from app.engine import desk_ticket, trading_rules
 from app.engine import scanner_rules as rules
 from app.engine.chart_math import ET
 from app.engine.level_alerts import LATENESS
@@ -417,6 +421,30 @@ def idea_contract(contract: dict | None) -> dict | None:
     return {"option_type": contract["option_type"], "expiry": expiry.isoformat(), "strike": strike} if strike > 0 else None
 
 
+def rules_context(db: Session, events: list[PaperEvent] | None = None, run: PaperRun | None = None,
+                  skip: str | None = None) -> dict | None:
+    """What his rules check a paper entry against: the paper cash now, and how many paper positions are open plus
+    working paper buys (``skip``: the order being filled, which is this entry)."""
+    run = run or current_run(db)
+    if run is None:
+        return None
+    events = _events(db, run) if events is None else events
+    positions = fold(events)
+    working = [o for o in orders(events) if o["status"] == "working"]
+    count = sum(1 for p in positions if p["status"] == "open") + sum(1 for o in working if o["side"] == "open" and o["id"] != skip)
+    return trading_rules.paper_context(account(run, positions, working)["cash"], count)
+
+
+def _rules_at(db: Session, rules: list[dict], answers: dict, spec: dict, need: float, stop, at: float,
+              events: list[PaperEvent], run: PaperRun, skip: str | None = None) -> list[dict]:
+    """The entry's checklist at its fill: the most it can lose (``need``: a debit's cost, a credit spread's width less
+    its credit) against the paper cash, and the rest of his rules."""
+    if not rules:
+        return []
+    order = {"instrument": spec["instrument"], "expiry": spec.get("expiry"), "size": need, "stop": stop, "at": at}
+    return trading_rules.evaluate(rules, order, rules_context(db, events, run, skip), answers)
+
+
 def _note(body: dict) -> str | None:
     text = " ".join(str(body.get("note") or "").split())[:NOTE_CHARS]
     return text or None
@@ -455,6 +483,9 @@ def open_order(db: Session, body: dict, now: float, preview: bool = False) -> di
         raise PaperError(f"Not enough paper buying power: this needs {usd(need)} and you have {usd(book['buying_power'])}.", 409)
     data = {**spec, "quantity": qty, "per_share": per, "cash": cash, "legs_filled": fill["legs"], "stock": stock,
             "note": note, "stop": stop, "target": target, **origin}
+    if not preview:  # his rules at the fill: a broken one is recorded, never a refusal
+        data["rules"] = _rules_at(db, trading_rules.current(db), trading_rules.answers_of(body.get("rule_answers")), spec,
+                                  need, stop, fill["quoted_at"], events, run)
     result = {"label": spec["label"], "quantity": qty, "per_share": per, "cash": cash, "quoted_at": fill["quoted_at"],
               "legs": fill["legs"], "stock": stock, "buying_power_after": round(book["buying_power"] - need, 2),
               "buying_power": book["buying_power"], "need_each": round(need / qty, 4)}
@@ -568,6 +599,8 @@ def place_limit(db: Session, body: dict, now: float, preview: bool = False) -> d
         stock = _marks([spec["symbol"]]).get(spec["symbol"], {}).get("last")
         stop, target = _levels(body, spec["bias"], stock if isinstance(stock, (int, float)) and stock > 0 else None)
         extra = {"note": _note(body), "stop": stop, "target": target, **_source(body)}
+        if not preview:  # checked at the fill, against the rules as they stand now
+            extra.update(rule_answers=trading_rules.answers_of(body.get("rule_answers")), rules_set=trading_rules.current(db))
     if spec["instrument"] == "spread" and limit >= spec["width"]:
         raise PaperError(f"A {limit:g} limit on a {spec['width']:g}-wide spread can never be a real market.")
     pays = _pays(spec, closing)
@@ -717,6 +750,10 @@ def _try_limit(db: Session, order: dict, quotes: dict, now: float, floor: float 
                 "stock": stock, "note": order.get("note"), "stop": order.get("stop"), "target": order.get("target"),
                 "source": order.get("source") or "mine", "idea_id": order.get("idea_id"),
                 "order_id": order["id"], "limit": order["limit"]}
+        if order.get("rules_set") is not None:
+            need = round((order["width"] * order["multiplier"] * qty if order["credit"] else 0.0) - cash, 2)
+            data["rules"] = _rules_at(db, order["rules_set"], order.get("rule_answers") or {}, order, need, order.get("stop"),
+                                      fill["quoted_at"], events, run, skip=order["id"])
         kind, position_id = "open", uuid.UUID(order["id"])
     key = f"fill:{order['id']}"
     if not _store(db, run, position_id, kind, key, fill["quoted_at"], data):
@@ -1085,6 +1122,8 @@ def _position_view(p: dict, marks: dict | None, extra: dict | None = None) -> di
             "closed_at", "realized", "idea_id")
     out = {k: p.get(k) for k in keep}
     out["source"] = p.get("source") or "mine"  # recorded before sources: his own ticket
+    out["rules"] = p.get("rules")  # None: entered before his rules were checked
+    out["rules_outcome"] = trading_rules.outcome(p.get("rules"))
     out["legs"] = [{"quote": leg["quote"], "action": leg["action"], "strike": leg["strike"]} for leg in p["legs"]]
     out["basis"] = p["basis_left"]
     out["awaiting_close"] = bool(p.get("awaiting_close"))
@@ -1136,6 +1175,8 @@ def view(db: Session, now: float, settle_expired: bool = True) -> dict:
     paper = stats([p["realized"] for p in closed], [(_ny_day(p["closed_at"]), p["realized"]) for p in closed])
     paper["open_pnl"] = round(sum(m["pnl"] for m in priced), 2) if priced else None
     paper["by_source"] = by_source(closed)
+    rules = trading_rules.current(db)
+    paper["rules"] = trading_rules.split([(p.get("rules"), p["realized"]) for p in closed], rules)
     number = next(i for i, r in enumerate(runs, 1) if r.id == run.id)
     earlier = []
     for i, older in enumerate(runs[:number - 1], 1):
@@ -1151,6 +1192,7 @@ def view(db: Session, now: float, settle_expired: bool = True) -> dict:
         "positions": shown,
         "orders": [_order_view(o) for o in reversed(working)],
         "closed": [_position_view(p, None) for p in sorted(closed, key=lambda p: p["closed_at"], reverse=True)[:CLOSED_SHOWN]],
-        "score": {"paper": paper, "real": real_trades(db, run.started_at)},
+        "score": {"paper": paper, "real": real_trades(db, run.started_at), "real_rules": trading_rules.real_split(db, rules)},
+        "my_rules": rules,
         "earlier": list(reversed(earlier)), "market_open": _market_open(now), "fresh_seconds": FRESH_SECONDS,
     }

@@ -9,6 +9,7 @@ import {
   type PaperBook, type PaperFill, type PaperOrder, type PaperPosition, type PaperSource, type PaperStats, type PaperWorkingOrder,
 } from "@/lib/paperBook";
 import { cn } from "@/lib/utils";
+import { RulesChecklist, RulesEditor, RulesSplitLine } from "./DeskRules";
 
 /**
  * His own paper book on the desk (docs/copilot-lab.md § Paper): a Paper button wherever the desk builds an order (the
@@ -114,6 +115,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
   const [error, setError] = useState<{ text: string; start: boolean } | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [key, setKey] = useState("");
+  const [ticked, setTicked] = useState<Record<string, boolean>>({});  // his tick-box rules, answered here
   const qtyN = Number(qty);
   const valid = Number.isInteger(qtyN) && qtyN > 0;
   const limitN = Number(limitText);
@@ -136,7 +138,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
   };
   const levels = () => {
     const level = (text: string) => text.trim() ? Number(text) : null;
-    return { note: words.trim() || null, stop: level(stopText), target: level(targetText),
+    return { note: words.trim() || null, stop: level(stopText), target: level(targetText), rule_answers: ticked,
       // The idea's id as the book keeps it (letters, digits and _ . : -, at most 64), or none.
       ...(source !== "mine" ? { source, idea_id: ideaId?.replace(/[^A-Za-z0-9_.:-]/g, "").slice(0, 64) || null } : {}) };
   };
@@ -184,6 +186,10 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
   const width = order?.instrument === "spread" ? Math.abs(order.long_strike - order.short_strike) : null;
   const hold = limitValid && valid ? Math.round((credit && width != null ? width - limitN : limitN) * multiplier * qtyN * 100) / 100 : null;
   const form = preview || closedNow;
+  // What his rules check: the most it can lose at entry (a market fill's need at the quote read, a limit's hold).
+  const size = type === "market" ? (preview?.need_each != null && valid ? Math.round(preview.need_each * qtyN * 100) / 100 : null) : hold;
+  const stopN = stopText.trim() && Number(stopText) > 0 ? Number(stopText) : null;
+  const entry = order && form ? { side: "paper" as const, instrument: order.instrument, expiry: order.instrument === "stock" ? null : order.expiry, size, stop: stopN } : null;
   return (
     <div data-testid="paper-confirm" className="w-full space-y-2 rounded-md border border-dashed border-amber-400/50 p-2.5">
       <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-200">Paper · not real money{source !== "mine" && <span data-testid="paper-idea" className="ml-1 font-normal normal-case tracking-normal text-muted-foreground">· {SOURCE_WORD[source]}&apos;s idea{order ? `: ${orderWords(order)}` : ""}</span>}</p>
@@ -213,6 +219,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
             </label>
           </div>
           <input aria-label="Paper note" maxLength={280} placeholder="Why (optional, one line)" value={words} onChange={e => setWords(e.target.value)} className={cn(INPUT, "w-full")} />
+          <RulesChecklist entry={entry} ticked={ticked} onTick={(id, on) => setTicked(t => ({ ...t, [id]: on }))} />
           {type === "market" && preview ? (
             <p className="text-[11px] text-muted-foreground">Fill on paper re-reads the quote and fills at that moment&apos;s {Object.values(preview.legs).length > 1 ? "natural price" : "ask"}. {preview.buying_power != null && preview.need_each != null && valid && <>Paper buying power after: {preview.buying_power - preview.need_each * qtyN < 0 ? "−" : ""}{usd(preview.buying_power - preview.need_each * qtyN)}{preview.buying_power - preview.need_each * qtyN < 0 ? " (not enough)" : ""}.</>}</p>
           ) : (
@@ -457,6 +464,7 @@ function Score({ paper, real, since }: { paper: PaperStats; real: PaperStats; si
 /** The Paper section under the book: one panel, folded to its account line and score line until Progress is opened. */
 export default function DeskPaper({ book, failed, symbol, top = null }: { book: PaperBook | null; failed: boolean; symbol: string | null; top?: React.ReactNode }) {
   const [progress, setProgress] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [closing, setClosing] = useState<{ id: string; trim: boolean } | null>(null);
   const [cash, setCash] = useState("10000");
   const [resetting, setResetting] = useState(false);
@@ -471,11 +479,15 @@ export default function DeskPaper({ book, failed, symbol, top = null }: { book: 
       <h2 className={cn(LABEL, "text-amber-200")}>Paper</h2>
       <span className="rounded border border-amber-400/50 px-1 text-[10px] uppercase tracking-wide text-amber-200">not real money</span>
       {book?.run && <span className="text-[11px] text-muted-foreground">run {book.run.number} · since {day(book.run.started_at)}</span>}
-      {book?.run && <button type="button" aria-expanded={progress} data-testid="paper-progress-toggle" onClick={() => setProgress(p => !p)} className="ml-auto text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">{progress ? "Hide progress" : "Progress"}</button>}
+      {book && <button type="button" aria-expanded={editing} data-testid="rules-toggle" onClick={() => setEditing(e => !e)}
+        title="Your own trading rules, checked at each entry" className="ml-auto text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+        Rules{book.my_rules?.length ? ` (${book.my_rules.length})` : ""}</button>}
+      {book?.run && <button type="button" aria-expanded={progress} data-testid="paper-progress-toggle" onClick={() => setProgress(p => !p)} className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">{progress ? "Hide progress" : "Progress"}</button>}
     </div>
   );
   const frame = (children: React.ReactNode) => (
-    <section aria-label="Paper book" data-testid="desk-paper" className="rounded-lg border border-dashed border-amber-400/40 bg-card">{head}{children}</section>
+    <section aria-label="Paper book" data-testid="desk-paper" className="rounded-lg border border-dashed border-amber-400/40 bg-card">{head}
+      {editing && book && <RulesEditor rules={book.my_rules ?? []} onDone={() => setEditing(false)} />}{children}</section>
   );
   if (!book) return frame(<p className="px-3 pb-2.5 text-xs text-muted-foreground">{failed ? "Your paper book could not be read; it reads again in a minute." : "Reading your paper book…"}</p>);
   const startForm = (reset: boolean) => (
@@ -549,6 +561,7 @@ export default function DeskPaper({ book, failed, symbol, top = null }: { book: 
         <span className="text-muted-foreground">closed, since {day(book.run.started_at)}</span>
       </p>
       <BySource rows={score.paper.by_source} />
+      <RulesSplitLine paper={score.paper.rules} real={score.real_rules} />
       {progress && (
         <div data-testid="paper-progress" className="space-y-3 px-3 pt-2">
           <Score paper={score.paper} real={score.real} since={book.run.started_at} />
