@@ -128,6 +128,10 @@ class ReplayEvidence:
         return {"state": "unavailable", "reason": "Week reviews are unavailable in replay (they read the journal as it is now, "
                                                   "including what happened after the frozen moment)."}
 
+    def get_paper_book(self, symbol: str | None = None) -> dict:
+        return {"state": "unavailable", "reason": "The paper book is unavailable in replay (it reads the book as it is now, "
+                                                  "including paper trades after the frozen moment)."}
+
     def get_level_history(self, symbol: str, level: float | None = None, side: str | None = None, minutes: int | None = None,
                           entry: float | None = None, lookback_days: int = 180) -> dict:
         return {"state": "unavailable", "symbol": symbol,

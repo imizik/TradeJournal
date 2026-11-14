@@ -418,6 +418,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   - In replay both say `unavailable`: fundamentals are as they are now, and
     the proof is hindsight by construction. The fixture serves a simulated
     NBIS profile and proof card. Tests: `backend/tests/test_copilot_profile.py`.
+  - `get_paper_book(symbol?)` reads his paper book, read only (§ Paper). Book
+    context, never offered to research jobs. Tests: `backend/tests/test_copilot_paper.py`.
 - **Chart and book tools** (`backend/app/ai/copilot_book.py`):
   - `get_chart_context(symbol, timeframe 1m/5m/15m/1h/1D)` reads the same
     `chart_feed.workspace` as the Charts page. It returns:
@@ -2074,9 +2076,36 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   a position is their fold; and the orders' and switches' own facts: `order`, its fill or one `cancel`/`lapse`, `auto`,
   `touch`, `trigger`), additive migration `a7c3e9f1b5d2`, no new table. Nothing here writes fills, trades, accounts, real P&L,
   the shadow and scanner books, calls Robinhood or places an order anywhere. `GET /copilot/paper` is
-  one of the desk's minute reads. The copilot does not read the paper book (its tool list is unchanged).
+  one of the desk's minute reads.
+- **The copilot reads it** (`get_paper_book`, `backend/app/ai/copilot_paper_book.py`; Isaac's yes on 2026-11-14): a
+  compact view of `paper_book.view` and no new math: the account (cash, buying power, value and P&L at the desk's newest
+  prices, with their time), open paper positions with P&L and the time of the price behind it (a position with no price
+  says so, never zero; one past its expiration says it settles on the desk's next read; the close-at-stop/target switch
+  when on), his working day limit orders (one past its close says it ended), the eight newest closed paper trades with his note and how each ended against his stop and target, and the
+  scorecard beside his real trades. `symbol` narrows the lists to one ticker. It never places, closes or changes a paper
+  order, and neither settles an expiry nor ends a lapsed day order (`view(settle_expired=False)`): it writes nothing. Prices are the desk's kept
+  ticks (`desk_ticks.kept_rows`): no quote read and no Robinhood call. Tickers he does not follow are left out of the
+  lists and stay in the totals. Desk and Telegram turns get it; it is book context, never offered to research jobs;
+  replay says it is unavailable, the fixture serves a simulated book. Paper actions from the copilot, if ever wanted,
+  would go through the action cards (`copilot_actions.py`); none exist.
+- **How am I doing?** A chip at the top of the Paper section (`components/copilot/PaperReview.tsx`) sends that question
+  to the copilot, which reads `get_paper_book` and answers from its figures.
+- **The weekly paper review** (`backend/app/engine/paper_review.py`, job `paper_review`): after Friday's close (16:45
+  New York on the week's last trading day, per the market calendar), on the level alert monitor's loop while the lab is
+  on, one no-tool turn on the day read's pattern (§ The day read: its runner, cap, output limit, budget headroom, figure
+  check and hidden-ticker check) compares the week's paper trades with his real ones from the week's facts: each paper
+  trade closed this week with its note, stop, target and how it ended, the paper positions still open, the week's paper
+  and real scorecards and his real trades closed this week. Four to six lines: Week, Worked, Stops and targets, Next
+  week. Skipped with no call in a week with no closed paper trade; a review quoting a figure the facts do not hold, or
+  naming a ticker he does not follow, is not shown. One turn a week on the shared daily budget (`kind="paper_review"`).
+  Kept in `backend/data/paper_review/<friday>.json` (eight weeks) and carried by `GET /copilot/paper` as `review`, shown
+  at the top of the Paper section with its date until the next one. One Telegram (else ntfy) ping, `PAPER REVIEW · week
+  of <Monday>`, with its own daily budget of one (`PING_BUDGET_PAPER_REVIEW`), so it never spends Radar's or the
+  position alerts'; sent at most once (the kept file says `sending` before the send; a send that may have landed is
+  `unknown`, never resent; one not sent within two hours is `expired`).
 
-Proof: `backend/tests/test_paper_book.py`, `backend/tests/test_paper_orders.py`, `frontend/e2e/copilot-desk-paper.spec.ts`.
+Proof: `backend/tests/test_paper_book.py`, `backend/tests/test_paper_orders.py`, `backend/tests/test_copilot_paper.py`, `frontend/e2e/copilot-desk-paper.spec.ts`,
+`frontend/e2e/copilot-desk-paper-review.spec.ts`.
 
 ## Chatter
 
@@ -2347,7 +2376,7 @@ headings" and then the Verdict / Read / bullets / Against shape, and the
 companion "at most 80 words" beside the same five-part shape.
 `copilot.run_turn(..., job=)` now takes the turn's job, which
 `copilot_spend.recorded_turn` works out from what its callers already pass
-(`copilot_prompt.job_for`: kind `check_call`, `desk_read` or `day_read`, else source `telegram`, else
+(`copilot_prompt.job_for`: kind `check_call`, `desk_read`, `day_read` or `paper_review`, else source `telegram`, else
 kind `prep`, `companion` or `week_review`, else `desk`). Each job gets the shared core (who the owner
 is, the four questions, the evidence, time, untrusted-text, account,
 SIMULATED and no-order rules), a line framing its own job, only the working
@@ -2360,14 +2389,15 @@ answered as on the desk, in the chat format.
 
 | Job | Who runs it | Answer format | Tools | Prompt + tools |
 | --- | --- | --- | --- | --- |
-| `desk` | desk, Charts, Radar, panel | as above, unchanged | all 25 | 3,715 words + 22,200 chars, about 11,700 tokens |
-| `telegram` | typed, spoken or photo question, Why? | Verdict line, at most three short plain lines, Against, Changes if; no Read line, no Compare rows, no markdown; under 120 words | all 25 | 3,207 words, about 11,000 tokens |
+| `desk` | desk, Charts, Radar, panel | as above, unchanged | all 26 | 3,715 words + 22,200 chars, about 11,700 tokens |
+| `telegram` | typed, spoken or photo question, Why? | Verdict line, at most three short plain lines, Against, Changes if; no Read line, no Compare rows, no markdown; under 120 words | all 26 | 3,207 words, about 11,000 tokens |
 | `prep` | morning brief (`premarket_prep`) | the lines its message lists, plain, no Verdict/Read/Against, no headings | 11 market reads | 1,173 words + 6,800 chars, about 3,700 tokens |
 | `companion` | position companion (`position_companion`) | exactly the shape its message gives (the adopt draft's six lines, an update's 80 words, the exit note) | 12: the trade review, chart, group, news, quotes, level history, option candidates, trades | 1,342 words + 9,200 chars, about 4,600 tokens |
 | `week_review` | automatic week review (`week_review_auto`) | Verdict line, then the review in short one-fact lines | 5: week and trade review, trades, proof, `propose_plan` | 1,278 words + 7,700 chars, about 4,100 tokens |
 | `check_call` | Check a call (`call_check.run`, from Telegram or the desk tab) | a Reading line (`?` for anything not stated), Verdict (Pass, Wait or Draft; Unclear only with no ticker), three or four `Tile: label \| value` lines, Against, Changes if, Also for other calls; "Not a call" for an image with none | 5: `get_call_facts` (its own job's alone), quotes, chart, level history, trades | 1,271 words + 5,000 chars, about 3,300 tokens |
 | `desk_read` | the desk read of a selected ticker (`desk_read.read`, § The desk read) | Verdict (never Draft), one or two one-sentence bullets (where it is against his levels, what is moving it today), Changes if; three or four lines | 7: group, news, events, quotes, chart, market regime, Radar today | 1,190 words + 4,300 chars, about 3,000 tokens |
 | `day_read` | the read of his day after the close (`day_read.read`, § The day read) | P&L, Plans, Biggest, Tomorrow (and one more line only when it changes the picture); four to six plain lines, under 110 words, every dollar figure as the facts write it | none: the day's facts are in its message | 960 words, about 1,300 tokens |
+| `paper_review` | the Friday paper review (`paper_review.write`, § Paper) | Week, Worked, Stops and targets, Next week (and one more line only when it changes the picture); four to six plain lines, under 120 words, every dollar figure as the facts write it, paper and real kept apart | none: the week's facts are in its message; no owner context block | 823 words, about 1,100 tokens |
 
 Token figures are estimates (characters ÷ 4 for prose, ÷ 3.5 for tool JSON);
 the scorecard's input and cache figures are the measured ones. The brief
@@ -3605,7 +3635,7 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   single pings that carry a [setup card](radar.md#setup-cards-off-by-default),
   ranked just above `radar_event`), `radar_event` 4 (Radar's other single
   pings), `radar_digest` 2, `thesis_watch` 2, `research` 1, `paper` 6 (his
-  [paper book](#paper)'s PAPER pings, ranked last). Before 09:30
+  [paper book](#paper)'s PAPER pings) and `paper_review` 1 (the Friday [paper review](#paper)), ranked last. Before 09:30
   New York these kinds together also have `PING_PREOPEN_ALLOWANCE` (default 2)
   pings, so pre-open headlines cannot spend the day. While the
   [morning brief](#pre-market-prep) is on and not yet decided today, one of them

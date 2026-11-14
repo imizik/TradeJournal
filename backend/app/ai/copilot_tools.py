@@ -184,6 +184,18 @@ TOOLS: list[dict] = [
                                                                       "omit for the latest week with closed trades"}}},
     },
     {
+        "name": "get_paper_book",
+        "description": "The owner's own paper book (practice with no money, filled at the live ask to buy and the bid to "
+                       "sell): the account (cash, buying power, value and P&L at the desk's newest prices), open paper "
+                       "positions with P&L and the time of the price behind it, working orders if any, the latest closed "
+                       "paper trades with his note and how each ended against his stop and target, and the scorecard of "
+                       "paper against his real closed trades over the same dates. Read it when he asks about paper "
+                       "trading, how he is doing on paper, or whether a paper call was right. Read only.",
+        "input_schema": {"type": "object", "additionalProperties": False,
+                         "properties": {"symbol": {"type": "string", "description": "Optional: list only this ticker's paper "
+                                                                                     "trades (the score stays the whole run)"}}},
+    },
+    {
         "name": "get_level_history",
         "description": "What the owner's own closed long option trades in a symbol did at a level like the one being "
                        "drafted: the level is set the same percent from each past trade's entry as `level` is from "
@@ -648,6 +660,8 @@ def validate(name: str, args: Any) -> dict:
         return {"symbols": list(dict.fromkeys(_symbol(s) for s in symbols))}
     if name == "get_positions":
         return {}
+    if name == "get_paper_book":
+        return {"symbol": _symbol(args["symbol"])} if args.get("symbol") is not None else {}
     if name == "get_call_facts":
         from app.engine import call_check
         try:
@@ -876,7 +890,7 @@ CHANGE_EVIDENCE, CHANGE_ALERTS, CHANGE_JOBS, CHANGE_RESULTS = 12, 6, 5, 2  # one
 # The owner context rows and trade reviews are the owner's own book and words, not market evidence: "what changed"
 # leaves them out.
 BOOK_CONTEXT_TOOLS = frozenset({"owner_context", "get_owner_context", "get_trade_review", "get_week_review",
-                                "get_level_history", "get_proof"})
+                                "get_level_history", "get_proof", "get_paper_book"})
 # A moment's as-of dates a past candle, not what the evidence says now: "what changed" leaves it out too.
 NOT_CURRENT_TOOLS = BOOK_CONTEXT_TOOLS | {"get_moment"}
 
@@ -1104,6 +1118,10 @@ class LiveEvidence:
         from app.ai import copilot_review
         return copilot_review.week_review(week_start)
 
+    def get_paper_book(self, symbol: str | None = None) -> dict:
+        from app.ai import copilot_paper_book
+        return copilot_paper_book.live_paper_book(symbol)
+
     def week_exit_reviews(self, week_start: str) -> dict:
         """The week's exit reviews with each plan's thread, for the owner's page only (never the model)."""
         from app.ai import copilot_review
@@ -1163,6 +1181,7 @@ PROVENANCE = {
     "get_radar_today": ("Radar recorded passes, saved events, revisions, news checks and ratings", "recorded"),
     "get_symbol_profile": ("Tradier fundamentals, calendar, dividends and corporate actions (cached a day) · FINRA short interest "
                            "and Tradier easy-to-borrow (Polygon, cached) · Yahoo / Webull analysts (unofficial, cached)", "cached"),
+    "get_paper_book": ("His paper book (TradeJournal paper fills) · the desk's kept prices · journal closed trades", "saved"),
     "get_proof": ("Proof pages: exit habits and alert feedback, plan proof, outcomes, alert scorecard (TradeJournal)", "saved"),
     "web_search": ("Anthropic web search (third-party pages, untrusted)", "fetched"),
     "get_macro": ("FRED, Federal Reserve Bank of St. Louis (daily and weekly series, cached 6 h)", "fetched"),

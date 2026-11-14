@@ -5,7 +5,8 @@ typed question or a Why? tap in the phone chat), ``prep`` (the 08:30/09:00 morni
 companion update), ``week_review`` (the automatic weekly review), ``check_call`` (a trade call the owner shared from
 Discord, checked: ``engine/call_check.py``), ``desk_read`` (the desk's few-line read of a ticker the owner selected,
 written before he types: ``engine/desk_read.py``) or ``day_read`` (the desk's read of the owner's day at the close,
-written from the day's facts with no tool: ``engine/day_read.py``). A job gets a shared core (who the owner is, the four
+written from the day's facts with no tool: ``engine/day_read.py``) or ``paper_review`` (the Friday review of the owner's
+paper trades beside his real ones, written from the week's facts with no tool: ``engine/paper_review.py``). A job gets a shared core (who the owner is, the four
 questions, the evidence and safety rules), the parts of the desk's working rules it uses, its own answer format, its own
 shape reminder and only the tools it calls. Until 2026-11-10 every job got the desk's 3,800-word prompt, all 26 tools
 and the desk's shape, so the brief and the companion were told two contradictory formats at once.
@@ -21,10 +22,13 @@ DESK, TELEGRAM, PREP, COMPANION, WEEK_REVIEW = "desk", "telegram", "prep", "comp
 CHECK = "check_call"
 DESK_READ = "desk_read"
 DAY_READ = "day_read"
-JOBS = (DESK, TELEGRAM, PREP, COMPANION, WEEK_REVIEW, CHECK, DESK_READ, DAY_READ)
+PAPER_REVIEW = "paper_review"
+JOBS = (DESK, TELEGRAM, PREP, COMPANION, WEEK_REVIEW, CHECK, DESK_READ, DAY_READ, PAPER_REVIEW)
 ALL = frozenset(JOBS)
 CHAT = frozenset({DESK, TELEGRAM})  # the conversational jobs: the owner asked something
-OWNER_BLOCK = ALL - {PREP}  # the brief's own facts pack carries its positions and plans; the owner block would repeat them
+# The brief's own facts pack carries its positions and plans; the owner block would repeat them. The paper review's facts
+# carry the paper and the real week; the block's real-book figures would only invite a figure the facts do not hold.
+OWNER_BLOCK = ALL - {PREP, PAPER_REVIEW}
 
 # --------------------------------------------------------------------------- the paragraphs, in the order they are read
 
@@ -94,12 +98,22 @@ take a dollar figure from the owner context block, write a contract as the facts
 name a ticker the facts do not. A fill marked provisional is called provisional. Judge the trades in the owner's terms (entry \
 timing, size, held through a level or an alert, exited early, no plan) only from what the facts show; when they do not \
 show why, say what they do show. No generic advice, encouragement or anything to rate.""",
+    PAPER_REVIEW: """This turn is the owner's weekly paper review, written once after Friday's close. Paper is his \
+practice book with no money: he trades it the way he would on Robinhood to see whether he is right. The message carries \
+the week's facts: each paper trade closed this week (contract, size, dates, realised P&L, his note, his stop and target \
+as stock prices, and how it ended against them), the paper positions still open, the week's paper and real scorecards, \
+and his real trades closed this week. There are no tools: write only from those facts. Every dollar figure comes from \
+the facts, copied exactly as they write it, sign and cents included; never round, add up, estimate or work out a figure \
+the facts do not state, write a contract as the facts name it (no $ on a strike or a stock price), and never name a \
+ticker or a trade the facts do not. Keep paper and real apart: say which each figure is. When a trade has no stop or \
+target, say so rather than judge it against one. Speak plainly, in the owner's terms. No generic advice, encouragement \
+or anything to rate.""",
 }
 
 # The working rules: (jobs, text). The desk gets every one, in this order, which is its prompt as it was apart from the
 # 2026-11-10 trims (no audit figures, no example answer lines, the book tools that only repeated the owner block).
 RULES: tuple[tuple[frozenset, str], ...] = (
-    (ALL - {DAY_READ}, """- Investigate with the read-only tools before giving a market read. Use only what they return; never invent \
+    (ALL - {DAY_READ, PAPER_REVIEW}, """- Investigate with the read-only tools before giving a market read. Use only what they return; never invent \
 prices, moves or news. If a tool fails or reports missing/stale coverage, say so plainly and reason only from what is \
 available."""),
     (frozenset({DESK}), """- Follow-ups reuse what was read. When the owner's message comes after an "Earlier evidence" \
@@ -110,7 +124,7 @@ cover, dispute a specific number, or when its read is more than 15 minutes old w
 peer moves and quotes are fetched at a moment; news has publish times. State as-of times briefly and distinguish \
 "recorded earlier this session" from "fetched just now". If the market is closed or the data is from a prior \
 session, say that."""),
-    (ALL - {WEEK_REVIEW, CHECK, DAY_READ}, """- When the owner asks why a symbol is moving, or whether a move is the stock or the market, \
+    (ALL - {WEEK_REVIEW, CHECK, DAY_READ, PAPER_REVIEW}, """- When the owner asks why a symbol is moving, or whether a move is the stock or the market, \
 read get_market_regime (SPY, QQQ, IWM and RSP, the symbol's sector ETF, VIX, the 10-year and today's macro calendar) \
 beside the group comparison, and say which it is: the stock, its group, its sector or the whole market, with the \
 numbers. When they ask what Radar saw or what is moving today, get_radar_today lists the session's recorded events \
@@ -139,6 +153,10 @@ get_symbol_profile and name the source and age of every figure you quote (the ca
 about two weeks behind). When the owner asks whether the alerts, plans or pings are helping, read get_proof (scope \
 week, or symbol for one name) and quote its verdicts and counts as they stand, "not enough data" included; never turn a \
 count into a judgement of them."""),
+    (frozenset({DESK, TELEGRAM}), """- When the owner asks about paper trading, how he is doing on paper, or whether a paper \
+call was right, read get_paper_book and answer from its figures: each with the time of the price behind it, a position \
+with no price as unknown (never zero), every stop or target verdict as it reads. Paper and real are kept apart; never \
+mix their figures. You cannot place, close or change a paper order."""),
     (frozenset({DESK, TELEGRAM, PREP}), """- When web_search is offered (three searches a turn: stop after the third), use \
 it for what the app's tools do not carry: macro and policy (the Fed, rates, Treasury supply, fiscal), politics and \
 elections, geopolitics, industry news, and what a company or its customers said. A gap, bounce or selloff today needs \
@@ -256,9 +274,9 @@ desk chart has 2m, 15m and 1D: for another timeframe, say so and offer the neare
 not followed, a price on the wrong side, no plan or more than one, no such position or more than one), say why in a \
 sentence (or ask which one) and do nothing else. An answer \
 that only carries cards is one short plain sentence with no Verdict line: the card says what it will do."""),
-    (ALL - {PREP, COMPANION, CHECK, DESK_READ, DAY_READ}, """- You cannot place orders or change accounts, and you cannot save plans, memories or \
+    (ALL - {PREP, COMPANION, CHECK, DESK_READ, DAY_READ, PAPER_REVIEW}, """- You cannot place orders or change accounts, and you cannot save plans, memories or \
 alerts yourself: propose_plan only proposes. Say so if asked."""),
-    (frozenset({PREP, COMPANION, CHECK, DESK_READ, DAY_READ}), """- You cannot place orders or change accounts, and you cannot save plans, memories \
+    (frozenset({PREP, COMPANION, CHECK, DESK_READ, DAY_READ, PAPER_REVIEW}), """- You cannot place orders or change accounts, and you cannot save plans, memories \
 or alerts. Say so if asked."""),
 )
 
@@ -380,11 +398,23 @@ Add one more line only for a fact the four leave out that changes the picture (a
 held through). When nothing closed and nothing is open, say so in the P&L line and leave out Biggest. No Verdict line, \
 no closing note, no question back."""
 
+PAPER_REVIEW_FORMAT = """Answer format (the owner's weekly paper review). Four to six short plain lines, nothing \
+before or after, no markdown, headings, bold or bullets, each line one or two sentences, under 120 words in all:
+Week: <paper closed P&L and trades this week beside real closed P&L and trades this week, each figure exactly as the facts write it>
+Worked: <the paper trade or habit that went best this week, by contract, with its figure, and why from the facts>
+Stops and targets: <where he took his own target or stop, and where he got out early or went past his stop, by contract; \
+say which trades had none>
+Next week: <one concrete thing to try, tied by name to a trade from this week>
+Add one more line only for a fact the four leave out that changes the picture (a paper position still open past its \
+stop, real and paper pulling apart). No Verdict line, no closing note, no question back."""
+
 FORMAT = {DESK: DESK_FORMAT, TELEGRAM: TELEGRAM_FORMAT, PREP: PREP_FORMAT, COMPANION: COMPANION_FORMAT, WEEK_REVIEW: WEEK_FORMAT,
-          CHECK: CHECK_FORMAT, DESK_READ: DESK_READ_FORMAT, DAY_READ: DAY_READ_FORMAT}
+          CHECK: CHECK_FORMAT, DESK_READ: DESK_READ_FORMAT, DAY_READ: DAY_READ_FORMAT,
+          PAPER_REVIEW: PAPER_REVIEW_FORMAT}
 SHAPE = {DESK: copilot_answer.ANSWER_SHAPE, TELEGRAM: copilot_answer.TELEGRAM_SHAPE, PREP: copilot_answer.PREP_SHAPE,
          COMPANION: copilot_answer.COMPANION_SHAPE, WEEK_REVIEW: copilot_answer.WEEK_SHAPE, CHECK: copilot_answer.CHECK_SHAPE,
-         DESK_READ: copilot_answer.DESK_READ_SHAPE, DAY_READ: copilot_answer.DAY_READ_SHAPE}
+         DESK_READ: copilot_answer.DESK_READ_SHAPE, DAY_READ: copilot_answer.DAY_READ_SHAPE,
+         PAPER_REVIEW: copilot_answer.PAPER_REVIEW_SHAPE}
 
 # --------------------------------------------------------------------------- tools by job
 
@@ -402,12 +432,12 @@ JOB_ONLY = frozenset({"get_call_facts"})  # offered to its own job alone, never 
 DESK_ONLY = frozenset({"desk_action"})  # acts on the desk page, so only a desk turn gets it (never the phone chat)
 TOOL_NAMES = {DESK: None, TELEGRAM: None, PREP: frozenset(PREP_TOOLS), COMPANION: frozenset(COMPANION_TOOLS),
               WEEK_REVIEW: frozenset(WEEK_TOOLS), CHECK: frozenset(CHECK_TOOLS), DESK_READ: frozenset(DESK_READ_TOOLS),
-              DAY_READ: frozenset()}  # the day read: no tools, the day's facts are in its message  # None: every tool but JOB_ONLY (and DESK_ONLY off the desk)
+              DAY_READ: frozenset(), PAPER_REVIEW: frozenset()}  # the day read and the paper review: no tools, the day's facts are in its message  # None: every tool but JOB_ONLY (and DESK_ONLY off the desk)
 
 
 def job_for(kind: str | None, source: str | None) -> str:
     """The job of a recorded turn, from what its caller already passes to ``copilot_spend.recorded_turn``."""
-    if kind in (CHECK, DESK_READ, DAY_READ):
+    if kind in (CHECK, DESK_READ, DAY_READ, PAPER_REVIEW):
         return kind
     if source == "telegram":
         return TELEGRAM

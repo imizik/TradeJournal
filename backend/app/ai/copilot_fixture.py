@@ -222,6 +222,10 @@ class FixtureEvidence:
     def get_owner_context(self, symbol: str) -> dict:
         return self.owner_context(symbol)
 
+    def get_paper_book(self, symbol: str | None = None) -> dict:
+        from app.ai import copilot_paper_book
+        return copilot_paper_book.fixture_paper_book(symbol)
+
     def get_week_review(self, week_start: str | None = None) -> dict:
         """SIMULATED: shaped like ``copilot_review.week_review`` for a week of eight closed trades, mostly unplanned, with
         one invalidation that fired while held and was ridden past 15 minutes."""
