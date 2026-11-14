@@ -4,7 +4,6 @@ that cannot be evaluated says why and is never a pass. Invented numbers, no netw
 
 from datetime import UTC, date, datetime
 import json
-from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
