@@ -173,28 +173,31 @@ const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "
 const iso = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
 /** The expiry a contract's words name ("2026-11-20", "11/20/26", "11/20", "Nov 20 '26", "Nov 20, 2026", "Nov 20"); a
- *  date with no year is its next one from ``today`` (YYYY-MM-DD, New York). Null when none, or not a real date. */
-function expiryIn(text: string, today: string): string | null {
+ *  date with no year is its next one from ``today`` (YYYY-MM-DD, New York). With the words it was read from, or null when
+ *  none (or not a real date). */
+function expiryIn(text: string, today: string): { date: string; words: string } | null {
   const [ty, tm, td] = today.split("-").map(Number);
   const fill = (m: number, d: number, y: number | null) => {
     const year = y == null ? (m < tm || (m === tm && d < td) ? ty + 1 : ty) : y < 100 ? 2000 + y : y;
     const date = new Date(Date.UTC(year, m - 1, d));
     return date.getUTCMonth() === m - 1 && date.getUTCDate() === d ? iso(year, m, d) : null;
   };
+  const found = (hit: RegExpMatchArray, date: string | null) => date ? { date, words: hit[0] } : null;
   let hit = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
-  if (hit) return fill(Number(hit[2]), Number(hit[3]), Number(hit[1]));
+  if (hit) return found(hit, fill(Number(hit[2]), Number(hit[3]), Number(hit[1])));
   hit = text.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?\b/);
-  if (hit) return fill(Number(hit[1]), Number(hit[2]), hit[3] ? Number(hit[3]) : null);
+  if (hit) return found(hit, fill(Number(hit[1]), Number(hit[2]), hit[3] ? Number(hit[3]) : null));
   // A year after the day only as '26 or 2026 (a bare "Nov 20 95 call" names the strike, not 2095).
   hit = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s*(?:['’](\d{2})|(20\d{2}))\b)?/i);
-  if (hit) { const year = hit[3] ?? hit[4]; return fill(MONTHS.indexOf(hit[1].toLowerCase()) + 1, Number(hit[2]), year ? Number(year) : null); }
+  if (hit) { const year = hit[3] ?? hit[4]; return found(hit, fill(MONTHS.indexOf(hit[1].toLowerCase()) + 1, Number(hit[2]), year ? Number(year) : null)); }
   return null;
 }
 
 /**
- * A copilot plan's contract words as a paper order: one call or put, by strike ("95C", "$100 call", "100 puts") and
- * expiry ("Nov 20 '26", "11/20"); the plan's own instrument decides call or put when the words do not. Returns the order,
- * or why there is not enough to place one.
+ * A copilot plan's contract words as a paper order: one call or put, by strike ("95C", "$100 call") and expiry ("Nov 20
+ * '26", "11/20"); the plan's own instrument decides call or put. Strict on purpose: words that could name a different
+ * contract (a spread "95/100", a count "2 calls", any other number left over such as "at 100" or a delta) are refused
+ * with the reason, so the button is never enabled on a guess. Returns the order, or why there is not enough to place one.
  */
 export function planOrder(symbol: string, instrument: "stock" | "calls" | "puts", direction: "long" | "short", contract: string,
   today: string): { order: PaperOrder; why?: undefined } | { order: null; why: string } {
@@ -204,11 +207,27 @@ export function planOrder(symbol: string, instrument: "stock" | "calls" | "puts"
   }
   const words = contract.trim();
   if (!words) return { order: null, why: "No contract named: pick one from the Contract list to paper it." };
-  const want = instrument === "calls" ? "call" : "put";
-  const strike = words.match(/\$?(\d+(?:\.\d+)?)\s*(c|p|calls?|puts?)\b/i);
+  const unclear = { order: null, why: `"${words}" does not name one strike and an expiry plainly: pick a contract from the Contract list to paper it.` } as const;
   const expiry = expiryIn(words, today);
-  if (!strike || !expiry) return { order: null, why: `"${words}" does not name a strike and an expiry: pick a contract from the Contract list to paper it.` };
-  const kind = strike[2].toLowerCase().startsWith("c") ? "call" : "put";
+  if (!expiry) return unclear;
+  const rest = words.replace(expiry.words, " ");
+  if (/\d\s*[cp]?\s*\/\s*\$?\d/i.test(rest)) return { order: null, why: `"${words}" names a spread: paper it from the Ticket or the Chain.` };
+  // One strike, written "95C", "95 C", "$95 call" or "95 put" (a plural "2 calls" is a count, not a strike).
+  const strikes = [...rest.matchAll(/(?<![\w.$])\$?(\d+(?:\.\d+)?)\s*(c|p|call|put)\b/gi)];
+  if (strikes.length !== 1) return unclear;
+  const [hit] = strikes;
+  if (/\d/.test(rest.replace(hit[0], " "))) return unclear; // another number could be the strike
+  const kind = hit[2].toLowerCase().startsWith("c") ? "call" : "put";
+  const want = instrument === "calls" ? "call" : "put";
   if (kind !== want) return { order: null, why: `${words} is a ${kind}, but this plan buys ${instrument}.` };
-  return { order: { instrument: "option", symbol, option_type: kind, expiry, strike: Number(strike[1]) } };
+  return { order: { instrument: "option", symbol, option_type: kind, expiry: expiry.date, strike: Number(hit[1]) } };
+}
+
+/** An order in his words for the confirm: "NBIS $100 Call 11/20/26", "NBIS 100/110 call spread 12/18/26", "NBIS shares". */
+export function orderWords(order: PaperOrder): string {
+  if (order.instrument === "stock") return `${order.symbol} shares`;
+  const [y, m, d] = order.expiry.split("-").map(Number);
+  const day = `${m}/${d}/${String(y % 100).padStart(2, "0")}`;
+  if (order.instrument === "option") return `${order.symbol} $${order.strike} ${order.option_type === "call" ? "Call" : "Put"} ${day}`;
+  return `${order.symbol} ${order.long_strike}/${order.short_strike} ${order.option_type} spread ${day}`;
 }

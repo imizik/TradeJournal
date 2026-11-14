@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { useDeskTicks } from "@/lib/deskTicks";
 import {
-  PAPER_EVENT, PAPER_SOURCES, PaperRefused, SOURCE_WORD, cancelPaperOrder, fillClose, fillOpen, isCredit, orderKey, paperPnl, paperSymbols, paperValue, placeLimitClose,
+  PAPER_EVENT, PAPER_SOURCES, PaperRefused, SOURCE_WORD, cancelPaperOrder, orderWords, fillClose, fillOpen, isCredit, orderKey, paperPnl, paperSymbols, paperValue, placeLimitClose,
   placeLimitOpen, previewClose, previewOpen, setPaperAuto, startPaper,
   type PaperBook, type PaperFill, type PaperOrder, type PaperPosition, type PaperSource, type PaperStats, type PaperWorkingOrder,
 } from "@/lib/paperBook";
@@ -186,7 +186,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
   const form = preview || closedNow;
   return (
     <div data-testid="paper-confirm" className="w-full space-y-2 rounded-md border border-dashed border-amber-400/50 p-2.5">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-200">Paper · not real money{source !== "mine" && <span data-testid="paper-idea" className="ml-1 font-normal normal-case tracking-normal text-muted-foreground">· {SOURCE_WORD[source]}&apos;s idea{order ? `: ${order.symbol}` : ""}</span>}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-200">Paper · not real money{source !== "mine" && <span data-testid="paper-idea" className="ml-1 font-normal normal-case tracking-normal text-muted-foreground">· {SOURCE_WORD[source]}&apos;s idea{order ? `: ${orderWords(order)}` : ""}</span>}</p>
       {busy && !form && <p className="text-xs text-muted-foreground">Reading a live quote…</p>}
       {form && !done && (
         <>
@@ -386,17 +386,19 @@ function SourceTag({ source }: { source?: PaperSource }) {
   return <span data-testid="paper-source" className="ml-1.5 rounded border border-border px-1 align-middle text-[10px] uppercase tracking-wide text-muted-foreground">{SOURCE_WORD[source]}</span>;
 }
 
-/** Closed paper P&L by whose idea it was, one line: "Mine +$84.50 · 1 of 2 won · Copilot …". Only once a trade closed. */
+/** Closed paper P&L by whose idea it was, one compact line: "Mine +$84.50 50%/2 · Copilot …" (win rate / closed trades).
+ *  Only once a paper trade has closed. */
 function BySource({ rows }: { rows?: PaperStats["by_source"] }) {
   const shown = PAPER_SOURCES.map(s => rows?.find(r => r.source === s)).filter((r): r is NonNullable<typeof r> => !!r);
   if (!shown.some(r => r.trades > 0)) return null;
   return (
-    <p data-testid="paper-by-source" aria-label="Closed paper P&L by whose idea" className="flex flex-wrap gap-x-3 px-3 pt-0.5 text-xs tabular-nums">
+    <p data-testid="paper-by-source" aria-label="Closed paper P&L by whose idea" title="Closed paper P&L, win rate and trades by whose idea it was"
+      className="flex flex-wrap gap-x-2.5 px-3 pt-0.5 text-[11px] tabular-nums">
       {shown.map(r => (
-        <span key={r.source} data-testid="paper-by-source-cell" data-source={r.source}>
+        <span key={r.source} data-testid="paper-by-source-cell" data-source={r.source} className="whitespace-nowrap">
           <span className="text-muted-foreground">{SOURCE_WORD[r.source]} </span>
           {r.trades === 0 ? <span className="text-muted-foreground">—</span> : <>
-            <span className={toneOf(r.pnl)}>{signed(r.pnl)}</span><span className="text-muted-foreground"> · {r.win_rate}% of {r.trades}</span></>}
+            <span className={toneOf(r.pnl)}>{signed(r.pnl)}</span><span className="text-muted-foreground"> {r.win_rate}%/{r.trades}</span></>}
         </span>
       ))}
     </p>

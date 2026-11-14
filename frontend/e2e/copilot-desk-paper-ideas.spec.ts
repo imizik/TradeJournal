@@ -113,7 +113,7 @@ for (const width of [1440, 375]) {
     const mu = feed.getByTestId("feed-item").filter({ hasText: "MU dip turning up" });
     await mu.getByTestId("paper-button").click();
     const confirm = mu.getByTestId("paper-confirm");
-    await expect(confirm.getByTestId("paper-idea")).toHaveText("· Radar's idea: MU");
+    await expect(confirm.getByTestId("paper-idea")).toHaveText("· Radar's idea: MU $95 Call 11/20/26");
     await expect(confirm.getByTestId("paper-preview")).toContainText("Buy 1 × MU $95 Call 11/20/26 at 2.10 (the ask), quote 10:59:58 AM ET: costs $210.00");
     expect(orders).toHaveLength(1); // the preview only: nothing placed yet
     await expect(confirm.getByLabel("Paper stop (stock price)")).toHaveValue("92.5");
@@ -138,7 +138,7 @@ test("Paper it on a scanner pick carries the scanner's stop and target", async (
   const row = feed.getByTestId("scanner-row").filter({ hasText: "CRWV" });
   await row.getByTestId("paper-button").click();
   const confirm = row.getByTestId("paper-confirm");
-  await expect(confirm.getByTestId("paper-idea")).toHaveText("· Scanner's idea: CRWV");
+  await expect(confirm.getByTestId("paper-idea")).toHaveText("· Scanner's idea: CRWV $115 Put 11/20/26");
   await expect(confirm.getByTestId("paper-preview")).toContainText("Buy 1 × CRWV $115 Put 11/20/26 at 1.85 (the ask");
   await expect(confirm.getByLabel("Paper stop (stock price)")).toHaveValue("120.15");
   await expect(confirm.getByLabel("Paper target (stock price)")).toHaveValue("115.9");
@@ -156,8 +156,8 @@ for (const width of [1440, 375]) {
     const paper = page.getByTestId("desk-paper");
     await expect(paper.getByTestId("paper-position").getByTestId("paper-source")).toHaveText("Radar");
     const split = paper.getByTestId("paper-by-source");
-    await expect(split.locator('[data-source="mine"]')).toHaveText("Mine +$80.50 · 100% of 2");
-    await expect(split.locator('[data-source="radar"]')).toHaveText("Radar −$95.00 · 0% of 1");
+    await expect(split.locator('[data-source="mine"]')).toHaveText("Mine +$80.50 100%/2");
+    await expect(split.locator('[data-source="radar"]')).toHaveText("Radar −$95.00 0%/1");
     await expect(split.locator('[data-source="copilot"]')).toHaveText("Copilot —");
     await expect(split.locator('[data-source="scanner"]')).toHaveText("Scanner —");
   });

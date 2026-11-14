@@ -708,7 +708,7 @@ test("Paper it opens the paper confirm prefilled from the plan and records it as
   const card = await askForPlan(page);
   await card.getByTestId("paper-button").click();
   const confirm = card.getByTestId("paper-confirm");
-  await expect(confirm.getByTestId("paper-idea")).toHaveText("· Copilot's idea: NBIS");
+  await expect(confirm.getByTestId("paper-idea")).toHaveText("· Copilot's idea: NBIS $100 Call 11/21/26");
   // He sees the fill price before anything is placed: one preview, no order yet.
   await expect(confirm.getByTestId("paper-preview")).toContainText("Buy 1 × NBIS $100 Call 11/21/26 at 3.40 (the ask");
   expect(orders.map((o) => o.preview)).toEqual([true]);

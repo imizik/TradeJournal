@@ -209,7 +209,7 @@ test("Paper it on a spread ticket card opens the paper confirm on both legs as t
   await desk(page, [{ ...TICKET, short_strike: 110 }]);
   const card = actionCard(page, "ticket");
   await card.getByTestId("paper-button").click();
-  await expect(card.getByTestId("paper-idea")).toHaveText("· Copilot's idea: NBIS");
+  await expect(card.getByTestId("paper-idea")).toHaveText("· Copilot's idea: NBIS 100/110 call spread 12/18/26");
   await expect(card.getByTestId("paper-preview")).toContainText("Open 1 × NBIS 100/110 Call Debit Spread 12/18/26 at 3.10 net debit");
   expect(orders).toEqual([expect.objectContaining({ preview: true, instrument: "spread", symbol: "NBIS", option_type: "call", expiry: "2026-12-18",
     long_strike: 100, short_strike: 110 })]);

@@ -140,10 +140,13 @@ function ScannerRow({ row, onOpen, onPlan, focused }: { row: DeskScannerRow; onO
         </span>
         {row.radar && <span className="block text-xs text-muted-foreground">Radar: {row.radar.levels_line}</span>}
       </button>
-      <div className="flex flex-wrap gap-1.5 px-3 pb-2">
-        {row.radar && row.radar.plan_state === "none" && <button type="button" onClick={() => onPlan(row.radar!.href)} className={ACTION}>Plan it</button>}
-        <ScannerPaperIt row={row} />
-      </div>
+      {/* Paper it while the pick is live: once the scanner's own paper trade is out, the idea is over. */}
+      {((row.radar && row.radar.plan_state === "none") || row.status !== "exit") && (
+        <div className="flex flex-wrap gap-1.5 px-3 pb-2">
+          {row.radar && row.radar.plan_state === "none" && <button type="button" onClick={() => onPlan(row.radar!.href)} className={ACTION}>Plan it</button>}
+          {row.status !== "exit" && <ScannerPaperIt row={row} />}
+        </div>
+      )}
     </li>
   );
 }
