@@ -589,6 +589,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const chainTicket = useCallback((id: string, pick: ChainPick) => openTicket(id, { expiry: pick.expiry, strike: pick.strike }), []);
   // An Unusual options row: its contract selected in the Chain tab, in place.
   const openUnusual = useCallback((pick: ChainPick) => { setPicked(pick.symbol); setPickedKey(null); setChainFocus(f => ({ pick, n: (f?.n ?? 0) + 1 })); setCentreTab("chain"); }, []);
+  // A TradingView alert row: its ticker on the desk chart, in place, where the alert's marker sits.
+  const openFeedChart = useCallback((symbol: string) => { setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }, []);
   // A Scanner row: its ticker on the desk chart, in place, with the scanner's levels as thin lines.
   const openScanner = useCallback((row: DeskScannerRow) => { setPicked(row.symbol); setPickedKey(null); setScanLines({ symbol: row.symbol, lines: scannerGuides(row) }); setCentreTab("chart"); }, []);
   const chartActions = useMemo<DeskChartActions>(() => ({ go, ask: (symbol, text) => askAbout(symbol, text) }), [go, askAbout]);
@@ -742,7 +744,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 : centreTab === "chart"
                 ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events}
                   guides={scanLines && scanLines.symbol === centreSymbol ? scanLines.lines : undefined} />
-                : <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed} unusual={unusual} onUnusual={openUnusual}
+                : <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed} onChart={openFeedChart} unusual={unusual} onUnusual={openUnusual}
                   scanner={scanner} onScanner={openScanner} onScannerPlan={go} />}
             </div>
           </section>

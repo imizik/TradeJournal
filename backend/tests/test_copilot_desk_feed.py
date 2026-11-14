@@ -189,3 +189,70 @@ def test_headlines_are_read_once_per_window(desk, engine, reads):  # noqa: F811
     read(desk)
     read(desk)
     assert reads["news_calls"] == [["NBIS"], None]  # cached for NEWS_TTL_S: two provider reads, not four
+
+
+# ------------------------------------------------------------------ his TradingView alerts
+
+
+def tv_alert(db, symbol, minute, *, setup="orb_break", side="long", timeframe="5", price="94.1200", day=T0, n=0):
+    """One stored TradingView delivery (the webhook's row), ``minute`` after ``day`` (naive UTC)."""
+    from decimal import Decimal
+    from app.models import TradingViewAlert
+    at = day + timedelta(minutes=minute)
+    stamp = int(at.replace(tzinfo=UTC).timestamp() * 1000)
+    db.add(TradingViewAlert(alert_id=f"v1:1.0.0:{symbol}:{timeframe}:{stamp}:{setup}:{side}:{n}", contract_version=1,
+                            parser_revision="tv-alert-v1-r1", indicator_version="1.0.0", content_sha256="a" * 64,
+                            raw_payload_sha256="b" * 64, symbol=symbol, timeframe=timeframe, setup=setup, side=side,
+                            price=Decimal(price), bar_time_ms=stamp, bar_time=at, received_at=at, payload_json="{}"))
+
+
+def test_his_tradingview_alerts_today_are_his_own_rows_with_what_fired_and_the_price(desk, engine, reads):  # noqa: F811
+    with Session(engine) as db:
+        tv_alert(db, "NBIS", 31)  # 10:31
+        tv_alert(db, "CRWV", 75, setup="vwap_reject", side="short", timeframe="60", price="131.4000")  # 11:15
+        tv_alert(db, "NBIS", -60 * 24, n=1)  # yesterday: not today's
+        db.commit()
+    body = read(desk)
+    rows = [i for i in body["items"] if i["source"] == "TradingView"]
+    assert [(r["symbol"], r["text"]) for r in rows] == [("CRWV", "VWAP reject short · 1h at 131.40"),
+                                                         ("NBIS", "ORB break long · 5m at 94.12")]
+    assert all(r["mine"] and r["plan"] == "own" and not r["upcoming"] for r in rows)
+    assert rows[1]["at"] == int((T0 + timedelta(minutes=31)).replace(tzinfo=UTC).timestamp())
+    assert rows[1]["href"].startswith("/signals/v1%3A1.0.0%3ANBIS%3A5%3A")  # the stored alert on the Signals page
+    assert body["sources"]["tradingview"] == "ok"
+    assert body["tradingview"]["last_at"] == rows[0]["at"]
+
+
+def test_a_day_with_no_alert_says_when_the_last_one_came_and_hidden_tickers_stay_silent(desk, engine, reads):  # noqa: F811
+    with Session(engine) as db:
+        db.add(DayJournalEntry(operation_id="f1", day=WED, kind="follow", symbol="APLD", text="Not following", created_at=T0))
+        tv_alert(db, "APLD", 20)  # today, but not followed
+        tv_alert(db, "APLD", -60 * 20, n=1)  # yesterday, not followed
+        tv_alert(db, "NBIS", -60 * 26, n=2)  # yesterday 08:00 ET: the last one on a ticker he follows
+        db.commit()
+    body = read(desk)
+    assert not [i for i in body["items"] if i["source"] == "TradingView"]
+    assert body["tradingview"]["last_at"] == int((T0 - timedelta(hours=26)).replace(tzinfo=UTC).timestamp())
+
+
+def test_no_alert_ever_is_nothing_at_all(desk, engine, reads):  # noqa: F811
+    body = read(desk)
+    assert body["tradingview"] == {"last_at": None}
+    assert body["sources"]["tradingview"] == "ok"
+
+
+def test_the_sandbox_shows_two_invented_alerts(engine):  # noqa: F811
+    now = (T0 + timedelta(minutes=289)).replace(tzinfo=UTC).timestamp()
+    with Session(engine) as db:
+        tv_alert(db, "MU", 10)  # a stored row: the sandbox shows its invented pair instead
+        db.commit()
+        rows = desk_feed.tradingview_today(db, now, mode="fixture")
+    assert [(r["symbol"], desk_feed.tradingview_words(r)) for r in rows] == [
+        ("NBIS", "ORB break long · 5m at 94.12"), ("CRWV", "VWAP reject short · 2m at 131.40")]
+    assert rows[0]["at"] == int(now) - 14 * 60
+
+
+@pytest.mark.parametrize("timeframe, said", [("1", "1m"), ("15", "15m"), ("240", "4h"), ("90", "90m"), ("D", "1D"),
+                                             ("1D", "1D"), ("W", "1W")])
+def test_tradingview_intervals_read_as_the_desk_says_them(timeframe, said):
+    assert desk_feed._timeframe_words(timeframe) == said

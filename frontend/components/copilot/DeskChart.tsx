@@ -28,7 +28,7 @@ import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type 
 /*
  * The cockpit centre's chart (docs/copilot-lab.md § The desk): the selected symbol's candles from the desk's chart read
  * (`GET /copilot/desk/{id}/chart`) on the library the Charts workspace uses, with the plan's entry and invalidation as
- * labelled lines, the owner's fills, today's phone pings and Radar hits as marks, and a time stop still ahead as a
+ * labelled lines, the owner's fills, today's phone pings, Radar hits and his TradingView alerts as marks, and a time stop still ahead as a
  * dashed vertical line. Crosshair, wheel or pinch zoom, drag to pan, Reset. It reads again each minute while bars can
  * still change; no stream.
  *
@@ -55,7 +55,7 @@ import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type 
  */
 
 const ET = "America/New_York";
-const COLOR = { fill: "#e9a23b", ping: "#a78bfa", radar: "#60a5fa", entry: "#7db3f0", invalidation: "#fca5a5", target: "#86efac", stop: "#a1a1aa",
+const COLOR = { fill: "#e9a23b", ping: "#a78bfa", radar: "#60a5fa", tradingview: "#f0abfc", entry: "#7db3f0", invalidation: "#fca5a5", target: "#86efac", stop: "#a1a1aa",
   alert: "#f4c66bb0", reference: "#9a9aa3a0", pick: "#e4e4e7", guide: "#5eead4c0" };
 
 /** The studies each timeframe offers, in the legend's order; ``levels`` is the previous close and the pre-market high
@@ -94,7 +94,7 @@ const saveChoices = (choices: Choices) => { try { window.localStorage.setItem(ST
 const isOn = (choices: Choices, timeframe: DeskTimeframe, key: StudyKey) => choices[slot(timeframe, key)]?.[key] ?? !OFF_BY_DEFAULT.has(key);
 const REFERENCE_TITLE = { prev_close: "Prev close", pm_high: "PM high", pm_low: "PM low" } as const;
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
-const KIND_WORD: Record<DeskChartMark["kind"], string> = { fill: "Fill", ping: "Ping", radar: "Radar" };
+const KIND_WORD: Record<DeskChartMark["kind"], string> = { fill: "Fill", ping: "Ping", radar: "Radar", tradingview: "TradingView" };
 /** A plan line further than this from the last price does not stretch the price scale; the row above still names it. */
 const LEVEL_REACH = 0.1;
 const NO_GUIDES: DeskGuide[] = [];
@@ -173,7 +173,7 @@ function seriesMarkers(byCandle: Map<number, DeskChartMark[]>): SeriesMarker<Tim
           ? { id, time: at, position: "atPriceMiddle", price: mark.price, shape: buy ? "arrowUp" : "arrowDown", color: COLOR.fill }
           : { id, time: at, position: buy ? "belowBar" : "aboveBar", shape: buy ? "arrowUp" : "arrowDown", color: COLOR.fill });
       } else {
-        out.push({ id, time: at, position: "aboveBar", shape: mark.kind === "ping" ? "circle" : "square", color: COLOR[mark.kind], size: 0.8 });
+        out.push({ id, time: at, position: "aboveBar", shape: mark.kind === "radar" ? "square" : "circle", color: COLOR[mark.kind], size: 0.8 });
       }
     });
   }

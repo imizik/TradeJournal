@@ -522,6 +522,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
         <Key color="#e9a23b" glyph="▲▼">your fills</Key>
         <Key color="#a78bfa" glyph="●">pings</Key>
         {ref && <Key color="#60a5fa" glyph="■">Radar</Key>}
+        {ref && shown?.marks.some(m => m.kind === "tradingview") && <Key color="#f0abfc" glyph="●">TradingView</Key>}
       </p>
       </>}
       {book && (versus !== null || book.days_held != null) && (
