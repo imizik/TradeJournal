@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 
 type Trade = { side: number; entry_at: number; entry: number; exit_at: number | null; exit: number | null; how: string | null };
 type Day = { day: string; bp: number; dollars: number; trades: Trade[] };
-type Book = { enabled: boolean; symbol: string; stake: number; backtest: { mean_bp: number; years: string };
+type Book = { enabled: boolean; symbol: string; stake: number; now: number; backtest: { mean_bp: number; years: string };
   holding: { side: number; entry_at: number; entry: number } | null; days: Day[];
   totals: { days: number; days_traded: number; mean_bp: number | null; dollars: number | null; up: number; missed_checks: number } };
 
@@ -25,6 +25,8 @@ const usd = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}$${Math.abs(n).to
 const tone = (n: number | null) => n == null || n === 0 ? "text-muted-foreground" : n > 0 ? "text-emerald-300" : "text-rose-300";
 const date = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
 const time = (epoch: number) => new Date(epoch * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
+const nyDay = (epoch: number) => new Date(epoch * 1000).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+const sameDay = (a: number, b: number) => nyDay(a) === nyDay(b);
 const word = (side: number) => side > 0 ? "Long" : "Short";
 
 export default function DeskMomentum({ on }: { on: boolean }) {
@@ -53,7 +55,7 @@ export default function DeskMomentum({ on }: { on: boolean }) {
         <>
           <p data-testid="desk-momentum-state" className="mt-1 text-sm">
             {book.holding
-              ? <>{word(book.holding.side)} since {time(book.holding.entry_at)} at {book.holding.entry.toFixed(2)}. Checks on the hour; flat by 3:59 PM.</>
+              ? <>{word(book.holding.side)} since {sameDay(book.holding.entry_at, book.now) ? "" : `${date(nyDay(book.holding.entry_at))} `}{time(book.holding.entry_at)} at {book.holding.entry.toFixed(2)}. {sameDay(book.holding.entry_at, book.now) ? "Checks on the hour; flat by 3:59 PM." : "Left open by an outage; it closes at the next open."}</>
               : <>Flat. Checks QQQ on the hour from 10:00{book.enabled ? "" : " once switched on"}.</>}
           </p>
           {t && t.days > 0 && (

@@ -2218,7 +2218,7 @@ rows.
 The intraday rule that passed its registered exam ([result](../research/notes/qqq-intraday-momentum-2026-11-14.md)),
 with the exam's chosen settings, recorded live at 1x before any money (`backend/app/engine/intraday_momentum_book.py`).
 On each full session (the calendar's 16:00 close; none on early closes or without the calendar) it checks QQQ on the hour
-from 10:00 to 15:00. The noise band is max/min(the 09:30 open, the previous close) x (1 +/- 1.25 x the average move from
+from 10:00 to 15:00. The noise band is max/min(the 09:30 open, the previous session's official close from the Tradier quote) x (1 +/- 1.25 x the average move from
 the open to that hour over the previous 60 sessions). Flat, it goes long above max(upper band, VWAP) and short below
 min(lower band, VWAP); held, it closes when the price crosses back through that level, and only the opposite side can
 open at that check. Anything open closes at 15:59. Decisions use the close of the minute before the check from the chart

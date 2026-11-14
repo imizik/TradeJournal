@@ -56,13 +56,14 @@ class Feed:
         return bars
 
 
-def quotes(clock: Clock, spread: float = 0.02, calls: list | None = None, feed: Feed | None = None):
+def quotes(clock: Clock, spread: float = 0.02, calls: list | None = None, feed: Feed | None = None, prev: float = 100.0):
     def get(symbols):
         if calls is not None:
             calls.append(clock.t)
         last = feed.today_minutes("QQQ", clock.t)[-1]["close"] if feed else 100.0
         ms = int((clock.t - 1) * 1000)
-        return {"QQQ": TradierQuote(symbol="QQQ", bid=round(last - spread / 2, 2), ask=round(last + spread / 2, 2), bid_date=ms, ask_date=ms)}
+        return {"QQQ": TradierQuote(symbol="QQQ", bid=round(last - spread / 2, 2), ask=round(last + spread / 2, 2), bid_date=ms, ask_date=ms,
+                                    raw={"prevclose": prev})}
     return get
 
 
@@ -146,7 +147,7 @@ def test_a_stale_quote_waits_and_one_check_never_trades_twice(tmp_path):
     def stale(symbols):
         calls.append(clock.t)
         ms = int((clock.t - 300) * 1000)
-        return {"QQQ": TradierQuote(symbol="QQQ", bid=100.99, ask=101.01, bid_date=ms, ask_date=ms)}
+        return {"QQQ": TradierQuote(symbol="QQQ", bid=100.99, ask=101.01, bid_date=ms, ask_date=ms, raw={"prevclose": 100.0})}
     b = book(tmp_path, clock, feed, quote=stale)
     b.run()
     assert b.store.trades() == [] and b.store.checks() == []  # waits for a fresh quote
@@ -209,3 +210,32 @@ def test_decide_matches_the_study_rule():
 def test_off_by_default(monkeypatch):
     monkeypatch.delenv("INTRADAY_MOMENTUM_BOOK_ENABLED", raising=False)
     assert not ib.enabled()
+
+
+def test_the_band_anchors_on_the_real_previous_close_from_the_quote(tmp_path):
+    # The book's last recorded close is 100, but the real previous session (an early close it never recorded) closed at
+    # 104. Monday opens at 104 and trades at 103.3 by 10:00: with the real close the lower band is 104 x 0.995 = 103.48.
+    clock = Clock(at(DAY, 9, 59, 30))
+    feed = Feed(clock, base=104.0, path={580: 103.3})
+    b = book(tmp_path, clock, feed, quote=quotes(clock, feed=feed, prev=104.0))
+    run_until(b, clock, DAY, 10, 1)
+    assert [t["side"] for t in b.store.trades()] == [-1]
+    # Without a usable previous close the check waits, and is missed after five minutes, never traded on a guess.
+    (tmp_path / "noprev").mkdir()
+    other = book(tmp_path / "noprev", clock, feed, quote=quotes(clock, feed=feed, prev=0))
+    clock.t = at(DAY, 9, 59, 30)
+    run_until(other, clock, DAY, 10, 6)
+    assert other.store.trades() == [] and other.store.checks()[0]["status"] == "missed"
+
+
+def test_the_session_record_waits_for_the_1559_bar(tmp_path):
+    clock = Clock(at(DAY, 16, 0, 5))
+    feed = Feed(clock)
+    b = book(tmp_path, clock, feed)
+    b._bars = lambda now: [x for x in feed.today_minutes("QQQ", now) if x["time"] < at(DAY, 15, 58)]  # a stale read
+    b.run()
+    assert not b.store.has_session(DAY)
+    b._bars = lambda now: feed.today_minutes("QQQ", now)
+    clock.t += 30
+    b.run()
+    assert b.store.has_session(DAY)

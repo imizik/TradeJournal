@@ -2,7 +2,7 @@
 (research/notes/qqq-intraday-momentum-2026-11-14.md), recorded live at 1x before any money.
 
 The noise area at each hourly check (10:00 to 15:00) is max/min(today's 09:30 open, the previous close) x (1 +/- 1.25 x
-sigma), where sigma is the average absolute move from the open to that time over the previous 60 full sessions. At a
+sigma) -- the previous close is the previous session's official close from the Tradier quote, early closes included --, where sigma is the average absolute move from the open to that time over the previous 60 full sessions. At a
 check the book goes long above max(upper band, VWAP) and short below min(lower band, VWAP); a held position closes at a
 check when the price crosses back through that level (and only the opposite side can open at that check); anything open
 closes at 15:59. Decisions use the close of the minute bar before the check (Tradier timesales, the chart feed's cached
@@ -187,6 +187,14 @@ def fresh(quote, now: float) -> tuple[float, float] | None:
     return float(quote.bid), float(quote.ask)
 
 
+def previous_close(quote) -> float | None:
+    try:
+        value = float((quote.raw or {}).get("prevclose")) if quote is not None else None
+    except (TypeError, ValueError):
+        return None
+    return value if value and value > 0 else None
+
+
 def bp(t: dict) -> float | None:
     if t.get("status") != "closed":
         return None
@@ -258,12 +266,15 @@ class IntradayMomentumBook:
     def _bars(self, now: float) -> list[dict]:
         return self.feed.today_minutes(SYMBOL, now) if self.feed is not None else []
 
-    def _quote(self, now: float) -> tuple[float, float] | None:
+    def _raw_quote(self):
         try:
-            return fresh(self.quote([SYMBOL]).get(SYMBOL), now)
+            return self.quote([SYMBOL]).get(SYMBOL)
         except Exception as exc:
             log.warning("Intraday momentum book quote failed: %s", exc)
             return None
+
+    def _quote(self, now: float) -> tuple[float, float] | None:
+        return fresh(self._raw_quote(), now)
 
     def run(self) -> None:
         try:
@@ -326,12 +337,18 @@ class IntradayMomentumBook:
         start = datetime(today.year, today.month, today.day, 9, 30, tzinfo=ET).timestamp()
         if not before or before[0]["time"] != start or before[-1]["time"] < start + (m - OPEN_MINUTE - 1) * 60:
             return  # the 09:30 bar or the bar just before the check is not in yet: the next pass tries again
+        # The previous session's official close (Tradier's ``prevclose``): the real previous session, an early close
+        # included, whatever this book recorded. One quote request a check; it also fills any order.
+        q = self._raw_quote()
+        prev = previous_close(q)
+        if prev is None:
+            return  # no quote yet: the next pass inside the check's five minutes tries again
         price, open_ = before[-1]["close"], before[0]["open"]
-        lv = levels(open_, history[-1]["close"], sig, vwap(before))
+        lv = levels(open_, prev, sig, vwap(before))
         side = held["side"] if held is not None else 0
         stop, want = decide(side, price, lv)
         if stop or want:
-            got = self._quote(now)
+            got = fresh(q, now)
             if got is None:
                 return  # no fresh quote yet: the next pass inside the check's five minutes tries again
             bid, ask = got
@@ -351,8 +368,8 @@ class IntradayMomentumBook:
             log.info("Intraday momentum book could not read today's bars: %s", exc)
             return
         start = datetime(today.year, today.month, today.day, 9, 30, tzinfo=ET).timestamp()
-        if not bars or bars[0]["time"] != start:
-            return
+        if not bars or bars[0]["time"] != start or bars[-1]["time"] != start + (CLOSE_MINUTE - OPEN_MINUTE) * 60:
+            return  # the 09:30 or the 15:59 bar is not in (a stale cached read): a later pass tries again
         open_ = bars[0]["open"]
         moves = {}
         for m in CHECKS:
