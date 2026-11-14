@@ -2120,6 +2120,37 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
 Proof: `backend/tests/test_paper_book.py`, `backend/tests/test_paper_orders.py`, `backend/tests/test_copilot_paper.py`, `frontend/e2e/copilot-desk-paper.spec.ts`,
 `frontend/e2e/copilot-desk-paper-review.spec.ts`.
 
+### Paper replay
+
+Paper trading on a past day, any time (nights and weekends included): "Replay" on the desk chart
+(`frontend/components/copilot/DeskReplay.tsx`, `backend/app/engine/paper_replay.py`, routes under
+`/copilot/paper/replay`, all owner-only).
+
+- **Pick a day and a ticker.** The last 20 trading days (the market calendar's early closes kept); the ticker defaults to
+  one he traded that day, else the desk's selected one, else one he watches, never one set to "Not following". The
+  day's minute bars come from the Charts history store (`chart_history`: Alpaca SIP, raw, stored on disk once read, its
+  own budget and lock), never Tradier or Robinhood. A day whose bars cannot be read is greyed out with the reason.
+- **The clock.** The chart starts at 9:30 ET with the premarket and nothing after; Play, Pause, 1×/5×/20×/60× (60× is a
+  replayed minute a second) and one bar. Only bars that ended by the clock are drawn. While it runs the live desk is
+  hidden behind an amber `REPLAY · <date> · <time> ET` badge (its keys off, the copilot hidden: nothing live shows beside
+  a replayed price); Back to live puts it back exactly as it was, since it stays mounted underneath.
+- **Fills: shares only.** A market order fills at the newest finished regular-session bar's close plus an assumed
+  half-spread to buy (less one to sell): the spread is assumed 0.05% of the price, each half rounded up to the cent,
+  and the confirm says so. A bar more than two minutes old is no price. Options are refused with the reason: the app
+  keeps no past option chain to pick a contract from and no past option quotes, so there is no honest option price.
+- **Limits, stop and target** use the live book's rules on the replayed bars, one bar at a time: a buy limit fills on
+  the first bar whose low plus the half-spread reaches it (at the limit, or at the bar's open plus the half-spread when
+  lower); stop and target are judged on finished bars after the fill's minute, a bar touching both is the stop; with
+  "Close automatically" on, the touch sells at the next bar's open less the half-spread, off it is only recorded. At the
+  replayed close working orders lapse and everything is sold at the last close; Back to live sells at the clock's price.
+  The run's clock never goes back.
+- **Its own runs.** Each replay is a `paper_run` with `kind` `replay` and `replay_day` (migration `7f3b276ac082`), on the
+  paper book's own events and fold; `paper_book.current_run` reads live runs only, so replay never mixes with live paper
+  or real trades. "Replay practice" under the Paper section scores every replay apart: P&L, win rate, and each trade with
+  its day, how it ended and its note.
+
+Proof: `backend/tests/test_paper_replay.py`, `frontend/e2e/copilot-desk-replay.spec.ts`.
+
 ## Chatter
 
 Buzz from r/wallstreetbets and NYT business headlines, behind the desk Feed's own **Market › Chatter** pick

@@ -476,8 +476,10 @@ function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
  * its book row does not carry (the stock against SPY today, time held: P&L, the distance to the stop and expiry are the
  * row's) and, folded, what touched the thread. No symbol: QQQ with the owner's fills and pings.
  */
-export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], earnings = null, guides }: {
+export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], earnings = null, guides, onReplay }: {
   symbol: string | null; thread: DeskThreadRef | null; row: DeskThread | null; sparks: DeskSparks | null; actions?: DeskChartActions;
+  /** Opens Replay: paper trading on a past day (``DeskReplay``). */
+  onReplay?(): void;
   /** The desk's rows, so a held option's standing can tell a lone long option from one leg of a structure. */
   rows?: DeskThread[];
   /** Earnings tags (``useDeskEvents``): a held option's header says when a report falls inside its life. */
@@ -521,6 +523,8 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
           ))}
         </div>}
         <span className="ml-auto" />
+        {onReplay && <button type="button" data-testid="replay-open" onClick={onReplay} title="Paper trade a past day, any time: the day replays bar by bar"
+          className="inline-flex min-h-11 items-center rounded px-1.5 text-xs text-amber-200/80 hover:text-amber-100 sm:min-h-0">Replay</button>}
         <TapeToggle open={tape} onToggle={setTape} />
         <Link href={charts} className="inline-flex min-h-11 items-center whitespace-nowrap text-xs text-muted-foreground hover:text-foreground sm:min-h-0"><span><span className="max-sm:sr-only">Open in </span>Charts<span className="max-sm:sr-only"> →</span></span></Link>
       </div>

@@ -186,7 +186,8 @@ def test_the_routes_are_owner_only_and_a_day_without_bars_says_why(db, day, monk
     app.include_router(copilot_paper.router, prefix="/copilot")
     app.dependency_overrides[get_session] = lambda: db
     with TestClient(app) as client:
-        home = client.get("/copilot/paper/replay").json()
+        assert "days" not in client.get("/copilot/paper/replay").json()
+        home = client.get("/copilot/paper/replay", params={"with_days": "true"}).json()
         assert home["days"][0]["date"] == "2026-11-13" and home["score"]["trades"] == 0 and "Shares only" in home["options"]
         missing = client.get("/copilot/paper/replay/bars", params={"day": "2026-11-13", "symbol": "ZZZZ"})
         assert missing.status_code == 409 and "No minute bars for ZZZZ" in missing.json()["detail"]

@@ -12,6 +12,7 @@ import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/componen
 import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
 import DeskPaper, { usePaperBook } from "@/components/copilot/DeskPaper";
 import DeskOvernight from "@/components/copilot/DeskOvernight";
+import DeskReplay, { ReplayPractice } from "@/components/copilot/DeskReplay";
 import PaperReviewCard from "@/components/copilot/PaperReview";
 import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
 import DeskRoll from "@/components/copilot/DeskRoll";
@@ -178,6 +179,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   }, [keepRows]);
   const [saved, setSaved] = useState<InvestigationSummary[]>([]);
   const [palette, setPalette] = useState(false);
+  // Replay (DeskReplay): paper trading on a past day. While it runs the live desk stays mounted but hidden, so leaving
+  // puts it back exactly as it was, and none of its live pieces shows beside a replayed price.
+  const [replay, setReplay] = useState(false);
   const [threadsShown, setThreadsShown] = useState(false);
   const toggleThreads = useCallback(() => setThreadsShown(shown => !shown), []);
   // The centre: the symbol the owner picked in the book (else the copilot's, else the first followed position), on Chart
@@ -524,7 +528,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   }, [walk, thread?.id, actions]);
 
   useEffect(() => {
-    if (!on) return;
+    if (!on || replay) return;  // the desk's keys act on the live desk, hidden while a replay runs
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || typing(event.target)) return;
       // The open dialog itself, not state: Escape closes it before React re-renders this listener.
@@ -564,7 +568,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [on, step, planTrade, toggleThreads, openCentre, showFeed, focusBook, showCopilot, focusCopilot]);
+  }, [on, replay, step, planTrade, toggleThreads, openCentre, showFeed, focusBook, showCopilot, focusCopilot]);
 
   // The open symbol's row in the thread list (a position or a plan): its close question and horizon, as the list shows them.
   const deskRow = useCallback((symbol: string | null | undefined) =>
@@ -779,7 +783,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       data-view={phoneView} data-feed={feedShown ? "shown" : "hidden"}>
       {/* The desk's head: the top bar and, at its right, the desk's buttons. On a phone the buttons' row comes first, stays at
           the top of the screen, and starts with the switch between the desk's three views (CopilotLab.module.css). */}
-      <div className={styles.head}>
+      <div className={styles.head} style={replay ? { display: "none" } : undefined}>
       {on && (
         <div className={styles.topRow}>
           {/* A phone's switch: one view at a time, the middle one named for the selected ticker. Wider screens show all at once. */}
@@ -839,7 +843,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         {on && <ScalpShortlistNudge />}
       </header>
       </div>
-      <div id="desk-cockpit" className={styles.cockpit}>
+      {on && replay && <DeskReplay symbol={centreSymbol} onLeave={() => setReplay(false)} />}
+      <div id="desk-cockpit" className={styles.cockpit} style={replay ? { display: "none" } : undefined}>
         {on && (
           <div className={styles.strip}>
             {/* A phone shows the strip on its Book view; on the other two the Book's button carries the amber count. */}
@@ -873,6 +878,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
             <DeskPaper book={paper.book} failed={paper.failed} symbol={centreSymbol} top={<PaperReviewCard review={paper.book?.review} onAsk={actions.ask} />} />
             {/* The QQQ overnight paper book: the one rule that passed its registered test, recorded live. Hidden until switched on. */}
             <DeskOvernight on={on} />
+            {/* Replay practice: past days paper traded on the desk, scored apart from live paper. */}
+            <ReplayPractice />
             {/* Before the open and after the close the day's block (the brief, the day report) comes straight after the
                 book; in the session it waits under Watching. */}
             {dayPhase !== null && lower}
@@ -904,7 +911,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                   onPlaced={symbol => { setTicketRoll(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} />
                 : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} pick={ticketPick} close={ticketClose} onOpen={id => { setTicketFor(id); setTicketPick(null); setTicketClose(null); }} onClose={() => { setTicketFor(null); setTicketPick(null); setTicketClose(null); }}
                 onPlaced={symbol => { setTicketFor(null); setTicketClose(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
-                : <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events}
+                : <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events} onReplay={() => setReplay(true)}
                   guides={scanLines && scanLines.symbol === centreSymbol ? scanLines.lines : undefined} />}
             </div>
           </section>
@@ -995,10 +1002,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         </div>
       </div>
       {/* A phone shows only the round button, so it never sits over a book row's P&L; its name is the same. */}
-      {on && <button type="button" onClick={askCopilot} className={cn(styles.ask, "min-h-11 items-center gap-1.5 rounded-full border border-foreground/30 bg-card px-4 text-sm font-medium text-foreground shadow-lg hover:bg-secondary max-sm:size-12 max-sm:justify-center max-sm:px-0")}>
+      {on && !replay && <button type="button" onClick={askCopilot} className={cn(styles.ask, "min-h-11 items-center gap-1.5 rounded-full border border-foreground/30 bg-card px-4 text-sm font-medium text-foreground shadow-lg hover:bg-secondary max-sm:size-12 max-sm:justify-center max-sm:px-0")}>
         <MessageCircle size={15} aria-hidden className="text-muted-foreground max-sm:size-5 max-sm:text-foreground" /><span className="max-sm:sr-only">Ask the copilot{picked && picked !== talking ? ` about ${picked}` : ""}</span>
       </button>}
-      {on && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} onConversation={actions.open} />}
+      {on && !replay && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} onConversation={actions.open} />}
     </div>
   );
 }

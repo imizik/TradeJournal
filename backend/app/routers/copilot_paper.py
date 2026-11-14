@@ -129,7 +129,7 @@ def auto(body: AutoAsk, db: Session = Depends(get_session)):
 
 
 # --- paper replay: practice on a past day (``engine/paper_replay.py``) -------------------------------------------------
-# ``GET /copilot/paper/replay``: the past trading days offered and the replay scorecard (every replay run's closed trades,
+# ``GET /copilot/paper/replay``: the replay scorecard, and with ``with_days`` the past trading days offered (every replay run's closed trades,
 # apart from live paper and real trades). ``GET /copilot/paper/replay/day?day=``: the tickers to suggest for a day.
 # ``GET /copilot/paper/replay/bars?day=&symbol=``: that day's minute bars from the Charts history store (refused with the
 # reason when they cannot be read). ``POST /copilot/paper/replay/runs``: start a replay run on a day. ``.../step``: bring
@@ -146,9 +146,13 @@ def _replay(call):
 
 
 @router.get("/paper/replay")
-def replay_home(db: Session = Depends(get_session)):
-    return _replay(lambda: {"days": paper_replay.days(time.time()), **paper_replay.scorecard(db),
-                            "spread_bps": paper_replay.SPREAD_BPS, "options": paper_replay.OPTIONS_REFUSED})
+def replay_home(with_days: bool = False, db: Session = Depends(get_session)):
+    def call():
+        found = {**paper_replay.scorecard(db), "spread_bps": paper_replay.SPREAD_BPS, "options": paper_replay.OPTIONS_REFUSED}
+        if with_days:  # the market calendar: only when he opens replay, never on the desk's own read
+            found["days"] = paper_replay.days(time.time())
+        return found
+    return _replay(call)
 
 
 @router.get("/paper/replay/day")
