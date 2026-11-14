@@ -576,7 +576,7 @@ def desk_requests(prompt: str, symbol: str, today) -> list[dict] | str | None:
         out.append({"action": "draw", "symbol": symbol, "price": float(m.group(1)),
                     **({"label": m.group(2).strip()} if m.group(2) else {})})
     if re.search(r"\b(ticket|build the)\b", lower):
-        pair = re.search(rf"\b(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\s*(c|calls?|p|puts?)\b", lower)
+        pair = re.search(r"\b(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\s*(c|calls?|p|puts?)\b", lower)
         strike = pair and re.search(rf"\b{_NUM}\s*(c|calls?|p|puts?)\b", lower[pair.start(2):]) or re.search(rf"\b{_NUM}\s*(c|calls?|p|puts?)\b", lower)
         when = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\.?\s+(\d{1,2})\b", lower)
         if not strike or not when:

@@ -7,7 +7,7 @@ import pytest
 from sqlmodel import Session, select
 
 from app.ai import copilot, copilot_actions, copilot_prompt, copilot_tools
-from app.ai.copilot_fixture import FixtureEvidence, desk_requests
+from app.ai.copilot_fixture import desk_requests
 from app.engine import copilot_investigations, desk_watch
 from app.models import DayJournalEntry, LevelAlert
 from tests.test_copilot import NOW, _cfg
