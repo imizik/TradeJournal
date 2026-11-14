@@ -178,7 +178,7 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   in `DESK_GROUPS` order (Act now, Near a trigger, Waiting for you, New since
   you looked, Watching); the list regroups them by symbol in the browser.
   - **Now**: today's Main chat (below, § The desk). Pressing it opens it and sends nothing; the
-    open conversation stays saved. Radar hits are in the cockpit's Feed tab and Review my
+    open conversation stays saved. Radar hits are in the desk's Feed and Review my
     week in ⌘K, not rows in the list. The row shows the Radar count ("18 Radar", an amber dot while one
     is unseen in this browser); alert and Radar ratings are optional and never counted here. Open conversations about no ticker (an older
     turn, a week review) are listed under it, title and date: today's, the open one and the latest automatic week
@@ -543,6 +543,18 @@ screen of #733): one screen that says in a few seconds what is going on and puts
 plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and one for What's moving
 (`GET /copilot/desk/moving`):
 
+- **Where things live** (the layout pass of 2026-11-13; `frontend/e2e/copilot-desk-layout.spec.ts`). The order follows
+  his day. What needs a decision keeps the top (the Needs-you strip) and his positions the left (the book, always
+  first in its column). The centre is the selected ticker's tools and nothing else: **Chart**, **Chain**, **Ticket**,
+  then **Check a call** and, set apart at the right, the **Grid**. The right side is the copilot, with the **Feed**
+  (his own items, ideas, the market) behind the tab beside it (**Copilot | Feed**), so the chart stays on show while he
+  reads the Feed: a Feed row's chart, Scanner row or unusual contract changes the centre in place and the Feed stays
+  where it was, on the pick he left (Mine, Ideas with its Radar / Scanner / Unusual pick, Market, All; kept while he
+  stays on the desk). Picking a book or Watching row while the Feed shows leaves the Feed up (the copilot opens that
+  ticker behind its tab, which names it); anything that asks the copilot (a Feed row's Ask or Plan it, the strip's
+  answers, the palette, the thread list) brings the copilot forward. From 768 to 1179 px the Feed is a drawer on the
+  right opened by the top bar's **Feed** button; a phone has it as a view (§ Phone). Every place has a key while not
+  typing and a ⌘K command (§ Keys and the palette). Nothing was removed: each piece is at most two taps from the desk.
 - **Top bar.** Desk, the market phase with the New York clock of the session read ("Live · 11:48 ET", "Pre-market ·
   8:52 ET", "Closed 16:00"), SPY / QQQ / VIX's change, **Realized today** (the trades closed today, New York's day,
   Webull left out: the session read's `realized_today`; absent until it is not $0) and **Open** (every open position's unrealized P&L now,
@@ -597,7 +609,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   tag); a time stop coming due; Act now's give-back reason from an alert on an earlier day; Close the day and its
   count; and the Seen button.
 - **What's moving** (`components/copilot/MovingStrip.tsx`, `GET /copilot/desk/moving`, `app/engine/desk_moving.py`,
-  since 2026-11-12), under the Needs-you strip and across the book and the centre (on a phone, under the book): one thin
+  since 2026-11-12), under the Needs-you strip and across the book and the centre (on a phone, on the Book view under the book): one thin
   row (36 px) that says where the action is today. It starts **folded** to a 24 px "Moving ▸" line (since 2026-11-13: it
   is the market's, not his book's), and opening or folding it is remembered in this browser's `localStorage`
   `desk.moving.collapsed.v1` ("0" open, "1" folded); folded, it still reads once a minute, so opening it shows today's
@@ -635,8 +647,9 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   its conversation (its own, else the ticker's newest open one, else its link; a position whose link leaves the desk
   opens the symbol's desk view). The desk never reloads for it: a symbol's desk view opens in place (see *The address*
   below), so the book, the top bar, the strip and the centre keep their data. Each row's eye sets its ticker to **Not following**; those sit behind "N not followed
-  ▾" at the bottom, each with Show again. Under the book, the time of day's block (below), then one quiet facts line:
-  **At risk now** (see Exposure) and the practice goal.
+  ▾" at the bottom, each with Show again. Under the book, Watching and the time of day's block (below: straight after
+  the book before the open and after the close, when the brief or the day report is the job; under Watching in the
+  session), then one quiet facts line: **At risk now** (see Exposure) and the practice goal.
 - **Watching** (`components/copilot/Watching.tsx`, `GET /copilot/desk/watching`, `app/engine/desk_watch.py`), under
   the book: the names he watches and does not hold. The list of record is the app's own watchlist, the Charts one (the
   `chart_settings` row's `watchlist`, at most 30; never saved, both screens show Charts' starting names), so Charts and
@@ -696,14 +709,15 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   calendar's FOMC, CPI and jobs days, faint; no other chart does. The Chain tab marks **ER** on each expiry that lives
   through the next report (on or after its date), with one line naming the report; its read carries `earnings` and each
   expiry's `earnings` flag, from the same cache (`desk_events.next_report`).
-- **Centre.** A tab strip, **Chart** first, **Grid** (below), **Chain** (see [Chain](#chain)), **Feed**, **Check a call** (§ Check a
-  call) and **Ticket** (see [Ticket](#ticket); no tab shows before it works). Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
+- **Centre.** A tab strip of the selected ticker's tools in the order he works: **Chart**, **Chain** (see
+  [Chain](#chain)), **Ticket** (see [Ticket](#ticket)), then **Check a call** (§ Check a call) and, at the right end,
+  **Grid** (below). The Feed is not a centre tab (since 2026-11-13): it sits beside the copilot. Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
   position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's
   fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D, with studies (VWAP, EMAs, SMAs,
   volume), his Charts levels and drawings (with a pencil to draw), the symbol's alerts and a level menu to act from
   the chart, a reading line under the symbol, **Tape** (below) and
-  **Open in Charts →**; then, for a held
-  position, two tiles the book row does not carry: vs SPY today (the stock's change today less SPY's, from the sparks
+  **Open in Charts →** ("Charts" on a phone); then, under the chart, a held option's standing (§ Where a held option
+  stands) and, for a held position, two tiles the book row does not carry: vs SPY today (the stock's change today less SPY's, from the sparks
   read) and Held (its P&L, distance to the stop and expiry are the row's, beside it); and **Timeline ▾** folded under it. The sparks read takes at most 12 symbols (the centre's first), plus up to 30 watched names (Watching, above), and
   answers a repeat within 30 seconds from memory, so several open desks cost one chart-feed read a minute. The chart is
   its own small component on the library `/charts` uses (lightweight-charts), not the workspace's `PriceChart`: that
@@ -747,7 +761,9 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   call when Alpaca serves; at most nine low-priority Tradier calls a minute (two at once, shared with the Chart tab's
   own request) when it does not.
 - **Feed** (`components/copilot/DeskFeed.tsx`, `GET /copilot/desk/feed`, `app/engine/desk_feed.py`): one stream of what
-  the app already knows today, so there is a reason to open the desk that is not a ping. Its tab carries a grey count of
+  the app already knows today, so there is a reason to open the desk that is not a ping. It sits beside the copilot
+  (the **Feed** tab of the right side from 1180 px, a drawer from the top bar's Feed button from 768 px, a phone's
+  third view), never over the chart, and keeps its pick while he stays on the desk. Its tab carries a grey count of
   his own items (Mine) new since the Feed was last opened in this browser; Ideas and Market never add to it. Each item is one row: its source (**Alert**, **Plan**,
   **Radar**, **Radar setup**, **News**, **Calendar**, **Copilot note**, **TradingView**), its time, its symbol and one or two plain
   sentences. Sources: the phone pings judged today, sent or held (position alerts; plan pings for an entry or
@@ -843,9 +859,19 @@ and a symbol whose session was never cached reads "not measured": more rows say 
 symbols he checks. The 30-day total counts every check in the window, today's included. Radar's own quotes are not used
 for a closing price.
 
-**Phone (375 to 440 px).** The same pieces stacked: the Needs-you strip, the book, What's moving, then the centre, so
-what needs a decision and the book's first rows are the first screen. The top bar is three short rows: Desk with its buttons (Threads, Jump to…, Plan a
-trade, as icons), the clock and SPY / QQQ / VIX, then Realized today and Open, and the account line as one row that
+**Phone (375 to 440 px).** One view at a time, picked on a switch that stays at the top of the screen (since
+2026-11-13; before, one long page): **Book** (the Needs-you strip, the book, Watching, the day's block, What's moving), the
+selected ticker (the button carries its symbol, "Market" with none: the centre's Chart, Chain, Ticket, Check a call and
+Grid, five tabs that fit the width) and **Feed** (with its grey count). It opens on the Book, so what needs a decision
+and the book's first rows are the first screen; a link that names a ticker (a ping's `?symbol=`) opens on that
+ticker's view, under the copilot's sheet. The strip shows on the Book; on the other two views the Book button
+carries an amber count of what needs him. A book or Watching row, a What's moving tile, a Feed row's chart, a closing
+ticket and `?ticket=` go to the ticker's view, which keeps a held position's own book row above the centre (its P&L,
+its standing line and the Close buttons), so closing is still row, then Close at target. The Book starts at the page's
+top; the ticker and the Feed start right under the switch. The chart sets its default view again when it is first laid
+out (it had no width while another view showed). The top is three short rows: the switch with the desk's buttons
+(Threads, Jump to…, Plan a trade, as icons) in the row that stays put (the word "Desk" is the app's tab bar's, not
+repeated here), the clock and SPY / QQQ / VIX, then Realized today and Open, and the account line as one row that
 swipes sideways (numbers masked). Installed on the home screen it runs full screen: the desk's top clears the notch and the
 status bar, and the sheet's message box clears the home indicator (`env(safe-area-inset-*)`). The copilot is a
 full-screen sheet opened by the round **Ask the copilot** button at the bottom right (its name says "about NBIS" when
@@ -853,9 +879,10 @@ a picked position differs; on a phone it is an icon so it never covers a book ro
 **Desk** closes it. Behind the closed sheet the copilot never scrolls the page: tapping a position keeps its chart in
 view while the copilot opens its conversation. Open, the sheet follows a streaming answer and keeps the message box
 in view above the keyboard. A deep link or a saved thread opens on the sheet; the bare address opens on the cockpit,
-and `?ticket=` scrolls to the Ticket once the book has read. Controls are at least 44 px tall on a phone; the row of
+and `?ticket=` opens the ticker's view on the Ticket. Controls are at least 44 px tall on a phone; the row of
 canned questions fades at its right edge to show it scrolls. One tab bar only: the app's. From 768 to 1179 px the book
-and the centre sit side by side and the copilot is a sheet on the right. The thread list is a drawer at every width
+and the centre sit side by side, the copilot is a sheet on the right and the Feed a drawer there (the top bar's Feed
+button; Escape or its Desk button closes it). The thread list is a drawer at every width
 (over the whole screen on a phone). Browser proof: `frontend/e2e/copilot-desk-phone.spec.ts` (375, 393 and 440 px).
 
 **Not following.** A ticker the owner does not follow (an old position no longer watched)
@@ -1147,7 +1174,7 @@ threshold. Proof: `tests/test_alert_scorecard.py`,
 `frontend/e2e/copilot-scorecard.spec.ts`.
 
 **Radar hits open on a decision** (`components/copilot/RadarDecision.tsx`).
-A stock Radar hit (its row in the centre's Feed, or its ping) opens the desk on that hit: what
+A stock Radar hit (its row in the Feed, or its ping) opens the desk on that hit: what
 Radar saw (its kind, direction, first-seen time and summary, with Open in
 Radar) and one choice. **Watching** or **Pass** logs a `decision` day-journal
 entry for the symbol ("Watching. Radar vs SPY: …", "Passing. …") after the
@@ -1382,7 +1409,7 @@ drop counts on that visit, and the plan leaves the list on the next read).
 unsent (check each plan against the pre-market and propose what is missing).
 Opening a thread or Close leaves the checklist. Nothing in it arms, sizes or
 sends an order. On a
-phone Jump to…, Threads and Plan a trade show as icons. One
+phone Jump to…, Threads and Plan a trade show as icons beside the view switch. One
 read, `GET /copilot/desk/session` (owner only, refused while the lab is off),
 once a minute while the page is visible, read once by the desk
 (`useDeskSession`) for its top bar, strip and lower block, composed in `copilot_desk.py` from readers
@@ -1402,8 +1429,9 @@ order, each with its status line and value), Conversations (from two letters
 typed, every saved conversation whose title, symbol or conclusion holds the
 words, up to the newest 50 matches, from `GET /copilot/investigations?q=`, so a
 closed or old thread stays reachable) and Commands (Plan a trade, Review
-my week, What matters right now?, and the day's phase commands: Arm today's plans
-and Prep the day before 9:30 on a weekday, Close the day after 16:00). Type to filter, arrows
+my week, What matters right now?, the day's phase commands: Arm today's plans
+and Prep the day before 9:30 on a weekday, Close the day after 16:00; then every place on the desk with its key:
+Chart, Chain, Ticket, Check a call, Grid, Feed, Copilot, Book, Threads). Type to filter, arrows
 and Enter to choose, Escape or a click outside to close. A thread opens through
 the list's own path (in place, or its deep link); Plan a trade opens the same
 unsent "Plan a trade: " link as the desk bar's Plan a trade; Review my week and What
@@ -1430,16 +1458,16 @@ prices are marked: the book shows **Updating…** with its P&L dimmed and the to
 a thread header's price block is dimmed until its read lands; "Since you entered" keeps its own as-of time. Only the
 very first load shows "Reading positions…". While not typing in a field: J / K open the next or previous
 conversation as the list shows it (those under Main, then each ticker's
-subthreads when shown, else its newest; folded ones are skipped), N opens Plan a trade (not while the message box holds unsent words), `[` opens or closes the thread list's drawer, and Escape closes the drawer, else the copilot's sheet. No desk key fires in an
+subthreads when shown, else its newest; folded ones are skipped), N opens Plan a trade (not while the message box holds unsent words), `[` opens or closes the thread list's drawer, a place's key opens it (**C** Chart, **O** Chain, **T** Ticket, **L** Check a call, **G** Grid, **F** the Feed and back to the copilot, **B** the Book, **/** the copilot's message box), and Escape closes the drawer, else the Feed's drawer, else the copilot's sheet. No desk key fires in an
 input, text area or editable field, ⌘K included, and no other browser shortcut
-is taken. A one-line key hint sits at the foot of the thread list on a wide
+is taken (**/** is Firefox's quick find outside a field; on the desk it goes to the message box). A one-line key hint sits at the foot of the thread list on a wide
 screen. Browser proof: `frontend/e2e/copilot-desk-keys.spec.ts` (palette,
 J/K order, the drawer, keys ignored while typing, the cockpit by the time of day at 1440 and
 375 px, the strip's items and +N more); `frontend/e2e/copilot-desk-live-fixes.spec.ts` (the strip's rules,
 self-clearing and views, the book's tag and layout, interrupted answers, the chart's subject and edges).
 
 The layout follows the screen's width (above: three columns from 1180 px, two from 768 px with the copilot as a right
-sheet, stacked below that with a full-screen sheet). While the lab is off only the conversation shows, saying so. On
+sheet and the Feed as a drawer there, one view at a time below that with the copilot as a full-screen sheet). While the lab is off only the conversation shows, saying so. On
 a wide screen (1024 px and up) the desk takes the whole screen, as Charts does (`AppMain.fullScreenRoute`), and the
 book, the centre and the copilot each scroll on their own. From 768 px the
 app's navigation folds into one **Menu** button at the left of the top bar
@@ -1455,7 +1483,7 @@ the Jump entry it is the one way to Plan a trade from the desk. The read-only no
 place: it is first in the menu and the phone's first tab ("Desk",
 `withDesk` in `frontend/components/Nav.tsx`), `/today` forwards to it, and
 the Labs entry for the same page goes. What Today showed that the desk did
-not now sits in the centre's Feed (the pings held back today, each saying why) and, after the close, Watch
+not now sits in the Feed (the pings held back today, each saying why) and, after the close, Watch
 today under the day report once a replay was kept. With the lab off, Today is unchanged.
 
 The message box (desk and side panel alike) is one box: on the desk the
@@ -1512,7 +1540,7 @@ minute reads above are unchanged. Proof: `backend/tests/test_desk_ticks.py` and 
 
 ### Where a held option stands
 
-Selecting a held call or put shows, under the centre's header (and in one line under its book row), what Robinhood's
+Selecting a held call or put shows, under the centre's chart (and in one line under its book row), what Robinhood's
 position screen shows: break-even (strike ± the cost a share) and how far the stock is from it in $ and %, days left
 (0–2 days in words: "Expires today", "Expires Friday"), what the position is worth at expiry if the stock stays where it
 is (intrinsic value × contracts × 100) against what it is worth now (the difference is time value), decay a day
@@ -1549,7 +1577,7 @@ With a held single-leg call or put selected, the centre chart's header offers **
 contract in the browser). Contract draws the option itself, as Robinhood's position screen does: its price for the
 latest session with trades, his fills as lines at their premium, and at the cursor the price and which it is, his P&L
 in dollars for his size (the book's own formula, `book.tick`) and the stock's price at that moment. The closing
-tickets stay in the position header above it.
+tickets stay in the position's standing under it.
 
 - **Where the price comes from.** `GET /copilot/desk/contract?symbol=&occ=` (`backend/app/engine/desk_contract.py`):
   one Tradier time-and-sales read of the OCC symbol (1-minute trades, the last five calendar days to today's 20:00)
@@ -1628,7 +1656,7 @@ that nothing in it places or sends anything.
   (written for one long option) are not run on a spread, and works out holding overnight for the spread as a whole.
   Straddles, strangles, condors, butterflies, rolls and calendars are still refused.
 - **Closing tickets: Close at target / Close at stop.** A held single long call or put with a plan shows these in the
-  position header (beside the What if…) and under its book row. Each opens the Ticket as a **sell to close** of the
+  position's standing under the chart (beside the What if…) and under its book row. Each opens the Ticket as a **sell to close** of the
   contracts held, filled in the browser from the book row (`frontend/lib/closingTicket.ts`): the account holding it
   (Robinhood's label and masked number, so a position the live feed does not show gets no closing ticket), the contract, the quantity held, and a limit
   estimated for the stock at that plan level, mark + delta x (level − stock), never below the contract's value at

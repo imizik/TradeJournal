@@ -86,6 +86,8 @@ async function open(page: Page, { width = 1440, height = 900, pins }: { width?: 
   });
   await page.goto("/copilot-lab");
   await expect(page.getByTestId("desk-book")).toBeVisible();
+  const ticker = page.getByTestId("desk-view-ticker");
+  if (await ticker.isVisible()) await ticker.click(); // a phone opens on its Book: the centre is its second view
   await page.getByRole("tablist", { name: "Centre" }).getByRole("tab", { name: "Grid" }).click();
   await expect(page.getByTestId("desk-grid")).toBeVisible();
   return seen;

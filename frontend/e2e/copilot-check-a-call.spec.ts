@@ -37,7 +37,7 @@ async function lab(page: Page) {
   await page.route(`**/copilot/checks/${ID}/pass`, (route) => { passed = true; return route.fulfill({ json: { ...CHECKED, outcome: "passed", outcome_at: "2026-11-11T15:43:00Z" } }); });
   await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: { groups: [], sections: {} } }));
   await page.goto("/copilot-lab?view=new");
-  const pane = page.getByRole("region", { name: "Chart and feed" });
+  const pane = page.getByRole("region", { name: "Chart and tools" });
   await pane.getByRole("tab", { name: "Check a call" }).click();
   return { posts, pane, passed: () => passed };
 }

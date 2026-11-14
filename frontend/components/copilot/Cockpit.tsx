@@ -237,7 +237,8 @@ const left = (expiry: string | null, day: string) => {
  * The book: one dense row per followed open position (ticker, contract, unrealized P&L in dollars and percent, today's
  * sparkline of the underlying, where it sits between invalidation and entry, days to expiry and one state tag).
  * Selecting a row (``onSelect``) drives the centre and the copilot; its eye stops following the ticker (``onFollow``),
- * and those sit behind "N not followed" at the bottom.
+ * and those sit behind "N not followed" at the bottom. The selected row (and its standing line) carry ``data-selected``:
+ * a phone's ticker view keeps just that row above the chart (CopilotLab.module.css).
  */
 export function Book({ rows, sparks, selected, selectedKey = null, day, read, updating = false, live = null, earnings = null, onRefreshLive, onSelect, onFollow, children }: {
   rows: DeskThread[]; sparks: DeskSparks | null; selected: string | null; selectedKey?: string | null; day: string; read: boolean;
@@ -268,7 +269,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
     onFollow(symbol, following).catch(() => setFailed(`${symbol}: not saved. Try again.`));
   };
   return (
-    <section aria-label="Your book" data-testid="desk-book" className="rounded-lg border bg-card">
+    <section aria-label="Your book" data-testid="desk-book" data-desk-book className="rounded-lg border bg-card">
       <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 px-3 pb-1.5 pt-2.5 max-sm:items-center max-sm:py-0">
         <h2 className={cn(LABEL, "shrink-0")}>
           Your book{shown.length > 0 && <> · <span className="tabular-nums">{shown.length}</span> followed</>}
@@ -294,7 +295,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
             // The line's newest point follows the live price, so the row moves between the minute reads.
             const points = spark?.points.length && under && !under.stale ? [...spark.points.slice(0, -1), under.last] : spark?.points;
             return (<Fragment key={row.key}>
-              <li className={cn("flex items-stretch border-t", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")}>
+              <li data-selected={on || undefined} className={cn("flex items-stretch border-t", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")}>
                 <button type="button" onClick={() => onSelect(row)} aria-pressed={on} aria-label={`${row.symbol} ${full}`}
                   className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_48px_minmax(60px,auto)] items-center gap-2 py-2 pl-3 text-left hover:bg-secondary">
                   <span className="min-w-0 overflow-hidden">
@@ -329,7 +330,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                   </button>
                 )}
               </li>
-              {on && book?.option && <li className="bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]"><OptionStandingLine row={row} rows={held} fallback={sparkPrice(sparks, row.symbol)} /></li>}
+              {on && book?.option && <li data-selected className="bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]"><OptionStandingLine row={row} rows={held} fallback={sparkPrice(sparks, row.symbol)} /></li>}
             </Fragment>);
           })}
         </ul>
@@ -456,9 +457,9 @@ function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
 /**
  * The centre's Chart: the selected symbol's interactive chart (``DeskChart``: candles with the plan's entry and invalidation
  * lines, the owner's fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D; the timeframe
- * holds across positions) with Open in Charts, then two tiles for a held position that its book row does not carry (the
- * stock against SPY today, time held: P&L, the distance to the stop and expiry are the row's) and, folded, what touched
- * the thread. No symbol: QQQ with the owner's fills and pings.
+ * holds across positions) with Open in Charts, then a held option's standing, then two tiles for a held position that
+ * its book row does not carry (the stock against SPY today, time held: P&L, the distance to the stop and expiry are the
+ * row's) and, folded, what touched the thread. No symbol: QQQ with the owner's fills and pings.
  */
 export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], earnings = null, guides }: {
   symbol: string | null; thread: DeskThreadRef | null; row: DeskThread | null; sparks: DeskSparks | null; actions?: DeskChartActions;
@@ -493,12 +494,6 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
         <span className="min-w-0 truncate text-xs text-muted-foreground">{row ? (row.instrument && row.instrument !== row.symbol ? row.instrument : row.title) : symbol ? "today" : "market today"}</span>
       </div>
       <ReadingLine symbol={symbol ?? "QQQ"} data={reading} fallback={fallback} live={live} />
-      {row?.book?.option && <OptionStanding row={row} rows={rows}
-        fallback={reading?.state === "ok" && reading.reading ? { last: reading.reading.last, at: reading.reading.at } : sparkPrice(sparks, symbol)}
-        levels={{ entry: reading?.levels.find(l => l.role === "entry")?.price, stop: reading?.levels.find(l => l.role === "invalidation")?.price,
-          target: reading?.levels.find(l => l.role === "target")?.price }}
-        earnings={symbol ? earnings?.rows[symbol]?.date ?? null : null} />}
-      <PositionEarnings row={row} earnings={earnings} />
       <div className="flex items-center gap-1">
         {contract.available && <ChartViewToggle view={contract.view} onPick={contract.pick} />}
         {!onContract && <div role="group" aria-label="Timeframe" className="flex gap-1">
@@ -512,7 +507,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
         </div>}
         <span className="ml-auto" />
         <TapeToggle open={tape} onToggle={setTape} />
-        <Link href={charts} className="inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Open in Charts →</Link>
+        <Link href={charts} className="inline-flex min-h-11 items-center whitespace-nowrap text-xs text-muted-foreground hover:text-foreground sm:min-h-0"><span><span className="max-sm:sr-only">Open in </span>Charts<span className="max-sm:sr-only"> →</span></span></Link>
       </div>
       {tape && <DeskTape symbol={symbol ?? "QQQ"} option={!!row?.book?.option} />}
       {onContract ? <ContractChart held={held} data={contract.data!} /> : <>
@@ -525,6 +520,14 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
         {ref && shown?.marks.some(m => m.kind === "tradingview") && <Key color="#f0abfc" glyph="●">TradingView</Key>}
       </p>
       </>}
+      {/* The held option's standing sits under the chart: the chart comes first, and its book row already carries the
+          short form (break-even, time value, decay) with the same Close buttons. */}
+      {row?.book?.option && <OptionStanding row={row} rows={rows}
+        fallback={reading?.state === "ok" && reading.reading ? { last: reading.reading.last, at: reading.reading.at } : sparkPrice(sparks, symbol)}
+        levels={{ entry: reading?.levels.find(l => l.role === "entry")?.price, stop: reading?.levels.find(l => l.role === "invalidation")?.price,
+          target: reading?.levels.find(l => l.role === "target")?.price }}
+        earnings={symbol ? earnings?.rows[symbol]?.date ?? null : null} />}
+      <PositionEarnings row={row} earnings={earnings} />
       {book && (versus !== null || book.days_held != null) && (
         <div data-testid="desk-tiles" className="grid grid-cols-[repeat(auto-fit,minmax(104px,1fr))] gap-1.5">
           {versus !== null && <Tile label="vs SPY today" className={tone(versus)}>{`${versus > 0 ? "+" : versus < 0 ? "−" : ""}${Math.abs(versus).toFixed(1)} pts`}</Tile>}

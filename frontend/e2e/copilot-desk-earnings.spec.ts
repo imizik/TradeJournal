@@ -105,7 +105,7 @@ test("book and Watching rows: amber when the report is inside a held contract, g
 
 test("chart: the next earnings sits on the date axis with the implied move on hover; macro days only on QQQ", async ({ page }) => {
   await open(page, "/copilot-lab?symbol=NBIS");
-  const pane = page.getByRole("region", { name: "Chart and feed" });
+  const pane = page.getByRole("region", { name: "Chart and tools" });
   await expect(pane.getByTestId("desk-chart-canvas")).toHaveAttribute("data-bars", "60");
   await expect(pane.getByTestId("desk-chart-earnings")).toHaveText("Earnings Thu · ±5.2% implied");
   // 2m: today's candles only, so next Thursday is past the right edge, pinned with an arrow; the last report is off the left.
@@ -133,7 +133,7 @@ test("chart: the next earnings sits on the date axis with the implied move on ho
 test("the market chart (QQQ) shows the macro days, faint, and no earnings", async ({ page }) => {
   // No book row: the centre is the market chart.
   await open(page, "/copilot-lab", { threads: { ...THREADS, threads: [] } });
-  const pane = page.getByRole("region", { name: "Chart and feed" });
+  const pane = page.getByRole("region", { name: "Chart and tools" });
   await expect(pane.getByTestId("desk-chart-canvas")).toHaveAttribute("data-bars", "60");
   await pane.getByRole("button", { name: "1D", exact: true }).click();
   await expect(pane.locator('[data-testid="desk-chart-event"][data-kind="macro"]')).toHaveText(["FOMC", "CPI"]);

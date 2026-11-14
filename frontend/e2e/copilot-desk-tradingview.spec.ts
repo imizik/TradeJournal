@@ -81,10 +81,10 @@ async function open(page: Page, body: unknown) {
 
 test("an alert that fired today: a row under Mine, counted as new, and Show on chart marks it there", async ({ page }) => {
   await open(page, feed([ALERT, MARKET], epoch("2026-11-13T15:46:00Z")));
-  const centre = page.getByRole("region", { name: "Chart and feed" });
+  const centre = page.getByRole("region", { name: "Chart and tools" });
   await expect(page.getByTestId("feed-new")).toHaveText("1 new"); // his alert; the market's headline never counts
-  await centre.getByRole("tab", { name: "Feed" }).click();
-  const feedList = centre.getByTestId("desk-feed");
+  await page.getByRole("tab", { name: "Feed" }).click();
+  const feedList = page.getByTestId("desk-feed");
   const row = feedList.getByTestId("feed-item");
   await expect(row).toHaveCount(1); // Mine: the alert only
   await expect(row.getByTestId("feed-source")).toHaveText("TradingView");
@@ -104,9 +104,9 @@ test("an alert that fired today: a row under Mine, counted as new, and Show on c
 
 test("a day with no alert yet: one grey line with the last one's time, and nothing when there has never been one", async ({ page }) => {
   await open(page, feed([MARKET], epoch("2026-11-12T20:42:00Z")));
-  const centre = page.getByRole("region", { name: "Chart and feed" });
-  await centre.getByRole("tab", { name: "Feed" }).click();
-  const feedList = centre.getByTestId("desk-feed");
+  const centre = page.getByRole("region", { name: "Chart and tools" });
+  await page.getByRole("tab", { name: "Feed" }).click();
+  const feedList = page.getByTestId("desk-feed");
   await expect(feedList.getByTestId("feed-tradingview-quiet")).toHaveText("No TradingView alerts today. Last one Thu 15:42.");
   await feedList.getByRole("group", { name: "Show" }).getByRole("button", { name: "Market" }).click();
   await expect(feedList.getByTestId("feed-tradingview-quiet")).toHaveCount(0); // Mine only
@@ -114,8 +114,8 @@ test("a day with no alert yet: one grey line with the last one's time, and nothi
 
 test("no alert ever: no line at all", async ({ page }) => {
   await open(page, feed([MARKET], null));
-  const centre = page.getByRole("region", { name: "Chart and feed" });
-  await centre.getByRole("tab", { name: "Feed" }).click();
-  await expect(centre.getByTestId("desk-feed").getByText("Nothing on your book or plans yet today.", { exact: false })).toBeVisible();
-  await expect(centre.getByTestId("feed-tradingview-quiet")).toHaveCount(0);
+  const centre = page.getByRole("region", { name: "Chart and tools" });
+  await page.getByRole("tab", { name: "Feed" }).click();
+  await expect(page.getByTestId("desk-feed").getByText("Nothing on your book or plans yet today.", { exact: false })).toBeVisible();
+  await expect(page.getByTestId("feed-tradingview-quiet")).toHaveCount(0);
 });

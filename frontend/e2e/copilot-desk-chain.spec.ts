@@ -82,7 +82,9 @@ async function lab(page: Page, plans: object[] = [], ticket: object = TICKET) {
   await expect(page.getByText("The group is bid; size small.")).toBeVisible();
   const back = page.getByRole("region", { name: "Conversation" }).getByRole("button", { name: "Back to the desk" });
   if (await back.isVisible()) await back.click(); // a phone opens the link on the copilot sheet
-  const pane = page.getByRole("region", { name: "Chart and feed" });
+  const ticker = page.getByTestId("desk-view-ticker");
+  if (await ticker.isVisible()) await ticker.click(); // and the desk on its Book: the ticker's tools are its second view
+  const pane = page.getByRole("region", { name: "Chart and tools" });
   await pane.getByRole("tab", { name: "Chain" }).click();
   return { pane, chainReads, methods, tickets };
 }
@@ -183,10 +185,11 @@ test("the expiries that live through the next earnings report are marked ER, wit
 
 test("an Unusual options row in the Feed selects its contract in the Chain tab, on its expiry, marked", async ({ page }) => {
   const { pane, chainReads, methods } = await lab(page);
-  await pane.getByRole("tab", { name: "Feed" }).click();
-  await pane.getByRole("button", { name: "Ideas", exact: true }).click();
-  await pane.getByRole("button", { name: "Unusual options" }).click();
-  const list = pane.getByTestId("feed-unusual");
+  await page.getByRole("tab", { name: "Feed" }).click();
+  const feed = page.getByTestId("desk-feed");
+  await feed.getByRole("button", { name: "Ideas", exact: true }).click();
+  await feed.getByRole("button", { name: "Unusual options" }).click();
+  const list = feed.getByTestId("feed-unusual");
   await expect(list.getByTestId("unusual-rule")).toHaveAttribute("title", /3× its open interest/);
   await expect(list).toContainText("NBIS puts 2.6× usual");
   await expect(list).toContainText("Not read yet: AMD.");
