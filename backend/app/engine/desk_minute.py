@@ -28,7 +28,7 @@ READ_SECONDS = 8.0  # one read past this answers 504 for itself, so a stuck prov
 PATHS = frozenset({
     "/copilot/desk/threads", "/copilot/desk/session", "/copilot/desk/watching", "/copilot/desk/moving",
     "/copilot/desk/feed", "/copilot/desk/sparks", "/copilot/unusual", "/copilot/scanner", "/copilot/tickets",
-    "/copilot/exposure", "/copilot/investigations", "/copilot/desk/health", "/copilot/paper", "/copilot/desk/overnight",
+    "/copilot/exposure", "/copilot/investigations", "/copilot/desk/health", "/copilot/paper", "/copilot/desk/overnight", "/copilot/desk/momentum",
 })
 # The centre chart's minute bars: a thread id or ``symbol:NVDA``, in the characters the frontend proxy lets through.
 CHART = re.compile(r"/copilot/desk/(?!\.\.?/)[A-Za-z0-9_.:-]+/chart")
