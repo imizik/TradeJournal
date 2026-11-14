@@ -3554,6 +3554,31 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   everything through (still recorded). Settings in the table below.
 - Tests: `backend/tests/test_notification_policy.py`.
 
+### Where a ping opens
+
+While the copilot is on (the desk is the owner's home), every ping's tap opens the desk on what it is about;
+with the copilot off, `phone.desk_link` falls back to the page the ping opened before, so a tap always lands.
+
+| Ping | Desk link | Copilot off |
+| --- | --- | --- |
+| Price alert you set (not a plan's level) | `?symbol=X`: its chart, with its alert line | `/charts` |
+| A plan's entry / invalidation level, plan nudge, give-back and other open-trade alerts, thesis watch, companion | the plan's thread (`?investigation=`) or `?symbol=` (unchanged) | trade page for open-trade alerts |
+| Plan time stop | `?investigation=<the plan's thread>` | `/trades/<id>` |
+| Plan link ping ("link it to your plan?") | `?symbol=X`: its thread carries the same Link to plan bar | `/plans/link?trade=` |
+| Fill-time pattern interrupt | `?symbol=X` (Noted still opens the trade page) | `/trades/<id>?interrupt=` |
+| First pullback (SPY/QQQ) | `?symbol=X` | `/charts?symbol=X` |
+| Radar single | `?symbol=X&radar=<event>&feed=radar:<event>`: the chart and the Feed on Ideas › Radar with the card marked; the hit's decision waits in the copilot (its tab or sheet, one tap away) | `/radar?event=` |
+| Radar group move | `?feed=radar:<event>` | `/radar?event=` |
+| Radar digest | `?feed=radar` | `/radar` |
+| Setup scanner push | `?symbol=X&feed=scanner:<candidate>`: the chart with the scanner's levels, the Feed on Ideas › Scanner with the row marked | `/scanner` |
+| Pre-market prep, week review, evening review (`?close=1`), research results | unchanged desk links | — |
+
+`feed=<radar|scanner>[:<id>]` is the one desk parameter added for pings: the Feed comes forward (the side's Feed tab
+from 1180 px, its drawer from 768 px, the Feed view on a phone), on Ideas › that kind, the named card marked with an
+amber edge and scrolled into view. A link with `symbol` opens a phone on the ticker's view and without one on the Book
+(the morning brief); `feed` wins on a phone. Watch your day (`/replay/<day>`, a video) and the Daily Practice decision
+ping (`/?decision=`, not a desk item) keep their own pages. Ratings (ntfy's Useful / Not useful) still open `/radar`.
+
 ## Position companion
 
 Every unplanned long option is adopted by the copilot, watched, and kept in one Telegram conversation until it

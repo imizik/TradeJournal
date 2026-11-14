@@ -39,7 +39,12 @@ def test_signal_levels_and_retirement(side):
     assert pb.first_trigger(normalize_bars(rows), OPEN, END) is None
 
 
-def test_watcher_records_and_sends_each_side_once_on_fresh_data(monkeypatch):
+@pytest.mark.parametrize("copilot", [False, True])
+def test_watcher_records_and_sends_each_side_once_on_fresh_data(monkeypatch, copilot):
+    if copilot:
+        monkeypatch.setenv("COPILOT_ENABLED", "true")
+    else:
+        monkeypatch.delenv("COPILOT_ENABLED", raising=False)
     engine = create_engine("sqlite://")
     PhonePing.__table__.create(engine)
     now = [END + 31]
@@ -63,7 +68,7 @@ def test_watcher_records_and_sends_each_side_once_on_fresh_data(monkeypatch):
     run()  # fresh monitor instance, same durable claim
     assert [s[0] for s in sent] == ["SPY first pullback · CALL", "QQQ first pullback · PUT"]
     assert "ETF stop $102.50 · 1.5R target $104.00" in sent[0][1]
-    assert "09:47 ET" in sent[1][1] and sent[1][2] == "/charts?symbol=QQQ"
+    assert "09:47 ET" in sent[1][1] and sent[1][2] == ("/copilot-lab?symbol=QQQ" if copilot else "/charts?symbol=QQQ")
     with Session(engine) as db:
         assert all(p.delivered_at for p in db.exec(select(PhonePing)).all())
     engine.dispose()

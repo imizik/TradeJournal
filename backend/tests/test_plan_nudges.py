@@ -170,8 +170,13 @@ def test_a_linked_plan_means_no_nudge(engine, world):
     assert nudges(engine) == []
 
 
-def test_a_suggested_plan_sends_a_link_ping_not_a_nudge(engine, world, monkeypatch):
+@pytest.mark.parametrize("copilot", [False, True])
+def test_a_suggested_plan_sends_a_link_ping_not_a_nudge(engine, world, monkeypatch, copilot):
     sent = []
+    if copilot:
+        monkeypatch.setenv("COPILOT_ENABLED", "true")
+    else:
+        monkeypatch.delenv("COPILOT_ENABLED", raising=False)
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
     monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: sent.append((title, body, kw)))
     clock, nudger = world
@@ -187,7 +192,8 @@ def test_a_suggested_plan_sends_a_link_ping_not_a_nudge(engine, world, monkeypat
     [(title, body, kw)] = sent
     assert title == "NBIS 10/23 100C filled"
     assert body == 'Link it to your plan "Group recovery" (captured 9:58)? Tap to confirm.'
-    assert kw["path"] == f"/plans/link?trade={trade_id}" and kw["direct_click"] is True
+    # The copilot on: the desk on the ticker, whose thread carries the same Link to plan bar; off: the confirm page.
+    assert kw["path"] == ("/copilot-lab?symbol=NBIS" if copilot else f"/plans/link?trade={trade_id}") and kw["direct_click"] is True
     # Once per position: the next pass sends nothing more of either kind.
     tick(clock, nudger, "10:10")
     nudger.deliver()

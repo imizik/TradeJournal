@@ -712,6 +712,16 @@ export function readDeepLink(params: { symbol?: string | string[]; context?: str
     ...(radar && SYMBOL_RE.test(symbol) ? { radar } : {}) };
 }
 
+/** A ping's ``feed=<kind>[:<id>]`` (docs/copilot-lab.md § Where a ping opens): the desk opens with the Feed forward on
+ * Ideas › Radar or Scanner, the card ``id`` names picked (a Radar event id or a scanner candidate id). Anything else is
+ * dropped. */
+export type FeedLink = { kind: "radar" | "scanner"; id: string | null };
+export function readFeedLink(value: string | string[] | undefined): FeedLink | null {
+  const one = (Array.isArray(value) ? value[0] : value) ?? "";
+  const match = /^(radar|scanner)(?::([A-Za-z0-9._-]{1,120}))?$/.exec(one.trim());
+  return match ? { kind: match[1] as FeedLink["kind"], id: match[2] ?? null } : null;
+}
+
 // --------------------------------------------------------------------------- research queue
 
 export type ResearchJob = {

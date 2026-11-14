@@ -39,7 +39,7 @@ import ThisWeek from "@/components/copilot/ThisWeek";
 import { ScalpShortlistNudge } from "@/components/ScalpShortlistPanel";
 import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
-import { WHAT_MATTERS_PROMPT, copilotLabHref, mainChatLabel, type InvestigationSummary } from "@/lib/copilot";
+import { WHAT_MATTERS_PROMPT, copilotLabHref, mainChatLabel, type FeedLink, type InvestigationSummary } from "@/lib/copilot";
 import { useKept } from "@/components/copilot/DeskMemory";
 import { afterClose, answerSymbol, deskLinkIn, deskNeeds, refreshRobinhood, type DeskLive, deskSymbolThread, nyDay, readOpened, saveFollow, saveHorizon, saveOpened, threadInUrl, toReview, type DeskCommand, type DeskPlan, type DeskThreads, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
@@ -131,7 +131,11 @@ function typing(target: EventTarget | null) {
  * switch (Book, the ticker, Feed) and the copilot as its sheet. Every place has a key (C O T L G, F, B, /) and a ⌘K
  * command.
  */
-export default function CopilotLab({ link: linkProp = null, close = false, daily: dailyProp = false }: { link?: PanelLink | null; close?: boolean; daily?: boolean }) {
+export default function CopilotLab({ link: linkProp = null, close = false, daily: dailyProp = false, feed: feedLink = null }: {
+  link?: PanelLink | null; close?: boolean; daily?: boolean;
+  /** A Radar or scanner ping's card (?feed=): the desk opens with the Feed forward on it. */
+  feed?: FeedLink | null;
+}) {
   const on = useCopilotOn();
   const router = useRouter();
   // The desk link on show: the one the page loaded, then each one followed in place. Followed, it is no longer Now.
@@ -140,7 +144,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const navFolded = useFoldedNav();
   const session = useDeskSession(on);
   // Below 1180 px the copilot is a sheet: a deep link or a saved thread opens on it, Now on the cockpit.
-  const [sheet, setSheet] = useState(!daily);
+  const [sheet, setSheet] = useState(!daily && !feedLink);
   const [command, setCommand] = useState<DeskCommand | null>(null);
   const [thread, setThread] = useState<DeskThreadRef | null>(null);
   // Now: today's Main chat (or the desk's bare address while it opens). An earlier day's Main chat is that day's
@@ -176,15 +180,20 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const [pickedKey, setPickedKey] = useState<string | null>(null);
   const [centreTab, setCentreTab] = useState<CentreTab>("chart");
   // The tab survives a link that reopens the desk (a checked call's Plan it) for this browser tab.
-  useEffect(() => { try { const kept = window.sessionStorage.getItem(CENTRE_KEY); if (kept === "check" || kept === "chain" || kept === "grid") setCentreTab(kept); } catch { /* chart */ } }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+  // A ping's card (?feed=) opens on the chart.
+  useEffect(() => { if (feedLink) return; try { const kept = window.sessionStorage.getItem(CENTRE_KEY); if (kept === "check" || kept === "chain" || kept === "grid") setCentreTab(kept); } catch { /* chart */ } }, [feedLink]); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
   // The Feed sits beside the copilot, never over the chart: from 1180 px it takes the copilot's column while shown (the
   // Copilot | Feed tabs), from 768 px it is a drawer on the right, and a phone shows it as one of its three views.
-  const [feedShown, setFeedShown] = useState(false);
+  const [feedShown, setFeedShown] = useState(!!feedLink);
   const feedKept = useRef(false);
   useEffect(() => { feedKept.current = feedShown; }, [feedShown]);
   // A phone shows one view at a time (the switch in its top row): the book, the selected ticker's tools, or the Feed. It
   // opens on the Book; a link that names a ticker (a ping's) opens on that ticker's view, under the copilot's sheet.
-  const [phoneView, setPhoneView] = useState<DeskView>(linkProp?.symbol ? "ticker" : "book");
+  // A ping's ?feed= opens on the Feed (its view on a phone; the drawer or the side's Feed tab wider).
+  const [phoneView, setPhoneView] = useState<DeskView>(feedLink ? "feed" : linkProp?.symbol ? "ticker" : "book");
+  // Once, on the link's load: a phone's Feed is its view, not the drawer; wider, the Feed is the drawer or the side's tab
+  // and the phone's view goes back to what a link without ?feed= opens on (so "the Feed is open" follows feedShown alone).
+  useEffect(() => { if (!feedLink) return; if (narrow()) setFeedShown(false); else setPhoneView(linkProp?.symbol ? "ticker" : "book"); }, []); // eslint-disable-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   // The width crossed 768 px (a phone turned on its side): the Feed on show stays on show in the new layout's way, so
   // "the Feed is open" never means a view or a drawer that is not on screen.
   useEffect(() => {
@@ -691,6 +700,17 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const openFeedChart = useCallback((symbol: string) => { setPicked(symbol); setPickedKey(null); setCentreTab("chart"); showCentre(); }, [showCentre]);
   // A Scanner row: its ticker on the desk chart, in place, with the scanner's levels as thin lines.
   const openScanner = useCallback((row: DeskScannerRow) => { setPicked(row.symbol); setPickedKey(null); setScanLines({ symbol: row.symbol, lines: scannerGuides(row) }); setCentreTab("chart"); showCentre(); }, [showCentre]);
+  // A scanner ping's card: its ticker on the chart with the scanner's levels, once the scanner has read, without moving
+  // a phone off the Feed.
+  const scanLinked = useRef(false);
+  useEffect(() => {
+    if (scanLinked.current || feedLink?.kind !== "scanner" || !feedLink.id) return;
+    const row = scanner?.rows.find(r => r.id === feedLink.id);
+    if (!row) return;
+    scanLinked.current = true;
+    setPicked(row.symbol); setPickedKey(null); // eslint-disable-line react-hooks/set-state-in-effect -- follows the scanner's first read
+    setScanLines({ symbol: row.symbol, lines: scannerGuides(row) });
+  }, [scanner, feedLink]);
   const chartActions = useMemo<DeskChartActions>(() => ({ go, ask: (symbol, text) => askAbout(symbol, text) }), [go, askAbout]);
   // A feed item's Plan it: a Radar setup card opens on its own Plan it (the desk's Radar card); his own position or plan
   // opens its plan thread, else the plan form for the symbol. Nothing is saved or sent from the feed.
@@ -896,7 +916,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               </button>
             </div>
             <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed} onChart={openFeedChart} unusual={unusual} onUnusual={openUnusual}
-              scanner={scanner} onScanner={openScanner} onScannerPlan={go} />
+              scanner={scanner} onScanner={openScanner} onScannerPlan={go} focus={feedLink} />
           </div>
         )}
         <section aria-label="Conversation" className={styles.thread}>

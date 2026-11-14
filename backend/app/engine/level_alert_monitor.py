@@ -471,7 +471,7 @@ class LevelAlertMonitor:
                 if path:
                     _, image_state = phone.send(title, body, kind=alert.plan_role or "level_alert", image=image, path=path, direct_click=True)
                 else:
-                    phone.send(title, body, kind="level_alert", path="/charts")
+                    phone.send(title, body, kind="level_alert", path=phone.desk_link("/charts", symbol=alert.symbol))
             except phone.SendError as exc:
                 event.delivery = "pending"
                 event.next_attempt_at = _utc(now + BACKOFF[min(event.attempts, len(BACKOFF)) - 1])

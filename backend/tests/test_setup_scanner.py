@@ -1181,3 +1181,11 @@ def test_paper_deadline_is_flat_by_close_when_earlier_than_the_time_stop(engine)
     assert setup_scanner._paper_deadline(candidate, late_entry, session) == {"at": "2026-10-07T19:45:00Z", "kind": "flat"}
     assert setup_scanner._paper_deadline(candidate, late_entry, None)["kind"] == "time_stop"
     assert setup_scanner._paper_deadline(candidate, {}, session) is None
+
+
+def test_the_push_opens_the_desk_feed_on_its_candidate_or_the_scanner_page_while_the_copilot_is_off(monkeypatch):
+    candidate = SimpleNamespace(symbol="NBIS", id="c0ffee00-0000-4000-8000-000000000001")
+    monkeypatch.delenv("COPILOT_ENABLED", raising=False)
+    assert setup_scanner.push_path(candidate) == "/scanner"
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    assert setup_scanner.push_path(candidate) == "/copilot-lab?symbol=NBIS&feed=scanner%3Ac0ffee00-0000-4000-8000-000000000001"

@@ -8,7 +8,8 @@ import { useKeptState } from "@/components/copilot/DeskMemory";
 import { cn } from "@/lib/utils";
 import type { ChainPick } from "@/components/copilot/DeskChain";
 import { UnusualList, type UnusualReply } from "@/components/copilot/DeskUnusual";
-import { ScannerList, type DeskScannerReply, type DeskScannerRow } from "@/components/copilot/DeskScanner";
+import { FOCUSED, ScannerList, useInView, type DeskScannerReply, type DeskScannerRow } from "@/components/copilot/DeskScanner";
+import type { FeedLink } from "@/lib/copilot";
 
 export type FeedSource = "Alert" | "Plan" | "Radar" | "Radar setup" | "News" | "Calendar" | "Copilot note" | "TradingView" | "r/wallstreetbets" | "NYT";
 /** One feed row (``app/engine/desk_feed.py``). ``plan``: "setup" (a Radar setup card's own Plan it) or "own" (his own
@@ -153,18 +154,21 @@ export function useFeedNew(data: DeskFeedBody | null, open: boolean): { count: n
  * the Chain tab. **Scanner** (``DeskScanner``), while the setup scanner is switched on: today's candidates; a row opens
  * the ticker on the desk chart with the scanner's levels. Neither counts as new or mixes into the other picks.
  */
-export default function DeskFeed({ data, failed, since, onAsk, onPlan, onChart, unusual = null, onUnusual, scanner = null, onScanner, onScannerPlan }: {
+export default function DeskFeed({ data, failed, since, onAsk, onPlan, onChart, unusual = null, onUnusual, scanner = null, onScanner, onScannerPlan, focus = null }: {
   data: DeskFeedBody | null; failed: boolean; since: number | null; onAsk(item: FeedItem): void; onPlan(item: FeedItem): void;
   /** A row's Show on chart: its ticker on the desk chart, in place (a TradingView alert's marker sits there). */
   onChart?(symbol: string): void;
   unusual?: UnusualReply | null; onUnusual?(pick: ChainPick): void;
   scanner?: DeskScannerReply | null; onScanner?(row: DeskScannerRow): void; onScannerPlan?(href: string): void;
+  /** A ping's card (the desk's ?feed=): the Feed opens on Ideas › its kind with that card picked and in view. */
+  focus?: FeedLink | null;
 }) {
   // The picks hold while he stays on the desk (a link that reopens it included), so the Feed is where he left it.
   const [group, setGroup] = useKeptState<Group>("desk.feed.group", "mine");
   const [ideaPick, setIdea] = useKeptState<Idea>("desk.feed.idea", "radar");
   const [marketPick, setMarket] = useKeptState<MarketPick>("desk.feed.market", "news");
   const [symbol, setSymbol] = useState<string | null>(null);
+  useEffect(() => { if (focus) { setGroup("ideas"); setIdea(focus.kind); } }, [focus, setGroup, setIdea]); // once per link: the desk remounts for each
   const chatter = data?.chatter ?? null;
   const chatterOn = (chatter?.items.length ?? 0) > 0;
   const scannerOn = !!scanner && scanner.state !== "off";
@@ -210,7 +214,8 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, onChart, 
       )}
       {filter === "chatter" && !symbol && chatter && <ChatterHead chatter={chatter} day={day} />}
       {filter === "unusual" && !symbol ? <UnusualList reply={unusual} onPick={pick => onUnusual?.(pick)} />
-        : filter === "scanner" && !symbol ? <ScannerList reply={scanner} onOpen={row => onScanner?.(row)} onPlan={href => onScannerPlan?.(href)} /> : <>
+        : filter === "scanner" && !symbol ? <ScannerList reply={scanner} onOpen={row => onScanner?.(row)} onPlan={href => onScannerPlan?.(href)}
+          focused={focus?.kind === "scanner" ? focus.id : null} /> : <>
       {!data && (failed ? <p className="text-xs text-muted-foreground">The feed could not be read right now.</p>
         : <p className="text-xs text-muted-foreground">Reading the feed…</p>)}
       {data && !items.length && (
@@ -222,6 +227,7 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, onChart, 
         <ol className="divide-y rounded-lg border bg-card">
           {items.map((item, i) => (
             <FeedRow key={item.id} item={item} day={day} fresh={!item.chatter && since !== null && !item.upcoming && item.at > since}
+              focused={focus?.kind === "radar" && !!focus.id && item.radar_event_id === focus.id}
               ahead={!item.chatter && item.upcoming && !items[i - 1]?.upcoming} now={data?.now ?? 0} onSymbol={setSymbol} onAsk={onAsk} onPlan={onPlan} onChart={onChart} />
           ))}
         </ol>
@@ -292,15 +298,19 @@ function ChatterHead({ chatter, day }: { chatter: DeskChatter; day: string }) {
   );
 }
 
-function FeedRow({ item, day, fresh, ahead, now, onSymbol, onAsk, onPlan, onChart }: {
+function FeedRow({ item, day, fresh, ahead, now, onSymbol, onAsk, onPlan, onChart, focused = false }: {
   item: FeedItem; day: string; fresh: boolean; ahead: boolean; now: number; onSymbol(symbol: string): void; onAsk(item: FeedItem): void; onPlan(item: FeedItem): void;
   onChart?(symbol: string): void;
+  /** The card a ping opened the desk on: marked and scrolled into view. */
+  focused?: boolean;
 }) {
+  const at = useInView(focused);
   const chatter = !!item.chatter;
   const tradingView = item.source === "TradingView";
   const open = chatter ? null : item.source === "Radar" || (item.source === "Copilot note" && item.href && !item.href.includes("symbol=")) ? item.href : null;
   return (
-    <li data-testid="feed-item" className="min-w-0 px-3 py-2.5">
+    <li ref={at} data-testid="feed-item" data-focused={focused || undefined} aria-current={focused || undefined}
+      className={cn("min-w-0 px-3 py-2.5", focused && FOCUSED)}>
       {ahead && <p className="-mt-0.5 mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Coming up</p>}
       <p className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
         <span data-testid="feed-source" className="whitespace-nowrap rounded border px-1.5 py-px text-[11px]">{item.source}</span>

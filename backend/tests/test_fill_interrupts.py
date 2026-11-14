@@ -291,7 +291,12 @@ def test_six_rules_fire_in_order_in_one_message():
 
 # ------------------------------------------------------------------ the pass
 
-def test_the_seeded_day_one_message_per_fill(engine, world, sent):
+@pytest.mark.parametrize("copilot", [False, True])
+def test_the_seeded_day_one_message_per_fill(engine, world, sent, monkeypatch, copilot):
+    if copilot:
+        monkeypatch.setenv("COPILOT_ENABLED", "true")
+    else:
+        monkeypatch.delenv("COPILOT_ENABLED", raising=False)
     clock, interrupts = world
     fill(engine, ny("10:00"), "SNDK", option_type="call", strike=500, price=100, expiration=date(2026, 10, 30))
     tick(clock, interrupts, "10:01")
@@ -319,7 +324,9 @@ def test_the_seeded_day_one_message_per_fill(engine, world, sent):
     ]
     add = found[3]
     kw = sent[2][2]
-    assert kw["path"] == f"/trades/{add.trade_id}?interrupt={add.id}" and kw["more"] == (("Noted", f"/trades/{add.trade_id}?interrupt={add.id}&noted=1"),)
+    # The tap opens the desk on the ticker while the copilot is on (the trade page otherwise); Noted stays the trade page's.
+    assert kw["path"] == ("/copilot-lab?symbol=NBIS" if copilot else f"/trades/{add.trade_id}?interrupt={add.id}")
+    assert kw["more"] == (("Noted", f"/trades/{add.trade_id}?interrupt={add.id}&noted=1"),)
     with Session(engine) as db:
         pings = db.exec(select(PhonePing).order_by(PhonePing.decided_at)).all()
         assert [(p.sender, p.kind, p.decision) for p in pings] == [("fill_interrupts", "interrupt", "sent")] * 3

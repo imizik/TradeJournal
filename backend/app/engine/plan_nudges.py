@@ -123,13 +123,14 @@ def _clock(received_at: datetime) -> str:
     return f"{moment.hour % 12 or 12}:{moment.minute:02d}"
 
 
-def link_message(title_label: str, plans: list[TradeCapture], trade_id: uuid.UUID) -> tuple[str, str, str]:
-    """The link ping: title, body and the confirm page it opens."""
+def link_message(title_label: str, plans: list[TradeCapture], trade_id: uuid.UUID, symbol: str = "") -> tuple[str, str, str]:
+    """The link ping: title, body and where it opens: the desk on ``symbol``, whose thread carries the same Link to plan
+    bar (FillLinkBar), while the copilot is on; else the confirm page."""
     if len(plans) == 1:
         body = f'Link it to your plan "{plan_name(plans[0])}" (captured {_clock(plans[0].received_at)})? Tap to confirm.'
     else:
         body = f"{len(plans)} of your saved plans match it. Tap to choose the one to link."
-    return f"{title_label} filled", body, f"{LINK_PATH}?" + urlencode({"trade": str(trade_id)})
+    return f"{title_label} filled", body, phone.desk_link(f"{LINK_PATH}?" + urlencode({"trade": str(trade_id)}), symbol=symbol)
 
 
 def candidates(db: Session, trade: Trade) -> list[TradeCapture]:
@@ -271,7 +272,7 @@ class PlanNudges:
                     nudge.last_error = "Its plan was linked or set aside before the ping went out, so it was not sent."
                     db.commit()
                     return
-                title, body, path = link_message(label, plans, trade.id)
+                title, body, path = link_message(label, plans, trade.id, nudge.ticker)
             else:
                 title, body, path = message(nudge, label)
                 practice = practice_line(db, nudge)

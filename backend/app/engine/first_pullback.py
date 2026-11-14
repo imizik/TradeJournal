@@ -154,6 +154,6 @@ class FirstPullbackAlerts:
                                                 now=self.clock(), new_only=True)
             if ticket.held or ticket.id is None or self.clock() >= signal.end + 60:
                 return
-            phone.send(title, body + ticket.append, kind="first_pullback", path=f"/charts?symbol={symbol}")
+            phone.send(title, body + ticket.append, kind="first_pullback", path=phone.desk_link(f"/charts?symbol={symbol}", symbol=symbol))
             notification_policy.delivered(db, ticket, self.clock())
             db.commit()
