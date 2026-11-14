@@ -132,8 +132,9 @@ def test_the_day_report_the_copilot_thesis_and_the_day_journal_carry_the_notes(d
     at = 1_789_000_000
     week = {"this_week": {"entries": [{"trade_id": str(trade.id), "short": "AMD stock", "state": "unplanned", "entry_time": at}]}}
     monkeypatch.setattr(plan_streak, "streak", lambda db: week)
-    from datetime import date
-    rows = day_report.entries_today(db, date.fromtimestamp(at), set())["rows"]
+    from datetime import datetime
+    from app.engine.chart_math import ET
+    rows = day_report.entries_today(db, datetime.fromtimestamp(at, ET).date(), set())["rows"]  # New York's day, on any machine clock
     assert rows[0]["notes"] == ["Why I'm in: gap fill"]
     # The copilot's thesis for the position: no plan, but his note is in its revisions and reaches the pack.
     thesis = trader_context.thesis_for(db, trade, adopted={}, horizons={})
