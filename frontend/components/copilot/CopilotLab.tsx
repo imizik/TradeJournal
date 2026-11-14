@@ -315,7 +315,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const planTrade = useCallback(() => go(PLAN_HREF), [go]);
   const [refresh, setRefresh] = useState(0);
   // The copilot's desk action cards: a view card moves the centre (Undo puts it back); a tap that changed a list reads again.
-  useDeskActionHost({ picked, tab: centreTab, setPicked, setPickedKey, setTab: setCentreTab, setRefresh, setSheet });
+  const revealCentre = useCallback(() => { if (sheetLayout()) setSheet(false); showCentre(); }, [showCentre]);
+  useDeskActionHost({ picked, tab: centreTab, setPicked, setPickedKey, setTab: setCentreTab, setRefresh, reveal: revealCentre });
   // Mark plan done in the thread menu: only for a plan row (armed and not entered, or exited), never a held position's.
   const [planSymbol, setPlanSymbol] = useState<string | null>(null);
   // A decision or an alert still asking today: a conversation opens on it, at the top of the thread.

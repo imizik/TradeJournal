@@ -171,9 +171,9 @@ export default function DeskActionCard({ proposal, onOutcome }: { proposal: Desk
  * the Chart) and reports what it replaced for Undo; a tap that changed a list reads the desk again; a phone's "Show it"
  * (``reveal``) closes the copilot's sheet onto the centre.
  */
-export function useDeskActionHost({ picked, tab, setPicked, setPickedKey, setTab, setRefresh, setSheet }: {
+export function useDeskActionHost({ picked, tab, setPicked, setPickedKey, setTab, setRefresh, reveal }: {
   picked: string | null; tab: CentreTab; setPicked(symbol: string | null): void; setPickedKey(key: string | null): void;
-  setTab(tab: CentreTab): void; setRefresh(next: (n: number) => number): void; setSheet(open: boolean): void;
+  setTab(tab: CentreTab): void; setRefresh(next: (n: number) => number): void; reveal(): void;
 }) {
   const now = useRef({ picked, tab });
   useEffect(() => { now.current = { picked, tab }; }, [picked, tab]);
@@ -183,10 +183,7 @@ export function useDeskActionHost({ picked, tab, setPicked, setPickedKey, setTab
       const detail = (event as CustomEvent<DeskView & { was: DeskView }>).detail;
       if ("symbol" in detail && detail.symbol !== undefined) { detail.was.symbol = now.current.picked; setPicked(detail.symbol); setPickedKey(null); }
       if (detail.tab) { detail.was.tab = now.current.tab; setTab(detail.tab); }
-      if (detail.reveal && window.matchMedia("(max-width: 1179px)").matches) { // the sheet layout (CopilotLab.module.css)
-        setSheet(false);
-        document.getElementById("desk-centre")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
+      if (detail.reveal) reveal(); // the desk brings the ticker's tools forward (a phone's ticker view, the sheet layout's centre)
     };
     const onChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ timeframe?: string; tape?: boolean }>).detail ?? {};
@@ -195,5 +192,5 @@ export function useDeskActionHost({ picked, tab, setPicked, setPickedKey, setTab
     window.addEventListener(DESK_VIEW_EVENT, onView);
     window.addEventListener(DESK_CHANGED_EVENT, onChanged);
     return () => { window.removeEventListener(DESK_VIEW_EVENT, onView); window.removeEventListener(DESK_CHANGED_EVENT, onChanged); };
-  }, [setPicked, setPickedKey, setTab, setRefresh, setSheet]);
+  }, [setPicked, setPickedKey, setTab, setRefresh, reveal]);
 }
