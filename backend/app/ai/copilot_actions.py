@@ -110,8 +110,9 @@ def read_state(symbol: str) -> dict:
             plans.append({"investigation_id": row["investigation_id"], "direction": row["direction"], "thesis": row["thesis"],
                           "invalidation": None if alert is None else {"price": float(alert.price), "alert_id": str(alert.id),
                                                                       "state": alert.state}})
+        # As the Chain's Put on ticket: only a long call or put plan has an option ticket.
         tickets = [{"investigation_id": r["investigation_id"], "option_type": r["option_type"], "thesis": r["thesis"]}
-                   for r in desk_ticket.armed(db) if r["symbol"] == symbol]
+                   for r in desk_ticket.armed(db) if r["symbol"] == symbol and r["option_type"]]
     return {"hidden": hidden, "watching": list(watching), "plans": plans, "tickets": tickets}
 
 
@@ -181,15 +182,17 @@ def act(evidence, request: dict, now: float | None = None) -> dict:
     elif action == "ticket":
         plan = _which(desk["tickets"], symbol, "that a ticket can open (a ticket opens only from a saved long call or put "
                       "plan not yet entered)")
+        if not plan["option_type"]:
+            raise ToolInputError(f"the saved {symbol} plan is not a long call or put plan, so it has no option ticket")
         if request.get("short_strike") is not None:
             # As the Chain's Make it a spread: a spread that gains as the stock rises goes on a call plan, one that gains as
             # it falls on a put plan.
             from app.engine import desk_ticket
             bullish = desk_ticket.spread_bullish(request["option_type"], request["strike"], request["short_strike"])
-            if plan["option_type"] and plan["option_type"] != ("call" if bullish else "put"):
+            if plan["option_type"] != ("call" if bullish else "put"):
                 raise ToolInputError(f"that spread gains as {symbol} {'rises' if bullish else 'falls'}, against the saved "
                                      f"{plan['option_type']} plan")
-        elif plan["option_type"] and plan["option_type"] != request["option_type"]:
+        elif plan["option_type"] != request["option_type"]:
             raise ToolInputError(f"the saved {symbol} plan is for {plan['option_type']}s, not {request['option_type']}s")
         from app.engine.chart_math import ET
         today = datetime.fromtimestamp(card["made_at"], ET).date()

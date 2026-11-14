@@ -11,10 +11,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { cleanLevel, todayNewYork, validSymbol } from "@/lib/charts";
-import { CHART_SETTINGS_SAVED, useChartSettings } from "@/lib/chartSync";
+import { CHART_SETTINGS_SAVED, readChartSettings, useChartSettings } from "@/lib/chartSync";
 import { applyEdit, MAX_LEVELS } from "@/lib/drawings";
 import type { Proposal, ProposalOutcome } from "@/lib/copilot";
-import { DESK_CHANGED_EVENT, DESK_VIEW_EVENT, Stale, actionLine, actionVerb, applyShow, arrived, runAction, showOnDesk, staleByAge, undoFor,
+import { freshQuote } from "@/lib/copilot";
+import { DESK_CHANGED_EVENT, DESK_VIEW_EVENT, Stale, actionLine, actionVerb, applyShow, arrived, runAction, showOnDesk, staleByAge, staleByPrice, undoFor,
   undoShow, type CentreTab, type DeskAction, type DeskView, type Done } from "@/lib/deskAction";
 import { cn } from "@/lib/utils";
 
@@ -25,17 +26,19 @@ const BUTTON = "inline-flex min-h-11 items-center rounded px-3 py-1 text-xs sm:m
 /** Draws the card's level through the chart settings' own store and sync (the desk's drawings), then reports. */
 function DrawLevel({ card, onDone, onFail }: { card: Extract<DeskAction, { action: "draw" }>; onDone(done: Done): void; onFail(why: string): void }) {
   const { settings, setSettings, ready, sync } = useChartSettings(undefined, { borrowed: true });
-  const placed = useRef(false);
+  const placed = useRef<string | null>(null); // the new level's id
   const saving = useRef(false);
   const reported = useRef(false);
+  const checking = useRef(false);
   useEffect(() => {
     if (!ready || placed.current) return;
-    placed.current = true;
+    placed.current = "pending";
     const levels = settings.levels[card.symbol] ?? [];
     if (!validSymbol(card.symbol)) { reported.current = true; onFail(`${card.symbol} cannot carry a level.`); return; }
     if (levels.length >= MAX_LEVELS) { reported.current = true; onFail(`Remove a ${card.symbol} line first: ${MAX_LEVELS} per symbol.`); return; }
     const level = cleanLevel({ id: crypto.randomUUID(), price: card.price, label: card.label ?? `Level ${levels.length + 1}`, drawn_on: todayNewYork() });
     if (!level) { reported.current = true; onFail("That level could not be drawn."); return; }
+    placed.current = level.id;
     setSettings(s => {
       const next = applyEdit(s, { symbol: card.symbol, layer: "levels", before: null, after: level, index: (s.levels[card.symbol] ?? []).length }, "after") ?? s;
       return next.hiddenGroups.levels ? { ...next, hiddenGroups: { ...next.hiddenGroups, levels: false } } : next;
@@ -44,12 +47,27 @@ function DrawLevel({ card, onDone, onFail }: { card: Extract<DeskAction, { actio
   useEffect(() => {
     if (!placed.current || reported.current) return;
     if (sync === "saving") saving.current = true;
-    else if (sync === "saved" && saving.current) {
-      reported.current = true;
-      window.dispatchEvent(new Event(CHART_SETTINGS_SAVED)); // the desk chart's own copy reads the new level now
-      onDone({ text: `Drawn: ${card.price.toFixed(2)} on ${card.symbol}${card.label ? ` (${card.label})` : ""}, on the desk chart and in Charts.`, symbol: card.symbol });
+    else if (sync === "saved" && saving.current && !checking.current) {
+      // "Saved" can also mean a save that met another device's and merged, with the merged copy (holding the level) still
+      // to be sent: report only once the server's copy has the level; otherwise wait for the next save.
+      saving.current = false;
+      checking.current = true;
+      void readChartSettings().then(server => {
+        checking.current = false;
+        if (reported.current) return;
+        if (server?.levels[card.symbol]?.some(l => l.id === placed.current)) {
+          reported.current = true;
+          window.dispatchEvent(new Event(CHART_SETTINGS_SAVED)); // the desk chart's own copy reads the new level now
+          onDone({ text: `Drawn: ${card.price.toFixed(2)} on ${card.symbol}${card.label ? ` (${card.label})` : ""}, on the desk chart and in Charts.`, symbol: card.symbol });
+        }
+      });
     } else if (sync === "offline") { reported.current = true; onFail("The chart settings could not be saved just now. Try again."); }
   }, [sync, card, onDone, onFail]);
+  // A save that never confirms (the merged copy lost, the server gone) fails plainly instead of waiting for ever.
+  useEffect(() => {
+    const timer = window.setTimeout(() => { if (!reported.current) { reported.current = true; onFail("The level could not be confirmed as saved. Check the chart, then try again."); } }, 15_000);
+    return () => window.clearTimeout(timer);
+  }, [onFail]);
   return <span className="text-muted-foreground">Drawing…</span>;
 }
 
@@ -95,7 +113,14 @@ export default function DeskActionCard({ proposal, onOutcome }: { proposal: Desk
     }
     const old = staleByAge(card, Date.now() / 1000);
     if (old) { setNote(old); setPhase("stale"); return; }
-    if (card.action === "draw") { setPhase("drawing"); return; }
+    if (card.action === "draw") {
+      try {
+        const moved = staleByPrice(card, (await freshQuote(card.symbol)).last ?? card.last);
+        if (moved) { setNote(moved); setPhase("stale"); return; }
+      } catch { /* no quote: a level is harmless to draw, so it is drawn at the price he asked for */ }
+      setPhase("drawing");
+      return;
+    }
     setPhase("working");
     try {
       finish(await runAction(card, Date.now() / 1000));

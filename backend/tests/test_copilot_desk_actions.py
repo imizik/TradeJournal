@@ -124,16 +124,19 @@ def test_the_desk_state_reads_follow_watching_and_plans_without_a_quote(engine, 
     import app.database
     monkeypatch.setattr(app.database, "engine", engine)
     plan(engine)
+    plan(engine, inv="44444444-4444-4444-8444-444444444444", side="buy_stock", instrument="stock", contract=None, minute=20, client_id="card-2")
     with Session(engine) as db:
         desk_watch.add(db, "IREN")
         db.add(DayJournalEntry(operation_id="f1", day=WED, kind="follow", symbol="RKLB", text="Not following"))
         db.commit()
-        stop = db.exec(select(LevelAlert).where(LevelAlert.plan_role == "invalidation")).one()
+        stop = db.exec(select(LevelAlert).where(LevelAlert.plan_role == "invalidation", LevelAlert.source_id == NBIS)).one()
     state = copilot_actions.read_state("NBIS")
     assert state["hidden"] is False and "IREN" in state["watching"]  # beside the Charts list it started from
-    assert state["plans"] == [{"investigation_id": NBIS, "direction": "long", "thesis": "Reclaims VWAP with the group.",
+    assert state["plans"][:1] == [{"investigation_id": NBIS, "direction": "long", "thesis": "Reclaims VWAP with the group.",
                                "invalidation": {"price": 90.0, "alert_id": str(stop.id), "state": "active"}}]
+    # The stock plan beside it has no option ticket, so a ticket card never has to ask which of the two.
     assert [t["investigation_id"] for t in state["tickets"]] == [NBIS] and state["tickets"][0]["option_type"] == "call"
+    assert len(state["plans"]) == 2
     assert copilot_actions.read_state("RKLB")["hidden"] is True
 
 
@@ -228,4 +231,6 @@ def test_a_spread_ticket_goes_on_the_plan_its_direction_fits():
     assert card(Desk(tickets=calls), action="ticket", symbol="NBIS", strike=90, short_strike=95, option_type="put", expiry="2026-12-18")
     assert "against the saved call plan" in refused(Desk(tickets=calls), action="ticket", symbol="NBIS", strike=95, short_strike=90,
                                                     option_type="put", expiry="2026-12-18")
+    stock = [{"investigation_id": NBIS, "option_type": None, "thesis": None}]  # never in read_state, refused if it were
+    assert "no option ticket" in refused(Desk(tickets=stock), action="ticket", symbol="NBIS", strike=100, option_type="call", expiry="2026-12-18")
     assert "differ" in refused(Desk(tickets=calls), action="ticket", symbol="NBIS", strike=100, short_strike=100, option_type="call", expiry="2026-12-18")

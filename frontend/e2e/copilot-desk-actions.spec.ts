@@ -84,8 +84,8 @@ async function desk(page: Page, cards: unknown[], { width = 1440, quote = 101.2,
   });
   await page.route(`**/charts/alerts/${STOP}/rearm`, (r) => { seen.rearmed.push(r.request().postDataJSON()); return r.fulfill({ json: { alerts: [], phone: true } }); });
   await page.route("**/charts/settings", (r) => {
-    if (r.request().method() === "PUT") { const body = r.request().postDataJSON(); seen.settings.push(body); return r.fulfill({ json: { revision: 2, data: body.data } }); }
-    return r.fulfill({ json: { revision: 1, data: null } });
+    if (r.request().method() === "PUT") { const body = r.request().postDataJSON(); seen.settings.push(body); return r.fulfill({ json: { revision: 1 + seen.settings.length, data: body.data } }); }
+    return r.fulfill({ json: { revision: 1 + seen.settings.length, data: seen.settings.at(-1)?.data ?? null } });
   });
   await page.route("**/copilot/tickets", (r) => r.fulfill({ json: { plans: [] } }));
   await page.route("**/copilot/tickets/*", (r) => { seen.tickets.push(r.request().url()); return r.fulfill({ status: 503, json: { detail: "No ticket in this test." } }); });
@@ -132,13 +132,16 @@ test("an alert card sets nothing until the tap, then the chart's own alert route
 });
 
 test("a card whose price moved far, or that is a day old, says so and does not act", async ({ page }) => {
-  const seen = await desk(page, [ALERT, { ...WATCH, made_at: MADE - 2 * 86400 }], { quote: 90 });
+  const seen = await desk(page, [ALERT, { ...WATCH, made_at: MADE - 2 * 86400 }, DRAW], { quote: 90 });
   await actionCard(page, "alert").getByRole("button", { name: "Set it" }).click();
   await expect(actionCard(page, "alert")).toContainText("NBIS has moved from 101.20 to 90.00 since this card, so it does not act. Ask again.");
   await actionCard(page, "watch").getByRole("button", { name: "Add" }).click();
   await expect(actionCard(page, "watch")).toContainText("This card is more than a day old");
+  await actionCard(page, "draw").getByRole("button", { name: "Draw" }).click();
+  await expect(actionCard(page, "draw")).toContainText("NBIS has moved from 101.20 to 90.00");
   expect(seen.alerts).toEqual([]);
   expect(seen.watched).toEqual([]);
+  expect(seen.settings).toEqual([]);
 });
 
 test("watch adds to the app's own Watching list; draw saves a level in the chart settings", async ({ page }) => {
