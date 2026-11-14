@@ -136,11 +136,11 @@ def test_the_priority_order_and_what_the_cap_never_drops():
     assert policy.rank("expiry_first") == policy.rank("expiry_eve") == policy.rank("time_stop") and policy.rank("link") == policy.rank("nudge")
     assert policy.rank("companion_adopt") == policy.rank("nudge")
     assert policy.rank("week_review") == policy.rank("day_replay") == policy.rank("prep")
-    assert policy.rank("radar_something") == 17  # an unknown kind goes last
+    assert policy.rank("radar_something") == 18  # an unknown kind goes last
     assert policy.enabled() and policy.quiet_seconds() == 600 and policy.preopen_allowance() == 2
     assert {k: policy.budget(k) for k in policy.BUDGETS} == {"interrupt": 4, "companion_update": 12, "nudge": 2, "prep": 1, "radar_setup": 4,
                                                              "radar_event": 4, "radar_digest": 2, "thesis_watch": 2, "research": 1,
-                                                             "paper": 6}
+                                                             "paper": 6, "paper_review": 1}
     assert policy.budget("companion_adopt") == 2
     assert (policy.budget("link"), policy.budget("week_review"), policy.budget("hold_hour"), policy.budget("evening_review")) == (2, 1, None, None)
 

@@ -209,6 +209,7 @@ async def _maybe_start_level_alerts(app_: FastAPI, stream):
     from app.engine.day_replay import DayReplays, enabled as day_replay_enabled
     from app.engine.evening_review import EveningReviews, enabled as evening_review_enabled
     from app.engine.notification_policy import FollowUps
+    from app.engine.paper_review import PaperReviews
 
     paper = PaperWatcher(engine, chart_feed, chart_calendar, chart_splits, clock=time.time)
     scanner = SetupScanner(engine, chart_feed, chart_calendar, options_chain, clock=time.time,
@@ -223,7 +224,8 @@ async def _maybe_start_level_alerts(app_: FastAPI, stream):
     monitor = LevelAlertMonitor(engine, stream, feed=chart_feed, calendar=chart_calendar, splits=chart_splits, paper=paper,
                                 scanner=scanner, positions=positions, nudges=nudges, time_stops=time_stops,
                                 prep=prep, week_review=week_review, day_replay=day_replay, evening_review=evening_review,
-                                follow_ups=FollowUps(engine, clock=time.time))
+                                follow_ups=FollowUps(engine, clock=time.time),
+                                paper_review=PaperReviews(engine, chart_calendar, clock=time.time))
     stream.attach(monitor)
     await monitor.start()
     app_.state.level_alerts = monitor

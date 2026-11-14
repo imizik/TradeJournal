@@ -159,8 +159,8 @@ def test_the_three_book_reads_are_offered_only_where_a_job_needs_them():
     assert {job: reads & n for job, n in names.items()} == {
         "desk": {"get_positions", "get_trades", "get_owner_context"}, "telegram": {"get_positions", "get_trades", "get_owner_context"},
         "prep": set(), "companion": {"get_trades"}, "week_review": {"get_trades"}, "check_call": {"get_trades"},
-        "desk_read": set(), "day_read": set()}
-    assert len(copilot_tools.TOOLS) == 27  # 25, the check job's own get_call_facts and the desk's own desk_action
+        "desk_read": set(), "day_read": set(), "paper_review": set()}
+    assert len(copilot_tools.TOOLS) == 28  # 26, the check job's own get_call_facts and the desk's own desk_action
 
 
 @pytest.mark.parametrize("job,deep", [("desk", False), ("telegram", False), ("prep", False), ("companion", True), ("week_review", True)])

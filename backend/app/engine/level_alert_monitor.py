@@ -67,7 +67,7 @@ class LevelAlertMonitor:
     def __init__(self, engine, stream=None, *, feed=None, calendar=None, splits=None,
                  clock: Callable[[], float] = time.time, sweep_seconds: float = SWEEP_SECONDS, paper=None, scanner=None,
                  positions=None, nudges=None, time_stops=None, prep=None, week_review=None, day_replay=None, evening_review=None,
-                 follow_ups=None, interrupts=None, expressions=None, overnight=None):
+                 follow_ups=None, interrupts=None, expressions=None, paper_review=None, overnight=None):
         self.engine = engine
         self.paper = paper  # Practice paper plans (A2), judged on the same pass and the same feed
         self.scanner = scanner  # Paper S1 and/or stock-only awareness; each retains its own enable flag.
@@ -94,6 +94,7 @@ class LevelAlertMonitor:
         self.week_review = week_review  # The automatic week review ping, when WEEK_REVIEW_AUTO_ENABLED
         self.day_replay = day_replay  # Watch your day's clips and ping at the close, when DAY_REPLAY_ENABLED
         self.evening_review = evening_review  # The evening review ping, when EVENING_REVIEW_PING_ENABLED
+        self.paper_review = paper_review  # The Friday paper review and its ping, while the copilot lab is on
         self.stream = stream
         self.feed = feed
         self.calendar = calendar
@@ -202,11 +203,18 @@ class LevelAlertMonitor:
                                                     await asyncio.to_thread(self.day_replay.deliver)
                                         finally:
                                             try:
-                                                if self.evening_review is not None:
-                                                    try:
-                                                        await asyncio.to_thread(self.evening_review.run)
-                                                    finally:
-                                                        await asyncio.to_thread(self.evening_review.deliver)
+                                                try:
+                                                    if self.evening_review is not None:
+                                                        try:
+                                                            await asyncio.to_thread(self.evening_review.run)
+                                                        finally:
+                                                            await asyncio.to_thread(self.evening_review.deliver)
+                                                finally:
+                                                    if self.paper_review is not None:
+                                                        try:
+                                                            await asyncio.to_thread(self.paper_review.run)  # writes on its own thread
+                                                        finally:
+                                                            await asyncio.to_thread(self.paper_review.deliver)
                                             finally:
                                                 try:
                                                     if self.interrupts is not None:
