@@ -7,6 +7,7 @@ import SetupRecordLines, { premiumLine } from "@/components/copilot/SetupRecordL
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { getSymbolLoop, type SetupRecord } from "@/lib/copilot";
 import type { ClosingTicket } from "@/lib/closingTicket";
+import { spreadCopyText, spreadFigures, spreadSentence } from "@/lib/spreadTicket";
 import { cn } from "@/lib/utils";
 
 /**
@@ -16,15 +17,18 @@ import { cn } from "@/lib/utils";
  * A ticket opens only from a saved plan (``openTicket`` from a confirmed plan card, a plan thread's header, a book row,
  * or this tab's list of armed plans not yet entered). A closing ticket (``openClosingTicket``, the held option's "Close
  * at target" / "Close at stop") is filled in the browser from the book row (``lib/closingTicket.ts``): a sell to close
- * of the contracts held with an estimated limit; it reads nothing and has no Send button at all.
+ * of the contracts held with an estimated limit; it reads nothing and has no Send button at all. A two-leg vertical
+ * (the Chain tab's Make it a spread, or a plan whose words name one) shows both legs, the net debit or credit at the
+ * mid and at the natural price, and copies legs then the net limit (``lib/spreadTicket.ts``); it has no Send button.
  */
 
 export const TICKET_EVENT = "tradejournal:open-ticket";
 const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
 const STALE_S = 15 * 60;  // the server's QUOTE_STALE_S
 
-/** A contract he picked for a ticket (the Chain tab's Put on ticket): it replaces the contract the plan names. */
-export type TicketPick = { expiry: string; strike: number };
+/** A contract he picked for a ticket (the Chain tab's Put on ticket): it replaces the contract the plan names. With
+ *  ``short`` it is the long leg of a vertical spread that sells ``short`` (``kind``: its type) in the same expiry. */
+export type TicketPick = { expiry: string; strike: number; short?: number; kind?: "call" | "put" };
 
 /** Opens a saved plan's ticket: on the desk the Ticket tab takes it; anywhere else the desk opens on it. */
 export function openTicket(investigationId: string, pick?: TicketPick) {
@@ -47,15 +51,23 @@ type Quote = { state: "ok" | "stale" | "missing"; reason?: string; as_of?: numbe
   mid?: number; spread?: number; spread_pct?: number | null; multiplier?: number | null };
 type Candidate = { expiry: string; strike: number; type: "call" | "put"; days: number; bid?: number; ask?: number; mid?: number;
   ask_contract?: number | null; spread_pct?: number; breakeven_move_pct?: number; expected_move_pct?: number | null; move_needed_vs_expected?: number | null };
+type SpreadLeg = { role: "long" | "short"; action: "buy" | "sell"; strike: number; label: string; quote: Quote; wide: boolean };
+type Spread = {
+  kind: "call" | "put"; expiry: string; type: "debit" | "credit"; width: number; long: number; short: number; label: string;
+  source: "plan" | "picked"; multiplier: number | null; legs: SpreadLeg[]; net_mid: number | null; net_natural: number | null;
+  rough: string[]; bullish: boolean; against_plan: string | null;
+};
 type Ticket = {
   state: "ok" | "not_option" | "no_quotes"; reason?: string; investigation_id: string; symbol: string; direction: string | null;
   thesis: string | null; option_type: "call" | "put" | null; entry: number | null; invalidation: number | null; time_stop: string | null;
+  target?: number | null; // the plan's profit target (the stock's price), when it has one
   plan_contract_words: string | null; size: { contracts: number | null; risk_usd: number | null; text: string | null };
   accounts: Account[]; account: string | null; simulated: boolean;
   contract: { strike: number; expiry: string; type: "call" | "put"; label: string; source: "plan" | "picked"; multiplier: number | null } | null;
   candidates: { state: "ok" | "stale" | "missing"; reason?: string; as_of?: number | null; rows: Candidate[] } | null;
   quote: Quote | null; underlying: { state: "ok" | "stale" | "missing"; last?: number; as_of?: number | null; reason?: string } | null;
   expected_move_pct: number | null; limit: number | null; contracts: number | null;
+  spread?: Spread | null; // a two-leg vertical: then ``contract`` and ``quote`` are null
   check?: PlayCheckData | null; // the Play check: plan parts, habits before the entry, holding overnight
 };
 
@@ -164,7 +176,7 @@ export default function DeskTicket({ plans, failed, open, pick = null, close = n
 }) {
   // Each click is a fresh ticket (a new mark or stock price re-fills the limit), keyed on what it was priced from.
   if (close) return <ClosingView key={`${close.symbol}|${close.expiry}|${close.strike}|${close.at}|${close.stock}|${close.mark}`} ticket={close} onClose={onClose} onPlaced={onPlaced} />;
-  if (open) return <TicketView key={`${open}|${pick?.expiry ?? ""}|${pick?.strike ?? ""}`} investigationId={open} initialPick={pick} onClose={onClose} onPlaced={onPlaced} />;
+  if (open) return <TicketView key={`${open}|${pick?.expiry ?? ""}|${pick?.strike ?? ""}|${pick?.short ?? ""}|${pick?.kind ?? ""}`} investigationId={open} initialPick={pick} onClose={onClose} onPlaced={onPlaced} />;
   return (
     <div data-testid="desk-ticket" className="space-y-3">
       <p className="text-xs text-muted-foreground">A ticket opens only from a saved plan. It fills in what you type into Robinhood; nothing is sent from here.</p>
@@ -212,7 +224,7 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
 
   useEffect(() => {
     const controller = new AbortController();
-    const query = pick ? `?expiration=${pick.expiry}&strike=${pick.strike}` : "";
+    const query = pick ? `?expiration=${pick.expiry}&strike=${pick.strike}${pick.short != null ? `&short_strike=${pick.short}&option_type=${pick.kind ?? ""}` : ""}` : "";
     read<Ticket>(`/copilot/tickets/${encodeURIComponent(investigationId)}${query}`, controller.signal).then(found => {
       setTicket(found); setError(null);
       setAccount(was => was ?? found.account);
@@ -224,7 +236,7 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
     return () => controller.abort();
   }, [investigationId, pick, reload]);
 
-  const ageing = !!ticket?.quote && ticket.quote.state === "ok" && !ticket.quote.simulated && ticket.quote.as_of != null && nowS - ticket.quote.as_of > STALE_S;
+  const ageing = quotedAt(ticket) !== null && nowS - quotedAt(ticket)! > STALE_S;
   useEffect(() => { if (ageing && seeded) { setLimit(was => (was === seeded ? "" : was)); setSeeded(""); } }, [ageing, seeded]); // eslint-disable-line react-hooks/set-state-in-effect -- the quote aged on the clock
 
   const symbol = ticket?.symbol;
@@ -270,6 +282,11 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
       </span>
     </div>
   );
+
+  if (ticket.spread) {
+    return <SpreadView ticket={ticket} spread={ticket.spread} head={head} switcher={switcher} foot={foot(true)} limit={limit} setLimit={setLimit}
+      qty={qty} setQty={setQty} nowS={nowS} onReread={() => setReload(r => r + 1)} />;
+  }
 
   // No contract named: two or three real contracts to choose from; nothing is chosen for him.
   if (!ticket.contract) {
@@ -379,6 +396,123 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
         </div>
       )}
       {foot(true)}
+    </div>
+  );
+}
+
+/** The oldest time among the ticket's fresh quotes (one contract's, or both legs' of a spread); only live ones age, so
+ *  simulated quotes count only when ``simulated`` is asked for (to say their time, never to age them). */
+function quotedAt(ticket: Ticket | null, simulated = false): number | null {
+  if (!ticket) return null;
+  const quotes = ticket.spread ? ticket.spread.legs.map(l => l.quote) : ticket.quote ? [ticket.quote] : [];
+  const times = quotes.filter(q => q.state === "ok" && (simulated || !q.simulated) && q.as_of != null).map(q => q.as_of!);
+  return times.length ? Math.min(...times) : null;
+}
+
+const ROLE_WORD = { entry: "entry", target: "target", stop: "stop" } as const;
+
+/**
+ * A two-leg vertical: each leg with its own quote (grey with its time when stale or missing), the net debit or credit
+ * at the mid and the natural price, the width, and what the limit and count he types give: the most he can lose and
+ * make, break-even, and the spread's worth at expiry at his plan's levels. Copy all puts the legs, then the net limit
+ * price as a debit or credit, then the quantity on the clipboard. It copies; there is no Send button.
+ */
+function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, qty, setQty, nowS, onReread }: {
+  ticket: Ticket; spread: Spread; head: React.ReactNode; switcher: React.ReactNode; foot: React.ReactNode;
+  limit: string; setLimit(v: string): void; qty: string; setQty(v: string): void; nowS: number; onReread(): void;
+}) {
+  const limitN = limit.trim() && Number(limit) > 0 ? Number(limit) : null;
+  const qtyN = /^\d+$/.test(qty.trim()) && Number(qty) > 0 ? Number(qty) : null;
+  const spot = ticket.underlying?.state === "ok" ? ticket.underlying.last ?? null : null;
+  const f = spreadFigures(s.kind, s.long, s.short, limitN, qtyN, s.multiplier, spot, ticket.expected_move_pct,
+    { entry: ticket.entry, target: ticket.target ?? null, stop: ticket.invalidation });
+  const aged = (q: Quote) => q.state === "ok" && !q.simulated && q.as_of != null && nowS - q.as_of > STALE_S;
+  const legOk = (q: Quote) => q.state === "ok" && !aged(q);
+  const fresh = s.legs.every(l => legOk(l.quote));
+  const rough = [...s.rough, ...s.legs.filter(l => l.quote.state === "ok" && aged(l.quote)).map(l => `the $${l.strike} leg's quote is now older than 15 minutes`)];
+  const roughTag = rough.length > 0 ? <span className="ml-1 rounded border border-amber-300/50 px-1 text-[10px] uppercase tracking-wide text-amber-300">rough</span> : null;
+  const sentence = spreadSentence(s.kind, s.long, s.short, limitN, qtyN, f);
+  const all = spreadCopyText({ symbol: ticket.symbol, kind: s.kind, expiry: s.expiry, long: s.long, short: s.short,
+    limit: limitN !== null ? limitN.toFixed(2) : "", contracts: qtyN ? String(qtyN) : "" });
+  const field = "w-24 rounded border bg-background px-2 py-1.5 text-base tabular-nums sm:text-sm";
+  const per = (n: number | null) => n === null ? "—" : `${n.toFixed(2)} ${s.type}`;
+  return (
+    <div data-testid="desk-ticket" data-spread={s.type} className="space-y-3">
+      {head}
+      {switcher}
+      <div className="rounded-lg border bg-card px-3 py-1.5">
+        <Row name="Spread" copy={<CopyButton text={s.label} label="spread" />}>
+          <span className="font-mono tabular-nums">{s.label}</span>
+          <span className="block text-xs text-muted-foreground">
+            {s.type === "debit" ? "You pay to open it" : "You take in a credit to open it"} · width {s.width}{s.multiplier ? ` · ×${s.multiplier} a spread` : ""}
+            {s.source === "picked" ? ` · your pick from the chain${ticket.plan_contract_words ? ` (your plan says: ${ticket.plan_contract_words})` : ""}` : ticket.plan_contract_words ? ` · your plan says: ${ticket.plan_contract_words}` : ""}
+          </span>
+          {s.against_plan && <span data-testid="spread-against" className="block text-xs text-amber-300">{s.against_plan}</span>}
+        </Row>
+        {s.legs.map((l, i) => {
+          const q = l.quote, ok = legOk(q);
+          return (
+            <Row key={l.role} name={`Leg ${i + 1}: ${l.action === "buy" ? "Buy" : "Sell"}`} copy={<CopyButton text={`${l.action === "buy" ? "Buy" : "Sell"} ${l.label}`} label={`leg ${i + 1}`} />}>
+              <span className={cn("font-mono tabular-nums", !ok && "text-muted-foreground")}>{l.label}</span>
+              <span data-testid="spread-leg-quote" className={cn("block text-xs tabular-nums", ok ? "text-muted-foreground" : "text-muted-foreground/80")}>
+                {ok ? <>Bid {q.bid!.toFixed(2)} · Ask {q.ask!.toFixed(2)} · Mid {q.mid!.toFixed(2)} · as of {clock(q.as_of)}{l.wide && <span className="text-amber-300"> · wide ({q.spread_pct}% of the mid)</span>}</>
+                  : aged(q) ? `Quote stale (last ${clock(q.as_of)}): now older than 15 minutes.`
+                  : q.state === "stale" ? `Quote stale (last ${clock(q.as_of)}): ${q.reason}` : `No quote: ${q.reason ?? "the chain could not be read."}`}
+              </span>
+            </Row>
+          );
+        })}
+        <Row name="Net price">
+          <span data-testid="spread-net" className="tabular-nums">
+            {s.net_mid !== null && fresh ? <>{per(s.net_mid)} at the mid · {s.net_natural !== null && s.net_natural > 0 ? per(s.net_natural) : s.type === "credit" ? "no credit" : "—"} at the natural price</> : <span className="text-muted-foreground">No net price: {rough[0] ?? "a leg has no fresh quote"}.</span>}
+            {roughTag}
+          </span>
+          {rough.length > 0 && <span data-testid="spread-rough" className="block text-xs text-amber-300">Rough: {rough.join("; ")}.</span>}
+          {s.net_mid !== null && fresh && <span className="block text-xs text-muted-foreground">Natural: {s.type === "debit" ? "buy at the ask and sell at the bid, the most you would pay" : "sell at the bid and buy at the ask, the least you would take in"}.</span>}
+        </Row>
+        <Row name="Quantity" copy={<CopyButton text={qtyN ? String(qtyN) : ""} label="quantity" disabled={!qtyN} />}>
+          <input aria-label="Quantity in spreads" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/[^\d]/g, "").slice(0, 4))} placeholder="set it" className={field} />
+          <span className="block text-xs text-muted-foreground">{ticket.size.text ? `Plan's size: ${ticket.size.text}.` : "Your plan gives no size."} One spread is one of each leg.</span>
+        </Row>
+        <Row name={`Limit (${s.type})`} copy={<CopyButton text={limitN !== null ? limitN.toFixed(2) : ""} label="limit price" disabled={limitN === null} />}>
+          <input aria-label={`Net limit price per share, ${s.type}`} inputMode="decimal" value={limit} onChange={e => setLimit(e.target.value.replace(/[^\d.]/g, "").replace(/^(\d{0,6}(?:\.\d{0,2})?).*$/, "$1"))} placeholder="set it" className={field} />
+          <span className="block text-xs text-muted-foreground">{fresh && s.net_mid !== null && ticket.limit !== null ? `The net mid as of ${clock(quotedAt(ticket, true))}${rough.length ? " (rough)" : ""}` : "No fresh net price: set it yourself."}</span>
+        </Row>
+        {f.warning ? <Row name="Check the price"><span data-testid="spread-warning" className="text-xs text-amber-300">{f.warning}</span></Row> : <>
+          <Row name={s.type === "debit" ? "Cost" : "Credit"}><span className="tabular-nums">{s.type === "debit" ? (f.cost !== null ? usd(f.cost) : "—") : (f.credit !== null ? usd(f.credit) : "—")}</span></Row>
+          <Row name="Most you can lose"><span data-testid="spread-max-loss" className="tabular-nums">{f.maxLoss !== null ? usd(f.maxLoss) : "—"}{f.maxLoss !== null && <span className="text-muted-foreground"> {s.type === "debit" ? "(what you pay)" : "(the width less the credit)"}</span>}</span></Row>
+          <Row name="Most you can make"><span data-testid="spread-max-gain" className="tabular-nums">{f.maxGain !== null ? usd(f.maxGain) : "—"}{f.maxGain !== null && <span className="text-muted-foreground"> {s.type === "debit" ? "(the width less what you pay)" : "(the credit)"}</span>}</span></Row>
+          <Row name="Break-even">
+            {f.breakeven !== null ? (
+              <span className="tabular-nums">{ticket.symbol} {f.breakeven.toFixed(2)} at expiry
+                {f.movePct !== null && <span className="text-muted-foreground"> · needs {signedPct(f.movePct)} from {spot}{ticket.underlying?.as_of ? ` (${clock(ticket.underlying.as_of)})` : ""}</span>}
+                {ticket.expected_move_pct && <span className="text-muted-foreground"> · expected move ±{ticket.expected_move_pct}%</span>}
+              </span>
+            ) : "—"}
+            {ticket.underlying && ticket.underlying.state !== "ok" && <span className="block text-xs text-amber-300">{ticket.underlying.reason}</span>}
+          </Row>
+          {f.atLevels.length > 0 && (
+            <Row name="At your levels">
+              <ul data-testid="spread-levels" className="space-y-0.5 text-xs tabular-nums">
+                {f.atLevels.map(a => (
+                  <li key={a.role}>At your {ROLE_WORD[a.role]} {a.price}: worth {a.worth.toFixed(2)} at expiry{a.pnl !== null ? <>, <span className={a.pnl >= 0 ? "text-emerald-400" : "text-rose-400"}>{a.pnl >= 0 ? "+" : "−"}{usd(Math.abs(a.pnl))}</span></> : ""}</li>
+                ))}
+              </ul>
+              <span className="block text-xs text-muted-foreground">At expiry only: before then time and volatility move it, and that is not estimated here.</span>
+            </Row>
+          )}
+        </>}
+      </div>
+      {sentence && <p data-testid="spread-sentence" className="text-sm">{sentence}{rough.length > 0 && <span className="text-amber-300"> Rough: the legs&apos; quotes are not clean.</span>}</p>}
+      {ticket.check && <PlayCheck check={ticket.check} investigationId={ticket.investigation_id} symbol={ticket.symbol} contracts={qtyN} paid={f.cost} unit="spreads" />}
+      {!fresh && (
+        <button type="button" onClick={onReread} className="text-xs text-foreground underline underline-offset-2">Read the quotes again</button>
+      )}
+      <div className="space-y-2">
+        <CopyButton text={all} label="Copy all for Robinhood" wide />
+        <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {ticket.symbol}, Trade, Trade options, pick both legs (Buy the ${s.long}, Sell the ${s.short}, {shortDate(s.expiry)}), then the limit as a {s.type} and the quantity. Nothing is sent from here.</p>
+      </div>
+      {foot}
     </div>
   );
 }

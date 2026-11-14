@@ -371,6 +371,9 @@ def check(db: Session, ticket: dict, row: dict, *, account_id, now: float, chain
     moment = datetime.fromtimestamp(now, ET)
     horizon = day_journal.check_ins(db)[0].get(ticket["symbol"])
     out = {"play": play(ticket, row, horizon), "habits": None, "overnight": None}
+    if ticket.get("spread") is not None:
+        return _spread_check(db, ticket, row, out, horizon=horizon, moment=moment, chain_read=chain_read, traded=traded,
+                             quote_for=quote_for)
     contract = ticket.get("contract")
     expiry = date.fromisoformat(contract["expiry"]) if contract else None
     try:
@@ -396,5 +399,79 @@ def check(db: Session, ticket: dict, row: dict, *, account_id, now: float, chain
                                      quote_for=quote_for)
     except Exception:  # noqa: BLE001
         log.warning("Play check overnight failed", exc_info=True)
+        out["overnight"] = {"state": "missing", "show": False, "reason": "The overnight figures could not be worked out."}
+    return out
+
+
+# --- a vertical spread -----------------------------------------------------------------------------------------------
+
+SPREAD_HABITS = "Your habit checks read single options; a spread is not checked against them."
+
+
+def spread_overnight(*, symbol: str, legs, chain, spot: float, now: datetime, time_stop: dict | None, horizon: str | None,
+                     quote_for, closes=None) -> dict:
+    """Holding overnight for one vertical (``basis``: dollars per spread), the same model as a single contract's: each
+    leg at the volatility its own mid implies, price and volatility held. Its cost is signed by the row's ``credit``; a
+    credit spread's time decay and unchanged-price cost come out negative (time works for it)."""
+    long_c, short_c = legs
+    root = long_c.root or primary_root(symbol)
+    end, source, past_close = hold_until(now, time_stop, horizon)
+    expiry = expires_at(long_c.expiration, root, closes)
+    parts = [_leg(long_c, 1, quote_for(long_c, chain), root, closes, spot, now),
+             _leg(short_c, -1, quote_for(short_c, chain), root, closes, spot, now)]
+    hold_end = min(end, expiry)
+    hold_years = (hold_end - now).total_seconds() / YEAR_SECONDS
+    iv = parts[0]["iv"]
+    expected_pct = round(iv * sqrt(hold_years) * 100, 2) if iv and hold_years > 0 else None
+    row = {"name": "as_traded", "label": _label("spread", symbol, parts), "unit": "spreads"}
+    bad = next((p for p in parts if p["quote"]["state"] != "ok"), None)
+    if bad is not None:
+        row = {**row, "state": bad["quote"]["state"], "as_of": bad["quote"].get("as_of"), "reason": bad["quote"].get("reason") or "No usable quote."}
+    else:
+        paid = sum(p["sign"] * p["mid"] * p["multiplier"] for p in parts)  # per spread; negative: a credit taken in
+        thetas = [p["theta"] for p in parts]
+        decay = None if None in thetas else -sum(p["sign"] * p["theta"] * p["multiplier"] for p in parts)
+        now_value, end_value = structure_value(parts, spot, now), structure_value(parts, spot, end)
+        hold_cost = now_value - end_value if now_value is not None and end_value is not None else None
+        even = breakeven(parts, paid, spot, end)
+        move = (even - spot) / spot * 100 if even is not None else None
+        row = {**row, "state": "ok", "units": 1, "cost": round(abs(paid), 2), "credit": paid < 0, "max_loss": None,
+               "max_loss_note": None,
+               "decay_day": round(decay, 2) + 0.0 if decay is not None else None,
+               "decay_pct": round(decay / paid * 100, 1) + 0.0 if decay is not None and paid > 0 else None,
+               "hold_cost": round(hold_cost, 2) + 0.0 if hold_cost is not None else None,
+               "hold_cost_pct": round(hold_cost / paid * 100, 1) if hold_cost is not None and paid > 0 else None,
+               "breakeven": round(even, 2) if even is not None else None,
+               "breakeven_move_pct": round(move, 2) if move is not None else None,
+               "vs_expected": round(abs(move) / expected_pct, 1) if move is not None and expected_pct else None}
+    return {"state": "ok", "show": past_close, "until": int(end.timestamp()), "until_source": source,
+            "expires_first": end >= expiry, "trading_days": rules.trading_days(now.date(), hold_end.date()),
+            "hold_days": round((hold_end - now).total_seconds() / 86400, 2), "greeks_as_of": long_c.greeks_updated_at,
+            "expected_move_pct": expected_pct, "basis": "per spread", "rows": [row]}
+
+
+def _spread_check(db: Session, ticket: dict, row: dict, out: dict, *, horizon, moment: datetime, chain_read, traded,
+                  quote_for) -> dict:
+    """A spread's Play check: the plan's parts as for any ticket; the after-fill habit rules are written for one long
+    option, so they are not run on a spread and it says so (a ticker not followed stays silent); holding overnight for
+    the spread as a whole when both legs and the stock have fresh quotes, else why not."""
+    from app.engine import day_journal
+    quiet = ticket["symbol"] in day_journal.quiet(db)
+    out["habits"] = {"state": "quiet" if quiet else "spread", "fired": [], "size": None, "footer": rules.FOOTER,
+                     "reason": None if quiet else SPREAD_HABITS}
+    stock = ticket.get("underlying") or {}
+    bad = next((leg["quote"] for leg in ticket["spread"]["legs"] if leg["quote"]["state"] != "ok"), None)
+    if bad is None and stock.get("state") != "ok":
+        bad = stock
+    if bad is not None or chain_read is None or not traded or None in traded:
+        bad = bad or {}
+        out["overnight"] = {"state": bad.get("state") or "missing", "as_of": bad.get("as_of"), "show": False,
+                            "reason": bad.get("reason") or "The spread's legs could not be read."}
+        return out
+    try:
+        out["overnight"] = spread_overnight(symbol=ticket["symbol"], legs=traded, chain=chain_read["chain"], spot=stock["last"],
+                                            now=moment, time_stop=row.get("time_stop"), horizon=horizon, quote_for=quote_for)
+    except Exception:  # noqa: BLE001 -- the ticket matters more than its check
+        log.warning("Play check spread overnight failed", exc_info=True)
         out["overnight"] = {"state": "missing", "show": False, "reason": "The overnight figures could not be worked out."}
     return out

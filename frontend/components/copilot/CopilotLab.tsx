@@ -586,7 +586,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // The Chain tab's actions: Check a call with the contract in the box, the plan flow, a saved plan's ticket.
   const chainCheck = useCallback((text: string) => { setCheckSeed(seed => ({ text, n: (seed?.n ?? 0) + 1 })); setCentreTab("check"); }, []);
   const chainPlan = useCallback((pick: ChainPick, line: string) => go(copilotLabHref(pick.symbol, planContext(line), { kind: "copilot", ref: null })), [go]);
-  const chainTicket = useCallback((id: string, pick: ChainPick) => openTicket(id, { expiry: pick.expiry, strike: pick.strike }), []);
+  const chainTicket = useCallback((id: string, pick: ChainPick) => openTicket(id, { expiry: pick.expiry, strike: pick.strike,
+    ...(pick.short != null ? { short: pick.short, kind: pick.side } : {}) }), []);
   // An Unusual options row: its contract selected in the Chain tab, in place.
   const openUnusual = useCallback((pick: ChainPick) => { setPicked(pick.symbol); setPickedKey(null); setChainFocus(f => ({ pick, n: (f?.n ?? 0) + 1 })); setCentreTab("chain"); }, []);
   // A TradingView alert row: its ticker on the desk chart, in place, where the alert's marker sits.

@@ -14,6 +14,12 @@ live bid, ask and mid with their quote time (``stale`` or ``missing`` carries no
 only from a fresh quote); cost, the most he can lose (the premium: a long option only) and break-even with the move it
 needs against the expiry's expected move (``figures``); and the accounts the switch offers, by journal label with the
 number masked to its last four.
+
+A two-leg vertical spread (same symbol, expiry and type; one leg bought, one sold) is a ticket too: from the Chain tab's
+Make it a spread (``pick`` with ``short_strike``) or from plan words that state one plainly (``read_spread``). Both legs'
+quotes come from the one chain read a single contract's ticket makes; the net debit or credit at the mid and at the
+natural price, the most it can lose and make, break-even and its worth at expiry at the plan's levels are arithmetic
+(``spread_figures``). Straddles, strangles, condors, butterflies, rolls and calendars stay refused as before.
 """
 from __future__ import annotations
 
@@ -71,6 +77,88 @@ def contracts_for_risk(risk_usd: float | None, limit: float | None, multiplier: 
     return count or None
 
 
+# --- a two-leg vertical spread ---------------------------------------------------------------------------------------
+# One long leg (bought) and one short leg (sold): same symbol, same expiry, same type, two strikes. Prices are per share
+# like a single option's; the ticket's limit is the net price as a positive number, a debit (paid) or a credit (taken
+# in) by the strikes: a call spread that buys the lower strike, or a put spread that buys the higher, is a debit.
+
+def is_debit(kind: str, long_strike: float, short_strike: float) -> bool:
+    """Whether buying ``long_strike`` and selling ``short_strike`` costs money: the long leg is the one nearer the money."""
+    return long_strike < short_strike if kind == "call" else long_strike > short_strike
+
+
+def spread_value(kind: str, long_strike: float, short_strike: float, price: float) -> float:
+    """What one spread is worth per share at expiry with the stock at ``price``, signed: the long leg's intrinsic value
+    minus the short leg's. A debit spread's is from 0 to the width; a credit spread's from minus the width to 0."""
+    payoff = (lambda k: max(price - k, 0.0)) if kind == "call" else (lambda k: max(k - price, 0.0))
+    return payoff(long_strike) - payoff(short_strike)
+
+
+def spread_figures(kind: str, long_strike: float, short_strike: float, limit: float | None, contracts: int | None,
+                   multiplier: int | None, spot: float | None, expected_move_pct: float | None = None,
+                   levels: dict[str, float | None] | None = None) -> dict:
+    """A vertical at the net ``limit`` (per share, positive). Debit: he pays the limit; the most he can lose is what he
+    paid and the most he can make is the width less it. Credit: he takes in the limit; the most he can make is that and
+    the most he can lose is the width less it. Dollars are ×``multiplier``×``contracts`` (None without a count).
+    Break-even at expiry: a call spread's lower strike plus the limit, a put spread's higher strike less it, debit or
+    credit alike. A limit at or over the width gives no figures and says why. ``at_levels``: for each plan level (the
+    stock's price), the spread's worth at expiry (what it sells for, or what buying a credit spread back costs) and the
+    profit or loss then."""
+    width = abs(short_strike - long_strike)
+    debit = is_debit(kind, long_strike, short_strike)
+    out = {"type": "debit" if debit else "credit", "width": round(width, 4), "cost": None, "credit": None, "max_loss": None,
+           "max_gain": None, "breakeven": None, "move_pct": None, "vs_expected": None, "at_levels": [], "warning": None}
+    if limit is None or not limit > 0 or not width > 0:
+        return out
+    if limit >= width - 1e-9:
+        out["warning"] = (f"A {limit:g} debit is the {width:g} width or more: the spread can never be worth more than you pay."
+                          if debit else f"A {limit:g} credit is the {width:g} width or more: no real market pays that. Check the price.")
+        return out
+    per = multiplier * contracts if contracts and contracts > 0 and multiplier else None
+    if per:
+        paid_or_taken = round(limit * per, 2)
+        other = round((width - limit) * per, 2)
+        if debit:
+            out.update(cost=paid_or_taken, max_loss=paid_or_taken, max_gain=other)
+        else:
+            out.update(credit=paid_or_taken, max_gain=paid_or_taken, max_loss=other)
+    low, high = sorted((long_strike, short_strike))
+    out["breakeven"] = round(low + limit if kind == "call" else high - limit, 4)
+    if spot and spot > 0:
+        out["move_pct"] = round((out["breakeven"] - spot) / spot * 100, 2)
+        if expected_move_pct and expected_move_pct > 0:
+            out["vs_expected"] = round(abs(out["move_pct"]) / expected_move_pct, 1)
+    net = limit if debit else -limit  # what he pays per share, signed: a credit is money in
+    for role, price in (levels or {}).items():
+        if price is None or not price > 0:
+            continue
+        value = spread_value(kind, long_strike, short_strike, price)
+        out["at_levels"].append({"role": role, "price": price, "worth": round(abs(value), 4),
+                                 "pnl": round((value - net) * per, 2) if per else None})
+    return out
+
+
+def spreads_for_risk(risk_usd: float | None, type_: str, limit: float | None, width: float, multiplier: int | None) -> int | None:
+    """Whole spreads whose most-to-lose stays within ``risk_usd``: the debit paid, or the width less the credit."""
+    if not risk_usd or not limit or not multiplier or limit <= 0 or limit >= width:
+        return None
+    each = (limit if type_ == "debit" else width - limit) * multiplier
+    count = math.floor(risk_usd / each + 1e-9)
+    return count or None
+
+
+def spread_label(symbol: str, kind: str, long_strike: float, short_strike: float, expiry: date) -> str:
+    """As Robinhood names a vertical: "NBIS $100/$110 Call Debit Spread 12/19/26", the strikes low to high."""
+    low, high = sorted((long_strike, short_strike))
+    type_ = "Debit" if is_debit(kind, long_strike, short_strike) else "Credit"
+    return f"{symbol} ${low:g}/${high:g} {kind.title()} {type_} Spread {expiry.month}/{expiry.day}/{expiry.year % 100:02d}"
+
+
+def spread_bullish(kind: str, long_strike: float, short_strike: float) -> bool:
+    """A debit call spread and a credit put spread gain as the stock rises; the other two as it falls."""
+    return is_debit(kind, long_strike, short_strike) == (kind == "call")
+
+
 # --- reading the plan ------------------------------------------------------------------------------------------------
 
 _STRIKE = re.compile(r"\$?(\d+(?:\.\d+)?)\s?(C|P|calls?|puts?)\b", re.I)
@@ -106,6 +194,47 @@ def read_contract(text: str | None, since: date) -> tuple[float, date, str] | No
         return None  # none, or more than one: not stated plainly
     (strike, kind), = strikes
     return strike, dates.pop(), kind
+
+
+# A vertical: two strikes with a slash ("100/110C", "$100/$110 Call", "95P/90P"), or a dash when the words also say
+# spread or vertical ("105-110 call spread"), then the type.
+_PAIR = re.compile(r"\$?(\d+(?:\.\d+)?)\s*(?:[CP]\b)?\s*(/|-)\s*\$?(\d+(?:\.\d+)?)\s*(C|P|calls?|puts?)\b", re.I)
+_SPREAD_WORD = re.compile(r"\bspreads?\b|\bverticals?\b", re.I)
+_NOT_VERTICAL = re.compile(r"\bstraddles?\b|\bstrangles?\b|\bcondors?\b|\bbutterfl(?:y|ies)\b|\brolls?\b|\bcalendars?\b"
+                           r"|\bdiagonals?\b|\biron\b|\bratio\b|\bflys?\b", re.I)
+
+
+def read_spread(text: str | None, since: date) -> dict | None:
+    """A same-expiry two-leg vertical when the plan's words state it plainly: one strike pair, one type, one date
+    ("NBIS 12/19 100/110C", "100/110 call spread Dec 19", "Dec 19 '26 95/90 put credit spread"). A debit spread unless
+    the words say credit; which strike is bought follows from that (a debit buys the strike nearer the money). Straddles,
+    strangles, condors, butterflies, rolls, calendars and anything vaguer: None."""
+    if not text or _NOT_VERTICAL.search(text):
+        return None
+    pairs = list(_PAIR.finditer(text))
+    if len(pairs) != 1:
+        return None
+    pair = pairs[0]
+    if re.search(r"[/-]\s*\$?$", text[:pair.start()]) or re.match(r"\s*[CP]?\s*[/-]", text[pair.end():], re.I):
+        return None  # a third strike chained on ("100/110/120C"): not a vertical
+    if pair.group(2) == "-" and not _SPREAD_WORD.search(text):
+        return None  # "105-110 calls" may be a range of single strikes; only "spread" makes it two legs
+    a, b = float(pair.group(1)), float(pair.group(3))
+    if a == b or not a > 0 or not b > 0:
+        return None
+    kind = "call" if pair.group(4)[0].lower() == "c" else "put"
+    rest = text[:pair.start()] + " | " + text[pair.end():]
+    if _STRIKE.search(rest):
+        return None  # another strike besides the pair: more than two legs
+    dates = {d for m in _SLASH.finditer(rest) if (d := _year(m.group(3), int(m.group(1)), int(m.group(2)), since))}
+    dates |= {d for m in _MONTH.finditer(rest) if (d := _year(m.group(3) or m.group(4), MONTHS[m.group(1).lower()[:3]], int(m.group(2)), since))}
+    if len(dates) != 1:
+        return None
+    credit = bool(re.search(r"\bcredit\b", text, re.I))
+    low, high = sorted((a, b))
+    near, far = (low, high) if kind == "call" else (high, low)  # the strike nearer the money first
+    long_strike, short_strike = (far, near) if credit else (near, far)
+    return {"kind": kind, "expiry": dates.pop(), "long": long_strike, "short": short_strike}
 
 
 def _contract_words(note: str | None) -> str | None:
@@ -330,10 +459,13 @@ def _candidates(read: dict, now: float, simulated: bool) -> dict:
 
 
 def build(db: Session, investigation_id: str, *, mode: str = "live", now: float | None = None,
-          pick: tuple[date, float] | None = None, chain_read: Callable[[str, date], dict] | None = None,
+          pick: tuple[date, float] | None = None, short_strike: float | None = None, pick_kind: str | None = None,
+          chain_read: Callable[[str, date], dict] | None = None,
           candidates_read: Callable[[str, int, str], dict] | None = None) -> dict:
     """One saved plan's ticket. ``pick``: the contract he chose (its expiry and strike), from the ticket's candidates or
-    the Chain tab; it replaces the contract the plan names, on the plan's own side.
+    the Chain tab; it replaces the contract the plan names, on the plan's own side. With ``short_strike`` the pick is
+    the long leg of a vertical spread (the Chain tab's Make it a spread) of ``pick_kind`` (the plan's side when None)
+    that sells ``short_strike`` in the same expiry; the plan's own words naming a vertical give one too (``read_spread``).
     ``mode``: the copilot's evidence (``live``; ``fixture`` reads the simulated chain; ``replay`` reads no quote).
     Raises ``TicketError`` without a saved, armed, not-entered plan."""
     now = time.time() if now is None else now
@@ -346,10 +478,11 @@ def build(db: Session, investigation_id: str, *, mode: str = "live", now: float 
     out = {"state": "ok", "investigation_id": investigation_id, "symbol": symbol, "direction": row["direction"],
            "thesis": row["thesis"], "confirmed_at": row["confirmed_at"], "option_type": kind,
            "entry": row["entry"] and row["entry"]["price"], "invalidation": row["invalidation"] and row["invalidation"]["price"],
+           "target": _target(row),
            "time_stop": row["time_stop"] and row["time_stop"]["text"], "plan_contract_words": words, "size": size,
            "accounts": account_list, "account": selected, "contract": None, "candidates": None, "quote": None,
            "underlying": None, "expected_move_pct": None, "limit": None, "contracts": size["contracts"], "figures": None,
-           "simulated": mode == "fixture"}
+           "spread": None, "simulated": mode == "fixture"}
     if kind is None:
         return {**out, "state": "not_option",
                 "reason": "This plan is not a long call or put; the ticket covers single long calls and puts only."}
@@ -361,8 +494,16 @@ def build(db: Session, investigation_id: str, *, mode: str = "live", now: float 
     if named and named[2] != kind:
         named = None  # a contract on the other side is not this plan's
     source = "plan" if named else None
+    spread = read_spread(words, since) if named is None and not (capture.strike and capture.expiration) else None
+    if spread is not None:
+        source = "plan"
     if pick is not None:  # his pick (a candidate here, or a contract from the Chain tab) wins; the plan's words still show
-        named, source = (pick[1], pick[0], kind), "picked"
+        if short_strike is not None and abs(short_strike - pick[1]) > 1e-9:
+            named, spread, source = None, {"kind": pick_kind or kind, "expiry": pick[0], "long": pick[1], "short": short_strike}, "picked"
+        else:
+            named, spread, source = (pick[1], pick[0], kind), None, "picked"
+    if spread is not None:
+        return _spread_ticket(db, out, row, capture, spread, source, mode=mode, now=now, chain_read=chain_read)
     if named is None:
         read = (candidates_read or _candidates_reader(mode))(symbol, _horizon_days(db, row, now), row["direction"] or ("long" if kind == "call" else "short"))
         found = {**out, "candidates": _candidates(read, now, mode == "fixture")}
@@ -395,6 +536,80 @@ def build(db: Session, investigation_id: str, *, mode: str = "live", now: float 
                                                now=chain["fetched"] if simulated and chain.get("fetched") else now,
                                                chain_read=chain if chain.get("chain") is not None else None,
                                                traded=contract, quote_for=quote_for)}
+
+
+def _target(row: dict) -> float | None:
+    target = row.get("target")
+    return target.get("price") if isinstance(target, dict) else target
+
+
+def _spread_ticket(db: Session, out: dict, row: dict, capture, spread: dict, source: str, *, mode: str, now: float,
+                   chain_read: Callable[[str, date], dict] | None) -> dict:
+    """A vertical's ticket: each leg's own quote (bid, ask, mid and time from the one chain read the ticket makes), the
+    net price at the mid and at the natural price (buy the long leg at its ask, sell the short leg at its bid: the worst
+    fill), the width, and ``spread_figures`` at the default limit, the net mid. A leg that is stale or missing gives no
+    net number at all; a wide leg (``desk_chain.WIDE_PCT``) gives one, said to be rough."""
+    from app.engine.desk_chain import WIDE_PCT
+    symbol, kind, expiry = out["symbol"], spread["kind"], spread["expiry"]
+    long_strike, short_strike = spread["long"], spread["short"]
+    chain = (chain_read or (_fixture_chain if mode == "fixture" else _live_chain))(symbol, expiry)
+    have = chain.get("chain") is not None
+    simulated = chain.get("simulated", False)
+    debit = is_debit(kind, long_strike, short_strike)
+    width = abs(short_strike - long_strike)
+    legs, listed, rough = [], [], []
+    for role, strike in (("long", long_strike), ("short", short_strike)):
+        contract = _find(chain.get("chain"), strike, kind, symbol)
+        quote = contract_quote(contract, chain.get("fetched"), now, simulated) if have \
+            else {"state": "missing", "reason": chain.get("issue") or "The option chain could not be read."}
+        wide = quote["state"] == "ok" and quote.get("spread_pct") is not None and quote["spread_pct"] >= WIDE_PCT
+        legs.append({"role": role, "action": "buy" if role == "long" else "sell", "strike": strike,
+                     "label": label(symbol, strike, expiry, kind), "quote": quote, "wide": wide})
+        listed.append(contract)
+        name = f"the ${strike:g} leg"
+        if quote["state"] != "ok":
+            rough.append(f"{name} has {'a stale quote' if quote['state'] == 'stale' else 'no usable quote'}")
+        elif wide:
+            rough.append(f"{name}'s market is wide ({quote['spread_pct']:g}% of its mid)")
+    multipliers = {c.multiplier for c in listed if c is not None and c.multiplier}
+    multiplier = next(iter(multipliers)) if len(multipliers) == 1 else None
+    if len(multipliers) > 1:
+        rough.append("the two legs have different multipliers (an adjusted contract), so no dollar figures")
+    stock = underlying(chain, now)
+    move = None
+    if have and stock["state"] == "ok":
+        from app.ai.copilot_options import expected_move
+        move = expected_move(chain["chain"], stock["last"]).get("move_pct")
+    net_mid = net_natural = None
+    long_q, short_q = legs[0]["quote"], legs[1]["quote"]
+    if long_q["state"] == "ok" and short_q["state"] == "ok":
+        paid_mid = (long_q["bid"] + long_q["ask"]) / 2 - (short_q["bid"] + short_q["ask"]) / 2  # per share, signed: + is paid
+        paid_natural = long_q["ask"] - short_q["bid"]  # buy at the ask, sell at the bid
+        net_mid = round(paid_mid if debit else -paid_mid, 2)
+        net_natural = round(paid_natural if debit else -paid_natural, 2)
+    limit = net_mid if net_mid is not None and 0 < net_mid < width and multiplier else None
+    if net_mid is not None and limit is None and multiplier:
+        rough.append(f"the quotes put the net mid at {net_mid:.2f}, outside 0 to the {width:g} width")
+    type_ = "debit" if debit else "credit"
+    count = out["size"]["contracts"] or spreads_for_risk(out["size"]["risk_usd"], type_, limit, width, multiplier)
+    bullish = spread_bullish(kind, long_strike, short_strike)
+    against = row["direction"] in ("long", "short") and (row["direction"] == "long") != bullish
+    levels = {"entry": out["entry"], "target": out["target"], "stop": out["invalidation"]}
+    found = {**out, "option_type": kind, "underlying": stock, "expected_move_pct": move, "limit": limit, "contracts": count,
+             "spread": {"kind": kind, "expiry": expiry.isoformat(), "type": type_, "width": round(width, 4),
+                        "long": long_strike, "short": short_strike, "label": spread_label(symbol, kind, long_strike, short_strike, expiry),
+                        "source": source, "multiplier": multiplier, "legs": legs, "net_mid": net_mid, "net_natural": net_natural,
+                        "rough": rough, "bullish": bullish,
+                        "against_plan": (f"This {type_} {kind} spread gains as {symbol} {'rises' if bullish else 'falls'}; "
+                                         f"your plan is {row['direction']}.") if against else None},
+             "figures": spread_figures(kind, long_strike, short_strike, limit, count, multiplier, stock.get("last"), move, levels)}
+
+    def quote_for(other, its_chain):
+        return contract_quote(other, chain.get("fetched"), now, simulated)
+
+    return {**found, "check": play_check.check(db, found, row, account_id=capture.account_id,
+                                               now=chain["fetched"] if simulated and chain.get("fetched") else now,
+                                               chain_read=chain if have else None, traded=tuple(listed), quote_for=quote_for)}
 
 
 def _candidates_reader(mode: str) -> Callable[[str, int, str], dict]:
