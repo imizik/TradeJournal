@@ -655,7 +655,7 @@ def chart(db: Session, inv: CopilotInvestigation | SymbolThread | None, now: flo
     so they are right from the first candle; ``reference`` lines (intraday: the previous close and today's pre-market
     high and low); ``reading``: the newest price, the previous close, VWAP and RVol, each with its time; its plan's
     entry and invalidation (and its saved target, a line with no alert) as ``levels``; the symbol's other armed level
-    ``alerts``; ``marks``: the owner's fills on the symbol since the first candle and ``events`` (today's pings sent and Radar hits, ``kind``/``at``/``text``); the
+    ``alerts``; ``marks``: the owner's fills on the symbol since the first candle and ``events`` (today's pings sent, Radar hits and TradingView alerts, ``kind``/``at``/``text``); the
     plan's time stop while still ahead. ``inv`` None is the market chart: ``MARKET`` with ``events`` alone (the day's
     fills on any symbol and pings sent). ``live`` says bars can still change, so the desk reads again each minute.
     No bars, a failed read or a run past the budget is ``state`` "unavailable" with the reason."""
@@ -673,7 +673,7 @@ def chart(db: Session, inv: CopilotInvestigation | SymbolThread | None, now: flo
         return {**base, "state": "unavailable", "reason": str(exc)}
     shown = read["bars"]
     marks = [{"kind": e["kind"], "at": int(e["at"]), "price": None, "side": None, "text": e.get("text") or e["kind"].title()}
-             for e in events if e.get("at") is not None and e["kind"] in ("fill", "ping", "radar")]
+             for e in events if e.get("at") is not None and e["kind"] in ("fill", "ping", "radar", "tradingview")]
     levels: list[dict] = []
     time_stop = None
     if inv is not None:

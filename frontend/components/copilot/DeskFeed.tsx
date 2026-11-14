@@ -9,7 +9,7 @@ import type { ChainPick } from "@/components/copilot/DeskChain";
 import { UnusualList, type UnusualReply } from "@/components/copilot/DeskUnusual";
 import { ScannerList, type DeskScannerReply, type DeskScannerRow } from "@/components/copilot/DeskScanner";
 
-export type FeedSource = "Alert" | "Plan" | "Radar" | "Radar setup" | "News" | "Calendar" | "Copilot note" | "r/wallstreetbets" | "NYT";
+export type FeedSource = "Alert" | "Plan" | "Radar" | "Radar setup" | "News" | "Calendar" | "Copilot note" | "TradingView" | "r/wallstreetbets" | "NYT";
 /** One feed row (``app/engine/desk_feed.py``). ``plan``: "setup" (a Radar setup card's own Plan it) or "own" (his own
  * position or plan); never on news, calendar or Radar events. */
 export type FeedItem = {
@@ -29,8 +29,9 @@ export type ChatterBuzz = { symbol: string; count: number; before: number | null
 export type ChatterState = "on" | "stale" | "not set up" | "unavailable";
 /** The Feed's chatter block: shown only behind its own Chatter filter, never in ``items``. */
 export type DeskChatter = { sources: Record<string, ChatterState>; buzz: ChatterBuzz[]; items: FeedItem[] };
+/** ``tradingview.last_at``: when his newest stored TradingView alert (on a ticker he follows) came in, or null. */
 export type DeskFeedBody = { as_of: string; now: number; day: string; items: FeedItem[]; total: number;
-  sources: Record<string, string>; unavailable: string[]; chatter?: DeskChatter };
+  sources: Record<string, string>; unavailable: string[]; chatter?: DeskChatter; tradingview?: { last_at: number | null } };
 
 const SEEN_KEY = "desk.feed.seen.v1";
 const ACTION = "inline-flex min-h-11 items-center gap-1 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-7";
@@ -55,12 +56,31 @@ export function feedWhen(item: Pick<FeedItem, "at" | "has_time">, day: string): 
   return other ? `${weekday} ${clock}` : clock;
 }
 
+/** "just now", "12 min ago", "2 h ago": how long before the feed's read a TradingView alert came in. */
+export function feedAgo(at: number, now: number): string {
+  const minutes = Math.floor(Math.max(0, now - at) / 60);
+  return minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ago`;
+}
+
+/** Under Mine on a day with no TradingView alert yet: when the last one came ("Thu 15:42" this week, else "Oct 30"),
+ * so a quiet webhook shows as quiet. Nothing when there has never been one, or one came today. */
+export function tradingViewQuiet(data: DeskFeedBody): string | null {
+  const last = data.tradingview?.last_at ?? null;
+  if (last === null || data.items.some(i => i.source === "TradingView")) return null;
+  if (new Date(last * 1000).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) === data.day) return null;
+  const when = data.now - last < 6 * 86_400 ? feedWhen({ at: last, has_time: true }, data.day) : ny(last, { month: "short", day: "numeric" });
+  return `No TradingView alerts today. Last one ${when}.`;
+}
+
 /** The question "Ask the copilot" puts in the box, unsent: the item as the feed shows it. A headline is quoted as the
  * publisher's words, named as such. */
 export function feedQuestion(item: FeedItem, day: string): string {
   const when = feedWhen(item, day);
   if (item.chatter) {
     return `About this ${item.source} item (${when}${item.symbol ? `, ${item.symbol}` : ""}), quoted as posted: "${item.text}". What is it about, and does it touch my positions or plans?`;
+  }
+  if (item.source === "TradingView") {
+    return `About my TradingView alert (${when}${item.symbol ? `, ${item.symbol}` : ""}): "${item.text}". What is the chart doing now, and does it touch my positions or plans?`;
   }
   if (item.source === "News") {
     return `About the ${item.publisher ?? "news"} headline on ${item.symbol ?? "the market"} (${when}), quoted: "${item.text}". What is it about, and does it touch my positions or plans?`;
@@ -122,6 +142,9 @@ export function useFeedNew(data: DeskFeedBody | null, open: boolean): { count: n
  * headline at its publisher, and Plan it only on a Radar setup card or his own position or plan. Facts only; nothing here
  * is an order. A source that could not be read is left out quietly. The copilot's own questions (What matters right
  * now?, Review my week) are in the copilot and ⌘K, not repeated here.
+ * **TradingView** rows (under Mine, counted as new): his own alerts that reached the webhook today, with what fired, the
+ * price then and how long ago; Show on chart puts the ticker on the desk chart (its marker there), On Signals opens the
+ * stored alert. A day with none says once, in grey, when the last one came; never a sound or a pop-up.
  * **Chatter** (r/wallstreetbets buzz from ApeWisdom's counts, NYT headlines): its rows never show under the other picks,
  * never count as new, and carry only Ask the copilot and their link; what a chatter source did not deliver is said only
  * under it.
@@ -129,8 +152,10 @@ export function useFeedNew(data: DeskFeedBody | null, open: boolean): { count: n
  * the Chain tab. **Scanner** (``DeskScanner``), while the setup scanner is switched on: today's candidates; a row opens
  * the ticker on the desk chart with the scanner's levels. Neither counts as new or mixes into the other picks.
  */
-export default function DeskFeed({ data, failed, since, onAsk, onPlan, unusual = null, onUnusual, scanner = null, onScanner, onScannerPlan }: {
+export default function DeskFeed({ data, failed, since, onAsk, onPlan, onChart, unusual = null, onUnusual, scanner = null, onScanner, onScannerPlan }: {
   data: DeskFeedBody | null; failed: boolean; since: number | null; onAsk(item: FeedItem): void; onPlan(item: FeedItem): void;
+  /** A TradingView row's Chart: its ticker on the desk chart, where the alert's marker sits. */
+  onChart?(symbol: string): void;
   unusual?: UnusualReply | null; onUnusual?(pick: ChainPick): void;
   scanner?: DeskScannerReply | null; onScanner?(row: DeskScannerRow): void; onScannerPlan?(href: string): void;
 }) {
@@ -158,6 +183,7 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, unusual =
   const ideas: readonly (readonly [Idea, string])[] = [["radar", "Radar"], ...(scannerOn ? [["scanner", "Scanner"] as const] : []), ["unusual", "Unusual options"]];
   const markets: readonly (readonly [MarketPick, string])[] = chatterOn ? [["news", "News & calendar"], ["chatter", "Chatter"]] : [];
   const chatterNote = chatterWhy(chatter);
+  const quietLine = data && filter === "mine" && !symbol ? tradingViewQuiet(data) : null;
 
   return (
     <section aria-label="Feed" data-testid="desk-feed" className="space-y-2">
@@ -194,13 +220,14 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, unusual =
         <ol className="divide-y rounded-lg border bg-card">
           {items.map((item, i) => (
             <FeedRow key={item.id} item={item} day={day} fresh={!item.chatter && since !== null && !item.upcoming && item.at > since}
-              ahead={!item.chatter && item.upcoming && !items[i - 1]?.upcoming} onSymbol={setSymbol} onAsk={onAsk} onPlan={onPlan} />
+              ahead={!item.chatter && item.upcoming && !items[i - 1]?.upcoming} now={data?.now ?? 0} onSymbol={setSymbol} onAsk={onAsk} onPlan={onPlan} onChart={onChart} />
           ))}
         </ol>
       )}
       {data && filter !== "chatter" && data.total > data.items.length && !symbol && (
         <p className="px-1 text-xs text-muted-foreground">Showing the first {data.items.length} of {data.total}.</p>
       )}
+      {quietLine && <p data-testid="feed-tradingview-quiet" className="px-1 text-xs text-muted-foreground">{quietLine}</p>}
       {chatterNote && filter === "chatter" && <p data-testid="feed-chatter-note" className="px-1 text-xs text-muted-foreground">{chatterNote}</p>}
       </>}
     </section>
@@ -263,17 +290,19 @@ function ChatterHead({ chatter, day }: { chatter: DeskChatter; day: string }) {
   );
 }
 
-function FeedRow({ item, day, fresh, ahead, onSymbol, onAsk, onPlan }: {
-  item: FeedItem; day: string; fresh: boolean; ahead: boolean; onSymbol(symbol: string): void; onAsk(item: FeedItem): void; onPlan(item: FeedItem): void;
+function FeedRow({ item, day, fresh, ahead, now, onSymbol, onAsk, onPlan, onChart }: {
+  item: FeedItem; day: string; fresh: boolean; ahead: boolean; now: number; onSymbol(symbol: string): void; onAsk(item: FeedItem): void; onPlan(item: FeedItem): void;
+  onChart?(symbol: string): void;
 }) {
   const chatter = !!item.chatter;
+  const tradingView = item.source === "TradingView";
   const open = chatter ? null : item.source === "Radar" || (item.source === "Copilot note" && item.href && !item.href.includes("symbol=")) ? item.href : null;
   return (
     <li data-testid="feed-item" className="min-w-0 px-3 py-2.5">
       {ahead && <p className="-mt-0.5 mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Coming up</p>}
       <p className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
         <span data-testid="feed-source" className="whitespace-nowrap rounded border px-1.5 py-px text-[11px]">{item.source}</span>
-        <span className="tabular-nums">{feedWhen(item, day)}</span>
+        <span className="tabular-nums">{feedWhen(item, day)}{tradingView && now > 0 && <> · {feedAgo(item.at, now)}</>}</span>
         {fresh && <span aria-label="new" className="size-1.5 rounded-full bg-muted-foreground" />}
         {item.symbol && chatter && <span className="ml-auto font-semibold text-foreground">{item.symbol}</span>}
         {item.symbol && !chatter && (
@@ -296,13 +325,15 @@ function FeedRow({ item, day, fresh, ahead, onSymbol, onAsk, onPlan }: {
       )}
       <div className="mt-2 flex flex-wrap gap-1.5">
         <button type="button" onClick={() => onAsk(item)} className={ACTION}>Ask the copilot</button>
-        {item.symbol && !chatter && <Link href={`/charts?symbol=${encodeURIComponent(item.symbol)}`} className={ACTION}>Open in Charts</Link>}
+        {tradingView && item.symbol && onChart && <button type="button" onClick={() => onChart(item.symbol!)} className={ACTION}>Show on chart</button>}
+        {item.symbol && !chatter && !tradingView && <Link href={`/charts?symbol=${encodeURIComponent(item.symbol)}`} className={ACTION}>Open in Charts</Link>}
         {item.url && (
           <a href={item.url} target="_blank" rel="noopener noreferrer nofollow" className={ACTION}>
             {item.source === "r/wallstreetbets" ? "Open on Reddit" : `Read at ${item.publisher ?? "the source"}`}<ExternalLink size={12} aria-hidden />
           </a>
         )}
         {open && <Link href={open} className={ACTION}>Open</Link>}
+        {tradingView && item.href && <Link href={item.href} className={ACTION}>On Signals</Link>}
         {item.plan && !chatter && <button type="button" onClick={() => onPlan(item)} className={ACTION}>Plan it</button>}
       </div>
     </li>

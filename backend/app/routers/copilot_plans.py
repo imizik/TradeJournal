@@ -171,7 +171,7 @@ def desk_picture(investigation_id: str, timeframe: Literal["2m", "15m", "1D"] = 
 @router.get("/desk/{investigation_id}/chart")
 def desk_chart(investigation_id: str, timeframe: Literal["2m", "15m", "1D"] = "2m", db: Session = Depends(get_session)):
     """The cockpit centre's interactive chart as data (``desk_context.chart``): the thread's symbol on ``timeframe`` with
-    its plan's levels, the owner's fills, today's pings sent and Radar hits on the symbol, and the time stop still
+    its plan's levels, the owner's fills, today's pings sent, Radar hits and his TradingView alerts on the symbol, and the time stop still
     ahead. ``market`` is QQQ with the day's fills and pings, less tickers he does not follow. One cached chart-feed read, like the picture. No bars is
     ``state`` "unavailable" with the reason, never an error page."""
     from app.routers import copilot_desk
@@ -188,7 +188,21 @@ def desk_chart(investigation_id: str, timeframe: Literal["2m", "15m", "1D"] = "2
     inv = _thread(investigation_id, db)
     radar = today._section(db, "desk chart radar", lambda: copilot_desk._radar_events(day))
     events = [r for r in pings.get("rows", []) + radar.get("rows", []) if inv.symbol and r.get("symbol") == inv.symbol]
+    if inv.symbol:
+        mode = getattr(copilot.settings(), "evidence", "live")
+        alerts = today._section(db, "desk chart tradingview", lambda: _tradingview_marks(db, inv.symbol, now, mode))
+        events += alerts.get("rows", [])
     return desk_context.chart(db, inv, now, timeframe, events)
+
+
+def _tradingview_marks(db: Session, symbol: str, now: float, mode: str) -> dict:
+    """Today's TradingView alerts on ``symbol`` as chart marks (stored rows only); none on a ticker he does not follow."""
+    from app.engine import desk_feed
+    if symbol in day_journal.not_following(db):  # strict: an unreadable setting marks nothing
+        return {"state": "ok", "rows": []}
+    rows = [{"kind": "tradingview", "at": a["at"], "symbol": symbol, "text": desk_feed.tradingview_words(a)}
+            for a in desk_feed.tradingview_today(db, now, mode, symbol=symbol)]
+    return {"state": "ok", "rows": rows}
 
 
 @router.get("/desk/{investigation_id}/news")
