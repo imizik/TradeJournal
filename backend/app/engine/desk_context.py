@@ -655,7 +655,7 @@ def chart(db: Session, inv: CopilotInvestigation | SymbolThread | None, now: flo
     so they are right from the first candle; ``reference`` lines (intraday: the previous close and today's pre-market
     high and low); ``reading``: the newest price, the previous close, VWAP and RVol, each with its time; its plan's
     entry and invalidation (and its saved target, a line with no alert) as ``levels``; the symbol's other armed level
-    ``alerts``; ``marks``: the owner's fills on the symbol since the first candle and ``events`` (today's pings sent, Radar hits and TradingView alerts, ``kind``/``at``/``text``); the
+    ``alerts``; ``marks``: the owner's fills on the symbol since the first candle, his paper entries and exits (``paper``) and ``events`` (today's pings sent, Radar hits and TradingView alerts, ``kind``/``at``/``text``); the
     plan's time stop while still ahead. ``inv`` None is the market chart: ``MARKET`` with ``events`` alone (the day's
     fills on any symbol and pings sent). ``live`` says bars can still change, so the desk reads again each minute.
     No bars, a failed read or a run past the budget is ``state`` "unavailable" with the reason."""
@@ -694,6 +694,11 @@ def chart(db: Session, inv: CopilotInvestigation | SymbolThread | None, now: flo
         fills = db.exec(select(Fill).where(Fill.ticker == symbol, Fill.executed_at >= since, _not_webull())
                         .order_by(Fill.executed_at.desc()).limit(MAX_FILLS)).all()
         marks = [_fill_mark(f) for f in reversed(fills)] + marks
+        try:  # his paper entries and exits, marked apart from real fills
+            from app.engine import paper_book
+            marks += paper_book.chart_marks(db, symbol, shown[0]["time"])
+        except Exception:  # noqa: BLE001 -- the chart stands without them
+            log.warning("desk chart: paper marks unavailable for %s", symbol, exc_info=True)
     marks = sorted((m for m in marks if m["at"] is not None and m["at"] >= shown[0]["time"]), key=lambda m: m["at"])[-MAX_MARKS:]
     alerts = _alerts(db, symbol, {level["id"] for level in levels})
     return {**base, **read, "state": "ok", "reason": None, "levels": levels, "alerts": alerts, "marks": marks,

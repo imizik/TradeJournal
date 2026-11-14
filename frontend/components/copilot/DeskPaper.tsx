@@ -4,16 +4,19 @@ import { useCallback, useEffect, useState } from "react";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { useDeskTicks } from "@/lib/deskTicks";
 import {
-  PAPER_EVENT, PaperRefused, fillClose, fillOpen, orderKey, paperPnl, paperSymbols, paperValue, previewClose, previewOpen, startPaper,
-  type PaperBook, type PaperFill, type PaperOrder, type PaperPosition, type PaperStats,
+  PAPER_EVENT, PaperRefused, cancelPaperOrder, fillClose, fillOpen, isCredit, orderKey, paperPnl, paperSymbols, paperValue, placeLimitClose,
+  placeLimitOpen, previewClose, previewOpen, setPaperAuto, startPaper,
+  type PaperBook, type PaperFill, type PaperOrder, type PaperPosition, type PaperStats, type PaperWorkingOrder,
 } from "@/lib/paperBook";
 import { cn } from "@/lib/utils";
 
 /**
  * His own paper book on the desk (docs/copilot-lab.md § Paper): a Paper button wherever the desk builds an order (the
  * Ticket, the Chain tab, shares of the selected ticker), and the Paper section under the book: the account, open paper
- * positions at the desk's live prices with Close and Trim, and the scorecard beside his real trades over the same dates.
- * Every fill is at a live quote read when he taps (the ask to buy, the bid to sell); nothing is placed anywhere.
+ * positions at the desk's live prices with Close and Trim, working limit orders with Cancel, each position's "Close
+ * automatically at stop/target" switch, and the scorecard beside his real trades over the same dates. A market fill is at
+ * a live quote read when he taps (the ask to buy, the bid to sell); a limit fills on a later fresh quote that reaches its
+ * price, checked once a minute; nothing is placed anywhere.
  */
 
 const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
@@ -59,12 +62,35 @@ function fillLine(fill: PaperFill, opening: boolean, multiplier: number) {
     : `${price(one.price)} (the ${one.action === "buy" ? "ask" : "bid"})`;
   const verb = opening ? (spread ? "Open" : "Buy") : (spread ? "Close" : "Sell");
   const money = `${fill.cash >= 0 ? "takes in" : "costs"} ${usd(fill.cash)}`;
-  return `${verb} ${fill.quantity.toLocaleString("en-US")}${multiplier === 1 ? " shares of" : " ×"} ${fill.label} at ${priceWords}, quote ${at(fill.quoted_at, true)}: ${money}`;
+  // Shares read "Buy 10 NBIS shares" (their label names them); contracts "Buy 2 × NBIS $100 Call 11/20/26".
+  return `${verb} ${fill.quantity.toLocaleString("en-US")}${multiplier === 1 ? "" : " ×"} ${fill.label} at ${priceWords}, quote ${at(fill.quoted_at, true)}: ${money}`;
+}
+
+/** Market or Limit, as on Robinhood: market fills at the quote read now; a limit is a day order that waits for its price. */
+function OrderType({ type, onChange, market = true }: { type: "market" | "limit"; onChange(type: "market" | "limit"): void; market?: boolean }) {
+  return (
+    <div role="radiogroup" aria-label="Paper order type" className="inline-flex rounded-md border text-xs">
+      {(["market", "limit"] as const).map(t => (
+        <button key={t} type="button" role="radio" aria-checked={type === t} disabled={t === "market" && !market} data-testid={`paper-type-${t}`}
+          onClick={() => onChange(t)}
+          className={cn("min-h-11 px-3 first:rounded-l-md last:rounded-r-md disabled:cursor-not-allowed disabled:opacity-45 sm:min-h-8",
+            type === t ? "bg-amber-400/15 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>{t === "market" ? "Market" : "Limit"}</button>
+      ))}
+    </div>
+  );
+}
+
+/** What a limit does, in one line: when it fills, at what, and until when. ``pays``: buying, or a spread costing a debit. */
+function limitWords(limit: number, spread: boolean, pays: boolean, closing: boolean) {
+  const n = price(limit);
+  if (spread) return pays ? `Fills at the natural price once it costs ${n} or less` : `Fills at the natural price once it takes in ${n} or more`;
+  return closing ? `Sells at the bid once the bid is ${n} or more` : `Buys at the ask once the ask is ${n} or less`;
 }
 
 /**
- * The Paper button: one tap reads a live quote and shows what the order would fill at; Fill on paper fills it at the
- * quote read then (the ask to buy, the bid to sell). A note, a stop and a target (stock prices) can ride with it.
+ * The Paper button: one tap reads a live quote and shows what the order would fill at. Market fills on paper at the
+ * quote read then (the ask to buy, the bid to sell); Limit places a day order that fills once a fresh quote reaches its
+ * price, until the close or a cancel. A note, a stop and a target (stock prices) can ride with it.
  */
 export function PaperButton({ order, quantity = 1, note = null, stop = null, target = null, label = "Paper trade it" }: {
   order: PaperOrder | null; quantity?: number | null; note?: string | null; stop?: number | null; target?: number | null; label?: string;
@@ -76,27 +102,55 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
   const [stopText, setStopText] = useState(stop != null ? String(stop) : "");
   const [targetText, setTargetText] = useState(target != null ? String(target) : "");
   const [preview, setPreview] = useState<PaperFill | null>(null);
+  const [type, setType] = useState<"market" | "limit">("market");
+  const [limitText, setLimitText] = useState("");
+  const [closedNow, setClosedNow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ text: string; start: boolean } | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [key, setKey] = useState("");
   const qtyN = Number(qty);
   const valid = Number.isInteger(qtyN) && qtyN > 0;
+  const limitN = Number(limitText);
+  const limitValid = limitText.trim() !== "" && limitN > 0;
+  const spread = order?.instrument === "spread";
+  const credit = !!order && isCredit(order);
   const refuse = (e: unknown) => setError({ text: e instanceof Error ? e.message : "Not filled.", start: e instanceof PaperRefused && /Start a paper account/.test(e.message) });
 
   const check = async (count = qtyN) => {
     if (!order) return;
-    setOpen(true); setBusy(true); setError(null); setDone(null); setKey(orderKey());
-    try { setPreview(await previewOpen(order, count)); } catch (e) { setPreview(null); refuse(e); } finally { setBusy(false); }
+    setOpen(true); setBusy(true); setError(null); setDone(null); setKey(orderKey()); setClosedNow(false);
+    try {
+      const found = await previewOpen(order, count);
+      setPreview(found); setLimitText(price(Math.abs(found.per_share)));
+    } catch (e) {
+      setPreview(null);
+      // Closed: no live quote to fill at, but a day limit can still be placed before the open.
+      if (e instanceof PaperRefused && /market is closed/.test(e.message)) { setClosedNow(true); setType("limit"); } else refuse(e);
+    } finally { setBusy(false); }
+  };
+  const levels = () => {
+    const level = (text: string) => text.trim() ? Number(text) : null;
+    return { note: words.trim() || null, stop: level(stopText), target: level(targetText) };
   };
   const fill = async () => {
     if (!order || !valid) return;
     setBusy(true); setError(null);
-    const level = (text: string) => text.trim() ? Number(text) : null;
     try {
-      const filled = await fillOpen(order, qtyN, { note: words.trim() || null, stop: level(stopText), target: level(targetText) }, key);
+      const filled = await fillOpen(order, qtyN, levels(), key);
       setDone(filled ? `Paper: ${fillLine(filled, true, multiplier)}.` : "Already filled on paper.");
       setPreview(null);
+    } catch (e) { refuse(e); } finally { setBusy(false); }
+  };
+  const place = async () => {
+    if (!order || !valid || !limitValid) return;
+    setBusy(true); setError(null);
+    try {
+      const placed = await placeLimitOpen(order, qtyN, limitN, levels(), key);
+      setDone(placed.filled ? `Paper limit filled: ${fillLine(placed.filled, true, multiplier)}.`
+        : placed.working ? `Paper limit working: ${spread ? "open" : "buy"} ${qtyN.toLocaleString("en-US")} at ${price(limitN)}${spread ? (credit ? " credit or more" : " debit or less") : " or better"}, until ${at(placed.working.expires_at)} or until you cancel it below.`
+        : "Already placed on paper.");
+      setPreview(null); setClosedNow(false);
     } catch (e) { refuse(e); } finally { setBusy(false); }
   };
   const start = async () => {
@@ -107,18 +161,31 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
   if (!open) {
     return (
       <button type="button" data-testid="paper-button" disabled={!order}
-        onClick={() => { const n = quantity && quantity > 0 ? quantity : 1; setQty(String(n)); check(n); }} title="Fill this on paper at the live quote: no money, nothing sent"
+        onClick={() => { const n = quantity && quantity > 0 ? quantity : 1; setQty(String(n)); setType("market"); check(n); }} title="Fill this on paper at the live quote, or place a paper limit: no money, nothing sent"
         className={cn(BUTTON, "border-amber-400/60 text-amber-200")}>{label}</button>
     );
   }
   const cost = preview ? Math.round(preview.per_share * multiplier * (valid ? qtyN : preview.quantity) * 100) / 100 : null;
+  const width = order?.instrument === "spread" ? Math.abs(order.long_strike - order.short_strike) : null;
+  const hold = limitValid && valid ? Math.round((credit && width != null ? width - limitN : limitN) * multiplier * qtyN * 100) / 100 : null;
+  const form = preview || closedNow;
   return (
     <div data-testid="paper-confirm" className="w-full space-y-2 rounded-md border border-dashed border-amber-400/50 p-2.5">
       <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-200">Paper · not real money</p>
-      {busy && !preview && <p className="text-xs text-muted-foreground">Reading a live quote…</p>}
-      {preview && (
+      {busy && !form && <p className="text-xs text-muted-foreground">Reading a live quote…</p>}
+      {form && !done && (
         <>
-          <p data-testid="paper-preview" className="text-sm tabular-nums">{fillLine({ ...preview, quantity: valid ? qtyN : preview.quantity, cash: cost ?? preview.cash }, true, multiplier)}.</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <OrderType type={type} onChange={setType} market={!closedNow} />
+            {type === "limit" && (
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Limit $
+                <input aria-label="Paper limit price" data-testid="paper-limit" inputMode="decimal" value={limitText} onChange={e => setLimitText(e.target.value.replace(/[^\d.]/g, ""))} className={cn(INPUT, "w-20")} />
+              </label>
+            )}
+          </div>
+          {closedNow && <p className="text-xs text-muted-foreground">The market is closed, so there is no live quote to fill at. A limit placed before the open works from 9:30 AM ET until the close.</p>}
+          {preview && type === "market" && <p data-testid="paper-preview" className="text-sm tabular-nums">{fillLine({ ...preview, quantity: valid ? qtyN : preview.quantity, cash: cost ?? preview.cash }, true, multiplier)}.</p>}
+          {preview && type === "limit" && <p className="text-xs tabular-nums text-muted-foreground">Now: {fillLine({ ...preview, quantity: valid ? qtyN : preview.quantity, cash: cost ?? preview.cash }, true, multiplier)}.</p>}
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground">{multiplier === 1 ? "Shares" : order?.instrument === "spread" ? "Spreads" : "Contracts"}
               <input aria-label="Paper quantity" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/[^\d]/g, ""))} className={cn(INPUT, "w-20")} />
@@ -131,10 +198,16 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
             </label>
           </div>
           <input aria-label="Paper note" maxLength={280} placeholder="Why (optional, one line)" value={words} onChange={e => setWords(e.target.value)} className={cn(INPUT, "w-full")} />
-          <p className="text-[11px] text-muted-foreground">Fill on paper re-reads the quote and fills at that moment&apos;s {Object.values(preview.legs).length > 1 ? "natural price" : "ask"}. {preview.buying_power != null && preview.need_each != null && valid && <>Paper buying power after: {preview.buying_power - preview.need_each * qtyN < 0 ? "−" : ""}{usd(preview.buying_power - preview.need_each * qtyN)}{preview.buying_power - preview.need_each * qtyN < 0 ? " (not enough)" : ""}.</>}</p>
+          {type === "market" && preview ? (
+            <p className="text-[11px] text-muted-foreground">Fill on paper re-reads the quote and fills at that moment&apos;s {Object.values(preview.legs).length > 1 ? "natural price" : "ask"}. {preview.buying_power != null && preview.need_each != null && valid && <>Paper buying power after: {preview.buying_power - preview.need_each * qtyN < 0 ? "−" : ""}{usd(preview.buying_power - preview.need_each * qtyN)}{preview.buying_power - preview.need_each * qtyN < 0 ? " (not enough)" : ""}.</>}</p>
+          ) : (
+            <p data-testid="paper-limit-words" className="text-[11px] text-muted-foreground">{limitValid ? <>{limitWords(limitN, spread, !credit, false)}, on a live quote only. A day order: it works until the close or until you cancel it{hold != null && <>, and holds {usd(hold)} of paper buying power meanwhile</>}.</> : "Name the limit price."}</p>
+          )}
           <div className="flex flex-wrap gap-2">
-            <button type="button" data-testid="paper-fill" disabled={busy || !valid} onClick={fill} className={cn(BUTTON, "border-amber-400/70 text-amber-100")}>Fill on paper</button>
-            <button type="button" onClick={() => { setOpen(false); setPreview(null); setError(null); }} className={QUIET}>Cancel</button>
+            {type === "market"
+              ? <button type="button" data-testid="paper-fill" disabled={busy || !valid || !preview} onClick={fill} className={cn(BUTTON, "border-amber-400/70 text-amber-100")}>Fill on paper</button>
+              : <button type="button" data-testid="paper-place-limit" disabled={busy || !valid || !limitValid} onClick={place} className={cn(BUTTON, "border-amber-400/70 text-amber-100")}>Place limit on paper</button>}
+            <button type="button" onClick={() => { setOpen(false); setPreview(null); setError(null); setClosedNow(false); }} className={QUIET}>Cancel</button>
           </div>
         </>
       )}
@@ -142,7 +215,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
         <div className="flex flex-wrap items-center gap-2">
           <p role="alert" data-testid="paper-refused" className="text-xs text-amber-300">{error.text}</p>
           {error.start && <button type="button" disabled={busy} onClick={start} className={BUTTON}>Start a $10,000 paper account</button>}
-          {!preview && <button type="button" onClick={() => { setOpen(false); setError(null); }} className={QUIET}>Close</button>}
+          {!form && <button type="button" onClick={() => { setOpen(false); setError(null); }} className={QUIET}>Close</button>}
         </div>
       )}
       {done && (
@@ -155,19 +228,26 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
   );
 }
 
-/** Close or trim an open paper position: a live quote first, then Fill on paper at the bid (the ask to buy a leg back). */
+/** Close or trim an open paper position: a live quote first, then Fill on paper at the bid (the ask to buy a leg back),
+ *  or a sell limit that waits for its price until the close. What a working sell limit holds cannot be sold twice. */
 function CloseRow({ position, trim, onDone }: { position: PaperPosition; trim: boolean; onDone(): void }) {
-  const [qty, setQty] = useState(String(trim ? Math.max(1, Math.floor(position.remaining / 2)) : position.remaining));
+  const free = position.remaining - (position.held ?? 0);
+  const [qty, setQty] = useState(String(trim ? Math.max(1, Math.floor(free / 2)) : free));
   const [preview, setPreview] = useState<PaperFill | null>(null);
+  const [type, setType] = useState<"market" | "limit">("market");
+  const [limitText, setLimitText] = useState("");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [key] = useState(orderKey);
   const qtyN = Number(qty);
-  const valid = Number.isInteger(qtyN) && qtyN > 0 && qtyN <= position.remaining;
+  const valid = Number.isInteger(qtyN) && qtyN > 0 && qtyN <= free;
+  const limitN = Number(limitText);
+  const limitValid = limitText.trim() !== "" && limitN > 0;
+  const spread = position.instrument === "spread";
   useEffect(() => {
     let live = true;
-    previewClose(position.id, Number(qty) || position.remaining).then(p => { if (live) setPreview(p); })
+    previewClose(position.id, Number(qty) || free).then(p => { if (live) { setPreview(p); setLimitText(price(Math.abs(p.per_share))); } })
       .catch(e => { if (live) setError(e instanceof Error ? e.message : "No quote."); })
       .finally(() => { if (live) setBusy(false); });
     return () => { live = false; };
@@ -179,24 +259,108 @@ function CloseRow({ position, trim, onDone }: { position: PaperPosition; trim: b
       setDone(filled ? `Paper: ${fillLine(filled, false, position.multiplier)}; ${filled.pnl! >= 0 ? "made" : "lost"} ${usd(filled.pnl!)}.` : "Already filled on paper.");
     } catch (e) { setError(e instanceof Error ? e.message : "Not filled."); } finally { setBusy(false); }
   };
+  const place = async () => {
+    setBusy(true); setError(null);
+    try {
+      const placed = await placeLimitClose(position.id, qtyN, limitN, key);
+      setDone(placed.filled ? `Paper limit filled: ${fillLine(placed.filled, false, position.multiplier)}; ${placed.filled.pnl! >= 0 ? "made" : "lost"} ${usd(placed.filled.pnl!)}.`
+        : placed.working ? `Paper limit working: ${spread ? "close" : "sell"} ${qtyN} at ${price(limitN)}, until ${at(placed.working.expires_at)} or until you cancel it.` : "Already placed on paper.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Not placed."); } finally { setBusy(false); }
+  };
   const share = preview && valid ? Math.round(preview.per_share * position.multiplier * qtyN * 100) / 100 : null;
   return (
     <div data-testid="paper-close" className="space-y-1.5 border-t border-dashed border-amber-400/30 px-3 py-2">
       {busy && !preview && !error && <p className="text-xs text-muted-foreground">Reading a live quote…</p>}
       {preview && !done && (
         <>
-          <p className="text-xs tabular-nums">{fillLine({ ...preview, quantity: valid ? qtyN : preview.quantity, cash: share ?? preview.cash }, false, position.multiplier)}.</p>
           <div className="flex flex-wrap items-center gap-2">
-            {trim && <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Of {position.remaining}
+            <OrderType type={type} onChange={setType} />
+            {type === "limit" && (
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Limit $
+                <input aria-label="Paper sell limit price" data-testid="paper-close-limit" inputMode="decimal" value={limitText} onChange={e => setLimitText(e.target.value.replace(/[^\d.]/g, ""))} className={cn(INPUT, "w-20")} />
+              </label>
+            )}
+          </div>
+          <p className={cn("tabular-nums", type === "market" ? "text-xs" : "text-[11px] text-muted-foreground")}>{type === "limit" && "Now: "}{fillLine({ ...preview, quantity: valid ? qtyN : preview.quantity, cash: share ?? preview.cash }, false, position.multiplier)}.</p>
+          {type === "limit" && <p className="text-[11px] text-muted-foreground">{limitValid ? `${limitWords(limitN, spread, position.credit, true)}, on a live quote only; until the close or until you cancel it.` : "Name the limit price."}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            {trim && <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Of {free}
               <input aria-label="Paper quantity to trim" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/[^\d]/g, ""))} className={cn(INPUT, "w-16")} />
             </label>}
-            <button type="button" data-testid="paper-close-fill" disabled={busy || !valid} onClick={fill} className={cn(BUTTON, "border-amber-400/70 text-amber-100")}>Fill on paper</button>
+            {type === "market"
+              ? <button type="button" data-testid="paper-close-fill" disabled={busy || !valid} onClick={fill} className={cn(BUTTON, "border-amber-400/70 text-amber-100")}>Fill on paper</button>
+              : <button type="button" data-testid="paper-close-place" disabled={busy || !valid || !limitValid} onClick={place} className={cn(BUTTON, "border-amber-400/70 text-amber-100")}>Place limit on paper</button>}
             <button type="button" onClick={onDone} className={QUIET}>Cancel</button>
           </div>
         </>
       )}
       {error && <div className="flex flex-wrap items-center gap-2"><p role="alert" className="text-xs text-amber-300">{error}</p><button type="button" onClick={onDone} className={QUIET}>Close</button></div>}
       {done && <div className="flex flex-wrap items-center gap-2"><p role="status" className="text-xs text-emerald-300">{done}</p><button type="button" onClick={onDone} className={QUIET}>Done</button></div>}
+    </div>
+  );
+}
+
+/** Working paper limits, each with its last check and Cancel. */
+function WorkingOrders({ orders }: { orders: PaperWorkingOrder[] }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (!orders.length) return null;
+  const cancel = async (id: string) => {
+    setBusy(id); setError(null);
+    try { await cancelPaperOrder(id); } catch (e) { setError(e instanceof Error ? e.message : "Not canceled."); } finally { setBusy(null); }
+  };
+  return (
+    <div className="border-t border-border/60">
+      <p className={cn(LABEL, "px-3 pt-1.5")}>Working orders</p>
+      <ul aria-label="Working paper orders" data-testid="paper-orders">
+        {orders.map(o => {
+          const verb = o.instrument === "spread" ? (o.side === "open" ? "Open" : "Close") : (o.side === "open" ? "Buy" : "Sell");
+          const what = o.instrument === "stock" ? `${o.quantity.toLocaleString("en-US")} ${o.label}` : `${o.quantity.toLocaleString("en-US")} × ${o.label}`;
+          const terms = o.instrument === "spread" ? (o.pays ? "debit or less" : "credit or more") : "or better";
+          const c = o.check;
+          const last = !c ? "not checked yet" : c.quoted_at == null ? "no quote yet" : `quote ${at(c.quoted_at)}${c.issue ? ", not live" : c.natural != null ? `: ${price(c.natural)} now` : ""}`;
+          return (
+            <li key={o.id} data-testid="paper-order" className="flex items-center gap-2 px-3 py-1.5 text-xs tabular-nums">
+              <div className="min-w-0 flex-1">
+                <p data-testid="paper-order-terms"><span className="font-medium">{verb} {what}</span> · <span className="text-amber-200">limit {price(o.limit)}</span> {terms}</p>
+                <p className="text-[11px] text-muted-foreground">until {at(o.expires_at)}{o.reserve > 0 && ` · holds ${usd(o.reserve)}`} · <span data-testid="paper-order-check" title={c?.issue ?? undefined}>{last}</span></p>
+              </div>
+              <button type="button" data-testid="paper-order-cancel" disabled={busy === o.id} onClick={() => cancel(o.id)} className={cn(BUTTON, "px-2")}>Cancel</button>
+            </li>
+          );
+        })}
+      </ul>
+      {error && <p role="alert" className="px-3 pb-1 text-xs text-amber-300">{error}</p>}
+    </div>
+  );
+}
+
+/** The position's stop and target, the "Close automatically at stop/target" switch (off by default, so whether he kept
+ *  his stop still means something), and what touched. */
+function Levels({ p }: { p: PaperPosition }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const has = p.stop != null || p.target != null;
+  if (!has && !p.note) return null;
+  const flip = async (on: boolean) => {
+    setBusy(true); setError(null);
+    try { await setPaperAuto(p.id, on); } catch (e) { setError(e instanceof Error ? e.message : "Not changed."); } finally { setBusy(false); }
+  };
+  const touched = Object.entries(p.touched ?? {}).map(([level, when]) => `${level} touched ${at(when!)}`);
+  return (
+    <div className="space-y-1 px-3 pb-1.5 text-[11px] text-muted-foreground">
+      {(has || p.note) && <p className="truncate">{p.stop != null && <>Stop {p.stop} </>}{p.target != null && <>· Target {p.target} </>}{p.note && <>· {p.note}</>}</p>}
+      {has && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+          <label className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 sm:min-h-0">
+            <input type="checkbox" data-testid="paper-auto" checked={!!p.auto} disabled={busy} onChange={e => flip(e.target.checked)} className="h-4 w-4 accent-amber-400" />
+            <span className={cn(p.auto && "text-amber-100")}>Close automatically at stop/target</span>
+          </label>
+          {p.exiting && <span data-testid="paper-exiting" className="text-amber-200">Touched: selling at the next fresh bid</span>}
+          {!p.exiting && touched.length > 0 && <span data-testid="paper-touched">{touched.join(" · ")}{p.auto ? "" : ", nothing closed"}</span>}
+        </div>
+      )}
+      {error && <p role="alert" className="text-amber-300">{error}</p>}
     </div>
   );
 }
@@ -287,7 +451,7 @@ export default function DeskPaper({ book, failed, symbol }: { book: PaperBook | 
   if (!book.run) {
     return frame(
       <div className="space-y-2 px-3 pb-3">
-        <p className="text-xs text-muted-foreground">Trade the way you would on Robinhood, with no money: Paper on the Ticket or the Chain fills at the live ask (the bid to sell) and keeps score against your real trades.</p>
+        <p className="text-xs text-muted-foreground">Trade the way you would on Robinhood, with no money: Paper on the Ticket or the Chain fills at the live ask (the bid to sell), or places a day limit, and keeps score against your real trades.</p>
         {startForm(false)}
       </div>,
     );
@@ -306,7 +470,9 @@ export default function DeskPaper({ book, failed, symbol }: { book: PaperBook | 
         <span><span className="text-muted-foreground">Cash </span>{acct.cash < 0 ? "−" : ""}{usd(acct.cash)}</span>
         <span><span className="text-muted-foreground">Buying power </span>{usd(acct.buying_power)}</span>
         {acct.collateral > 0 && <span><span className="text-muted-foreground">Held for spreads </span>{usd(acct.collateral)}</span>}
+        {(acct.reserved ?? 0) > 0 && <span><span className="text-muted-foreground">Held for orders </span>{usd(acct.reserved!)}</span>}
       </p>
+      <WorkingOrders orders={book.orders ?? []} />
       {positions.length > 0 ? (
         <ul aria-label="Paper positions">
           {positions.map(p => {
@@ -322,15 +488,12 @@ export default function DeskPaper({ book, failed, symbol }: { book: PaperBook | 
                     </span>
                   ) : <span data-testid="paper-pnl" className="text-xs text-muted-foreground">{p.awaiting_close ? "Expired: settles on the close once it is read" : "No price yet"}</span>}
                   <span className="flex gap-1">
-                    {p.remaining > 1 && <button type="button" onClick={() => setClosing({ id: p.id, trim: true })} className={cn(BUTTON, "px-2")}>Trim</button>}
-                    <button type="button" data-testid="paper-close-button" onClick={() => setClosing({ id: p.id, trim: false })} className={cn(BUTTON, "px-2")}>Close</button>
+                    {p.remaining - (p.held ?? 0) > 1 && <button type="button" onClick={() => setClosing({ id: p.id, trim: true })} className={cn(BUTTON, "px-2")}>Trim</button>}
+                    <button type="button" data-testid="paper-close-button" disabled={p.remaining - (p.held ?? 0) <= 0} title={p.held ? `${p.held} held for a working sell limit` : undefined}
+                      onClick={() => setClosing({ id: p.id, trim: false })} className={cn(BUTTON, "px-2")}>Close</button>
                   </span>
                 </div>
-                {(p.note || p.stop != null || p.target != null) && (
-                  <p className="truncate px-3 pb-1.5 text-[11px] text-muted-foreground">
-                    {p.stop != null && <>Stop {p.stop} </>}{p.target != null && <>· Target {p.target} </>}{p.note && <>· {p.note}</>}
-                  </p>
-                )}
+                <Levels p={p} />
                 {closing?.id === p.id && <CloseRow key={`${p.id}|${closing.trim}`} position={p} trim={closing.trim} onDone={() => setClosing(null)} />}
               </li>
             );
@@ -358,7 +521,7 @@ export default function DeskPaper({ book, failed, symbol }: { book: PaperBook | 
                       <span className="min-w-0 flex-1 truncate"><span className="font-medium">{c.label}</span> ×{c.quantity} · {day(c.opened_at)}–{day(c.closed_at!)}</span>
                       <span className={cn("tabular-nums", toneOf(c.realized))}>{signed(c.realized)}</span>
                     </div>
-                    <p className={cn("text-[11px]", c.verdict?.kind === "stop" || c.verdict?.kind === "target" ? "text-foreground/80" : "text-muted-foreground")}>{c.verdict?.text}{c.note ? ` · “${c.note}”` : ""}</p>
+                    <p className={cn("text-[11px]", c.verdict?.kind === "stop" || c.verdict?.kind === "target" ? "text-foreground/80" : "text-muted-foreground")}>{c.verdict?.auto && <span data-testid="paper-auto-tag" className="mr-1 rounded border border-amber-400/50 px-1 text-[10px] uppercase tracking-wide text-amber-200">auto</span>}{c.verdict?.text}{c.note ? ` · “${c.note}”` : ""}</p>
                   </li>
                 ))}
               </ul>

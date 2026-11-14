@@ -530,6 +530,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
         label={`${symbol ?? "QQQ"} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />
       <p aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <Key color="#e9a23b" glyph="▲▼">your fills</Key>
+        {ref && shown?.marks.some(m => m.kind === "paper") && <Key color="#fef3c7" glyph="P">paper</Key>}
         <Key color="#a78bfa" glyph="●">pings</Key>
         {ref && <Key color="#60a5fa" glyph="■">Radar</Key>}
         {ref && shown?.marks.some(m => m.kind === "tradingview") && <Key color="#f0abfc" glyph="●">TradingView</Key>}

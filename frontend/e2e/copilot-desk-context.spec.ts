@@ -31,6 +31,7 @@ function chartRead(timeframe: keyof typeof STEP, symbol = "NBIS", plan = true) {
     levels: plan ? [{ role: "entry", price: 95.9, label: "Entry 95.90" }, { role: "invalidation", price: 92.3, label: "Invalidation 92.30" }] : [],
     marks: [
       { kind: "fill", at: bars[20].time + 10, price: 94.4, side: "buy", text: `Bought 2 ${symbol} 11/20/26 100C · ${symbol} at 94.40` },
+      { kind: "paper", at: bars[30].time + 5, price: 94.1, side: "buy", text: `Paper: Bought 1 × ${symbol} $100 Call 11/20/26 at 3.40 · ${symbol} 94.10` },
       { kind: "ping", at: bars[40].time + 30, price: null, side: null, text: `Give-back ping · ${symbol}` },
       { kind: "radar", at: bars[50].time, price: null, side: null, text: `Radar · ${symbol} volume burst` },
     ],
@@ -121,7 +122,7 @@ test("the chart draws the plan's lines, the fills, pings, Radar and the time sto
   await expect(group.getByRole("button", { name: "2m" })).toHaveAttribute("aria-pressed", "true");
   await expect(pane.getByRole("img", { name: /NBIS today: 2-minute candles with .*pings and Radar hits/ })).toBeVisible();
   await expect(canvas).toHaveAttribute("data-bars", "60");
-  await expect(canvas).toHaveAttribute("data-marks", "3");
+  await expect(canvas).toHaveAttribute("data-marks", "4");
   await expect(canvas.locator("canvas").first()).toBeVisible(); // the library drew
   // The lines and the time stop are named above the chart; every mark, with its New York time, in the chart's own list.
   // The stop is 20 minutes ahead, so after about 23:40 New York it falls on the next day and carries that day's date.
@@ -129,10 +130,12 @@ test("the chart draws the plan's lines, the fills, pings, Radar and the time sto
   const marks = pane.getByRole("list", { name: "On the chart" }).getByRole("listitem");
   await expect(marks).toHaveText(["Entry 95.90", "Invalidation 92.30",
     /^Fill · Bought 2 NBIS 11\/20\/26 100C · NBIS at 94.40 · .*\d{1,2}:\d{2} [AP]M ET$/,
+    /^Paper · Paper: Bought 1 × NBIS \$100 Call 11\/20\/26 at 3.40 · NBIS 94.10 · .*ET$/,
     /^Ping · Give-back ping · NBIS · .*ET$/, /^Radar · Radar · NBIS volume burst · .*ET$/, /^Time stop .* · out by 15:30$/]);
   await expect(pane.getByTestId("desk-chart-readout")).toContainText(/ET · O \d+\.\d{2} H .* C /);
   const legend = pane.getByLabel("Legend");
   await expect(legend).toContainText("your fills");
+  await expect(legend).toContainText("paper"); // his paper fills, pale and lettered P
   await expect(legend).toContainText("pings");
   await expect(legend).toContainText("Radar");
   await pane.screenshot({ path: test.info().outputPath("desk-chart-2m.png") });
@@ -206,7 +209,7 @@ test("a symbol opened with no saved conversation charts it by the symbol", async
   const pane = page.getByRole("region", { name: "Chart and tools" });
   await expect(pane.getByRole("img", { name: /NBIS today: 2-minute candles/ })).toBeVisible();
   await expect(pane.getByTestId("desk-chart-lines")).toHaveText("no plan lines saved0Reset"); // a symbol with no plan draws no lines and says so (then the bell, no alerts)
-  await expect(pane.getByRole("list", { name: "On the chart" }).getByRole("listitem")).toHaveCount(3);
+  await expect(pane.getByRole("list", { name: "On the chart" }).getByRole("listitem")).toHaveCount(4); // its fill, paper fill, ping and Radar marks
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
   await expect(pane.getByRole("list", { name: "Timeline" }).getByRole("listitem")).toHaveText([/Bought 5 NBIS stock at 94.20.*the open position/]);

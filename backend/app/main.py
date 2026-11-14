@@ -452,6 +452,22 @@ async def _maybe_start_robinhood_fills(app_: FastAPI):
     return asyncio.create_task(robinhood_fills.poller.loop())
 
 
+async def _maybe_start_paper_runner(app_: FastAPI):
+    """His paper book's minute (app/engine/paper_runner.py): working limit orders, stop and target touches and automatic
+    exits; runs while the copilot is on with live evidence, and reads nothing while there is nothing to watch."""
+    app_.state.paper_runner = None
+    if os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    from app.ai import copilot
+    found = copilot.settings()
+    if not found.enabled or found.evidence != "live":
+        return None
+    from app.engine.paper_runner import PaperRunner
+    runner = PaperRunner(engine)
+    app_.state.paper_runner = runner
+    return asyncio.create_task(runner.loop())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Alembic owns the schema. The app used to call create_all() here, which
@@ -492,11 +508,14 @@ async def lifespan(_app: FastAPI):
     companion = await _maybe_start_position_companion(_app)
     chatter = await _maybe_start_chatter(_app)
     robinhood_fills = await _maybe_start_robinhood_fills(_app)
+    paper_runner = await _maybe_start_paper_runner(_app)
     from app.routers.copilot_desk import warm_at_start
     warm_at_start()  # the desk's market calendar, on its own thread
     try:
         yield
     finally:
+        if paper_runner is not None:
+            paper_runner.cancel()
         if robinhood_fills is not None:
             robinhood_fills.cancel()
         if chatter is not None:

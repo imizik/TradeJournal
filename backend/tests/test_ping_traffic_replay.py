@@ -54,6 +54,8 @@ def traffic():
         add(f"{10 + i:02d}:07", "radar_setup", f"radar-setup-{i}")
     for i, hhmm in enumerate(("10:00", "14:00", "15:00")):
         add(hhmm, "radar_digest", f"radar-digest-{i}")
+    for i in range(7):  # his paper book's pings spend only their own budget
+        add(f"11:{i + 1:02d}", "paper", f"paper-{i}")
     for kind in ("giveback", "invalidation", "expiry_final"):
         add("15:30", kind, f"late-{kind}")
     # One duplicate give-back on the same anchor inside the quiet window.
@@ -96,7 +98,7 @@ def replay(monkeypatch):
         connection.rollback()
 
 
-@pytest.mark.parametrize("kind", ("radar_setup", "radar_event", "radar_digest"))
+@pytest.mark.parametrize("kind", ("radar_setup", "radar_event", "radar_digest", "paper"))
 def test_gap_day_radar_gets_its_budget_without_waiting(replay, kind):
     rows, _, _ = replay
     candidates = [row for row in rows if row.kind == kind]

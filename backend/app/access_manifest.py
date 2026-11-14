@@ -130,6 +130,8 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/paper',  # his own paper book and scorecard: database reads, the desk's kept prices; settles an expired paper option at its close; no Robinhood
     'POST /copilot/paper/runs',  # start or reset his paper account: paper tables only
     'POST /copilot/paper/orders',  # a paper fill at one live quote read through the chart feed: paper tables only; never an order, never Robinhood
+    'POST /copilot/paper/orders/cancel',  # cancel a working paper limit order: paper tables only
+    'POST /copilot/paper/auto',  # a paper position's close-automatically switch: paper tables only
     'GET /copilot/tickets',
     'GET /copilot/tickets/{investigation_id}',
     'GET /copilot/roll',  # the desk's roll ticket: the held contract's terms from the book row in, two contracts' quotes (one paced options-feed pass) and arithmetic out; never Robinhood, never an order

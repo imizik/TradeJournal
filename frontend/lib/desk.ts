@@ -560,7 +560,8 @@ export async function getDeskPicture(id: string, signal?: AbortSignal, timeframe
  * Times are epoch seconds; ``step`` is a candle's seconds; ``extended`` candles are the pre-market or after hours. A mark
  * with no ``price`` sits on its candle. ``time_stop`` is the plan's time stop while still ahead. ``live``: bars can still
  * change, so the desk reads again each minute. ``state`` "unavailable" carries no bars and the reason. */
-export type DeskChartMark = { kind: "fill" | "ping" | "radar" | "tradingview"; at: number; price: number | null; side: "buy" | "sell" | null; text: string };
+/** ``paper``: his paper entries and exits (``paper_book.chart_marks``), at the stock's price when each filled. */
+export type DeskChartMark = { kind: "fill" | "paper" | "ping" | "radar" | "tradingview"; at: number; price: number | null; side: "buy" | "sell" | null; text: string };
 export type DeskChartData = {
   symbol: string; timeframe: DeskTimeframe; step: number; as_of: number; live: boolean;
   state: "ok" | "unavailable"; reason: string | null;

@@ -6,8 +6,11 @@ option at its close and otherwise only reads.
 ``POST /copilot/paper/runs``: start the paper account (``starting_cash``, default $10,000), or with ``reset`` a new run;
 every older run keeps its history.
 ``POST /copilot/paper/orders``: open (``action: open``) or close/trim (``action: close``) a paper position at the live
-quote; ``preview`` answers what it would fill at and stores nothing. Refused outside the regular session, on a stale
-quote, or without the buying power.
+quote, or with ``order_type: limit`` and ``limit_price`` place a day limit order that works until a fresh quote crosses
+it, the close or a cancel; ``preview`` answers what it would fill at (or hold) and stores nothing. A market order is
+refused outside the regular session, on a stale quote, or without the buying power.
+``POST /copilot/paper/orders/cancel``: cancel a working paper limit order.
+``POST /copilot/paper/auto``: turn a position's "Close automatically at stop/target" switch on or off.
 
 Paper only: nothing here places an order anywhere, calls Robinhood, or writes fills, trades or accounts. Owner-only like
 every ``/copilot`` route; refuses while the lab is off, and fills only on live evidence.
@@ -40,6 +43,8 @@ class RunAsk(BaseModel):
 
 class OrderAsk(BaseModel):
     action: Literal["open", "close"]
+    order_type: Literal["market", "limit"] = "market"
+    limit_price: float | None = None
     preview: bool = False
     order_key: str | None = Field(None, max_length=64)
     # open
@@ -82,8 +87,38 @@ def order(body: OrderAsk, db: Session = Depends(get_session)):
         raise HTTPException(409, "Paper fills need live quotes, and the desk is on simulated evidence.")
     ask = body.model_dump()
     try:
+        if body.order_type == "limit":
+            return paper_book.place_limit(db, ask, time.time(), preview=body.preview)
         if body.action == "open":
             return paper_book.open_order(db, ask, time.time(), preview=body.preview)
         return paper_book.close_order(db, ask, time.time(), preview=body.preview)
+    except paper_book.PaperError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+
+
+class CancelAsk(BaseModel):
+    order_id: str = Field(..., max_length=40)
+
+
+@router.post("/paper/orders/cancel")
+def cancel(body: CancelAsk, db: Session = Depends(get_session)):
+    _settings()
+    try:
+        return paper_book.cancel_order(db, body.model_dump(), time.time())
+    except paper_book.PaperError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+
+
+class AutoAsk(BaseModel):
+    position_id: str = Field(..., max_length=40)
+    on: bool
+    order_key: str | None = Field(None, max_length=64)
+
+
+@router.post("/paper/auto")
+def auto(body: AutoAsk, db: Session = Depends(get_session)):
+    _settings()
+    try:
+        return paper_book.set_auto(db, body.model_dump(), time.time())
     except paper_book.PaperError as exc:
         raise HTTPException(exc.status, str(exc)) from None

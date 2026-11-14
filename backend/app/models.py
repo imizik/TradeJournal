@@ -2111,7 +2111,7 @@ class PaperEvent(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     run_id: uuid.UUID = Field(foreign_key="paper_run.id", index=True)
     position_id: uuid.UUID = Field(index=True)
-    kind: str  # open | close | expire
+    kind: str  # open | close | expire; the orders' and switches' own: order | cancel | lapse | auto | touch | trigger
     order_key: str = Field(unique=True)
     effective_at: datetime  # UTC: the quote (or the expiry's close) the fill priced from
     recorded_at: datetime = Field(default_factory=utc_now_naive)  # UTC
