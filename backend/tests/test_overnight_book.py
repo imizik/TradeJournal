@@ -148,3 +148,27 @@ def test_off_by_default(monkeypatch):
     monkeypatch.delenv("OVERNIGHT_BOOK_ENABLED", raising=False)
     assert not ob.enabled()
 
+
+
+def test_a_1559_never_seen_or_an_unknown_calendar_records_no_miss(tmp_path):
+    clock = Clock(at("2026-11-16", 18, 0))  # switched on after the close
+    b = book(tmp_path, clock, quote_feed(500.0, 500.02, clock))
+    b.run()
+    assert b.store.nights() == []
+    nocal = ob.OvernightBook(None, clock=clock, quote=quote_feed(500.0, 500.02, clock, age=86_400),
+                             store=ob.Store(tmp_path / "nocal.sqlite3"))
+    for t in (at("2026-11-26", 15, 59, 2), at("2026-11-26", 16, 1)):  # a holiday with no calendar: stale quote
+        clock.t = t
+        nocal.run()
+    assert nocal.store.nights() == []
+
+
+def test_an_unfilled_exit_asks_once_a_minute(tmp_path):
+    clock, calls = Clock(at("2026-11-12", 15, 59, 2)), []
+    b = book(tmp_path, clock, quote_feed(500.0, 500.02, clock))
+    b.run()
+    b.quote = quote_feed(500.0, 500.02, clock, age=600, calls=calls)  # stale all morning
+    for s in range(0, 600, 20):
+        clock.t = at("2026-11-13", 9, 30) + s
+        b.run()
+    assert len(calls) == 10

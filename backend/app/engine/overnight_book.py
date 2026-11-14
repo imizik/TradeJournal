@@ -5,11 +5,14 @@ Each full session (the market calendar's regular close at 16:00), the first pass
 ask of a fresh quote; the first pass at or after 09:30:00 on the next open session sells it at the bid of a fresh quote (the regular
 session only: a position whose exit cannot fill waits for the next session rather than selling after hours).
 Early closes have no entry, as in the study. A quote is fresh when its bid and ask are above zero, the ask is at or
-above the bid and both were updated within ``QUOTE_AGE_SECONDS`` of the pass. No fresh quote before 16:00:00 makes
-the night ``missed`` (counted, never filled). An exit keeps trying until it fills and records its own time, so a late
-exit shows as late instead of being dropped. A night the server never saw at all leaves no row.
+above the bid and both were updated within ``QUOTE_AGE_SECONDS`` of the pass. When this process tried during 15:59 on a
+session the calendar confirms but found no fresh quote before 16:00:00, the night is ``missed`` (counted, never filled);
+a 15:59 the process never saw (switched on or restarted later, the calendar unreadable) leaves no row. An exit keeps
+trying, at most once a minute, until it fills, and records its own time, so a late exit shows as late instead of being
+dropped; while it is unsold no new night starts and the skipped entry day leaves no row.
 
-Paper only: one quote request at the entry minute and at the exit minute, nothing placed anywhere, no message sent.
+Paper only: normally one to three quote requests at 15:59 and one at the open (an unfilled exit, once a minute),
+nothing placed anywhere, no message sent.
 Storage is a SQLite file of its own (``OVERNIGHT_BOOK_PATH``), not the journal database: no migration. Everything is
 derived from the rows, so a restart neither loses nor repeats a night. Off unless ``OVERNIGHT_BOOK_ENABLED=true`` (the
 owner's switch); it runs on the level alert monitor's loop and never raises into it.
@@ -38,6 +41,7 @@ FULL_CLOSE = 16 * 60  # entries only on sessions that close at 16:00
 OPEN_MINUTE = 9 * 60 + 30  # the sell goes at 09:30:00
 QUOTE_AGE_SECONDS = 60
 RUN_SECONDS = 5  # the monitor passes every 20 s; this only stops a double pass
+EXIT_RETRY_SECONDS = 60  # an exit that cannot fill asks again at most once a minute
 STAKE = 10_000.0  # dollars a night, for the desk's dollar line (results are in basis points)
 BACKTEST = {"protocol_id": PROTOCOL_ID, "mean_bp": 4.2, "interval_bp": [1.1, 7.13], "nights": 2711,
             "years": "2016-2026", "note": "research/notes/qqq-overnight-2026-11-14.md"}
@@ -157,20 +161,23 @@ class OvernightBook:
         self.quote = quote
         self.store = store or Store(store_path())
         self._last_run = 0.0
+        self._last_exit_try = 0.0
+        self._tried: set[str] = set()  # entry days whose 15:59 minute this process saw on a confirmed full session
 
     def deliver(self) -> None:
         """Nothing to send; present so the monitor can treat it like its other stages."""
 
-    def hours(self, day: date) -> tuple[int, int] | None:
-        """(open, close) in New York minutes, or None when the market is shut that day."""
+    def hours(self, day: date) -> tuple[int, int, bool] | None:
+        """(open, close, confirmed) in New York minutes, or None when the market is shut that day. Without the calendar
+        a weekday is taken as a full session but not confirmed: it can enter on a fresh quote, never record a miss."""
         if day.weekday() >= 5:
             return None
         found = self.calendar.hours(day) if self.calendar is not None else None
         if not found:
-            return (OPEN_MINUTE, FULL_CLOSE)
+            return OPEN_MINUTE, FULL_CLOSE, False
         if found.get("status") not in (None, "open") or found.get("close") is None:
             return None
-        return int(found.get("open") or OPEN_MINUTE), int(found["close"])
+        return int(found.get("open") or OPEN_MINUTE), int(found["close"]), True
 
     def _quote(self, now: float) -> tuple[float, float] | None:
         try:
@@ -198,7 +205,9 @@ class OvernightBook:
         held = self.store.open_night()
         if held is not None:
             # Sold only in a regular session after the entry day; never bought again before it is sold.
-            if held["day"] < today.isoformat() and hours[0] <= minute < hours[1]:
+            if (held["day"] < today.isoformat() and hours[0] <= minute < hours[1]
+                    and now - self._last_exit_try >= EXIT_RETRY_SECONDS):
+                self._last_exit_try = now
                 got = self._quote(now)
                 if got is not None:
                     self.store.exit(held["day"], today.isoformat(), now, *got)
@@ -206,10 +215,12 @@ class OvernightBook:
         if hours[1] != FULL_CLOSE or self.store.night(today.isoformat()) is not None:
             return
         if minute == ENTRY_MINUTE:
+            if hours[2]:
+                self._tried.add(today.isoformat())
             got = self._quote(now)
             if got is not None:
                 self.store.enter(today.isoformat(), now, *got)
-        elif minute >= FULL_CLOSE:
+        elif minute >= FULL_CLOSE and today.isoformat() in self._tried:
             self.store.miss(today.isoformat(), "no fresh QQQ quote between 15:59 and 16:00")
 
 
