@@ -87,6 +87,11 @@ def is_debit(kind: str, long_strike: float, short_strike: float) -> bool:
     return long_strike < short_strike if kind == "call" else long_strike > short_strike
 
 
+def cents(value: float) -> float:
+    """To the cent, a half cent up, as ``lib/spreadTicket.ts`` rounds, so the Chain tab and the ticket show one net."""
+    return math.floor(value * 100 + 0.5 + 1e-9) / 100
+
+
 def spread_value(kind: str, long_strike: float, short_strike: float, price: float) -> float:
     """What one spread is worth per share at expiry with the stock at ``price``, signed: the long leg's intrinsic value
     minus the short leg's. A debit spread's is from 0 to the width; a credit spread's from minus the width to 0."""
@@ -116,8 +121,8 @@ def spread_figures(kind: str, long_strike: float, short_strike: float, limit: fl
         return out
     per = multiplier * contracts if contracts and contracts > 0 and multiplier else None
     if per:
-        paid_or_taken = round(limit * per, 2)
-        other = round((width - limit) * per, 2)
+        paid_or_taken = cents(limit * per)
+        other = cents((width - limit) * per)
         if debit:
             out.update(cost=paid_or_taken, max_loss=paid_or_taken, max_gain=other)
         else:
@@ -134,7 +139,7 @@ def spread_figures(kind: str, long_strike: float, short_strike: float, limit: fl
             continue
         value = spread_value(kind, long_strike, short_strike, price)
         out["at_levels"].append({"role": role, "price": price, "worth": round(abs(value), 4),
-                                 "pnl": round((value - net) * per, 2) if per else None})
+                                 "pnl": cents((value - net) * per) if per else None})
     return out
 
 
@@ -198,7 +203,7 @@ def read_contract(text: str | None, since: date) -> tuple[float, date, str] | No
 
 # A vertical: two strikes with a slash ("100/110C", "$100/$110 Call", "95P/90P"), or a dash when the words also say
 # spread or vertical ("105-110 call spread"), then the type.
-_PAIR = re.compile(r"\$?(\d+(?:\.\d+)?)\s*(?:[CP]\b)?\s*(/|-)\s*\$?(\d+(?:\.\d+)?)\s*(C|P|calls?|puts?)\b", re.I)
+_PAIR = re.compile(r"\$?(\d+(?:\.\d+)?)\s*([CP]\b)?\s*(/|-)\s*\$?(\d+(?:\.\d+)?)\s*(C|P|calls?|puts?)\b", re.I)
 _SPREAD_WORD = re.compile(r"\bspreads?\b|\bverticals?\b", re.I)
 _NOT_VERTICAL = re.compile(r"\bstraddles?\b|\bstrangles?\b|\bcondors?\b|\bbutterfl(?:y|ies)\b|\brolls?\b|\bcalendars?\b"
                            r"|\bdiagonals?\b|\biron\b|\bratio\b|\bflys?\b", re.I)
@@ -217,12 +222,14 @@ def read_spread(text: str | None, since: date) -> dict | None:
     pair = pairs[0]
     if re.search(r"[/-]\s*\$?$", text[:pair.start()]) or re.match(r"\s*[CP]?\s*[/-]", text[pair.end():], re.I):
         return None  # a third strike chained on ("100/110/120C"): not a vertical
-    if pair.group(2) == "-" and not _SPREAD_WORD.search(text):
+    if pair.group(3) == "-" and not _SPREAD_WORD.search(text):
         return None  # "105-110 calls" may be a range of single strikes; only "spread" makes it two legs
-    a, b = float(pair.group(1)), float(pair.group(3))
+    a, b = float(pair.group(1)), float(pair.group(4))
     if a == b or not a > 0 or not b > 0:
         return None
-    kind = "call" if pair.group(4)[0].lower() == "c" else "put"
+    kind = "call" if pair.group(5)[0].lower() == "c" else "put"
+    if pair.group(2) and pair.group(2).lower() != pair.group(5)[0].lower():
+        return None  # a call and a put ("100C/110P"): a strangle or a risk reversal, not a vertical
     rest = text[:pair.start()] + " | " + text[pair.end():]
     if _STRIKE.search(rest):
         return None  # another strike besides the pair: more than two legs
@@ -585,8 +592,8 @@ def _spread_ticket(db: Session, out: dict, row: dict, capture, spread: dict, sou
     if long_q["state"] == "ok" and short_q["state"] == "ok":
         paid_mid = (long_q["bid"] + long_q["ask"]) / 2 - (short_q["bid"] + short_q["ask"]) / 2  # per share, signed: + is paid
         paid_natural = long_q["ask"] - short_q["bid"]  # buy at the ask, sell at the bid
-        net_mid = round(paid_mid if debit else -paid_mid, 2)
-        net_natural = round(paid_natural if debit else -paid_natural, 2)
+        net_mid = cents(paid_mid if debit else -paid_mid)
+        net_natural = cents(paid_natural if debit else -paid_natural)
     limit = net_mid if net_mid is not None and 0 < net_mid < width and multiplier else None
     if net_mid is not None and limit is None and multiplier:
         rough.append(f"the quotes put the net mid at {net_mid:.2f}, outside 0 to the {width:g} width")

@@ -64,6 +64,8 @@ test("the net price at the mid and at the natural price", () => {
   expect(spreadNet("call", 110, 100, { bid: 0.97, ask: 1.03 }, { bid: 3.1, ask: 3.3 })).toEqual({ mid: 2.2, natural: 2.07 });
   expect(spreadNet("put", 95, 90, { bid: 4, ask: 4.2 }, { bid: 2, ask: 2.1 })).toEqual({ mid: 2.05, natural: 2.2 });
   expect(spreadNet("call", 100, 110, { bid: null, ask: 3.3 }, { bid: 0.97, ask: 1.03 })).toBeNull();
+  // A half-cent net (0.865) rounds up to 0.87, as the server's ticket does.
+  expect(spreadNet("call", 100, 110, { bid: 1, ask: 1 }, { bid: 0.1, ask: 0.17 })).toEqual({ mid: 0.87, natural: 0.9 });
 });
 
 test("names, plan words, the copy block and the plain line", () => {

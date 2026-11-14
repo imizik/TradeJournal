@@ -14,7 +14,8 @@ export const isDebit = (kind: Side, long: number, short: number) => kind === "ca
 /** A call debit and a put credit gain as the stock rises. */
 export const isBullish = (kind: Side, long: number, short: number) => isDebit(kind, long, short) === (kind === "call");
 
-const cents = (n: number) => Math.round(n * 100) / 100;
+/** To the cent, a half cent up, as the server's ``desk_ticket.cents`` rounds the net price. */
+const cents = (n: number) => Math.floor(n * 100 + 0.5 + 1e-9) / 100;
 const strikeText = (n: number) => Number.isInteger(n) ? String(n) : String(+n.toFixed(2));
 const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const shortDate = (iso: string) => { const [y, m, d] = iso.split("-"); return `${Number(m)}/${Number(d)}/${y.slice(2)}`; };

@@ -156,6 +156,9 @@ def _s(kind, expiry, long_strike, short_strike):
     ("NBIS 11/13 100C", None),  # one contract is not a spread
     ("100/110C", None),  # no expiry
     ("100/100C Dec 19", None),
+    ("NBIS Dec 19 100C/110P", None),  # a call and a put: not a vertical
+    ("100P/110C Dec 19", None),
+    ("100C/110C Dec 19", _s("call", DEC19, 100.0, 110.0)),
     (None, None),
 ])
 def test_a_vertical_is_read_only_when_stated_plainly(words, expected):
@@ -262,6 +265,15 @@ def test_a_missing_leg_and_a_wide_leg(engine):
     found = ticket(engine, pick=(contract().expiration, 100.0), short_strike=110.0, chain_read=chain_read(*wide))
     assert found["spread"]["net_mid"] == 2.2 and found["spread"]["legs"][1]["wide"] is True
     assert found["spread"]["rough"] == ["the $110 leg's market is wide (20% of its mid)"]
+
+
+def test_a_half_cent_net_rounds_up_as_the_chain_tab_does(engine):
+    # Long 1.00/1.00, short 0.10/0.17: a 0.865 net mid shows as 0.87 here and on the Chain tab (lib/spreadTicket.ts).
+    plan(engine)
+    legs = (contract(100.0, bid=1.00, ask=1.00), contract(110.0, bid=0.10, ask=0.17))
+    found = ticket(engine, pick=(contract().expiration, 100.0), short_strike=110.0, chain_read=chain_read(*legs))
+    assert (found["spread"]["net_mid"], found["spread"]["net_natural"], found["limit"]) == (0.87, 0.9, 0.87)
+    assert [desk_ticket.cents(x) for x in (0.865, -0.865, 2.2, 2.3300000000000001, 0.004)] == [0.87, -0.86, 2.2, 2.33, 0.0]
 
 
 def test_crossed_quotes_and_mixed_multipliers_give_no_limit(engine):
