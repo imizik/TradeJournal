@@ -31,12 +31,14 @@ _LEVEL_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["
 
 # desk_action (copilot_actions.py): what the owner asked the desk to do, as a card. The desk chart's timeframes are
 # frontend/lib/desk.ts DESK_TIMEFRAMES.
-DESK_ACTIONS = ("show", "alert", "watch", "unwatch", "draw", "ticket", "plan_stop")
+DESK_ACTIONS = ("show", "alert", "watch", "unwatch", "draw", "ticket", "plan_stop", "close", "trim", "note", "plan_idea")
 DESK_TIMEFRAMES = ("2m", "15m", "1D")
 DESK_TABS = ("chart", "chain", "tape")
 DESK_SIDES = ("above", "below")
 DESK_OPTION_TYPES = ("call", "put")
 DESK_LABEL_MAX = 40
+DESK_NOTE_MAX = 300  # app/engine/trade_notes.py MAX: one line
+DESK_DIRECTIONS = ("long", "short")
 DESK_ACTIONS_PER_ANSWER = 3
 MOMENT_TIMEFRAMES = ("1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D")  # every Charts interval but 1W
 
@@ -381,9 +383,16 @@ TOOLS: list[dict] = [
                        "action=ticket (the copy-only order ticket of the owner's saved plan in `symbol`, filled with "
                        "`expiry` YYYY-MM-DD, `strike` (the leg bought) and `option_type`, and for a vertical spread `short_strike` (the "
                        "leg sold, same expiry: a debit spread buys the strike nearer the money); it never sends an order), action=plan_stop (move "
-                       "the saved plan's stop, its invalidation, to `price`). At most three in one answer. The result says "
-                       "what the card will do, or why it cannot (a ticker not followed, a price on the wrong side, no plan "
-                       "or more than one): then say so or ask, never guess.",
+                       "the saved plan's stop, its invalidation, to `price`), action=close (the copy-only closing ticket for a "
+                       "position the owner holds in `symbol`: sell to close the whole long call or put, or the closing "
+                       "spread of a held vertical, at the mark now), action=trim (the same ticket for part of it: "
+                       "`quantity` contracts, or `half` true for half rounded down, at least one), action=note (save "
+                       "`text`, one line, as his note on that position), action=plan_idea (the Plan it of today's Radar "
+                       "setup card in `symbol`, which a scanner pick also plans from; `direction` long or short when there "
+                       "are two). For close, trim and note, `option_type`, `strike` and `expiry` pick the contract when he "
+                       "holds more than one. At most three in one answer. The result says what the card will do, or why "
+                       "it cannot (a ticker not followed, a price on the wrong side, no plan or more than one, no such "
+                       "position or more than one): then say so or ask, never guess.",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["action", "symbol"],
                          "properties": {"action": {"type": "string", "enum": list(DESK_ACTIONS)},
                                         "symbol": _SYMBOL_SCHEMA,
@@ -395,7 +404,11 @@ TOOLS: list[dict] = [
                                         "expiry": {"type": "string", "description": "YYYY-MM-DD"},
                                         "strike": {"type": "number"},
                                         "short_strike": {"type": "number", "description": "ticket: a vertical spread's sold leg"},
-                                        "option_type": {"type": "string", "enum": list(DESK_OPTION_TYPES)}}},
+                                        "option_type": {"type": "string", "enum": list(DESK_OPTION_TYPES)},
+                                        "quantity": {"type": "integer", "description": "trim: contracts to sell, at least 1"},
+                                        "half": {"type": "boolean", "description": "trim: half the position, rounded down, at least 1"},
+                                        "text": {"type": "string", "description": f"note: one line, at most {DESK_NOTE_MAX} characters"},
+                                        "direction": {"type": "string", "enum": list(DESK_DIRECTIONS)}}},
     },
 ]
 TOOL_NAMES = frozenset(t["name"] for t in TOOLS)
@@ -998,10 +1011,11 @@ class LiveEvidence:
     def get_investigation_changes(self, investigation_id: str) -> dict:
         return investigation_changes(investigation_id)
 
-    def desk_state(self, symbol: str) -> dict:
-        """The desk's own state for a desk_action (copilot_actions.read_state): database reads, no quote."""
+    def desk_state(self, symbol: str, need: frozenset = frozenset()) -> dict:
+        """The desk's own state for a desk_action (copilot_actions.read_state): database reads and, for a position, the
+        Robinhood snapshot the desk already holds; no quote, no Robinhood read."""
         from app.ai import copilot_actions
-        return copilot_actions.read_state(symbol)
+        return copilot_actions.read_state(symbol, need)
 
     def get_quotes(self, symbols: list[str]) -> dict:
         from app.engine.chart_feed import ChartFeedError, chart_feed

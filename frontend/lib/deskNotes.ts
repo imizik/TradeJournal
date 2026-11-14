@@ -14,6 +14,9 @@ export type DeskNotes = { trades: Record<string, DeskNote[]>; fills: Record<stri
 export type NoteTarget = { trade_id: string } | { symbol: string; contract: string };
 
 export const NOTE_MAX = 300;
+/** A note saved away from the book row's pen (the copilot's note card): ``{ trade_id, note }``, added to the book's notes
+ * in place. */
+export const NOTE_SAVED_EVENT = "tradejournal:desk-note-saved";
 
 /** A book row's journal trade: ``trade:<id>`` rows are the journal's; a Robinhood-only row has none yet. */
 export const rowTrade = (row: DeskThread): string | null => row.tradeId ?? (row.key.startsWith("trade:") ? row.key.slice(6) : null);
