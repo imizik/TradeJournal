@@ -327,6 +327,17 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // Anything else that changes the address to such a link (a link inside the copilot, Next's own Back) is followed too,
   // and so is the bare address (the nav's Desk) while the desk shows something other than Now.
   const params = useSearchParams();
+  // "Redo in replay" on a real closed trade (``redoHref``): Replay opens on that trade. The address drops the link once
+  // it is read, so a reload or Back never starts a second redo.
+  const [redo, setRedo] = useState<string | null>(null);
+  useEffect(() => {
+    const id = params.get("redo");
+    if (!id) return;
+    setRedo(id); setReplay(true);
+    const rest = new URLSearchParams(params.toString());
+    rest.delete("redo");
+    window.history.replaceState(null, "", `/copilot-lab${rest.size ? `?${rest}` : ""}`);
+  }, [params]);
   const shownLink = useRef(link);
   useEffect(() => { shownLink.current = link; }, [link]);
   useEffect(() => {
@@ -844,7 +855,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         {on && <ScalpShortlistNudge />}
       </header>
       </div>
-      {on && replay && <DeskReplay symbol={centreSymbol} onLeave={() => setReplay(false)} />}
+      {on && replay && <DeskReplay symbol={centreSymbol} redo={redo} onLeave={() => { setReplay(false); setRedo(null); }} />}
       <div id="desk-cockpit" className={styles.cockpit} style={replay ? { display: "none" } : undefined}>
         {on && (
           <div className={styles.strip}>

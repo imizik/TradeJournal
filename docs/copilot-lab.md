@@ -2170,6 +2170,36 @@ Paper trading on a past day, any time (nights and weekends included): "Replay" o
 Proof: `backend/tests/test_paper_replay.py`, `backend/tests/test_paper_replay_options.py`,
 `frontend/e2e/copilot-desk-replay.spec.ts`.
 
+### Redo a real trade
+
+Trade one of his own closed real trades again on Replay, without seeing what he did, then compare
+(`backend/app/engine/replay_redo.py`, the redo mode of `DeskReplay.tsx`, routes `/copilot/paper/replay/redo`, all
+owner-only).
+
+- **Where.** "Redo in replay" on a closed trade's page (`/trades/[id]`, `redoHref`: `/copilot-lab?redo=<trade id>`,
+  read once and dropped from the address), and "Redo my worst" in Replay's day picker: his five biggest real losing
+  trades opened on one of the days Replay offers, Webull and not-followed tickers left out. The desk book and the day
+  report list no closed real trade, so neither carries the button.
+- **The plan** (`GET /copilot/paper/replay/redo?trade_id=`): the trade's New York day and ticker, starting at the open or
+  15 minutes before his first entry (refused with the reason when that is before the open), and its call or put
+  preselected on the ticket when options replay that day; outside option replay's window it is shares with that reason.
+  Nothing about how the trade went (fills, notes, P&L) is in it. A trade still open, or one from today, is refused.
+- **No peeking.** While the redo runs the live desk is hidden as for any replay, the replay chart draws only his replay
+  fills and bars up to the clock, and the badge says "your real trade hidden".
+- **The link.** A redo is an ordinary replay run (`POST /copilot/paper/replay/redo`) plus one `redo` event on it carrying
+  the original trade's id and where it started (no schema change; the fold ignores it). Its trades show `source` `redo`
+  and `redo_of` in the run view and the replay scorecard, for a later "redos vs originals" line. The `trade` row, fills
+  and FIFO are only read.
+- **The comparison** (`GET /copilot/paper/replay/redo/compare?run_id=`), shown when he presses End redo and compare
+  (what is open sells at the clock, as leaving does) or the replayed day closes: entry, exit, most held at once, time
+  held and P&L for the real trade (its journal row; an option's per-contract prices shown a share, as the paper book's
+  are) and the redo (its closed trades, prices size-weighted; shares and options together have no one price or size),
+  the difference (redo less real; skipping counts as $0), and one line of what changed built from those facts: skipped
+  it, shares instead of the option, entered or exited earlier or later (5 minutes or more apart), smaller or bigger
+  size, sold the same day when the real one was held overnight. No AI.
+
+Proof: `backend/tests/test_replay_redo.py`, `frontend/e2e/copilot-desk-redo.spec.ts`.
+
 ## Chatter
 
 Buzz from r/wallstreetbets and NYT business headlines, behind the desk Feed's own **Market › Chatter** pick

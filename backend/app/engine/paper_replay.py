@@ -68,6 +68,15 @@ class ReplayError(pb.PaperError):
     pass
 
 
+REDO = "redo"  # a redo run's link event (``replay_redo``): the real trade it redoes
+
+
+def redo_link(events: list[PaperEvent]) -> dict | None:
+    """A redo run's link (the original trade's id, where it started), or None for a plain replay."""
+    found = next((e for e in events if e.kind == REDO), None)
+    return None if found is None else json.loads(found.data_json)
+
+
 # --- the day and its bars --------------------------------------------------------------------------------------------
 
 def _utc(stamp: float) -> datetime:
@@ -812,16 +821,18 @@ def view(db: Session, run: PaperRun, at: float) -> dict:
     equity = round(acct["cash"] + sum(m["value"] for m in priced), 2) if len(priced) == len(shown) else None
     closed = [p for p in positions if p["status"] != "open"]
     score = pb.stats([p["realized"] for p in closed], [(run.replay_day, p["realized"]) for p in closed])
-    return {"run": _run_view(run, positions), "at": at,
+    redo = redo_link(book.events)
+    return {"run": _run_view(run, positions, redo), "at": at,
             "account": {**acct, "equity": equity, "pnl": None if equity is None else round(equity - run.starting_cash, 2)},
             "positions": shown, "orders": [pb._order_view(o) for o in reversed(working)],
-            "closed": [_closed_view(p, run) for p in sorted(closed, key=lambda p: p["closed_at"], reverse=True)],
+            "closed": [_closed_view(p, run, redo) for p in sorted(closed, key=lambda p: p["closed_at"], reverse=True)],
             "score": score, "ended": hours is not None and at >= hours[1]}
 
 
-def _run_view(run: PaperRun, positions: list[dict]) -> dict:
+def _run_view(run: PaperRun, positions: list[dict], redo: dict | None = None) -> dict:
     hours = regular(run.replay_day)
     return {"id": str(run.id), "day": run.replay_day.isoformat(), "starting_cash": run.starting_cash,
+            "redo_of": redo["trade_id"] if redo else None,
             "options_off": ro.off_reason(run.replay_day, time.time()),
             "started_at": _epoch(run.started_at), "open_at": hours[0] if hours else None, "close_at": hours[1] if hours else None,
             "symbols": sorted({p["symbol"] for p in positions}),
@@ -830,8 +841,10 @@ def _run_view(run: PaperRun, positions: list[dict]) -> dict:
             "left_open": sum(1 for p in positions if p["status"] == "open")}
 
 
-def _closed_view(p: dict, run: PaperRun) -> dict:
+def _closed_view(p: dict, run: PaperRun, redo: dict | None = None) -> dict:
     out = pb._position_view(p, None)
+    if redo:  # every trade in a redo run is a redo of that real trade
+        out["source"], out["redo_of"] = REDO, redo["trade_id"]
     last = p["exits"][-1] if p["exits"] else {}
     if last.get("flat"):
         out["verdict"] = {"kind": "flat", "text": "Sold at the replayed day's close"}
@@ -847,14 +860,17 @@ def scorecard(db: Session) -> dict:
     and the day replayed; and each run."""
     all_runs = runs(db)
     trades, listed = [], []
+    links = {}
     for run in all_runs:
-        positions = pb.fold(pb._events(db, run))
-        listed.append(_run_view(run, positions))
+        events = pb._events(db, run)
+        positions = pb.fold(events)
+        links[run.id] = redo_link(events)
+        listed.append(_run_view(run, positions, links[run.id]))
         trades += [(run, p) for p in positions if p["status"] != "open"]
     stats = pb.stats([p["realized"] for _, p in trades], [(run.replay_day, p["realized"]) for run, p in trades])
     trades.sort(key=lambda rp: (rp[1]["closed_at"], rp[0].started_at), reverse=True)
     return {"score": stats, "runs": list(reversed(listed)),
-            "trades": [_closed_view(p, run) for run, p in trades[:SCORE_SHOWN]]}
+            "trades": [_closed_view(p, run, links[run.id]) for run, p in trades[:SCORE_SHOWN]]}
 
 
 TICKER = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")

@@ -8,10 +8,10 @@ import {
 import { Pause, Play, SkipForward } from "lucide-react";
 import { PaperRefused, orderKey, type PaperPosition, type PaperStats } from "@/lib/paperBook";
 import {
-  REPLAY_EVENT, SPEEDS, autoReplay, cancelReplay, expiryShort, msPerBar, orderReplay, previewReplay, replayBadge, replayBars, replayDate,
-  replayHome, replayOptions, replaySymbols, replayTime, shownBars, startReplay, stepReplay,
-  type ReplayAsk, type ReplayBar, type ReplayHappening, type ReplayHome, type ReplayOptions, type ReplayQuote, type ReplayScore,
-  type ReplayTrade, type ReplayView, type Speed,
+  REPLAY_EVENT, SPEEDS, autoReplay, cancelReplay, expiryShort, msPerBar, orderReplay, previewReplay, redoCompare, redoPlan, replayBadge,
+  replayBars, replayDate, replayHome, replayOptions, replaySymbols, replayTime, shownBars, startRedo, startReplay, stepReplay,
+  type RedoCompare, type RedoPlan, type RedoSide, type ReplayAsk, type ReplayBar, type ReplayHappening, type ReplayHome, type ReplayOptions,
+  type ReplayQuote, type ReplayScore, type ReplayTrade, type ReplayView, type Speed,
 } from "@/lib/paperReplay";
 import { cn } from "@/lib/utils";
 
@@ -22,6 +22,11 @@ import { cn } from "@/lib/utils";
  * and leaving puts the live desk back exactly as it was (it stays mounted underneath). Shares, or one call or put that
  * traded that day priced from its own trade bars (on a day older than the contracts' minute history, options are off
  * with the reason). Replay trades are their own runs, scored apart from live paper and real trades.
+ *
+ * Redo (``redo``, a real closed trade's id; or one picked from "Redo my worst"): Replay opens on that trade's day and
+ * ticker, at the open or 15 minutes before his first entry, with its contract preselected when options replay that day.
+ * His real fills, notes and P&L stay out of sight until he ends the redo (or the day closes); then one card compares
+ * the two (``RedoCompareCard``).
  */
 
 const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
@@ -161,6 +166,7 @@ function TradeRows({ trades, days = true }: { trades: ReplayTrade[]; days?: bool
           <div className="flex flex-wrap items-baseline gap-x-2">
             {days && <span className="text-muted-foreground">{replayDate(t.day)}</span>}
             <span className="font-medium text-foreground" data-testid="replay-trade-name">{t.quantity.toLocaleString("en-US")} {named(t)}</span>
+            {t.redo_of && <span className="rounded border border-amber-400/40 px-1 text-[10px] uppercase tracking-wide text-amber-200">redo</span>}
             <span className="tabular-nums text-muted-foreground">in {px(Math.abs(t.per_share))} · {replayTime(t.opened_at)}</span>
             <span className={cn("ml-auto tabular-nums", toneOf(t.realized))}>{signed(t.realized)}</span>
           </div>
@@ -312,14 +318,16 @@ function OptionPicker({ day, symbol, at, picked, onPick }: {
   );
 }
 
-function Ticket({ view, at, symbol, options, onView, pause }: {
+function Ticket({ view, at, symbol, options, onView, pause, preset = null }: {
   view: ReplayView; at: number; symbol: string; options: string; onView(view: ReplayView): void; pause(): void;
+  /** A redo's real contract, preselected (the plan offers it only when options replay that day). */
+  preset?: Picked | null;
 }) {
   const off = view.run.options_off ?? null;
-  const [what, setWhat] = useState<"stock" | "option">("stock");
-  const [picked, setPicked] = useState<Picked | null>(null);
+  const [what, setWhat] = useState<"stock" | "option">(preset && !off ? "option" : "stock");
+  const [picked, setPicked] = useState<Picked | null>(preset && !off ? preset : null);
   const option = what === "option" && !off;
-  const [qty, setQty] = useState("10");
+  const [qty, setQty] = useState(preset && !off ? "1" : "10");
   const [type, setType] = useState<"market" | "limit">("market");
   const [limit, setLimit] = useState("");
   const [stop, setStop] = useState("");
@@ -378,6 +386,7 @@ function Ticket({ view, at, symbol, options, onView, pause }: {
       </div>
       {off ? <p className="text-[11px] text-muted-foreground" data-testid="replay-options-reason">{off}</p>
         : option && <p className="text-[11px] text-muted-foreground" data-testid="replay-options-reason">{options}</p>}
+      {option && preset && picked?.label === preset.label && <p data-testid="redo-preset" className="text-xs text-foreground">Your real contract, preselected: {preset.label}. Pick another below if you would.</p>}
       {option && <OptionPicker day={view.run.day} symbol={symbol} at={at} picked={picked} onPick={p => { setPicked(p); setPreview(null); setLimit(""); }} />}
       <div className="flex flex-wrap items-center gap-2">
         <div role="radiogroup" aria-label="Order type" className="inline-flex rounded-md border text-xs">
@@ -542,11 +551,63 @@ function RunBook({ view, at, onView, pause, log }: { view: ReplayView; at: numbe
   );
 }
 
+// --- the redo's comparison ------------------------------------------------------------------------------------------
+
+const heldFor = (m: number) => m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}` : `${m} min`;
+const unitOf = (s: RedoSide) => s.instrument === "option" ? (s.quantity === 1 ? "contract" : "contracts")
+  : s.instrument === "stock" ? (s.quantity === 1 ? "share" : "shares") : "";
+const sizeOf = (s: RedoSide) => s.quantity == null ? "shares and options" : `${s.quantity.toLocaleString("en-US")} ${unitOf(s)}`;
+
+/** The redo beside the real trade: entry, exit, size, time held and P&L for each, the difference (redo less real) and
+ *  one plain line of what changed, built by the server from those facts. */
+export function RedoCompareCard({ data }: { data: RedoCompare }) {
+  const real = data.real, redo = data.redo;
+  const price = (n: number | null) => n == null ? "—" : px(n);
+  const realExit = real.expired ? `expired ${replayDate(real.closed_day)}`
+    : `${price(real.exit.price)} · ${real.overnight ? `${replayDate(real.closed_day)} ` : ""}${replayTime(real.exit.at)}`;
+  const rows: [string, string, string][] = [
+    ["Entry", `${price(real.entry.price)} · ${replayTime(real.entry.at)}`, redo ? `${price(redo.entry.price)} · ${replayTime(redo.entry.at)}` : "—"],
+    ["Exit", realExit, redo ? `${price(redo.exit.price)} · ${replayTime(redo.exit.at)}` : "—"],
+    ["Most held", sizeOf(real), redo ? `${sizeOf(redo)}${redo.trades > 1 ? ` · ${redo.trades} trades` : ""}` : "skipped"],
+    ["Held", heldFor(real.held_minutes), redo ? heldFor(redo.held_minutes) : "—"],
+  ];
+  const diff = data.difference;
+  return (
+    <section aria-label="Redo compared with your real trade" data-testid="redo-compare" className="space-y-2 rounded-md border border-amber-400/50 p-2.5 text-xs">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <span className={LABEL}>Redo vs real</span>
+        <span className="text-muted-foreground">{real.label} · {replayDate(data.day)}</span>
+      </div>
+      <table className="w-full tabular-nums">
+        <thead><tr className="text-left text-[11px] text-muted-foreground"><th className="font-normal" /><th className="font-normal">Real</th><th className="font-normal">Redo</th></tr></thead>
+        <tbody>
+          {rows.map(([name, a, b]) => (
+            <tr key={name} className="border-t border-border/50"><td className="py-1 text-muted-foreground">{name}</td><td className="text-foreground">{a}</td><td className="text-foreground">{b}</td></tr>
+          ))}
+          <tr className="border-t border-border/50">
+            <td className="py-1 text-muted-foreground">P&amp;L</td>
+            <td className={toneOf(real.pnl)} data-testid="redo-real-pnl">{real.pnl == null ? "unknown" : signed(real.pnl)}</td>
+            <td className={toneOf(redo?.pnl ?? 0)} data-testid="redo-redo-pnl">{redo ? signed(redo.pnl ?? 0) : signed(0)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p data-testid="redo-difference" className="text-sm text-foreground">
+        {diff == null ? "Difference unknown: the real trade has no P&L recorded."
+          : diff === 0 ? "The redo made the same as the real trade."
+          : <>The redo did <span className={cn("font-medium", toneOf(diff))}><span className="tabular-nums">{usd(diff)}</span> {diff > 0 ? "better" : "worse"}</span> than the real trade.</>}
+      </p>
+      <p data-testid="redo-note" className="text-foreground/90">{data.note}</p>
+      {(real.instrument === "option" || redo?.instrument === "option") && <p className="text-[11px] text-muted-foreground">Option prices are a share (×100 a contract). Most held is the most open at once.</p>}
+      {real.overnight && !real.expired && <p className="text-[11px] text-muted-foreground">The real trade was held past the day; the redo ends at the replayed close.</p>}
+    </section>
+  );
+}
+
 // --- the replay mode -------------------------------------------------------------------------------------------------
 
 type Loaded = { key: string; bars: ReplayBar[]; open_at: number; close_at: number };
 
-export default function DeskReplay({ symbol, onLeave }: { symbol: string | null; onLeave(): void }) {
+export default function DeskReplay({ symbol, redo = null, onLeave }: { symbol: string | null; redo?: string | null; onLeave(): void }) {
   const [home, setHome] = useState<ReplayHome | null>(null);
   const [homeError, setHomeError] = useState<string | null>(null);
   const [day, setDay] = useState<string | null>(null);
@@ -565,6 +626,25 @@ export default function DeskReplay({ symbol, onLeave }: { symbol: string | null;
   const [leaving, setLeaving] = useState(false);
   const name = ticker.trim().toUpperCase();
   const keyOf = (d: string, s: string) => `${d}|${s}`;
+  // Redo a real trade: its plan (day, ticker, contract, start times; nothing of how it went), the running redo, and
+  // the comparison once he ends it.
+  const [redoId, setRedoId] = useState<string | null>(redo);
+  const [plan, setPlan] = useState<RedoPlan | null>(null);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [startFrom, setStartFrom] = useState<"open" | "before">("open");
+  const [active, setActive] = useState<RedoPlan | null>(null);
+  const [compare, setCompare] = useState<RedoCompare | null>(null);
+  const [comparing, setComparing] = useState(false);
+  useEffect(() => { if (redo) setRedoId(redo); }, [redo]);
+  useEffect(() => {
+    setPlan(null); setPlanError(null);
+    if (!redoId) return;
+    const controller = new AbortController();
+    redoPlan(redoId, controller.signal).then(found => {
+      setPlan(found); setDay(found.day); setTyped(true); setTicker(found.symbol); setStartFrom("open");
+    }).catch(e => { if (!controller.signal.aborted) setPlanError(words(e)); });
+    return () => controller.abort();
+  }, [redoId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -609,14 +689,20 @@ export default function DeskReplay({ symbol, onLeave }: { symbol: string | null;
     if (!day || !ready) return;
     setError(null);
     try {
-      const started = await startReplay(day);
-      setView(started); setAt(loaded!.open_at); setLog([]); setPlaying(false);
+      if (redoId && plan) {
+        const started = await startRedo(plan.trade_id, startFrom);
+        setView(started); setAt(started.redo.start_at); setActive(plan); setCompare(null);
+      } else {
+        const started = await startReplay(day);
+        setView(started); setAt(loaded!.open_at); setActive(null);
+      }
+      setLog([]); setPlaying(false);
     } catch (e) { setError(words(e)); }
   };
 
   // The clock: one replayed minute per tick at the chosen speed, stopping at the close.
   const closeAt = loaded?.close_at ?? 0;
-  const ended = !!view && at >= closeAt;
+  const ended = !!view && (at >= closeAt || !!compare);  // a redo he ended is over too
   const running = playing && !ended;  // the clock stops itself at the close
   useEffect(() => {
     if (!running) return;
@@ -666,7 +752,21 @@ export default function DeskReplay({ symbol, onLeave }: { symbol: string | null;
     }
     onLeave();
   };
-  const another = () => { setView(null); setLog([]); setPlaying(false); };
+  const another = () => { setView(null); setLog([]); setPlaying(false); setActive(null); setCompare(null); setRedoId(null); };
+
+  // Ending a redo sells what is open at the clock (as leaving does), then shows the comparison; at the replayed close it
+  // shows by itself. Asked once per run.
+  const compared = useRef<string | null>(null);
+  const endRedo = useCallback(async () => {
+    if (!view || !active || compared.current === view.run.id) return;
+    compared.current = view.run.id;
+    setPlaying(false); setComparing(true); setError(null);
+    try {
+      if (!view.ended) apply(await stepReplay(view.run.id, at, true));
+      setCompare(await redoCompare(view.run.id));
+    } catch (e) { compared.current = null; setError(words(e)); } finally { setComparing(false); }
+  }, [view, active, at, apply]);
+  useEffect(() => { if (active && view?.ended && !compare) void endRedo(); }, [active, view?.ended, compare, endRedo]);
 
   const shown = useMemo(() => view && loaded ? shownBars(loaded.bars, at) : [], [loaded, at, view]);
   const last = shown.length ? shown[shown.length - 1] : null;
@@ -678,6 +778,8 @@ export default function DeskReplay({ symbol, onLeave }: { symbol: string | null;
         <span data-testid="replay-badge" role="status" className="rounded bg-amber-400 px-2 py-0.5 text-xs font-bold tracking-wide text-black tabular-nums">
           {view ? replayBadge(view.run.day, at) : day ? `REPLAY · ${replayDate(day)} · not started` : "REPLAY"}
         </span>
+        {(active || (redoId && !view)) && <span data-testid="redo-badge" className="rounded border border-amber-400/60 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-100">
+          {compare ? "Redo · compared with your real trade" : "Redo · your real trade hidden"}</span>}
         {view && (
           <div className="flex flex-wrap items-center gap-1">
             <button type="button" data-testid="replay-play" aria-label={running ? "Pause the replay" : "Play the replay"} disabled={ended} onClick={() => setPlaying(!running)}
@@ -692,7 +794,12 @@ export default function DeskReplay({ symbol, onLeave }: { symbol: string | null;
             </div>
           </div>
         )}
-        <button type="button" data-testid="replay-leave" disabled={leaving} onClick={leave} className={cn(BUTTON, "ml-auto")}>
+        {active && view && !compare && (
+          <button type="button" data-testid="redo-end" disabled={comparing} onClick={() => void endRedo()} className={cn(BUTTON, AMBER, "ml-auto")}>
+            {comparing ? "Comparing…" : "End redo and compare"}
+          </button>
+        )}
+        <button type="button" data-testid="replay-leave" disabled={leaving} onClick={leave} className={cn(BUTTON, active && view && !compare ? "" : "ml-auto")}>
           {leaving ? "Selling what is open…" : "Back to live"}
         </button>
       </div>
@@ -701,7 +808,51 @@ export default function DeskReplay({ symbol, onLeave }: { symbol: string | null;
 
       {!view && (
         <section aria-label="Pick a day" data-testid="replay-setup" className="space-y-3">
+          {redoId ? (
+            <section aria-label="Redo a real trade" data-testid="redo-setup" className="space-y-2 rounded-md border border-amber-400/50 p-3">
+              <span className={LABEL}>Redo a real trade</span>
+              {planError ? <p role="alert" data-testid="redo-refused" className="text-xs text-amber-300">{planError}</p>
+                : !plan ? <p className="text-xs text-muted-foreground">Reading the trade…</p>
+                : <>
+                  <p className="text-sm text-foreground">{plan.label} on {replayDate(plan.day)}. Trade the day again as if for the first time: your real fills, notes and P&amp;L stay hidden until you end the redo, then one card compares the two.</p>
+                  {plan.contract
+                    ? <p className="text-xs text-muted-foreground">The ticket starts on your contract, {plan.contract.label}, priced from its own trades that day.</p>
+                    : plan.shares_reason && <p data-testid="redo-shares-reason" className="text-xs text-amber-300">{plan.shares_reason}</p>}
+                  <div role="radiogroup" aria-label="Where the redo starts" className="flex flex-wrap gap-1.5">
+                    <button type="button" role="radio" aria-checked={startFrom === "open"} onClick={() => setStartFrom("open")}
+                      className={cn("min-h-11 rounded-md border px-2.5 text-xs sm:min-h-8", startFrom === "open" ? "border-amber-400/70 bg-amber-400/10 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>
+                      At the open, {replayTime(plan.open_at)}
+                    </button>
+                    <button type="button" role="radio" aria-checked={startFrom === "before"} disabled={plan.before_at == null} title={plan.before_reason ?? undefined}
+                      data-testid="redo-before" onClick={() => setStartFrom("before")}
+                      className={cn("min-h-11 rounded-md border px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-45 sm:min-h-8", startFrom === "before" ? "border-amber-400/70 bg-amber-400/10 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>
+                      15 min before your entry{plan.before_at != null ? `, ${replayTime(plan.before_at)}` : ""}
+                    </button>
+                  </div>
+                  {plan.before_at == null && plan.before_reason && <p className="text-[11px] text-muted-foreground">{plan.before_reason}</p>}
+                </>}
+              <button type="button" onClick={() => { setRedoId(null); setTyped(false); }} className={QUIET}>Pick a day instead</button>
+            </section>
+          ) : <>
           <p className="text-sm text-foreground">Practice paper trading on a past day. The chart starts at the open and plays forward; fills are priced from that day&apos;s bars, and these trades are scored apart from live paper and your real trades.</p>
+          {home?.worst && home.worst.length > 0 && (
+            <div className="space-y-1.5" data-testid="redo-worst">
+              <span className={LABEL}>Redo my worst</span>
+              <ul className="space-y-1">
+                {home.worst.map(w => (
+                  <li key={w.trade_id}>
+                    <button type="button" data-testid="redo-worst-trade" onClick={() => setRedoId(w.trade_id)}
+                      className="flex min-h-11 w-full flex-wrap items-baseline gap-x-2 rounded-md border px-2.5 py-1 text-left text-xs hover:bg-secondary sm:min-h-8">
+                      <span className="text-muted-foreground">{replayDate(w.day)}</span>
+                      <span className="font-medium text-foreground">{w.label}</span>
+                      <span className={cn("ml-auto tabular-nums", toneOf(w.pnl))}>{signed(w.pnl)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-[11px] text-muted-foreground">Your biggest real losses on these days. Redo one: the day replays from the open, and what you did stays hidden until you end it.</p>
+            </div>
+          )}
           <div className="space-y-1.5">
             <span className={LABEL}>Day</span>
             <div role="radiogroup" aria-label="Replay day" className="flex flex-wrap gap-1.5">
@@ -733,11 +884,14 @@ export default function DeskReplay({ symbol, onLeave }: { symbol: string | null;
             </div>
             <p className="text-[11px] text-muted-foreground">• traded that day. Not-followed tickers are left out.</p>
           </div>
+          </>}
           {reason ? <p role="alert" data-testid="replay-missing" className="text-xs text-amber-300">{day ? replayDate(day) : ""} is greyed out for {name}: {reason}</p>
             : ready ? <p data-testid="replay-ready" className="text-xs text-muted-foreground">{name} on {replayDate(day!)}: {loaded!.bars.filter(b => b.time >= loaded!.open_at && b.time < loaded!.close_at).length} minute bars, from {replayTime(loaded!.open_at)} to {replayTime(loaded!.close_at)} ET.</p>
             : loading ? <p className="text-xs text-muted-foreground">Reading {name}&apos;s minute bars…</p> : null}
           {error && <p role="alert" className="text-xs text-amber-300">{error}</p>}
-          <button type="button" data-testid="replay-start" disabled={!ready} onClick={start} className={cn(BUTTON, AMBER)}>Start the replay at {loaded && ready ? replayTime(loaded.open_at) : "9:30 AM"}</button>
+          {redoId ? <button type="button" data-testid="replay-start" disabled={!ready || !plan} onClick={start} className={cn(BUTTON, AMBER)}>
+              Start the redo at {plan ? replayTime(startFrom === "before" && plan.before_at != null ? plan.before_at : plan.open_at) : "the open"}</button>
+            : <button type="button" data-testid="replay-start" disabled={!ready} onClick={start} className={cn(BUTTON, AMBER)}>Start the replay at {loaded && ready ? replayTime(loaded.open_at) : "9:30 AM"}</button>}
           {home && home.runs.length > 0 && (
             <div className="space-y-1 border-t pt-3">
               <span className={LABEL}>Replay practice so far</span>
@@ -760,13 +914,16 @@ export default function DeskReplay({ symbol, onLeave }: { symbol: string | null;
             <p className="text-[11px] text-muted-foreground">One-minute candles to the replay clock, premarket included; nothing after it is drawn. Pale arrows are your replay fills.</p>
             {ended && (
               <div data-testid="replay-over" className="flex flex-wrap items-center gap-2 rounded-md border border-amber-400/40 p-2 text-xs">
-                <span className="text-foreground">The replayed day is over{view.closed.length ? `: ${signed(view.score.pnl)} on ${view.score.trades} trade${view.score.trades === 1 ? "" : "s"}` : ""}.</span>
+                <span className="text-foreground">{active && at < closeAt ? "You ended the redo" : "The replayed day is over"}{view.closed.length ? `: ${signed(view.score.pnl)} on ${view.score.trades} trade${view.score.trades === 1 ? "" : "s"}` : ""}.</span>
                 <button type="button" onClick={another} className={BUTTON}>Replay another day</button>
               </div>
             )}
+            {active && comparing && !compare && <p role="status" className="text-xs text-muted-foreground">Comparing with your real trade…</p>}
+            {compare && <RedoCompareCard data={compare} />}
           </div>
           <div className="min-w-0 space-y-3">
-            {!ended && <Ticket view={view} at={at} symbol={name} options={home?.options ?? ""} onView={onView} pause={pause} />}
+            {!ended && <Ticket view={view} at={at} symbol={name} options={home?.options ?? ""} onView={onView} pause={pause}
+              preset={active?.contract ? { ...active.contract } : null} />}
             <RunBook view={view} at={at} onView={onView} pause={pause} log={log} />
             {error && <p role="alert" className="text-xs text-amber-300">{error}</p>}
           </div>

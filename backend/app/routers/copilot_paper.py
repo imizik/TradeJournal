@@ -25,7 +25,7 @@ from sqlmodel import Session
 
 from app.ai import copilot
 from app.database import get_session
-from app.engine import paper_book, paper_replay, paper_review
+from app.engine import paper_book, paper_replay, paper_review, replay_redo
 
 router = APIRouter()
 
@@ -153,6 +153,7 @@ def replay_home(with_days: bool = False, db: Session = Depends(get_session)):
         found = {**paper_replay.scorecard(db), "spread_bps": paper_replay.SPREAD_BPS, "options": paper_replay.OPTIONS_RULE}
         if with_days:  # the market calendar: only when he opens replay, never on the desk's own read
             found["days"] = paper_replay.days(time.time())
+            found["worst"] = replay_redo.worst(db, found["days"])  # Redo my worst: his biggest real losses on those days
         return found
     return _replay(call)
 
@@ -240,3 +241,29 @@ class ReplayAuto(AutoAsk):
 @router.post("/paper/replay/auto")
 def replay_auto(body: ReplayAuto, db: Session = Depends(get_session)):
     return _replay(lambda: paper_replay.set_auto(db, body.model_dump(), time.time()))
+
+
+# --- redo a real trade in replay (``engine/replay_redo.py``) ---------------------------------------------------------
+# ``GET /copilot/paper/replay/redo?trade_id=``: what Replay needs to redo a closed real trade (its day, ticker, start
+# times and the contract to preselect, or shares with the reason); nothing about how it went. ``POST
+# /copilot/paper/replay/redo``: start the redo, a replay run linked to the trade. ``GET
+# /copilot/paper/replay/redo/compare?run_id=``: the real trade beside the redo. Reads ``trade`` rows, never writes them.
+
+@router.get("/paper/replay/redo")
+def redo_plan(trade_id: str = Query(..., max_length=40), db: Session = Depends(get_session)):
+    return _replay(lambda: replay_redo.plan(db, trade_id, time.time()))
+
+
+class RedoStart(BaseModel):
+    trade_id: str = Field(..., max_length=40)
+    start: Literal["open", "before"] = "open"
+
+
+@router.post("/paper/replay/redo")
+def redo_start(body: RedoStart, db: Session = Depends(get_session)):
+    return _replay(lambda: replay_redo.start(db, body.model_dump(), time.time()))
+
+
+@router.get("/paper/replay/redo/compare")
+def redo_compare(run_id: str = Query(..., max_length=40), db: Session = Depends(get_session)):
+    return _replay(lambda: replay_redo.compare(db, run_id))
