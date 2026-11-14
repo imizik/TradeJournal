@@ -163,7 +163,7 @@ export function RulesEditor({ rules, onDone }: { rules: Rule[]; onDone(): void }
 
 function Cell({ g }: { g: { trades: number; pnl: number; win_rate: number | null } }) {
   if (g.trades === 0) return <span className="text-muted-foreground">—</span>;
-  return <><span className={tone(g.pnl)}>{signed(g.pnl)}</span><span className="text-muted-foreground"> {g.win_rate}%/{g.trades}</span></>;
+  return <span className="whitespace-nowrap"><span className={tone(g.pnl)}>{signed(g.pnl)}</span><span className="text-muted-foreground"> {g.win_rate}%/{g.trades}</span></span>;
 }
 
 /** One line under the score: closed trades with every rule followed versus any broken (P&L, win rate / trades); a tap
@@ -173,7 +173,7 @@ export function RulesSplitLine({ paper, real }: { paper?: RulesSplit; real?: Rul
   const has = (s?: RulesSplit | null) => !!s && s.followed.trades + s.broken.trades + s.unclear.trades > 0;
   if (!has(paper) && !real?.checklists) return null;
   const side = (name: string, s: RulesSplit | null | undefined, extra?: string) => (
-    <span className="whitespace-nowrap">
+    <span>
       <span className={name === "Paper" ? "text-amber-200" : "text-muted-foreground"}>{name} </span>
       {has(s) ? <>
         <span className="text-muted-foreground">followed </span><Cell g={s!.followed} />
@@ -194,18 +194,15 @@ export function RulesSplitLine({ paper, real }: { paper?: RulesSplit; real?: Rul
         {real?.checklists ? side("Real", real, realExtra) : null}
       </button>
       {open && (
-        <table data-testid="rules-by-rule" className="mt-1 w-full text-[11px]">
-          <thead><tr className="text-muted-foreground"><th className="py-0.5 text-left font-normal">Rule</th><th className="text-right font-normal">Followed</th><th className="text-right font-normal">Broken</th></tr></thead>
-          <tbody>
-            {([["Paper", paper], ["Real", real]] as const).flatMap(([name, s]) => rows(s).map(r => (
-              <tr key={`${name}-${r.id}`} className="border-t border-border/50">
-                <td className="py-0.5 pr-2"><span className={name === "Paper" ? "text-amber-200" : "text-muted-foreground"}>{name}</span> {r.text}{!r.current && <span className="text-muted-foreground"> (removed)</span>}</td>
-                <td className="whitespace-nowrap text-right"><Cell g={r.followed} /></td>
-                <td className="whitespace-nowrap pl-2 text-right"><Cell g={r.broken} /></td>
-              </tr>
-            )))}
-          </tbody>
-        </table>
+        <ul data-testid="rules-by-rule" className="mt-1 space-y-1 border-t border-border/50 pt-1">
+          {([["Paper", paper], ["Real", real]] as const).flatMap(([name, s]) => rows(s).map(r => (
+            <li key={`${name}-${r.id}`} data-testid="rules-by-rule-row">
+              <p><span className={name === "Paper" ? "text-amber-200" : "text-muted-foreground"}>{name}</span> {r.text}{!r.current && <span className="text-muted-foreground"> (removed)</span>}</p>
+              <p className="flex flex-wrap gap-x-2"><span><span className="text-muted-foreground">followed </span><Cell g={r.followed} /></span>
+                <span><span className="text-muted-foreground">broken </span><Cell g={r.broken} /></span></p>
+            </li>
+          )))}
+        </ul>
       )}
     </div>
   );

@@ -163,7 +163,7 @@ for (const width of [1440, 375]) {
     await expect(split).toContainText("Real followed +$150.00 100%/1 · broken — · 1 copied, not matched to a fill, 1 still open");
     await split.getByRole("button").click();
     const table = split.getByTestId("rules-by-rule");
-    await expect(table.getByRole("row").filter({ hasText: "Stop before I enter" })).toContainText("+$184.50 66.7%/3−$260.00 0%/2");
+    await expect(table.getByTestId("rules-by-rule-row").filter({ hasText: "Stop before I enter" })).toContainText("followed +$184.50 66.7%/3broken −$260.00 0%/2");
     await paper.getByTestId("rules-toggle").click();
     const editor = paper.getByTestId("rules-editor");
     await expect(editor.getByTestId("rules-editor-row")).toHaveCount(4);
