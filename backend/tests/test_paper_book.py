@@ -96,11 +96,12 @@ def test_a_call_fills_at_the_ask_times_one_hundred_and_closes_at_the_bid(db, mar
     preview = paper_book.open_order(db, {"symbol": "NBIS", "instrument": "option", "option_type": "call", "expiry": "2026-11-20",
                                          "strike": 100, "quantity": 2}, NOW, preview=True)["preview"]
     assert preview["per_share"] == -3.40 and preview["cash"] == -680.00 and preview["buying_power_after"] == 9320.00
+    assert preview["buying_power"] == 10000.00 and preview["need_each"] == 340.0
     assert db.exec(select(PaperEvent)).all() == []  # a preview stores nothing
     filled = buy_call(db, note="  reclaim of 98\n on volume ", stop=95, target=105)["filled"]
     assert filled["cash"] == -680.00 and filled["label"] == "NBIS $100 Call 11/20/26"
     book = paper_book.view(db, NOW + 30)
-    assert book["account"] == {"cash": 9320.0, "collateral": 0.0, "buying_power": 9320.0, "equity": None, "pnl": None, "unpriced": 1}
+    assert book["account"] == {"cash": 9320.0, "collateral": 0.0, "buying_power": 9320.0, "equity": None, "pnl": None, "unpriced": 1, "prices_at": None}
     [held] = book["positions"]
     assert held["note"] == "reclaim of 98 on volume" and held["mark"] is None  # no price yet: never a zero
     # The desk's ticked mark moves the live P&L: 4.00 × 100 × 2 − 680 = +120.
@@ -313,3 +314,30 @@ def test_the_migration_adds_only_the_two_paper_tables(tmp_path):
     assert set(after) - set(before) == {"paper_run", "paper_event"}
     assert {k: v for k, v in after.items() if k in before} == before
     _alembic(path, "downgrade", "e2c6a8f4b1d9")
+
+
+def test_two_closes_racing_never_make_cash_and_a_trim_waits_for_the_rest_in_closed_pnl(db, market):
+    paper_book.start_run(db, None, False, NOW)
+    market.quotes = {CALL: q(CALL, 3.30, 3.40), "NBIS": q("NBIS", 98.0, 98.1, last=98.05)}
+    filled = buy_call(db, qty=2)["filled"]
+    market.quotes = {CALL: q(CALL, 3.40, 3.50, now=NOW + 60), "NBIS": q("NBIS", 99, 99.1, last=99.05, now=NOW + 60)}
+    paper_book.close_order(db, {"position_id": filled["position_id"], "quantity": 1, "order_key": key()}, NOW + 60)  # trim +$0
+    market.quotes = {CALL: q(CALL, 3.90, 4.00, now=NOW + 120), "NBIS": q("NBIS", 101, 101.1, last=101.05, now=NOW + 120)}
+    book = paper_book.view(db, NOW + 61)
+    assert book["score"]["paper"] == {**book["score"]["paper"], "trades": 0, "pnl": 0.0, "curve": []}  # a trim is not a closed trade
+    # Two closes of the last contract read the book before either was stored (phone and desk): the second is stored
+    # but counts for nothing; cash moves once.
+    run = paper_book.current_run(db)
+    data = {"quantity": 1, "per_share": 3.9, "cash": 390.0, "legs_filled": {}, "stock": 101.05}
+    for n in range(2):
+        paper_book._store(db, run, UUID(filled["position_id"]), "close", f"race-close-{n}", NOW + 120, data)
+    book = paper_book.view(db, NOW + 130)
+    assert book["account"]["cash"] == 10000.0 - 680.0 + 340.0 + 390.0
+    [closed] = book["closed"]
+    assert closed["realized"] == 50.0 and book["score"]["paper"]["pnl"] == 50.0
+    # An over-sized close counts only the share that was left, its cash scaled to it.
+    market.quotes = {CALL: q(CALL, 3.30, 3.40, now=NOW + 200), "NBIS": q("NBIS", 98.0, 98.1, last=98.05, now=NOW + 200)}
+    other = buy_call(db, qty=1, now=NOW + 200)["filled"]
+    paper_book._store(db, run, UUID(other["position_id"]), "close", "too-many", NOW + 260, {**data, "quantity": 3, "cash": 1170.0})
+    book = paper_book.view(db, NOW + 270)
+    assert book["account"]["cash"] == 10050.0 - 340.0 + 390.0

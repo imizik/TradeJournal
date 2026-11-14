@@ -224,8 +224,13 @@ def _stock_price(spec: dict, quotes: dict) -> float | None:
 
 # --- the book: runs, events and their fold ----------------------------------------------------------------------------
 
-def current_run(db: Session) -> PaperRun | None:
-    return db.exec(select(PaperRun).order_by(col(PaperRun.started_at).desc(), col(PaperRun.id).desc())).first()
+def current_run(db: Session, lock: bool = False) -> PaperRun | None:
+    """The newest run; ``lock`` holds its row until the order's commit, so two orders on one run go one after the other
+    (Postgres; SQLite has one writer anyway)."""
+    newest = db.exec(select(PaperRun).order_by(col(PaperRun.started_at).desc(), col(PaperRun.id).desc())).first()
+    if newest is None or not lock:
+        return newest
+    return db.exec(select(PaperRun).where(PaperRun.id == newest.id).with_for_update()).one()
 
 
 def start_run(db: Session, starting_cash, reset: bool, now: float) -> PaperRun:
@@ -248,35 +253,39 @@ def _events(db: Session, run: PaperRun) -> list[PaperEvent]:
 
 def fold(events: list[PaperEvent]) -> list[dict]:
     """Each position from its events, oldest first. A close (or the expiry) is matched to its share of the opening cash
-    (the last one takes what is left, so the cash flows and the realized P&L add up to the cent)."""
+    (the last one takes what is left, so the cash flows and the realized P&L add up to the cent). A close of more than is
+    left (two closes racing) counts only for what was left, and one after the position is closed counts for nothing:
+    ``applied`` is the cash the fold actually used, the only cash the account counts."""
     out: dict[uuid.UUID, dict] = {}
     for event in events:
         data = json.loads(event.data_json)
         if event.kind == "open":
             out[event.position_id] = {**data, "id": str(event.position_id), "opened_at": _epoch(event.effective_at),
                                       "remaining": data["quantity"], "basis_left": data["cash"], "realized": 0.0,
-                                      "exits": [], "status": "open", "closed_at": None}
+                                      "exits": [], "status": "open", "closed_at": None, "applied": data["cash"]}
             continue
         position = out.get(event.position_id)
         if position is None or position["remaining"] <= 0:
             continue
         qty = min(data["quantity"], position["remaining"])
+        cash = data["cash"] if qty == data["quantity"] else round(data["cash"] * qty / data["quantity"], 2)
         basis = position["basis_left"] if qty == position["remaining"] else round(position["cash"] * qty / position["quantity"], 2)
-        pnl = round(data["cash"] + basis, 2)
+        pnl = round(cash + basis, 2)
+        position["applied"] = round(position["applied"] + cash, 2)
         position["basis_left"] = round(position["basis_left"] - basis, 2)
         position["remaining"] -= qty
         position["realized"] = round(position["realized"] + pnl, 2)
-        position["exits"].append({**data, "kind": event.kind, "at": _epoch(event.effective_at), "pnl": pnl})
+        position["exits"].append({**data, "quantity": qty, "cash": cash, "kind": event.kind, "at": _epoch(event.effective_at), "pnl": pnl})
         if position["remaining"] <= 0:
             position["status"] = "expired" if event.kind == "expire" else "closed"
             position["closed_at"] = _epoch(event.effective_at)
     return list(out.values())
 
 
-def account(run: PaperRun, events: list[PaperEvent], positions: list[dict]) -> dict:
-    """Cash is the start plus every fill's cash; a credit spread's width is held as collateral, so buying power is the
-    cash less it."""
-    cash = round(run.starting_cash + sum(json.loads(e.data_json)["cash"] for e in events), 2)
+def account(run: PaperRun, positions: list[dict]) -> dict:
+    """Cash is the start plus every fill's cash the fold applied; a credit spread's width is held as collateral, so
+    buying power is the cash less it."""
+    cash = round(run.starting_cash + sum(p["applied"] for p in positions), 2)
     collateral = round(sum(p["width"] * p["multiplier"] * p["remaining"] for p in positions
                            if p["status"] == "open" and p["credit"]), 2)
     return {"cash": cash, "collateral": collateral, "buying_power": round(cash - collateral, 2)}
@@ -319,7 +328,7 @@ def _note(body: dict) -> str | None:
 
 def open_order(db: Session, body: dict, now: float, preview: bool = False) -> dict:
     """Open a paper position at the live quote (``preview``: what it would fill at, nothing stored)."""
-    run = current_run(db)
+    run = current_run(db, lock=not preview)
     if run is None:
         raise PaperError("Start a paper account first.", 409)
     spec = contract(body, _ny_day(now))
@@ -342,7 +351,7 @@ def open_order(db: Session, body: dict, now: float, preview: bool = False) -> di
     stop, target = _levels(body, spec["bias"], stock)
     cash = round(per * spec["multiplier"] * qty, 2)
     events = _events(db, run)
-    book = account(run, events, fold(events))
+    book = account(run, fold(events))
     held = round(spec["width"] * spec["multiplier"] * qty, 2) if spec["credit"] else 0.0
     need = round(held - cash, 2)  # a debit: what it costs; a credit spread: the width held less the credit taken in
     if need > book["buying_power"] + 0.005:
@@ -350,7 +359,8 @@ def open_order(db: Session, body: dict, now: float, preview: bool = False) -> di
     data = {**spec, "quantity": qty, "per_share": per, "cash": cash, "legs_filled": fill["legs"], "stock": stock,
             "note": note, "stop": stop, "target": target}
     result = {"label": spec["label"], "quantity": qty, "per_share": per, "cash": cash, "quoted_at": fill["quoted_at"],
-              "legs": fill["legs"], "stock": stock, "buying_power_after": round(book["buying_power"] - need, 2)}
+              "legs": fill["legs"], "stock": stock, "buying_power_after": round(book["buying_power"] - need, 2),
+              "buying_power": book["buying_power"], "need_each": round(need / qty, 4)}
     if preview:
         return {"preview": result}
     position_id = uuid.uuid4()
@@ -361,7 +371,7 @@ def open_order(db: Session, body: dict, now: float, preview: bool = False) -> di
 
 def close_order(db: Session, body: dict, now: float, preview: bool = False) -> dict:
     """Close all of an open paper position, or trim part of it, at the live quote."""
-    run = current_run(db)
+    run = current_run(db, lock=not preview)
     if run is None:
         raise PaperError("Start a paper account first.", 409)
     try:
@@ -495,7 +505,7 @@ def verdict(position: dict) -> dict:
 
 
 def stats(results: list[float], realized: list[tuple[date, float]]) -> dict:
-    """Closed trades' win rate, average winner and loser and largest loss; P&L by day from every realized amount."""
+    """Closed trades' win rate, average winner and loser and largest loss; closed P&L by day."""
     wins = [r for r in results if r > 0]
     losses = [r for r in results if r < 0]
     curve, total = [], 0.0
@@ -548,15 +558,15 @@ def view(db: Session, now: float) -> dict:
     if settle(db, run, positions, now):
         events = _events(db, run)
         positions = fold(events)
-    book = account(run, events, positions)
+    book = account(run, positions)
     open_ = [p for p in positions if p["status"] == "open"]
     marks = _marks(sorted({leg["quote"] for p in open_ for leg in p["legs"]}))
     shown = [_position_view(p, marks) for p in reversed(open_)]
     priced = [s["mark"] for s in shown if s["mark"] is not None]
     equity = round(book["cash"] + sum(m["value"] for m in priced), 2) if len(priced) == len(shown) else None
     closed = [p for p in positions if p["status"] != "open"]
-    realized = [(_ny_day(e["at"]), e["pnl"]) for p in positions for e in p["exits"]]
-    paper = stats([p["realized"] for p in closed], realized)
+    # As the journal's trades: a position counts once it is fully closed, on its close day (a trim waits for the rest).
+    paper = stats([p["realized"] for p in closed], [(_ny_day(p["closed_at"]), p["realized"]) for p in closed])
     paper["open_pnl"] = round(sum(m["pnl"] for m in priced), 2) if priced else None
     number = next(i for i, r in enumerate(runs, 1) if r.id == run.id)
     earlier = []
@@ -569,7 +579,7 @@ def view(db: Session, now: float) -> dict:
     return {
         "run": {"id": str(run.id), "number": number, "starting_cash": run.starting_cash, "started_at": _epoch(run.started_at)},
         "account": {**book, "equity": equity, "pnl": None if equity is None else round(equity - run.starting_cash, 2),
-                    "unpriced": len(shown) - len(priced)},
+                    "unpriced": len(shown) - len(priced), "prices_at": min((m["at"] for m in priced), default=None)},
         "positions": shown,
         "closed": [_position_view(p, None) for p in sorted(closed, key=lambda p: p["closed_at"], reverse=True)[:CLOSED_SHOWN]],
         "score": {"paper": paper, "real": real_trades(db, run.started_at)},

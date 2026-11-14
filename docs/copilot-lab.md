@@ -2023,19 +2023,23 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   `MAX_DELAY_SECONDS`). Otherwise it is refused with the quote's time; a closed market, no quote or no usable bid and ask
   is refused too. The quote is one read through the chart feed (its single-flight and minute budget). A spread fills at
   the natural price; a credit spread with no credit there, or a debit spread that costs nothing, is refused. Refused on
-  fixture or replay evidence. Each order carries its own key, so a double tap records one fill.
+  fixture or replay evidence. Each confirm carries one key, so a retried Fill on paper records one fill; orders on a
+  run go one at a time (its row is locked until the fill is stored), and a close of more than is left counts only for
+  what was left, so two closes racing never make cash.
 - **The account** (`POST /copilot/paper/runs`): he names the starting cash (default $10,000). Cash is the start plus
   every fill's cash; options use the ×100 multiplier; a credit spread holds its width as collateral, as Robinhood does,
   so buying power is the cash less it and falls by the spread's most-to-lose. An order he cannot pay for is refused with
   what it needs. A new run starts fresh cash; every older run keeps its history ("Earlier runs" under Progress).
 - **Positions** sit in the Paper section under the book, its dashed amber frame and "not real money" tag keeping it
-  apart from real money. Each shows P&L from the desk's own live ticks (its legs ride the one ticks read; no new
+  apart from real money. The account's value is its cash plus each position's worth at those same prices. Each shows P&L
+  from the desk's own live ticks (its legs ride the one ticks read; no new
   polling), else the server's newest kept price greyed with its time, else "No price yet", never a zero. Close and Trim
   read a live quote first and fill at the bid (a leg sold short is bought back at the ask). An option or spread still
   open after its expiration's close settles at intrinsic value from the underlying's regular-session close (the stored
   close, else one daily-history read), 15 minutes after the close; with no close yet it says so and waits.
 - **Progress.** One line always (paper and real closed P&L and win rates since the run started); "Progress" opens the
-  scorecard: closed P&L, trades, win rate, average winner and loser and largest loss for paper beside his real closed
+  scorecard: closed P&L (as the journal counts a trade: once the position is fully closed, on its close day; a trim
+  waits for the rest), trades, win rate, average winner and loser and largest loss for paper beside his real closed
   trades over the same dates (the journal's `trade` rows, read only, Webull left out), closed P&L by day for both, each
   closed paper trade with its note and how it ended against his stop and target (stock prices: took the target, out at
   the stop and how far past it, out before either, held to expiry).

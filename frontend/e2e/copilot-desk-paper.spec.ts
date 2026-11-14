@@ -77,6 +77,8 @@ for (const width of [1440, 375]) {
     await expect(paper.getByTestId("paper-account")).toContainText("Buying power $9,360.50");
     // The live tick (4.00) moves the P&L: 4.00 × 100 × 2 − 680 = +$120.00, +17.6%.
     await expect(paper.getByTestId("paper-pnl")).toHaveText("+$120.00+17.6%");
+    // The account's value at the same live prices: $9,360.50 cash + 4.00 × 100 × 2 = $10,160.50, +$160.50 on $10,000.
+    await expect(paper.getByTestId("paper-value")).toHaveText("Value $10,160.50");
     await paper.getByTestId("paper-close-button").click();
     await expect(paper.getByTestId("paper-close")).toContainText("Sell 2 × NBIS $100 Call 11/20/26 at 3.90 (the bid");
     await expect(paper.getByTestId("paper-close")).toContainText("takes in $780.00");

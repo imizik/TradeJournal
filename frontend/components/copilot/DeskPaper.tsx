@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { useDeskTicks } from "@/lib/deskTicks";
 import {
-  PAPER_EVENT, PaperRefused, fillClose, fillOpen, paperPnl, paperSymbols, previewClose, previewOpen, startPaper,
+  PAPER_EVENT, PaperRefused, fillClose, fillOpen, orderKey, paperPnl, paperSymbols, paperValue, previewClose, previewOpen, startPaper,
   type PaperBook, type PaperFill, type PaperOrder, type PaperPosition, type PaperStats,
 } from "@/lib/paperBook";
 import { cn } from "@/lib/utils";
@@ -78,13 +78,14 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ text: string; start: boolean } | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [key, setKey] = useState("");
   const qtyN = Number(qty);
   const valid = Number.isInteger(qtyN) && qtyN > 0;
   const refuse = (e: unknown) => setError({ text: e instanceof Error ? e.message : "Not filled.", start: e instanceof PaperRefused && /Start a paper account/.test(e.message) });
 
   const check = async (count = qtyN) => {
     if (!order) return;
-    setOpen(true); setBusy(true); setError(null); setDone(null);
+    setOpen(true); setBusy(true); setError(null); setDone(null); setKey(orderKey());
     try { setPreview(await previewOpen(order, count)); } catch (e) { setPreview(null); refuse(e); } finally { setBusy(false); }
   };
   const fill = async () => {
@@ -92,7 +93,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
     setBusy(true); setError(null);
     const level = (text: string) => text.trim() ? Number(text) : null;
     try {
-      const filled = await fillOpen(order, qtyN, { note: words.trim() || null, stop: level(stopText), target: level(targetText) });
+      const filled = await fillOpen(order, qtyN, { note: words.trim() || null, stop: level(stopText), target: level(targetText) }, key);
       setDone(filled ? `Paper: ${fillLine(filled, true, multiplier)}.` : "Already filled on paper.");
       setPreview(null);
     } catch (e) { refuse(e); } finally { setBusy(false); }
@@ -104,7 +105,8 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
 
   if (!open) {
     return (
-      <button type="button" data-testid="paper-button" disabled={!order} onClick={() => check()} title="Fill this on paper at the live quote: no money, nothing sent"
+      <button type="button" data-testid="paper-button" disabled={!order}
+        onClick={() => { const n = quantity && quantity > 0 ? quantity : 1; setQty(String(n)); check(n); }} title="Fill this on paper at the live quote: no money, nothing sent"
         className={cn(BUTTON, "border-amber-400/60 text-amber-200")}>{label}</button>
     );
   }
@@ -128,7 +130,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
             </label>
           </div>
           <input aria-label="Paper note" maxLength={280} placeholder="Why (optional, one line)" value={words} onChange={e => setWords(e.target.value)} className={cn(INPUT, "w-full")} />
-          <p className="text-[11px] text-muted-foreground">Fill on paper re-reads the quote and fills at that moment&apos;s {Object.values(preview.legs).length > 1 ? "natural price" : "ask"}. {preview.buying_power_after != null && <>Paper buying power after: {usd(preview.buying_power_after)}.</>}</p>
+          <p className="text-[11px] text-muted-foreground">Fill on paper re-reads the quote and fills at that moment&apos;s {Object.values(preview.legs).length > 1 ? "natural price" : "ask"}. {preview.buying_power != null && preview.need_each != null && valid && <>Paper buying power after: {preview.buying_power - preview.need_each * qtyN < 0 ? "−" : ""}{usd(preview.buying_power - preview.need_each * qtyN)}{preview.buying_power - preview.need_each * qtyN < 0 ? " (not enough)" : ""}.</>}</p>
           <div className="flex flex-wrap gap-2">
             <button type="button" data-testid="paper-fill" disabled={busy || !valid} onClick={fill} className={cn(BUTTON, "border-amber-400/70 text-amber-100")}>Fill on paper</button>
             <button type="button" onClick={() => { setOpen(false); setPreview(null); setError(null); }} className={QUIET}>Cancel</button>
@@ -159,6 +161,7 @@ function CloseRow({ position, trim, onDone }: { position: PaperPosition; trim: b
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [key] = useState(orderKey);
   const qtyN = Number(qty);
   const valid = Number.isInteger(qtyN) && qtyN > 0 && qtyN <= position.remaining;
   useEffect(() => {
@@ -171,7 +174,7 @@ function CloseRow({ position, trim, onDone }: { position: PaperPosition; trim: b
   const fill = async () => {
     setBusy(true); setError(null);
     try {
-      const filled = await fillClose(position.id, qtyN);
+      const filled = await fillClose(position.id, qtyN, key);
       setDone(filled ? `Paper: ${fillLine(filled, false, position.multiplier)}; ${filled.pnl! >= 0 ? "made" : "lost"} ${usd(filled.pnl!)}.` : "Already filled on paper.");
     } catch (e) { setError(e instanceof Error ? e.message : "Not filled."); } finally { setBusy(false); }
   };
@@ -289,13 +292,16 @@ export default function DeskPaper({ book, failed, symbol }: { book: PaperBook | 
     );
   }
   const acct = book.account!, score = book.score!;
+  const value = paperValue(book, ticks);
+  const pnlNow = value ? Math.round((value.value - book.run.starting_cash) * 100) / 100 : null;
   const positions = book.positions ?? [];
   const closed = book.closed ?? [];
   return frame(
     <div className="pb-2">
       <p data-testid="paper-account" className="flex flex-wrap gap-x-3 gap-y-0.5 px-3 pb-1.5 text-xs tabular-nums">
-        <span><span className="text-muted-foreground">Value </span>{acct.equity != null ? usd(acct.equity) : <span className="text-muted-foreground">needs a live price for {acct.unpriced} open</span>}</span>
-        {acct.pnl != null && <span className={toneOf(acct.pnl)}>{signed(acct.pnl)}</span>}
+        <span data-testid="paper-value"><span className="text-muted-foreground">Value </span>{value ? <span className={cn(value.stale && "text-muted-foreground")}>{usd(value.value)}</span>
+          : <span className="text-muted-foreground">needs a live price for {acct.unpriced} open</span>}</span>
+        {value && pnlNow != null && <span className={value.stale ? "text-muted-foreground" : toneOf(pnlNow)}>{signed(pnlNow)}{value.stale && value.at && <span className="ml-1 text-[11px]">as of {at(value.at)}</span>}</span>}
         <span><span className="text-muted-foreground">Cash </span>{acct.cash < 0 ? "−" : ""}{usd(acct.cash)}</span>
         <span><span className="text-muted-foreground">Buying power </span>{usd(acct.buying_power)}</span>
         {acct.collateral > 0 && <span><span className="text-muted-foreground">Held for spreads </span>{usd(acct.collateral)}</span>}

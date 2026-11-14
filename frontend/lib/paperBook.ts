@@ -26,7 +26,7 @@ export type PaperStats = {
 export type PaperBook = {
   run: null | { id: string; number: number; starting_cash: number; started_at: number };
   default_cash?: number;
-  account?: { cash: number; collateral: number; buying_power: number; equity: number | null; pnl: number | null; unpriced: number };
+  account?: { cash: number; collateral: number; buying_power: number; equity: number | null; pnl: number | null; unpriced: number; prices_at: number | null };
   positions?: PaperPosition[]; closed?: PaperPosition[];
   score?: { paper: PaperStats; real: PaperStats };
   earlier: { number: number; started_at: number; ended_at: number; starting_cash: number; realized: number; trades: number; left_open: number }[];
@@ -41,7 +41,7 @@ export type PaperOrder =
 export type PaperFill = {
   label: string; quantity: number; per_share: number; cash: number; quoted_at: number; stock: number | null;
   legs: Record<string, { action: "buy" | "sell"; bid: number; ask: number; price: number }>;
-  buying_power_after?: number; pnl?: number; all?: boolean; position_id?: string;
+  buying_power_after?: number; buying_power?: number; need_each?: number; pnl?: number; all?: boolean; position_id?: string;
 };
 
 export class PaperRefused extends Error {
@@ -56,7 +56,8 @@ async function post<T>(path: string, body: object): Promise<T> {
 }
 
 const changed = () => window.dispatchEvent(new Event(PAPER_EVENT));
-const orderKey = () => (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");
+/** One key per confirm: a retry of the same Fill on paper reuses it, so the server records one fill. */
+export const orderKey = () => (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");
 
 export async function startPaper(startingCash: number, reset = false): Promise<PaperBook> {
   const book = await post<PaperBook>("/copilot/paper/runs", { starting_cash: startingCash, reset });
@@ -68,16 +69,16 @@ type Levels = { note?: string | null; stop?: number | null; target?: number | nu
 export function previewOpen(order: PaperOrder, quantity: number) {
   return post<{ preview: PaperFill }>("/copilot/paper/orders", { action: "open", preview: true, ...order, quantity }).then(r => r.preview);
 }
-export async function fillOpen(order: PaperOrder, quantity: number, levels: Levels = {}) {
-  const reply = await post<{ filled: PaperFill | null }>("/copilot/paper/orders", { action: "open", ...order, quantity, ...levels, order_key: orderKey() });
+export async function fillOpen(order: PaperOrder, quantity: number, levels: Levels, key: string) {
+  const reply = await post<{ filled: PaperFill | null }>("/copilot/paper/orders", { action: "open", ...order, quantity, ...levels, order_key: key });
   changed();
   return reply.filled;
 }
 export function previewClose(positionId: string, quantity: number) {
   return post<{ preview: PaperFill }>("/copilot/paper/orders", { action: "close", preview: true, position_id: positionId, quantity }).then(r => r.preview);
 }
-export async function fillClose(positionId: string, quantity: number) {
-  const reply = await post<{ filled: PaperFill | null }>("/copilot/paper/orders", { action: "close", position_id: positionId, quantity, order_key: orderKey() });
+export async function fillClose(positionId: string, quantity: number, key: string) {
+  const reply = await post<{ filled: PaperFill | null }>("/copilot/paper/orders", { action: "close", position_id: positionId, quantity, order_key: key });
   changed();
   return reply.filled;
 }
@@ -100,3 +101,16 @@ export function paperPnl(p: PaperPosition, ticks: DeskTicks, now = Date.now() / 
 
 /** The symbols the desk's ticker should price for these positions: each leg's quote and the underlying. */
 export const paperSymbols = (positions: PaperPosition[] | undefined) => (positions ?? []).flatMap(p => [...p.legs.map(l => l.quote), p.symbol]);
+
+/** The account's value at the desk's live prices: cash plus what each open position is worth (its P&L less the opening
+ *  cash left), with the oldest price's time; the server's value (and its prices' time) when a position has no live
+ *  price. Null when a position has no price at all. */
+export function paperValue(book: PaperBook, ticks: DeskTicks, now = Date.now() / 1000): { value: number; at: number | null; stale: boolean } | null {
+  const acct = book.account!;
+  const each = (book.positions ?? []).map(p => ({ p, pnl: paperPnl(p, ticks, now) }));
+  if (each.every(e => e.pnl?.live)) {
+    const value = Math.round((acct.cash + each.reduce((sum, e) => sum + e.pnl!.pnl - e.p.basis, 0)) * 100) / 100;
+    return { value, at: each.length ? Math.min(...each.map(e => e.pnl!.at)) : null, stale: each.some(e => e.pnl!.stale) };
+  }
+  return acct.equity == null ? null : { value: acct.equity, at: acct.prices_at, stale: true };
+}

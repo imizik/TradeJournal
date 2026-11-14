@@ -23,7 +23,8 @@ log = logging.getLogger(__name__)
 
 MAX_READS = 16
 READ_SECONDS = 8.0  # one read past this answers 504 for itself, so a stuck provider never holds the minute's other reads
-# The desk's minute reads (frontend lib/deskMinute.ts ``BATCHED``): read-only GETs.
+# The desk's minute reads (frontend lib/deskMinute.ts ``BATCHED``): GETs; only the paper book's writes, settling an
+# expired paper option at its close.
 PATHS = frozenset({
     "/copilot/desk/threads", "/copilot/desk/session", "/copilot/desk/watching", "/copilot/desk/moving",
     "/copilot/desk/feed", "/copilot/desk/sparks", "/copilot/unusual", "/copilot/scanner", "/copilot/tickets",
