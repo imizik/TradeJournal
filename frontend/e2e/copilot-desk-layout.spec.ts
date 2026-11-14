@@ -179,6 +179,22 @@ test("every place has a key and a ⌘K command; keys typed in the message box ar
   await expect(feedPane(page)).toBeHidden();
 });
 
+// The palette's Enter and a place's key in the same moment, before the browser's next frame: a fast hand, or a slow
+// machine whose frames come late. The key reaches the desk, never the closed palette's search box.
+test("B straight after ⌘K's Enter, before the next frame, still puts the keys on the book", async ({ page }) => {
+  await open(page);
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.keyboard.type("feed");
+  await expect(page.getByRole("dialog", { name: "Jump to" }).getByRole("option")).toHaveText([/^Feed.*F$/]);
+  // Both keys in one task, each to whatever holds focus as it arrives, as the browser routes them.
+  await page.evaluate(() => {
+    for (const key of ["Enter", "b"]) (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+  });
+  await expect(feedPane(page)).toBeVisible();
+  await expect(page.getByTestId("desk-book").getByRole("button", { name: "ORCL 11/20/26 250C" })).toBeFocused();
+  await expect(page.getByRole("dialog", { name: "Jump to" })).toBeHidden();
+});
+
 test("a phone: one view at a time under the switch, the strip on the Book, the ticker named on its button", async ({ page }) => {
   await open(page, { width: 390, height: 844 });
   const views = page.getByTestId("desk-views").getByRole("button");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { TONE, numeric } from "@/components/copilot/ThreadRail";
 import type { InvestigationSummary } from "@/lib/copilot";
 import { searchConversations, type DeskThread } from "@/lib/desk";
@@ -45,12 +45,22 @@ export default function CommandPalette({ open, onClose, threads, commands, onThr
   const [active, setActive] = useState(0);
   const id = useId();
 
+  // Closing hands focus back to what had it before the palette opened. With nothing before it (the page itself), the
+  // browser leaves focus on the hidden search box until its next frame, and a key pressed in that gap (B straight after
+  // Enter) went to the box, not the desk. So focus still inside is let go of at once.
+  const release = useCallback(() => {
+    const node = dialog.current;
+    if (!node) return;
+    if (node.open) node.close();
+    if (document.activeElement instanceof HTMLElement && node.contains(document.activeElement)) document.activeElement.blur();
+  }, []);
+
   useEffect(() => {
     const node = dialog.current;
     if (!node) return;
     if (open && !node.open) node.showModal();
-    else if (!open && node.open) node.close();
-  }, [open]);
+    else if (!open) release();
+  }, [open, release]);
 
   const asked = query.trim().length >= SEARCH_MIN ? query.trim() : "";
   const [found, setFound] = useState<{ asked: string; talks: InvestigationSummary[]; failed: boolean } | null>(null);
@@ -87,7 +97,7 @@ export default function CommandPalette({ open, onClose, threads, commands, onThr
 
   const choose = (item: Item | undefined) => {
     if (!item) return;
-    dialog.current?.close(); // now, so the dialog hands focus back before a command (a fill) takes it
+    release(); // now, so the dialog hands focus back before a command (a fill, the book's row) takes it
     shut();
     if (item.kind === "thread") onThread(item.row);
     else if (item.kind === "talk") onConversation(item.talk.id);
@@ -131,7 +141,8 @@ export default function CommandPalette({ open, onClose, threads, commands, onThr
   const heading = (text: string) => <li role="presentation" className="px-2.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{text}</li>;
   return (
     // A click on the dialog itself is a click on its backdrop: the panel inside fills the box.
-    <dialog ref={dialog} aria-label="Jump to" onClose={shut} onClick={event => { if (event.target === dialog.current) shut(); }}
+    // Escape: closed and let go of in its own keystroke, not in the close event's later task.
+    <dialog ref={dialog} aria-label="Jump to" onCancel={release} onClose={shut} onClick={event => { if (event.target === dialog.current) shut(); }}
       className="mx-auto mb-auto mt-[12vh] w-[min(560px,calc(100%-32px))] max-w-none overflow-hidden rounded-xl border bg-card p-0 text-foreground shadow-2xl backdrop:bg-background/70">
       <div>
         <input autoFocus value={query} placeholder="Jump to a symbol, plan, conversation or command…" aria-label="Jump to"
