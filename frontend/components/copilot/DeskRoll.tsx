@@ -45,7 +45,8 @@ export default function DeskRoll({ from, onClose, onPlaced }: { from: RollFrom; 
   const [openQty, setOpenQty] = useState<string | null>(null); // null: follows the close count
   const [limit, setLimit] = useState("");
   const [limitType, setLimitType] = useState<"debit" | "credit">("debit");
-  const [seeded, setSeeded] = useState(""); // the net limit as the quotes set it, so an ageing quote can take it back
+  // The limits as the quotes set them (net, close, open), so an ageing quote can take back any he has not changed.
+  const [seeded, setSeeded] = useState({ net: "", close: "", open: "" });
   const [closeLimit, setCloseLimit] = useState("");
   const [openLimit, setOpenLimit] = useState("");
   const [nowS, setNowS] = useState(() => Date.now() / 1000);
@@ -63,17 +64,22 @@ export default function DeskRoll({ from, onClose, onPlaced }: { from: RollFrom; 
       const found = body as Roll;
       setRoll(found);
       const mid = found.net_mid !== null && found.net_mid_type ? found.net_mid : null;
-      setLimit(mid !== null ? mid.toFixed(2) : ""); setSeeded(mid !== null ? mid.toFixed(2) : "");
+      const seed = { net: mid !== null ? mid.toFixed(2) : "", close: found.close_mid !== null ? found.close_mid.toFixed(2) : "",
+        open: found.open_mid !== null ? found.open_mid.toFixed(2) : "" };
+      setSeeded(seed); setLimit(seed.net); setCloseLimit(seed.close); setOpenLimit(seed.open);
       setLimitType(found.net_mid_type === "credit" ? "credit" : "debit");
-      setCloseLimit(found.close_mid !== null ? found.close_mid.toFixed(2) : "");
-      setOpenLimit(found.open_mid !== null ? found.open_mid.toFixed(2) : "");
     }).catch(e => { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "The roll could not be priced."); });
     return () => controller.abort();
   }, [from, to, reload]);
 
   const quotedAt = roll ? Math.min(...roll.legs.map(l => l.quote.state === "ok" && !l.quote.simulated && l.quote.as_of != null ? l.quote.as_of : Infinity)) : Infinity;
   const ageing = Number.isFinite(quotedAt) && nowS - quotedAt > STALE_S;
-  useEffect(() => { if (ageing && seeded) { setLimit(was => (was === seeded ? "" : was)); setSeeded(""); } }, [ageing, seeded]); // eslint-disable-line react-hooks/set-state-in-effect -- the quote aged on the clock
+  useEffect(() => { // the quote aged on the clock: take back the prices it filled in, unless he changed them
+    if (!ageing || !(seeded.net || seeded.close || seeded.open)) return;
+    const take = (was: string, seed: string) => (seed && was === seed ? "" : was);
+    setLimit(was => take(was, seeded.net)); setCloseLimit(was => take(was, seeded.close)); setOpenLimit(was => take(was, seeded.open)); // eslint-disable-line react-hooks/set-state-in-effect -- the quote aged on the clock
+    setSeeded({ net: "", close: "", open: "" });
+  }, [ageing, seeded]);
 
   const held = optionLabel(from.symbol, from.side, from.strike, from.expiry);
   const closeN = /^\d+$/.test(closeQty) && Number(closeQty) > 0 && Number(closeQty) <= from.held ? Number(closeQty) : null;
@@ -175,11 +181,14 @@ export default function DeskRoll({ from, onClose, onPlaced }: { from: RollFrom; 
   const openLimitN = openLimit.trim() && Number(openLimit) > 0 ? Number(openLimit) : null;
   const spot = roll.underlying.state === "ok" ? roll.underlying.last ?? null : null;
   // The new contract's own break-even is at its mid; the dollars are at the limit he types (one order's net, or two).
-  const f = rollFigures(from.side, from.strike, to.strike, from.expiry, to.expiry, {
+  const computed = rollFigures(from.side, from.strike, to.strike, from.expiry, to.expiry, {
     closeQty: closeN, openQty: openN, multiplier: roll.multiplier, spot, costPerContract: from.cost,
     closePrice: twoOrders ? closeLimitN : fresh ? roll.close_mid : null, openPrice: twoOrders ? openLimitN : fresh ? roll.open_mid : null,
     net: twoOrders ? null : signedNet,
   });
+  // The dollars that change hands follow a limit he has (one net, or both orders' prices), never the mids alone.
+  const priced = twoOrders ? closeLimitN !== null && openLimitN !== null : signedNet !== null;
+  const f = priced ? computed : { ...computed, netUsd: null, inTradeAfter: null, atRiskAfter: null, tradeBreakeven: null, ahead: false };
   const be = fresh && roll.open_mid !== null ? rollFigures(from.side, from.strike, to.strike, from.expiry, to.expiry,
     { closeQty: null, openQty: null, multiplier: null, closePrice: null, openPrice: roll.open_mid, spot }) : null;
   const sentence = fresh ? rollSentence(from.symbol, from.side, from.strike, from.expiry, to.strike, to.expiry, { ...f, breakeven: be?.breakeven ?? null }) : null;

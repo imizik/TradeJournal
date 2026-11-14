@@ -104,6 +104,16 @@ def test_a_credit_bigger_than_the_cost_leaves_him_ahead():
     assert f["ahead"] is True and f["trade_breakeven"] is None and f["breakeven"] == 121.0
 
 
+def test_taking_out_exactly_what_he_put_in_is_not_ahead():
+    # 3 bought at 2.50 ($750); a 2.50 credit takes $750 back out: nothing left in, so the new strike is break-even.
+    f = desk_roll.roll_figures("call", 100, 105, NOV21, DEC19, close_qty=3, open_qty=3, multiplier=100, close_price=4.00,
+                               open_price=1.50, cost_per_contract=250)
+    assert (f["net_usd"], f["in_trade_after"], f["ahead"], f["trade_breakeven"]) == (-750.0, 0.0, False, 105.0)
+    p = desk_roll.roll_figures("put", 100, 95, NOV21, DEC19, close_qty=1, open_qty=1, multiplier=100, close_price=5.00,
+                               open_price=1.00, cost_per_contract=400)
+    assert (p["in_trade_after"], p["ahead"], p["trade_breakeven"]) == (0.0, False, 95.0)
+
+
 def test_the_typed_net_limit_sets_the_dollars_not_the_leg_mids():
     # Robinhood fills a roll at its net: a 1.25 debit typed against 4.00 / 5.40 mids moves $375 for 3, not $420.
     f = desk_roll.roll_figures("call", 100, 105, NOV21, DEC19, close_qty=3, open_qty=3, multiplier=100, close_price=4.00,

@@ -28,6 +28,13 @@ test("a credit bigger than the cost leaves him ahead", () => {
   expect([f.net, f.netType, f.netUsd, f.inTradeAfter, f.ahead, f.tradeBreakeven, f.breakeven]).toEqual([7, "credit", -700, -500, true, null, 121]);
 });
 
+test("taking out exactly what he put in is not ahead: the new strike is the break-even", () => {
+  const f = rollFigures("call", 100, 105, NOV21, DEC19, { closeQty: 3, openQty: 3, multiplier: 100, closePrice: 4, openPrice: 1.5, costPerContract: 250 });
+  expect([f.netUsd, f.inTradeAfter, f.ahead, f.tradeBreakeven]).toEqual([-750, 0, false, 105]);
+  const p = rollFigures("put", 100, 95, NOV21, DEC19, { closeQty: 1, openQty: 1, multiplier: 100, closePrice: 5, openPrice: 1, costPerContract: 400 });
+  expect([p.inTradeAfter, p.ahead, p.tradeBreakeven]).toEqual([0, false, 95]);
+});
+
 test("the typed net sets the dollars; different counts are two orders", () => {
   const typed = rollFigures("call", 100, 105, NOV21, DEC19, { closeQty: 3, openQty: 3, multiplier: 100, closePrice: 4, openPrice: 5.4, net: 1.25, costPerContract: 250 });
   expect([typed.net, typed.netUsd, typed.atRiskAfter, typed.inTradeAfter, typed.tradeBreakeven]).toEqual([1.25, 375, 1575, 1125, 108.75]);

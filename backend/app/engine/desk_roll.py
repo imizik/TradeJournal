@@ -61,7 +61,7 @@ def roll_figures(kind: str, old_strike: float, new_strike: float, old_expiry: da
       Robinhood will show the new position from its own fill; ``move_pct`` the stock's move from ``spot`` to it.
     - ``trade_breakeven``: where the new contracts at expiry pay back all the money in the trade (``in_trade_after``
       spread over ``open_qty x multiplier`` shares from the new strike); ``ahead`` when he has already taken out more
-      than he put in, so there is none.
+      than he put in, so there is none (taken out exactly what he put in: the new strike).
     - ``days_added``: new expiry less old, in days (negative when the new expiry is earlier).
     Anything the inputs do not give is None.
     """
@@ -98,7 +98,7 @@ def roll_figures(kind: str, old_strike: float, new_strike: float, old_expiry: da
         out["basis_before"] = cents(cost_per_contract * close_qty)
         if out["net_usd"] is not None:
             out["in_trade_after"] = round(out["basis_before"] + out["net_usd"], 2)
-            if out["in_trade_after"] <= 0:
+            if out["in_trade_after"] < 0:  # at exactly 0 the new strike is the whole trade's break-even
                 out["ahead"] = True
             else:
                 out["trade_breakeven"] = round(new_strike + sign * out["in_trade_after"] / (multiplier * open_qty), 4)

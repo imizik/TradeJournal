@@ -63,7 +63,7 @@ export function rollFigures(kind: Side, oldStrike: number, newStrike: number, ol
     out.basisBefore = cents(o.costPerContract * closeQty);
     if (out.netUsd !== null) {
       out.inTradeAfter = round(out.basisBefore + out.netUsd, 2);
-      if (out.inTradeAfter <= 0) out.ahead = true;
+      if (out.inTradeAfter < 0) out.ahead = true; // at exactly 0 the new strike is the whole trade's break-even
       else out.tradeBreakeven = round(newStrike + sign * out.inTradeAfter / (m * openQty), 4);
     }
   }

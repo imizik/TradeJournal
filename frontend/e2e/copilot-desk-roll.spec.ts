@@ -203,6 +203,9 @@ test("Roll: the held call is leg 1, the chain picks leg 2, and the ticket prices
   await expect(r.getByTestId("roll-net-usd")).toContainText("You take in $60.00");
   await expect(r.getByTestId("roll-basis")).toContainText("→ $1,180.00 after the roll (−$60.00)");
   await r.getByRole("radio", { name: "Debit (you pay)" }).click();
+  // No limit: no dollars change hands on screen (the mids alone are not his price).
+  await r.getByLabel("Net limit price per share, debit").fill("");
+  await expect(r.getByTestId("roll-net-usd")).toHaveText("—");
   await r.getByLabel("Net limit price per share, debit").fill("1.40");
   // Copy only: no Send button; Copy all is Robinhood's roll screen.
   await expect(r.getByRole("button", { name: /send/i })).toHaveCount(0);
@@ -217,6 +220,11 @@ test("Roll: the held call is leg 1, the chain picks leg 2, and the ticket prices
   await r.getByRole("button", { name: "Copy both orders for Robinhood" }).click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
     "Order 1 of 2 · ORCL · Sell to close · ORCL $250 Call 11/20/26\nLimit price 4.05\nContracts 2\n\nOrder 2 of 2 · ORCL · Buy to open · ORCL $255 Call 12/18/26\nLimit price 5.45\nContracts 1");
+  // Once the quotes pass 15 minutes, the prices the quotes filled in are taken back: no dollars from old mids.
+  await page.clock.runFor(16 * 60_000);
+  await expect(r.getByTestId("roll-net-usd")).toHaveText("—");
+  await expect(r.getByLabel("Sell to close limit price per share")).toHaveValue("");
+  await expect(r.getByLabel("Buy to open limit price per share")).toHaveValue("");
   // Closing more than held is said, and the copy waits.
   await r.getByLabel("Contracts to close").fill("3");
   await expect(r).toContainText("You hold 2: a roll closes at most that many.");
