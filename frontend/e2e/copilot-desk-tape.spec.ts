@@ -114,9 +114,16 @@ test("closing the Tape stops a running stream", async ({ page }) => {
   await desk(page, "NBIS", streaming());
   await page.getByTestId("tape-toggle").click();
   await expect(page.getByTestId("tape-status")).toHaveText("Connecting NBIS…");
+  // The desk's data health shows the session as Level 2 while it runs, and off once the Tape closes.
+  await page.getByTestId("desk-health").click();
+  await expect(page.getByTestId("health-level2")).toHaveAttribute("data-state", "live");
+  await expect(page.getByTestId("health-level2")).toContainText("Live · NBIS");
+  await page.keyboard.press("Escape");
   await page.getByTestId("tape-toggle").click();
   await expect(page.getByTestId("desk-tape")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (window as unknown as { tapeAborted: boolean }).tapeAborted)).toBe(true);
+  await page.getByTestId("desk-health").click();
+  await expect(page.getByTestId("health-level2")).toHaveAttribute("data-state", "off");
 });
 
 test("another session holding the bridge is named, not fought", async ({ page }) => {

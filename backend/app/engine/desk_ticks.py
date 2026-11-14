@@ -55,6 +55,14 @@ def clear() -> None:
         _issue = None
 
 
+def health() -> dict:
+    """For the desk's data health, no I/O: ``good`` (when the newest quote read came back), ``failed`` (when the newest
+    read failed), ``asked`` (when a desk last asked for a price) and ``reading`` (a read is in flight)."""
+    with _lock:
+        return {"good": max((at for at, _row in _kept.values()), default=None), "failed": _issue[0] if _issue else None,
+                "asked": max(_wanted.values(), default=None), "reading": _flight is not None}
+
+
 def names(symbols: str) -> list[str]:
     """The asked symbols, upper-cased, de-duplicated in order: stock tickers and OCC option symbols only."""
     out: list[str] = []

@@ -7,6 +7,7 @@ import SetupRecordLines, { premiumLine } from "@/components/copilot/SetupRecordL
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { getSymbolLoop, type SetupRecord } from "@/lib/copilot";
 import type { AnyClosingTicket, ClosingTicket, CloseNowTicket } from "@/lib/closingTicket";
+import type { RollFrom } from "@/lib/rollTicket";
 import { spreadCopyText, spreadFigures, spreadSentence } from "@/lib/spreadTicket";
 import { cn } from "@/lib/utils";
 
@@ -39,6 +40,11 @@ export function openTicket(investigationId: string, pick?: TicketPick) {
 /** Opens a closing ticket on the desk's Ticket tab. Its buttons live only on the desk, which handles the event. */
 export function openClosingTicket(close: AnyClosingTicket) {
   window.dispatchEvent(new CustomEvent(TICKET_EVENT, { detail: { close }, cancelable: true }));
+}
+
+/** Opens a roll ticket for a held long call or put (its book row's Roll, or a closing ticket's Roll instead). */
+export function openRollTicket(roll: RollFrom) {
+  window.dispatchEvent(new CustomEvent(TICKET_EVENT, { detail: { roll }, cancelable: true }));
 }
 
 export type TicketPlan = {
@@ -143,7 +149,7 @@ async function copyText(text: string): Promise<void> {
   if (!ok) throw new Error("copy refused");
 }
 
-function CopyButton({ text, label, disabled = false, wide = false }: { text: string; label: string; disabled?: boolean; wide?: boolean }) {
+export function CopyButton({ text, label, disabled = false, wide = false }: { text: string; label: string; disabled?: boolean; wide?: boolean }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const copy = () => copyText(text).then(() => setState("copied"), () => setState("failed"))
     .finally(() => setTimeout(() => setState("idle"), 1800));
@@ -157,7 +163,7 @@ function CopyButton({ text, label, disabled = false, wide = false }: { text: str
   );
 }
 
-function Row({ name, children, copy }: { name: string; children: React.ReactNode; copy?: React.ReactNode }) {
+export function Row({ name, children, copy }: { name: string; children: React.ReactNode; copy?: React.ReactNode }) {
   return (
     <div className="grid grid-cols-[6rem_minmax(0,1fr)_auto] items-center gap-2 border-t py-1.5 first:border-t-0 sm:grid-cols-[9rem_minmax(0,1fr)_auto]">
       <span className="text-xs text-muted-foreground">{name}</span>
@@ -640,6 +646,7 @@ function ClosingView({ ticket: t, onClose, onPlaced }: { ticket: ClosingTicket; 
       <div className="space-y-2">
         <CopyButton text={all} label="Copy all for Robinhood" wide />
         <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {t.symbol}, your {kindWord(t.side).toLowerCase()} position, Sell, then enter each field. Nothing is sent from here.</p>
+        {t.roll && <button type="button" data-testid="closing-roll" onClick={() => openRollTicket(t.roll!)} className="text-xs text-foreground underline underline-offset-2">Roll it instead: close these and open another contract</button>}
       </div>
       <div className="flex flex-wrap gap-2 border-t pt-3">
         <button type="button" onClick={() => onPlaced(t.symbol)} className="inline-flex min-h-11 items-center rounded-md border px-3 text-xs font-medium hover:bg-secondary sm:min-h-8">I placed it</button>

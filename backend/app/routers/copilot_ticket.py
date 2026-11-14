@@ -8,6 +8,10 @@ same-expiry vertical spread that sells ``short_strike``. 404 without a saved pla
 There is no write here and nothing that places, sends or stages an order; the ticket's fields are copied into
 Robinhood by hand. Owner-only like every ``/copilot`` route; refuses while the lab is off.
 
+``GET /copilot/roll``: a roll ticket for a held long call or put (``engine/desk_roll.py``): the held contract's terms as
+the desk's book row shows them, the contract to roll to, and the counts; both legs' quotes from one paced chain pass and
+the arithmetic. 400 for a roll this build does not price. Market data only; never Robinhood, never an order.
+
 ``GET /copilot/chain?symbol=&expiration=``: the desk's Chain tab (``engine/desk_chain.py``), one expiry of the ticker's
 option chain around the price with his held and planned contracts marked. Market data only; never Robinhood.
 
@@ -26,7 +30,7 @@ from sqlmodel import Session
 
 from app.ai import copilot
 from app.database import get_session
-from app.engine import desk_chain, desk_scanner, desk_ticket, desk_unusual
+from app.engine import desk_chain, desk_roll, desk_scanner, desk_ticket, desk_unusual
 
 router = APIRouter()
 
@@ -55,6 +59,21 @@ def ticket(investigation_id: str, expiration: date | None = None, strike: float 
                                  short_strike=short_strike if pick else None, pick_kind=option_type if pick else None)
     except desk_ticket.TicketError as exc:
         raise HTTPException(404 if exc.code == "no_plan" else 409, str(exc)) from None
+
+
+@router.get("/roll")
+def roll(symbol: str = Query(..., min_length=1, max_length=15), option_type: Literal["call", "put"] = Query(...),
+         strike: float = Query(..., gt=0, lt=100000), expiration: date = Query(...), held: int = Query(..., gt=0, lt=10000),
+         new_strike: float = Query(..., gt=0, lt=100000), new_expiration: date = Query(...),
+         quantity: int | None = Query(None, gt=0, lt=10000), new_quantity: int | None = Query(None, gt=0, lt=10000),
+         cost: float | None = Query(None, gt=0, lt=10_000_000)):
+    found = _settings()
+    try:
+        return desk_roll.build(symbol.strip().upper(), option_type, strike, expiration, held, new_strike, new_expiration,
+                               close_qty=quantity, open_qty=new_quantity, cost_per_contract=cost,
+                               mode=getattr(found, "evidence", "live"))
+    except desk_roll.RollError as exc:
+        raise HTTPException(400, str(exc)) from None
 
 
 @router.get("/chain")

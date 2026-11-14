@@ -1790,6 +1790,31 @@ def _now() -> float:
     return time.time()
 
 
+@router.get("/desk/health")
+def desk_health(db: Session = Depends(get_session)):
+    """Is each source behind the desk live (``app/engine/desk_health.py``): Robinhood, prices, chatter, TradingView,
+    fill emails, Radar and the copilot budget, each with its state, last good time and what it affects. Read from what
+    each source already keeps; no provider call, no Robinhood call. Read-only, owner-only, refused while the lab is off."""
+    found = copilot.settings()
+    if not found.enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import desk_health as health
+    now = today._now()
+    return health.build(db, now, lambda: _robinhood_health(now), mode=getattr(found, "evidence", "live"))
+
+
+def _robinhood_health(now: float) -> dict:
+    """The Robinhood feed's state for the data-health strip, without starting a read: the cached snapshot's state
+    (``kick=False``), its newest good read, whether a read is in flight, the feed's stale window and the order-history
+    pass's last status."""
+    from app.engine import robinhood_book as rb
+    from app.engine import robinhood_fills
+    summary, _snap = rb.feed.snapshot(kick=False)
+    return {"state": summary.get("state"), "last_at": rb.feed.last_read_at(), "reading": rb.feed.reading(),
+            "refresh_window": rb.STALE_REFRESHES * rb.ttl(now),
+            "orders": {"mode": robinhood_fills.mode(), "status": robinhood_fills.poller.status()}}
+
+
 @router.get("/desk/feed")
 def desk_feed(db: Session = Depends(get_session)):
     """The desk's Feed (``app/engine/desk_feed.py``): today's pings, plan events, his TradingView alerts, Radar events and setup cards, headlines

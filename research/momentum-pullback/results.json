@@ -1,0 +1,155 @@
+{
+  "protocol_id": "momentum-pullback-20261113-v1",
+  "beats_market": {
+    "trades": 12534,
+    "mean_excess_pct": -0.057,
+    "interval_pct": [
+      -0.387,
+      0.296
+    ],
+    "periods_pct": {
+      "first": -0.145,
+      "second": 0.201,
+      "third": -0.195
+    },
+    "mean_excess_doubled_costs_pct": -0.21,
+    "decision": "no evidence either way"
+  },
+  "pullback_adds": {
+    "trades": 12534,
+    "mean_vs_controls_pct": 0.035,
+    "interval_pct": [
+      -0.18,
+      0.268
+    ],
+    "periods_pct": {
+      "first": -0.005,
+      "second": 0.143,
+      "third": -0.019
+    },
+    "decision": "no evidence either way"
+  },
+  "descriptive": {
+    "signals": 17519,
+    "skipped_while_open": 4983,
+    "net": {
+      "trades": 12534,
+      "mean_pct": 0.241,
+      "median_pct": -1.247,
+      "win_rate": 0.333
+    },
+    "gross": {
+      "trades": 12534,
+      "mean_pct": 0.393,
+      "median_pct": -1.098,
+      "win_rate": 0.348
+    },
+    "net_doubled_costs": {
+      "trades": 12534,
+      "mean_pct": 0.089,
+      "median_pct": -1.39,
+      "win_rate": 0.321
+    },
+    "spy_over_holds": {
+      "trades": 12534,
+      "mean_pct": 0.299,
+      "median_pct": 0.131,
+      "win_rate": 0.544
+    },
+    "controls_net": {
+      "trades": 12534,
+      "mean_pct": 0.206,
+      "median_pct": -0.132,
+      "win_rate": 0.478
+    },
+    "controls_excess": {
+      "trades": 12534,
+      "mean_pct": -0.093,
+      "median_pct": -0.245,
+      "win_rate": 0.454
+    },
+    "mean_hold_sessions": 4.72,
+    "exits": {
+      "stop": 7825,
+      "no progress": 1238,
+      "time": 3462,
+      "end of data": 9
+    },
+    "mean_r": 0.732,
+    "opened_below_stop": 2073,
+    "by_year": {
+      "2016": {
+        "trades": 494,
+        "mean_pct": -0.212,
+        "median_pct": -0.988,
+        "win_rate": 0.306
+      },
+      "2017": {
+        "trades": 933,
+        "mean_pct": -0.039,
+        "median_pct": -0.873,
+        "win_rate": 0.315
+      },
+      "2018": {
+        "trades": 956,
+        "mean_pct": -0.282,
+        "median_pct": -1.04,
+        "win_rate": 0.351
+      },
+      "2019": {
+        "trades": 972,
+        "mean_pct": -0.078,
+        "median_pct": -0.971,
+        "win_rate": 0.36
+      },
+      "2020": {
+        "trades": 1108,
+        "mean_pct": 1.455,
+        "median_pct": -0.697,
+        "win_rate": 0.437
+      },
+      "2021": {
+        "trades": 1577,
+        "mean_pct": -0.368,
+        "median_pct": -1.703,
+        "win_rate": 0.313
+      },
+      "2022": {
+        "trades": 1241,
+        "mean_pct": -0.196,
+        "median_pct": -0.851,
+        "win_rate": 0.369
+      },
+      "2023": {
+        "trades": 1101,
+        "mean_pct": -0.549,
+        "median_pct": -1.262,
+        "win_rate": 0.305
+      },
+      "2024": {
+        "trades": 1540,
+        "mean_pct": -0.068,
+        "median_pct": -1.211,
+        "win_rate": 0.309
+      },
+      "2025": {
+        "trades": 1338,
+        "mean_pct": -0.144,
+        "median_pct": -1.307,
+        "win_rate": 0.348
+      },
+      "2026": {
+        "trades": 1274,
+        "mean_pct": -0.097,
+        "median_pct": -1.768,
+        "win_rate": 0.327
+      }
+    },
+    "without_best_1pct_months": {
+      "trades": 12389,
+      "mean_pct": -0.116,
+      "median_pct": -1.171,
+      "win_rate": 0.338
+    }
+  }
+}
