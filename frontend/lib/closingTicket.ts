@@ -14,6 +14,7 @@
  */
 
 import { intrinsic, type OptionTerms } from "@/lib/optionStanding";
+import type { RollFrom } from "@/lib/rollTicket";
 
 export type ClosingAt = "target" | "stop";
 export const CLOSING_LABEL: Record<ClosingAt, string> = { target: "Close at target", stop: "Close at stop" };
@@ -44,6 +45,8 @@ export type ClosingTicket = {
   floored: boolean;
   /** Shares a contract (100 for a standard contract), for the proceeds. */
   multiplier: number;
+  /** The same contracts as a roll (the ticket's "Roll instead"), when the book row can roll them. */
+  roll?: RollFrom | null;
 };
 
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);

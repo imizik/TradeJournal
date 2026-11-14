@@ -82,7 +82,9 @@ test("a headline marker opens its headlines, and Ask hands the headline and the 
   await expect(tip.getByRole("link").first()).toHaveText("Invented: wins a large GPU cloud contract");
   await expect(tip.getByRole("link").first()).toHaveAttribute("href", "https://example.com/two");
   await expect(tip.getByRole("link").first()).toHaveAttribute("target", "_blank");
-  await expect(tip.getByTestId("desk-news-item").first()).toContainText(/benzinga\s?· \d{1,2}:\d{2} [AP]M ET/);
+  // A headline from an earlier New York day carries its date ("Nov 13 11:22 PM ET"): the bars run off the real clock,
+  // so just after midnight ET the headlines fall on yesterday.
+  await expect(tip.getByTestId("desk-news-item").first()).toContainText(/benzinga\s?· (?:[A-Z][a-z]{2} \d{1,2} )?\d{1,2}:\d{2} [AP]M ET/);
   await pane.screenshot({ path: test.info().outputPath("desk-news-tip.png") });
 
   // Leaving it closes it; a tap pins it open, and the pointer may move into it.
@@ -99,7 +101,7 @@ test("a headline marker opens its headlines, and Ask hands the headline and the 
   await expect(tip).toBeHidden();
   const message = page.getByRole("textbox", { name: "Message" });
   await expect(message).toHaveValue(new RegExp(
-    '^Context: NBIS headline \\(benzinga, \\d{1,2}:\\d{2} [AP]M ET\\): "Invented: wins a large GPU cloud contract"\\. ' +
+    '^Context: NBIS headline \\(benzinga, (?:[A-Z][a-z]{2} \\d{1,2} )?\\d{1,2}:\\d{2} [AP]M ET\\): "Invented: wins a large GPU cloud contract"\\. ' +
     "NBIS moved \\+2\\.8% .*–.* ET on the 2m chart, well beyond its typical candle\\. " +
     "Did this headline move it, and does it touch my positions or plans\\?"));
   await expect(page).toHaveURL(/\/copilot-lab\?symbol=NBIS&context=NBIS\+headline/);

@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
  * Make it a spread turns a picked contract into the long leg of a same-expiry vertical: the next contract tapped on the
  * same side is the leg sold, and the row shows the net debit or credit at the mid and the natural price, the most it can
  * lose and make, and Plan it / Put on ticket for the spread as one (``lib/spreadTicket.ts``).
+ * In roll mode (``roll``, inside the roll ticket ``DeskRoll``) a tapped contract offers only Roll to this.
  * Above the strikes, the shown expiry's walls in one line (the Charts strike ladder's read, ``lib/deskWalls.ts``, once a
  * minute), with the wall and max-pain strikes marked; a read that is not current is grey with its time.
  */
@@ -160,18 +161,24 @@ export function spreadPlanFor(plans: TicketPlan[] | null, symbol: string, bullis
   return ticketPlanFor(plans, symbol, bullish ? "call" : "put");
 }
 
-export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, unusual = [], focus = null }: {
+/** The roll ticket's pick (``DeskRoll``): the contract held, and where the contract to roll to goes. */
+export type ChainRoll = { side: ChainSide; strike: number; expiry: string; onPick(pick: ChainPick): void };
+
+export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, unusual = [], focus = null, roll = null }: {
   symbol: string | null; plans: TicketPlan[] | null;
   onCheck(text: string): void; onPlan(pick: ChainPick, line: string): void; onTicket(investigationId: string, pick: ChainPick): void;
   unusual?: UnusualRow[]; focus?: { pick: ChainPick; n: number } | null;
+  /** Roll mode, inside the roll ticket: opens on the held contract's expiry and side, and a tapped contract offers
+   *  "Roll to this" instead of the usual actions. */
+  roll?: ChainRoll | null;
 }) {
   // The expiry he picked belongs to its ticker: a new ticker starts at its nearest, with no extra read of the old date.
   // A Feed pick seeds the first read, so the tab never reads the nearest expiry first.
   const seeded = focus && focus.pick.symbol === symbol ? focus.pick : null;
-  const [chosen, setChosen] = useState<{ symbol: string | null; date: string } | null>(seeded ? { symbol, date: seeded.expiry } : null);
+  const [chosen, setChosen] = useState<{ symbol: string | null; date: string } | null>(seeded ? { symbol, date: seeded.expiry } : roll ? { symbol, date: roll.expiry } : null);
   const expiry = chosen && chosen.symbol === symbol ? chosen.date : null;
   const setExpiry = (date: string) => setChosen({ symbol, date });
-  const [side, setSide] = useState<ChainSide>(seeded?.side ?? "call");
+  const [side, setSide] = useState<ChainSide>(seeded?.side ?? roll?.side ?? "call");
   const [picked, setPicked] = useState<ChainPick | null>(seeded);
   const [spreadFrom, setSpreadFrom] = useState<ChainPick | null>(null); // Make it a spread: the long leg, waiting for the leg sold
   // A Feed row's contract: its expiry, selected, on the side shown, its strike inside the window.
@@ -285,7 +292,8 @@ export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, un
                   </tr>
                   {selected && selected.strike === row.strike && sides.includes(selected.side) && (
                     <tr><td colSpan={span} className="border-b bg-muted/30 p-0">
-                      {long && selected.side === long.side && selected.strike !== long.strike
+                      {roll ? <RollPick pick={selected} cell={row[selected.side]} roll={roll} onClose={() => setPicked(null)} />
+                        : long && selected.side === long.side && selected.strike !== long.strike
                         ? <SpreadActions long={long} short={selected} longCell={cellAt(long.side, long.strike)} shortCell={row[selected.side]} plans={plans}
                             spot={price ?? null} onPlan={onPlan} onTicket={onTicket} onBack={() => { setPicked(long); setSpreadFrom(null); }} onClose={() => { setPicked(null); setSpreadFrom(null); }} />
                         : <Actions pick={selected} cell={row[selected.side]} plans={plans} onCheck={onCheck} onPlan={onPlan} onTicket={onTicket}
@@ -301,7 +309,7 @@ export default function DeskChain({ symbol, plans, onCheck, onPlan, onTicket, un
       )}
       <p className="text-[11px] text-muted-foreground">
         {shown.centred_on === "parity" ? "No current price: centred where calls and puts cost the same. " : ""}
-        Held contracts and your saved plans&apos; contracts and levels are marked. Tap a contract to check it, plan it or put it on a ticket; nothing is sent from here.
+        Held contracts and your saved plans&apos; contracts and levels are marked. {roll ? `Tap the ${roll.side} to roll to; other expiries are in the dates above.` : "Tap a contract to check it, plan it or put it on a ticket;"} nothing is sent from here.
       </p>
     </div>
   );
@@ -493,6 +501,33 @@ function Actions({ pick, cell, plans, onCheck, onPlan, onTicket, onClose, buildi
         {plan ? `Put on ticket opens your saved ${pick.symbol} plan's ticket with this contract, to copy into Robinhood. Nothing is sent from here.`
           : `A ticket opens from a saved plan: there is no armed ${pick.symbol} ${pick.side} plan yet, so Plan it first.`}
       </p>
+    </div>
+  );
+}
+
+/** Roll mode's row under a tapped contract: its quote, and Roll to this (a contract of the held side other than the one
+ *  held), else why not. */
+function RollPick({ pick, cell, roll, onClose }: { pick: ChainPick; cell: Cell | null; roll: ChainRoll; onClose(): void }) {
+  const same = pick.side === roll.side && pick.strike === roll.strike && pick.expiry === roll.expiry;
+  const why = pick.side !== roll.side ? `A roll keeps the ${roll.side}: pick a ${roll.side}.` : same ? "This is the contract you hold: pick another strike or expiry." : null;
+  const button = "inline-flex min-h-11 items-center rounded-md border px-3 text-xs font-medium hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-45 sm:min-h-8";
+  return (
+    <div data-testid="chain-roll-pick" className="space-y-2 px-3 py-2.5 font-sans">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="font-mono text-sm font-semibold">{contractLabel(pick)}</span>
+        {cell && (
+          <span className="text-xs text-muted-foreground">
+            {cell.state === "missing" ? "No usable bid and ask right now."
+              : <>Bid {quote(cell, cell.bid)} · Ask {quote(cell, cell.ask)} · Mark {money(cell.mark)} · Δ {delta(cell.delta)} · OI {count(cell.open_interest)}</>}
+            {cell.state === "stale" && <> · quote from {clock(cell.quoted_at)}, not live</>}
+          </span>
+        )}
+      </div>
+      {why ? <p className="text-xs text-amber-300">{why}</p> : null}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={button} disabled={!!why} onClick={() => roll.onPick(pick)}>Roll to this</button>
+        <button type="button" onClick={onClose} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Close</button>
+      </div>
     </div>
   );
 }
