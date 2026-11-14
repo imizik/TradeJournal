@@ -19,7 +19,8 @@ A two-leg vertical spread (same symbol, expiry and type; one leg bought, one sol
 Make it a spread (``pick`` with ``short_strike``) or from plan words that state one plainly (``read_spread``). Both legs'
 quotes come from the one chain read a single contract's ticket makes; the net debit or credit at the mid and at the
 natural price, the most it can lose and make, break-even and its worth at expiry at the plan's levels are arithmetic
-(``spread_figures``). Straddles, strangles, condors, butterflies, rolls and calendars stay refused as before.
+(``spread_figures``). Straddles, strangles, condors, butterflies, rolls and calendars stay refused as plan tickets; a
+held long option rolls on its own ticket (``desk_roll``).
 """
 from __future__ import annotations
 
