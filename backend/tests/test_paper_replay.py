@@ -234,3 +234,32 @@ def test_the_migration_adds_the_run_kind_and_keeps_existing_runs_live(tmp_path):
     assert after["paper_run"] == before["paper_run"] + ["kind", "replay_day"]
     assert {k: v for k, v in after.items() if k != "paper_run"} == {k: v for k, v in before.items() if k != "paper_run"}
     _alembic(path, "downgrade", "a7c3e9f1b5d2")
+
+
+def test_each_ticker_is_judged_only_against_its_own_bars(db, day):  # noqa: F811 -- review: AAPL's bars never fill NBIS
+    day.bars["AAPL"] = [bar(m, 230 + m * 0.1, 230.5 + m * 0.1, 229.5 + m * 0.1, 230 + m * 0.1) for m in range(8)]
+    r = run(db)
+    nbis = buy(db, r, at(2), target=150.0)["positions"][0]
+    paper_replay.order(db, {"run_id": str(r.id), "at": at(3), "action": "open", "symbol": "AAPL", "instrument": "stock",
+                            "quantity": 1, "order_key": key()}, NOW)
+    paper_replay.order(db, {"run_id": str(r.id), "at": at(3), "action": "close", "position_id": nbis["id"], "order_type": "limit",
+                            "limit_price": 140.0, "order_key": key()}, NOW)
+    stepped = step(db, r, at(7))
+    assert [h for h in stepped["happened"] if h["symbol"] == "NBIS"] == []
+    held = {p["symbol"]: p for p in stepped["positions"]}
+    assert held["NBIS"]["status"] == "open" and held["NBIS"]["touched"] == {} and len(stepped["orders"]) == 1
+
+
+def test_a_cancel_or_switching_off_never_undoes_what_earlier_bars_did(db):  # noqa: F811 -- review: act after the pass
+    r = run(db)
+    placed = buy(db, r, at(2), order_type="limit", limit_price=99.10)  # the 09:32 bar fills it
+    with pytest.raises(paper_replay.ReplayError, match="filled or ended before this moment"):
+        paper_replay.cancel(db, {"run_id": str(r.id), "at": at(6), "order_id": placed["working"]["id"]}, NOW)
+    [held] = paper_replay.view(db, r, at(6))["positions"]
+    assert held["per_share"] == -99.1
+    r2 = run(db)
+    pos = buy(db, r2, at(5), stop=99.0, target=104.0, auto=True)["positions"][0]  # the 09:35 bar touches the stop
+    with pytest.raises(paper_replay.ReplayError, match="closed before this moment"):
+        paper_replay.set_auto(db, {"run_id": str(r2.id), "at": at(8), "position_id": pos["id"], "on": False, "order_key": key()}, NOW)
+    [trade] = paper_replay.view(db, r2, at(8))["closed"]
+    assert trade["verdict"]["kind"] == "stop"

@@ -35,6 +35,7 @@ import re
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
 from app.engine import paper_book as pb
@@ -261,6 +262,11 @@ class _Book:
         self.db.add(event)
         try:
             self.db.commit()
+        except IntegrityError:  # a racing request recorded this fact first: it stands once
+            self.db.rollback()
+            self.keys.add(key)
+            self.events = pb._events(self.db, self.run)
+            return False
         except Exception:
             self.db.rollback()
             raise
@@ -376,15 +382,16 @@ def _sell_all(book: _Book, position: dict, per: float, at: float, key: str, extr
             "pnl": round(cash + current["basis_left"], 2)}
 
 
-def _pass(book: _Book, session: list[dict], hours: tuple[int, int], at: float) -> list[dict]:
-    """Every completed regular-session bar up to ``at``, oldest first: a triggered automatic exit sells at the bar's
-    open; then each working limit is checked against the bar; then each open position's stop and target."""
+def _pass(book: _Book, session: list[dict], hours: tuple[int, int], at: float, symbol: str) -> list[dict]:
+    """Every completed regular-session bar of ``symbol`` up to ``at``, oldest first: a triggered automatic exit sells at
+    the bar's open; then each working limit is checked against the bar; then each open position's stop and target.
+    Only ``symbol``'s orders and positions are judged against its bars."""
     out: list[dict] = []
     for bar in session:
         if bar["time"] + 60 > at:
             break
-        positions = {p["id"]: p for p in book.positions()}
-        working = book.working()
+        positions = {p["id"]: p for p in book.positions() if p["symbol"] == symbol}
+        working = [o for o in book.working() if o["symbol"] == symbol]
         open_ = [p for p in positions.values() if p["status"] == "open"]
         if not working and not open_:
             continue
@@ -406,12 +413,12 @@ def _pass(book: _Book, session: list[dict], hours: tuple[int, int], at: float) -
                 out.append(found)
         # 2. Working limits placed before this bar began.
         for order in book.working():
-            if order["placed_at"] <= bar["time"] and order["instrument"] == "stock":
+            if order["symbol"] == symbol and order["placed_at"] <= bar["time"] and order["instrument"] == "stock":
                 found = _fill_limit(book, order, bar)
                 if found:
                     out.append(found)
         # 3. Stop and target on completed bars after each position's fill (or its switch).
-        for position in [p for p in book.positions() if p["status"] == "open"]:
+        for position in [p for p in book.positions() if p["status"] == "open" and p["symbol"] == symbol]:
             if position.get("stop") is None and position.get("target") is None:
                 continue
             switch = pb.switches(book.events).get(position["id"])
@@ -449,6 +456,19 @@ def _symbols(book: _Book) -> set[str]:
     return {p["symbol"] for p in book.positions() if p["status"] == "open"} | {o["symbol"] for o in book.working()}
 
 
+def _advance(db: Session, run: PaperRun, book: _Book, at: float, also: str | None = None) -> tuple[list[dict], dict[str, list[dict]], tuple[int, int] | None]:
+    """Work each symbol with an open position or a working order (and ``also``) bar by bar up to ``at``, before anything
+    new is recorded at ``at``, so nothing he does at the clock undoes what the bars before it already did."""
+    symbols = _symbols(book) | ({also} if also else set())
+    if not symbols:
+        return [], {}, regular(run.replay_day)
+    sessions, hours = _load(db, run, symbols)
+    found = []
+    for symbol in sorted(symbols):
+        found += _pass(book, sessions[symbol], hours, at, symbol)
+    return found, sessions, hours
+
+
 def step(db: Session, body: dict, now: float) -> dict:
     """Bring the run to the replay clock ``at``: work the bars up to it; at the close (or with ``end``, when he leaves)
     end the orders and sell what is open."""
@@ -458,16 +478,11 @@ def step(db: Session, body: dict, now: float) -> dict:
     if hours is None:
         raise ReplayError("The replayed day has no regular session.", 409)
     at = _clock(run, book, body.get("at"), hours)
-    found = []
-    symbols = _symbols(book)
-    if symbols:
-        sessions, hours = _load(db, run, symbols)
-        for symbol in sorted(symbols):
-            found += _pass(book, sessions[symbol], hours, at)
-        if at >= hours[1] or body.get("end"):
-            reason = "flat" if at >= hours[1] else "left"
-            for symbol in sorted(symbols):
-                found += _flatten_symbol(book, sessions[symbol], at, reason, symbol)
+    found, sessions, hours = _advance(db, run, book, at)
+    if sessions and (at >= hours[1] or body.get("end")):
+        reason = "flat" if at >= hours[1] else "left"
+        for symbol in sorted(sessions):
+            found += _flatten_symbol(book, sessions[symbol], at, reason, symbol)
     db.commit()
     return {"happened": found, **view(db, run, at)}
 
@@ -528,7 +543,7 @@ def order(db: Session, body: dict, now: float) -> dict:
         spec = _spec(body, run.replay_day)
         position = None
     session = _regular_bars(session_bars(spec["symbol"], run.replay_day)[0], hours)
-    happened = [] if preview else _pass(book, session, hours, at)
+    happened = [] if preview else _advance(db, run, book, at, also=spec["symbol"])[0]
     if not preview:
         positions = book.positions()
         if closing:
@@ -607,13 +622,15 @@ def cancel(db: Session, body: dict, now: float) -> dict:
     book = _Book(db, run)
     hours = regular(run.replay_day)
     at = _clock(run, book, body.get("at"), hours)
+    happened = _advance(db, run, book, at)[0]  # a fill on an earlier bar stands
     order_id = str(body.get("order_id") or "")
     found = next((o for o in book.working() if o["id"] == order_id), None)
     if found is None:
-        raise ReplayError("That paper order is no longer working.", 409)
+        db.commit()
+        raise ReplayError("That paper order is no longer working: it filled or ended before this moment.", 409)
     book.store(uuid.UUID(order_id), "cancel", f"end:{order_id}", at, {"reason": "You canceled it."})
     db.commit()
-    return view(db, run, at)
+    return {"happened": happened, **view(db, run, at)}
 
 
 def set_auto(db: Session, body: dict, now: float) -> dict:
@@ -621,10 +638,12 @@ def set_auto(db: Session, body: dict, now: float) -> dict:
     book = _Book(db, run)
     hours = regular(run.replay_day)
     at = _clock(run, book, body.get("at"), hours)
+    happened = _advance(db, run, book, at)[0]  # an exit an earlier bar triggered stands
     position_id = str(body.get("position_id") or "")
     position = next((p for p in book.positions() if p["id"] == position_id), None)
     if position is None or position["status"] != "open":
-        raise ReplayError("That paper position is not open.", 409)
+        db.commit()
+        raise ReplayError("That paper position is not open: it closed before this moment.", 409)
     if position.get("stop") is None and position.get("target") is None:
         raise ReplayError("This position has no stop or target to close at.", 409)
     on = body.get("on") is True
@@ -632,7 +651,7 @@ def set_auto(db: Session, body: dict, now: float) -> dict:
     if bool(current and current["on"]) != on:
         book.store(uuid.UUID(position_id), "auto", f"auto:{pb._key(body)}", at, {"on": on})
     db.commit()
-    return view(db, run, at)
+    return {"happened": happened, **view(db, run, at)}
 
 
 # --- what the desk shows ---------------------------------------------------------------------------------------------

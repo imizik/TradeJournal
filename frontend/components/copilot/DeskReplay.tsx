@@ -6,7 +6,7 @@ import {
   type IChartApi, type IPriceLine, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type Time, type UTCTimestamp,
 } from "lightweight-charts";
 import { Pause, Play, SkipForward } from "lucide-react";
-import { orderKey, type PaperPosition, type PaperStats } from "@/lib/paperBook";
+import { PaperRefused, orderKey, type PaperPosition, type PaperStats } from "@/lib/paperBook";
 import {
   REPLAY_EVENT, SPEEDS, autoReplay, cancelReplay, msPerBar, orderReplay, previewReplay, replayBadge, replayBars, replayDate,
   replayHome, replaySymbols, replayTime, shownBars, startReplay, stepReplay,
@@ -211,7 +211,10 @@ function Ticket({ view, at, symbol, options, onView, pause }: {
   const [target, setTarget] = useState("");
   const [auto, setAuto] = useState(false);
   const [note, setNote] = useState("");
-  const [preview, setPreview] = useState<ReplayQuote | null>(null);
+  const [quoted, setQuoted] = useState<{ at: number; quote: ReplayQuote } | null>(null);
+  // A confirm holds only at the moment it was priced: once the clock moves on, Review prices it again.
+  const preview = quoted && quoted.at === at ? quoted.quote : null;
+  const setPreview = (quote: ReplayQuote | null) => setQuoted(quote ? { at, quote } : null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -274,16 +277,16 @@ function Ticket({ view, at, symbol, options, onView, pause }: {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Stop
-          <input aria-label="Replay stop" inputMode="decimal" placeholder="$" value={stop} onChange={e => setStop(e.target.value.replace(/[^\d.]/g, ""))} className={cn(INPUT, "w-20")} />
+          <input aria-label="Replay stop" inputMode="decimal" placeholder="$" value={stop} onChange={e => { setStop(e.target.value.replace(/[^\d.]/g, "")); setPreview(null); }} className={cn(INPUT, "w-20")} />
         </label>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Target
-          <input aria-label="Replay target" inputMode="decimal" placeholder="$" value={target} onChange={e => setTarget(e.target.value.replace(/[^\d.]/g, ""))} className={cn(INPUT, "w-20")} />
+          <input aria-label="Replay target" inputMode="decimal" placeholder="$" value={target} onChange={e => { setTarget(e.target.value.replace(/[^\d.]/g, "")); setPreview(null); }} className={cn(INPUT, "w-20")} />
         </label>
         <label className="flex min-h-11 items-center gap-1.5 text-xs text-muted-foreground sm:min-h-0">
-          <input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} disabled={!stop.trim() && !target.trim()} />Close automatically at stop/target
+          <input type="checkbox" checked={auto} onChange={e => { setAuto(e.target.checked); setPreview(null); }} disabled={!stop.trim() && !target.trim()} />Close automatically at stop/target
         </label>
       </div>
-      <input aria-label="Replay note" maxLength={280} placeholder="Why (optional, one line)" value={note} onChange={e => setNote(e.target.value)} className={cn(INPUT, "w-full")} />
+      <input aria-label="Replay note" maxLength={280} placeholder="Why (optional, one line)" value={note} onChange={e => { setNote(e.target.value); setPreview(null); }} className={cn(INPUT, "w-full")} />
       {preview && (
         <div data-testid="replay-confirm" className="space-y-1 rounded-md bg-amber-400/5 p-2 text-xs">
           {preview.fills_now ? (
@@ -312,7 +315,9 @@ function Ticket({ view, at, symbol, options, onView, pause }: {
 // --- the replay run's book -------------------------------------------------------------------------------------------
 
 function Position({ p, view, at, onView, pause }: { p: PaperPosition; view: ReplayView; at: number; onView(v: ReplayView): void; pause(): void }) {
-  const [selling, setSelling] = useState<ReplayQuote | null>(null);
+  const [quoted, setQuoted] = useState<{ at: number; quote: ReplayQuote } | null>(null);
+  const selling = quoted && quoted.at === at ? quoted.quote : null;  // priced at this moment only
+  const setSelling = (quote: ReplayQuote | null) => setQuoted(quote ? { at, quote } : null);
   const [limit, setLimit] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -499,7 +504,7 @@ export default function DeskReplay({ symbol, onLeave }: { symbol: string | null;
   const sending = useRef<number | null>(null);
   const wanted = useRef(0);
   const apply = useCallback((next: ReplayView) => {
-    setView(prev => prev && next.run.id === prev.run.id ? next : prev);
+    setView(prev => prev && next.run.id === prev.run.id && next.at >= prev.at ? next : prev);  // a late, older answer never rolls it back
     if (next.happened?.length) setLog(l => [...l, ...next.happened!]);
   }, []);
   const sync = useCallback((target: number) => {
@@ -508,7 +513,10 @@ export default function DeskReplay({ symbol, onLeave }: { symbol: string | null;
     const runId = view.run.id;
     const send = (clock: number) => {
       sending.current = clock;
-      stepReplay(runId, clock).then(apply).catch(e => setError(words(e))).finally(() => {
+      stepReplay(runId, clock).then(next => { apply(next); setError(null); })
+        // An order recorded at a later clock while this step was out refuses it; the next step catches up.
+        .catch(e => { if (!(e instanceof PaperRefused && e.status === 409 && /only goes forward/.test(e.message))) setError(words(e)); })
+        .finally(() => {
         sending.current = null;
         if (wanted.current > clock) send(wanted.current);
       });
