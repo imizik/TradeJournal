@@ -139,11 +139,27 @@ export type DeskLiveAccount = {
   /** The account line's figures, summed on the server from the feed's positions; null when a figure they need is unknown. */
   options_value?: number | null; open_pnl?: number | null; day_change?: number | null; day_change_pct?: number | null;
 };
+/** One line of the day's account value (``engine/desk_value_line.py``): segments of ``[epoch, value]`` with a break
+ * between each two (no reading for longer than the feed allows, or a reading without the value); change since the first
+ * reading; ``quiet_since`` when the newest reading is older than the feed allows. */
+export type DeskValueSeries = {
+  label: string; segments: [number, number][][]; breaks: { from: number; to: number }[];
+  first: { at: number; value: number }; last: { at: number; value: number }; high: { at: number; value: number }; low: { at: number; value: number };
+  change: number; change_pct: number | null; quiet_since: number | null;
+};
+/** The session's account value line: per masked account and ``all``; empty before the first reading. ``open``/``close``:
+ * the regular session (outside it the line is grey). ``fills``: the session's fills, drawn as dots. */
+export type DeskDayLine = {
+  day: string; open: number | null; close: number | null; series: Record<string, DeskValueSeries>;
+  fills: { at: number; masked: string; symbol: string; text: string }[];
+};
 export type DeskLive = {
   state: "off" | "signed_out" | "expired" | "loading" | "unavailable" | "stale" | "ok";
   as_of?: number; issue?: string | null; joined?: boolean; accounts?: DeskLiveAccount[];
   /** Orders with no followed book row to sit on (no position yet, or the fill closed it): the book's "Orders" group. */
   orders?: DeskOrder[];
+  /** The day's account value line, from the readings the feed already took (kept when the feed is signed out or stale). */
+  day_line?: DeskDayLine;
 };
 export const liveOn = (live: DeskLive | null | undefined) => live?.state === "ok" && live.joined === true;
 

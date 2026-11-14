@@ -562,7 +562,9 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   Robinhood does not show belongs to no account and waits until the filter is cleared. Tapping it again shows every
   row; the line going unavailable clears it too. Not live (signed out, expired, unavailable): one grey **Accounts
   unavailable**, or **Accounts as of 10:04 AM** when the read is stale, and no money; with the feed switched off, no
-  account line at all (on a phone it is one row that swipes sideways, § Phone).
+  account line at all (on a phone it is one row that swipes sideways, § Phone). Before it, **the day's value line**:
+  total account value through the session (the tapped account's alone), change since the first reading, fills as dots,
+  breaks as gaps; hover or tap for the high and low ([the feed § The value line](robinhood-read-feed.md#the-value-line)).
 - **Needs you** (`NeedsStrip`), **the Needs-you strip**. Only what needs a decision now, in amber; most of the day
   there is none and the strip is absent. Nothing in it is dismissed and there is no Seen: the strip shows the single
   top item with its own answers, and **+N more** opens every other item at once, each with its own answers. The rules

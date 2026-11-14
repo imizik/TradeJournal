@@ -128,3 +128,69 @@ test("on a phone the accounts are one row that swipes", async ({ page }) => {
   await account(page, "MCP").click();
   await expect(heading(page)).toHaveText("Your book · 1 followed");
 });
+
+// The day's account value line (docs/robinhood-read-feed.md § The value line): invented readings each minute from 9:31,
+// none from 10:02 to 10:31 (a break, never a straight line), the day's two fills as dots.
+const ET_OPEN = Date.parse("2026-10-23T13:30:00Z") / 1000;
+const minute = (m: number) => ET_OPEN + m * 60;
+const seg = (from: number, to: number, value: (m: number) => number) =>
+  Array.from({ length: to - from + 1 }, (_, i) => [minute(from + i), Math.round(value(from + i) * 100) / 100] as [number, number]);
+const series = (label: string, base: number, slope: number, quiet: number | null = null) => {
+  const segments = [seg(1, 32, m => base + slope * m), seg(61, 89, m => base + slope * m)];
+  const points = segments.flat();
+  const first = points[0], last = points[points.length - 1];
+  const change = Math.round((last[1] - first[1]) * 100) / 100;
+  const [low, high] = slope >= 0 ? [first, last] : [last, first];
+  return { label, segments, breaks: [{ from: minute(32), to: minute(61) }], first: { at: first[0], value: first[1] }, last: { at: last[0], value: last[1] },
+    high: { at: high[0], value: high[1] }, low: { at: low[0], value: low[1] }, change, change_pct: Math.round(10000 * change / first[1]) / 100, quiet_since: quiet };
+};
+const DAY_LINE = {
+  day: "2026-10-23", open: ET_OPEN, close: ET_OPEN + 390 * 60,
+  series: { all: series("All accounts", 10_000, 4), [ROTH.masked]: series("Roth IRA", 9_500, 5), [MCP.masked]: series("MCP", 500, -1) },
+  fills: [{ at: minute(10), masked: ROTH.masked, symbol: "NBIS", text: "Buy to open 2 NBIS 10/30/26 100C" },
+    { at: minute(70), masked: MCP.masked, symbol: "APLD", text: "Buy to open 1 APLD 11/27/26 30P" }],
+};
+
+test("the day's value line: change, fills as dots, a break with its times, and the account tap", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page, desk({ ...LIVE, day_line: DAY_LINE }));
+  const line = page.getByTestId("desk-value-line");
+  // All accounts: 10,004 at 9:31 to 10,356 at 10:29 → +$352 +3.5%.
+  await expect(line.getByTestId("value-change")).toHaveText("+$352 +3.5%");
+  await expect(line).toContainText("since 9:31 AM");
+  await expect(line.locator("[data-testid=value-segment]")).toHaveCount(2); // the break is a gap, not a line
+  await expect(line.locator("[data-testid=value-fill]")).toHaveCount(2);
+  await expect(page.getByTestId("value-detail")).toBeHidden();
+  await line.hover();
+  const detail = page.getByTestId("value-detail");
+  await expect(detail.getByTestId("value-high-low")).toHaveText("High $10,356 at 10:59 AMLow $10,004 at 9:31 AM");
+  await expect(detail.getByTestId("value-break")).toHaveText("No readings 10:02 AM–10:31 AM");
+  await page.screenshot({ path: test.info().outputPath("desk-value-line-1440.png") });
+  // MCP alone: its own line, its own fill, a loss in red.
+  await account(page, "MCP").click();
+  await expect(line.getByTestId("value-change")).toHaveText("−$88 −17.6%");
+  await expect(line.getByTestId("value-change")).toHaveClass(/text-rose/);
+  await expect(line.locator("[data-testid=value-fill]")).toHaveCount(1);
+  await account(page, "MCP").click();
+  await expect(line.getByTestId("value-change")).toHaveText("+$352 +3.5%");
+});
+
+test("the value line stays when the feed goes stale and says since when", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const quiet = { ...DAY_LINE, series: { all: series("All accounts", 10_000, 4, minute(89)) } };
+  await open(page, desk({ state: "stale", as_of: minute(89), issue: null, day_line: quiet }));
+  const line = page.getByTestId("desk-value-line");
+  await expect(line.getByTestId("value-quiet")).toHaveText("· last 10:59 AM");
+  await expect(page.getByTestId("desk-accounts")).toHaveText("Accounts as of 10:59 AM");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await line.click(); // a phone's tap opens the detail
+  await expect(page.getByTestId("value-detail")).toContainText("No reading since 10:59 AM");
+  await page.screenshot({ path: test.info().outputPath("desk-value-line-375.png") });
+});
+
+test("before the day's first reading there is no value line", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page, desk({ ...LIVE, day_line: { ...DAY_LINE, series: {}, fills: [] } }));
+  await expect(page.getByTestId("desk-accounts")).toBeVisible();
+  await expect(page.getByTestId("desk-value-line")).toHaveCount(0);
+});

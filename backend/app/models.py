@@ -2388,3 +2388,22 @@ class RobinhoodReconciliation(SQLModel, table=True):
     note: Optional[str] = None
     created_at: datetime = Field(default_factory=utc_now_naive)
     updated_at: datetime = Field(default_factory=utc_now_naive)
+
+
+class DeskAccountValue(SQLModel, table=True):
+    """One account's total value at one reading of the desk's live account feed (``engine/desk_value_line.py``): the
+    desk's line of account value through the day. Written only from the feed's snapshots the desk already reads (no
+    read of its own); kept a week. Display only and additive: nothing here touches fills, trades or P&L. The account
+    is its label and its number masked to the last four, never the number."""
+
+    __tablename__ = "desk_account_value"
+    __table_args__ = (
+        UniqueConstraint("at", "masked", name="uq_desk_account_value_reading"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    day: str = Field(index=True)  # New York date of the reading
+    at: int = Field(index=True)  # the reading's time, epoch seconds
+    masked: str  # ••8267
+    label: str
+    total_value: Optional[float] = None  # None: the feed read no value for this account at this reading

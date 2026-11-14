@@ -636,3 +636,46 @@ def test_reading_the_orders_on_the_desk_writes_nothing(desk, engine, quotes, liv
     for _ in range(5):
         read(desk)
     assert state() == before
+
+
+# --------------------------------------------------------------------------- the day's account value line
+
+def test_the_desk_read_records_the_snapshot_it_holds_and_draws_the_line_with_its_fills(desk, engine, quotes, live, orders, fake):  # noqa: F811
+    """docs/robinhood-read-feed.md § The value line: stored from the snapshot the read already holds (once, no call of
+    its own), the session's line per account and all, and the day's fills as dots; a ticker not followed has none."""
+    from app.models import DayJournalEntry, DeskAccountValue
+    from tests.robinhood_fake import execution
+    from tests.test_copilot_plans import WED
+    from tests.test_robinhood_fills import utc
+    fake.option_orders["333338267"] = [
+        nbis_close("f1", [execution("f1a", "4.30000000", "1.00000", utc(14, 42, day=DAY))], created_at=utc(14, 41, day=DAY))]
+    orders.run_once()
+    calls = len(fake.calls)
+    line = read(desk)["robinhood"]["day_line"]
+    read(desk)
+    assert len(fake.calls) == calls  # the line reads no broker: the snapshot was already there
+    with Session(engine) as db:
+        stored = db.exec(select(DeskAccountValue)).all()
+    assert sorted(r.masked for r in stored) == ["••7884", "••8267"] and len({r.at for r in stored}) == 1
+    assert line["day"] == DAY and set(line["series"]) == {"••8267", "••7884", "all"}
+    snapshot = live.snapshot(kick=False)[1]
+    values = {a["masked"]: a["total_value"] for a in snapshot["accounts"]}
+    assert line["series"]["all"]["last"]["value"] == round(sum(values.values()), 2)
+    assert line["series"]["••8267"]["segments"] == [[[int(snapshot["at"]), values["••8267"]]]]
+    assert [(f["masked"], f["symbol"], f["text"]) for f in line["fills"]] == [("••8267", "NBIS", "Sell to close 1 NBIS 10/23/26 100C")]
+    text = json.dumps(line)
+    assert "333338267" not in text and GUIDE not in text
+    with Session(engine) as db:
+        db.add(DayJournalEntry(day=WED, operation_id="f-2", kind="follow", symbol="NBIS", text="Not following",
+                               created_at=T0 + timedelta(minutes=1)))
+        db.commit()
+    assert read(desk)["robinhood"]["day_line"]["fills"] == []
+
+
+def test_signed_out_the_morning_stays_and_off_there_is_no_line(desk, engine, quotes, live, monkeypatch):  # noqa: F811
+    first = read(desk)["robinhood"]["day_line"]["series"]["all"]
+    monkeypatch.setattr(live, "_settings", lambda: rb.Settings(True, None, ("roth ira", "mcp")))
+    body = read(desk)["robinhood"]
+    assert body["state"] == "signed_out" and body["day_line"]["series"]["all"]["first"] == first["first"]
+    monkeypatch.setattr(rb, "feed", rb.Feed(settings_fn=lambda: rb.Settings(False, None, ())))
+    assert read(desk)["robinhood"] == {"state": "off"}
