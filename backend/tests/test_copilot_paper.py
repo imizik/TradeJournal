@@ -357,3 +357,13 @@ def test_a_second_delivery_pass_during_the_send_never_sends_it_twice(lab, monkey
     assert asyncio.run(paper_review.write(FRIDAY))["ping"]["state"] == "pending"
     reviews.deliver()
     assert sent == ["PAPER REVIEW · week of Nov 9"]
+
+
+def test_an_automatic_exit_keeps_its_grade():
+    view = {"run": {"number": 1, "started_at": at(9, 10), "starting_cash": 1e4},
+            "account": {"cash": 1e4, "collateral": 0, "buying_power": 1e4, "equity": 1e4, "pnl": 0, "prices_at": None, "unpriced": 0},
+            "positions": [], "score": {"paper": {"trades": 1, "pnl": -50.0}, "real": {"trades": 0, "pnl": 0}},
+            "closed": [{"label": "NBIS shares", "symbol": "NBIS", "quantity": 10, "opened_at": at(10, 10), "closed_at": at(10, 11),
+                        "realized": -50.0, "stop": 95.0, "verdict": {"kind": "stop", "auto": True, "text": "Auto exit at the stop: the stock touched 95"}}]}
+    [row] = copilot_paper_book.compact(view, set(), FRIDAY)["closed"]
+    assert row["auto_exit"] is True and row["ended_kind"] == "stop" and row["ended"].startswith("Auto exit at the stop")

@@ -66,6 +66,8 @@ def _closed_row(c: dict) -> dict:
     row = {"label": c["label"], "symbol": c["symbol"], "quantity": c["quantity"], "opened": clock(c["opened_at"]),
            "closed": clock(c["closed_at"]), "realized": c["realized"], "ended": (c.get("verdict") or {}).get("text"),
            "ended_kind": (c.get("verdict") or {}).get("kind")}
+    if (c.get("verdict") or {}).get("auto"):
+        row["auto_exit"] = True  # the close-at-stop/target switch sold it, not his own tap
     for key in ("stop", "target"):
         if c.get(key) is not None:
             row[key] = c[key]
