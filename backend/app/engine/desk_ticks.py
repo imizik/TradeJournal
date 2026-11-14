@@ -55,6 +55,13 @@ def clear() -> None:
         _issue = None
 
 
+def health() -> tuple[float | None, float | None]:
+    """(when the newest quote read came back, when the newest read failed), for the desk's data health. No I/O."""
+    with _lock:
+        good = max((at for at, _row in _kept.values()), default=None)
+        return good, _issue[0] if _issue else None
+
+
 def names(symbols: str) -> list[str]:
     """The asked symbols, upper-cased, de-duplicated in order: stock tickers and OCC option symbols only."""
     out: list[str] = []

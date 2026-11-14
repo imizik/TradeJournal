@@ -428,6 +428,11 @@ class Feed:
     def view(self, kick: bool = True) -> dict:
         return self.snapshot(kick=kick)[0]
 
+    def last_read_at(self) -> float | None:
+        """When the newest good read was made (kept across a sign-out until the file changes), else None. No I/O."""
+        snap = self._snapshot
+        return snap["at"] if snap else None
+
 
 feed = Feed()
 
