@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
+import { useKeptState } from "@/components/copilot/DeskMemory";
 import { cn } from "@/lib/utils";
 import type { ChainPick } from "@/components/copilot/DeskChain";
 import { UnusualList, type UnusualReply } from "@/components/copilot/DeskUnusual";
@@ -132,7 +133,7 @@ export function useFeedNew(data: DeskFeedBody | null, open: boolean): { count: n
 }
 
 /**
- * The centre's Feed tab (docs/copilot-lab.md § The desk): one stream of what the app already knows today, from
+ * The Feed, beside the copilot (docs/copilot-lab.md § The desk): one stream of what the app already knows today, from
  * ``GET /copilot/desk/feed``, in four groups: **Mine** (the default: his book, plans and day), **Ideas** (things he could
  * act on that are not his yet: Radar's events and setup cards, the setup scanner's candidates while it is on, and unusual
  * options on his held and watched names, one tap apart on a small second row), **Market** (the rest: headlines and the
@@ -154,14 +155,15 @@ export function useFeedNew(data: DeskFeedBody | null, open: boolean): { count: n
  */
 export default function DeskFeed({ data, failed, since, onAsk, onPlan, onChart, unusual = null, onUnusual, scanner = null, onScanner, onScannerPlan }: {
   data: DeskFeedBody | null; failed: boolean; since: number | null; onAsk(item: FeedItem): void; onPlan(item: FeedItem): void;
-  /** A TradingView row's Chart: its ticker on the desk chart, where the alert's marker sits. */
+  /** A row's Show on chart: its ticker on the desk chart, in place (a TradingView alert's marker sits there). */
   onChart?(symbol: string): void;
   unusual?: UnusualReply | null; onUnusual?(pick: ChainPick): void;
   scanner?: DeskScannerReply | null; onScanner?(row: DeskScannerRow): void; onScannerPlan?(href: string): void;
 }) {
-  const [group, setGroup] = useState<Group>("mine");
-  const [ideaPick, setIdea] = useState<Idea>("radar");
-  const [marketPick, setMarket] = useState<MarketPick>("news");
+  // The picks hold while he stays on the desk (a link that reopens it included), so the Feed is where he left it.
+  const [group, setGroup] = useKeptState<Group>("desk.feed.group", "mine");
+  const [ideaPick, setIdea] = useKeptState<Idea>("desk.feed.idea", "radar");
+  const [marketPick, setMarket] = useKeptState<MarketPick>("desk.feed.market", "news");
   const [symbol, setSymbol] = useState<string | null>(null);
   const chatter = data?.chatter ?? null;
   const chatterOn = (chatter?.items.length ?? 0) > 0;
@@ -170,7 +172,7 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, onChart, 
   const marketShown: MarketPick = marketPick === "chatter" && !chatterOn ? "news" : marketPick;
   const filter: Filter = group === "ideas" ? idea : group === "market" ? marketShown : group;
   // Chatter gone (nothing to show this minute): back to News & calendar for good, so it never reopens without a tap.
-  useEffect(() => { if (marketPick === "chatter" && data && !chatterOn) setMarket("news"); }, [marketPick, data, chatterOn]); // eslint-disable-line react-hooks/set-state-in-effect -- follows the feed's own read
+  useEffect(() => { if (marketPick === "chatter" && data && !chatterOn) setMarket("news"); }, [marketPick, data, chatterOn, setMarket]); // follows the feed's own read
   const items = useMemo(() => {
     if ((filter === "chatter" || filter === "unusual" || filter === "scanner") && !symbol) return filter === "chatter" ? chatter?.items ?? [] : [];
     const all = (data?.items ?? []).filter(i => !i.chatter);
@@ -325,7 +327,8 @@ function FeedRow({ item, day, fresh, ahead, now, onSymbol, onAsk, onPlan, onChar
       )}
       <div className="mt-2 flex flex-wrap gap-1.5">
         <button type="button" onClick={() => onAsk(item)} className={ACTION}>Ask the copilot</button>
-        {tradingView && item.symbol && onChart && <button type="button" onClick={() => onChart(item.symbol!)} className={ACTION}>Show on chart</button>}
+        {/* The same first step on every row about a ticker: its chart on the desk, in place, the Feed still beside it. */}
+        {item.symbol && !chatter && onChart && <button type="button" onClick={() => onChart(item.symbol!)} className={ACTION}>Show on chart</button>}
         {item.symbol && !chatter && !tradingView && <Link href={`/charts?symbol=${encodeURIComponent(item.symbol)}`} className={ACTION}>Open in Charts</Link>}
         {item.url && (
           <a href={item.url} target="_blank" rel="noopener noreferrer nofollow" className={ACTION}>

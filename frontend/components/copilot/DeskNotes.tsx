@@ -98,17 +98,19 @@ function NoteInput({ label, onSave, onClose }: { label: string; onSave(text: str
 }
 
 /** A row's saved notes (grey, one line each, newest last) and its open text line. Nothing when there is neither. */
-export function NoteLines({ notes, id, trade, target, label, className, as: Tag = "span" }: {
+export function NoteLines({ notes, id, trade, target, label, className, as: Tag = "span", selected = false }: {
   notes: DeskNotesState; id: string; trade: string | null; target: NoteTarget | null; label: string; className?: string;
   /** ``li`` directly in the book's list; a ``span`` inside a line. */
   as?: "li" | "span";
+  /** The picked book row's notes: a phone's ticker view keeps that row's lines (``data-selected``, CopilotLab.module.css). */
+  selected?: boolean;
 }) {
   const saved: DeskNote[] = (trade && notes.data.trades[trade]) || [];
   const open = notes.open === id && target !== null;
   if (!saved.length && !open) return null;
   const shown = saved.slice(-SHOWN);
   return (
-    <Tag data-testid="desk-notes" className={cn("flex min-w-0 flex-col gap-0.5 text-[11px] text-muted-foreground", className)}>
+    <Tag data-testid="desk-notes" data-selected={selected || undefined} className={cn("flex min-w-0 flex-col gap-0.5 text-[11px] text-muted-foreground", className)}>
       {saved.length > SHOWN && <span className="text-muted-foreground/70">{saved.length - SHOWN} earlier</span>}
       {shown.map(note => (
         <span key={note.id} data-testid="desk-note" title={note.text} className="flex min-w-0 gap-1.5">

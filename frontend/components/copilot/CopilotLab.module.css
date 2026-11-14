@@ -4,9 +4,10 @@
  * either theme, and every component inside (bg-card, text-muted-foreground, bg-primary) picks them up. Warm graphite
  * surfaces; amber is the one accent and means "needs you". Numbers set in tabular-nums use Plex Mono.
  *
- * Layout by the screen's width: from 1180 px the book, the centre and the copilot sit side by side and each scrolls on
- * its own; from 768 px the book and the centre do, and the copilot opens as a sheet on the right; below that the strip,
- * the book and the centre stack and the copilot is a full-screen sheet. The thread list is a drawer at every width.
+ * Layout by the screen's width: from 1180 px the book, the centre and the side (the copilot, with the Feed behind its
+ * tab) sit side by side and each scrolls on its own; from 768 px the book and the centre do, and the copilot and the
+ * Feed each open as a sheet on the right; below that one view shows at a time under the switch (the book, the selected
+ * ticker's tools, or the Feed) and the copilot is a full-screen sheet. The thread list is a drawer at every width.
  */
 .desk {
   --background: 240 6% 6%;
@@ -40,14 +41,29 @@
   letter-spacing: -0.01em;
 }
 
-.bar {
+/* The head: the top bar (clock, indices, the day's money) with the desk's buttons at its right. The buttons come first
+   in the page (a phone puts their row on top), so here they are ordered after the bar. */
+.head {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 8px 14px;
   min-height: 52px;
   padding: 8px 14px;
   border-bottom: 1px solid hsl(var(--border));
+}
+
+.topRow {
+  display: contents;
+}
+
+.bar {
+  order: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
 }
 
 .title {
@@ -65,6 +81,8 @@
 }
 
 .barActions {
+  order: 2;
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -123,8 +141,22 @@
 }
 
 .sheetBar,
-.ask {
+.ask,
+.views,
+.sideTabs,
+.feedBar,
+.feedButton,
+.feed {
   display: none;
+}
+
+/* Below 1180 px the side's two panes lay out as the cockpit's own children (each a sheet, or a phone's view). */
+.side {
+  display: contents;
+}
+
+.feed {
+  min-width: 0;
 }
 
 /* The thread list: a drawer opened from the top bar or with [: over the whole screen on a phone, over the book's column
@@ -217,6 +249,39 @@
     box-shadow: -24px 0 48px rgb(0 0 0 / 0.5);
   }
 
+  /* The Feed: a drawer on the right, opened from the top bar. */
+  .feedButton {
+    display: inline-flex;
+  }
+
+  .desk[data-feed="shown"] .feed {
+    display: block;
+    position: fixed;
+    z-index: 45;
+    inset: 0 0 0 auto;
+    width: min(460px, 100%);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 12px 12px;
+    border-left: 1px solid hsl(var(--border));
+    background: hsl(var(--background));
+    box-shadow: -24px 0 48px rgb(0 0 0 / 0.5);
+    scrollbar-width: thin;
+  }
+
+  .feedBar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    margin: 0 -12px 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--background));
+  }
+
   .desk[data-on="true"][data-sheet="closed"] .ask {
     bottom: 16px;
   }
@@ -237,9 +302,43 @@
     grid-template-rows: minmax(0, 1fr);
   }
 
-  .thread {
+  /* The side: the copilot, or the Feed while its tab is picked, under the two tabs. */
+  .side {
+    grid-area: thread;
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+    min-width: 0;
+    min-height: 0;
     border-left: 1px solid hsl(var(--border));
-    padding: 0 0 0 12px;
+    padding-left: 12px;
+  }
+
+  .desk[data-on="true"] .sideTabs {
+    display: flex;
+    flex: none;
+    gap: 4px;
+    margin-bottom: 8px;
+    box-shadow: inset 0 -1px 0 hsl(var(--border));
+  }
+
+  .thread {
+    flex: 1;
+    min-height: 0;
+    padding: 0;
+  }
+
+  .desk[data-feed="shown"] .thread {
+    display: none;
+  }
+
+  .desk[data-feed="shown"] .feed {
+    display: block;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 2px;
+    scrollbar-width: thin;
   }
 }
 
@@ -252,33 +351,69 @@
     border-radius: 0;
   }
 
+  /* The first row is the switch between the desk's views and the desk's buttons; it stays at the top of the screen. The
+     bar under it is the clock and indices, then the day's P&L and the Accounts button. The word "Desk" is left to the
+     app's own tab bar. */
+  .head {
+    display: contents;
+  }
+
+  .topRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: sticky;
+    top: env(safe-area-inset-top);
+    z-index: 25;
+    padding: 4px 8px;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--background));
+  }
+
+  /* Under the notch of the installed app, nothing shows through above it. */
+  .topRow::before {
+    content: "";
+    position: absolute;
+    inset: auto 0 100%;
+    height: env(safe-area-inset-top);
+    background: hsl(var(--background));
+  }
+
   .bar {
     gap: 4px 12px;
-    padding: 4px 12px 8px;
+    padding: 6px 12px 8px;
+    border-bottom: 1px solid hsl(var(--border));
   }
 
-  .bar > * {
-    order: 3;
-  }
-
-  .bar > .title {
-    order: 1;
-  }
-
-  .bar > .barActions {
-    order: 2;
+  .title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .desk[data-on="true"][data-sheet="closed"] .ask {
     margin-right: 8px;
   }
 
-  /* Positions and what needs a decision fill the first screen: the Needs-you strip, the book, then What's moving and the
-     centre. */
+  /* One view at a time under the switch (the head's first row), which stays at the top of the screen: the Book (what needs a decision, the
+     positions, Watching, the day's block, What's moving), the selected ticker's tools, or the Feed. The Needs-you strip
+     shows on every view. */
   .cockpit {
     display: flex;
     flex-direction: column;
     padding-inline: 8px;
+    /* A view starts right under the switch's row (52 px with its border). */
+    scroll-margin-top: calc(52px + env(safe-area-inset-top));
+  }
+
+  .views {
+    display: flex;
+    flex: 1 1 0;
+    min-width: 0;
+    gap: 2px;
   }
 
   .strip {
@@ -293,12 +428,38 @@
     order: 3;
   }
 
-  .centre {
+  .centre,
+  .feed {
     order: 4;
   }
 
   .thread {
     order: 5;
+  }
+
+  .desk[data-on="true"][data-view="feed"] .book,
+  .desk[data-on="true"]:not([data-view="book"]) .needs,
+  .desk[data-on="true"]:not([data-view="book"]) .moving,
+  .desk[data-on="true"]:not([data-view="ticker"]) .centre {
+    display: none;
+  }
+
+  .desk[data-view="feed"] .feed {
+    display: block;
+  }
+
+  /* The ticker's view keeps a held position's own row above its chart (its P&L, its standing line and the Close
+     buttons), and nothing else of the book's column; a ticker he does not hold shows none. */
+  .desk[data-on="true"][data-view="ticker"] .book:not(:has(li[data-selected])),
+  .desk[data-on="true"][data-view="ticker"] .book > :not([data-desk-book]),
+  .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] > :not(ul),
+  .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] > ul > li:not([data-selected]) {
+    display: none;
+  }
+
+  .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] > ul > li[data-selected]:first-of-type,
+  .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] > ul > li[data-selected] {
+    border-top: 0;
   }
 }
 

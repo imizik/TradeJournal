@@ -78,7 +78,7 @@ async function lab(page: Page, server: Server, { alertsSupported = true, url = "
 
 /** The centre's Timeline, under the open thread's chart, unfolded. */
 async function timeline(page: Page) {
-  const centre = page.getByRole("region", { name: "Chart and feed" });
+  const centre = page.getByRole("region", { name: "Chart and tools" });
   const fold = centre.getByRole("button", { name: /^Timeline/ });
   if (await fold.getAttribute("aria-expanded") !== "true") await fold.click();
   return centre.getByRole("list", { name: "Timeline" });

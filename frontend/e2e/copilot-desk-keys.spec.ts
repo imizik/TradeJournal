@@ -113,6 +113,8 @@ async function lab(page: Page, { time = NOW, session = SESSION, threads = () => 
 }
 
 const palette = (page: Page) => page.getByRole("dialog", { name: "Jump to" });
+/** The Feed: the tab beside the copilot, or a phone's third view. */
+const openFeed = (page: Page, width = 1280) => width < 768 ? page.getByTestId("desk-view-feed").click() : page.getByRole("tab", { name: "Feed" }).click();
 const conversation = (page: Page) => page.getByRole("region", { name: "Conversation" });
 /** A command from Jump to (⌘K): the time of day's actions (Arm today's plans, Close the day) live there, not on the desk. */
 async function command(page: Page, name: string) {
@@ -127,7 +129,9 @@ test("⌘K opens the palette: type to filter, Enter opens the thread, Escape and
   await expect(box).toBeVisible();
   const options = box.getByRole("option");
   // The thread list's rows in list order, tickers first and Main's Radar hits after (pinned rows are the commands), then the commands.
-  await expect(options).toHaveText([/^NBIS/, /^CRWV/, /^APLD/, /^MU/, /^Plan a trade/, /^Review my week/, /^What matters right now\?/]);
+  // The threads, the desk's commands, then every place on the desk with its key.
+  await expect(options).toHaveText([/^NBIS/, /^CRWV/, /^APLD/, /^MU/, /^Plan a trade/, /^Review my week/, /^What matters right now\?/,
+    /^Chart.*C$/, /^Chain.*O$/, /^Ticket.*T$/, /^Check a call.*L$/, /^Grid.*G$/, /^Feed.*F$/, /^Copilot.*\/$/, /^Book.*B$/, /^Threads.*\[$/]);
   await expect(options.first()).toContainText("1.0% from invalidation 92.30");
   await expect(options.first()).toContainText("+$180.00");
   await page.keyboard.type("crw");
@@ -336,13 +340,15 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
     // Mid-session the lower block is Since you looked (a first visit says so); no phase button.
     await expect(page.getByTestId("since-you-looked")).toContainText("First look from this browser");
     await expect(page.getByRole("button", { name: /Close the day|Arm today's plans/ })).toHaveCount(0);
-    // The day's pings, Radar, news and calendar sit behind the centre's Feed tab: a grey count of what is new on his own
-    // book, plans and day (the alert, the NBIS headline, the brief); Radar and the market's news never add to it.
-    await expect(page.getByTestId("feed-new")).toHaveText("3 new");
-    await page.getByRole("tab", { name: "Feed" }).click();
+    // The day's pings, Radar, news and calendar sit behind the Feed (the tab beside the copilot; a phone's third view):
+    // a grey count of what is new on his own book, plans and day (the alert, the NBIS headline, the brief); Radar and
+    // the market's news never add to it.
+    const feedNew = page.getByTestId(width < 768 ? "feed-new-phone" : "feed-new");
+    await expect(feedNew).toHaveText("3 new");
+    await openFeed(page, width);
     await expect(page.getByTestId("feed-item").first()).toContainText(/Alert\s*10:31\s*NBIS\s*NBIS 100C give-back/);
-    await expect(page.getByTestId("feed-new")).toHaveCount(0); // looked at
-    await page.getByRole("tab", { name: "Chart" }).click();
+    await expect(feedNew).toHaveCount(0); // looked at
+    if (width < 768) await page.getByTestId("desk-view-book").click(); else await page.getByRole("tab", { name: "Copilot" }).click();
     await page.screenshot({ path: test.info().outputPath(`cockpit-session-${width}.png`), fullPage: width < 768 });
 
     // Selecting the position: beside the copilot it opens the thread at once; on a phone Ask the copilot does. Opening
@@ -858,9 +864,8 @@ for (const width of [1440, 375] as const) {
   test(`the Feed: Mine, Ideas, Market and All; a symbol's story; Ask puts the item in its thread's box; Plan it only on his own items and a setup card, at ${width} px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width < 768 ? 812 : 900 });
     const { chats } = await lab(page, { showThreads: false });
-    const centre = page.getByRole("region", { name: "Chart and feed" });
-    await centre.getByRole("tab", { name: "Feed" }).click();
-    const feed = centre.getByTestId("desk-feed");
+    await openFeed(page, width);
+    const feed = page.getByTestId("desk-feed");
     const rows = feed.getByTestId("feed-item");
     // Mine (the default): his alert, a headline on his name, his brief, then what is ahead under Coming up.
     await expect(rows.getByTestId("feed-source")).toHaveText(["Alert", "News", "Copilot note", "Plan"]);
@@ -898,7 +903,10 @@ for (const width of [1440, 375] as const) {
     await rows.nth(1).getByRole("button", { name: "Ask the copilot" }).click();
     await expect(conversation(page).getByLabel("Message")).toHaveValue(/^About the Benzinga headline on NBIS \(10:20\), quoted: "Nebius signs a compute deal"\./);
     expect(chats).toEqual([]);
+    // Asking brought the copilot forward; the Feed is one tap back, where he left it (All).
     if (width < 768) await page.getByRole("button", { name: "Back to the desk" }).click();
+    else await page.getByRole("tab", { name: "Feed" }).click();
+    await expect(rows).toHaveCount(6);
     // Plan it on the setup card opens the desk's Radar card, which has the setup's own Plan it.
     await feed.getByRole("button", { name: "Plan it" }).nth(1).click();
     await expect(page).toHaveURL(`/copilot-lab?symbol=MU&radar=${EVENT}`);
@@ -930,10 +938,9 @@ for (const width of [1440, 375] as const) {
     await page.setViewportSize({ width, height: width < 768 ? 812 : 900 });
     const { chats } = await lab(page, { showThreads: false, feed: { ...FEED, chatter: CHATTER } });
     // The tab's new count is his own items only: chatter (and Ideas or Market) never counts.
-    await expect(page.getByTestId("feed-new")).toHaveText("3 new");
-    const centre = page.getByRole("region", { name: "Chart and feed" });
-    await centre.getByRole("tab", { name: "Feed" }).click();
-    const feed = centre.getByTestId("desk-feed");
+    await expect(page.getByTestId(width < 768 ? "feed-new-phone" : "feed-new")).toHaveText("3 new");
+    await openFeed(page, width);
+    const feed = page.getByTestId("desk-feed");
     const rows = feed.getByTestId("feed-item");
     // Mine, Market's news and All never show chatter.
     await expect(rows.getByTestId("feed-source")).toHaveText(["Alert", "News", "Copilot note", "Plan"]);
@@ -974,9 +981,8 @@ test("Chatter counts not updated: chips grey with their time, never zero", async
   const stale = { ...CHATTER, sources: { "r/wallstreetbets": "stale", NYT: "not set up" },
     buzz: CHATTER.buzz.map(b => ({ ...b, stale: true })), items: CHATTER.items.slice(0, 2).map(i => ({ ...i, stale: true })) };
   await lab(page, { showThreads: false, feed: { ...FEED, chatter: stale } });
-  const centre = page.getByRole("region", { name: "Chart and feed" });
-  await centre.getByRole("tab", { name: "Feed" }).click();
-  const feed = centre.getByTestId("desk-feed");
+  await openFeed(page);
+  const feed = page.getByTestId("desk-feed");
   await feed.getByRole("button", { name: "Market", exact: true }).click();
   await feed.getByRole("button", { name: "Chatter" }).click();
   await expect(feed.getByTestId("buzz-chip").nth(0)).toHaveAttribute("data-stale", "true");
@@ -988,9 +994,8 @@ test("Chatter counts not updated: chips grey with their time, never zero", async
 
 test("Chatter that is on but has nothing yet: no filter, and nothing about it outside its filter", async ({ page }) => {
   await lab(page, { showThreads: false, feed: { ...FEED, chatter: { ...CHATTER, sources: { "r/wallstreetbets": "on", NYT: "not set up" }, buzz: [], items: [] } } });
-  const centre = page.getByRole("region", { name: "Chart and feed" });
-  await centre.getByRole("tab", { name: "Feed" }).click();
-  const feed = centre.getByTestId("desk-feed");
+  await openFeed(page);
+  const feed = page.getByTestId("desk-feed");
   await feed.getByRole("button", { name: "Market", exact: true }).click();
   await expect(feed.getByRole("button", { name: "Chatter" })).toHaveCount(0);
   await expect(feed.getByTestId("feed-chatter-note")).toHaveCount(0);

@@ -56,7 +56,7 @@ async function desk(page: Page) {
   });
   await page.route("**/charts/alerts**", (route) => route.fulfill({ json: { alerts: [], phone: true } }));
   await page.goto("/copilot-lab?symbol=NBIS");
-  const pane = page.getByRole("region", { name: "Chart and feed" });
+  const pane = page.getByRole("region", { name: "Chart and tools" });
   await expect(pane.getByTestId("desk-chart-canvas")).toHaveAttribute("data-bars", "60");
   return { pane, reads };
 }

@@ -79,7 +79,7 @@ async function desk(page: Page, { alerts = [ALERT] as object[] } = {}) {
     return route.fulfill({ json: { alerts: [], phone: true } });
   });
   await page.goto("/copilot-lab?symbol=NBIS");
-  const pane = page.getByRole("region", { name: "Chart and feed" });
+  const pane = page.getByRole("region", { name: "Chart and tools" });
   await expect(pane.getByTestId("desk-chart-canvas")).toHaveAttribute("data-bars", "60");
   return { pane, posted, timeframes, writes: () => posted.map((r) => `${r.method()} ${new URL(r.url()).pathname}`) };
 }

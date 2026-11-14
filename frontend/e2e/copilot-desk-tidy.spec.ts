@@ -91,10 +91,10 @@ test("quiet top: What's moving starts folded and remembers being opened; no acco
 
 test("the Feed: four groups, Ideas opens on Radar, and the tab counts only his own new items", async ({ page }) => {
   await open(page);
-  const centre = page.getByRole("region", { name: "Chart and feed" });
+  const centre = page.getByRole("region", { name: "Chart and tools" });
   await expect(page.getByTestId("feed-new")).toHaveText("1 new"); // the ORCL headline; Radar and the Fed line never count
-  await centre.getByRole("tab", { name: "Feed" }).click();
-  const feed = centre.getByTestId("desk-feed");
+  await page.getByRole("tab", { name: "Feed" }).click();
+  const feed = page.getByTestId("desk-feed");
   const show = feed.getByRole("group", { name: "Show" }).getByRole("button");
   await expect(show).toHaveText(["Mine", "Ideas", "Market", "All"]);
   await expect(show.nth(0)).toHaveAttribute("aria-pressed", "true");
@@ -113,12 +113,16 @@ test("the Feed: four groups, Ideas opens on Radar, and the tab counts only his o
   await expect(sources).toHaveText(["News", "Radar", "News"]);
 });
 
-test("a phone: the book comes before What's moving and the centre", async ({ page }) => {
+test("a phone: the book comes before What's moving, and the centre waits behind the switch", async ({ page }) => {
   await open(page, 390);
   const top = async (id: string) => (await page.getByTestId(id).boundingBox())!.y;
   const book = await top("desk-book");
   const moving = await top("desk-moving");
-  const centre = (await page.getByRole("region", { name: "Chart and feed" }).boundingBox())!.y;
   expect(book).toBeLessThan(moving);
-  expect(moving).toBeLessThan(centre);
+  // The ticker's tools are the second view: not on the Book, and there once its button is tapped.
+  const centre = page.getByRole("region", { name: "Chart and tools" });
+  await expect(centre).toBeHidden();
+  await page.getByTestId("desk-view-ticker").click();
+  await expect(centre).toBeVisible();
+  await expect(page.getByTestId("desk-moving")).toBeHidden();
 });

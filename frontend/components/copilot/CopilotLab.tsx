@@ -62,6 +62,28 @@ const CLOSE_PROMPT = "Close the day: for each position and plan today, did I fol
 const sheetLayout = () => typeof window !== "undefined" && window.matchMedia("(max-width: 1179px)").matches;
 const narrow = () => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
 
+type CentreTab = "chart" | "chain" | "ticket" | "check" | "grid";
+/** The centre's tabs: the selected ticker's tools in the order he works (see it, pick a contract, build the ticket),
+ * then Check a call and the Grid of many tickers. ``key`` is the tab's desk key. */
+const CENTRE_TABS: readonly { id: CentreTab; label: string; key: string; hint: string }[] = [
+  { id: "chart", label: "Chart", key: "C", hint: "The selected ticker's chart" },
+  { id: "chain", label: "Chain", key: "O", hint: "The selected ticker's option chain" },
+  { id: "ticket", label: "Ticket", key: "T", hint: "A plan's ticket to copy. Nothing is sent." },
+  { id: "check", label: "Check a call", key: "L", hint: "Paste a call and check it" },
+  { id: "grid", label: "Grid", key: "G", hint: "Your positions and watched names, several charts at once" },
+];
+/** A phone's three views (CopilotLab.module.css): one shows at a time under the switch. */
+type DeskView = "book" | "ticker" | "feed";
+/** A phone's view changed: the page goes to where that view starts. */
+function toView(view: DeskView) {
+  requestAnimationFrame(() => {
+    // The Book starts at the page's top (the clock and the day's P&L above it); the ticker and the Feed start right under
+    // the switch, which stays at the top of the screen.
+    if (view === "book") window.scrollTo({ top: 0 });
+    else document.getElementById("desk-cockpit")?.scrollIntoView({ block: "start" });
+  });
+}
+
 const shortDay = (iso: string) => new Date(iso).toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });
 
 /** You are here: "Now › a conversation about no ticker", or "NBIS › its conversation · Oct 29". Now goes back to the
@@ -91,16 +113,23 @@ function typing(target: EventTarget | null) {
  * The Copilot desk, a cockpit (docs/copilot-lab.md § The desk): the top bar (market phase and clock, SPY / QQQ / VIX,
  * the day's P&L), the Needs-you strip (the one most urgent item), then three columns: the book of followed positions
  * with the time of day's block under it (the morning brief, Since you looked, or the day report), the centre (the
- * selected symbol's Chart, and the Feed of what the app knows today), and the copilot (today's Main chat or the open thread, its
- * decision, close pass or checklist on top). Selecting a position drives the centre and the copilot. Below 1180 px the
- * copilot is a sheet opened by "Ask the copilot" and by any Ask action; a phone stacks the strip, the book and the
- * centre. The thread list is a drawer. While the lab is off only the conversation shows, saying so. ⌘K (Ctrl+K) or
- * Jump to… opens the palette; while not typing, J / K open the next or previous thread, N starts a plan, [ toggles the
- * thread list and Escape closes the drawer or the sheet.
+ * selected symbol's Chart and tools), and the side: the copilot (today's Main chat or the open thread, its decision,
+ * close pass or checklist on top) with the Feed of what the app knows today behind its tab. Selecting a position drives
+ * the centre and the copilot. Below 1180 px the copilot is a sheet opened by "Ask the copilot" and by any Ask action
+ * and the Feed a drawer; a phone shows one view at a time (Book, the ticker, Feed). The thread list is a drawer. While
+ * the lab is off only the conversation shows, saying so. ⌘K (Ctrl+K) or Jump to… opens the palette; while not typing,
+ * J / K open the next or previous thread, N starts a plan, [ toggles the thread list, a place's key opens it and Escape
+ * closes the drawer or the sheet.
  *
  * The page remounts the desk for each deep link it loads; a symbol or context link the desk opens itself (a position
  * picked in the book, a feed item's Ask, Plan a trade) is followed in place (``go``): the address changes with the
  * History API and the copilot starts that conversation, so the book, the top bar, the strip and the centre stay mounted.
+ *
+ * Where things live (the 2026-11-13 layout pass): what needs him and his positions keep the top and the left; the centre
+ * is the selected ticker's tools only (Chart, Chain, Ticket, then Check a call and the Grid); the right is the copilot
+ * with the Feed behind its tab, so the chart stays while he reads ideas. A phone shows one of three views under a
+ * switch (Book, the ticker, Feed) and the copilot as its sheet. Every place has a key (C O T L G, F, B, /) and a ⌘K
+ * command.
  */
 export default function CopilotLab({ link: linkProp = null, close = false, daily: dailyProp = false }: { link?: PanelLink | null; close?: boolean; daily?: boolean }) {
   const on = useCopilotOn();
@@ -145,9 +174,40 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // or the Feed.
   const [picked, setPicked] = useState<string | null>(null);
   const [pickedKey, setPickedKey] = useState<string | null>(null);
-  const [centreTab, setCentreTab] = useState<"chart" | "grid" | "chain" | "feed" | "check" | "ticket">("chart");
-  // The tab survives a link that reopens the desk (a feed item's Ask or Plan it, a checked call's Plan it) for this browser tab.
-  useEffect(() => { try { const kept = window.sessionStorage.getItem(CENTRE_KEY); if (kept === "feed" || kept === "check" || kept === "chain" || kept === "grid") setCentreTab(kept); } catch { /* chart */ } }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+  const [centreTab, setCentreTab] = useState<CentreTab>("chart");
+  // The tab survives a link that reopens the desk (a checked call's Plan it) for this browser tab.
+  useEffect(() => { try { const kept = window.sessionStorage.getItem(CENTRE_KEY); if (kept === "check" || kept === "chain" || kept === "grid") setCentreTab(kept); } catch { /* chart */ } }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+  // The Feed sits beside the copilot, never over the chart: from 1180 px it takes the copilot's column while shown (the
+  // Copilot | Feed tabs), from 768 px it is a drawer on the right, and a phone shows it as one of its three views.
+  const [feedShown, setFeedShown] = useState(false);
+  const feedKept = useRef(false);
+  useEffect(() => { feedKept.current = feedShown; }, [feedShown]);
+  // A phone shows one view at a time (the switch in its top row): the book, the selected ticker's tools, or the Feed. It
+  // opens on the Book; a link that names a ticker (a ping's) opens on that ticker's view, under the copilot's sheet.
+  const [phoneView, setPhoneView] = useState<DeskView>(linkProp?.symbol ? "ticker" : "book");
+  // The width crossed 768 px (a phone turned on its side): the Feed on show stays on show in the new layout's way, so
+  // "the Feed is open" never means a view or a drawer that is not on screen.
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 767px)");
+    const flip = () => {
+      if (query.matches) { if (feedKept.current) { setFeedShown(false); setPhoneView("feed"); } }
+      else setPhoneView(view => { if (view === "feed") setFeedShown(true); return view === "feed" ? "book" : view; });
+    };
+    query.addEventListener("change", flip);
+    return () => query.removeEventListener("change", flip);
+  }, []);
+  // The copilot comes forward (its sheet below 1180 px, its column beside the Feed's tab above).
+  const showCopilot = useCallback(() => { setSheet(true); setFeedShown(false); }, []);
+  // The selected ticker's tools come forward: a phone's ticker view; below 1180 px the Feed's drawer gives way.
+  const showCentre = useCallback((smooth = true) => {
+    if (narrow()) { setPhoneView("ticker"); toView("ticker"); }
+    else if (sheetLayout()) { setFeedShown(false); document.getElementById("desk-centre")?.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" }); }
+  }, []);
+  const showBook = useCallback(() => { if (narrow()) { setPhoneView("book"); toView("book"); } }, []);
+  const showFeed = useCallback(() => {
+    if (narrow()) { setPhoneView("feed"); toView("feed"); }
+    else { setFeedShown(true); if (sheetLayout()) setSheet(false); }
+  }, []);
   useEffect(() => { try { window.sessionStorage.setItem(CENTRE_KEY, centreTab); } catch { /* this view only */ } }, [centreTab]);
   // On a phone the tab strip scrolls: keep the chosen tab in it (a link can choose Ticket), never moving the page.
   useEffect(() => {
@@ -168,7 +228,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   useEffect(() => { if (centreTab !== "check") setCheckSeed(null); }, [centreTab]); // eslint-disable-line react-hooks/set-state-in-effect -- the Chain's contract fills Check a call once, not on every later visit
   const ticketLinked = useRef(false); // a ?ticket= link on a phone: the Ticket comes into view once the book above it has read
   useEffect(() => {
-    const show = (id: string | null, pick: TicketPick | null = null, close: ClosingTicket | null = null) => { setTicketFor(id); setTicketPick(pick); setTicketClose(close); setCentreTab("ticket"); if (sheetLayout()) document.getElementById("desk-centre")?.scrollIntoView({ behavior: "smooth", block: "start" }); };
+    const show = (id: string | null, pick: TicketPick | null = null, close: ClosingTicket | null = null) => { setTicketFor(id); setTicketPick(pick); setTicketClose(close); setCentreTab("ticket"); showCentre(); };
     const onTicket = (event: Event) => {
       event.preventDefault();
       const detail = (event as CustomEvent<{ investigationId?: string; pick?: TicketPick; close?: ClosingTicket }>).detail;
@@ -179,9 +239,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     if (linked) { show(linked); ticketLinked.current = true; }
     window.addEventListener(TICKET_EVENT, onTicket);
     return () => window.removeEventListener(TICKET_EVENT, onTicket);
-  }, []);
+  }, [showCentre]);
   const feed = useDeskFeed(on);
-  const feedNew = useFeedNew(feed.data, on && centreTab === "feed");
+  const feedOpen = feedShown || phoneView === "feed";
+  const feedNew = useFeedNew(feed.data, on && feedOpen);
   const unusual = useDeskUnusual(on);
   const scanner = useDeskScanner(on);
   const [scanLines, setScanLines] = useState<{ symbol: string; lines: DeskGuide[] } | null>(null); // a Scanner row's levels on the chart
@@ -206,10 +267,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const followLink = useCallback((next: PanelLink) => {
     setView({ link: next, daily: false });
     setCommand({ kind: "link", link: next, n: ++sent.current });
-    setSheet(true);
+    showCopilot();
     setArming(false);
     setAnswering(false);
-  }, []);
+  }, [showCopilot]);
   // Now (the top bar's, the breadcrumb's, Back to the bare address): today's Main chat in place, its address replacing
   // the bare one as a fresh load's does.
   const onNowShown = useRef(onNow);
@@ -221,16 +282,17 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     setView({ link: null, daily: true });
     setCommand({ kind: "now", n: ++sent.current });
     setSheet(false);
+    setFeedShown(false); // beside the Feed, Now brings the copilot's column forward
     setArming(false);
     setAnswering(false);
   }, []);
   const actions = useMemo<HomeActions>(() => ({
-    open: id => { setCommand({ kind: "open", id, n: ++sent.current }); setSheet(true); if (narrow()) setThreadsShown(false); },
-    ask: text => { setCommand({ kind: "ask", text, n: ++sent.current }); setSheet(true); },
+    open: id => { setCommand({ kind: "open", id, n: ++sent.current }); showCopilot(); if (narrow()) setThreadsShown(false); },
+    ask: text => { setCommand({ kind: "ask", text, n: ++sent.current }); showCopilot(); },
     // Back to Now from any thread or deep link, without carrying its conversation into the new view.
     home: () => goNow(true),
-  }), [goNow]);
-  const fill = useCallback((text: string) => { setCommand({ kind: "fill", text, n: ++sent.current }); setSheet(true); }, []);
+  }), [goNow, showCopilot]);
+  const fill = useCallback((text: string) => { setCommand({ kind: "fill", text, n: ++sent.current }); showCopilot(); }, [showCopilot]);
   const go = useCallback((href: string) => {
     const next = deskLinkIn(href);
     if (!next) { router.push(href); return; }
@@ -361,9 +423,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     const [next] = toReview(rows, nyDay(), reviewed.current);
     setClosing(!!next);
     if (next) review(next);
-    else if (steps.length) { setAnswering(true); setSheet(true); }
+    else if (steps.length) { setAnswering(true); showCopilot(); }
     else fill(CLOSE_PROMPT);
-  }, [rows, review, fill, setClosing, steps.length]);
+  }, [rows, review, fill, setClosing, steps.length, showCopilot]);
   // ``?close=1`` (the evening review ping) starts the pass once the list and the session have read, after the close: the
   // first unreviewed thread by a page load of its link (the pass carries on in this tab), else the fills to link here. With nothing left, or read before the close (a tab kept open stays as it is), the desk just opens.
   const closeLink = useRef(close);
@@ -371,8 +433,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   useEffect(() => {
     if (!ticketLinked.current || !rowsFresh || !sessionRead) return;
     ticketLinked.current = false;
-    if (sheetLayout()) document.getElementById("desk-centre")?.scrollIntoView({ block: "start" });
-  }, [rowsFresh, sessionRead]);
+    showCentre(false);
+  }, [rowsFresh, sessionRead, showCentre]);
   useEffect(() => {
     if (!closeLink.current || !rows.length || !sessionRead) return;
     closeLink.current = false;
@@ -382,8 +444,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       setClosing(true);
       window.location.replace(next.investigationId ? `/copilot-lab?investigation=${next.investigationId}`
         : `/copilot-lab?${new URLSearchParams({ symbol: next.symbol! })}`);
-    } else if (steps.length) { setAnswering(true); setSheet(true); } // eslint-disable-line react-hooks/set-state-in-effect -- the link starts the pass once
-  }, [rows, sessionRead, dayPhase, setClosing, steps.length]);
+    } else if (steps.length) { setAnswering(true); showCopilot(); } // eslint-disable-line react-hooks/set-state-in-effect -- the link starts the pass once
+  }, [rows, sessionRead, dayPhase, setClosing, steps.length, showCopilot]);
   const onReviewed = useCallback((symbol: string) => {
     reviewed.current.add(symbol);
     setRefresh(n => n + 1);
@@ -406,15 +468,33 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     lastThread.current = thread?.id ?? null;
     if (was !== null) { setArming(false); setAnswering(false); }
   }, [thread?.id]);
+  // A centre tab by its key or the palette: the tab, and on a phone the ticker's view with it.
+  const openCentre = useCallback((tab: CentreTab) => { setCentreTab(tab); showCentre(); }, [showCentre]);
+  // The copilot's message box: the copilot comes forward, then the box takes the keys.
+  const focusCopilot = useCallback(() => {
+    showCopilot();
+    requestAnimationFrame(() => desk.current?.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message']")?.focus());
+  }, [showCopilot]);
+  // The book: a phone's Book view, and the keys on its first row (Tab and Enter from there).
+  const focusBook = useCallback(() => {
+    showBook();
+    requestAnimationFrame(() => desk.current?.querySelector<HTMLElement>("[data-desk-book] li button")?.focus());
+  }, [showBook]);
   const commands = useMemo<PaletteCommand[]>(() => [
     { id: "plan", name: "Plan a trade", hint: "A new plan; you name the symbol. Nothing is sent.", key: "N", run: planTrade },
     { id: "week", name: "Review my week", hint: "One turn: planned vs unplanned, follow-through, exits", run: () => actions.ask(WEEK_REVIEW_CONTEXT) },
     { id: "matters", name: "What matters right now?", hint: "One turn across your positions, watches and investigations", run: () => actions.ask(WHAT_MATTERS_PROMPT) },
     ...(dayPhase === "pre" ? [
-      { id: "arm", name: "Arm today's plans", hint: "Each armed plan: still good, change or drop. Nothing is sent.", run: () => { setArming(true); setSheet(true); } },
+      { id: "arm", name: "Arm today's plans", hint: "Each armed plan: still good, change or drop. Nothing is sent.", run: () => { setArming(true); showCopilot(); } },
       { id: "prep", name: "Prep the day", hint: "Puts a prep question in the box, unsent", run: () => fill(PREP_PROMPT) }] : []),
     ...(dayPhase === "close" ? [{ id: "close", name: "Close the day", hint: "Each close question and fill to link, one at a time. Nothing is sent.", run: closeDay }] : []),
-  ], [actions, dayPhase, fill, planTrade, closeDay]);
+    // Every place on the desk, each with its key: the ticker's tools, the Feed, the copilot's message box, the thread list.
+    ...CENTRE_TABS.map(tab => ({ id: `go-${tab.id}`, name: tab.label, hint: tab.hint, key: tab.key, run: () => openCentre(tab.id) })),
+    { id: "go-feed", name: "Feed", hint: "Yours, ideas and the market today", key: "F", run: showFeed },
+    { id: "go-copilot", name: "Copilot", hint: "The conversation and its message box", key: "/", run: focusCopilot },
+    { id: "go-book", name: "Book", hint: "Your positions and what needs you", key: "B", run: focusBook },
+    { id: "go-threads", name: "Threads", hint: "The thread list and previous days", key: "[", run: toggleThreads },
+  ], [actions, dayPhase, fill, planTrade, closeDay, openCentre, showFeed, focusCopilot, focusBook, toggleThreads, showCopilot]);
 
   // J / K walk the conversations the thread list shows, subthreads included, in its order.
   const [walk, setWalk] = useState<string[]>([]);
@@ -448,12 +528,25 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         event.preventDefault();
         planTrade();
       }
-      // Escape closes the thread list's drawer, else the copilot's sheet.
-      else if (event.key === "Escape") { setThreadsShown(shown => { if (!shown) setSheet(false); return false; }); }
+      // Escape closes the thread list's drawer, else the Feed's drawer (below 1180 px), else the copilot's sheet.
+      else if (event.key === "Escape") {
+        setThreadsShown(shown => {
+          if (!shown) { if (feedKept.current && sheetLayout()) setFeedShown(false); else setSheet(false); }
+          return false;
+        });
+      }
+      // A place by its key: C chart, O chain (options), T ticket, L check a call, G grid, F feed, B book, / the message box.
+      else if (!event.repeat) {
+        const tab = CENTRE_TABS.find(t => t.key.toLowerCase() === key);
+        if (tab) { event.preventDefault(); openCentre(tab.id); }
+        else if (key === "f") { event.preventDefault(); if (feedKept.current) showCopilot(); else showFeed(); }
+        else if (key === "b") { event.preventDefault(); focusBook(); }
+        else if (event.key === "/") { event.preventDefault(); focusCopilot(); }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [on, step, planTrade, toggleThreads]);
+  }, [on, step, planTrade, toggleThreads, openCentre, showFeed, focusBook, showCopilot, focusCopilot]);
 
   // The open symbol's row in the thread list (a position or a plan): its close question and horizon, as the list shows them.
   const deskRow = useCallback((symbol: string | null | undefined) =>
@@ -536,9 +629,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     setPicked(row.symbol);
     setPickedKey(row.key);
     setCentreTab("chart");
-    if (!sheetLayout()) { if (row.symbol !== talking) openRow(row); }
-    else document.getElementById("desk-centre")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [openRow, talking]);
+    // Beside the Feed, the copilot opens it behind the Feed's tab: picking a row never takes the Feed away.
+    if (!sheetLayout()) { if (row.symbol !== talking) { openRow(row); setFeedShown(feedKept.current); } }
+    else showCentre();
+  }, [openRow, talking, showCentre]);
   // A watched name (no row of its own) opens the way a position without one does: the symbol's newest open
   // conversation, else its desk view, in place.
   const openWatched = useCallback((symbol: string) => {
@@ -551,9 +645,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     setPicked(symbol);
     setPickedKey(null);
     setCentreTab("chart");
-    if (!sheetLayout()) { if (symbol !== talking) openWatched(symbol); }
-    else document.getElementById("desk-centre")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [openWatched, talking]);
+    if (!sheetLayout()) { if (symbol !== talking) { openWatched(symbol); setFeedShown(feedKept.current); } }
+    else showCentre();
+  }, [openWatched, talking, showCentre]);
   // A Grid tile: the name on the full Chart tab, in place, as its book row or Watching row would open it.
   const openFromGrid = useCallback((symbol: string) => {
     const row = followed.find(r => r.symbol === symbol);
@@ -562,14 +656,14 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   }, [followed, select, selectWatched]);
   const gridHeld = useMemo(() => [...new Set(followed.flatMap(r => r.symbol ? [r.symbol] : []))], [followed]);
   const gridHidden = useMemo(() => new Set(rows.flatMap(r => r.hidden && r.symbol ? [r.symbol] : [])), [rows]);
-  const askWatched = useCallback((symbol: string) => { setPicked(symbol); setPickedKey(null); if (symbol !== talking) openWatched(symbol); setSheet(true); }, [openWatched, talking]);
+  const askWatched = useCallback((symbol: string) => { setPicked(symbol); setPickedKey(null); if (symbol !== talking) openWatched(symbol); showCopilot(); }, [openWatched, talking, showCopilot]);
   const planWatched = useCallback((symbol: string) => go(copilotLabHref(symbol, planContext(), { kind: "copilot", ref: null })), [go]);
   // Ask the copilot (the sheet's button): about the picked position (or watched name) when the copilot is on another ticker.
   const askCopilot = () => {
     const row = picked && picked !== talking ? followed.find(r => r.symbol === picked) : undefined;
     if (row) openRow(row);
     else if (picked && picked !== talking && watched.includes(picked)) openWatched(picked);
-    setSheet(true);
+    showCopilot();
   };
 
   // A feed item's Ask: its question in the box, unsent, in the item's own thread (a plan's), else the symbol's open
@@ -579,24 +673,24 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     if (symbol) setPicked(symbol);
     const talk = investigationId ?? (symbol ? deskRow(symbol)?.investigationId ?? rows.find(r => r.symbol === symbol && r.investigationId)?.investigationId
       ?? saved.filter(t => t.symbol === symbol && t.status !== "closed").sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]?.id ?? null : null);
-    if (talk) { setCommand({ kind: "open", id: talk, text, n: ++sent.current }); setSheet(true); }
+    if (talk) { setCommand({ kind: "open", id: talk, text, n: ++sent.current }); showCopilot(); }
     else if (symbol) go(copilotLabHref(symbol, text));
     else if (!thread || thread.mainDay === today) fill(text);
     else go(copilotLabHref("", text));
-  }, [today, deskRow, rows, saved, go, thread, fill]);
+  }, [today, deskRow, rows, saved, go, thread, fill, showCopilot]);
   const askFeed = useCallback((item: FeedItem) => askAbout(item.symbol, feedQuestion(item, today), item.investigation_id), [askAbout, today]);
   // The chart's level menu: Plan from here follows its desk link in place; Ask scopes the copilot like a feed item's Ask.
   // The Chain tab's actions: Check a call with the contract in the box, the plan flow, a saved plan's ticket.
-  const chainCheck = useCallback((text: string) => { setCheckSeed(seed => ({ text, n: (seed?.n ?? 0) + 1 })); setCentreTab("check"); }, []);
+  const chainCheck = useCallback((text: string) => { setCheckSeed(seed => ({ text, n: (seed?.n ?? 0) + 1 })); setCentreTab("check"); showCentre(); }, [showCentre]);
   const chainPlan = useCallback((pick: ChainPick, line: string) => go(copilotLabHref(pick.symbol, planContext(line), { kind: "copilot", ref: null })), [go]);
   const chainTicket = useCallback((id: string, pick: ChainPick) => openTicket(id, { expiry: pick.expiry, strike: pick.strike,
     ...(pick.short != null ? { short: pick.short, kind: pick.side } : {}) }), []);
   // An Unusual options row: its contract selected in the Chain tab, in place.
-  const openUnusual = useCallback((pick: ChainPick) => { setPicked(pick.symbol); setPickedKey(null); setChainFocus(f => ({ pick, n: (f?.n ?? 0) + 1 })); setCentreTab("chain"); }, []);
+  const openUnusual = useCallback((pick: ChainPick) => { setPicked(pick.symbol); setPickedKey(null); setChainFocus(f => ({ pick, n: (f?.n ?? 0) + 1 })); setCentreTab("chain"); showCentre(); }, [showCentre]);
   // A TradingView alert row: its ticker on the desk chart, in place, where the alert's marker sits.
-  const openFeedChart = useCallback((symbol: string) => { setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }, []);
+  const openFeedChart = useCallback((symbol: string) => { setPicked(symbol); setPickedKey(null); setCentreTab("chart"); showCentre(); }, [showCentre]);
   // A Scanner row: its ticker on the desk chart, in place, with the scanner's levels as thin lines.
-  const openScanner = useCallback((row: DeskScannerRow) => { setPicked(row.symbol); setPickedKey(null); setScanLines({ symbol: row.symbol, lines: scannerGuides(row) }); setCentreTab("chart"); }, []);
+  const openScanner = useCallback((row: DeskScannerRow) => { setPicked(row.symbol); setPickedKey(null); setScanLines({ symbol: row.symbol, lines: scannerGuides(row) }); setCentreTab("chart"); showCentre(); }, [showCentre]);
   const chartActions = useMemo<DeskChartActions>(() => ({ go, ask: (symbol, text) => askAbout(symbol, text) }), [go, askAbout]);
   // A feed item's Plan it: a Radar setup card opens on its own Plan it (the desk's Radar card); his own position or plan
   // opens its plan thread, else the plan form for the symbol. Nothing is saved or sent from the feed.
@@ -621,7 +715,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const unchecked = !on ? null : rowsFailed || sections?.positions === "unavailable" ? "positions"
     : sections?.plans === "unavailable" ? "plans" : session.error ? "today's alerts"
     : session.data?.sections?.alerts_to_answer === "unavailable" ? "today's alerts" : null;
-  const openNeed = (row: DeskThread) => { setPicked(row.symbol); openRow(row); setSheet(true); };
+  const openNeed = (row: DeskThread) => { setPicked(row.symbol); openRow(row); showCopilot(); };
   // The same words as the copilot's own "Why is it moving?" about that ticker, sent in today's conversation.
   const askWhy = (need: DeskNeed) => actions.ask(`Why is ${need.symbol} moving today?`);
   const openSymbol = (need: DeskNeed) => need.row ? openNeed(need.row) : need.symbol ? (setPicked(need.symbol), go(`/copilot-lab?${new URLSearchParams({ symbol: need.symbol })}`)) : undefined;
@@ -632,7 +726,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       case "level": return [{ label: "Open the plan", primary: true, run: () => openSymbol(need) }, { label: "Ask why", run: () => askWhy(need) }];
       case "card": return [{ label: "Open the card", primary: true, run: () => { setPicked(row!.symbol); pick(row!); } }];
       case "expiring": return [{ label: "Open it", primary: true, run: () => openSymbol(need) }];
-      case "fill": return [{ label: "Link it", primary: true, run: () => { fills.start(); setSheet(true); } }];
+      case "fill": return [{ label: "Link it", primary: true, run: () => { fills.start(); showCopilot(); } }];
     }
   };
 
@@ -652,27 +746,36 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     ) : <SinceYouLooked rows={rows} session={session.data} read={rowsRead} />;
 
   return (
-    <div ref={desk} className={styles.desk} data-on={on} data-sheet={sheet ? "open" : "closed"} data-threads={threadsShown ? "shown" : "hidden"}>
-      <header className={styles.bar}>
-        {/* A wide screen folds the app's navigation into this button, so the desk has the full width; a phone keeps its tabs. */}
-        {navFolded && (
-          <button type="button" onClick={openNavMenu} aria-label="Open menu" title="All pages, sync and the plan streak"
-            className="-ml-1.5 hidden h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground md:inline-flex">
-            <Menu size={15} aria-hidden />Menu
-          </button>
-        )}
-        <h1 className={styles.title}><MessagesSquare size={17} aria-hidden />Desk</h1>
-        {on && <DeskStatus data={session.data} />}
-        {on && <DayPnl session={session.data} rows={rows} read={rowsFresh} />}
-        {on && <DeskAccounts live={rowsFresh ? live : null} rows={rows} active={account} onPick={setAccount} />}
-        {on && <ScalpShortlistNudge />}
-        {on && (
+    <div ref={desk} className={styles.desk} data-on={on} data-sheet={sheet ? "open" : "closed"} data-threads={threadsShown ? "shown" : "hidden"}
+      data-view={phoneView} data-feed={feedShown ? "shown" : "hidden"}>
+      {/* The desk's head: the top bar and, at its right, the desk's buttons. On a phone the buttons' row comes first, stays at
+          the top of the screen, and starts with the switch between the desk's three views (CopilotLab.module.css). */}
+      <div className={styles.head}>
+      {on && (
+        <div className={styles.topRow}>
+          {/* A phone's switch: one view at a time, the middle one named for the selected ticker. Wider screens show all at once. */}
+          <nav id="desk-views" aria-label="Desk views" data-testid="desk-views" className={styles.views}>
+            {([["book", "Book"], ["ticker", centreSymbol ?? "Market"], ["feed", "Feed"]] as const).map(([id, label]) => (
+              <button key={id} type="button" aria-pressed={phoneView === id} data-testid={`desk-view-${id}`}
+                onClick={() => id === "book" ? showBook() : id === "ticker" ? showCentre() : showFeed()}
+                className={cn("min-h-11 min-w-0 flex-1 truncate rounded-md px-1 text-sm", phoneView === id ? "bg-secondary font-semibold text-foreground" : "text-muted-foreground")}>
+                {label}
+                {id === "book" && phoneView !== "book" && needs.length > 0 && <span data-testid="desk-view-needs" className="ml-1.5 text-xs font-semibold tabular-nums text-primary">{needs.length}<span className="sr-only"> need you</span></span>}
+                {id === "feed" && feedNew.count > 0 && <span data-testid="feed-new-phone" className="ml-1.5 text-xs tabular-nums text-muted-foreground">{feedNew.count}<span className="sr-only"> new</span></span>}
+              </button>
+            ))}
+          </nav>
           <div className={styles.barActions}>
             {/* The desk's front door: today's Main chat in the copilot. */}
             <Link href="/copilot-lab" aria-current={onNow ? "page" : undefined} title="Back to today: Main chat in the copilot"
-              onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); if (!onNow) goNow(true); }}
+              onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setFeedShown(false); if (!onNow) goNow(true); }}
               className={cn("inline-flex min-h-11 items-center whitespace-nowrap rounded-md border px-2.5 text-xs sm:min-h-8",
                 onNow ? "bg-secondary font-medium text-foreground max-md:hidden" : "text-muted-foreground hover:text-foreground")}>Now</Link>
+            {/* Between 768 and 1180 px the Feed is a drawer on the right: this opens it (wider, it is the tab beside the copilot; a phone has its view). */}
+            <button type="button" onClick={() => feedShown ? setFeedShown(false) : showFeed()} aria-pressed={feedShown} title="Yours, ideas and the market today ( F )"
+              className={cn(styles.feedButton, "min-h-11 items-center gap-1.5 rounded-md border px-2.5 text-xs text-muted-foreground hover:text-foreground sm:min-h-8", feedShown && "bg-secondary")}>
+              Feed{feedNew.count > 0 && <span data-testid="feed-new-bar" className="tabular-nums">{feedNew.count}<span className="sr-only"> new</span></span>}
+            </button>
             {/* No count here: what needs him is the strip's, counted once there. */}
             <button type="button" onClick={toggleThreads} aria-pressed={threadsShown} aria-label="Threads" title="The thread list and previous days ( [ )"
               className={cn("inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground sm:min-h-8", threadsShown && "bg-secondary")}>
@@ -688,12 +791,28 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               <Plus size={14} aria-hidden /><span className="sr-only sm:not-sr-only">Plan a trade</span>
             </button>
           </div>
+        </div>
+      )}
+      <header className={styles.bar}>
+        {/* A wide screen folds the app's navigation into this button, so the desk has the full width; a phone keeps its tabs. */}
+        {navFolded && (
+          <button type="button" onClick={openNavMenu} aria-label="Open menu" title="All pages, sync and the plan streak"
+            className="-ml-1.5 hidden h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground md:inline-flex">
+            <Menu size={15} aria-hidden />Menu
+          </button>
         )}
+        <h1 className={styles.title}><MessagesSquare size={17} aria-hidden />Desk</h1>
+        {on && <DeskStatus data={session.data} />}
+        {on && <DayPnl session={session.data} rows={rows} read={rowsFresh} />}
+        {on && <DeskAccounts live={rowsFresh ? live : null} rows={rows} active={account} onPick={setAccount} />}
+        {on && <ScalpShortlistNudge />}
       </header>
-      <div className={styles.cockpit}>
+      </div>
+      <div id="desk-cockpit" className={styles.cockpit}>
         {on && (
           <div className={styles.strip}>
-            {needs.length > 0 && <NeedsStrip needs={needs} actions={needActions} />}
+            {/* A phone shows the strip on its Book view; on the other two the Book's button carries the amber count. */}
+            {needs.length > 0 && <div className={styles.needs}><NeedsStrip needs={needs} actions={needActions} /></div>}
             {unchecked && <p data-testid="needs-you-unchecked" className="px-1 pt-1 text-xs text-muted-foreground">Needs you could not check {unchecked} just now; it will read again in a minute.</p>}
             {/* What's moving: one thin row across the book and the centre, folded until opened; a tile selects its symbol in
                 place, as a watched name does. A phone puts it under the book. */}
@@ -719,39 +838,66 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           <div className={styles.book}>
             <Book rows={booked.rows} sparks={sparks} earnings={events} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} updating={rowsRead && !rowsFresh} onSelect={select} onFollow={changeFollow}
               live={booked.live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} />
+            {/* Before the open and after the close the day's block (the brief, the day report) comes straight after the
+                book; in the session it waits under Watching. */}
+            {dayPhase !== null && lower}
             <Watching data={rowsRead ? watching.data : null} failed={watching.failed} sparks={sparks} earnings={events} held={held} selected={centreSymbol}
               onSelect={selectWatched} onAsk={askWatched} onPlan={planWatched} onChange={watching.set} />
-            {lower}
+            {dayPhase === null && lower}
             <DayFacts session={session.data} />
           </div>
         )}
         {on && (
-          <section id="desk-centre" aria-label="Chart and feed" className={styles.centre}>
-            {/* Chart first, then the Grid, Chain, Feed, Check a call and Ticket. */}
-            {/* Six tabs are wider than a 375 px phone: the strip scrolls sideways inside itself, never the page. Its bottom
-                line is an inset shadow, so a tab's underline paints over it without spilling past the scroll box. */}
+          <section id="desk-centre" aria-label="Chart and tools" className={styles.centre}>
+            {/* The selected ticker's tools in the order he works: Chart, Chain, Ticket; then Check a call and, set apart, the
+                Grid of many tickers. The Feed is not here: it sits beside the copilot, so the chart stays while he reads it. */}
+            {/* The strip's bottom line is an inset shadow, so a tab's underline paints over it without spilling past the scroll box. */}
             <div role="tablist" aria-label="Centre" className="flex gap-0.5 overflow-x-auto px-1.5 pt-1.5 shadow-[inset_0_-1px_0_hsl(var(--border))] [scrollbar-width:none] sm:gap-1 sm:px-2">
-              {([["chart", "Chart"], ["grid", "Grid"], ["chain", "Chain"], ["feed", "Feed"], ["check", "Check a call"], ["ticket", "Ticket"]] as const).map(([id, label]) => (
-                <button key={id} type="button" role="tab" aria-selected={centreTab === id} onClick={() => setCentreTab(id)}
-                  className={cn("min-h-11 shrink-0 whitespace-nowrap border-b-2 px-2 text-sm sm:min-h-9 sm:px-2.5", centreTab === id ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+              {CENTRE_TABS.map(({ id, label, key }) => (
+                <button key={id} type="button" role="tab" aria-selected={centreTab === id} onClick={() => setCentreTab(id)} title={`${label} ( ${key} )`}
+                  className={cn("min-h-11 shrink-0 whitespace-nowrap border-b-2 px-2 text-sm sm:min-h-9 sm:px-2.5", id === "grid" && "ml-auto",
+                    centreTab === id ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
                   {label}
-                  {id === "feed" && feedNew.count > 0 && <span data-testid="feed-new" className="ml-1.5 text-xs tabular-nums text-muted-foreground">{feedNew.count}<span className="sr-only"> new</span></span>}
                 </button>
               ))}
             </div>
-            <div role="tabpanel" aria-label={centreTab === "chart" ? "Chart" : centreTab === "grid" ? "Grid" : centreTab === "chain" ? "Chain" : centreTab === "check" ? "Check a call" : centreTab === "ticket" ? "Ticket" : "Feed"} className="p-3">
+            <div role="tabpanel" aria-label={CENTRE_TABS.find(t => t.id === centreTab)!.label} className="p-3">
               {centreTab === "check" ? <CheckACall seed={checkSeed} />
                 : centreTab === "grid" ? <DeskGrid held={gridHeld} watched={watched} hidden={gridHidden} sparks={sparks} earnings={events} selected={centreSymbol} onOpen={openFromGrid} />
                 : centreTab === "chain" ? <DeskChain symbol={centreSymbol} plans={tickets.plans} onCheck={chainCheck} onPlan={chainPlan} onTicket={chainTicket} unusual={unusual?.rows} focus={chainFocus} />
                 : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} pick={ticketPick} close={ticketClose} onOpen={id => { setTicketFor(id); setTicketPick(null); setTicketClose(null); }} onClose={() => { setTicketFor(null); setTicketPick(null); setTicketClose(null); }}
                 onPlaced={symbol => { setTicketFor(null); setTicketClose(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
-                : centreTab === "chart"
-                ? <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events}
-                  guides={scanLines && scanLines.symbol === centreSymbol ? scanLines.lines : undefined} />
-                : <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed} onChart={openFeedChart} unusual={unusual} onUnusual={openUnusual}
-                  scanner={scanner} onScanner={openScanner} onScannerPlan={go} />}
+                : <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events}
+                  guides={scanLines && scanLines.symbol === centreSymbol ? scanLines.lines : undefined} />}
             </div>
           </section>
+        )}
+        {/* The right side: the copilot, and the Feed behind its tab (CopilotLab.module.css lays the two out by width). */}
+        <div className={styles.side}>
+        {on && (
+          <div role="tablist" aria-label="Side" className={styles.sideTabs}>
+            <button type="button" role="tab" aria-selected={!feedShown} onClick={showCopilot} title="The copilot ( / )"
+              className={cn("min-h-9 shrink-0 whitespace-nowrap border-b-2 px-2.5 text-sm", !feedShown ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+              Copilot{talking && <span className="ml-1.5 text-xs text-muted-foreground">{talking}</span>}
+            </button>
+            <button type="button" role="tab" aria-selected={feedShown} onClick={showFeed} title="Yours, ideas and the market today ( F )"
+              className={cn("min-h-9 shrink-0 whitespace-nowrap border-b-2 px-2.5 text-sm", feedShown ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+              Feed{feedNew.count > 0 && <span data-testid="feed-new" className="ml-1.5 text-xs tabular-nums text-muted-foreground">{feedNew.count}<span className="sr-only"> new</span></span>}
+            </button>
+          </div>
+        )}
+        {on && (
+          <div id="desk-feed" data-testid="desk-feed-pane" className={styles.feed}>
+            <div className={styles.feedBar}>
+              <span className="text-sm font-semibold">Feed</span>
+              <button type="button" onClick={() => setFeedShown(false)} aria-label="Close the Feed"
+                className="ml-auto inline-flex min-h-11 items-center gap-1 rounded-md border px-2.5 text-xs text-muted-foreground hover:text-foreground">
+                <X size={14} aria-hidden />Desk
+              </button>
+            </div>
+            <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed} onChart={openFeedChart} unusual={unusual} onUnusual={openUnusual}
+              scanner={scanner} onScanner={openScanner} onScannerPlan={go} />
+          </div>
         )}
         <section aria-label="Conversation" className={styles.thread}>
           {on && (
@@ -777,7 +923,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           {on && arming && (
             <ArmChecklist onClose={() => setArming(false)} onDropped={() => setRefresh(n => n + 1)}
               ask={() => { setArming(false); fill(ARM_PROMPT); }}
-              change={(plan, text) => { setArming(false); setCommand({ kind: "open", id: plan.investigationId!, text, n: ++sent.current }); setSheet(true); }} />
+              change={(plan, text) => { setArming(false); setCommand({ kind: "open", id: plan.investigationId!, text, n: ++sent.current }); showCopilot(); }} />
           )}
           {on && !arming && closeStep && (
             <ClosePass key={closeStep.id} done={tally.done} total={tally.total}
@@ -809,6 +955,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           ) : null)}
           <CopilotPanel variant="page" link={link} desk={hooks} daily={daily} />
         </section>
+        </div>
       </div>
       {/* A phone shows only the round button, so it never sits over a book row's P&L; its name is the same. */}
       {on && <button type="button" onClick={askCopilot} className={cn(styles.ask, "min-h-11 items-center gap-1.5 rounded-full border border-foreground/30 bg-card px-4 text-sm font-medium text-foreground shadow-lg hover:bg-secondary max-sm:size-12 max-sm:justify-center max-sm:px-0")}>

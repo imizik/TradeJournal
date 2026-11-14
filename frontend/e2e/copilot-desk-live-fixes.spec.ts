@@ -292,6 +292,7 @@ for (const width of [1440, 375]) {
     const bars = Array.from({ length: 480 }, (_, i) => ({ time: last - (479 - i) * step, open: 100, high: 101, low: 99, close: 100.5, volume: 10, extended: false }));
     await open(page, { path: "/copilot-lab", chart: { symbol: "ORCL", timeframe: "2m", step, as_of: last, live: false, state: "ok",
       reason: null, bars, levels: [], marks: [], time_stop: null } });
+    if (width < 768) await page.getByTestId("desk-view-ticker").click(); // a phone opens on its Book: the chart is its second view
     const canvas = page.getByTestId("desk-chart-canvas");
     await expect(canvas).toHaveAttribute("data-bars", "480");
     await expect(canvas).toHaveAttribute("data-edges", /^\d+,\d+$/);

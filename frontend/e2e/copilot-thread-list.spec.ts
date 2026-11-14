@@ -218,10 +218,10 @@ test("Radar hits sit in the Feed, not the ticker list: each hit opening its even
       detail: "vs sector", publisher: null, url: null, href: `/radar?event=${EVENT}`, investigation_id: null, radar_event_id: EVENT, setup: null,
       plan: null, mine: false, upcoming: false }] } }));
   await lab(page);
-  const centre = page.getByRole("region", { name: "Chart and feed" });
-  await centre.getByRole("tab", { name: "Feed" }).click();
-  await centre.getByRole("button", { name: "Ideas", exact: true }).click(); // opens on Radar
-  const hit = centre.getByTestId("feed-item");
+  await page.getByRole("tab", { name: "Feed" }).click();
+  const feed = page.getByTestId("desk-feed");
+  await feed.getByRole("button", { name: "Ideas", exact: true }).click(); // opens on Radar
+  const hit = feed.getByTestId("feed-item");
   await expect(hit).toContainText("MU up 4.1% while SMH is up 0.6%");
   await expect(hit.getByRole("link", { name: "Open", exact: true })).toHaveAttribute("href", `/radar?event=${EVENT}`);
   await expect(hit.getByRole("button", { name: "Plan it" })).toHaveCount(0); // a Radar event carries no Plan it

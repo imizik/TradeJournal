@@ -80,7 +80,8 @@ async function open(page: Page, { width = 393, height = 852, path = "/copilot-la
     instrument: "calls", thesis: "Reclaims VWAP with the group", confirmed_at: epoch("2026-11-12T15:55:00Z"), entry: 95.9, invalidation: 92.3 }] } }));
   await page.route(/\/copilot\/tickets\/[^/]+$/, route => route.fulfill({ json: TICKET }));
   await page.goto(path);
-  await expect(page.getByTestId("desk-book")).toBeVisible();
+  // The desk has read: its Book, or (a ticket link) the ticker's view it opens on.
+  await expect(path.includes("ticket=") ? page.locator("#desk-centre") : page.getByTestId("desk-book")).toBeVisible();
   return release;
 }
 
@@ -112,10 +113,18 @@ for (const width of [375, 393, 440]) {
     const figure = await amd.getByText("+$12,345").evaluate(el => el.getBoundingClientRect().right);
     const eye = await amd.getByRole("button", { name: /^Hide AMD/ }).evaluate(el => el.getBoundingClientRect().left);
     expect(figure).toBeLessThanOrEqual(eye);
-    for (const tab of ["Feed", "Check a call", "Ticket"]) {
+    // The other two views, and the ticker's tabs (five: they fit the width without swiping).
+    await page.getByTestId("desk-view-feed").click();
+    await expect(page.getByTestId("desk-feed")).toBeVisible();
+    expect(await sideways(page), `Feed at ${width} px`).toBeLessThanOrEqual(0);
+    await page.getByTestId("desk-view-ticker").click();
+    const strip = page.getByRole("tablist", { name: "Centre" });
+    expect(await strip.evaluate(el => el.scrollWidth - el.clientWidth), `the tab strip at ${width} px`).toBeLessThanOrEqual(0);
+    for (const tab of ["Chain", "Check a call", "Ticket", "Grid"]) {
       await page.getByRole("tab", { name: new RegExp(`^${tab}`) }).click();
       expect(await sideways(page), `${tab} at ${width} px`).toBeLessThanOrEqual(0);
     }
+    await page.getByTestId("desk-view-book").click();
     // The round Ask button opens the copilot over the page; one tap on Desk closes it.
     const ask = page.getByRole("button", { name: /^Ask the copilot/ });
     const box = await ask.boundingBox();
@@ -144,21 +153,27 @@ test("with the software keyboard up the message box stays in view", async ({ pag
 test("tapping a position keeps its chart in view while the copilot opens behind the closed sheet", async ({ page }) => {
   const release = await open(page, { mainChatHeld: true });
   await page.getByTestId("desk-book").getByRole("button", { name: /^SOFI/ }).click();
-  // In view near the top (the page's end can stop it a little short of the very top).
+  // The ticker's view: its tools in view near the top, under the switch and the position's own row.
+  await expect(page.getByTestId("desk-view-ticker")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("desk-view-ticker")).toHaveText("SOFI");
   await expect.poll(() => centreTop(page)).toBeLessThan(250);
+  const at = await centreTop(page), scrolled = await page.evaluate(() => window.scrollY);
   // Now the Main chat opens in the closed sheet and tries to land for the next two seconds: the page stays on the chart.
   release();
   await expect(page.locator("section[aria-label=Conversation] h2", { hasText: "Main chat" })).toBeAttached(); // in the closed sheet
   await page.waitForTimeout(3000);
-  expect(await centreTop(page)).toBeLessThan(250);
-  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(400);
+  expect(await centreTop(page)).toBe(at);
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
+  await expect(page.locator("#desk-centre")).toBeInViewport();
 });
 
 test("a ticket link from a phone ping lands on the Ticket", async ({ page }) => {
   await open(page, { path: "/copilot-lab?ticket=inv-nbis" });
   await expect(page.getByRole("tab", { name: "Ticket" })).toHaveAttribute("aria-selected", "true");
+  // The ticker's view, on its Ticket, near the top; it is still there after the book and the Main chat have read.
+  await expect(page.getByTestId("desk-view-ticker")).toHaveAttribute("aria-pressed", "true");
   await expect.poll(() => centreTop(page)).toBeLessThan(250);
   await page.waitForTimeout(2500);
   expect(await centreTop(page)).toBeLessThan(250);
-  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(400);
+  await expect(page.getByTestId("desk-ticket")).toBeInViewport();
 });

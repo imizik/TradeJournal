@@ -360,6 +360,8 @@ function defaultRange(parts: Parts, data: DeskChartData, host: HTMLElement | nul
   parts.chart.priceScale("right").applyOptions({ autoScale: true });
   const scale = parts.chart.timeScale();
   const width = scale.width();
+  // Set while the chart had no width (a phone's Book or Feed view was on show): it is set again once it has room.
+  if (host) { if (width > 0) delete host.dataset.unfit; else host.dataset.unfit = "1"; }
   // Bars that make EDGE_PX at the spacing the whole view will have (a little more than needed, never less). A whole
   // 2m day on a phone needs candles thinner than the usual minimum to fit between the margins: allow just that.
   const edge = width > 4 * EDGE_PX ? EDGE_PX * (last + 1 + room) / (width - 2 * EDGE_PX) : 1;
@@ -1001,6 +1003,16 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   };
 
   const reset = () => { if (parts.current && painted.current.shown) defaultRange(parts.current, painted.current.shown, host.current); };
+  // A chart whose default view was set while it was hidden gets it again when it is laid out; a view he set holds.
+  useEffect(() => {
+    const element = host.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => requestAnimationFrame(() => {
+      if (element.dataset.unfit && element.clientWidth > 0 && parts.current && painted.current.shown) defaultRange(parts.current, painted.current.shown, element);
+    }));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   const switching = !!read && read.key !== key;
   const unavailable = read && read.key === key ? ("error" in read ? read.error : read.data.state !== "ok" || !read.data.bars.length ? (read.data.reason ?? "No bars came back.") : null) : null;
   const daily = data?.timeframe === "1D";
