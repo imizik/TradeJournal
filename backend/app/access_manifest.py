@@ -133,6 +133,14 @@ DOMAIN_ROUTES = frozenset({
     'POST /copilot/paper/orders',  # a paper fill at one live quote read through the chart feed: paper tables only; never an order, never Robinhood
     'POST /copilot/paper/orders/cancel',  # cancel a working paper limit order: paper tables only
     'POST /copilot/paper/auto',  # a paper position's close-automatically switch: paper tables only
+    'GET /copilot/paper/replay',  # replay days and the replay scorecard: replay runs' paper rows; the market calendar
+    'GET /copilot/paper/replay/day',  # tickers to suggest for a past day: his fills, watchlist and follow settings, read only
+    'GET /copilot/paper/replay/bars',  # a past day's minute bars from the Charts history store (Alpaca SIP); never Tradier or Robinhood
+    'POST /copilot/paper/replay/runs',  # start a practice run on a past day: replay paper rows only
+    'POST /copilot/paper/replay/step',  # bring a replay run to its clock (limits, stop and target on past bars): replay paper rows only
+    'POST /copilot/paper/replay/orders',  # a share paper fill priced from a past bar plus an assumed spread: replay paper rows only; never an order, never Robinhood
+    'POST /copilot/paper/replay/orders/cancel',  # cancel a working replay limit: replay paper rows only
+    'POST /copilot/paper/replay/auto',  # a replay position's close-automatically switch: replay paper rows only
     'GET /copilot/tickets',
     'GET /copilot/tickets/{investigation_id}',
     'GET /copilot/roll',  # the desk's roll ticket: the held contract's terms from the book row in, two contracts' quotes (one paced options-feed pass) and arithmetic out; never Robinhood, never an order

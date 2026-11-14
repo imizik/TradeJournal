@@ -2099,6 +2099,10 @@ class PaperRun(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     starting_cash: float
     started_at: datetime = Field(default_factory=utc_now_naive, index=True)  # UTC
+    # ``live`` (the paper account, ``paper_book``) or ``replay`` (one practice run on a past day, ``paper_replay``):
+    # the two never mix. ``replay_day`` is the New York day a replay run plays.
+    kind: str = Field(default="live", sa_column_kwargs={"server_default": "live"})
+    replay_day: date | None = None
 
 
 class PaperEvent(SQLModel, table=True):
