@@ -211,6 +211,7 @@ export function planOrder(symbol: string, instrument: "stock" | "calls" | "puts"
   const expiry = expiryIn(words, today);
   if (!expiry) return unclear;
   const rest = words.replace(expiry.words, " ");
+  if (expiryIn(rest, today)) return unclear; // two dates ("Nov 21 5/10 C"): one may be a spread's strikes
   if (/\d\s*[cp]?\s*\/\s*\$?\d/i.test(rest)) return { order: null, why: `"${words}" names a spread: paper it from the Ticket or the Chain.` };
   // One strike, written "95C", "95 C", "$95 call" or "95 put" (a plural "2 calls" is a count, not a strike).
   const strikes = [...rest.matchAll(/(?<![\w.$])\$?(\d+(?:\.\d+)?)\s*(c|p|call|put)\b/gi)];
