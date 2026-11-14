@@ -333,3 +333,19 @@ def test_the_desks_paper_read_carries_the_newest_review(lab, monkeypatch):
     body = TestClient(app).get("/copilot/paper").json()
     assert body["review"]["day"] == "2026-11-13" and body["review"]["text"].startswith("Simulated paper review")
     assert "facts" not in body["review"]
+
+
+def test_a_second_delivery_pass_during_the_send_never_sends_it_twice(lab, monkeypatch):
+    seed(lab)
+    sent = []
+    reviews = paper_review.PaperReviews(app_engine, Calendar(), clock=lambda: FRIDAY, spawn=lambda work: None)
+
+    def publish(title, body, **kw):
+        sent.append(title)
+        paper_review.clear()  # as after a restart: the next pass reloads the kept file
+        reviews.deliver()  # the monitor's own pass, arriving while this send is in flight
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(ntfy, "publish", publish)
+    assert asyncio.run(paper_review.write(FRIDAY))["ping"]["state"] == "pending"
+    reviews.deliver()
+    assert sent == ["PAPER REVIEW · week of Nov 9"]

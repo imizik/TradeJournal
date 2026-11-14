@@ -42,7 +42,7 @@ def _stats(s: dict) -> dict:
 def _open_row(p: dict, now: float, today: date) -> dict:
     from app.engine.paper_book import clock
     row = {"label": p["label"], "symbol": p["symbol"], "quantity": p["remaining"], "opened": clock(p["opened_at"]),
-           "cost": p["basis"]}
+           "cash_at_open": p["basis"]}
     for key in ("stop", "target"):
         if p.get(key) is not None:
             row[key] = p[key]
@@ -88,8 +88,9 @@ def compact(view: dict, hidden: set[str], now: float, symbol: str | None = None)
     from app.engine.paper_book import clock
     out = {"state": "ok", "as_of": _now_iso(now), "symbol": symbol,
            "note": "His paper book: practice with no money, fills at the live ask to buy and the bid to sell. Every price "
-                   "has its time; a position without a price has no P&L yet. Read only: nothing here places or changes "
-                   "a paper order."}
+                   "has its time; a position without a price has no P&L yet. cash_at_open is the open part's cash at "
+                   "the fill: negative is what he paid, positive a credit he took in; pnl is value plus cash_at_open. "
+                   "Read only: nothing here places or changes a paper order."}
     run = view.get("run")
     if run is None:
         return {**out, "state": "none", "reason": "He has not started paper trading yet (the desk's Paper section starts it)."}
@@ -153,7 +154,7 @@ def live_paper_book(symbol: str | None = None, now: float | None = None) -> dict
 
 def fixture_paper_book(symbol: str | None = None) -> dict:
     """A SIMULATED paper book for the fixture backend: invented numbers, shaped like the live read."""
-    open_ = [{"label": "NBIS $100 Call 11/20/26", "symbol": "NBIS", "quantity": 2, "opened": "Nov 12 10:41 AM ET", "cost": -680.0,
+    open_ = [{"label": "NBIS $100 Call 11/20/26", "symbol": "NBIS", "quantity": 2, "opened": "Nov 12 10:41 AM ET", "cash_at_open": -680.0,
               "stop": 92.4, "target": 108.0, "note": "reclaim of the morning low", "value": 820.0, "pnl": 140.0, "pnl_pct": 20.6,
               "price_at": "Nov 13 3:58 PM ET", "price_age_minutes": 2}]
     closed = [{"label": "NBIS shares", "symbol": "NBIS", "quantity": 10, "opened": "Nov 10 9:52 AM ET", "closed": "Nov 11 2:15 PM ET",

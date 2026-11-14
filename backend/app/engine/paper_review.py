@@ -21,9 +21,12 @@ When and what it costs:
 Kept in ``data/paper_review/<friday>.json`` (the last ``KEEP_WEEKS`` weeks) and in memory; ``latest`` is what the desk's
 paper read (``GET /copilot/paper``) carries. One phone ping, ``PAPER REVIEW · week of <Monday>``, carries it (kind
 ``paper_review``: its own daily budget of one in ``notification_policy``, so it never spends Radar's or the position
-alerts'). Delivery is at most once: the kept file says ``sending`` before the send, and a send that may have reached the
-phone is ``unknown`` and never resent; one not sent within ``EXPIRE_SECONDS`` is ``expired``. Nothing here places, closes
-or changes a paper order, and it never calls Robinhood.
+alerts'). Delivery is at most once: the claim turns ``pending`` into ``sending`` under one lock and the kept file says
+``sending`` before the send, and a send that may have reached the phone is ``unknown`` and never resent; one not sent
+within ``EXPIRE_SECONDS`` is ``expired``. Nothing here places, closes or changes a paper order, and it never calls
+Robinhood. Its facts come from the desk's own paper read (``paper_book.view``), which settles an option still open past
+its expiration's close at intrinsic value, as the desk's minute read does (at most one cached daily-history read
+through the chart feed for that close).
 """
 from __future__ import annotations
 
@@ -53,7 +56,7 @@ ROOT = Path(__file__).resolve().parents[2] / "data" / "paper_review"
 QUESTION = "Paper review: the week of {monday}. Review my paper week against my real one from the facts below.\n\n{pack}"
 
 _latest: dict | None = None
-_lock = threading.Lock()
+_lock = threading.RLock()  # the kept review: its load, every save and the ping claim
 
 
 def clear() -> None:
@@ -214,17 +217,18 @@ def _load(day: str) -> dict | None:
 def _newest() -> dict | None:
     """The newest kept review (memory, else the newest file)."""
     global _latest
-    if _latest is not None:
-        return _latest
-    try:
-        names = sorted((p.stem for p in ROOT.glob("*.json")), reverse=True)
-    except OSError:
+    with _lock:
+        if _latest is not None:
+            return _latest
+        try:
+            names = sorted((p.stem for p in ROOT.glob("*.json")), reverse=True)
+        except OSError:
+            return None
+        for name in names:
+            if (entry := _load(name)) is not None:
+                _latest = entry
+                return entry
         return None
-    for name in names:
-        if (entry := _load(name)) is not None:
-            _latest = entry
-            return entry
-    return None
 
 
 def latest() -> dict | None:
@@ -355,20 +359,21 @@ class PaperReviews:
         from app.engine import notification_policy, phone
         from app.engine.position_alerts import _surely_unsent
         now = self.clock()
-        entry = _newest()
-        ping = (entry or {}).get("ping") or {}
-        if ping.get("state") != "pending" or (ping.get("next_at") and now < ping["next_at"]):
-            return
-        day = entry["day"]
+        with _lock:  # the claim: pending is read and turned into sending in one step, so two passes never both send
+            entry = _newest()
+            ping = (entry or {}).get("ping") or {}
+            if ping.get("state") != "pending" or (ping.get("next_at") and now < ping["next_at"]):
+                return
+            day = entry["day"]
 
-        def mark(state: str, error: str | None = None, **more) -> None:
-            entry["ping"] = {**entry["ping"], **more, "state": state, "error": error}
-            _save(day, entry)
-        if now - entry["at"] > EXPIRE_SECONDS:
-            return mark("expired", "Not sent within 2 hours of the review, so it was not sent late.")
-        if not phone.configured():
-            return mark("off", "Phone pings are not set up on this server.")
-        mark("sending", attempts=ping.get("attempts", 0) + 1)  # a crash from here on never sends twice
+            def mark(state: str, error: str | None = None, **more) -> None:
+                entry["ping"] = {**entry["ping"], **more, "state": state, "error": error}
+                _save(day, entry)
+            if now - entry["at"] > EXPIRE_SECONDS:
+                return mark("expired", "Not sent within 2 hours of the review, so it was not sent late.")
+            if not phone.configured():
+                return mark("off", "Phone pings are not set up on this server.")
+            mark("sending", attempts=ping.get("attempts", 0) + 1)  # a crash from here on never sends twice
         title, body = ping_title(entry), entry["text"]
         with Session(self.engine) as db:
             ticket = notification_policy.decide(db, sender="paper_review", source_id=day, kind=KIND, title=title, body=body, now=now)

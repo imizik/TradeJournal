@@ -28,7 +28,7 @@ const MAIN_CHAT = { id: MAIN, source: "copilot", title: "Main chat · 2026-11-16
   revision: 1, message_count: 0, has_findings: false, created_at: "2026-11-16T13:00:00Z", updated_at: "2026-11-16T13:00:00Z", transcript: [], evidence: [], findings: null };
 const BOOK = {
   run: { id: "r1", number: 1, starting_cash: 10000, started_at: at("2026-11-05T15:00:00Z") },
-  account: { cash: 9640.5, collateral: 0, buying_power: 9640.5, equity: 10129.5, pnl: 129.5, unpriced: 0 },
+  account: { cash: 10129.5, collateral: 0, buying_power: 10129.5, equity: 10129.5, pnl: 129.5, unpriced: 0 },
   positions: [], closed: [], score: { paper: { ...stats(129.5, 2, 50), open_pnl: null }, real: stats(-180, 2, 0) },
   earlier: [], market_open: true, review: REVIEW,
 };
