@@ -1,0 +1,58 @@
+{
+  "protocol_id": "qqq-intraday-momentum-20261114-v1",
+  "registered": "2026-11-14",
+  "registered_before": "any result of this rule on QQQ was computed here. The QQQ one-minute bars for 2016-2026 were downloaded for the QQQ opening range breakout (#813, result #814, closed) and reused for the overnight hold (#815, result #818); neither computed this rule. The rule is copied from Zarattini, Aziz and Barbon, 'Beat the Market: An Effective Intraday Momentum Strategy for S&P500 ETF (SPY)' (first version May 2024, read from the paper's own text, version of September 22, 2025, on 2026-11-14). On SPY from 2007 to early 2024 the paper reports, with a commission of $0.0035 and slippage of $0.001 a share: Sharpe 1.24 at 1x with the band-and-VWAP stop, 1.33 and 19.6% a year with its volatility sizing; it also reports that a 90-day lookback and a 1.5 volatility multiplier did better than its 14 and 1 on its own full sample. This repository's earlier intraday price-only setups (opening breakouts, dip buys, gap reversals) all failed; this is a different rule (a time-of-day noise band checked on the half hour, flat at the close), and its settings are searched only on the search years below.",
+  "question": "With settings chosen only on QQQ's 2016 to 2021 bars, does the paper's intraday momentum rule make money a day after costs on QQQ from 2022 to 2026, years the search never saw?",
+  "why_it_matters": "The owner wants a high-risk, high-reward intraday strategy and wants to try many settings. Searching settings on old years and taking the single winner once to untouched years is the honest way to do that: the search can be as wide as the grid, and only the exam decides. The rule is flat every night, so it is a different bet from the overnight hold, and the paper's sizing levers it up to four times.",
+  "data": "Alpaca SIP one-minute bars for QQQ, unadjusted, regular session 09:30 to 15:59 New York time, already downloaded (bars.json.gz from scripts.qqq_orb_study fetch). The 21 early closes in the QQQ opening range breakout script are not traded and are left out of the noise history; their 12:59 close is the next session's previous close.",
+  "rules": {
+    "sigma": "for each check time HH:MM, the average over the previous LOOKBACK full sessions of |price at HH:MM / that session's 09:30 open - 1|; the price at HH:MM is the close of the last minute bar before HH:MM",
+    "bands": "upper = max(today's 09:30 open, the previous session's last close) x (1 + VM x sigma); lower = min(the same two) x (1 - VM x sigma)",
+    "checks": "every EVERY minutes from 10:00 (10:00, 10:15, ... 15:45 for 15; 10:00 ... 15:30 for 30; 10:00 ... 15:00 for 60). Decisions use the price at the check (the previous minute's close); fills are at the open of the check minute's bar (or the first bar after it)",
+    "entry": "flat: long when the price is above the upper band, short when below the lower band; with the band_vwap stop a side also needs the price beyond VWAP (above it for a long, below for a short), so a position never opens already past its own stop. The paper defines VWAP only as a stop; this entry condition is this protocol's choice",
+    "stop": "held: at a check, a long closes when the price is below its stop and a short when above it. band_vwap: the stop is max(upper band, VWAP) for a long and min(lower band, VWAP) for a short (the paper's model); band: the current band alone; opposite: the opposite band (the paper's base model). After a stop, the same check can open only the opposite side, under the entry rule",
+    "vwap": "the volume-weighted average of each regular-session minute bar's (high + low + close) / 3 from 09:30 up to the check (the check minute's own bar left out)",
+    "close": "anything open closes at the session's last bar's close (15:59, standing in for the 16:00 close)",
+    "size": "the day's return at 1x is the sum over its trades of direction x (exit - entry), minus the costs, over the day's 09:30 open (the paper's 100% of equity)",
+    "cost": "$0.01 a share on each side (about a one-cent spread crossed, plus slippage; the owner's broker charges no commission); stress $0.02"
+  },
+  "search": {
+    "years": "2016-01-04 to 2021-12-31, scored from the first full session that has 90 previous full sessions (so every lookback has its history)",
+    "grid": {
+      "lookback": "14, 30, 60, 90 sessions",
+      "vm": "0.75, 1.0, 1.25, 1.5, 2.0",
+      "every": "15, 30, 60 minutes",
+      "stop": "band_vwap, band, opposite"
+    },
+    "combinations": "180 (4 x 5 x 3 x 3)",
+    "choice": "the combination with the highest annualized Sharpe ratio (mean / standard deviation of daily 1x net returns x sqrt 252) on the search years; ties go to the shorter lookback, then the smaller VM, then the shorter interval, then the stop's name in alphabetical order. Leverage is not searched: the Sharpe ratio does not depend on it"
+  },
+  "exam": {
+    "years": "2022-01-03 to 2026-11-13, run once with the chosen combination only",
+    "statistic": "mean daily net return at 1x in basis points over every full session (days with no trade count as 0)",
+    "uncertainty": "2,000 bootstrap resamples of calendar months (seed 20261114), each month's days kept together; two-sided percentile interval at 95% (one candidate goes to the exam)",
+    "periods": {"first": "2022-01-03 to 2023-12-31", "second": "2024-01-01 to 2026-11-13"}
+  },
+  "decisions": {
+    "worth a paper test": "the interval's lower end is above 0, the mean is above 0 in both exam periods, and the mean with the $0.02 cost is above 0",
+    "loses money": "the interval's upper end is below 0",
+    "no evidence either way": "anything else",
+    "what_each_allows": "Worth a paper test: a QQQ intraday momentum paper book on the desk with the chosen settings, at 1x first. Otherwise the noise-area intraday momentum rule on QQQ is closed: no new grid, settings, symbols or filters on any history"
+  },
+  "descriptive_only": [
+    "every combination's search Sharpe ratio and mean, the top ten, and the share with a positive Sharpe ratio",
+    "the paper's own settings (lookback 14, VM 1, every 30, band_vwap) on the search years and on the exam years (a fixed, pre-named rule; it does not change the decision)",
+    "the exam with the paper's sizing: each day's 1x return x min(4, 2% / the standard deviation of the previous 14 close-to-close returns) -- the high-risk version; its growth of $1 and maximum drawdown",
+    "exam trades by exit type and side, by year, days traded, share of up days, growth of $1 and maximum drawdown at 1x",
+    "QQQ buy-and-hold over the exam years"
+  ],
+  "limits": [
+    "fills are minute-bar opens plus a stated cost, not quotes; QQQ trades a cent wide, so a cent a side covers the spread on most days but not fast markets",
+    "the 15:59 bar's close stands in for the 16:00 close",
+    "the paper's sample (SPY, to April 2024) overlaps the first part of the exam years on a different symbol; the paper's own better settings (90 days, 1.5) were found on its full sample and are in this grid, so the search may pick them for reasons that include the paper's look at 2022-2024",
+    "margin interest and borrow costs for leverage and shorts are left out",
+    "a session missing from the data entirely would make the next session's previous close two sessions old; the bar days per year were checked against the NYSE calendar for the overnight study (#815) and none is missing"
+  ],
+  "results": "Market data only: the aggregate results are committed beside this protocol after the single run; the data stays outside the repository.",
+  "one_run": "one historical run under this id: the search and the exam together. A changed constant is a new protocol id, recorded beside this one"
+}
