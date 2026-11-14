@@ -19,4 +19,4 @@ Under the protocol, opening range breakouts are closed for this account, and no 
 - **The profit is concentrated:** a 13% win rate, wins averaging +9R and losses -1.3R. Without the best 1% of sessions (7 days), the mean is +0.011R.
 - **It depends on an unknowable detail:** whether the stop was touched inside the fill's own one-minute bar. Counting every touch in that bar as a stop gives -0.63R a trade. With a stop this tight, sub-minute order and real slippage decide the outcome, and one-minute history cannot show either.
 - **By year:** 2024 -0.02R, 2025 +0.14R, 2026 +0.11R.
-- **By relative-volume rank:** 1-5 +0.24R (2,757 trades), 6-10 +0.04R, 11-20 +0.01R. This is a slice chosen after seeing results. It can only be tested forward, on sessions not yet traded, under a new protocol id.
+- **By relative-volume rank:** 1-5 +0.24R (2,757 trades), 6-10 +0.04R, 11-20 +0.01R. This is a slice chosen after seeing results. It was tested afterwards on untouched 2016-2023 sessions with tape fills under a new protocol id: it loses money ([result](opening-breakout-top5-2026-11-13.md)).

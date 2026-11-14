@@ -1,0 +1,238 @@
+{
+  "protocol_id": "opening-breakout-top5-20261113-v1",
+  "sessions": 1982,
+  "both_sides": {
+    "trades": 7812,
+    "mean_r": -0.4107,
+    "total_r": -3208.21,
+    "win_rate": 0.097,
+    "mean_win_r": 8.564,
+    "mean_loss_r": -1.379,
+    "sessions": 1970,
+    "sessions_positive": 0.236,
+    "interval": [
+      -0.5072,
+      -0.3102
+    ],
+    "halves": {
+      "first_half": -0.3091,
+      "second_half": -0.5074
+    },
+    "mean_r_extra_cent": -0.5882,
+    "decision": "loses money"
+  },
+  "long_side": {
+    "trades": 3778,
+    "mean_r": -0.4877,
+    "total_r": -1842.45,
+    "win_rate": 0.095,
+    "mean_win_r": 8.122,
+    "mean_loss_r": -1.392,
+    "sessions": 1766,
+    "sessions_positive": 0.162,
+    "interval": [
+      -0.6118,
+      -0.3539
+    ],
+    "halves": {
+      "first_half": -0.3556,
+      "second_half": -0.6102
+    },
+    "mean_r_extra_cent": -0.6655,
+    "decision": "loses money"
+  },
+  "descriptive": {
+    "selected": 9855,
+    "triggered": 7812,
+    "triggered_share": 0.793,
+    "no_fill_quote": 0,
+    "exits": {
+      "stop": 7019,
+      "stop at level": 0,
+      "close": 792,
+      "close from bar": 1
+    },
+    "short_side": {
+      "trades": 4034,
+      "mean_r": -0.3386,
+      "total_r": -1365.76,
+      "win_rate": 0.1,
+      "mean_win_r": 8.959,
+      "mean_loss_r": -1.368,
+      "sessions": 1792,
+      "sessions_positive": 0.17
+    },
+    "by_year": {
+      "2016": {
+        "trades": 885,
+        "mean_r": -0.034,
+        "total_r": -30.09,
+        "win_rate": 0.127,
+        "mean_win_r": 8.986,
+        "mean_loss_r": -1.341,
+        "sessions": 226,
+        "sessions_positive": 0.31
+      },
+      "2017": {
+        "trades": 947,
+        "mean_r": -0.5737,
+        "total_r": -543.33,
+        "win_rate": 0.092,
+        "mean_win_r": 7.856,
+        "mean_loss_r": -1.427,
+        "sessions": 248,
+        "sessions_positive": 0.181
+      },
+      "2018": {
+        "trades": 988,
+        "mean_r": -0.2123,
+        "total_r": -209.74,
+        "win_rate": 0.11,
+        "mean_win_r": 9.649,
+        "mean_loss_r": -1.435,
+        "sessions": 248,
+        "sessions_positive": 0.282
+      },
+      "2019": {
+        "trades": 991,
+        "mean_r": -0.3986,
+        "total_r": -395.0,
+        "win_rate": 0.092,
+        "mean_win_r": 9.246,
+        "mean_loss_r": -1.374,
+        "sessions": 249,
+        "sessions_positive": 0.225
+      },
+      "2020": {
+        "trades": 978,
+        "mean_r": -0.6048,
+        "total_r": -591.49,
+        "win_rate": 0.082,
+        "mean_win_r": 7.498,
+        "mean_loss_r": -1.327,
+        "sessions": 250,
+        "sessions_positive": 0.184
+      },
+      "2021": {
+        "trades": 1015,
+        "mean_r": -0.4445,
+        "total_r": -451.13,
+        "win_rate": 0.085,
+        "mean_win_r": 9.396,
+        "mean_loss_r": -1.355,
+        "sessions": 251,
+        "sessions_positive": 0.223
+      },
+      "2022": {
+        "trades": 1008,
+        "mean_r": -0.4261,
+        "total_r": -429.55,
+        "win_rate": 0.108,
+        "mean_win_r": 6.845,
+        "mean_loss_r": -1.308,
+        "sessions": 250,
+        "sessions_positive": 0.268
+      },
+      "2023": {
+        "trades": 1000,
+        "mean_r": -0.5579,
+        "total_r": -557.87,
+        "win_rate": 0.087,
+        "mean_win_r": 8.97,
+        "mean_loss_r": -1.466,
+        "sessions": 248,
+        "sessions_positive": 0.218
+      }
+    },
+    "by_rank": {
+      "1": {
+        "trades": 1597,
+        "mean_r": -0.5547,
+        "total_r": -885.85,
+        "win_rate": 0.083,
+        "mean_win_r": 8.506,
+        "mean_loss_r": -1.378,
+        "sessions": 1597,
+        "sessions_positive": 0.083
+      },
+      "2": {
+        "trades": 1527,
+        "mean_r": -0.2512,
+        "total_r": -383.62,
+        "win_rate": 0.103,
+        "mean_win_r": 9.573,
+        "mean_loss_r": -1.377,
+        "sessions": 1527,
+        "sessions_positive": 0.103
+      },
+      "3": {
+        "trades": 1527,
+        "mean_r": -0.3111,
+        "total_r": -475.09,
+        "win_rate": 0.106,
+        "mean_win_r": 8.784,
+        "mean_loss_r": -1.391,
+        "sessions": 1527,
+        "sessions_positive": 0.106
+      },
+      "4": {
+        "trades": 1563,
+        "mean_r": -0.4313,
+        "total_r": -674.11,
+        "win_rate": 0.099,
+        "mean_win_r": 8.091,
+        "mean_loss_r": -1.369,
+        "sessions": 1563,
+        "sessions_positive": 0.099
+      },
+      "5": {
+        "trades": 1598,
+        "mean_r": -0.4941,
+        "total_r": -789.54,
+        "win_rate": 0.096,
+        "mean_win_r": 7.83,
+        "mean_loss_r": -1.382,
+        "sessions": 1598,
+        "sessions_positive": 0.096
+      }
+    },
+    "without_best_1pct_sessions": {
+      "trades": 7739,
+      "mean_r": -0.51,
+      "total_r": -3947.02,
+      "win_rate": 0.094,
+      "mean_win_r": 7.914,
+      "mean_loss_r": -1.379,
+      "sessions": 1951,
+      "sessions_positive": 0.228
+    },
+    "bar_replay_v1_rules": {
+      "trades": 7820,
+      "mean_r": 0.1189,
+      "total_r": 929.62,
+      "win_rate": 0.129,
+      "mean_win_r": 9.762,
+      "mean_loss_r": -1.31,
+      "sessions": 1971,
+      "sessions_positive": 0.328
+    },
+    "bar_replay_fill_bar_worst_case": {
+      "trades": 7820,
+      "mean_r": -0.6837,
+      "total_r": -5346.33,
+      "win_rate": 0.073,
+      "mean_win_r": 7.231,
+      "mean_loss_r": -1.304,
+      "sessions": 1971,
+      "sessions_positive": 0.167
+    },
+    "tape_minus_bar_r": {
+      "trades": 7812,
+      "mean": -0.531
+    },
+    "entry_spread_r": {
+      "mean": 0.597,
+      "median": 0.4347
+    }
+  }
+}
