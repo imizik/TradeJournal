@@ -46,6 +46,7 @@ import { useKept } from "@/components/copilot/DeskMemory";
 import { afterClose, answerSymbol, deskLinkIn, deskNeeds, refreshRobinhood, type DeskLive, deskSymbolThread, nyDay, readOpened, saveFollow, saveHorizon, saveOpened, threadInUrl, toReview, type DeskCommand, type DeskPlan, type DeskThreads, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import { DeskAccounts, activeAccount, forAccount } from "@/components/copilot/DeskAccounts";
+import DeskHealthDot from "@/components/copilot/DeskHealth";
 import styles from "./CopilotLab.module.css";
 
 // The Grid's code loads the first time its tab opens.
@@ -770,6 +771,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
             ))}
           </nav>
           <div className={styles.barActions}>
+            {/* Is every source behind the desk live: one dot, a list on a tap. */}
+            <DeskHealthDot />
             {/* The desk's front door: today's Main chat in the copilot. */}
             <Link href="/copilot-lab" aria-current={onNow ? "page" : undefined} title="Back to today: Main chat in the copilot"
               onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setFeedShown(false); if (!onNow) goNow(true); }}

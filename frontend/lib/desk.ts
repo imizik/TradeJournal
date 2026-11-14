@@ -996,3 +996,17 @@ export function sinceLines(look: DeskLook, rows: DeskThread[], events: DeskSessi
   const top = lines.sort((a, b) => b.weight - a.weight).map(l => l.text).slice(0, counts.length ? max - 1 : max);
   return counts.length ? [...top, counts.join(" · ")] : top;
 }
+
+/** ``GET /copilot/desk/health`` (backend ``app/engine/desk_health.py``): is each source behind the desk live. */
+export type HealthState = "live" | "closed" | "off" | "quiet" | "unknown" | "stale" | "down" | "low";
+export type HealthRow = {
+  id: string; name: string; state: HealthState; line: string; last_at: number | null; affects: string;
+  fix: { kind: "gmail_reconnect" } | { kind: "text"; text: string } | null;
+};
+export type DeskHealth = { as_of: string; now: number; phase: string; overall: "ok" | "unknown" | "bad"; sources: HealthRow[] };
+export async function getHealth(signal?: AbortSignal): Promise<DeskHealth> {
+  const response = await deskGet("/copilot/desk/health", signal);
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  return body as DeskHealth;
+}

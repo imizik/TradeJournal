@@ -126,6 +126,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/desk/notes',  # his notes on the book's trades: database reads only; no Robinhood
     'POST /copilot/desk/notes',  # one note saved with a trade (never a plan); no Robinhood, never changes fills or P&L
     'GET /copilot/desk/feed',
+    'GET /copilot/desk/health',  # is each source behind the desk live: in-memory states, saved files and database reads; no provider or Robinhood call
     'GET /copilot/tickets',
     'GET /copilot/tickets/{investigation_id}',
     'GET /copilot/roll',  # the desk's roll ticket: the held contract's terms from the book row in, two contracts' quotes (one paced options-feed pass) and arithmetic out; never Robinhood, never an order

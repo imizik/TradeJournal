@@ -428,6 +428,15 @@ class Feed:
     def view(self, kick: bool = True) -> dict:
         return self.snapshot(kick=kick)[0]
 
+    def reading(self) -> bool:
+        """A refresh is in flight now. No I/O."""
+        return self._flight.locked()
+
+    def last_read_at(self) -> float | None:
+        """When the newest good read was made (kept across a sign-out until the token file path changes), else None. No I/O."""
+        snap = self._snapshot
+        return snap["at"] if snap else None
+
 
 feed = Feed()
 

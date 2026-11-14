@@ -20,7 +20,7 @@ const MAX_READS = 16; // backend desk_minute.MAX_READS
 export const BATCHED = new Set([
   "/copilot/desk/threads", "/copilot/desk/session", "/copilot/desk/watching", "/copilot/desk/moving",
   "/copilot/desk/feed", "/copilot/desk/sparks", "/copilot/unusual", "/copilot/scanner", "/copilot/tickets",
-  "/copilot/exposure", "/copilot/investigations",
+  "/copilot/exposure", "/copilot/investigations", "/copilot/desk/health",
 ]);
 const CHART = /^\/copilot\/desk\/(?!\.\.?\/)[A-Za-z0-9_.:%-]+\/chart$/; // an id as the proxy lets through (``:`` may be encoded)
 
