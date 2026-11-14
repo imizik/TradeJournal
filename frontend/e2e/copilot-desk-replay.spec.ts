@@ -77,8 +77,13 @@ async function open(page: Page, width: number) {
       filled: { ...quote, at: OPEN_AT + 59 }, working: null } });
   });
   await page.goto("/copilot-lab?symbol=NBIS");
-  const back = page.getByRole("button", { name: "Back to the desk" });
-  if (width < 768 && await back.isVisible()) await back.click();
+  if (width < 768) {
+    // A phone opens a ticker link on the copilot's sheet: he taps Desk, then the ticker's view, where the chart's Replay is.
+    const back = page.getByRole("button", { name: "Back to the desk" });
+    await expect(back).toBeVisible();
+    await back.click();
+    await page.getByTestId("desk-view-ticker").click();
+  }
   await page.getByTestId("replay-open").click();
   return { steps, orders };
 }
