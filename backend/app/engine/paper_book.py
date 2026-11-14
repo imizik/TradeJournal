@@ -254,7 +254,8 @@ def _stock_price(spec: dict, quotes: dict) -> float | None:
 def current_run(db: Session, lock: bool = False) -> PaperRun | None:
     """The newest run; ``lock`` holds its row until the order's commit, so two orders on one run go one after the other
     (Postgres; SQLite has one writer anyway)."""
-    newest = db.exec(select(PaperRun).order_by(col(PaperRun.started_at).desc(), col(PaperRun.id).desc())).first()
+    newest = db.exec(select(PaperRun).where(PaperRun.kind == "live")  # replay runs are paper_replay's own
+                     .order_by(col(PaperRun.started_at).desc(), col(PaperRun.id).desc())).first()
     if newest is None or not lock:
         return newest
     return db.exec(select(PaperRun).where(PaperRun.id == newest.id).with_for_update()).one()
@@ -1101,7 +1102,7 @@ def view(db: Session, now: float, settle_expired: bool = True) -> dict:
     ``settle_expired=False`` (the copilot's read) writes nothing: an expired option still open, and a day order past its
     close, are shown as they stand until the desk's own read settles or ends them."""
     run = current_run(db)
-    runs = list(db.exec(select(PaperRun).order_by(col(PaperRun.started_at), col(PaperRun.id))).all())
+    runs = list(db.exec(select(PaperRun).where(PaperRun.kind == "live").order_by(col(PaperRun.started_at), col(PaperRun.id))).all())
     if run is None:
         return {"run": None, "default_cash": DEFAULT_CASH, "earlier": [], "market_open": _market_open(now)}
     if settle_expired:
