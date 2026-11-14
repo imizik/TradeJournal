@@ -80,7 +80,7 @@ export function staleByPrice(card: DeskAction, last: number): string | null {
 export const DESK_VIEW_EVENT = "tradejournal:desk-view";
 /** The desk's lists changed by a card's tap (the Watching list, alerts, levels): read them again now. */
 export const DESK_CHANGED_EVENT = "tradejournal:desk-changed";
-export type CentreTab = "chart" | "grid" | "chain" | "check" | "ticket"; // CopilotLab's centre tabs (the Feed sits beside the copilot since #804)
+export type CentreTab = "chart" | "grid" | "chain" | "feed" | "check" | "ticket";
 export type DeskView = { symbol?: string | null; tab?: CentreTab; timeframe?: DeskTimeframe; tape?: boolean; reveal?: boolean };
 type ViewDetail = DeskView & { was: DeskView };
 
