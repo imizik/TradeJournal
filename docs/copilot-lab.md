@@ -2031,7 +2031,8 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   trading day (with the market closed the Paper button offers Limit only), it works until a fresh quote crosses it, the
   close or his Cancel, whichever is first. A buy (or any order that pays: a debit, buying back a credit spread) fills when
   the natural price paid is at or below the limit, at the ask; a sell (or one taking in a credit) when the natural price
-  is at or above it, at the bid. A quote either of whose sides is older than two minutes never fills; the order keeps
+  is at or above it, at the bid. A quote either of whose sides is older than two minutes, or from before the open,
+  never fills; the order keeps
   working and shows that quote's time. An opening limit holds its most-to-pay (a credit spread: its width less the limit
   credit) out of buying power while it works ("Held for orders"); a closing one holds its quantity, so Close cannot sell
   it twice. A marketable limit is checked once when placed (one quote read, as a market order makes); after that the
@@ -2043,7 +2044,8 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   the switch that touches the stop or the target (both in one bar: the stop; the setup scanner's rule) triggers a sell
   of all that is left at the next bid both of whose sides moved after that bar; its grade says "auto". Off, a touch
   closes nothing: each level's first touch is recorded once and pinged. Bars are the desk chart's own cached minute read
-  (`chart_feed.today_minutes`), one per watched stock per minute.
+  (`chart_feed.today_minutes`), one per watched stock per minute. Known limit: the session's last minute is not judged
+  (its bar completes after the close), and an expired contract waiting to settle is not watched.
 - **PAPER pings.** One Telegram message per paper event: a limit filled, an automatic exit, or a stop or target touched
   with the switch off (a touch noticed more than 10 minutes after its bar is recorded without one). Each title starts
   "PAPER ·" and each text "Paper, not real money." They go through the notification policy as kind `paper`, with a

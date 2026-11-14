@@ -291,3 +291,32 @@ def test_the_new_routes_are_owner_only_and_work(db, market, monkeypatch):  # noq
         assert on.status_code == 200 and on.json() == {"auto": True}
         assert client.get("/copilot/paper").json()["positions"][0]["auto"] is True
 
+
+
+def test_a_quote_from_before_the_open_crossed_legs_or_an_expired_contract_never_act(db, market):  # noqa: F811
+    paper_book.start_run(db, None, False, NOW)
+    # A limit working at the open: a quote last updated at 09:29 is within two minutes but from before the bell.
+    market.open, market.phase = False, "pre"
+    limit(db, 3.50, now=OPEN - 600)
+    market.open, market.phase = True, "regular"
+    market.quotes = {CALL: q(CALL, 3.30, 3.40, now=OPEN - 60, age=0), "NBIS": q("NBIS", 98.0, 98.1, now=OPEN - 60, age=0)}
+    assert passes(db, OPEN + 35) == []
+    market.quotes = {CALL: q(CALL, 3.30, 3.40, now=OPEN + 60, age=0), "NBIS": q("NBIS", 98.0, 98.1, now=OPEN + 60, age=0)}
+    assert len(passes(db, OPEN + 95)) == 1
+    # Buying back a credit spread on crossed legs (the sold leg's ask below the bought leg's bid) is no real market.
+    market.quotes = {P95: q(P95, 1.80, 1.90), P90: q(P90, 0.60, 0.70), "NBIS": q("NBIS", 98.0, 98.1, last=98.05)}
+    spread = paper_book.open_order(db, {"symbol": "NBIS", "instrument": "spread", "option_type": "put", "expiry": "2026-11-20",
+                                        "long_strike": 90, "short_strike": 95, "quantity": 1, "order_key": key()}, NOW)["filled"]
+    market.quotes = {P95: q(P95, 0.40, 0.50, now=NOW + 60), P90: q(P90, 0.60, 0.70, now=NOW + 60), "NBIS": q("NBIS", 99, 99.1, now=NOW + 60)}
+    with pytest.raises(paper_book.PaperError, match="quotes are off"):
+        paper_book.close_order(db, {"position_id": spread["position_id"], "order_key": key()}, NOW + 60)
+    paper_book.place_limit(db, {"action": "close", "position_id": spread["position_id"], "limit_price": 0.05, "order_key": key()}, NOW + 60)
+    assert [o["side"] for o in paper_book.view(db, NOW + 61)["orders"]] == ["close"]  # still working, nothing booked
+    # A contract past its expiry, not yet settled, is never watched or pinged.
+    expired = "NBIS261113C00100000"
+    market.quotes = {expired: q(expired, 3.30, 3.40), "NBIS": q("NBIS", 98.0, 98.1, last=98.05)}
+    paper_book.open_order(db, {"symbol": "NBIS", "instrument": "option", "option_type": "call", "expiry": "2026-11-13",
+                               "strike": 100, "quantity": 1, "stop": 95, "order_key": key()}, NOW)
+    monday = NOW + 3 * 86400
+    market.quotes = {}
+    assert passes(db, monday + 120 + 31, [bar(monday + 60, 94, 96)]) == []

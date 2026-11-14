@@ -20,7 +20,7 @@ whether he is right.
   quote time (``_checks``, kept in memory).
 - **Stop and target.** Stock prices. By default they are only recorded and graded after the exit; a touch (the first
   completed regular-session 1-minute bar of the underlying past the level, the setup scanner's rule) is recorded once
-  per level (``touch``) for a ping. With the position's switch on (``auto``), the first such bar after the switch
+  per level (``touch``) for a ping. The session's final minute is not judged (it completes after the close). With the position's switch on (``auto``), the first such bar after the switch
   triggers (``trigger``; a bar touching both is the stop) a sell of all that is left at the next fresh bid, and the
   exit's grade says "auto".
 - **Expiry.** An option or spread still open after its expiration's close settles at intrinsic value from the
@@ -458,6 +458,8 @@ def close_order(db: Session, body: dict, now: float, preview: bool = False) -> d
         raise PaperError("The market is closed: paper orders fill only in the regular session, on a live quote.", 409)
     quotes = _live_quotes([leg["quote"] for leg in position["legs"]] + [position["symbol"]])
     fill = price(position, quotes, now, closing=True)
+    if position["instrument"] == "spread" and position["credit"] and fill["per_share"] >= 0:
+        raise PaperError("Buying this credit spread back pays nothing at the natural price right now: the quotes are off. No paper fill.", 409)
     cash = round(fill["per_share"] * position["multiplier"] * qty, 2)
     basis = position["basis_left"] if qty == position["remaining"] else round(position["cash"] * qty / position["quantity"], 2)
     stock = _stock_price(position, quotes)
@@ -641,17 +643,18 @@ def _did(spec: dict, qty: int, per: float, legs: dict, at: float, closing: bool)
     return f"{verb} {what} at {how}, {clock(at)}"
 
 
-def _try_limit(db: Session, order: dict, quotes: dict, now: float) -> dict | None:
+def _try_limit(db: Session, order: dict, quotes: dict, now: float, floor: float | None = None) -> dict | None:
     closing = order["side"] == "close"
     try:
-        fill = price(order, quotes, now, closing=closing)
+        fill = price(order, quotes, now, closing=closing, since=floor)
     except PaperError as exc:
         _checks[order["id"]] = {"at": now, "quoted_at": _quote_time(order, quotes), "natural": None, "issue": str(exc)}
         return None
     per = fill["per_share"]
     crossed = -per <= order["limit"] + EPS if order["pays"] else per >= order["limit"] - EPS
     issue = None
-    if order["instrument"] == "spread" and (abs(per) >= order["width"] or (not closing and (per >= 0) == order["pays"])):
+    if order["instrument"] == "spread" and (abs(per) >= order["width"] or (not closing and (per >= 0) == order["pays"])
+                                            or (closing and order["pays"] and per >= 0)):
         issue = "The spread's quotes are off right now (no real market at the natural price)."
     _checks[order["id"]] = {"at": now, "quoted_at": fill["quoted_at"], "natural": round(abs(per), 4), "issue": issue}
     if not crossed or issue:
@@ -713,15 +716,15 @@ def _pending_exits(events: list[PaperEvent], positions: dict[str, dict]) -> list
     return out
 
 
-def _try_exit(db: Session, position: dict, trigger: dict, quotes: dict, now: float) -> dict | None:
+def _try_exit(db: Session, position: dict, trigger: dict, quotes: dict, now: float, floor: float | None = None) -> dict | None:
     """Sell all that is left of a triggered position at the first quote both of whose sides moved after the trigger's bar."""
     try:
-        fill = price(position, quotes, now, closing=True, since=trigger["condition_at"])
+        fill = price(position, quotes, now, closing=True, since=max(trigger["condition_at"], floor or 0.0))
     except PaperError:
         return None
     per = fill["per_share"]
-    if position["instrument"] == "spread" and abs(per) >= position["width"]:
-        return None
+    if position["instrument"] == "spread" and (abs(per) >= position["width"] or (position["credit"] and per >= 0)):
+        return None  # crossed legs: no real market to buy a credit spread back at
     run = current_run(db, lock=True)
     events = _events(db, run)
     current = next((p for p in fold(events) if p["id"] == position["id"]), None)
@@ -765,8 +768,10 @@ def _execute(db: Session, now: float, only: str | None = None) -> list[dict]:
         for o in working:
             _checks[o["id"]] = {"at": now, "quoted_at": None, "natural": None, "issue": str(exc)}
         return []
-    out = [found for o in working if (found := _try_limit(db, o, quotes, now))]
-    out += [found for position, trigger in exits if (found := _try_exit(db, position, trigger, quotes, now))]
+    _phase, regular = _window(now)
+    floor = float(regular[0]) if regular else None  # a quote from before the open never fills an order working at it
+    out = [found for o in working if (found := _try_limit(db, o, quotes, now, floor))]
+    out += [found for position, trigger in exits if (found := _try_exit(db, position, trigger, quotes, now, floor))]
     return out
 
 
@@ -802,7 +807,9 @@ def _watch(db: Session, run: PaperRun, events: list[PaperEvent], now: float, min
     """Each open position with a stop or target against today's regular-session minute bars of its stock: with the
     switch on, the first touch after the switch is a ``trigger``; with it off, each level's first touch is a ``touch``
     (a ping unless noticed more than ``LATE_PING_SECONDS`` after its bar)."""
-    watched = [p for p in fold(events) if p["status"] == "open" and (p.get("stop") is not None or p.get("target") is not None)]
+    today = _ny_day(now).isoformat()
+    watched = [p for p in fold(events) if p["status"] == "open" and (p.get("stop") is not None or p.get("target") is not None)
+               and not (p.get("expiry") and p["expiry"] < today)]  # an expired contract waits to settle, never pinged
     if not watched:
         return []
     keys = {e.order_key for e in events}
