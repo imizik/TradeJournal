@@ -172,7 +172,9 @@ def create(db: Session, *, client_id: str, investigation_id: str, symbol: str, t
 def message(row: PlanTimeStop) -> tuple[str, str, str]:
     """Title, body and the app path the notification opens."""
     hhmm = datetime.fromtimestamp(_epoch(row.due_at), ET).strftime("%H:%M")
-    return f"{row.symbol} time stop", f"{row.symbol} time stop: you planned to be out by {hhmm}.", f"/trades/{row.trade_id}"
+    # The desk on the plan's conversation while the copilot is on; the trade page otherwise.
+    path = phone.desk_link(f"/trades/{row.trade_id}", investigation=row.investigation_id, symbol=None if row.investigation_id else row.symbol)
+    return f"{row.symbol} time stop", f"{row.symbol} time stop: you planned to be out by {hhmm}.", path
 
 
 def _picture(db: Session, row: PlanTimeStop, title: str, now: float):

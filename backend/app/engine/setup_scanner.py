@@ -28,7 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.engine import scanner_rules as rules
-from app.engine import ntfy, scanner_mail, tradier
+from app.engine import ntfy, phone, scanner_mail, tradier
 from app.engine import shadow_exchange
 from app.engine import scanner_settings
 from app.engine.chart_feed import ChartFeedError
@@ -112,12 +112,17 @@ def setup_push(candidate: ScannerCandidate) -> tuple[str, str]:
     return title, message
 
 
+def push_path(candidate: ScannerCandidate) -> str:
+    """The push's tap: the desk's Feed on Ideas › Scanner with this candidate picked and its chart, else /scanner."""
+    return phone.desk_link("/scanner", symbol=candidate.symbol, feed=f"scanner:{candidate.id}")
+
+
 def _push(candidate: ScannerCandidate) -> str:
     """Best effort, sent once: a failed push never holds back the email record."""
     if not ntfy.configured():
         return "off"
     try:
-        ntfy.publish(*setup_push(candidate), path="/scanner")
+        ntfy.publish(*setup_push(candidate), path=push_path(candidate))
     except ntfy.NtfyError as exc:
         log.warning("Setup push for %s not sent: %s", candidate.id, exc)
         return "failed"

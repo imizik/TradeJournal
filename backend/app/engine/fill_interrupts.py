@@ -464,7 +464,8 @@ class FillInterrupts:
             row.attempts += 1
             try:
                 _, image_state = phone.send(row.title, row.body + ticket.append, kind="interrupt", image=image, priority=4, tags=("mirror",),
-                                            path=path(row), direct_click=True, more=(("Noted", path(row, noted=True)),))
+                                            path=phone.desk_link(path(row), symbol=row.ticker), direct_click=True,
+                                            more=(("Noted", path(row, noted=True)),))
             except phone.SendError as exc:
                 if not _surely_unsent(exc):
                     row.delivery, row.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."

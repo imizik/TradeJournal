@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { type ScannerCandidateRow, type ScannerMonitoring } from "@/lib/api";
 import { etTime, monitoringText } from "@/components/ScannerFreshness";
@@ -70,7 +70,21 @@ function money(value: number) {
 }
 
 /** The Feed's Scanner section. */
-export function ScannerList({ reply, onOpen, onPlan }: { reply: DeskScannerReply | null; onOpen(row: DeskScannerRow): void; onPlan(href: string): void }) {
+/** A card a ping opened the desk on: an amber edge, as the book marks its selected row. */
+export const FOCUSED = "bg-secondary/50 shadow-[inset_3px_0_0_0_hsl(var(--primary))]";
+
+/** Brings the element into view once it is ``on`` (a ping's card). */
+export function useInView<T extends HTMLElement = HTMLLIElement>(on: boolean) {
+  const ref = useRef<T>(null);
+  useEffect(() => { if (on) ref.current?.scrollIntoView({ block: "nearest" }); }, [on]);
+  return ref;
+}
+
+export function ScannerList({ reply, onOpen, onPlan, focused = null }: {
+  reply: DeskScannerReply | null; onOpen(row: DeskScannerRow): void; onPlan(href: string): void;
+  /** The candidate a scanner ping opened the desk on. */
+  focused?: string | null;
+}) {
   if (!reply) return <p className="text-xs text-muted-foreground">Reading the scanner…</p>;
   const m = reply.monitoring;
   const stale = m?.state === "stale";
@@ -91,7 +105,7 @@ export function ScannerList({ reply, onOpen, onPlan }: { reply: DeskScannerReply
         </p>
       ) : (
         <ol className={cn("divide-y rounded-lg border bg-card", stale && "opacity-60")} data-stale={stale || undefined}>
-          {reply.rows.map(row => <ScannerRow key={row.id} row={row} onOpen={onOpen} onPlan={onPlan} />)}
+          {reply.rows.map(row => <ScannerRow key={row.id} row={row} onOpen={onOpen} onPlan={onPlan} focused={row.id === focused} />)}
         </ol>
       )}
       <p className="px-1 text-xs text-muted-foreground">The scanner&apos;s rules paper trades, shown as found: one contract, not your trades. Nothing here places an order.</p>
@@ -99,11 +113,13 @@ export function ScannerList({ reply, onOpen, onPlan }: { reply: DeskScannerReply
   );
 }
 
-function ScannerRow({ row, onOpen, onPlan }: { row: DeskScannerRow; onOpen(row: DeskScannerRow): void; onPlan(href: string): void }) {
+function ScannerRow({ row, onOpen, onPlan, focused }: { row: DeskScannerRow; onOpen(row: DeskScannerRow): void; onPlan(href: string): void; focused: boolean }) {
+  const at = useInView(focused);
   const levels = [row.trigger !== null ? `Trigger ${two(row.trigger)}` : null, `Stop ${two(row.stop)}`, `Target ${two(row.target)}`].filter(Boolean).join(" · ");
   const result = row.pnl !== null ? ` · ${EXIT_REASON[row.exit_reason ?? ""] ?? row.exit_reason ?? "Closed"} ${money(row.pnl)}` : "";
   return (
-    <li data-testid="scanner-row" data-symbol={row.symbol} className="min-w-0">
+    <li ref={at} data-testid="scanner-row" data-symbol={row.symbol} data-focused={focused || undefined} aria-current={focused || undefined}
+      className={cn("min-w-0", focused && FOCUSED)}>
       <button type="button" onClick={() => onOpen(row)} title={`Open ${row.symbol} on the chart with the scanner's levels`}
         className="block w-full min-w-0 px-3 py-2 text-left hover:bg-secondary">
         <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">

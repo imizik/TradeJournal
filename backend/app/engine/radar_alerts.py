@@ -235,6 +235,12 @@ def event_path(event_id: str, rating: str | None = None) -> str:
     return "/radar?" + urlencode({"event": event_id, **({"rate": rating} if rating else {})})
 
 
+def desk_path(event_id: str, symbol: str | None) -> str:
+    """A single's tap: the desk on the event (its ticker's chart, the hit's decision, the Feed on Ideas › Radar with its
+    card picked); the event on /radar while the copilot is off. A group move names no ticker: the Feed's card alone."""
+    return phone.desk_link(event_path(event_id), symbol=symbol, radar=event_id if symbol else None, feed=f"radar:{event_id}")
+
+
 def reply_buttons(alert_id, setup_id=None) -> tuple[tuple[str, str], ...]:
     """A single's Telegram buttons: the four ratings, then Plan it when the event has a setup card. ``telegram.keyboard``
     puts more than three buttons two to a row and ``phone.send`` adds Why? last, so the four ratings fill two rows and
@@ -449,11 +455,11 @@ class RadarAlerts:
             try:
                 if digest:
                     _, image_state = phone.send(alert.title, alert.body + ticket.append, kind=kind, priority=3, tags=("satellite",),
-                                                path="/radar", direct_click=True)
+                                                path=phone.desk_link("/radar", feed="radar"), direct_click=True)
                 else:
                     _, image_state = phone.send(
                         alert.title, alert.body + ticket.append, kind=kind, image=image, priority=4, tags=("satellite",),
-                        path=event_path(alert.event_id), direct_click=True,
+                        path=desk_path(alert.event_id, symbol), direct_click=True,
                         more=tuple((label, event_path(alert.event_id, rating)) for label, rating in RATING_ACTIONS),
                         buttons=reply_buttons(alert.id, setup_id))  # all four ratings; ntfy keeps RATING_ACTIONS
             except phone.SendError as exc:

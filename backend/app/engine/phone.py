@@ -18,6 +18,8 @@ ping that already has its own Why? (an open-trade alert's ``why:``) keeps just t
 """
 
 import logging
+import os
+from urllib.parse import quote, urlencode
 
 from app.engine import ntfy, ping_images, telegram
 
@@ -32,6 +34,17 @@ def with_why(kind: str, buttons: tuple[tuple[str, str], ...]) -> tuple[tuple[str
     if kind in NO_WHY or any(data.startswith(("why:", "ask:")) for _, data in buttons):
         return tuple(buttons)
     return (*buttons, ("Why?", f"ask:{kind}"[:64]))
+
+
+def desk_link(fallback: str, **params: str | None) -> str:
+    """Where a ping's tap opens: the desk (``/copilot-lab``, the owner's home while the copilot is on) on ``params`` (its
+    deep-link parameters: ``symbol``, ``investigation``, ``radar``, ``feed``; docs/copilot-lab.md § Where a ping opens), else
+    ``fallback``, the page the ping opened before, so a tap still lands somewhere while the copilot is off. Empty values
+    are left out."""
+    if os.environ.get("COPILOT_ENABLED") != "true":
+        return fallback
+    query = urlencode({key: value for key, value in params.items() if value}, quote_via=quote)
+    return f"/copilot-lab?{query}" if query else "/copilot-lab"
 
 
 def configured() -> bool:

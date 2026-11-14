@@ -921,3 +921,26 @@ def test_a_research_result_carries_its_ticker_to_the_policy(engine):
         assert research_queue.gate("job-sls", {"title": "Research: SLS – changed", "message": "m", "symbol": "SLS"}, session=db).held
         assert research_queue.gate("job-nbis", {"title": "Research: NBIS – changed", "message": "m", "symbol": "NBIS"},
                                    session=db).action == "send"
+
+
+@pytest.mark.parametrize("copilot", [False, True])
+def test_a_time_stop_opens_the_plan_s_desk_thread_or_the_trade_page_while_the_copilot_is_off(monkeypatch, copilot):
+    monkeypatch.setenv("COPILOT_ENABLED", "true") if copilot else monkeypatch.delenv("COPILOT_ENABLED", raising=False)
+    trade_id = uuid4()
+    row = PlanTimeStop(client_id="card-1", investigation_id=INV, symbol="SNDK", text="out by 15:30", trade_id=trade_id,
+                       due_at=utc(at("15:30")), created_at=utc(at("10:00")))
+    assert plan_time_stops.message(row)[2] == (f"/copilot-lab?investigation={INV}" if copilot else f"/trades/{trade_id}")
+
+
+@pytest.mark.parametrize("copilot", [False, True])
+def test_a_price_alert_not_from_a_plan_opens_the_desk_on_its_ticker_or_charts_while_the_copilot_is_off(engine, phone, monkeypatch, copilot):
+    monkeypatch.setenv("COPILOT_ENABLED", "true") if copilot else monkeypatch.delenv("COPILOT_ENABLED", raising=False)
+    with Session(engine) as db:
+        alert_id = create_alert(db, symbol="NBIS", price=101.0, reference=99.0, condition="crosses", interval=None, session="regular",
+                                source_kind="manual", source_id=None, label="NBIS 101", now=at("10:00")).id
+    monitor = LevelAlertMonitor(engine, None, clock=lambda: at("10:30"))
+    monitor.reload()
+    monitor.record([monitor._event(monitor._watched[alert_id], 101.2, at("10:30") - 30, "stream", None)])
+    monitor.deliver()
+    [(_, _, kw)] = phone
+    assert kw["path"] == ("/copilot-lab?symbol=NBIS" if copilot else "/charts")

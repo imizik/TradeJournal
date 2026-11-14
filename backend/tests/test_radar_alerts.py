@@ -813,3 +813,29 @@ def test_a_digest_with_only_hidden_stocks_is_skipped(engine, monkeypatch):
     clock.now = at(30) + 5
     alerts.deliver()
     assert sent == [] and digests(engine)[0].delivery == "skipped" and rows(engine)[0].delivery == "held"
+
+
+def test_while_the_copilot_is_on_a_single_opens_the_desk_on_its_card_and_the_digest_the_feed_s_radar(engine, monkeypatch):
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    sent = []
+    sent_to(monkeypatch, sent)
+    clock = Clock(at(10))
+    alerts = RadarAlerts(engine, clock=clock)
+    alerts.record([_event("e1", "AAA", 10, relative=5.2)])
+    clock.now = at(20)
+    alerts.record([_event("e3", "LAD", 20)])  # LAD is strong: a single
+    alerts.deliver()
+    single = sent[-1]
+    # The ticker's chart, the hit's decision (radar=) and the Feed on Ideas › Radar with its card picked.
+    assert single["path"] == "/copilot-lab?symbol=LAD&radar=e3&feed=radar%3Ae3"
+    assert single["more"] == (("Useful", "/radar?event=e3&rate=useful"), ("Not useful", "/radar?event=e3&rate=irrelevant"))  # ntfy's ratings stay
+    clock.now = at(30) + 5
+    alerts.deliver()
+    assert sent[-1]["title"].startswith("Radar digest") and sent[-1]["path"] == "/copilot-lab?feed=radar"
+
+
+def test_a_group_move_names_no_ticker_so_its_desk_link_is_the_feed_card_alone(monkeypatch):
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    assert radar_alerts.desk_path("g1", None) == "/copilot-lab?feed=radar%3Ag1"
+    monkeypatch.delenv("COPILOT_ENABLED")
+    assert radar_alerts.desk_path("g1", None) == "/radar?event=g1"
