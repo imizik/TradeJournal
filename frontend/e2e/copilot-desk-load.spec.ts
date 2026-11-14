@@ -40,6 +40,7 @@ const READS: Record<string, unknown> = {
   "/copilot/desk/feed": { as_of: "2026-11-13T16:00:00Z", now: epoch("2026-11-13T16:00:00Z"), day: "2026-11-13", total: 0, sources: {}, unavailable: [], items: [] },
   "/copilot/investigations": { investigations: [] },
   "/copilot/tickets": { plans: [] },
+  "/copilot/paper": { run: null, default_cash: 10000, earlier: [], market_open: true },
   "/copilot/unusual": { state: "ok", rows: [] },
   "/copilot/scanner": { state: "off", rows: [] },
   "/copilot/exposure": { line: null },

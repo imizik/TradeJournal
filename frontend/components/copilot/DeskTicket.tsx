@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { PaperButton } from "@/components/copilot/DeskPaper";
 import PlayCheck, { type PlayCheckData } from "@/components/copilot/PlayCheck";
 import SetupRecordLines, { premiumLine } from "@/components/copilot/SetupRecordLines";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
@@ -402,6 +403,8 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
           <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {ticket.symbol}, Trade, Trade options, then enter each field. Nothing is sent from here.</p>
         </div>
       )}
+      <PaperButton order={{ instrument: "option", symbol: ticket.symbol, option_type: k.type, expiry: k.expiry, strike: k.strike }} quantity={qtyN}
+        note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} />
       {foot(true)}
     </div>
   );
@@ -519,6 +522,8 @@ function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, 
         <CopyButton text={all} label="Copy all for Robinhood" wide />
         <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {ticket.symbol}, Trade, Trade options, pick both legs (Buy the ${s.long}, Sell the ${s.short}, {shortDate(s.expiry)}), then the limit as a {s.type} and the quantity. Nothing is sent from here.</p>
       </div>
+      <PaperButton order={{ instrument: "spread", symbol: ticket.symbol, option_type: s.kind, expiry: s.expiry, long_strike: s.long, short_strike: s.short }} quantity={qtyN}
+        note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} />
       {foot}
     </div>
   );

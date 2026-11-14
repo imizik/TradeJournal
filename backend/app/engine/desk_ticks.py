@@ -138,6 +138,13 @@ def marks(occ: str, now: float) -> list[tuple[int, float]]:
         return sorted(kept[1].items()) if kept and kept[0] == day else []
 
 
+def kept_rows(symbols: list[str]) -> dict[str, dict]:
+    """The newest price kept for each of ``symbols`` (a row with its ``at``), from earlier reads only: no I/O and no
+    provider call. A symbol no desk has asked for, or with no price, is left out."""
+    with _lock:
+        return {s: dict(_kept[s][1]) for s in symbols if s in _kept and _kept[s][1] is not None}
+
+
 def _session(now: float):
     from app.engine import desk_sparks
     _day, phase, _hours, regular = desk_sparks._session(now)

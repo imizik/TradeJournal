@@ -2089,6 +2089,35 @@ class ShadowBookEvent(SQLModel, table=True):
     data_json: str = Field(sa_column=Column(Text, nullable=False))
 
 
+class PaperRun(SQLModel, table=True):
+    """One run of the owner's own paper account (``engine/paper_book.py``): its starting cash and when it started. A
+    reset adds a new run; the newest is the current one and every older run keeps its history. Insert-only. Separate
+    from fills, trades, accounts and the copilot's shadow book."""
+
+    __tablename__ = "paper_run"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    starting_cash: float
+    started_at: datetime = Field(default_factory=utc_now_naive, index=True)  # UTC
+
+
+class PaperEvent(SQLModel, table=True):
+    """One append-only fact of the owner's paper book: a position opened, closed (in part or whole) or settled at
+    expiry. A position is the fold of its rows; ``order_key`` (the order's own key, or ``expire:<position>``) is unique,
+    so a double tap or a second settle never records a fact twice. Never touches fills, trades, accounts or P&L."""
+
+    __tablename__ = "paper_event"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    run_id: uuid.UUID = Field(foreign_key="paper_run.id", index=True)
+    position_id: uuid.UUID = Field(index=True)
+    kind: str  # open | close | expire
+    order_key: str = Field(unique=True)
+    effective_at: datetime  # UTC: the quote (or the expiry's close) the fill priced from
+    recorded_at: datetime = Field(default_factory=utc_now_naive)  # UTC
+    data_json: str = Field(sa_column=Column(Text, nullable=False))
+
+
 class MarketContextItem(SQLModel, table=True):
     """External market context for the pre-trade check (advisor step 9): each
     tracked symbol's next earnings date and a live VIX quote, from Tradier.
