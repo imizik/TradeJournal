@@ -3068,6 +3068,38 @@ instrument question needs real contracts, not just marks of the ones held.
   which stays the default; the pick goes into the saved plan's note. The
   Evidence strip labels the read "Option candidates".
 
+## Desk actions
+
+When the owner asks for something the desk already does by hand ("alert me if NBIS loses 98", "show me NBIS on the
+15-minute", "watch IREN", "mark 102.50 as resistance", "build the 100 call for Dec 18", "move my stop on the NBIS plan to
+96"), the desk's copilot calls `desk_action` (`app/ai/copilot_actions.py`; offered to the desk job only, never the phone
+chat) and the answer carries a card instead of only words. The tool writes nothing: it checks the request against the
+desk and returns the card, streamed as a `proposal` event with `kind: "desk_action"` and saved with the answer like any
+card (its outcome too). At most three per answer; the copilot offers one only when he asked for it in that message, and
+asks one short question when a part is missing (which price, contract, plan, above or below).
+
+The checks (`copilot_actions.act`): a ticker set to Not following gets no card of any kind (the copilot says so and does
+nothing); a price must be within 50% of the last quote (one quote read through the turn's evidence) and an alert on the
+side it names; a plan stop or a ticket needs exactly one saved plan in the symbol (none or several: the copilot asks); a
+ticket's plan must be a long call or put plan not yet entered, of the same option type; watch and unwatch read the
+Watching list. The desk's own state is read from the database (`read_state`, no quote read), in fixture turns too, so
+the sandbox exercises the cards end to end; only the prices are simulated there.
+
+| Card | The line | After the tap (`frontend/lib/deskAction.ts`) |
+| --- | --- | --- |
+| `show` (ticker, `2m` / `15m` / `1D`, Chart, Chain or Tape) | "Show NBIS · 15m" | Applied when it arrives in this tab, with **Undo**; a reopened card waits for **Show again**. |
+| `alert` | "Set alert: NBIS below 98.00" | `POST /charts/alerts` as the desk chart's own Alert here (`source_kind="level"`, `source_id="desk"`, crosses, regular hours), the fresh quote as the reference. |
+| `watch` / `unwatch` | "Watch IREN" | `POST` / `DELETE /copilot/desk/watching` (the app's own list; never Robinhood's). |
+| `draw` | "Draw 102.50 on NBIS · resistance" | A level in the shared chart settings (`useChartSettings`, `PUT /charts/settings`), on the desk chart and in Charts. |
+| `ticket` | "Open ticket: NBIS 100 call Dec 18", or with `short_strike` "Open ticket: NBIS 100/110 call debit spread Dec 18" | The Ticket tab on that saved plan with the contract or the vertical (`openTicket`, as the Chain's Put on ticket): copy-only, nothing is sent. A spread goes on the plan its direction fits (rises: a call plan; falls: a put plan). |
+| `plan_stop` | "Update plan: NBIS stop 92.30 → 96.00" | The plan's invalidation alert armed at the new price (`POST /charts/alerts/{id}/rearm`). The saved pre-trade capture keeps the words it was confirmed with. |
+
+A card more than a day old, a price card whose ticker has moved more than 5% since it was made (or whose level is now on
+the other side), and a plan card whose stop alert has changed or gone say so and ask again instead of acting. Every tap
+goes through the same owner-only route as the action by hand; there is no new route. A saved plan's target cannot be
+changed by hand on the desk yet, so there is no card for it. Tests: `backend/tests/test_copilot_desk_actions.py`,
+`frontend/e2e/copilot-desk-actions.spec.ts`.
+
 ## Confirm a plan
 
 When asked for a plan, the model may call `propose_plan` (at most two per

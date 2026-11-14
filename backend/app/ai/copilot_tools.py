@@ -29,6 +29,15 @@ _LEVEL_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["
                                 "price": {"type": "number", "description": "The level, positive"},
                                 "interval": {"type": "string", "description": "closes_beyond only: 1m, 3m, 5m, 15m, 30m, 1h or 4h"}}}
 
+# desk_action (copilot_actions.py): what the owner asked the desk to do, as a card. The desk chart's timeframes are
+# frontend/lib/desk.ts DESK_TIMEFRAMES.
+DESK_ACTIONS = ("show", "alert", "watch", "unwatch", "draw", "ticket", "plan_stop")
+DESK_TIMEFRAMES = ("2m", "15m", "1D")
+DESK_TABS = ("chart", "chain", "tape")
+DESK_SIDES = ("above", "below")
+DESK_OPTION_TYPES = ("call", "put")
+DESK_LABEL_MAX = 40
+DESK_ACTIONS_PER_ANSWER = 3
 MOMENT_TIMEFRAMES = ("1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D")  # every Charts interval but 1W
 
 TOOLS: list[dict] = [
@@ -361,8 +370,37 @@ TOOLS: list[dict] = [
                                                                                "no_opening_while_green", "max_trades_per_day"]},
                                         "target": {"type": "number", "description": "practice: a share 0-1, or the daily cap for max_trades_per_day"}}},
     },
+    {
+        "name": "desk_action",
+        "description": "Do something on the owner's desk that they asked for in this message, which the desk can already "
+                       "do by hand. It changes nothing itself: a view change (action=show: `symbol` on the desk chart, "
+                       "optional `timeframe` 2m, 15m or 1D, optional `tab` chart, chain or tape) is shown at once with an "
+                       "Undo, and everything else is a card the owner taps to do it: action=alert (a price alert: `price` "
+                       "and `side` above or below, optional `label`), action=watch or unwatch (the desk's Watching list), "
+                       "action=draw (a horizontal level on the desk chart at `price`, optional `label` such as resistance), "
+                       "action=ticket (the copy-only order ticket of the owner's saved plan in `symbol`, filled with "
+                       "`expiry` YYYY-MM-DD, `strike` (the leg bought) and `option_type`, and for a vertical spread `short_strike` (the "
+                       "leg sold, same expiry: a debit spread buys the strike nearer the money); it never sends an order), action=plan_stop (move "
+                       "the saved plan's stop, its invalidation, to `price`). At most three in one answer. The result says "
+                       "what the card will do, or why it cannot (a ticker not followed, a price on the wrong side, no plan "
+                       "or more than one): then say so or ask, never guess.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["action", "symbol"],
+                         "properties": {"action": {"type": "string", "enum": list(DESK_ACTIONS)},
+                                        "symbol": _SYMBOL_SCHEMA,
+                                        "timeframe": {"type": "string", "enum": list(DESK_TIMEFRAMES)},
+                                        "tab": {"type": "string", "enum": list(DESK_TABS)},
+                                        "price": {"type": "number", "description": "The underlying's price, positive"},
+                                        "side": {"type": "string", "enum": list(DESK_SIDES)},
+                                        "label": {"type": "string", "description": f"At most {DESK_LABEL_MAX} characters"},
+                                        "expiry": {"type": "string", "description": "YYYY-MM-DD"},
+                                        "strike": {"type": "number"},
+                                        "short_strike": {"type": "number", "description": "ticket: a vertical spread's sold leg"},
+                                        "option_type": {"type": "string", "enum": list(DESK_OPTION_TYPES)}}},
+    },
 ]
 TOOL_NAMES = frozenset(t["name"] for t in TOOLS)
+# The tools whose result is a card for the owner, not evidence: never carried, cited or counted as a read.
+CARD_TOOLS = frozenset({"propose_plan", "desk_action"})
 
 
 class ToolInputError(ValueError):
@@ -587,6 +625,9 @@ def validate(name: str, args: Any) -> dict:
         raise ToolInputError(f"unexpected arguments: {sorted(set(args) - allowed)}")
     if name == "propose_plan":
         return _proposal(args)
+    if name == "desk_action":
+        from app.ai import copilot_actions
+        return copilot_actions.validate(args)
     if name == "get_quotes":
         symbols = args.get("symbols")
         if not isinstance(symbols, list) or not 1 <= len(symbols) <= MAX_SYMBOLS:
@@ -957,6 +998,11 @@ class LiveEvidence:
     def get_investigation_changes(self, investigation_id: str) -> dict:
         return investigation_changes(investigation_id)
 
+    def desk_state(self, symbol: str) -> dict:
+        """The desk's own state for a desk_action (copilot_actions.read_state): database reads, no quote."""
+        from app.ai import copilot_actions
+        return copilot_actions.read_state(symbol)
+
     def get_quotes(self, symbols: list[str]) -> dict:
         from app.engine.chart_feed import ChartFeedError, chart_feed
         try:
@@ -1110,6 +1156,7 @@ PROVENANCE = {
     "get_breadth": ("Tradier quotes for the hand-kept S&P 500 list; counts computed here", "fetched"),
     "get_positioning": ("Tradier quotes (Cboe volatility indexes) · options feed chains (Tradier, ORATS IV hourly)", "fetched"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
+    "desk_action": ("A desk action for the owner to tap; nothing done", "proposal"),
 }
 
 
@@ -1159,5 +1206,8 @@ def propose(evidence, proposal: dict) -> dict:
 def call(evidence, name: str, args: dict) -> dict:
     if name == "propose_plan":
         return propose(evidence, args)
+    if name == "desk_action":
+        from app.ai import copilot_actions
+        return copilot_actions.act(evidence, args)
     method: Callable[..., dict] = getattr(evidence, name)
     return method(**args)

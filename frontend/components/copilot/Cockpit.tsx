@@ -15,6 +15,7 @@ import { useKeptState } from "@/components/copilot/DeskMemory";
 import { NotFollowed } from "@/components/copilot/SessionTape";
 import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
 import { getExposure } from "@/lib/copilot";
+import { DESK_CHANGED_EVENT, DESK_TIMEFRAME_KEY } from "@/lib/deskAction";
 import { DeskChart, ReadingLine, type DeskChartActions, type DeskGuide } from "@/components/copilot/DeskChart";
 import { DeskTimeline } from "@/components/copilot/Inspector";
 import { ChartViewToggle, ContractChart, heldContract, useContractView } from "@/components/copilot/DeskContract";
@@ -442,7 +443,7 @@ function Tile({ label, children, className }: { label: string; children: ReactNo
 }
 
 const SPAN: Record<DeskTimeframe, string> = { "2m": "today: 2-minute candles", "15m": "recent sessions: 15-minute candles", "1D": "the last few months: daily candles" };
-const TIMEFRAME_KEY = "desk.chart.timeframe.v1";
+const TIMEFRAME_KEY = DESK_TIMEFRAME_KEY;
 const Key = ({ color, glyph, children }: { color: string; glyph: string; children: ReactNode }) => (
   <span><span aria-hidden style={{ color }}>{glyph}</span> {children}</span>
 );
@@ -455,6 +456,10 @@ function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
       const saved = window.sessionStorage.getItem(TIMEFRAME_KEY);
       if (saved && (DESK_TIMEFRAMES as readonly string[]).includes(saved)) setTimeframe(saved as DeskTimeframe); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
     } catch { /* 2m */ }
+    // A copilot card that shows a timeframe wrote it where this reads (``lib/deskAction.ts``): follow it.
+    const follow = (event: Event) => { const next = (event as CustomEvent<{ timeframe?: DeskTimeframe }>).detail?.timeframe; if (next) setTimeframe(next); };
+    window.addEventListener(DESK_CHANGED_EVENT, follow);
+    return () => window.removeEventListener(DESK_CHANGED_EVENT, follow);
   }, []);
   const pick = (next: DeskTimeframe) => {
     setTimeframe(next);

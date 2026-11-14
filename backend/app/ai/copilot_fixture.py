@@ -75,6 +75,12 @@ class FixtureEvidence:
         return {"symbol": symbol, "state": "ok", "as_of": AT, "items": [],
                 "note": "Fixture mode does not read the owner's saved research (simulated)."}
 
+    def desk_state(self, symbol: str) -> dict:
+        """The desk is the owner's own app state, not market data: a fixture turn reads it from this server's database (a
+        sandbox's or a test's), so a desk action card works end to end there. Only the prices are simulated."""
+        from app.ai import copilot_actions
+        return copilot_actions.read_state(symbol)
+
     def get_quotes(self, symbols: list[str]) -> dict:
         prices = {"NBIS": 94.35, "CRWV": 131.20, "APLD": 27.85, "SPY": 671.10, "QQQ": 598.40}
         return {"fetched_at": AT, "state": "ok", "prices": {s: prices.get(s) for s in symbols},
@@ -518,3 +524,90 @@ def simulated_chains(symbol: str, spot: float, today, walls: bool = False) -> di
                     greeks_updated_at="2026-10-23 10:00:00"))
         out[expiry] = OptionChain(symbol, expiry, "simulated", fetched, tuple(contracts))
     return out
+
+
+# --------------------------------------------------------------------------- the fake model's desk requests
+
+_MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+_NUM = r"\$?(\d+(?:\.\d+)?)"
+
+
+def desk_requests(prompt: str, symbol: str, today) -> list[dict] | str | None:
+    """SIMULATED: the scripted model's reading of a desk request by keyword rules, not understanding. The desk_action
+    arguments for each action asked (at most three), a short question when a needed part is missing, or None when the
+    message asks for no desk action. Exists so the sandbox and the browser tests can produce every kind of card."""
+    import re
+    from datetime import date
+    # Only a message that opens with a request (a line starting "alert me", "show me", "watch", "mark", ...), so a question
+    # that merely mentions watching or a stop is never read as one.
+    if not re.search(r"(?m)^\s*(?:please\s+|can you\s+)?(alert me|set an alert|ping me|show me|pull up|open the|switch to|"
+                     r"stop watching|unwatch|watch|mark|draw|build the|move my stop)\b", prompt.lower()):
+        return None
+    lower = " ".join(prompt.lower().split())
+    named = re.findall(r"\b[A-Z]{2,5}\b", prompt)  # a ticker the request names wins over the desk's selected one
+    symbol = named[0] if named else symbol
+    out: list[dict] = []
+    asked = re.search(r"\b(alert me|set an alert|ping me)\b", lower)
+    if asked and (m := re.search(rf"\b(loses|below|under|breaks below|drops below)\s+{_NUM}", lower)):
+        out.append({"action": "alert", "symbol": symbol, "side": "below", "price": float(m.group(2))})
+    elif asked and (m := re.search(rf"\b(above|over|clears|breaks above|reclaims)\s+{_NUM}", lower)):
+        out.append({"action": "alert", "symbol": symbol, "side": "above", "price": float(m.group(2))})
+    elif asked:
+        return f"At what price, and above or below, for the {symbol} alert?"
+    if re.search(r"\b(show me|pull up|open the chain|open the tape|switch to)\b", lower):
+        show: dict = {"action": "show", "symbol": symbol}
+        if m := re.search(r"\b(\d+)[\s-]*(?:minute|min|m)\b", lower):
+            tf = {"2": "2m", "15": "15m"}.get(m.group(1))
+            if tf is None:
+                return f"The desk chart has 2m, 15m and 1D: want {symbol} on the 2m or the 15m?"
+            show["timeframe"] = tf
+        elif re.search(r"\b(daily|1d|day chart)\b", lower):
+            show["timeframe"] = "1D"
+        if "chain" in lower:
+            show["tab"] = "chain"
+        elif "tape" in lower:
+            show["tab"] = "tape"
+        out.append(show)
+    if re.search(r"\b(stop watching|unwatch)\b", lower):
+        out.append({"action": "unwatch", "symbol": symbol})
+    elif re.search(r"\bwatch\b", lower):
+        out.append({"action": "watch", "symbol": symbol})
+    if m := re.search(rf"\b(?:mark|draw)\s+{_NUM}(?:\s+as\s+([a-z]{{1,30}}))?", lower):
+        out.append({"action": "draw", "symbol": symbol, "price": float(m.group(1)),
+                    **({"label": m.group(2).strip()} if m.group(2) else {})})
+    if re.search(r"\b(ticket|build the)\b", lower):
+        pair = re.search(r"\b(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\s*(c|calls?|p|puts?)\b", lower)
+        strike = pair and re.search(rf"\b{_NUM}\s*(c|calls?|p|puts?)\b", lower[pair.start(2):]) or re.search(rf"\b{_NUM}\s*(c|calls?|p|puts?)\b", lower)
+        when = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\.?\s+(\d{1,2})\b", lower)
+        if not strike or not when:
+            return f"Which {symbol} contract: the strike, call or put, and the expiry?"
+        month, day = _MONTHS[when.group(1)], int(when.group(2))
+        expiry = date(today.year, month, day)
+        if expiry < today:
+            expiry = date(today.year + 1, month, day)
+        kind = "put" if strike.group(2).startswith("p") else "call"
+        ticket = {"action": "ticket", "symbol": symbol, "strike": float(strike.group(1)), "option_type": kind, "expiry": expiry.isoformat()}
+        if pair:  # a debit spread buys the strike nearer the money, unless the words say credit
+            low, high = sorted((float(pair.group(1)), float(pair.group(2))))
+            near, far = (low, high) if kind == "call" else (high, low)
+            bought, sold = (far, near) if "credit" in lower else (near, far)
+            ticket.update(strike=bought, short_strike=sold)
+        out.append(ticket)
+    if re.search(r"\bstop\b", lower) and (m := re.search(rf"\bto\s+{_NUM}", lower)) and "watching" not in lower:
+        out.append({"action": "plan_stop", "symbol": symbol, "price": float(m.group(1))})
+    return out[:3] or None
+
+
+def desk_answer(outcomes: list[tuple[dict, str | None]]) -> str:
+    """SIMULATED: the scripted model's one-line answer under its desk cards: what is on the cards, or why one was not
+    made (the tool's refusal, in its own words)."""
+    refused = [reason for _, reason in outcomes if reason]
+    made = [card for card, reason in outcomes if not reason]
+    shown = [c for c in made if c.get("action") == "show"]
+    parts = []
+    if shown:
+        parts.append(f"{shown[0]['symbol']} is on the desk now (Undo is on the card).")
+    if len(made) > len(shown):
+        parts.append("Tap the card to do it; nothing happens until you do.")
+    parts += [f"I did not make that card: {reason}." for reason in refused]
+    return " ".join(parts) + " (Simulated demo model.)"

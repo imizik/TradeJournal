@@ -76,7 +76,7 @@ def test_each_job_is_offered_only_its_tools_in_a_stable_order():
         names = [t["name"] for t in copilot_prompt.TOOLS[job]]
         assert names == [n for n in order if n in names], job  # TOOLS order: the cached prefix never reshuffles
     every = len(copilot_tools.TOOLS) - len(copilot_prompt.JOB_ONLY)  # the check's facts tool is its own job's alone
-    assert len(copilot_prompt.TOOLS["desk"]) == every == len(copilot_prompt.TOOLS["telegram"])
+    assert len(copilot_prompt.TOOLS["desk"]) == every == len(copilot_prompt.TOOLS["telegram"]) + len(copilot_prompt.DESK_ONLY)
     assert set(n["name"] for n in copilot_prompt.TOOLS["prep"]) == set(copilot_prompt.PREP_TOOLS)
     assert "propose_plan" not in {t["name"] for t in copilot_prompt.TOOLS["prep"]} | {t["name"] for t in copilot_prompt.TOOLS["companion"]}
     assert {"get_week_review", "propose_plan"} <= {t["name"] for t in copilot_prompt.TOOLS["week_review"]}
@@ -145,7 +145,7 @@ def test_a_jobs_prompt_names_only_the_tools_it_is_offered():
     """A rule naming a tool the job is not offered spends a round on a refused call (review of 2026-11-10)."""
     every = {t["name"] for t in copilot_tools.TOOLS}
     for job in JOBS:
-        named = set(re.findall(r"\b(get_[a-z_]+|propose_plan)\b", copilot_prompt.PROMPTS[job])) & (every | {"get_memories"})
+        named = set(re.findall(r"\b(get_[a-z_]+|propose_plan|desk_action)\b", copilot_prompt.PROMPTS[job])) & (every | {"get_memories"})
         offered = {t["name"] for t in copilot_prompt.TOOLS[job]}
         assert named <= offered, (job, sorted(named - offered))
     assert "get_week_review" in copilot_prompt.PROMPTS["telegram"]  # a typed "review my week" keeps its rules
@@ -160,7 +160,7 @@ def test_the_three_book_reads_are_offered_only_where_a_job_needs_them():
         "desk": {"get_positions", "get_trades", "get_owner_context"}, "telegram": {"get_positions", "get_trades", "get_owner_context"},
         "prep": set(), "companion": {"get_trades"}, "week_review": {"get_trades"}, "check_call": {"get_trades"},
         "desk_read": set(), "day_read": set()}
-    assert len(copilot_tools.TOOLS) == 26  # 25 and the check job's own get_call_facts
+    assert len(copilot_tools.TOOLS) == 27  # 25, the check job's own get_call_facts and the desk's own desk_action
 
 
 @pytest.mark.parametrize("job,deep", [("desk", False), ("telegram", False), ("prep", False), ("companion", True), ("week_review", True)])

@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 
 SYMBOL_PATTERN = r"^[A-Z][A-Z0-9.\-]{0,9}$"
 MAX_TRANSCRIPT_CHARS = 400_000  # message text and stored cards together
-MAX_PROPOSALS = 4  # per answer: it may make two, and a week review's practice card can join them
+MAX_PROPOSALS = 7  # per answer: it may make two, a week review's practice card can join them, and three desk actions
 PROPOSAL_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
 CLIENT_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")  # what the capture, time-stop and memory saves replay on
 Source = Literal["copilot", "research_job", "jo"]
@@ -96,12 +96,26 @@ def _saved_proposal(card: dict) -> dict:
         raise ValueError("a proposal's as_of is a time")
     if rest.get("kind") == "practice":
         rest.pop("label", None)  # derived from the measure and target
+    if rest.get("kind") == "desk_action":
+        # A desk action card keeps its price and time with its own checks (copilot_actions.saved).
+        from app.ai import copilot_actions
+        rest.pop("kind")
+        rest.update({k: v for k, v in (("last", last), ("as_of", as_of)) if v is not None})
+        try:
+            out = {"id": pid, "kind": "desk_action", **copilot_actions.saved(rest)}
+        except copilot_tools.ToolInputError as exc:
+            raise ValueError(f"proposal {pid}: {exc}") from None
+        return _with_outcome(out, pid, client_id, outcome)
     try:
         out = {"id": pid, **copilot_tools._proposal(rest)}
     except copilot_tools.ToolInputError as exc:
         raise ValueError(f"proposal {pid}: {exc}") from None
     if out["kind"] in ("watch", "trade_plan"):
         out.update({k: v for k, v in (("last", last), ("as_of", as_of)) if v is not None})
+    return _with_outcome(out, pid, client_id, outcome)
+
+
+def _with_outcome(out: dict, pid: str, client_id, outcome) -> dict:
     if client_id is not None:
         out["client_id"] = client_id
     if outcome is not None:

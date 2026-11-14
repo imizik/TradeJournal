@@ -20,6 +20,8 @@ import { cleanDrawings, cleanToolStyles, DRAWING_KINDS, MAX_DRAWINGS } from "@/l
  */
 export type SharedSettings = Omit<ChartSettings, "symbol" | "recent">;
 export type SyncState = "loading" | "saving" | "saved" | "offline";
+/** Another part of the page saved the settings (a copilot card drew a level): every copy reads them again now. */
+export const CHART_SETTINGS_SAVED = "tradejournal:chart-settings-saved";
 type ServerCopy = { revision: number; data: unknown };
 type Meta = { revision: number; base: SharedSettings };
 
@@ -314,7 +316,8 @@ export function useChartSettings(initialSymbol?: string, { borrowed = false }: {
     const timer = window.setInterval(() => void refresh(), REFRESH_MS);
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
-    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", onVisible); };
+    window.addEventListener(CHART_SETTINGS_SAVED, onVisible);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", onVisible); window.removeEventListener(CHART_SETTINGS_SAVED, onVisible); };
   }, [ready, push, localOnly]);
 
   useEffect(() => () => window.clearTimeout(pending.current), []);

@@ -15,6 +15,8 @@ import ExitLessons from "@/components/copilot/ExitLessons";
 import LongHolds from "@/components/copilot/LongHolds";
 import LinkedActivity from "@/components/copilot/LinkedActivity";
 import ProposalCard from "@/components/copilot/ProposalCard";
+import DeskActionCard from "@/components/copilot/DeskActionCard";
+import { markArrived } from "@/lib/deskAction";
 import ResearchDeeper from "@/components/copilot/ResearchDeeper";
 import { DayRead } from "@/components/copilot/DayRead";
 import { DeskRead } from "@/components/copilot/DeskRead";
@@ -44,7 +46,7 @@ const MAX_CHARS = 4000, MAX_MESSAGES = 23, MAX_TOTAL = 38_000;
 const UNAVAILABLE = new Set(["off", "unavailable", "failed", "error", "ungrouped", "not_configured"]);
 const TOOL_LABEL: Record<string, string> = {
   get_group_comparison: "Group comparison", get_peer_moves: "Peer moves", get_symbol_news: "News",
-  get_symbol_events: "Earnings", get_quotes: "Quotes", get_saved_research: "Saved research", propose_plan: "Proposal", get_investigation_changes: "What changed",
+  get_symbol_events: "Earnings", get_quotes: "Quotes", get_saved_research: "Saved research", propose_plan: "Proposal", desk_action: "Desk action", get_investigation_changes: "What changed",
   get_chart_context: "Chart", get_positions: "Positions", get_trades: "Trades", get_memories: "Memories",
   owner_context: "Your context", get_owner_context: "Your context", get_trade_review: "Trade review",
   get_week_review: "Week review", get_level_history: "Your history here", get_option_candidates: "Option candidates",
@@ -212,7 +214,7 @@ function RateAnswer({ rating, onRate, ask }: { rating?: Rating; onRate: (next: R
 }
 
 function Sources({ tools, metrics }: { tools: ToolEvent[]; metrics?: TurnMetrics }) {
-  const read = tools.filter(tool => tool.name !== "propose_plan"); // a proposal is its card, not a source
+  const read = tools.filter(tool => tool.name !== "propose_plan" && tool.name !== "desk_action"); // a card is not a source
   if (!read.length && !metrics) return null;
   const missing = (tool: ToolEvent) => tool.status === "error" || UNAVAILABLE.has(tool.provenance?.state ?? "");
   const count = (test: (tool: ToolEvent) => boolean) => read.filter(test).length;
@@ -1074,7 +1076,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           let id = event.id;
           for (let n = 2; taken.has(id); n += 1) id = `${event.id}.${n}`;
           const last = list[list.length - 1];
-          return [...list.slice(0, -1), { ...last, proposals: [...(last.proposals ?? []), { ...event, id, client_id: newClientId() }] }];
+          const client_id = newClientId();
+          if (event.kind === "desk_action") markArrived(client_id); // arrived live: a view change applies itself once
+          return [...list.slice(0, -1), { ...last, proposals: [...(last.proposals ?? []), { ...event, id, client_id }] }];
         });
         else if (event.type === "tool") update(last => {
           const tools = last.tools ?? [];
@@ -1529,6 +1533,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
                 <span className="block font-medium text-foreground">Review {proposal.symbol} plan in its own thread →</span>
                 <span className="mt-0.5 block text-xs text-muted-foreground">{tradePlanLine(proposal)}</span>
               </button>
+            ) : proposal.kind === "desk_action" ? (
+              <DeskActionCard key={proposal.id} proposal={proposal} onOutcome={outcome => recordOutcome(proposal.id, outcome)} />
             ) : proposal.kind === "trade_plan" ? (
               <TradePlanCard key={proposal.id} plan={proposal} investigationId={current?.id ?? null} origin={origin} drawn={drawn}
                 history={historyFor(message.tools ?? [], proposal)} candidates={candidatesFor(message.tools ?? [], proposal)}

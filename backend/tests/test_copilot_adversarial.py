@@ -44,7 +44,8 @@ JOB_SAFE = {"get_group_comparison", "get_peer_moves", "get_symbol_news", "get_sy
             "get_breadth", "get_positioning"}  # market data only, never the book
 NEVER_IN_JOBS = {"propose_plan", "get_investigation_changes", "get_positions", "get_trades", "get_owner_context",
                  "get_trade_review", "get_week_review", "get_level_history", "get_option_candidates", "get_moment", "get_proof",
-                 "get_call_facts"}  # the check's facts carry the owner's record
+                 "get_call_facts",  # the check's facts carry the owner's record
+                 "desk_action"}  # a card for the owner's desk, never a research job's
 
 
 @pytest.fixture(autouse=True)
