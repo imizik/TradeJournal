@@ -218,7 +218,7 @@ def _setups(db: Session, day: date) -> dict:
                        .order_by(col(RadarSetup.created_at).desc())).all()[:MAX_RADAR]:
         card = desk_radar_setups.view(db, row)
         setup = {k: card[k] for k in ("id", "event_id", "words", "levels_line", "contract_line", "record", "paper_record",
-                                      "plan_state", "investigation_id")}
+                                      "plan_state", "investigation_id", "direction", "invalidation", "contract")}
         href = f"/copilot-lab?{urlencode({'symbol': row.symbol, 'radar': row.event_id})}"
         rows.append(_item("Radar setup", str(row.id), _utc_epoch(row.created_at), f"{row.symbol} {card['words']}",
                           symbol=row.symbol, href=href, radar_event_id=row.event_id, setup=setup,

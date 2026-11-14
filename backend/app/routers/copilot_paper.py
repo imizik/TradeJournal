@@ -7,7 +7,7 @@ its close and otherwise only reads.
 ``POST /copilot/paper/runs``: start the paper account (``starting_cash``, default $10,000), or with ``reset`` a new run;
 every older run keeps its history.
 ``POST /copilot/paper/orders``: open (``action: open``) or close/trim (``action: close``) a paper position at the live
-quote, or with ``order_type: limit`` and ``limit_price`` place a day limit order that works until a fresh quote crosses
+quote (an opening order names whose idea it was: ``source`` mine, copilot, radar or scanner, and ``idea_id``), or with ``order_type: limit`` and ``limit_price`` place a day limit order that works until a fresh quote crosses
 it, the close or a cancel; ``preview`` answers what it would fill at (or hold) and stores nothing. A market order is
 refused outside the regular session, on a stale quote, or without the buying power.
 ``POST /copilot/paper/orders/cancel``: cancel a working paper limit order.
@@ -59,6 +59,9 @@ class OrderAsk(BaseModel):
     note: str | None = Field(None, max_length=2000)
     stop: float | None = None
     target: float | None = None
+    # whose idea: his own ticket (default), or Paper it on a copilot, Radar or scanner idea, with that idea's id
+    source: Literal["mine", "copilot", "radar", "scanner"] | None = None
+    idea_id: str | None = Field(None, max_length=64)
     # both
     quantity: int | None = None
     # close

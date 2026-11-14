@@ -7,6 +7,8 @@ import { etTime, monitoringText } from "@/components/ScannerFreshness";
 import type { DeskGuide } from "@/components/copilot/DeskChart";
 import { cn } from "@/lib/utils";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
+import { PaperButton } from "@/components/copilot/DeskPaper";
+import { contractOrder } from "@/lib/paperBook";
 
 /**
  * Today's setup-scanner candidates on the desk (docs/copilot-lab.md § Scanner on the desk), from ``GET /copilot/scanner``:
@@ -20,6 +22,8 @@ export type DeskScannerRow = {
   id: string; symbol: string; setup: ScannerCandidateRow["setup"]; direction: ScannerCandidateRow["direction"]; words: string; bar_end: string;
   trigger: number | null; stop: number; target: number; vwap: number | null; range_high: number | null; range_low: number | null;
   flags: string[]; contract_line: string | null; status: ScannerCandidateRow["status"]; pnl: number | null; exit_reason: string | null;
+  /** The candidate contract as Paper it names it, or null. */
+  contract?: { option_type: "call" | "put"; expiry: string; strike: number } | null;
   /** He neither holds, watches nor plans it. */
   new: boolean;
   /** The Radar setup card on the same name, day and direction: shown once, in this row. */
@@ -136,9 +140,19 @@ function ScannerRow({ row, onOpen, onPlan, focused }: { row: DeskScannerRow; onO
         </span>
         {row.radar && <span className="block text-xs text-muted-foreground">Radar: {row.radar.levels_line}</span>}
       </button>
-      {row.radar && row.radar.plan_state === "none" && (
-        <div className="px-3 pb-2"><button type="button" onClick={() => onPlan(row.radar!.href)} className={ACTION}>Plan it</button></div>
-      )}
+      <div className="flex flex-wrap gap-1.5 px-3 pb-2">
+        {row.radar && row.radar.plan_state === "none" && <button type="button" onClick={() => onPlan(row.radar!.href)} className={ACTION}>Plan it</button>}
+        <ScannerPaperIt row={row} />
+      </div>
     </li>
   );
+}
+
+/** Paper it on a scanner pick: its candidate contract on paper with the scanner's stop and target, recorded as the
+ *  scanner's idea (his own paper book, apart from the scanner's rules paper trade above). */
+function ScannerPaperIt({ row }: { row: DeskScannerRow }) {
+  const order = contractOrder(row.symbol, row.contract);
+  return <PaperButton key={row.id} order={order} why={order ? null : "No contract on this pick to paper."} source="scanner" ideaId={row.id}
+    label="Paper it" stop={row.stop} target={row.target}
+    note={`Scanner: ${row.symbol} ${row.words}.${row.trigger !== null ? ` Trigger ${two(row.trigger)}.` : ""} Stop ${two(row.stop)} · Target ${two(row.target)}`} />;
 }

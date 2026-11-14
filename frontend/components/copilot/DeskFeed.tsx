@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import type { ChainPick } from "@/components/copilot/DeskChain";
 import { UnusualList, type UnusualReply } from "@/components/copilot/DeskUnusual";
 import { FOCUSED, ScannerList, useInView, type DeskScannerReply, type DeskScannerRow } from "@/components/copilot/DeskScanner";
+import { RadarPaperIt } from "@/components/copilot/RadarDecision";
 import type { FeedLink } from "@/lib/copilot";
 
 export type FeedSource = "Alert" | "Plan" | "Radar" | "Radar setup" | "News" | "Calendar" | "Copilot note" | "TradingView" | "r/wallstreetbets" | "NYT";
@@ -18,7 +19,9 @@ export type FeedItem = {
   id: string; source: FeedSource; at: number; has_time: boolean; symbol: string | null; text: string; detail: string | null;
   publisher: string | null; url: string | null; href: string | null; investigation_id: string | null; radar_event_id: string | null;
   setup: { id: string; event_id: string; words: string; levels_line: string; contract_line: string | null; record: string | null;
-    paper_record: string | null; plan_state: string; investigation_id: string | null } | null;
+    paper_record: string | null; plan_state: string; investigation_id: string | null;
+    /** For Paper it: which way, the stop (the invalidation) and the candidate contract. */
+    direction?: "up" | "down"; invalidation?: number; contract?: { option_type: "call" | "put"; expiry: string; strike: number } | null } | null;
   plan: "setup" | "own" | null; mine: boolean; upcoming: boolean; chatter?: boolean;
   /** A chatter buzz row whose counts are not current: shown grey. */
   stale?: boolean;
@@ -348,6 +351,10 @@ function FeedRow({ item, day, fresh, ahead, now, onSymbol, onAsk, onPlan, onChar
         {open && <Link href={open} className={ACTION}>Open</Link>}
         {tradingView && item.href && <Link href={item.href} className={ACTION}>On Signals</Link>}
         {item.plan && !chatter && <button type="button" onClick={() => onPlan(item)} className={ACTION}>Plan it</button>}
+        {item.setup && item.symbol && item.setup.invalidation != null && (
+          <RadarPaperIt setup={{ id: item.setup.id, symbol: item.symbol, words: item.setup.words, levels_line: item.setup.levels_line,
+            invalidation: item.setup.invalidation, contract: item.setup.contract ?? null }} />
+        )}
       </div>
     </li>
   );

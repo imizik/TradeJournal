@@ -42,7 +42,7 @@ def _stats(s: dict) -> dict:
 def _open_row(p: dict, now: float, today: date) -> dict:
     from app.engine.paper_book import clock
     row = {"label": p["label"], "symbol": p["symbol"], "quantity": p["remaining"], "opened": clock(p["opened_at"]),
-           "cash_at_open": p["basis"]}
+           "cash_at_open": p["basis"], "source": p.get("source") or "mine"}
     for key in ("stop", "target"):
         if p.get(key) is not None:
             row[key] = p[key]
@@ -65,7 +65,7 @@ def _closed_row(c: dict) -> dict:
     from app.engine.paper_book import clock
     row = {"label": c["label"], "symbol": c["symbol"], "quantity": c["quantity"], "opened": clock(c["opened_at"]),
            "closed": clock(c["closed_at"]), "realized": c["realized"], "ended": (c.get("verdict") or {}).get("text"),
-           "ended_kind": (c.get("verdict") or {}).get("kind")}
+           "ended_kind": (c.get("verdict") or {}).get("kind"), "source": c.get("source") or "mine"}
     if (c.get("verdict") or {}).get("auto"):
         row["auto_exit"] = True  # the close-at-stop/target switch sold it, not his own tap
     for key in ("stop", "target"):
@@ -84,7 +84,7 @@ def _orders(view: dict, now: float, hidden: set[str], symbol: str | None) -> lis
         return NO_ORDERS
     out = []
     for o in found[:MAX_OPEN]:
-        row = {k: o[k] for k in ("side", "label", "symbol", "quantity", "limit", "stop", "target") if o.get(k) is not None}
+        row = {k: o[k] for k in ("side", "label", "symbol", "quantity", "limit", "stop", "target", "source") if o.get(k) is not None}
         row["placed"] = clock(o["placed_at"]) if o.get("placed_at") else None
         if o.get("expires_at"):
             row["ends"] = (f"ended at the close ({clock(o['expires_at'])}); the desk's next read records it"
@@ -104,6 +104,7 @@ def compact(view: dict, hidden: set[str], now: float, symbol: str | None = None)
            "note": "His paper book: practice with no money, fills at the live ask to buy and the bid to sell. Every price "
                    "has its time; a position without a price has no P&L yet. cash_at_open is the open part's cash at "
                    "the fill: negative is what he paid, positive a credit he took in; pnl is value plus cash_at_open. "
+                   "source is whose idea it was: mine (his own ticket), copilot, radar or scanner (Paper it on their idea). "
                    "Read only: nothing here places or changes a paper order."}
     run = view.get("run")
     if run is None:
@@ -134,6 +135,7 @@ def compact(view: dict, hidden: set[str], now: float, symbol: str | None = None)
         out["not_followed_left_out"] = f"{left_out} paper position(s) in tickers he does not follow; they stay in the totals"
     score = view["score"]
     out["score"] = {"since": clock(run["started_at"]), "paper": {**_stats(score["paper"]), "open_pnl": score["paper"].get("open_pnl")},
+                    "paper_by_source": [s for s in score["paper"].get("by_source") or [] if s["trades"]],
                     "real": _stats(score["real"]),
                     "note": "Closed trades only. Real is his journal's closed trades over the same dates (Webull left out); "
                             "a paper position counts once fully closed, on its close day."}
@@ -170,13 +172,13 @@ def fixture_paper_book(symbol: str | None = None) -> dict:
     """A SIMULATED paper book for the fixture backend: invented numbers, shaped like the live read."""
     open_ = [{"label": "NBIS $100 Call 11/20/26", "symbol": "NBIS", "quantity": 2, "opened": "Nov 12 10:41 AM ET", "cash_at_open": -680.0,
               "stop": 92.4, "target": 108.0, "note": "reclaim of the morning low", "value": 820.0, "pnl": 140.0, "pnl_pct": 20.6,
-              "price_at": "Nov 13 3:58 PM ET", "price_age_minutes": 2}]
+              "price_at": "Nov 13 3:58 PM ET", "price_age_minutes": 2, "source": "copilot"}]
     closed = [{"label": "NBIS shares", "symbol": "NBIS", "quantity": 10, "opened": "Nov 10 9:52 AM ET", "closed": "Nov 11 2:15 PM ET",
                "realized": 84.5, "ended": "Took the target: stock 104.2 vs target 104", "ended_kind": "target", "stop": 96.0,
-               "target": 104.0},
+               "target": 104.0, "source": "mine"},
               {"label": "NBIS $105 Call 11/14/26", "symbol": "NBIS", "quantity": 1, "opened": "Nov 11 10:05 AM ET",
                "closed": "Nov 12 3:40 PM ET", "realized": -95.0, "ended": "Out at the stop: stock 95.1 vs stop 96, 0.9% past it",
-               "ended_kind": "stop", "stop": 96.0}]
+               "ended_kind": "stop", "stop": 96.0, "source": "radar"}]
     return {"state": "ok", "as_of": "2026-11-13T21:00:00Z", "symbol": symbol,
             "note": "SIMULATED fixture paper book (invented numbers), shaped like his paper book.",
             "run": {"number": 1, "started": "Nov 10 9:30 AM ET", "starting_cash": 10000.0},
@@ -187,5 +189,7 @@ def fixture_paper_book(symbol: str | None = None) -> dict:
             "score": {"since": "Nov 10 9:30 AM ET",
                       "paper": {"trades": 2, "pnl": -10.5, "win_rate": 50.0, "avg_win": 84.5, "avg_loss": -95.0, "largest_loss": -95.0,
                                 "open_pnl": 140.0},
+                      "paper_by_source": [{"source": "mine", "trades": 1, "pnl": 84.5, "win_rate": 100.0},
+                                          {"source": "radar", "trades": 1, "pnl": -95.0, "win_rate": 0.0}],
                       "real": {"trades": 3, "pnl": -212.0, "win_rate": 33.3, "avg_win": 150.0, "avg_loss": -181.0, "largest_loss": -240.0},
                       "note": "Closed trades only (simulated)."}}

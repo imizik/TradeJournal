@@ -2019,6 +2019,16 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   plan's thesis, invalidation and target as the note, stop and target), "Paper" on the Chain tab's picked contract or
   spread, and "Paper buy SYMBOL shares" in the Paper section for the selected ticker. A tap reads one live quote and
   shows what it would fill at; nothing fills until "Fill on paper", which re-reads the quote and fills at that moment's.
+- **Paper it on an idea.** "Paper it" on the desk's ideas opens the same confirm, prefilled from the idea, and goes
+  through the same order route and fresh-quote rule: a copilot trade-plan card (its contract, read from the card's
+  Contract words such as "Nov 21 100C", its invalidation and target as stop and target, its thesis as the note; a
+  long-stock plan papers 10 shares), a copilot ticket card (its contract or vertical), a Radar setup card in the Feed or
+  on an opened Radar hit (today's only; its candidate contract, the invalidation as the stop) and a scanner pick in the
+  Feed (its candidate contract, the scanner's stop and target). An idea without enough to place an order (no contract
+  with a strike and an expiry, a short-stock plan) shows the button disabled with the reason. Each order records whose
+  idea it was, `source` `mine` (his own ticket, the default), `copilot`, `radar` or `scanner`, and the idea's id
+  (`idea_id`), as fields in the event data (no migration); a position recorded before sources counts as his own. Radar's
+  and the scanner's rows name the contract for it (`contract`, from `paper_book.idea_contract`).
 - **Fills on a live quote only** (`POST /copilot/paper/orders`, `backend/app/engine/paper_book.py`): in the regular
   session, each leg bought at its ask and each sold at its bid, and only when both sides of every leg's quote were
   updated in the last two minutes (`setup_scanner._fresh`, the shadow book's rule, against the scanner's
@@ -2071,7 +2081,9 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   waits for the rest), trades, win rate, average winner and loser and largest loss for paper beside his real closed
   trades over the same dates (the journal's `trade` rows, read only, Webull left out), closed P&L by day for both, each
   closed paper trade with its note and how it ended against his stop and target (stock prices: took the target, out at
-  the stop and how far past it, out before either, held to expiry).
+  the stop and how far past it, out before either, held to expiry). Under the line, once a paper trade has closed, one
+  more line splits closed paper P&L, trade count and win rate by whose idea it was (Mine, Copilot, Radar, Scanner;
+  `score.paper.by_source`), and each paper position not from his own ticket carries a small source tag.
 - **Stored apart and append-only.** `paper_run` (one row per run) and `paper_event` (each fill: open, close or expire;
   a position is their fold; and the orders' and switches' own facts: `order`, its fill or one `cancel`/`lapse`, `auto`,
   `touch`, `trigger`), additive migration `a7c3e9f1b5d2`, no new table. Nothing here writes fills, trades, accounts, real P&L,
@@ -2082,7 +2094,8 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   prices, with their time), open paper positions with P&L and the time of the price behind it (a position with no price
   says so, never zero; one past its expiration says it settles on the desk's next read; the close-at-stop/target switch
   when on), his working day limit orders (one past its close says it ended), the eight newest closed paper trades with his note and how each ended against his stop and target, and the
-  scorecard beside his real trades. `symbol` narrows the lists to one ticker. It never places, closes or changes a paper
+  scorecard beside his real trades. Each open and closed row and working order carries its `source`, and the score its
+  `paper_by_source` split (sources with a closed trade). `symbol` narrows the lists to one ticker. It never places, closes or changes a paper
   order, and neither settles an expiry nor ends a lapsed day order (`view(settle_expired=False)`): it writes nothing. Prices are the desk's kept
   ticks (`desk_ticks.kept_rows`): no quote read and no Robinhood call. Tickers he does not follow are left out of the
   lists and stay in the totals. Desk and Telegram turns get it; it is book context, never offered to research jobs;

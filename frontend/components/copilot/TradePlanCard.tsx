@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { confirmedElsewhere, createPlanAlert, freshQuote, getSymbolLoop, PLAN_CONFIRMED, previewTimeStop, rememberRisk, savedRisk, savePlanCapture, saveTimeStop, type DrawnPlan, type ExitLesson, type FreshQuote, type LevelHistory, type OptionCandidates, type OptionPick, type PlanConfirmed, type PlanLevel, type ProposalOutcome, type SetupRecord, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
 import { fetchSetup, newClientId, SIDE_LABEL, type CaptureOrigin, type CaptureSetup, type CaptureSide } from "@/lib/captures";
 import { openTicket } from "@/components/copilot/DeskTicket";
+import { PaperButton } from "@/components/copilot/DeskPaper";
+import { todayNewYork } from "@/lib/charts";
+import { planOrder } from "@/lib/paperBook";
 import JoCaseAgainst from "@/components/copilot/JoCaseAgainst";
 import LastExitLine from "@/components/copilot/LastExitLine";
 import SetupRecordLines, { premiumLine } from "@/components/copilot/SetupRecordLines";
@@ -501,10 +504,27 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
         </div>
       )}
       {finished && <p role="status" className="text-xs text-emerald-300">Plan confirmed.</p>}
+      <PaperIt plan={plan} contract={contract} stop={stop} target={target} thesis={thesis} ideaId={plan.client_id ?? plan.id} />
       {investigationId && results.plan.state === "done" && side !== "buy_stock" && side !== "short_stock" && (
         <button type="button" onClick={() => openTicket(investigationId)} className="inline-flex min-h-11 items-center rounded-md border px-3 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-8">Open its ticket</button>
       )}
       {investigationId && (finished || saved) && <JoCaseAgainst investigationId={investigationId} proposalId={plan.id} />}
     </section>
+  );
+}
+
+/** Paper it: this plan on paper, prefilled from the card as it stands (its contract, stop, target and thesis), recorded as
+ *  the copilot's idea. A plan without a contract with a strike and an expiry (or a short-stock plan) says why instead. */
+function PaperIt({ plan, contract, stop, target, thesis, ideaId }: {
+  plan: TradePlan; contract: string; stop: string; target: string; thesis: string; ideaId: string;
+}) {
+  const level = (text: string) => { const n = Number(text.trim()); return text.trim() && n > 0 ? n : null; };
+  const found = planOrder(plan.symbol, plan.instrument, plan.direction, contract, todayNewYork());
+  const shares = found.order?.instrument === "stock";
+  return (
+    <div data-testid="plan-paper-it" className="flex flex-wrap items-center gap-2">
+      <PaperButton key={`${contract}|${stop}|${target}`} order={found.order} why={found.why ?? null} source="copilot" ideaId={ideaId} label="Paper it"
+        quantity={shares ? 10 : 1} stop={level(stop)} target={level(target)} note={thesis.trim() ? `Copilot: ${thesis.trim()}` : null} />
+    </div>
   );
 }
