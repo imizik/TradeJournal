@@ -2101,6 +2101,28 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   lists and stay in the totals. Desk and Telegram turns get it; it is book context, never offered to research jobs;
   replay says it is unavailable, the fixture serves a simulated book. Paper actions from the copilot, if ever wanted,
   would go through the action cards (`copilot_actions.py`); none exist.
+- **My rules** (`backend/app/engine/trading_rules.py`, `components/copilot/DeskRules.tsx`). Paper › Rules holds his own
+  trading rules: up to eight, each in his own words, each with at most one automatic check the app can verify honestly
+  (size at most N% of the account; a stop set before entry; no entry in the first N minutes after the open; at most N
+  open positions; an option at least N days to expiry); a rule without one is a tick-box he answers. Each save is a new
+  `trading_rule_record` row (`kind` `rules`; additive migration `c4e8a2d6f0b3`), and a rule keeps its id across edits.
+  The paper confirm (every Paper button, Paper it included) and the Ticket's Copy all show the checklist
+  (`POST /copilot/rules/check`, read only, once after a pause when the order changes, never on a timer): each automatic
+  check passed, broken with the reason, not applying (shares have no expiry) or "can't check" with why (no size yet, no
+  account value, before the open or after the close, not a trading day; never a pass). Unticked tick-boxes count as not followed. A
+  broken rule says so in one line and never disables the order. Size is the most the entry can lose (a debit's cost, a
+  credit spread's width less its credit), against the paper cash on paper and, for a real order, against the account's
+  newest value on the desk's account line for the session (`desk_account_value`, the readings the desk already keeps;
+  on a weekend Friday's, dated; else can't check). Each copied checklist keeps that reading with the masked last four. Open positions are paper positions plus working paper buys, or the journal's open trades for a real order (a
+  fill not yet emailed is not counted). Paper keeps the checklist in the open fill's data (`rules`), evaluated at the
+  fill (a limit at its fill, with the answers and the rules as they stood when he placed it). A real order keeps it when
+  he taps Copy all (`POST /copilot/rules/ticket`, a `ticket` record keyed to the saved plan), and it is matched to a
+  real trade only through that plan's own capture link or the position companion's adopted trade; the rest are counted
+  as unmatched (or still open), never guessed. Under the score line, one line splits closed trades with every rule
+  followed versus any broken (P&L, win rate / trades; unclear ones counted apart, trades entered before he had rules
+  left out), for paper and for matched real tickets; a tap opens the split per rule (`score.paper.rules`,
+  `score.real_rules`). The copilot's paper read carries each row's `my_rules` (outcome, broken and can't-check rules
+  with reasons) and the score's `paper_by_my_rules` / `real_by_my_rules`; no tool changed.
 - **How am I doing?** A chip at the top of the Paper section (`components/copilot/PaperReview.tsx`) sends that question
   to the copilot, which reads `get_paper_book` and answers from its figures.
 - **The weekly paper review** (`backend/app/engine/paper_review.py`, job `paper_review`): after Friday's close (16:45
@@ -2118,7 +2140,7 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   `unknown`, never resent; one not sent within two hours is `expired`).
 
 Proof: `backend/tests/test_paper_book.py`, `backend/tests/test_paper_orders.py`, `backend/tests/test_copilot_paper.py`, `frontend/e2e/copilot-desk-paper.spec.ts`,
-`frontend/e2e/copilot-desk-paper-review.spec.ts`.
+`frontend/e2e/copilot-desk-paper-review.spec.ts`, `backend/tests/test_trading_rules.py`, `frontend/e2e/copilot-desk-rules.spec.ts`.
 
 ### Paper replay
 

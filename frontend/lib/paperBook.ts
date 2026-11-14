@@ -5,6 +5,7 @@
 
 import { apiUrl } from "@/lib/api";
 import { tickFor, type DeskTicks } from "@/lib/deskTicks";
+import type { Rule, RuleOutcome, RuleResult, RulesSplit } from "@/lib/tradingRules";
 
 export const PAPER_EVENT = "tradejournal:paper-changed";
 
@@ -24,6 +25,8 @@ export type PaperPosition = {
   awaiting_close: boolean; mark?: PaperMark; verdict?: PaperVerdict;
   /** Whose idea it was (``mine`` for one recorded before sources) and the idea's id, if any. */
   source?: PaperSource; idea_id?: string | null;
+  /** His own rules at the entry (null: entered before they were checked) and the outcome: followed, broken or unclear. */
+  rules?: RuleResult[] | null; rules_outcome?: RuleOutcome | null;
   /** Open positions: the "Close automatically at stop/target" switch, when each level was touched, an automatic exit
    *  waiting for a fresh bid, and how many a working sell limit holds. */
   auto?: boolean; touched?: { stop?: number; target?: number }; exiting?: boolean; held?: number;
@@ -34,6 +37,8 @@ export type PaperStats = {
   curve: { day: string; pnl: number }[]; open_pnl?: number | null;
   /** Paper only: closed trades split by whose idea they were, in ``PAPER_SOURCES`` order. */
   by_source?: { source: PaperSource; trades: number; pnl: number; win_rate: number | null }[];
+  /** Paper only: closed trades by whether his rules were followed at the entry. */
+  rules?: RulesSplit;
 };
 /** A working day limit order: ``check`` is the minute's last look (its quote's time, the natural price then, or why
  *  it could not fill on it). */
@@ -48,7 +53,9 @@ export type PaperBook = {
   default_cash?: number;
   account?: { cash: number; collateral: number; reserved?: number; buying_power: number; equity: number | null; pnl: number | null; unpriced: number; prices_at: number | null };
   positions?: PaperPosition[]; closed?: PaperPosition[]; orders?: PaperWorkingOrder[];
-  score?: { paper: PaperStats; real: PaperStats };
+  score?: { paper: PaperStats; real: PaperStats; real_rules?: RulesSplit | null };
+  /** His own trading rules now. */
+  my_rules?: Rule[];
   earlier: { number: number; started_at: number; ended_at: number; starting_cash: number; realized: number; trades: number; left_open: number }[];
   market_open: boolean;
   /** The newest Friday paper review (backend engine/paper_review.py), shown until the next one. */
@@ -89,7 +96,8 @@ export async function startPaper(startingCash: number, reset = false): Promise<P
   return book;
 }
 
-type Levels = { note?: string | null; stop?: number | null; target?: number | null; source?: PaperSource; idea_id?: string | null };
+type Levels = { note?: string | null; stop?: number | null; target?: number | null; source?: PaperSource; idea_id?: string | null;
+  rule_answers?: Record<string, boolean> };
 export function previewOpen(order: PaperOrder, quantity: number) {
   return post<{ preview: PaperFill }>("/copilot/paper/orders", { action: "open", preview: true, ...order, quantity }).then(r => r.preview);
 }

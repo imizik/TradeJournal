@@ -13,6 +13,12 @@ refused outside the regular session, on a stale quote, or without the buying pow
 ``POST /copilot/paper/orders/cancel``: cancel a working paper limit order.
 ``POST /copilot/paper/auto``: turn a position's "Close automatically at stop/target" switch on or off.
 
+His own trading rules (``engine/trading_rules.py``): ``GET /copilot/rules`` his list and the automatic checks it may use;
+``PUT /copilot/rules`` saves the list (up to 8). ``POST /copilot/rules/check``: the checklist for an entry he is about
+to make (``side`` paper or real), before he answers its tick-boxes; database reads and the market calendar only, no quote. ``POST /copilot/rules/ticket``:
+keeps a real order's checklist when he copies it from the Ticket, keyed to its saved plan. An opening paper order
+carries his tick-box answers (``rule_answers``) and is checked at its fill. A broken rule never refuses an order.
+
 Paper only: nothing here places an order anywhere, calls Robinhood, or writes fills, trades or accounts. Owner-only like
 every ``/copilot`` route; refuses while the lab is off, and fills only on live evidence.
 """
@@ -25,7 +31,7 @@ from sqlmodel import Session
 
 from app.ai import copilot
 from app.database import get_session
-from app.engine import paper_book, paper_replay, paper_review, replay_redo
+from app.engine import paper_book, paper_replay, paper_review, replay_redo, trading_rules
 
 router = APIRouter()
 
@@ -62,6 +68,7 @@ class OrderAsk(BaseModel):
     # whose idea: his own ticket (default), or Paper it on a copilot, Radar or scanner idea, with that idea's id
     source: Literal["mine", "copilot", "radar", "scanner"] | None = None
     idea_id: str | None = Field(None, max_length=64)
+    rule_answers: dict[str, bool] | None = None  # his tick-box rules: id to ticked
     # both
     quantity: int | None = None
     # close
@@ -129,6 +136,69 @@ def auto(body: AutoAsk, db: Session = Depends(get_session)):
 
 
 # --- paper replay: practice on a past day (``engine/paper_replay.py``) -------------------------------------------------
+class RuleCheck(BaseModel):
+    kind: str = Field(..., max_length=20)
+    n: float | None = None
+
+
+class RuleAsk(BaseModel):
+    id: str | None = Field(None, max_length=20)
+    text: str = Field("", max_length=400)
+    check: RuleCheck | None = None
+
+
+class RulesAsk(BaseModel):
+    rules: list[RuleAsk] = Field(..., max_length=20)
+
+
+class EntryAsk(BaseModel):
+    side: Literal["paper", "real"] = "paper"
+    instrument: Literal["stock", "option", "spread"]
+    expiry: str | None = Field(None, max_length=10)
+    size: float | None = Field(None, ge=0, lt=1e9)  # the most it can lose at entry, dollars
+    stop: float | None = Field(None, ge=0, lt=1e6)
+    last4: str | None = Field(None, max_length=4)  # real: the Ticket's account, to find its value on the account line
+
+
+class TicketRulesAsk(EntryAsk):
+    side: Literal["real"] = "real"
+    investigation_id: str = Field(..., max_length=80)
+    order_key: str = Field(..., max_length=64)
+    symbol: str | None = Field(None, max_length=12)
+    answers: dict[str, bool] | None = None
+
+
+@router.get("/rules")
+def rules(db: Session = Depends(get_session)):
+    _settings()
+    return {"rules": trading_rules.current(db), "max": trading_rules.MAX_RULES,
+            "checks": [{"kind": k, "words": v["words"], "n": "min" in v} for k, v in trading_rules.CHECKS.items()]}
+
+
+@router.put("/rules")
+def save_rules(body: RulesAsk, db: Session = Depends(get_session)):
+    _settings()
+    try:
+        return {"rules": trading_rules.save(db, [r.model_dump() for r in body.rules], time.time())}
+    except trading_rules.RulesError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+
+
+@router.post("/rules/check")
+def check_rules(body: EntryAsk, db: Session = Depends(get_session)):
+    _settings()
+    return trading_rules.check_entry(db, body.model_dump(), time.time())
+
+
+@router.post("/rules/ticket")
+def ticket_rules(body: TicketRulesAsk, db: Session = Depends(get_session)):
+    _settings()
+    try:
+        return trading_rules.record_ticket(db, body.model_dump(), time.time())
+    except trading_rules.RulesError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+
+
 # ``GET /copilot/paper/replay``: the replay scorecard, and with ``with_days`` the past trading days offered (every replay run's closed trades,
 # apart from live paper and real trades). ``GET /copilot/paper/replay/day?day=``: the tickers to suggest for a day.
 # ``GET /copilot/paper/replay/bars?day=&symbol=``: that day's minute bars from the Charts history store (refused with the
