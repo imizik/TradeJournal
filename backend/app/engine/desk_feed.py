@@ -19,6 +19,10 @@ Sources, each read on its own (``today._section``): one that fails reads ``unava
 - ``calendar``: this week's earnings for those symbols (the earnings cache only; a cold symbol refreshes in the
   background) and FOMC, CPI and jobs reports today through Sunday (``app/data/macro_calendar.json``).
 - ``brief``: today's morning brief, its saved lines (**Copilot note**).
+- ``tradingview``: his own TradingView alerts that reached the webhook today (**TradingView**, always his: ``mine``, Plan
+  it), newest first, each with what fired and the price at that moment, read from the stored rows only
+  (``tradingview_today``). ``tradingview.last_at`` is the newest stored alert on a ticker he follows, so the screen can
+  say when the last one came on a day with none. In the sandbox (``evidence`` "fixture") two invented ones stand in.
 - ``chatter`` (``app/engine/chatter.py``): r/wallstreetbets buzz (ApeWisdom's counts) and NYT headlines, returned
   apart from ``items`` for the screen's own Chatter filter only: never ranked with the rest, never counted as new, never
   Plan it. ``chatter.sources`` names each source's state (``on``, ``stale``, ``not set up``, ``unavailable``).
@@ -39,7 +43,7 @@ import re
 import threading
 import time as _time
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from sqlmodel import Session, col, select
 
@@ -56,6 +60,7 @@ MAX_SYMBOL_HEADLINES = 10
 PER_SYMBOL_HEADLINES = 2
 MAX_MARKET_HEADLINES = 3
 MAX_BRIEF_LINES = 5
+MAX_TRADINGVIEW = 12
 NEWS_TTL_S = 120
 TEXT = 220
 
@@ -72,6 +77,8 @@ RADAR_KIND = {"relative_to_spy": "vs SPY", "relative_to_sector": "vs sector", "g
               "dip_turn": "Dip turning up", "gap_reversal": "Gap reversal"}
 DESK_RADAR_KINDS = ("relative_to_spy", "relative_to_sector", "dip_turn", "gap_reversal")
 ROLE = {"entry": "Entry", "invalidation": "Invalidation"}
+# Setup-name words TradingView alerts use that read better in capitals ("orb_break" reads "ORB break").
+CAPS = {"orb", "vwap", "ema", "sma", "rsi", "macd", "hod", "lod", "pdh", "pdl", "atr", "or"}
 BROAD = {"SPY", "QQQ", "DIA", "IWM", "VOO", "VTI", "TLT", "GLD", "USO", "UUP"}
 
 
@@ -359,6 +366,81 @@ def _brief(db: Session, day: date, symbols: set[str]) -> dict:
     return {"state": "ok", "rows": rows}
 
 
+def _setup_words(setup: str) -> str:
+    words = [w.upper() if w in CAPS else w for w in setup.split("_") if w]
+    text = " ".join(words) or "Alert"
+    return text[0].upper() + text[1:]
+
+
+def _timeframe_words(timeframe: str) -> str:
+    """TradingView's interval as the desk says it: "5" reads 5m, "60" 1h, "D" 1D."""
+    if timeframe.isdigit():
+        minutes = int(timeframe)
+        return f"{minutes // 60}h" if minutes >= 60 and minutes % 60 == 0 else f"{minutes}m"
+    return timeframe if timeframe[:1].isdigit() else f"1{timeframe}"
+
+
+def _alert_price(value) -> str:
+    number = float(value)
+    return f"{number:,.2f}" if number >= 1 else f"{number:.4f}"
+
+
+def tradingview_words(alert: dict) -> str:
+    """One short line for what fired: "ORB break long · 5m at 94.12"."""
+    return (f"{_setup_words(alert['setup'])} {alert['side']} · {_timeframe_words(alert['timeframe'])} "
+            f"at {_alert_price(alert['price'])}")
+
+
+def _fixture_alerts(now: float) -> list[dict]:
+    """SIMULATED (sandbox only): two invented TradingView alerts today, on the copilot fixture's names."""
+    return [
+        {"alert_id": "fixture:nbis:orb_break:long", "symbol": "NBIS", "setup": "orb_break", "side": "long",
+         "timeframe": "5", "price": 94.12, "at": int(now) - 14 * 60},
+        {"alert_id": "fixture:crwv:vwap_reject:short", "symbol": "CRWV", "setup": "vwap_reject", "side": "short",
+         "timeframe": "2", "price": 131.4, "at": int(now) - 52 * 60},
+    ]
+
+
+def tradingview_today(db: Session, now: float, mode: str = "live", symbol: str | None = None,
+                      limit: int = MAX_TRADINGVIEW) -> list[dict]:
+    """Today's stored TradingView alerts (New York day, by when they reached the webhook), newest first, as
+    ``{alert_id, symbol, setup, side, timeframe, price, at}``. Light columns only; no provider call."""
+    from app.engine import notification_policy as policy
+    from app.models import TRADINGVIEW_ALERT_LIGHT, TradingViewAlert
+    if mode == "fixture":
+        return [a for a in _fixture_alerts(now) if symbol is None or a["symbol"] == symbol][:limit]
+    start, end = policy.day_bounds(now)
+    query = (select(TradingViewAlert).options(*TRADINGVIEW_ALERT_LIGHT)
+             .where(TradingViewAlert.received_at >= start, TradingViewAlert.received_at < end))
+    if symbol is not None:
+        query = query.where(TradingViewAlert.symbol == symbol)
+    rows = db.exec(query.order_by(col(TradingViewAlert.received_at).desc()).limit(limit)).all()
+    return [{"alert_id": r.alert_id, "symbol": r.symbol, "setup": r.setup, "side": r.side, "timeframe": r.timeframe,
+             "price": float(r.price), "at": _utc_epoch(r.received_at)} for r in rows]
+
+
+def _last_alert_at(db: Session, now: float, mode: str, blocked: set[str]) -> int | None:
+    """When the newest stored alert on a ticker he follows came in."""
+    from app.models import TradingViewAlert
+    if mode == "fixture":
+        return max(a["at"] for a in _fixture_alerts(now))
+    query = select(TradingViewAlert.received_at)
+    if blocked:
+        query = query.where(col(TradingViewAlert.symbol).not_in(sorted(blocked)))
+    found = db.exec(query.order_by(col(TradingViewAlert.received_at).desc()).limit(1)).first()
+    return _utc_epoch(found) if found is not None else None
+
+
+def _tradingview(db: Session, now: float, mode: str) -> dict:
+    rows = []
+    for alert in tradingview_today(db, now, mode):
+        item = _item("TradingView", alert["alert_id"], alert["at"], tradingview_words(alert), symbol=alert["symbol"],
+                     plan="own")
+        item["href"] = f"/signals/{quote(alert['alert_id'], safe='')}" if mode != "fixture" else None
+        rows.append(item)
+    return {"state": "ok", "rows": rows}
+
+
 # --------------------------------------------------------------------------- the feed
 
 def rank(items: list[dict], now: float) -> list[dict]:
@@ -369,7 +451,7 @@ def rank(items: list[dict], now: float) -> list[dict]:
     return past + ahead
 
 
-def build(db: Session, now: float) -> dict:
+def build(db: Session, now: float, mode: str = "live") -> dict:
     """The feed at ``now`` as ``GET /copilot/desk/feed`` returns it."""
     from app.routers import today
     day = datetime.fromtimestamp(now, ET).date()
@@ -391,7 +473,9 @@ def build(db: Session, now: float) -> dict:
     setups = today._section(db, "feed radar setups", lambda: _setups(db, day))
     brief = today._section(db, "feed brief", lambda: _brief(db, day, mine))
     calendar = today._section(db, "feed calendar", lambda: _calendar(symbols, day, now))
-    parts = {"pings": pings, "plans": plans, "radar": ahead["radar"].get(), "radar setups": setups, "brief": brief, "calendar": calendar}
+    tradingview = today._section(db, "feed tradingview", lambda: _tradingview(db, now, mode))
+    parts = {"pings": pings, "plans": plans, "radar": ahead["radar"].get(), "radar setups": setups, "brief": brief, "calendar": calendar,
+             "tradingview": tradingview}
     if since["state"] == "ok":
         parts["news"], parts["market news"] = ahead["news"].get(), ahead["market news"].get()
     else:
@@ -414,7 +498,7 @@ def build(db: Session, now: float) -> dict:
              and not (named and (named.search(i["text"]) or named.search(i["detail"] or "")))]
     for item in items:
         item.pop("kind", None)
-        own = item["source"] in ("Alert", "Plan", "Copilot note")  # always about his book, his plans or his day
+        own = item["source"] in ("Alert", "Plan", "Copilot note", "TradingView")  # always his book, plans, day or alerts
         item["mine"] = own or item["symbol"] in mine
         item["upcoming"] = item["at"] > now
         if item["plan"] is None and item["source"] in ("Alert", "Plan") and item["symbol"] in mine:
@@ -428,6 +512,9 @@ def build(db: Session, now: float) -> dict:
     else:  # not knowing what is hidden, chatter (which names tickers) stays out
         from app.engine.chatter import off
         chatter = off()
+    last = None
+    if hidden["state"] == "ok" and tradingview["state"] == "ok":
+        last = today._section(db, "feed tradingview last", lambda: {"state": "ok", "at": _last_alert_at(db, now, mode, blocked)})
     return {"as_of": today._iso(now), "now": int(now), "day": day.isoformat(), "items": shown, "total": len(ranked),
             "sources": states, "unavailable": sorted(n for n, s in states.items() if s == "unavailable"),
-            "chatter": chatter}
+            "chatter": chatter, "tradingview": {"last_at": (last or {}).get("at")}}

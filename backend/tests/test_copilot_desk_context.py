@@ -722,3 +722,22 @@ def test_a_whole_day_of_minutes_draws_as_candles_that_fit():
     assert candles[1]["extended"] is False  # one regular minute makes the candle regular
     assert len(desk_context._candles(minutes[:100])) == 50  # a short day still groups by two minutes
     assert desk_context._candles([]) == []
+
+
+def test_the_chart_marks_his_tradingview_alerts_today_on_its_symbol_and_none_when_not_followed(lab, engine, monkeypatch):  # noqa: F811
+    from tests.test_copilot_desk_feed import tv_alert
+    investigation(engine)
+    with Session(engine) as db:
+        tv_alert(db, "NBIS", 40)  # 10:40 ET
+        tv_alert(db, "CRWV", 41)  # another symbol
+        tv_alert(db, "NBIS", -60 * 24, n=1)  # yesterday
+        db.commit()
+    monkeypatch.setattr(desk_context, "today_minutes", lambda symbol: bars())
+    body = lab.get(f"/copilot/desk/{NBIS}/chart").json()
+    assert [(m["kind"], m["at"], m["text"]) for m in body["marks"]] == [
+        ("tradingview", int(epoch(T0 + timedelta(minutes=40))), "ORB break long · 5m at 94.12")]
+    with Session(engine) as db:
+        db.add(DayJournalEntry(operation_id="f1", day=date(2026, 10, 21), kind="follow", symbol="NBIS",
+                               text="Not following", created_at=T0))
+        db.commit()
+    assert lab.get(f"/copilot/desk/{NBIS}/chart").json()["marks"] == []

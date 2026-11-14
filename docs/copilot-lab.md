@@ -747,14 +747,20 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
 - **Feed** (`components/copilot/DeskFeed.tsx`, `GET /copilot/desk/feed`, `app/engine/desk_feed.py`): one stream of what
   the app already knows today, so there is a reason to open the desk that is not a ping. Its tab carries a grey count of
   his own items (Mine) new since the Feed was last opened in this browser; Ideas and Market never add to it. Each item is one row: its source (**Alert**, **Plan**,
-  **Radar**, **Radar setup**, **News**, **Calendar**, **Copilot note**), its time, its symbol and one or two plain
+  **Radar**, **Radar setup**, **News**, **Calendar**, **Copilot note**, **TradingView**), its time, its symbol and one or two plain
   sentences. Sources: the phone pings judged today, sent or held (position alerts; plan pings for an entry or
   invalidation reached and a time stop; the position companion's updates as Copilot notes), plan time stops still ahead
   and a plan level that fired without a ping, today's Radar events and setup cards (a card shows its level, contract
   and his record as the desk's Radar card does, and stands for its event), headlines since the previous close naming a
   symbol he holds or has a live plan on (catalysts first, two per symbol) and up to three market-wide ones (Fed, CPI,
   yields...), this week's earnings for those symbols (the earnings cache only) and FOMC, CPI and jobs reports today
-  through Sunday, and the morning brief's saved lines as Copilot notes. Nothing calls a model. Order: items on his book,
+  through Sunday, the morning brief's saved lines as Copilot notes, and his own **TradingView** alerts that reached the
+  webhook today (stored rows only, at most 12: what fired as "ORB break long · 5m at 94.12", its time and how long ago;
+  always under Mine and counted as new, with Ask, Plan it, **Show on chart** (the ticker on the desk chart, where its
+  marker sits) and **On Signals** (the stored alert); no sound, no pop-up). A day with none yet ends Mine with one grey
+  line, "No TradingView alerts today. Last one Thu 15:42." (the newest stored alert on a ticker he follows; nothing if
+  there has never been one), so a quiet webhook reads as quiet. The sandbox (`COPILOT_EVIDENCE=fixture`) shows two
+  invented alerts instead of stored ones. Nothing calls a model. Order: items on his book,
   plans and day first, then the rest, each newest first, then **Coming up**, soonest first; at most 40 rows (8 ahead),
   with the total. A ticker set to not followed is left out of every source, including a headline, Radar event or
   brief line that names it among others (if that setting cannot be read, only the macro calendar shows). Each source fails on its own and is left out quietly. Four groups
@@ -954,8 +960,9 @@ The cockpit's panes in detail:
     candle shown (amber arrows, up for a buy and down for a sell; at the fill's price for shares, at the underlying's
     recorded price for an option, else on the candle; a mark with no candle of its own, such as an extended-hours
     fill on the 15m candles, sits on the nearest one; Webull left out; at most 40); today's **phone pings** sent on
-    the symbol (violet circles, the session strip's ping reader) and **Radar hits** (blue squares, the Radar store
-    read-only, none when it is off); and on 2m and 15m a **time stop** still ahead as a dashed vertical line at its
+    the symbol (violet circles, the session strip's ping reader), **Radar hits** (blue squares, the Radar store
+    read-only, none when it is off) and his **TradingView alerts** today on the symbol (pink circles, stored rows only,
+    what fired on hover; none on a ticker he does not follow); and on 2m and 15m a **time stop** still ahead as a dashed vertical line at its
     time past the last candle, labelled, with room kept for it on the right. Hovering a mark (within 10 px, so a full
     day of 2m candles still answers) shows what it was and its New York time; the readout row shows the candle under
     the crosshair (time in New York, OHLC, pre-market or after hours). Drag or a horizontal swipe pans, the wheel or
