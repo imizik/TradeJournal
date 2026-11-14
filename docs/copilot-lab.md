@@ -3124,7 +3124,8 @@ instrument question needs real contracts, not just marks of the ones held.
 
 When the owner asks for something the desk already does by hand ("alert me if NBIS loses 98", "show me NBIS on the
 15-minute", "watch IREN", "mark 102.50 as resistance", "build the 100 call for Dec 18", "move my stop on the NBIS plan to
-96"), the desk's copilot calls `desk_action` (`app/ai/copilot_actions.py`; offered to the desk job only, never the phone
+96", "close my NBIS calls", "sell half my NBIS", "note on NBIS: took profit into the wall", "plan the IREN Radar setup"),
+the desk's copilot calls `desk_action` (`app/ai/copilot_actions.py`; offered to the desk job only, never the phone
 chat) and the answer carries a card instead of only words. The tool writes nothing: it checks the request against the
 desk and returns the card, streamed as a `proposal` event with `kind: "desk_action"` and saved with the answer like any
 card (its outcome too). At most three per answer; the copilot offers one only when he asked for it in that message, and
@@ -3134,8 +3135,15 @@ The checks (`copilot_actions.act`): a ticker set to Not following gets no card o
 nothing); a price must be within 50% of the last quote (one quote read through the turn's evidence) and an alert on the
 side it names; a plan stop or a ticket needs exactly one saved plan in the symbol (none or several: the copilot asks); a
 ticket's plan must be a long call or put plan not yet entered, of the same option type; watch and unwatch read the
-Watching list. The desk's own state is read from the database (`read_state`, no quote read), in fixture turns too, so
-the sandbox exercises the cards end to end; only the prices are simulated there.
+Watching list. A close, trim or note card needs the position in his book (`_held`: the journal's open positions in the
+symbol, with Robinhood's quantity, P&L and mark where the snapshot the desk already holds in memory matches, plus the ones
+only Robinhood shows; never a Robinhood or quote read): none says so, more than one that fits asks which (the contract
+he names picks one), a long and a short leg of one type, expiry and account in the same size are one vertical spread and
+close together, a short single leg or shares get no closing ticket, and a note needs a journal trade (a spread's goes on
+its bought leg). A trim sells `quantity` contracts or `half` (rounded down, at least one), never more than he holds. A
+plan card needs today's Radar setup card in the symbol with its Plan it still open (`_ideas`; a Scanner pick plans from
+the same card); a long and a short one asks which. The desk's own state is read from the database (`read_state`, no
+quote read), in fixture turns too, so the sandbox exercises the cards end to end; only the prices are simulated there.
 
 | Card | The line | After the tap (`frontend/lib/deskAction.ts`) |
 | --- | --- | --- |
@@ -3145,12 +3153,18 @@ the sandbox exercises the cards end to end; only the prices are simulated there.
 | `draw` | "Draw 102.50 on NBIS · resistance" | A level in the shared chart settings (`useChartSettings`, `PUT /charts/settings`), on the desk chart and in Charts. |
 | `ticket` | "Open ticket: NBIS 100 call Dec 18", or with `short_strike` "Open ticket: NBIS 100/110 call debit spread Dec 18" | The Ticket tab on that saved plan with the contract or the vertical (`openTicket`, as the Chain's Put on ticket): copy-only, nothing is sent. A spread goes on the plan its direction fits (rises: a call plan; falls: a put plan). |
 | `plan_stop` | "Update plan: NBIS stop 92.30 → 96.00" | The plan's invalidation alert armed at the new price (`POST /charts/alerts/{id}/rearm`). The saved pre-trade capture keeps the words it was confirmed with. |
+| `close` | "Close NBIS 100 call Nov 20 · all 3", under it the P&L and about what it brings at the mark (Robinhood's numbers; none for a journal-only position) | The Ticket tab's closing view at the mark now (`closeNowTicket` in `lib/closingTicket.ts`, from the desk's own book row and its live prices): sell to close, or for a held vertical the closing spread (sell the bought leg, buy back the sold one) at the net mark, a credit or a debit. Copy-only, as "Close at target/stop": nothing is placed, staged or sent. |
+| `trim` | "Trim NBIS 100 call Nov 20 · sell 1 of 3, 2 left" | The same view for that many contracts, saying how many are left. |
+| `note` | "Note on NBIS 100 call Nov 20: took profit into the wall" | `POST /copilot/desk/notes` on the journal trade, as the book row's pen; the note shows under the row at once. |
+| `plan_idea` | "Plan it: IREN dip turning up", the setup card's levels under it | Today's setup card opened on the desk (`/copilot-lab?symbol=…&radar=…`, the Feed's and the Scanner's own Plan it link), whose Plan it he taps to save the plan. |
 
 A card more than a day old, a price card whose ticker has moved more than 5% since it was made (or whose level is now on
-the other side), and a plan card whose stop alert has changed or gone say so and ask again instead of acting. Every tap
+the other side), a plan card whose stop alert has changed or gone, and a close or trim card whose position the book no
+longer shows in the size it was made for say so and ask again instead of acting. Every tap
 goes through the same owner-only route as the action by hand; there is no new route. A saved plan's target cannot be
 changed by hand on the desk yet, so there is no card for it. Tests: `backend/tests/test_copilot_desk_actions.py`,
-`frontend/e2e/copilot-desk-actions.spec.ts`.
+`backend/tests/test_copilot_desk_exits.py`, `frontend/e2e/copilot-desk-actions.spec.ts`,
+`frontend/e2e/copilot-desk-exits.spec.ts`.
 
 ## Confirm a plan
 

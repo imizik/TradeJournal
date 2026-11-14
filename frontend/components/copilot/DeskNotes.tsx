@@ -9,7 +9,7 @@
 
 import { NotebookPen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { NOTE_MAX, addDeskNote, getDeskNotes, type DeskNote, type DeskNotes, type NoteTarget } from "@/lib/deskNotes";
+import { NOTE_MAX, NOTE_SAVED_EVENT, addDeskNote, getDeskNotes, type DeskNote, type DeskNotes, type NoteTarget } from "@/lib/deskNotes";
 import { cn } from "@/lib/utils";
 
 const ET = "America/New_York";
@@ -46,10 +46,17 @@ export function useDeskNotes(trades: string[], fills: string[]): DeskNotesState 
       .then(setData).catch(() => { /* notes are extra: the book reads without them */ });
     return () => controller.abort();
   }, [tradeKey, fillKeyList]);
-  const save = useCallback(async (target: NoteTarget, text: string) => {
-    const saved = await addDeskNote(target, text);
-    setData(current => ({ ...current, trades: { ...current.trades, [saved.trade_id]: [...(current.trades[saved.trade_id] ?? []), saved.note] } }));
+  const add = useCallback((saved: { trade_id: string; note: DeskNote }) => {
+    setData(current => current.trades[saved.trade_id]?.some(n => n.id === saved.note.id) ? current
+      : { ...current, trades: { ...current.trades, [saved.trade_id]: [...(current.trades[saved.trade_id] ?? []), saved.note] } });
   }, []);
+  const save = useCallback(async (target: NoteTarget, text: string) => { add(await addDeskNote(target, text)); }, [add]);
+  // A note the copilot's card saved shows under its row at once, as the pen's own does.
+  useEffect(() => {
+    const onSaved = (event: Event) => { const saved = (event as CustomEvent<{ trade_id: string; note: DeskNote }>).detail; if (saved?.note) add(saved); };
+    window.addEventListener(NOTE_SAVED_EVENT, onSaved);
+    return () => window.removeEventListener(NOTE_SAVED_EVENT, onSaved);
+  }, [add]);
   return useMemo(() => ({ data, open, setOpen, save }), [data, open, save]);
 }
 

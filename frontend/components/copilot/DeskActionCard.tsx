@@ -15,8 +15,12 @@ import { CHART_SETTINGS_SAVED, readChartSettings, useChartSettings } from "@/lib
 import { applyEdit, MAX_LEVELS } from "@/lib/drawings";
 import type { Proposal, ProposalOutcome } from "@/lib/copilot";
 import { freshQuote } from "@/lib/copilot";
-import { DESK_CHANGED_EVENT, DESK_VIEW_EVENT, Stale, actionLine, actionVerb, applyShow, arrived, runAction, showOnDesk, staleByAge, staleByPrice, undoFor,
-  undoShow, type CentreTab, type DeskAction, type DeskView, type Done } from "@/lib/deskAction";
+import { DESK_CHANGED_EVENT, DESK_GO_EVENT, DESK_POSITION_EVENT, DESK_VIEW_EVENT, Stale, actionLine, actionVerb, applyShow, arrived, heldFacts, revealCentre,
+  rowForLeg, runAction, showOnDesk, staleByAge, staleByPrice, ticketDone, ticketFromBook, undoFor, undoShow, type CentreTab, type DeskAction,
+  type DeskView, type Done, type PositionDetail } from "@/lib/deskAction";
+import type { DeskThread } from "@/lib/desk";
+import { peekDeskTicks } from "@/lib/deskTicks";
+import { openClosingTicket } from "@/components/copilot/DeskTicket";
 import { cn } from "@/lib/utils";
 
 export type DeskActionProposal = Extract<Proposal, { kind: "desk_action" }>;
@@ -121,6 +125,21 @@ export default function DeskActionCard({ proposal, onOutcome }: { proposal: Desk
       setPhase("drawing");
       return;
     }
+    if (card.action === "close" || card.action === "trim") {
+      // The desk's own book row as it is now, priced at the mark the desk holds: the Ticket tab's closing view, copy-only.
+      const detail: PositionDetail = { symbol: card.symbol, legs: card.legs, rows: null };
+      if (window.dispatchEvent(new CustomEvent(DESK_POSITION_EVENT, { detail, cancelable: true })) || !detail.rows) { setNoDesk(true); return; }
+      try {
+        const ticket = ticketFromBook(card, detail.rows, peekDeskTicks());
+        openClosingTicket(ticket);
+        revealCentre(); // on a phone the copilot's sheet gives way to the ticket
+        finish({ text: ticketDone(ticket), symbol: card.symbol });
+      } catch (failure) {
+        setNote(failure instanceof Error ? failure.message : "No ticket was opened. Try again.");
+        setPhase(failure instanceof Stale ? "stale" : "failed");
+      }
+      return;
+    }
     setPhase("working");
     try {
       finish(await runAction(card, Date.now() / 1000));
@@ -131,6 +150,7 @@ export default function DeskActionCard({ proposal, onOutcome }: { proposal: Desk
     }
   }
 
+  const facts = phase === "done" ? null : card.action === "plan_idea" ? card.levels_line : heldFacts(card);
   const reveal = (symbol: string) => { showOnDesk({ symbol, tab: "chart", reveal: true }); };
   const undo = () => { if (undoShow(id)) setUndone(true); };
   const canUndo = card.action === "show" && phase === "done" && !undone && !!undoFor(id);
@@ -139,6 +159,7 @@ export default function DeskActionCard({ proposal, onOutcome }: { proposal: Desk
     <section aria-label="Desk action" data-testid="desk-action" data-action={card.action} data-phase={phase}
       className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded border border-primary/30 bg-primary/5 p-2 text-xs">
       <p className="min-w-0 flex-1 basis-48 font-medium text-foreground">{actionLine(card)}</p>
+      {facts && <p data-testid="desk-action-facts" className="basis-full text-muted-foreground tabular-nums">{facts}</p>}
       {phase === "drawing" && card.action === "draw" && <DrawLevel card={card} onDone={finish} onFail={fail} />}
       {(phase === "open" || phase === "failed") && (
         <button type="button" onClick={() => void tap()} className={cn(BUTTON, "bg-primary text-primary-foreground")}>{actionVerb(card)}</button>
@@ -171,12 +192,26 @@ export default function DeskActionCard({ proposal, onOutcome }: { proposal: Desk
  * the Chart) and reports what it replaced for Undo; a tap that changed a list reads the desk again; a phone's "Show it"
  * (``reveal``) closes the copilot's sheet onto the centre.
  */
-export function useDeskActionHost({ picked, tab, setPicked, setPickedKey, setTab, setRefresh, setSheet }: {
-  picked: string | null; tab: CentreTab; setPicked(symbol: string | null): void; setPickedKey(key: string | null): void;
-  setTab(tab: CentreTab): void; setRefresh(next: (n: number) => number): void; setSheet(open: boolean): void;
+export function useDeskActionHost({ picked, tab, rows, go, setPicked, setPickedKey, setTab, setRefresh, setSheet, showCentre }: {
+  picked: string | null; tab: CentreTab; rows: readonly DeskThread[]; go(href: string): void; setPicked(symbol: string | null): void;
+  setPickedKey(key: string | null): void; setTab(tab: CentreTab): void; setRefresh(next: (n: number) => number): void; setSheet(open: boolean): void;
+  /** The desk's own "the selected ticker's tools come forward": a phone's ticker view, the centre below 1180 px. */
+  showCentre(): void;
 }) {
-  const now = useRef({ picked, tab });
-  useEffect(() => { now.current = { picked, tab }; }, [picked, tab]);
+  const now = useRef({ picked, tab, rows });
+  useEffect(() => { now.current = { picked, tab, rows }; }, [picked, tab, rows]);
+  // A position card asks for its book rows; a plan card follows the Feed's own Plan it link in place.
+  useEffect(() => {
+    const onPosition = (event: Event) => {
+      event.preventDefault();
+      const detail = (event as CustomEvent<PositionDetail>).detail;
+      detail.rows = detail.legs.map(leg => rowForLeg(now.current.rows, detail.symbol, leg));
+    };
+    const onGo = (event: Event) => { event.preventDefault(); go((event as CustomEvent<{ href: string }>).detail.href); };
+    window.addEventListener(DESK_POSITION_EVENT, onPosition);
+    window.addEventListener(DESK_GO_EVENT, onGo);
+    return () => { window.removeEventListener(DESK_POSITION_EVENT, onPosition); window.removeEventListener(DESK_GO_EVENT, onGo); };
+  }, [go]);
   useEffect(() => {
     const onView = (event: Event) => {
       event.preventDefault();
@@ -185,7 +220,7 @@ export function useDeskActionHost({ picked, tab, setPicked, setPickedKey, setTab
       if (detail.tab) { detail.was.tab = now.current.tab; setTab(detail.tab); }
       if (detail.reveal && window.matchMedia("(max-width: 1179px)").matches) { // the sheet layout (CopilotLab.module.css)
         setSheet(false);
-        document.getElementById("desk-centre")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        showCentre();
       }
     };
     const onChanged = (event: Event) => {
@@ -195,5 +230,5 @@ export function useDeskActionHost({ picked, tab, setPicked, setPickedKey, setTab
     window.addEventListener(DESK_VIEW_EVENT, onView);
     window.addEventListener(DESK_CHANGED_EVENT, onChanged);
     return () => { window.removeEventListener(DESK_VIEW_EVENT, onView); window.removeEventListener(DESK_CHANGED_EVENT, onChanged); };
-  }, [setPicked, setPickedKey, setTab, setRefresh, setSheet]);
+  }, [setPicked, setPickedKey, setTab, setRefresh, setSheet, showCentre]);
 }
