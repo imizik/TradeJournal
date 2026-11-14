@@ -1,0 +1,50 @@
+{
+  "protocol_id": "qqq-orb-20261114-v1",
+  "registered": "2026-11-14",
+  "registered_before": "any result of this rule on QQQ was computed here. Already known: opening range breakouts on stocks in play lost money after tape fills (#803, mostly because the spread was large next to a 0.10 ATR stop) and showed no evidence on 2024-2026 bars (#794); 15 Strategy Factory ORB candidates on 18 large stocks plus SPY (2023-07 to 2024-09) failed screen (research/notes/orb-readiness-2026-10-25.md). The opening lab (research/opening_lab) scored a fade-the-first-five-minutes and a 15-minute ORB baseline as ten-minute direction forecasts on SPY and QQQ for July 1 to October 27, 2026; no stop, target or close exit was evaluated there. The rule is copied from Zarattini and Aziz (2023), 'Can Day Trading Really Be Profitable?' (SSRN 4416622), read from the paper's own text on 2026-11-14; the paper reports a 24% win rate and +0.13R a trade on QQQ from 2016-01 to 2023-02-17 with commissions only (no spread, no slippage). An independent replication on Nasdaq 100 CFDs (MQL5 blog, 2026-09-25) reported +0.13R gross and about zero net. This is the 18th opening breakout attempt in this repository's records, so the interval below is wider than the earlier tests'.",
+  "question": "Does the paper's 5-minute QQQ opening range breakout make money a trade after real fills from the consolidated tape, from 2016 to 2026, and does it still work after the paper was published?",
+  "why_it_matters": "The owner wants an opening breakout that works. QQQ trades a cent wide while its first five-minute range is usually much wider, so the cost that sank the stocks-in-play version is small here. A pass would be a daily morning setup on the desk, paper first.",
+  "sessions": "every regular QQQ session from 2016-01-04 to 2026-11-13, New York time, except the 21 early closes (13:00) listed in the script (the earlier studies' lists; none in 2026 before November 13)",
+  "data": "Alpaca SIP one-minute bars for QQQ, unadjusted (QQQ did not split in these years); SIP trades and quotes for QQQ, read only at the moments the rules below ask about. Market data only.",
+  "rules": {
+    "first_candle": "the 09:30 to 09:34 minute bars: open of 09:30, high and low over the five, close of 09:34. A session missing any of these five bars, or the 09:35 bar, has no trade",
+    "direction": "long if the first candle's close is above its open, short if below; no trade if they are equal (the paper's doji)",
+    "reference_price": "P = the open of the 09:35 minute bar (the paper's entry price)",
+    "stop": "the first candle's low for a long, its high for a short",
+    "risk": "R = P minus the stop for a long, the stop minus P for a short, in dollars a share. No trade if R is not above zero",
+    "target": "P plus 10 R for a long, P minus 10 R for a short, rounded to the cent",
+    "entry": "a market order sent at 09:35:00 reaches the market one second later and fills at the ask (long) or bid (short) in effect then",
+    "stop_fill": "the first confirmed tape trade at or beyond the stop, from the entry until 15:58:59, sends a market order that fills one second later at the bid (long) or ask (short); with no valid quote, at the stop",
+    "target_fill": "a resting limit order fills at the target when a confirmed tape trade prints at least one cent beyond it (the target plus or minus a cent, rounded to the cent), before the stop is reached; a stop and a target trade at the same moment count as the stop",
+    "close": "otherwise a market order at 15:59:00 fills one second later at the bid (long) or ask (short); with no valid quote, the close of the last minute bar at or before 15:59",
+    "confirmed_trade": "a trade of at least 100 shares within the quote in effect, widened by the larger of a cent and 0.2% of the midpoint (the top-5 study's rule)",
+    "measure": "net R a trade = (exit fill minus entry fill) x direction, over R. The spread is inside the fills; no commission (the owner's broker charges none)",
+    "stress": "an extra cent a share on each side"
+  },
+  "test": {
+    "statistic": "mean net R a trade over all sessions with a trade; a trade with no valid quote at its entry is counted but left out of the mean",
+    "uncertainty": "2,000 bootstrap resamples of calendar months (seed 20261114), each month's trades kept together; two-sided percentile interval at 99%, wider than the usual 95% because of the earlier opening breakout attempts"
+  },
+  "periods": {"first": "2016-01-04 to 2019-12-31", "second": "2020-01-01 to 2023-02-17 (the rest of the paper's sample)", "third": "2023-02-21 to 2026-11-13 (after the paper was published)"},
+  "decisions": {
+    "worth a paper test": "the interval's lower end is above 0, the mean is above 0 in each of the three periods, and the mean with the extra cent is above 0",
+    "loses money": "the interval's upper end is below 0",
+    "no evidence either way": "anything else",
+    "what_each_allows": "Worth a paper test: a morning QQQ paper book on the desk with these exact rules (shares, tape-like fills) before any money; options are a later, separate question. Otherwise the 5-minute QQQ opening range breakout is closed with no variants (other range lengths, stops, targets, symbols or filters) on any history"
+  },
+  "descriptive_only": [
+    "sessions, trades, dojis, sessions without the bars, trades with no fill quote; win rate, mean and median R; exits by type",
+    "long and short sides separately; by year; without the best 1% of months",
+    "the paper's version on one-minute bars (entry at P, stop and target at their levels, stop first when one bar reaches both, close at the 15:59 bar's close, no costs), to compare with the paper's +0.13R",
+    "the same tape rules with no target (out at the stop or the close)",
+    "entry spread in R; trades by the size of R (cents) in quintiles"
+  ],
+  "limits": [
+    "fills assume the displayed best quote one second after the order; real routing can differ, and the one-second delay is a stated assumption",
+    "the 09:30 bar's open is the first consolidated trade after the bell, which can differ from the official opening auction price the paper may have used",
+    "the close exit is a market order at 15:59 at the quote, not the closing auction",
+    "on days with a very small first candle, R is tiny and a cent of spread is a large part of it; the paper has no minimum and neither does this test"
+  ],
+  "results": "Market data only: the aggregate results are committed beside this protocol after the single run; the downloaded data stays outside the repository.",
+  "one_run": "one historical run under this id. A changed constant is a new protocol id, recorded beside this one"
+}
