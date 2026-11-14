@@ -1848,8 +1848,8 @@ Measured 2026-11-13 in market hours (UX sandbox with live market data, productio
 are 12 of them (`GET /copilot/desk/ticks` every 5 s, § Live prices); the rest:
 
 - **One clock, one request a minute** (`frontend/lib/deskMinute.ts`). The book, session, Watching, what's moving,
-  sparklines, Feed, unusual options, scanner picks, armed plans, exposure, saved conversations, data health and the
-  centre chart each read on mount as before (a cold page never waits on the slowest), then re-read on one shared minute beat
+  sparklines, Feed, unusual options, scanner picks, armed plans, exposure, saved conversations, data health, the paper
+  book and the centre chart each read on mount as before (a cold page never waits on the slowest), then re-read on one shared minute beat
   (`everyDeskMinute`); what they ask during the beat goes out as `GET /copilot/desk/minute?read=…`
   (`backend/app/engine/desk_minute.py`), each read dispatched through the whole app with the browser's own headers and
   answered exactly as its own route would (status and body, its own `Server-Timing` and timings entry), in order. Only
@@ -2007,6 +2007,48 @@ row or a fill whose email is not in yet has no pen until the journal has the tra
 The anchor is two nullable columns on `trade_capture_note` (`account_id`, `source_key`), and its `capture_id` may now
 be empty (additive migration `e2c6a8f4b1d9`, no backfill). Proof: `backend/tests/test_desk_trade_notes.py`,
 `frontend/e2e/copilot-desk-notes.spec.ts`.
+
+### Paper
+
+His own paper trading on the desk: trade the way he would on Robinhood, with no money, and see whether he is right. It
+is separate from the copilot's shadow book and the scanner's paper trades, and from every real book.
+
+- **Paper buttons.** "Paper trade it" on a plan's Ticket (one contract or the vertical it builds; its quantity, and the
+  plan's thesis, invalidation and target as the note, stop and target), "Paper" on the Chain tab's picked contract or
+  spread, and "Paper buy SYMBOL shares" in the Paper section for the selected ticker. A tap reads one live quote and
+  shows what it would fill at; nothing fills until "Fill on paper", which re-reads the quote and fills at that moment's.
+- **Fills on a live quote only** (`POST /copilot/paper/orders`, `backend/app/engine/paper_book.py`): in the regular
+  session, each leg bought at its ask and each sold at its bid, and only when both sides of every leg's quote were
+  updated in the last two minutes (`setup_scanner._fresh`, the shadow book's rule, against the scanner's
+  `MAX_DELAY_SECONDS`). Otherwise it is refused with the quote's time; a closed market, no quote or no usable bid and ask
+  is refused too. The quote is one read through the chart feed (its single-flight and minute budget). A spread fills at
+  the natural price; a credit spread with no credit there, or a debit spread that costs nothing, is refused. Refused on
+  fixture or replay evidence. Each confirm carries one key, so a retried Fill on paper records one fill; orders on a
+  run go one at a time (its row is locked until the fill is stored), and a close of more than is left counts only for
+  what was left, so two closes racing never make cash.
+- **The account** (`POST /copilot/paper/runs`): he names the starting cash (default $10,000). Cash is the start plus
+  every fill's cash; options use the ×100 multiplier; a credit spread holds its width as collateral, as Robinhood does,
+  so buying power is the cash less it and falls by the spread's most-to-lose. An order he cannot pay for is refused with
+  what it needs. A new run starts fresh cash; every older run keeps its history ("Earlier runs" under Progress).
+- **Positions** sit in the Paper section under the book, its dashed amber frame and "not real money" tag keeping it
+  apart from real money. The account's value is its cash plus each position's worth at those same prices. Each shows P&L
+  from the desk's own live ticks (its legs ride the one ticks read; no new
+  polling), else the server's newest kept price greyed with its time, else "No price yet", never a zero. Close and Trim
+  read a live quote first and fill at the bid (a leg sold short is bought back at the ask). An option or spread still
+  open after its expiration's close settles at intrinsic value from the underlying's regular-session close (the stored
+  close, else one daily-history read), 15 minutes after the close; with no close yet it says so and waits.
+- **Progress.** One line always (paper and real closed P&L and win rates since the run started); "Progress" opens the
+  scorecard: closed P&L (as the journal counts a trade: once the position is fully closed, on its close day; a trim
+  waits for the rest), trades, win rate, average winner and loser and largest loss for paper beside his real closed
+  trades over the same dates (the journal's `trade` rows, read only, Webull left out), closed P&L by day for both, each
+  closed paper trade with its note and how it ended against his stop and target (stock prices: took the target, out at
+  the stop and how far past it, out before either, held to expiry).
+- **Stored apart and append-only.** `paper_run` (one row per run) and `paper_event` (each fill: open, close or expire;
+  a position is their fold), additive migration `a7c3e9f1b5d2`. Nothing here writes fills, trades, accounts, real P&L,
+  notifications or the shadow and scanner books, calls Robinhood or places an order anywhere. `GET /copilot/paper` is
+  one of the desk's minute reads. The copilot does not read the paper book (its tool list is unchanged).
+
+Proof: `backend/tests/test_paper_book.py`, `frontend/e2e/copilot-desk-paper.spec.ts`.
 
 ## Chatter
 

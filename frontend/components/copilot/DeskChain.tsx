@@ -4,6 +4,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiUrl } from "@/lib/api";
 import { tickFor, useDeskTicks } from "@/lib/deskTicks";
 import { useDeskWalls, wallsLine, type DeskWalls } from "@/lib/deskWalls";
+import { PaperButton } from "@/components/copilot/DeskPaper";
 import type { TicketPlan } from "@/components/copilot/DeskTicket";
 import type { UnusualRow } from "@/components/copilot/DeskUnusual";
 import { isBullish, spreadFigures, spreadLabel, spreadNet, spreadWords } from "@/lib/spreadTicket";
@@ -494,6 +495,7 @@ function Actions({ pick, cell, plans, onCheck, onPlan, onTicket, onClose, buildi
           <button type="button" className={button} onClick={() => onPlan(pick, line)}>Plan it</button>
           <button type="button" className={button} disabled={!plan} onClick={() => plan && onTicket(plan.investigation_id, pick)}>Put on ticket</button>
           <button type="button" className={button} onClick={onSpread}>Make it a spread</button>
+          <PaperButton key={label} order={{ instrument: "option", symbol: pick.symbol, option_type: pick.side, expiry: pick.expiry, strike: pick.strike }} label="Paper" />
           <button type="button" onClick={onClose} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Close</button>
         </div>
       )}
@@ -581,6 +583,7 @@ function SpreadActions({ long, short, longCell, shortCell, plans, spot, onPlan, 
       <div className="flex flex-wrap gap-2">
         <button type="button" className={button} onClick={() => onPlan(pick, line)}>Plan it</button>
         <button type="button" className={button} disabled={!plan} onClick={() => plan && onTicket(plan.investigation_id, pick)}>Put on ticket</button>
+        <PaperButton key={label} order={{ instrument: "spread", symbol: long.symbol, option_type: kind, expiry: long.expiry, long_strike: long.strike, short_strike: short.strike }} label="Paper" />
         <button type="button" onClick={onBack} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Back to one contract</button>
         <button type="button" onClick={onClose} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Close</button>
       </div>

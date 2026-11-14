@@ -10,6 +10,7 @@ import CheckACall from "@/components/copilot/CheckACall";
 import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
 import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
+import DeskPaper, { usePaperBook } from "@/components/copilot/DeskPaper";
 import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
 import DeskRoll from "@/components/copilot/DeskRoll";
 import type { RollFrom } from "@/lib/rollTicket";
@@ -224,6 +225,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // The Ticket tab: a saved plan's ticket opens from its card, its thread's header, a book row or the tab's own list
   // (``openTicket``), or from a link (?ticket=) made where the desk was not open.
   const tickets = useTicketPlans(on);
+  const paper = usePaperBook(on);
   const [ticketFor, setTicketFor] = useState<string | null>(null);
   const [ticketPick, setTicketPick] = useState<TicketPick | null>(null); // the Chain tab's Put on ticket
   const [ticketClose, setTicketClose] = useState<AnyClosingTicket | null>(null); // a held option's Close at target / stop, or a copilot close card
@@ -845,6 +847,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           <div className={styles.book}>
             <Book rows={booked.rows} sparks={sparks} earnings={events} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} updating={rowsRead && !rowsFresh} onSelect={select} onFollow={changeFollow}
               live={booked.live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} />
+            {/* His own paper book: paper positions, Close and Trim, and the scorecard beside his real trades. Never real money. */}
+            <DeskPaper book={paper.book} failed={paper.failed} symbol={centreSymbol} />
             {/* Before the open and after the close the day's block (the brief, the day report) comes straight after the
                 book; in the session it waits under Watching. */}
             {dayPhase !== null && lower}
