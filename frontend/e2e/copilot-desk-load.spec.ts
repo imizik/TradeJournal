@@ -43,6 +43,7 @@ const READS: Record<string, unknown> = {
   "/copilot/unusual": { state: "ok", rows: [] },
   "/copilot/scanner": { state: "off", rows: [] },
   "/copilot/exposure": { line: null },
+  "/copilot/desk/health": { as_of: "2026-11-13T16:00:00Z", now: epoch("2026-11-13T16:00:00Z"), phase: "regular", overall: "ok", sources: [] },
 };
 
 // Requests by phase, from the browser's own request events (when each was sent, not when its stub ran).

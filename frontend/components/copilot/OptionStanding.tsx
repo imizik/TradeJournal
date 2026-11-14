@@ -6,7 +6,8 @@
  * and IV, with a small P&L-at-expiry line. The arithmetic is ``lib/optionStanding.ts``; this only lays it out. The
  * stock-price figures move with the desk's live prices (``lib/deskTicks.ts``); the Greeks are the book read's. Facts
  * only: nothing here tells the owner to buy, sell or hold. With a plan, "Close at target" / "Close at stop" open the
- * Ticket as a closing sell to copy (``lib/closingTicket.ts``); they are absent when any input is missing.
+ * Ticket as a closing sell to copy (``lib/closingTicket.ts``); they are absent when any input is missing. "Roll" opens the
+ * Ticket's roll mode (``DeskRoll``) for a single long call or put held in whole contracts.
  */
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
@@ -19,7 +20,8 @@ import {
   type WhatIfModel,
 } from "@/lib/optionStanding";
 import { CLOSING_LABEL, closingTicket, type ClosingAt, type ClosingTicket } from "@/lib/closingTicket";
-import { openClosingTicket } from "@/components/copilot/DeskTicket";
+import { openClosingTicket, openRollTicket } from "@/components/copilot/DeskTicket";
+import type { RollFrom } from "@/lib/rollTicket";
 import { Flash } from "@/components/copilot/Ticks";
 import { cn } from "@/lib/utils";
 
@@ -90,17 +92,23 @@ function useStanding(row: DeskThread, rows: readonly DeskThread[], fallback: { l
   const optionTick = book.tick ? tickFor(ticks, book.tick.quote) : null;
   // Robinhood's label and masked number (a matched row): the journal's account name never leaves the server here.
   const account = book.account ? `${book.account.label}${book.account.masked ? ` ${book.account.masked}` : ""}` : null;
+  // A roll: a single long call or put in whole contracts (a short or multi-leg position never reaches here).
+  const { side, strike, expiry, quantity, cost } = terms;
+  const roll: RollFrom | null = row.symbol && terms.direction === "long" && (side === "call" || side === "put") && typeof strike === "number" && strike > 0
+    && expiry && typeof quantity === "number" && Number.isInteger(quantity) && quantity > 0
+    ? { symbol: row.symbol, side, strike, expiry, held: quantity, cost: typeof cost === "number" && cost > 0 ? cost : null, account } : null;
   const closing = (["target", "stop"] as ClosingAt[]).flatMap((at): ClosingTicket[] => {
     const ticket = closingTicket({ symbol: row.symbol, at, terms, levels: book.plan_levels, account, worth,
       stock: stock ? { last: stock.last, at: stock.at } : null, markLive: !!optionTick && !optionTick.stale });
-    return ticket ? [ticket] : [];
+    return ticket ? [{ ...ticket, roll }] : [];
   });
-  return { standing, stock, terms, closing };
+  return { standing, stock, terms, closing, roll };
 }
 
-/** "Close at target" and "Close at stop": each opens the desk's Ticket as a closing sell to copy into Robinhood. */
-function CloseButtons({ closing, className }: { closing: ClosingTicket[]; className?: string }) {
-  if (!closing.length) return null;
+/** "Close at target" and "Close at stop": each opens the desk's Ticket as a closing sell to copy into Robinhood; "Roll"
+ * opens it as a roll of the contracts held. */
+function CloseButtons({ closing, roll, className }: { closing: ClosingTicket[]; roll: RollFrom | null; className?: string }) {
+  if (!closing.length && !roll) return null;
   return (
     <span data-testid="close-from-plan" className={cn("inline-flex flex-wrap gap-1.5", className)}>
       {closing.map(t => (
@@ -110,12 +118,19 @@ function CloseButtons({ closing, className }: { closing: ClosingTicket[]; classN
           {CLOSING_LABEL[t.at]}
         </button>
       ))}
+      {roll && (
+        <button type="button" data-testid="roll-open" onClick={() => openRollTicket(roll)}
+          title={`Close your ${roll.held} contract${roll.held === 1 ? "" : "s"} and open another (a later expiry or another strike), as one order on the Ticket. Nothing is sent.`}
+          className="inline-flex min-h-11 items-center rounded-md border px-2.5 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-7">
+          Roll
+        </button>
+      )}
     </span>
   );
 }
 
 const INCOMPLETE = "Break-even and Greeks not shown: the book is missing this contract's side, strike, expiry or size.";
-const UNKNOWN = "Break-even and Greeks not shown: a short or multi-leg position the book cannot read as one option.";
+const UNKNOWN = "Break-even and Greeks not shown: a short or multi-leg position the book cannot read as one option. Roll covers a single long call or put only.";
 
 function distance(s: Standing) {
   const to = s.toBreakEven;
@@ -138,7 +153,7 @@ export function OptionStanding({ row, rows, fallback = null, levels = {}, earnin
   const [open, setOpen] = useWhatIfOpen();
   if (read === null) return null;
   if (read === "unknown" || read === "incomplete") return <p data-testid="option-standing" className="text-xs text-muted-foreground">{read === "unknown" ? UNKNOWN : INCOMPLETE}</p>;
-  const { standing: s, stock, closing } = read;
+  const { standing: s, stock, closing, roll } = read;
   const dim = !!stock && !stock.live;
   const greeks = greeksLine(s.greeks);
   const missing = [s.decayPerDay === null && "decay", s.perDollar === null && "delta", s.ivPct === null && "IV"].filter((part): part is string => !!part);
@@ -174,7 +189,7 @@ export function OptionStanding({ row, rows, fallback = null, levels = {}, earnin
             className="min-h-11 rounded px-1 text-[11px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground sm:min-h-0">
             What if…{open ? " ▴" : " ▾"}
           </button>)}
-      <CloseButtons closing={closing} />
+      <CloseButtons closing={closing} roll={roll} />
     </div>
     {open && what && !("reason" in what) && (
       <OptionWhatIf key={`${row.key}:${read.terms.strike}:${read.terms.expiry}`} model={what} symbol={row.symbol ?? ""}
@@ -352,7 +367,7 @@ export function OptionStandingLine({ row, rows, fallback = null }: {
 }) {
   const read = useStanding(row, rows, fallback);
   if (read === null || read === "unknown" || read === "incomplete") return null;
-  const { standing: s, stock, closing } = read;
+  const { standing: s, stock, closing, roll } = read;
   const parts: string[] = [];
   if (s.breakEven !== null) parts.push(`BE ${priceText(s.breakEven)}${s.toBreakEven ? ` ${s.toBreakEven.past ? "passed" : pct(s.toBreakEven.pct)}` : ""}`);
   if (s.timeValue !== null && s.timeValue >= 0) parts.push(`${dollars(s.timeValue)} time value`);
@@ -360,13 +375,13 @@ export function OptionStandingLine({ row, rows, fallback = null }: {
   if (s.perDollar !== null) parts.push(`${dollars(s.perDollar, true)} per $1`);
   if (s.ivPct !== null) parts.push(`IV ${s.ivPct.toFixed(0)}%`);
   // A missing Greeks read is said once, in the chart's standing above, not again on the book row.
-  if (!parts.length) return <CloseButtons closing={closing} className="px-3 pb-2" />;
+  if (!parts.length) return <CloseButtons closing={closing} roll={roll} className="px-3 pb-2" />;
   return (
     <>
       <p data-testid="book-standing" className={cn("truncate px-3 pb-1.5 text-[11px] tabular-nums text-muted-foreground", stock && !stock.live && "opacity-70")}>
         {parts.join(" · ")}
       </p>
-      <CloseButtons closing={closing} className="px-3 pb-2" />
+      <CloseButtons closing={closing} roll={roll} className="px-3 pb-2" />
     </>
   );
 }

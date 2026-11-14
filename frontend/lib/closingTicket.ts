@@ -14,6 +14,7 @@
  */
 
 import { intrinsic, type OptionTerms } from "@/lib/optionStanding";
+import type { RollFrom } from "@/lib/rollTicket";
 
 export type ClosingAt = "target" | "stop";
 export const CLOSING_LABEL: Record<ClosingAt, string> = { target: "Close at target", stop: "Close at stop" };
@@ -44,6 +45,8 @@ export type ClosingTicket = {
   floored: boolean;
   /** Shares a contract (100 for a standard contract), for the proceeds. */
   multiplier: number;
+  /** The same contracts as a roll (the ticket's "Roll instead"), when the book row can roll them. */
+  roll?: RollFrom | null;
 };
 
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
@@ -85,4 +88,92 @@ export function closingTicket({ symbol, at, terms, levels, account, stock, worth
   const floored = !past && estimate > Math.max(0.01, Math.round((mark + delta * (level - stock.last)) * 100) / 100);
   return { at, symbol, side, strike, expiry, contracts: quantity, account, level, stock: stock.last, stockAt: stock.at, mark, markLive, delta,
     estimate, past, floored, multiplier };
+}
+
+// --------------------------------------------------------------------------- close now: the copilot's close and trim cards
+
+/**
+ * A closing ticket at the mark now, for the copilot's close and trim cards (``lib/deskAction.ts``): a sell to close of a
+ * held long call or put, or the closing spread of a held vertical (sell the bought leg, buy back the sold leg), for all
+ * of it or part. ``mark`` and ``shortMark`` are a share's premium now to the cent, from the book row's own value;
+ * ``net`` is the bought leg's less the sold leg's (positive: closing brings money in; negative: a held credit spread costs
+ * money to close). ``limit`` is ``net`` as a limit price, to the cent and at least $0.01; ``proceeds`` the signed dollars
+ * at that limit. Pure arithmetic: nothing here places, sends or reads anything.
+ */
+export type CloseNowTicket = {
+  at: "now";
+  symbol: string;
+  side: "call" | "put";
+  expiry: string;
+  /** The leg held long (a vertical's bought leg). */
+  strike: number;
+  /** A held vertical's sold leg, bought back with it; null for a single option. */
+  shortStrike: number | null;
+  /** Contracts (or spreads) held, sold by this ticket, and left after it. */
+  held: number;
+  contracts: number;
+  remains: number;
+  /** Robinhood's label and masked number when the book row has them; null for a position only the journal shows. */
+  account: string | null;
+  mark: number;
+  shortMark: number | null;
+  net: number;
+  limit: number;
+  /** Closing brings money in (a sell for a credit), or costs it (a debit). */
+  credit: boolean;
+  proceeds: number;
+  markLive: boolean;
+  multiplier: number;
+};
+
+/** Any ticket the Ticket tab's closing views open. */
+export type AnyClosingTicket = ClosingTicket | CloseNowTicket;
+
+/** Contracts a trim sells out of ``held`` (the server's ``copilot_actions.trim_count``): half rounds down and is at least
+ * 1; a count must be a whole number from 1 to ``held``. Null when it cannot be. */
+export function trimCount(held: number, ask: { quantity?: number | null; half?: boolean }): number | null {
+  if (!Number.isInteger(held) || held < 1) return null;
+  if (ask.half) return Math.max(1, Math.floor(held / 2));
+  const q = ask.quantity;
+  return typeof q === "number" && Number.isInteger(q) && q >= 1 && q <= held ? q : null;
+}
+
+/** One held leg as the book row has it: its terms and what the whole leg is worth now (``worthNow``). */
+export type HeldLeg = { terms: OptionTerms | null | undefined; worth: number | null; markLive: boolean };
+
+/** A share's premium now, to the cent (as a quote shows it, so a spread's net is the difference the ticket prints): the
+ * leg's worth over its size. */
+function markOf(leg: HeldLeg): number | null {
+  const t = leg.terms;
+  if (!t || !finite(leg.worth) || leg.worth < 0 || !finite(t.quantity) || t.quantity <= 0 || !finite(t.multiplier) || t.multiplier <= 0) return null;
+  return Math.round(leg.worth / (t.quantity * t.multiplier) * 100) / 100;
+}
+
+/**
+ * The close-now ticket for ``contracts`` of a held position, or null when it cannot be honest. ``legs`` is the long leg,
+ * and for a vertical the short leg after it: same type, expiry, multiplier and size, other strikes. Any missing mark,
+ * size or term gives no ticket: never a zero or made-up price.
+ */
+export function closeNowTicket({ symbol, legs, account, contracts }: {
+  symbol: string; legs: HeldLeg[]; account: string | null; contracts: number;
+}): CloseNowTicket | null {
+  const [long, short] = legs;
+  const t = long?.terms;
+  if (!symbol || !t || t.direction !== "long" || legs.length > 2) return null;
+  if ((t.side !== "call" && t.side !== "put") || !finite(t.strike) || !t.expiry || !finite(t.quantity) || !Number.isInteger(t.quantity)
+      || t.quantity < 1 || !finite(t.multiplier) || t.multiplier <= 0) return null;
+  const s = short?.terms;
+  if (short && (!s || s.direction !== "short" || s.side !== t.side || s.expiry !== t.expiry || s.quantity !== t.quantity
+      || s.multiplier !== t.multiplier || !finite(s.strike) || s.strike === t.strike)) return null;
+  if (!Number.isInteger(contracts) || contracts < 1 || contracts > t.quantity) return null;
+  const mark = markOf(long);
+  const shortMark = short ? markOf(short) : null;
+  if (mark === null || (short && shortMark === null)) return null;
+  const net = Math.round((mark - (shortMark ?? 0)) * 100) / 100;
+  const limit = Math.max(0.01, Math.round(Math.abs(net) * 100) / 100);
+  const credit = net >= 0;
+  return { at: "now", symbol, side: t.side, expiry: t.expiry, strike: t.strike, shortStrike: short ? s!.strike : null,
+    held: t.quantity, contracts, remains: t.quantity - contracts, account, mark, shortMark, net, limit, credit,
+    proceeds: Math.round((credit ? 1 : -1) * limit * t.multiplier * contracts * 100) / 100,
+    markLive: long.markLive && (!short || short.markLive), multiplier: t.multiplier };
 }

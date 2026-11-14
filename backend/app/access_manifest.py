@@ -126,8 +126,10 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/desk/notes',  # his notes on the book's trades: database reads only; no Robinhood
     'POST /copilot/desk/notes',  # one note saved with a trade (never a plan); no Robinhood, never changes fills or P&L
     'GET /copilot/desk/feed',
+    'GET /copilot/desk/health',  # is each source behind the desk live: in-memory states, saved files and database reads; no provider or Robinhood call
     'GET /copilot/tickets',
     'GET /copilot/tickets/{investigation_id}',
+    'GET /copilot/roll',  # the desk's roll ticket: the held contract's terms from the book row in, two contracts' quotes (one paced options-feed pass) and arithmetic out; never Robinhood, never an order
     'GET /copilot/chain',  # the desk's Chain tab: one expiry's option chain (Tradier via the options feed) and journal marks
     'GET /copilot/scanner',  # today's setup-scanner candidates and the scanner's freshness: database reads only; no Robinhood, no write
     'GET /copilot/unusual',  # unusual options on his held and watched names: the same option chain reads, paced and cached; no Robinhood

@@ -6,7 +6,8 @@ import PlayCheck, { type PlayCheckData } from "@/components/copilot/PlayCheck";
 import SetupRecordLines, { premiumLine } from "@/components/copilot/SetupRecordLines";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { getSymbolLoop, type SetupRecord } from "@/lib/copilot";
-import type { ClosingTicket } from "@/lib/closingTicket";
+import type { AnyClosingTicket, ClosingTicket, CloseNowTicket } from "@/lib/closingTicket";
+import type { RollFrom } from "@/lib/rollTicket";
 import { spreadCopyText, spreadFigures, spreadSentence } from "@/lib/spreadTicket";
 import { cn } from "@/lib/utils";
 
@@ -37,8 +38,13 @@ export function openTicket(investigationId: string, pick?: TicketPick) {
 }
 
 /** Opens a closing ticket on the desk's Ticket tab. Its buttons live only on the desk, which handles the event. */
-export function openClosingTicket(close: ClosingTicket) {
+export function openClosingTicket(close: AnyClosingTicket) {
   window.dispatchEvent(new CustomEvent(TICKET_EVENT, { detail: { close }, cancelable: true }));
+}
+
+/** Opens a roll ticket for a held long call or put (its book row's Roll, or a closing ticket's Roll instead). */
+export function openRollTicket(roll: RollFrom) {
+  window.dispatchEvent(new CustomEvent(TICKET_EVENT, { detail: { roll }, cancelable: true }));
 }
 
 export type TicketPlan = {
@@ -143,7 +149,7 @@ async function copyText(text: string): Promise<void> {
   if (!ok) throw new Error("copy refused");
 }
 
-function CopyButton({ text, label, disabled = false, wide = false }: { text: string; label: string; disabled?: boolean; wide?: boolean }) {
+export function CopyButton({ text, label, disabled = false, wide = false }: { text: string; label: string; disabled?: boolean; wide?: boolean }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const copy = () => copyText(text).then(() => setState("copied"), () => setState("failed"))
     .finally(() => setTimeout(() => setState("idle"), 1800));
@@ -157,7 +163,7 @@ function CopyButton({ text, label, disabled = false, wide = false }: { text: str
   );
 }
 
-function Row({ name, children, copy }: { name: string; children: React.ReactNode; copy?: React.ReactNode }) {
+export function Row({ name, children, copy }: { name: string; children: React.ReactNode; copy?: React.ReactNode }) {
   return (
     <div className="grid grid-cols-[6rem_minmax(0,1fr)_auto] items-center gap-2 border-t py-1.5 first:border-t-0 sm:grid-cols-[9rem_minmax(0,1fr)_auto]">
       <span className="text-xs text-muted-foreground">{name}</span>
@@ -170,11 +176,12 @@ function Row({ name, children, copy }: { name: string; children: React.ReactNode
 /** The Ticket tab: the open ticket, else the list of saved plans a ticket can open, else what to do with none. */
 export default function DeskTicket({ plans, failed, open, pick = null, close = null, onOpen, onClose, onPlaced, onPlan }: {
   plans: TicketPlan[] | null; failed: boolean; open: string | null; pick?: TicketPick | null; onOpen(investigationId: string): void; onClose(): void;
-  /** A closing ticket from a held option's plan; it takes the tab over an open plan ticket. */
-  close?: ClosingTicket | null;
+  /** A closing ticket from a held option's plan or a copilot close card; it takes the tab over an open plan ticket. */
+  close?: AnyClosingTicket | null;
   onPlaced(symbol: string): void; onPlan(): void;
 }) {
   // Each click is a fresh ticket (a new mark or stock price re-fills the limit), keyed on what it was priced from.
+  if (close?.at === "now") return <CloseNowView key={`${close.symbol}|${close.expiry}|${close.strike}|${close.shortStrike}|${close.contracts}|${close.mark}|${close.shortMark}`} ticket={close} onClose={onClose} onPlaced={onPlaced} />;
   if (close) return <ClosingView key={`${close.symbol}|${close.expiry}|${close.strike}|${close.at}|${close.stock}|${close.mark}`} ticket={close} onClose={onClose} onPlaced={onPlaced} />;
   if (open) return <TicketView key={`${open}|${pick?.expiry ?? ""}|${pick?.strike ?? ""}|${pick?.short ?? ""}|${pick?.kind ?? ""}`} investigationId={open} initialPick={pick} onClose={onClose} onPlaced={onPlaced} />;
   return (
@@ -518,6 +525,76 @@ function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, 
 }
 
 /**
+ * A close-now ticket (the copilot's close and trim cards, ``closeNowTicket``): a sell to close of all or part of a held
+ * long call or put at the mark now, or the closing spread of a held vertical (sell the bought leg, buy back the sold one)
+ * at its net mark. Filled in the browser from the book row; it copies and never sends (no Send button).
+ */
+function CloseNowView({ ticket: t, onClose, onPlaced }: { ticket: CloseNowTicket; onClose(): void; onPlaced(symbol: string): void }) {
+  const [limit, setLimit] = useState(t.limit.toFixed(2));
+  const [qty, setQty] = useState(String(t.contracts));
+  const limitN = limit.trim() && Number(limit) > 0 ? Number(limit) : null;
+  const qtyN = /^\d+$/.test(qty.trim()) && Number(qty) > 0 && Number(qty) <= t.held ? Number(qty) : null;
+  const spread = t.shortStrike !== null;
+  const unit = spread ? "spread" : "contract";
+  const kind = kindWord(t.side).toLowerCase();
+  const label = spread ? `${t.symbol} $${t.strike}/$${t.shortStrike} ${kindWord(t.side)} ${shortDate(t.expiry)}` : `${t.symbol} $${t.strike} ${kindWord(t.side)} ${shortDate(t.expiry)}`;
+  const action = spread ? `Close spread: sell the $${t.strike} ${kind}, buy back the $${t.shortStrike} ${kind}` : "Sell to close";
+  const limitText = limitN !== null ? limitN.toFixed(2) : "";
+  const all = spread
+    ? [t.symbol, action, `Expiration ${shortDate(t.expiry)}`, `Limit price ${limitText ? `${limitText} ${t.credit ? "credit" : "debit"}` : "(set it)"}`,
+       `Quantity ${qtyN ? String(qtyN) : "(set it)"}`].join("\n")
+    : copyAllText({ symbol: t.symbol, type: t.side, expiry: t.expiry, strike: t.strike, action: "Sell", limit: limitText, contracts: qtyN ? String(qtyN) : "" });
+  const left = qtyN ? t.held - qtyN : null;
+  const markWords = spread
+    ? `Mark now ${t.mark.toFixed(2)} − ${t.shortMark!.toFixed(2)} = ${t.net < 0 ? "−" : ""}${Math.abs(t.net).toFixed(2)}`
+    : `Mark now ${t.mark.toFixed(2)}`;
+  const whole = t.contracts === t.held;
+  const field = "w-24 rounded border bg-background px-2 py-1.5 text-base tabular-nums sm:text-sm";
+  return (
+    <div data-testid="desk-ticket" data-closing="now" className="space-y-3">
+      <div className="space-y-1">
+        <p className="text-sm"><span className="font-semibold">{t.symbol}</span><span className="text-muted-foreground"> · {whole ? "Close" : "Trim"} at the mark now</span></p>
+        <p className="text-xs text-muted-foreground">A closing {spread ? "spread" : "sell"} of {whole ? `all ${t.held}` : `${t.contracts} of the ${t.held}`} {unit}{t.held === 1 ? "" : "s"} you hold, priced at {spread ? "the spread's net" : "today's"} mark. It copies; it never sends.</p>
+      </div>
+      <div className="rounded-lg border bg-card px-3 py-1.5">
+        {t.account && <Row name="Account"><span>{t.account}</span></Row>}
+        <Row name="Action" copy={<CopyButton text={action} label="action" />}><span className="font-medium">{action}</span></Row>
+        <Row name="Contract" copy={<CopyButton text={label} label="contract" />}><span className="font-mono tabular-nums">{label}</span></Row>
+        <Row name="Quantity" copy={<CopyButton text={qtyN ? String(qtyN) : ""} label="quantity" disabled={!qtyN} />}>
+          <input aria-label={`Quantity in ${unit}s`} inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/[^\d]/g, "").slice(0, 4))} placeholder="set it" className={field} />
+          <span data-testid="close-now-left" className="block text-xs text-muted-foreground">
+            {qtyN === null ? `You hold ${t.held}: set 1 to ${t.held}.` : `You hold ${t.held}; ${left === 0 ? "none left after this" : `${left} left after this`}.`}
+          </span>
+        </Row>
+        <Row name="Limit price" copy={<CopyButton text={limitText} label="limit price" disabled={limitN === null} />}>
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <input aria-label={spread ? `Limit price, net ${t.credit ? "credit" : "debit"} per spread` : "Limit price per share"} inputMode="decimal" value={limit}
+              onChange={e => setLimit(e.target.value.replace(/[^\d.]/g, "").replace(/^(\d{0,6}(?:\.\d{0,2})?).*$/, "$1"))} placeholder="set it" className={field} />
+            {spread && <span className="text-xs">{t.credit ? "credit" : "debit"}</span>}
+            <span data-testid="close-now-mark" className="text-xs tabular-nums text-muted-foreground">{markWords}{t.markLive ? "" : " (last read)"}</span>
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            {spread && !t.credit ? "Closing this spread costs money: the leg you sold is worth more than the one you bought. " : ""}
+            Priced at the mark: a sell at or under the bid fills at once, at about the bid; above the mark it can wait unfilled. Set your own.
+          </span>
+        </Row>
+        <Row name={t.credit ? "Proceeds" : "Cost"}>
+          <span data-testid="close-now-proceeds" className="tabular-nums">{limitN !== null && qtyN ? `about ${usd(limitN * t.multiplier * qtyN)} at this limit` : "—"}</span>
+        </Row>
+      </div>
+      <div className="space-y-2">
+        <CopyButton text={all} label="Copy all for Robinhood" wide />
+        <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {t.symbol}, your {spread ? "spread" : `${kind} position`}, {spread ? "Close" : "Sell"}, then enter each field. Nothing is sent from here.</p>
+      </div>
+      <div className="flex flex-wrap gap-2 border-t pt-3">
+        <button type="button" onClick={() => onPlaced(t.symbol)} className="inline-flex min-h-11 items-center rounded-md border px-3 text-xs font-medium hover:bg-secondary sm:min-h-8">I placed it</button>
+        <button type="button" onClick={onClose} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Not now</button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * A closing ticket: a sell to close of the contracts held, with the limit estimated for the stock at the plan's level
  * and today's mark beside it. Filled in the browser from the book row; it copies and never sends (no Send button).
  */
@@ -569,6 +646,7 @@ function ClosingView({ ticket: t, onClose, onPlaced }: { ticket: ClosingTicket; 
       <div className="space-y-2">
         <CopyButton text={all} label="Copy all for Robinhood" wide />
         <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {t.symbol}, your {kindWord(t.side).toLowerCase()} position, Sell, then enter each field. Nothing is sent from here.</p>
+        {t.roll && <button type="button" data-testid="closing-roll" onClick={() => openRollTicket(t.roll!)} className="text-xs text-foreground underline underline-offset-2">Roll it instead: close these and open another contract</button>}
       </div>
       <div className="flex flex-wrap gap-2 border-t pt-3">
         <button type="button" onClick={() => onPlaced(t.symbol)} className="inline-flex min-h-11 items-center rounded-md border px-3 text-xs font-medium hover:bg-secondary sm:min-h-8">I placed it</button>

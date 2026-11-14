@@ -167,6 +167,10 @@ export function useDeskTicks(symbols: readonly (string | null | undefined)[]): D
   return ticks;
 }
 
+/** The live prices the desk already holds, read once without asking for any symbol (no read of its own): what a card's
+ * tap prices from. */
+export const peekDeskTicks = (): DeskTicks => snapshot;
+
 /** A symbol's tick while the session is open, with ``stale`` once its last good read is older than ``STALE_SECONDS``;
  * none once it is older than ``DROP_SECONDS``. */
 export function tickFor(ticks: DeskTicks, symbol: string | null | undefined, now = Date.now() / 1000): (DeskTick & { stale: boolean }) | null {

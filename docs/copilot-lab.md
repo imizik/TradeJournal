@@ -1654,7 +1654,31 @@ that nothing in it places or sends anything.
   says so. **Copy all** puts the legs, then the net limit as a debit or credit, then the quantity on the clipboard;
   there is no Send button. The Play check reads the plan's parts as for any ticket, says in grey that the habit rules
   (written for one long option) are not run on a spread, and works out holding overnight for the spread as a whole.
-  Straddles, strangles, condors, butterflies, rolls and calendars are still refused.
+  Straddles, strangles, condors, butterflies and calendars are still refused, and a plan's words naming a roll are not
+  a plan ticket (a held position rolls from its own Roll, below).
+- **Roll** (`GET /copilot/roll`, `app/engine/desk_roll.py`, `frontend/components/copilot/DeskRoll.tsx`,
+  `frontend/lib/rollTicket.ts`). A held single long call or put in whole contracts shows **Roll** beside its closing
+  buttons (the standing under the chart and the book row), and a closing ticket offers **Roll it instead**. It opens
+  the Ticket in roll mode: leg 1 is the contract held, **sell to close**, all of it by default (fewer if he types
+  fewer; never more than held, and the rest is said to be kept); leg 2 he picks in the Chain shown under it, opened on
+  the held expiry and side (**Roll to this**; the other side or the held contract itself says why not), **buy to open**,
+  the same count by default. The route takes the held contract's terms as the book row shows them (strike, expiry,
+  contracts held, cost a contract) and reads both expiries' chains in one paced options-feed pass; Robinhood is never
+  called. The ticket shows each leg's bid, ask and mid with its time; what closing brings in (mid, bid) and the new
+  contract costs (mid, ask); the net at the mid (the default limit, with a Debit/Credit switch) and at the natural price
+  (sell at the bid, buy at the ask); the dollars at the limit he types; the new contract's break-even at expiry at its
+  mid, and the whole trade's (the money still in it spread over the new contracts, or "ahead" when he has taken out more
+  than he put in); days added; money in the trade (the rolled contracts' cost basis, then that plus the roll's net) and
+  at risk from here (what his contracts are worth now, then what the new ones cost); and one line, "Roll NBIS 100C
+  Nov 21 → 105C Dec 19: pay $1.40 a share more ($140.00), break-even 110.40, 28 more days." A stale or missing leg is
+  grey with its time and gives no net number; a wide one (10%) gives one marked **rough**. **Copy all** puts Robinhood's
+  roll screen on the clipboard (the close leg, the open leg, the net limit as a debit or credit, the quantity); with a
+  different count on each leg Robinhood's roll cannot take it, so the ticket says so and copies two orders in order
+  (sell to close first, then buy to open), each with its own limit. No Send button. The plan stays with the old
+  contract's trade: it says to plan the new contract after the roll fills. Short options, spreads and other
+  multi-leg positions get no Roll (their standing says Roll covers a single long call or put only).
+  Proof: `backend/tests/test_desk_roll.py` (every money case, the quotes, the refusals, one feed pass, no send),
+  `frontend/e2e/roll-ticket.spec.ts` (the same cases in the browser's math), `frontend/e2e/copilot-desk-roll.spec.ts`.
 - **Closing tickets: Close at target / Close at stop.** A held single long call or put with a plan shows these in the
   position's standing under the chart (beside the What if…) and under its book row. Each opens the Ticket as a **sell to close** of the
   contracts held, filled in the browser from the book row (`frontend/lib/closingTicket.ts`): the account holding it
@@ -1824,8 +1848,8 @@ Measured 2026-11-13 in market hours (UX sandbox with live market data, productio
 are 12 of them (`GET /copilot/desk/ticks` every 5 s, § Live prices); the rest:
 
 - **One clock, one request a minute** (`frontend/lib/deskMinute.ts`). The book, session, Watching, what's moving,
-  sparklines, Feed, unusual options, scanner picks, armed plans, exposure, saved conversations and the centre chart each
-  read on mount as before (a cold page never waits on the slowest), then re-read on one shared minute beat
+  sparklines, Feed, unusual options, scanner picks, armed plans, exposure, saved conversations, data health and the
+  centre chart each read on mount as before (a cold page never waits on the slowest), then re-read on one shared minute beat
   (`everyDeskMinute`); what they ask during the beat goes out as `GET /copilot/desk/minute?read=…`
   (`backend/app/engine/desk_minute.py`), each read dispatched through the whole app with the browser's own headers and
   answered exactly as its own route would (status and body, its own `Server-Timing` and timings entry), in order. Only
@@ -1845,6 +1869,33 @@ caches; 12 are the live prices' one batched quote every 4–5 s), Alpaca news ~1
 Cold load did not change (first paint ~50 ms; a usable book ~0.9 s, bound by the book's own read). Main thread 4–5%
 busy, no dropped frames, before and after. `frontend/e2e/copilot-desk-load.spec.ts` pins the idle rate (≤ 20 a minute,
 the minute's reads only inside the one request) and the hidden page's zero.
+
+### Data health
+
+One dot at the left of the desk's buttons says whether every source behind the desk is live, so a quiet desk on a bad
+morning can be told from a dead feed. A green dot alone when every running source is live ("All live" is its name and
+tooltip); amber naming what is behind ("Robinhood down", "2 sources behind"); a grey dot alone when one cannot be told
+("Prices unknown", or "Health unknown" when the read itself failed): unknown is never green. Words show only when
+something is amber, so the top bar never jumps. A phone shows the dot alone. A tap lists each source with
+its state and last good time in plain words; a tap on a source says what it affects and, where one exists, the fix
+already in the app (Gmail's Reconnect; the Robinhood sign-in steps in docs/robinhood-read-feed.md). No new fix flow. It
+reads again a few seconds after the desk opens or comes back into view, once the desk's own first reads have landed.
+
+| Source | Read from | Stale after | Outside its hours |
+|---|---|---|---|
+| Robinhood | the feed's kept snapshot (`snapshot(kick=False)`: never starts a read) and the order-history pass's last status | three missed refreshes (3 min in market hours, 45 min otherwise); a read under way is "unknown", not stale | read while a desk is open; the order history every 15 min |
+| Prices | the live prices' last good and failed read (`desk_ticks.health`) | 60 s while a desk is asking; before its first read "unknown" | closed outside the regular session |
+| Level 2 | the Tape's own moomoo session, in the browser | — | off with no Tape session (not an error) |
+| Chatter | ApeWisdom's saved state file | 45 min | closed outside market days 6:00–20:00 |
+| TradingView | the newest stored alert on a followed ticker | live with one today; quiet with none (none may have fired) | — |
+| Fill emails | the Gmail health the nav already shows | its own heartbeat rules | — |
+| Radar | today's recorder passes (read-only) | 3 min | closed outside the regular session |
+| Copilot budget | today's API spend against `COPILOT_DAILY_BUDGET_USD` | amber under $0.50 left | resets at midnight New York |
+
+`GET /copilot/desk/health` (`backend/app/engine/desk_health.py`, thresholds in its `STALE_AFTER` table) is owner-only,
+read-only and rides the desk's minute request (§ What an open desk asks): no poll of its own, no provider call, no
+Robinhood call (the desk router hands it the feed's state). A hidden ticker's alert never shows in it. The fixture desk
+(the UX sandbox) answers invented rows.
 
 ### The desk read
 
@@ -3100,7 +3151,8 @@ instrument question needs real contracts, not just marks of the ones held.
 
 When the owner asks for something the desk already does by hand ("alert me if NBIS loses 98", "show me NBIS on the
 15-minute", "watch IREN", "mark 102.50 as resistance", "build the 100 call for Dec 18", "move my stop on the NBIS plan to
-96"), the desk's copilot calls `desk_action` (`app/ai/copilot_actions.py`; offered to the desk job only, never the phone
+96", "close my NBIS calls", "sell half my NBIS", "note on NBIS: took profit into the wall", "plan the IREN Radar setup"),
+the desk's copilot calls `desk_action` (`app/ai/copilot_actions.py`; offered to the desk job only, never the phone
 chat) and the answer carries a card instead of only words. The tool writes nothing: it checks the request against the
 desk and returns the card, streamed as a `proposal` event with `kind: "desk_action"` and saved with the answer like any
 card (its outcome too). At most three per answer; the copilot offers one only when he asked for it in that message, and
@@ -3110,8 +3162,15 @@ The checks (`copilot_actions.act`): a ticker set to Not following gets no card o
 nothing); a price must be within 50% of the last quote (one quote read through the turn's evidence) and an alert on the
 side it names; a plan stop or a ticket needs exactly one saved plan in the symbol (none or several: the copilot asks); a
 ticket's plan must be a long call or put plan not yet entered, of the same option type; watch and unwatch read the
-Watching list. The desk's own state is read from the database (`read_state`, no quote read), in fixture turns too, so
-the sandbox exercises the cards end to end; only the prices are simulated there.
+Watching list. A close, trim or note card needs the position in his book (`_held`: the journal's open positions in the
+symbol, with Robinhood's quantity, P&L and mark where the snapshot the desk already holds in memory matches, plus the ones
+only Robinhood shows; never a Robinhood or quote read): none says so, more than one that fits asks which (the contract
+he names picks one), a long and a short leg of one type, expiry and account in the same size are one vertical spread and
+close together, a short single leg or shares get no closing ticket, and a note needs a journal trade (a spread's goes on
+its bought leg). A trim sells `quantity` contracts or `half` (rounded down, at least one), never more than he holds. A
+plan card needs today's Radar setup card in the symbol with its Plan it still open (`_ideas`; a Scanner pick plans from
+the same card); a long and a short one asks which. The desk's own state is read from the database (`read_state`, no
+quote read), in fixture turns too, so the sandbox exercises the cards end to end; only the prices are simulated there.
 
 | Card | The line | After the tap (`frontend/lib/deskAction.ts`) |
 | --- | --- | --- |
@@ -3121,12 +3180,18 @@ the sandbox exercises the cards end to end; only the prices are simulated there.
 | `draw` | "Draw 102.50 on NBIS · resistance" | A level in the shared chart settings (`useChartSettings`, `PUT /charts/settings`), on the desk chart and in Charts. |
 | `ticket` | "Open ticket: NBIS 100 call Dec 18", or with `short_strike` "Open ticket: NBIS 100/110 call debit spread Dec 18" | The Ticket tab on that saved plan with the contract or the vertical (`openTicket`, as the Chain's Put on ticket): copy-only, nothing is sent. A spread goes on the plan its direction fits (rises: a call plan; falls: a put plan). |
 | `plan_stop` | "Update plan: NBIS stop 92.30 → 96.00" | The plan's invalidation alert armed at the new price (`POST /charts/alerts/{id}/rearm`). The saved pre-trade capture keeps the words it was confirmed with. |
+| `close` | "Close NBIS 100 call Nov 20 · all 3", under it the P&L and about what it brings at the mark (Robinhood's numbers; none for a journal-only position) | The Ticket tab's closing view at the mark now (`closeNowTicket` in `lib/closingTicket.ts`, from the desk's own book row and its live prices): sell to close, or for a held vertical the closing spread (sell the bought leg, buy back the sold one) at the net mark, a credit or a debit. Copy-only, as "Close at target/stop": nothing is placed, staged or sent. |
+| `trim` | "Trim NBIS 100 call Nov 20 · sell 1 of 3, 2 left" | The same view for that many contracts, saying how many are left. |
+| `note` | "Note on NBIS 100 call Nov 20: took profit into the wall" | `POST /copilot/desk/notes` on the journal trade, as the book row's pen; the note shows under the row at once. |
+| `plan_idea` | "Plan it: IREN dip turning up", the setup card's levels under it | Today's setup card opened on the desk (`/copilot-lab?symbol=…&radar=…`, the Feed's and the Scanner's own Plan it link), whose Plan it he taps to save the plan. |
 
 A card more than a day old, a price card whose ticker has moved more than 5% since it was made (or whose level is now on
-the other side), and a plan card whose stop alert has changed or gone say so and ask again instead of acting. Every tap
+the other side), a plan card whose stop alert has changed or gone, and a close or trim card whose position the book no
+longer shows in the size it was made for say so and ask again instead of acting. Every tap
 goes through the same owner-only route as the action by hand; there is no new route. A saved plan's target cannot be
 changed by hand on the desk yet, so there is no card for it. Tests: `backend/tests/test_copilot_desk_actions.py`,
-`frontend/e2e/copilot-desk-actions.spec.ts`.
+`backend/tests/test_copilot_desk_exits.py`, `frontend/e2e/copilot-desk-actions.spec.ts`,
+`frontend/e2e/copilot-desk-exits.spec.ts`.
 
 ## Confirm a plan
 

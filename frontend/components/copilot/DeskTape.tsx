@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppAccess } from "@/components/AccessProvider";
+import { reportLevel2 } from "@/components/copilot/DeskHealth";
 import { LEVEL2_TICKER, useDepthSession, type BookEvent, type Level, type Trade, type TradesEvent } from "@/components/level2/useDepthSession";
 import { heatBookKind } from "@/lib/depthHeatmap";
 import { cn } from "@/lib/utils";
@@ -120,6 +121,10 @@ function TapeStream({ symbol }: { symbol: string }) {
   }, []);
   const session = useDepthSession({ stopWhenHidden: true, onBook, onTrades });
   const { availability, enabled, running, refused, connect } = session;
+  // The desk's data health shows this session as Level 2 (off once the Tape closes).
+  const stopped = session.sessionPhase === "failed" || session.protocolError;
+  useEffect(() => { reportLevel2({ running, failed: stopped, symbol, at: null }); }, [running, stopped, symbol]);
+  useEffect(() => () => reportLevel2(null), []);
   // Only a session this panel had running counts as its own stop (hiding or closing it while refused stops nothing).
   const ownRunning = useRef(false);
   useEffect(() => { ownRunning.current = running; }, [running]);

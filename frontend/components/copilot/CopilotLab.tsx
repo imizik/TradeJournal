@@ -11,8 +11,10 @@ import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
 import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
 import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
+import DeskRoll from "@/components/copilot/DeskRoll";
+import type { RollFrom } from "@/lib/rollTicket";
 import { useDeskActionHost } from "@/components/copilot/DeskActionCard";
-import type { ClosingTicket } from "@/lib/closingTicket";
+import type { AnyClosingTicket } from "@/lib/closingTicket";
 import CopilotPanel, { rememberedThread, type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import DecisionBar from "@/components/copilot/DecisionBar";
 import FillLinkBar, { FillsToLink, useFillLinks } from "@/components/copilot/FillLinkBar";
@@ -44,6 +46,7 @@ import { useKept } from "@/components/copilot/DeskMemory";
 import { afterClose, answerSymbol, deskLinkIn, deskNeeds, refreshRobinhood, type DeskLive, deskSymbolThread, nyDay, readOpened, saveFollow, saveHorizon, saveOpened, threadInUrl, toReview, type DeskCommand, type DeskPlan, type DeskThreads, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import { DeskAccounts, activeAccount, forAccount } from "@/components/copilot/DeskAccounts";
+import DeskHealthDot from "@/components/copilot/DeskHealth";
 import styles from "./CopilotLab.module.css";
 
 // The Grid's code loads the first time its tab opens.
@@ -223,16 +226,18 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const tickets = useTicketPlans(on);
   const [ticketFor, setTicketFor] = useState<string | null>(null);
   const [ticketPick, setTicketPick] = useState<TicketPick | null>(null); // the Chain tab's Put on ticket
-  const [ticketClose, setTicketClose] = useState<ClosingTicket | null>(null); // a held option's Close at target / stop
+  const [ticketClose, setTicketClose] = useState<AnyClosingTicket | null>(null); // a held option's Close at target / stop, or a copilot close card
+  const [ticketRoll, setTicketRoll] = useState<RollFrom | null>(null); // a held option's Roll
   const [checkSeed, setCheckSeed] = useState<{ text: string; n: number } | null>(null); // the Chain tab's Check it
   useEffect(() => { if (centreTab !== "check") setCheckSeed(null); }, [centreTab]); // eslint-disable-line react-hooks/set-state-in-effect -- the Chain's contract fills Check a call once, not on every later visit
   const ticketLinked = useRef(false); // a ?ticket= link on a phone: the Ticket comes into view once the book above it has read
   useEffect(() => {
-    const show = (id: string | null, pick: TicketPick | null = null, close: ClosingTicket | null = null) => { setTicketFor(id); setTicketPick(pick); setTicketClose(close); setCentreTab("ticket"); showCentre(); };
+    const show = (id: string | null, pick: TicketPick | null = null, close: AnyClosingTicket | null = null, roll: RollFrom | null = null) => { setTicketFor(id); setTicketPick(pick); setTicketClose(close); setTicketRoll(roll); setCentreTab("ticket"); showCentre(); };
     const onTicket = (event: Event) => {
       event.preventDefault();
-      const detail = (event as CustomEvent<{ investigationId?: string; pick?: TicketPick; close?: ClosingTicket }>).detail;
-      if (detail.close) show(null, null, detail.close);
+      const detail = (event as CustomEvent<{ investigationId?: string; pick?: TicketPick; close?: AnyClosingTicket; roll?: RollFrom }>).detail;
+      if (detail.roll) show(null, null, null, detail.roll);
+      else if (detail.close) show(null, null, detail.close);
       else if (detail.investigationId) show(detail.investigationId, detail.pick ?? null);
     };
     const linked = new URLSearchParams(window.location.search).get("ticket");
@@ -315,7 +320,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const planTrade = useCallback(() => go(PLAN_HREF), [go]);
   const [refresh, setRefresh] = useState(0);
   // The copilot's desk action cards: a view card moves the centre (Undo puts it back); a tap that changed a list reads again.
-  useDeskActionHost({ picked, tab: centreTab, setPicked, setPickedKey, setTab: setCentreTab, setRefresh, setSheet });
+  useDeskActionHost({ picked, tab: centreTab, rows, go, setPicked, setPickedKey, setTab: setCentreTab, setRefresh, setSheet, showCentre });
   // Mark plan done in the thread menu: only for a plan row (armed and not entered, or exited), never a held position's.
   const [planSymbol, setPlanSymbol] = useState<string | null>(null);
   // A decision or an alert still asking today: a conversation opens on it, at the top of the thread.
@@ -766,6 +771,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
             ))}
           </nav>
           <div className={styles.barActions}>
+            {/* Is every source behind the desk live: one dot, a list on a tap. */}
+            <DeskHealthDot />
             {/* The desk's front door: today's Main chat in the copilot. */}
             <Link href="/copilot-lab" aria-current={onNow ? "page" : undefined} title="Back to today: Main chat in the copilot"
               onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setFeedShown(false); if (!onNow) goNow(true); }}
@@ -865,6 +872,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               {centreTab === "check" ? <CheckACall seed={checkSeed} />
                 : centreTab === "grid" ? <DeskGrid held={gridHeld} watched={watched} hidden={gridHidden} sparks={sparks} earnings={events} selected={centreSymbol} onOpen={openFromGrid} />
                 : centreTab === "chain" ? <DeskChain symbol={centreSymbol} plans={tickets.plans} onCheck={chainCheck} onPlan={chainPlan} onTicket={chainTicket} unusual={unusual?.rows} focus={chainFocus} />
+                : centreTab === "ticket" && ticketRoll ? <DeskRoll key={`${ticketRoll.symbol}|${ticketRoll.expiry}|${ticketRoll.strike}|${ticketRoll.held}`} from={ticketRoll} onClose={() => setTicketRoll(null)}
+                  onPlaced={symbol => { setTicketRoll(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} />
                 : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} pick={ticketPick} close={ticketClose} onOpen={id => { setTicketFor(id); setTicketPick(null); setTicketClose(null); }} onClose={() => { setTicketFor(null); setTicketPick(null); setTicketClose(null); }}
                 onPlaced={symbol => { setTicketFor(null); setTicketClose(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
                 : <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events}
