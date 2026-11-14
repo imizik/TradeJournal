@@ -29,7 +29,7 @@ from app.ai.copilot_tools import (DESK_ACTIONS as ACTIONS, DESK_LABEL_MAX as LAB
 # The constants live beside the tool's schema in copilot_tools; this module is its checks and its words.
 
 KEYS = {"show": {"timeframe", "tab"}, "alert": {"price", "side", "label"}, "watch": set(), "unwatch": set(),
-        "draw": {"price", "label"}, "ticket": {"expiry", "strike", "option_type"}, "plan_stop": {"price"}}
+        "draw": {"price", "label"}, "ticket": {"expiry", "strike", "short_strike", "option_type"}, "plan_stop": {"price"}}
 EXPIRY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PRICE_BAND = 0.5  # a level more than 50% from the last price is refused as a likely slip, not acted on
 EXPIRY_DAYS = 800  # a listed equity option expires within about two years
@@ -84,6 +84,10 @@ def validate(args: dict) -> dict:
         if args.get("option_type") not in OPTION_TYPES:
             raise ToolInputError("option_type is call or put")
         out.update(expiry=day.isoformat(), strike=_price(args.get("strike"), "strike"), option_type=args["option_type"])
+        if args.get("short_strike") is not None:  # a vertical spread: the sold leg, same expiry and type
+            out["short_strike"] = _price(args["short_strike"], "short_strike")
+            if out["short_strike"] == out["strike"]:
+                raise ToolInputError("a spread's two strikes differ")
     return out
 
 
@@ -177,7 +181,15 @@ def act(evidence, request: dict, now: float | None = None) -> dict:
     elif action == "ticket":
         plan = _which(desk["tickets"], symbol, "that a ticket can open (a ticket opens only from a saved long call or put "
                       "plan not yet entered)")
-        if plan["option_type"] and plan["option_type"] != request["option_type"]:
+        if request.get("short_strike") is not None:
+            # As the Chain's Make it a spread: a spread that gains as the stock rises goes on a call plan, one that gains as
+            # it falls on a put plan.
+            from app.engine import desk_ticket
+            bullish = desk_ticket.spread_bullish(request["option_type"], request["strike"], request["short_strike"])
+            if plan["option_type"] and plan["option_type"] != ("call" if bullish else "put"):
+                raise ToolInputError(f"that spread gains as {symbol} {'rises' if bullish else 'falls'}, against the saved "
+                                     f"{plan['option_type']} plan")
+        elif plan["option_type"] and plan["option_type"] != request["option_type"]:
             raise ToolInputError(f"the saved {symbol} plan is for {plan['option_type']}s, not {request['option_type']}s")
         from app.engine.chart_math import ET
         today = datetime.fromtimestamp(card["made_at"], ET).date()
@@ -211,7 +223,13 @@ def line(card: dict) -> str:
         return f"Draw {_money(card['price'])} on {s}{' · ' + card['label'] if card.get('label') else ''}"
     if a == "ticket":
         expiry = date.fromisoformat(card["expiry"])
-        return f"Open ticket: {s} {card['strike']:g} {card['option_type']} {expiry.strftime('%b')} {expiry.day}"
+        when = f"{expiry.strftime('%b')} {expiry.day}"
+        if card.get("short_strike") is not None:
+            from app.engine import desk_ticket
+            low, high = sorted((card["strike"], card["short_strike"]))
+            kind = "debit" if desk_ticket.is_debit(card["option_type"], card["strike"], card["short_strike"]) else "credit"
+            return f"Open ticket: {s} {low:g}/{high:g} {card['option_type']} {kind} spread {when}"
+        return f"Open ticket: {s} {card['strike']:g} {card['option_type']} {when}"
     return f"Update plan: {s} stop {_money(card['was'])} → {_money(card['price'])}" if "was" in card else f"Update plan: {s} stop {_money(card['price'])}"
 
 

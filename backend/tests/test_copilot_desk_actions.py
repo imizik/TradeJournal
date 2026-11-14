@@ -214,3 +214,18 @@ def test_the_fixture_reads_only_requests_that_open_the_message():
     assert desk_requests("What should I watch on NBIS today?", "NBIS", today) is None
     assert desk_requests("Is my stop too tight? Move it to 96?", "NBIS", today) is None
     assert desk_requests("Build the 100/110 call spread", "NBIS", today) == "Which NBIS contract: the strike, call or put, and the expiry?"
+    assert desk_requests("Build the 100/110 call spread for Dec 18", "NBIS", today) == [{"action": "ticket", "symbol": "NBIS", "strike": 100.0,
+        "short_strike": 110.0, "option_type": "call", "expiry": "2026-12-18"}]
+    assert desk_requests("Build the 95/90 put credit spread Dec 18", "NBIS", today) == [{"action": "ticket", "symbol": "NBIS",
+        "strike": 90.0, "short_strike": 95.0, "option_type": "put", "expiry": "2026-12-18"}]
+
+
+def test_a_spread_ticket_goes_on_the_plan_its_direction_fits():
+    calls = [{"investigation_id": NBIS, "option_type": "call", "thesis": None}]
+    debit = card(Desk(tickets=calls), action="ticket", symbol="NBIS", strike=100, short_strike=110, option_type="call", expiry="2026-12-18")
+    assert copilot_actions.line(debit) == "Open ticket: NBIS 100/110 call debit spread Dec 18" and debit["short_strike"] == 110
+    # A put credit spread gains as the stock rises: a call plan takes it; a put debit spread does not fit one.
+    assert card(Desk(tickets=calls), action="ticket", symbol="NBIS", strike=90, short_strike=95, option_type="put", expiry="2026-12-18")
+    assert "against the saved call plan" in refused(Desk(tickets=calls), action="ticket", symbol="NBIS", strike=95, short_strike=90,
+                                                    option_type="put", expiry="2026-12-18")
+    assert "differ" in refused(Desk(tickets=calls), action="ticket", symbol="NBIS", strike=100, short_strike=100, option_type="call", expiry="2026-12-18")

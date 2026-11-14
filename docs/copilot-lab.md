@@ -3060,7 +3060,7 @@ the sandbox exercises the cards end to end; only the prices are simulated there.
 | `alert` | "Set alert: NBIS below 98.00" | `POST /charts/alerts` as the desk chart's own Alert here (`source_kind="level"`, `source_id="desk"`, crosses, regular hours), the fresh quote as the reference. |
 | `watch` / `unwatch` | "Watch IREN" | `POST` / `DELETE /copilot/desk/watching` (the app's own list; never Robinhood's). |
 | `draw` | "Draw 102.50 on NBIS · resistance" | A level in the shared chart settings (`useChartSettings`, `PUT /charts/settings`), on the desk chart and in Charts. |
-| `ticket` | "Open ticket: NBIS 100 call Dec 18" | The Ticket tab on that saved plan with the contract (`openTicket`): copy-only, nothing is sent. |
+| `ticket` | "Open ticket: NBIS 100 call Dec 18", or with `short_strike` "Open ticket: NBIS 100/110 call debit spread Dec 18" | The Ticket tab on that saved plan with the contract or the vertical (`openTicket`, as the Chain's Put on ticket): copy-only, nothing is sent. A spread goes on the plan its direction fits (rises: a call plan; falls: a put plan). |
 | `plan_stop` | "Update plan: NBIS stop 92.30 → 96.00" | The plan's invalidation alert armed at the new price (`POST /charts/alerts/{id}/rearm`). The saved pre-trade capture keeps the words it was confirmed with. |
 
 A card more than a day old, a price card whose ticker has moved more than 5% since it was made (or whose level is now on

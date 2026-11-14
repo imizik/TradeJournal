@@ -1,6 +1,7 @@
 import { DESK_TIMEFRAMES, stopWatching, watchSymbol, type DeskTimeframe } from "@/lib/desk";
 import { createAlert, rearmAlert } from "@/lib/alerts";
 import { freshQuote, listAlerts as listAllAlerts } from "@/lib/copilot";
+import { isDebit } from "@/lib/spreadTicket";
 
 /**
  * The copilot's desk actions (docs/copilot-lab.md § Desk actions). The server's ``desk_action`` checked the request
@@ -16,7 +17,9 @@ export type DeskAction = { made_at: number } & (
   | { action: "alert"; symbol: string; price: number; side: "above" | "below"; label: string | null; last: number; as_of?: string | number | null }
   | { action: "watch" | "unwatch"; symbol: string }
   | { action: "draw"; symbol: string; price: number; label: string | null; last: number; as_of?: string | number | null }
-  | { action: "ticket"; symbol: string; expiry: string; strike: number; option_type: "call" | "put"; investigation_id: string }
+  | { action: "ticket"; symbol: string; expiry: string; strike: number; option_type: "call" | "put"; investigation_id: string;
+      /** A vertical spread's sold leg (``strike`` is the leg bought), same expiry and type. */
+      short_strike?: number }
   | { action: "plan_stop"; symbol: string; price: number; was: number; investigation_id: string; alert_id: string;
       direction: "long" | "short"; last: number; as_of?: string | number | null });
 
@@ -36,8 +39,12 @@ export function actionLine(card: DeskAction): string {
     case "unwatch": return `Stop watching ${card.symbol}`;
     case "draw": return `Draw ${money(card.price)} on ${card.symbol}${card.label ? ` · ${card.label}` : ""}`;
     case "ticket": {
-      const day = new Date(`${card.expiry}T12:00:00Z`);
-      return `Open ticket: ${card.symbol} ${card.strike} ${card.option_type} ${day.toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" })}`;
+      const day = new Date(`${card.expiry}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
+      if (card.short_strike != null) {
+        const low = Math.min(card.strike, card.short_strike), high = Math.max(card.strike, card.short_strike);
+        return `Open ticket: ${card.symbol} ${low}/${high} ${card.option_type} ${isDebit(card.option_type, card.strike, card.short_strike) ? "debit" : "credit"} spread ${day}`;
+      }
+      return `Open ticket: ${card.symbol} ${card.strike} ${card.option_type} ${day}`;
     }
     case "plan_stop": return `Update plan: ${card.symbol} stop ${money(card.was)} → ${money(card.price)}`;
   }
@@ -177,7 +184,9 @@ export async function runAction(card: DeskAction, nowS: number): Promise<Done> {
       return { text: `${card.symbol} is off Watching.` };
     case "ticket": {
       const { openTicket } = await import("@/components/copilot/DeskTicket");
-      openTicket(card.investigation_id, { expiry: card.expiry, strike: card.strike });
+      // As the Chain's Put on ticket (and its spread): the plan's ticket with this contract or vertical, copy-only.
+      openTicket(card.investigation_id, { expiry: card.expiry, strike: card.strike,
+        ...(card.short_strike != null ? { short: card.short_strike, kind: card.option_type } : {}) });
       return { text: "Ticket open on the desk: copy it into Robinhood. Nothing is sent from here." };
     }
     case "plan_stop": {

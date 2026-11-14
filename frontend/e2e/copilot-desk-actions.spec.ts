@@ -26,7 +26,7 @@ const SESSION = { as_of: "2026-11-13T16:00:00Z", now: epoch("2026-11-13T16:00:00
   indices: [{ symbol: "SPY", last: 580.1, change_pct: 0.42 }], quote_issue: null, realized_today: 0, sections: {} };
 const main = (fields: Record<string, unknown> = {}) => ({ id: MAIN, source: "copilot", title: "Main chat", symbol: null, status: "open", conclusion: null,
   revision: 1, message_count: 0, has_findings: false, created_at: "2026-11-13T14:00:00Z", updated_at: "2026-11-13T15:00:00Z", evidence: [],
-  findings: null, transcript: [], main_day: "2026-11-13", ...fields });
+  findings: null, transcript: [] as unknown[], main_day: "2026-11-13", ...fields });
 
 const card = (id: string, fields: Record<string, unknown>) => ({ type: "proposal", id, kind: "desk_action", made_at: MADE, ...fields });
 const SHOW = card("a_show", { action: "show", symbol: "NBIS", timeframe: "15m", tab: "chart" });
@@ -175,6 +175,13 @@ test("a ticket card opens the copy-only Ticket tab on the saved plan with that c
   await expect(page.getByRole("tab", { name: "Ticket" })).toHaveAttribute("aria-selected", "true");
   await expect.poll(() => seen.tickets.at(-1) ?? "").toContain(`/copilot/tickets/${PLAN}`);
   expect(seen.tickets.at(-1)).toContain("strike=100");
+});
+
+test("a spread ticket card opens the plan's ticket with both legs", async ({ page }) => {
+  const seen = await desk(page, [{ ...TICKET, short_strike: 110 }]);
+  await expect(actionCard(page, "ticket")).toContainText("Open ticket: NBIS 100/110 call debit spread Dec 18");
+  await actionCard(page, "ticket").getByRole("button", { name: "Open ticket" }).click();
+  await expect.poll(() => seen.tickets.at(-1) ?? "").toContain("short_strike=110");
 });
 
 test("on a phone the card fits and Show it closes the sheet onto the chart", async ({ page }) => {

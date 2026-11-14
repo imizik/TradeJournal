@@ -379,7 +379,8 @@ TOOLS: list[dict] = [
                        "and `side` above or below, optional `label`), action=watch or unwatch (the desk's Watching list), "
                        "action=draw (a horizontal level on the desk chart at `price`, optional `label` such as resistance), "
                        "action=ticket (the copy-only order ticket of the owner's saved plan in `symbol`, filled with "
-                       "`expiry` YYYY-MM-DD, `strike` and `option_type`; it never sends an order), action=plan_stop (move "
+                       "`expiry` YYYY-MM-DD, `strike` (the leg bought) and `option_type`, and for a vertical spread `short_strike` (the "
+                       "leg sold, same expiry: a debit spread buys the strike nearer the money); it never sends an order), action=plan_stop (move "
                        "the saved plan's stop, its invalidation, to `price`). At most three in one answer. The result says "
                        "what the card will do, or why it cannot (a ticker not followed, a price on the wrong side, no plan "
                        "or more than one): then say so or ask, never guess.",
@@ -393,6 +394,7 @@ TOOLS: list[dict] = [
                                         "label": {"type": "string", "description": f"At most {DESK_LABEL_MAX} characters"},
                                         "expiry": {"type": "string", "description": "YYYY-MM-DD"},
                                         "strike": {"type": "number"},
+                                        "short_strike": {"type": "number", "description": "ticket: a vertical spread's sold leg"},
                                         "option_type": {"type": "string", "enum": list(DESK_OPTION_TYPES)}}},
     },
 ]

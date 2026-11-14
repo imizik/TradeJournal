@@ -576,7 +576,8 @@ def desk_requests(prompt: str, symbol: str, today) -> list[dict] | str | None:
         out.append({"action": "draw", "symbol": symbol, "price": float(m.group(1)),
                     **({"label": m.group(2).strip()} if m.group(2) else {})})
     if re.search(r"\b(ticket|build the)\b", lower):
-        strike = re.search(rf"\b{_NUM}\s*(c|calls?|p|puts?)\b", lower)
+        pair = re.search(rf"\b(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\s*(c|calls?|p|puts?)\b", lower)
+        strike = pair and re.search(rf"\b{_NUM}\s*(c|calls?|p|puts?)\b", lower[pair.start(2):]) or re.search(rf"\b{_NUM}\s*(c|calls?|p|puts?)\b", lower)
         when = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\.?\s+(\d{1,2})\b", lower)
         if not strike or not when:
             return f"Which {symbol} contract: the strike, call or put, and the expiry?"
@@ -584,8 +585,14 @@ def desk_requests(prompt: str, symbol: str, today) -> list[dict] | str | None:
         expiry = date(today.year, month, day)
         if expiry < today:
             expiry = date(today.year + 1, month, day)
-        out.append({"action": "ticket", "symbol": symbol, "strike": float(strike.group(1)),
-                    "option_type": "put" if strike.group(2).startswith("p") else "call", "expiry": expiry.isoformat()})
+        kind = "put" if strike.group(2).startswith("p") else "call"
+        ticket = {"action": "ticket", "symbol": symbol, "strike": float(strike.group(1)), "option_type": kind, "expiry": expiry.isoformat()}
+        if pair:  # a debit spread buys the strike nearer the money, unless the words say credit
+            low, high = sorted((float(pair.group(1)), float(pair.group(2))))
+            near, far = (low, high) if kind == "call" else (high, low)
+            bought, sold = (far, near) if "credit" in lower else (near, far)
+            ticket.update(strike=bought, short_strike=sold)
+        out.append(ticket)
     if re.search(r"\bstop\b", lower) and (m := re.search(rf"\bto\s+{_NUM}", lower)) and "watching" not in lower:
         out.append({"action": "plan_stop", "symbol": symbol, "price": float(m.group(1))})
     return out[:3] or None

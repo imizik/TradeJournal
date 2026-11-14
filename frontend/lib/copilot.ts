@@ -124,7 +124,7 @@ export function cardLine(card: Proposal): string {
     : card.kind === "practice" ? `"${words(card.outcome?.text || card.label)}"`
     : card.kind === "desk_action" ? `${card.action} ${card.symbol}${"price" in card ? ` ${card.price}` : ""}${"side" in card ? ` ${card.side}` : ""}`
       + `${card.action === "show" && card.timeframe ? ` ${card.timeframe}` : ""}${card.action === "show" && card.tab !== "chart" ? ` ${card.tab}` : ""}`
-      + `${card.action === "ticket" ? ` ${card.strike} ${card.option_type} ${card.expiry}` : ""}`
+      + `${card.action === "ticket" ? ` ${card.strike}${card.short_strike != null ? `/${card.short_strike}` : ""} ${card.option_type} ${card.expiry}` : ""}`
     : `"${words(card.question)}" in ${card.horizon_days}d`;
   return `[card ${card.kind} ${what}: ${card.outcome?.state ?? "waiting"}]`;
 }
