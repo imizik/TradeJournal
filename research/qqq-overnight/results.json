@@ -1,0 +1,229 @@
+{
+  "protocol_id": "qqq-overnight-20261114-v1",
+  "test": {
+    "holds": 2711,
+    "mean_bp": 4.204,
+    "median_bp": 7.231,
+    "up_rate": 0.558,
+    "interval_bp": [
+      1.101,
+      7.134
+    ],
+    "periods_bp": {
+      "first": 4.487,
+      "second": 1.973,
+      "third": 5.655
+    },
+    "mean_bp_extra_cent": 3.36,
+    "intraday_same_days_bp": 3.063,
+    "decision": "worth a paper test"
+  },
+  "descriptive": {
+    "entry_sessions": 2732,
+    "holds_possible": 2711,
+    "early_closes_left_out": 21,
+    "missing_bars": 0,
+    "no_fill_quote": 0,
+    "exits": {
+      "bid": 2711,
+      "open from bar": 0
+    },
+    "by_year": {
+      "2016": {
+        "holds": 251,
+        "mean_bp": 0.199,
+        "median_bp": 3.426,
+        "up_rate": 0.538
+      },
+      "2017": {
+        "holds": 249,
+        "mean_bp": 6.743,
+        "median_bp": 6.898,
+        "up_rate": 0.59
+      },
+      "2018": {
+        "holds": 248,
+        "mean_bp": 3.463,
+        "median_bp": 8.852,
+        "up_rate": 0.548
+      },
+      "2019": {
+        "holds": 249,
+        "mean_bp": 7.575,
+        "median_bp": 12.777,
+        "up_rate": 0.602
+      },
+      "2020": {
+        "holds": 251,
+        "mean_bp": 7.836,
+        "median_bp": 26.054,
+        "up_rate": 0.618
+      },
+      "2021": {
+        "holds": 251,
+        "mean_bp": 5.78,
+        "median_bp": 13.424,
+        "up_rate": 0.59
+      },
+      "2022": {
+        "holds": 250,
+        "mean_bp": -7.735,
+        "median_bp": -5.658,
+        "up_rate": 0.44
+      },
+      "2023": {
+        "holds": 248,
+        "mean_bp": 3.86,
+        "median_bp": 1.612,
+        "up_rate": 0.512
+      },
+      "2024": {
+        "holds": 249,
+        "mean_bp": 10.673,
+        "median_bp": 9.387,
+        "up_rate": 0.582
+      },
+      "2025": {
+        "holds": 247,
+        "mean_bp": 4.882,
+        "median_bp": 7.664,
+        "up_rate": 0.563
+      },
+      "2026": {
+        "holds": 218,
+        "mean_bp": 2.841,
+        "median_bp": 7.014,
+        "up_rate": 0.55
+      }
+    },
+    "intraday_by_year_on_bars": {
+      "2016": {
+        "holds": 251,
+        "mean_bp": 3.068,
+        "median_bp": 6.825,
+        "up_rate": 0.53
+      },
+      "2017": {
+        "holds": 249,
+        "mean_bp": 4.555,
+        "median_bp": 9.327,
+        "up_rate": 0.586
+      },
+      "2018": {
+        "holds": 248,
+        "mean_bp": -3.896,
+        "median_bp": 1.695,
+        "up_rate": 0.504
+      },
+      "2019": {
+        "holds": 249,
+        "mean_bp": 7.606,
+        "median_bp": 5.253,
+        "up_rate": 0.546
+      },
+      "2020": {
+        "holds": 251,
+        "mean_bp": 7.859,
+        "median_bp": 15.546,
+        "up_rate": 0.582
+      },
+      "2021": {
+        "holds": 251,
+        "mean_bp": 4.33,
+        "median_bp": 12.315,
+        "up_rate": 0.566
+      },
+      "2022": {
+        "holds": 250,
+        "mean_bp": -4.437,
+        "median_bp": -12.702,
+        "up_rate": 0.476
+      },
+      "2023": {
+        "holds": 248,
+        "mean_bp": 13.731,
+        "median_bp": 17.933,
+        "up_rate": 0.597
+      },
+      "2024": {
+        "holds": 249,
+        "mean_bp": -2.48,
+        "median_bp": 1.994,
+        "up_rate": 0.53
+      },
+      "2025": {
+        "holds": 247,
+        "mean_bp": 1.891,
+        "median_bp": 10.186,
+        "up_rate": 0.543
+      },
+      "2026": {
+        "holds": 218,
+        "mean_bp": 1.218,
+        "median_bp": 1.673,
+        "up_rate": 0.5
+      }
+    },
+    "by_entry_weekday": {
+      "Mon": {
+        "holds": 507,
+        "mean_bp": 10.203,
+        "median_bp": 8.113,
+        "up_rate": 0.562
+      },
+      "Tue": {
+        "holds": 560,
+        "mean_bp": 9.395,
+        "median_bp": 11.401,
+        "up_rate": 0.6
+      },
+      "Wed": {
+        "holds": 557,
+        "mean_bp": 0.864,
+        "median_bp": 5.301,
+        "up_rate": 0.537
+      },
+      "Thu": {
+        "holds": 549,
+        "mean_bp": 1.229,
+        "median_bp": 8.211,
+        "up_rate": 0.546
+      },
+      "Fri": {
+        "holds": 538,
+        "mean_bp": -0.357,
+        "median_bp": 4.738,
+        "up_rate": 0.543
+      }
+    },
+    "without_best_1pct_months": {
+      "holds": 2690,
+      "mean_bp": 3.757,
+      "median_bp": 7.093,
+      "up_rate": 0.557
+    },
+    "on_bars_no_costs": {
+      "holds": 2711,
+      "mean_bp": 4.639,
+      "median_bp": 8.459,
+      "up_rate": 0.566
+    },
+    "intraday_on_bars_no_costs": {
+      "holds": 2711,
+      "mean_bp": 3.063,
+      "median_bp": 7.869,
+      "up_rate": 0.542
+    },
+    "entry_spread_bp": {
+      "mean": 0.459,
+      "median": 0.404
+    },
+    "growth_of_1": {
+      "overnight_net": 2.823,
+      "overnight_extra_cent": 2.246,
+      "overnight_on_bars": 3.178,
+      "intraday_on_bars": 1.945,
+      "buy_and_hold_on_bars": 6.213
+    }
+  }
+}
