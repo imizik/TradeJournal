@@ -1790,6 +1790,17 @@ def _now() -> float:
     return time.time()
 
 
+@router.get("/desk/overnight")
+def desk_overnight():
+    """The QQQ overnight paper book (``app/engine/overnight_book.py``): its state, recorded nights and running result
+    beside the registered backtest. Read from its own file; no provider call, no Robinhood call, never an order.
+    Read-only, owner-only, refused while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import overnight_book
+    return overnight_book.read(today._now())
+
+
 @router.get("/desk/health")
 def desk_health(db: Session = Depends(get_session)):
     """Is each source behind the desk live (``app/engine/desk_health.py``): Robinhood, prices, chatter, TradingView,
