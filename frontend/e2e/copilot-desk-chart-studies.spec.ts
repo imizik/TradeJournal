@@ -61,9 +61,13 @@ async function desk(page: Page, { alerts = [ALERT] as object[] } = {}) {
   });
   // The desk read of NBIS (a read sent as a POST; its own spec covers it) answers with no read here.
   await page.route("**/copilot/desk/read", (route) => route.fulfill({ json: { state: "hidden" } }));
+  // After the close the day report asks for the day's read (also a read sent as a POST; copilot-day-read.spec.ts covers
+  // it): answered with none, so the spec reads the same at any hour.
+  await page.route("**/copilot/desk/day-read", (route) => route.fulfill({ json: { state: "hidden" } }));
   // Every write this page makes is recorded; the alert routes answer as the backend's listing would.
   page.on("request", (request) => {
-    if (request.method() !== "GET" && !new URL(request.url()).pathname.endsWith("/copilot/desk/read")) posted.push(request);
+    const path = new URL(request.url()).pathname;
+    if (request.method() !== "GET" && !path.endsWith("/copilot/desk/read") && !path.endsWith("/copilot/desk/day-read")) posted.push(request);
   });
   await page.route("**/charts/alerts**", async (route) => {
     const request = route.request();
