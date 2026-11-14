@@ -44,6 +44,7 @@ export function level2Row(state: Level2Health): HealthRow {
 // --------------------------------------------------------------------------- the strip
 
 const BAD: HealthState[] = ["stale", "down", "low"];
+const SETTLE_MS = 8_000; // after an open or a return to the page: the desk's own first reads have landed by then
 const DOT: Record<HealthState, string> = {
   live: "bg-emerald-400", closed: "bg-muted-foreground/50", off: "bg-muted-foreground/50", quiet: "bg-muted-foreground/50",
   unknown: "bg-muted-foreground/50", stale: "bg-amber-400", down: "bg-amber-400", low: "bg-amber-400",
@@ -54,12 +55,12 @@ const WORD: Record<HealthState, string> = {
 
 /** The dot's summary from every row: amber naming the worst, grey when something cannot be told, else green. */
 export function summary(rows: HealthRow[] | null, failed: boolean): { tone: "ok" | "unknown" | "bad"; text: string } {
-  if (!rows) return { tone: "unknown", text: failed ? "Health unknown" : "Checking…" };
+  if (failed) return { tone: "unknown", text: "Health unknown" };
+  if (!rows) return { tone: "unknown", text: "Checking…" };
   const bad = rows.filter(r => BAD.includes(r.state));
   if (bad.length === 1) return { tone: "bad", text: `${bad[0].name} ${WORD[bad[0].state]}` };
   if (bad.length > 1) return { tone: "bad", text: `${bad.length} sources behind` };
   const unknown = rows.filter(r => r.state === "unknown");
-  if (failed) return { tone: "unknown", text: "Health unknown" };
   if (unknown.length) return { tone: "unknown", text: unknown.length === 1 ? `${unknown[0].name} unknown` : `${unknown.length} unknown` };
   return { tone: "ok", text: rows.some(r => r.state === "live") ? "All live" : "All fine · market closed" };
 }
@@ -81,14 +82,25 @@ export default function DeskHealthDot() {
         .catch(error => { if ((error as Error).name !== "AbortError") setFailed(true); });
     };
     read();
+    // Robinhood and prices are read because the desk asks: a few seconds after it opens or comes back into view, once
+    // its own first reads have landed, ask again so a cold start never reads as "behind" for a minute.
+    let again = window.setTimeout(read, SETTLE_MS);
+    let hiddenAt: number | null = null;
+    const seen = () => {
+      if (document.hidden) { hiddenAt = Date.now(); return; }
+      if (hiddenAt !== null && Date.now() - hiddenAt > SETTLE_MS) { window.clearTimeout(again); again = window.setTimeout(read, SETTLE_MS); }
+      hiddenAt = null;
+    };
+    document.addEventListener("visibilitychange", seen);
     const stop = everyDeskMinute(read);
-    return () => { controller.abort(); stop(); };
+    return () => { controller.abort(); stop(); window.clearTimeout(again); document.removeEventListener("visibilitychange", seen); };
   }, []);
 
   useEffect(() => {
     if (!open) return;
     const away = (event: MouseEvent | TouchEvent) => { if (box.current && !box.current.contains(event.target as Node)) setOpen(false); };
-    const key = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    // Escape closes this list only, not the desk's drawer or sheet behind it (the desk listens on window).
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") { event.stopPropagation(); setOpen(false); } };
     document.addEventListener("mousedown", away);
     document.addEventListener("touchstart", away);
     document.addEventListener("keydown", key);
@@ -96,14 +108,14 @@ export default function DeskHealthDot() {
   }, [open]);
 
   // Level 2 sits after prices, where it belongs among the market data.
-  const rows = data ? data.sources.flatMap(r => r.id === "prices" ? [r, level2Row(tape)] : [r]) : null;
-  // A failed read keeps the last rows but never shows them as fine.
+  // After a failed read the last rows are not shown at all: an old "Live" is not known to be live now.
+  const rows = data && !failed ? data.sources.flatMap(r => r.id === "prices" ? [r, level2Row(tape)] : [r]) : null;
   const said = summary(rows, failed);
   const dot = said.tone === "bad" ? "bg-amber-400" : said.tone === "ok" ? "bg-emerald-400" : "bg-muted-foreground/50";
 
   return (
     <div ref={box} className="relative">
-      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="true" data-testid="desk-health"
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="dialog" data-testid="desk-health"
         data-tone={said.tone} aria-label={`Data health: ${said.text}`} title="Is every source behind the desk live?"
         className={cn("inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md px-2 text-xs sm:min-h-8",
           said.tone === "bad" ? "text-amber-300" : "text-muted-foreground", open ? "bg-secondary" : "hover:bg-secondary")}>

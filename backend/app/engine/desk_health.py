@@ -102,8 +102,10 @@ def robinhood(now: float, facts: dict) -> dict:
         return _row("robinhood", name, "unknown", "Starting · no read yet", None, affects)
     if state == "unavailable" or last is None:
         return _row("robinhood", name, "down", f"Robinhood did not answer · {since}", last, affects,
-                    {"kind": "text", "text": "Refresh beside the book asks again; it retries on its own every minute."})
+                    {"kind": "text", "text": "Refresh beside the book asks again; an open desk also asks again each minute in market hours."})
     if now - last > STALE_AFTER["robinhood"](facts):
+        if facts.get("reading"):  # the desk's own read (opened just now, or back after a while) is under way
+            return _row("robinhood", name, "unknown", f"Reading now · last read {_clock(last, now)}", last, affects)
         return _row("robinhood", name, "stale", f"Last read {_clock(last, now)}", last, affects)
     # Positions are live; the order-history pass (its own poller, same sign-in) can still be behind.
     orders = facts.get("orders") or {}
@@ -124,7 +126,8 @@ PRICES_AFFECTS = "Prices, marks and P&L on the desk may be behind."
 
 def prices(now: float, phase: str) -> dict:
     from app.engine import desk_ticks
-    good, failed = desk_ticks.health()
+    seen = desk_ticks.health()
+    good, failed = seen["good"], seen["failed"]
     name = "Prices"
     if phase != "regular":
         return _row("prices", name, "closed", "Market closed · live prices run in the regular session", good, PRICES_AFFECTS)
@@ -132,6 +135,11 @@ def prices(now: float, phase: str) -> dict:
     if failed is not None and late and (good is None or failed > good):
         line = f"Quotes failing · last price {_clock(good, now)}" if good else "Quotes failing"
         return _row("prices", name, "down", line, good, PRICES_AFFECTS)
+    # Prices are read only while a desk asks: a desk just opened (or back after a while) has not asked yet, or its read
+    # is under way. That is not knowing yet, not stale.
+    asking = seen["asked"] is not None and now - seen["asked"] <= desk_ticks.WANTED_SECONDS
+    if late and (seen["reading"] or not asking):
+        return _row("prices", name, "unknown", "Waiting for the first price read", good, PRICES_AFFECTS)
     if good is None:
         return _row("prices", name, "unknown", "No price read yet", None, PRICES_AFFECTS)
     if late:
@@ -145,7 +153,7 @@ CHATTER_AFFECTS = "The Feed's chatter (what r/wallstreetbets is talking about) m
 def chatter_row(now: float, regular: tuple[int, int] | None) -> dict:
     from app.engine import chatter
     name = "Chatter"
-    if not chatter.wsb_enabled():
+    if not (chatter.wsb_enabled() and chatter.enabled()):  # enabled(): the reader does not run in the dot trial
         return _row("chatter", name, "off", "Not switched on", None, CHATTER_AFFECTS)
     state = chatter.load("wsb")
     ok_at, error_at = _epoch(state.get("ok_at")), _epoch(state.get("error_at"))

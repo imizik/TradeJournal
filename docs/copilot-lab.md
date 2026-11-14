@@ -1853,12 +1853,13 @@ morning can be told from a dead feed. Green with "All live" in grey when every r
 what is behind ("Robinhood down", "2 sources behind"); grey when one cannot be told ("Prices unknown", or "Health
 unknown" when the read itself failed): unknown is never green. A phone shows the dot alone. A tap lists each source with
 its state and last good time in plain words; a tap on a source says what it affects and, where one exists, the fix
-already in the app (Gmail's Reconnect; the Robinhood sign-in steps in docs/robinhood-read-feed.md). No new fix flow.
+already in the app (Gmail's Reconnect; the Robinhood sign-in steps in docs/robinhood-read-feed.md). No new fix flow. It
+reads again a few seconds after the desk opens or comes back into view, once the desk's own first reads have landed.
 
 | Source | Read from | Stale after | Outside its hours |
 |---|---|---|---|
-| Robinhood | the feed's kept snapshot (`snapshot(kick=False)`: never starts a read) and the order-history pass's last status | three missed refreshes (3 min in market hours, 45 min otherwise) | the feed keeps reading every 15 min |
-| Prices | the live prices' last good and failed read (`desk_ticks.health`) | 60 s | closed outside the regular session |
+| Robinhood | the feed's kept snapshot (`snapshot(kick=False)`: never starts a read) and the order-history pass's last status | three missed refreshes (3 min in market hours, 45 min otherwise); a read under way is "unknown", not stale | read while a desk is open; the order history every 15 min |
+| Prices | the live prices' last good and failed read (`desk_ticks.health`) | 60 s while a desk is asking; before its first read "unknown" | closed outside the regular session |
 | Level 2 | the Tape's own moomoo session, in the browser | — | off with no Tape session (not an error) |
 | Chatter | ApeWisdom's saved state file | 45 min | closed outside market days 6:00–20:00 |
 | TradingView | the newest stored alert on a followed ticker | live with one today; quiet with none (none may have fired) | — |

@@ -1805,11 +1805,13 @@ def desk_health(db: Session = Depends(get_session)):
 
 def _robinhood_health(now: float) -> dict:
     """The Robinhood feed's state for the data-health strip, without starting a read: the cached snapshot's state
-    (``kick=False``), its newest good read, the feed's stale window and the order-history pass's last status."""
+    (``kick=False``), its newest good read, whether a read is in flight, the feed's stale window and the order-history
+    pass's last status."""
     from app.engine import robinhood_book as rb
     from app.engine import robinhood_fills
     summary, _snap = rb.feed.snapshot(kick=False)
-    return {"state": summary.get("state"), "last_at": rb.feed.last_read_at(), "refresh_window": rb.STALE_REFRESHES * rb.ttl(now),
+    return {"state": summary.get("state"), "last_at": rb.feed.last_read_at(), "reading": rb.feed.reading(),
+            "refresh_window": rb.STALE_REFRESHES * rb.ttl(now),
             "orders": {"mode": robinhood_fills.mode(), "status": robinhood_fills.poller.status()}}
 
 

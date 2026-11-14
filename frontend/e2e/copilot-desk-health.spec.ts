@@ -130,9 +130,25 @@ test("a failed health read says unknown, not all live", async ({ page }) => {
   await expect(page.getByTestId("desk-health")).toHaveText("Health unknown");
 });
 
+test("a failed read after a good one: grey, and the old rows are not shown as live", async ({ page }) => {
+  const { answer } = await open(page, health(LIVE));
+  await expect(page.getByTestId("desk-health")).toHaveText("All live");
+  answer.status = 500;
+  answer.body = { detail: "boom" };
+  await page.clock.runFor(61_000);
+  await expect(page.getByTestId("desk-health")).toHaveText("Health unknown");
+  await page.getByTestId("desk-health").click();
+  const list = page.getByTestId("desk-health-list");
+  await expect(list).toContainText("Could not check just now");
+  await expect(list.getByTestId("health-prices")).toHaveCount(0);
+  await expect(list.getByTestId("health-level2")).toHaveAttribute("data-state", "off"); // the Tape's own still shows
+});
+
 test("it rides the minute's one request: a change shows on the next beat with no read of its own", async ({ page }) => {
   const { seen, answer } = await open(page, health(LIVE));
   await expect(page.getByTestId("desk-health")).toHaveText("All live");
+  await page.clock.runFor(10_000); // the one settle read a few seconds after opening (cold load, not the idle rate)
+  await expect.poll(() => seen.filter(p => p === "/copilot/desk/health").length).toBe(2);
   const before = seen.filter(p => p === "/copilot/desk/health").length;
   answer.body = health(LIVE.map(r => r.id === "radar" ? row("radar", "Radar", "stale", "Last pass 10:52") : r));
   await page.clock.runFor(61_000);

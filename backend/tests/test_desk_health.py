@@ -53,7 +53,7 @@ def test_every_source_has_a_row_and_nothing_switched_on_is_never_green(desk, reg
     assert list(rows) == ["robinhood", "prices", "chatter", "tradingview", "gmail", "radar", "budget"]
     assert rows["robinhood"]["state"] == "off"
     assert rows["prices"]["state"] == "unknown"  # in the session with no price read yet: unknown, not live
-    assert rows["prices"]["line"] == "No price read yet"
+    assert rows["prices"]["line"] == "Waiting for the first price read"
     assert rows["radar"]["state"] == "off" and rows["budget"]["state"] == "off"
     assert all(r["state"] != "live" for r in body["sources"])
     assert body["overall"] == "unknown"
@@ -62,8 +62,9 @@ def test_every_source_has_a_row_and_nothing_switched_on_is_never_green(desk, reg
 def test_closed_hours_say_closed_not_stale(desk, regular, monkeypatch):  # noqa: F811
     regular["now"] = "weekend"
     monkeypatch.setenv("CHATTER_WSB_SOURCE", "apewisdom")
+    monkeypatch.delenv("TJ_DOT_TRIAL_ENABLED", raising=False)
     monkeypatch.setattr(chatter, "load", lambda name, root=None: {"ok_at": NOW - 3 * 86400, "error_at": None})
-    monkeypatch.setattr(desk_ticks, "health", lambda: (NOW - 3 * 86400, None))
+    monkeypatch.setattr(desk_ticks, "health", lambda: {"good": NOW - 3 * 86400, "failed": None, "asked": None, "reading": False})
     rows = by_id(read(desk))
     assert rows["prices"]["state"] == "closed"
     assert rows["chatter"]["state"] == "closed"
@@ -71,25 +72,38 @@ def test_closed_hours_say_closed_not_stale(desk, regular, monkeypatch):  # noqa:
 
 
 def test_prices_live_then_stale_then_failing(desk, regular, monkeypatch):  # noqa: F811
-    good = {"at": NOW - 4, "failed": None}
-    monkeypatch.setattr(desk_ticks, "health", lambda: (good["at"], good["failed"]))
+    seen = {"good": NOW - 4, "failed": None, "asked": NOW - 2, "reading": False}
+    monkeypatch.setattr(desk_ticks, "health", lambda: dict(seen))
     assert by_id(read(desk))["prices"]["state"] == "live"
-    good["at"] = NOW - 5 * 60
+    seen["good"] = NOW - 5 * 60
     row = by_id(read(desk))["prices"]
     assert row["state"] == "stale" and row["line"] == "Last price 14:44"
-    good["failed"] = NOW - 2
+    seen["failed"] = NOW - 2
     row = by_id(read(desk))["prices"]
     assert row["state"] == "down" and row["line"] == "Quotes failing · last price 14:44"
 
 
-def test_desk_ticks_health_reports_the_newest_read_and_failure():
+def test_a_desk_just_opened_is_not_behind_before_its_first_price_read(regular, monkeypatch):
+    # Yesterday's last price, and no desk has asked yet (it opened this second) or its read is under way: not stale.
+    seen = {"good": NOW - 86400, "failed": None, "asked": None, "reading": False}
+    monkeypatch.setattr(desk_ticks, "health", lambda: dict(seen))
+    row = desk_health.prices(NOW, "regular")
+    assert row["state"] == "unknown" and row["line"] == "Waiting for the first price read"
+    seen.update(asked=NOW - 1, reading=True)
+    assert desk_health.prices(NOW, "regular")["state"] == "unknown"
+    seen.update(reading=False)  # asked, read done, still nothing new: now it is behind
+    assert desk_health.prices(NOW, "regular")["state"] == "stale"
+
+
+def test_desk_ticks_health_reports_reads_asks_and_flight():
     desk_ticks.clear()
     try:
-        assert desk_ticks.health() == (None, None)
+        assert desk_ticks.health() == {"good": None, "failed": None, "asked": None, "reading": False}
         with desk_ticks._lock:
             desk_ticks._kept.update({"NVDA": (100.0, {"last": 1}), "MU": (130.0, None)})
             desk_ticks._issue = (120.0, "timeout")
-        assert desk_ticks.health() == (130.0, 120.0)
+            desk_ticks._wanted.update({"NVDA": 125.0, "MU": 131.0})
+        assert desk_ticks.health() == {"good": 130.0, "failed": 120.0, "asked": 131.0, "reading": False}
     finally:
         desk_ticks.clear()
 
@@ -105,6 +119,9 @@ def test_the_router_reads_the_feed_without_starting_a_read(monkeypatch):
         def last_read_at(self):
             return NOW - 9 * 60
 
+        def reading(self):
+            return False
+
         def refresh(self, force=False):
             pytest.fail("the health read started a Robinhood read")
 
@@ -113,7 +130,7 @@ def test_the_router_reads_the_feed_without_starting_a_read(monkeypatch):
     monkeypatch.setattr(robinhood_fills.poller, "status", lambda: {"at": None, "state": "not run"})
     facts = copilot_desk._robinhood_health(NOW)
     assert calls == [False]
-    assert facts["state"] == "signed_out" and facts["last_at"] == NOW - 9 * 60
+    assert facts["state"] == "signed_out" and facts["last_at"] == NOW - 9 * 60 and facts["reading"] is False
     assert facts["refresh_window"] == robinhood_book.STALE_REFRESHES * robinhood_book.ttl(NOW)
     assert facts["orders"] == {"mode": "shadow", "status": {"at": None, "state": "not run"}}
 
@@ -136,6 +153,9 @@ def test_robinhood_signed_out_says_its_last_read_and_the_sign_in_steps():
 def test_robinhood_live_stale_and_orders_behind():
     assert desk_health.robinhood(NOW, rh())["state"] == "live"
     assert desk_health.robinhood(NOW, rh(last=NOW - 10 * 60))["state"] == "stale"  # past three market-hours refreshes
+    # The desk just opened (or came back) and its own read is under way: not knowing yet, never amber.
+    row = desk_health.robinhood(NOW, rh(last=NOW - 10 * 60) | {"reading": True})
+    assert row["state"] == "unknown" and row["line"] == "Reading now · last read 14:39"
     failed = {"mode": "shadow", "status": {"at": int(NOW - 60), "state": "read failed (timeout)"}}
     row = desk_health.robinhood(NOW, rh(orders=failed))
     assert row["state"] == "down" and row["line"] == "Positions live · orders: last read failed 14:48"
@@ -153,6 +173,7 @@ def test_robinhood_feed_last_read_at_is_the_kept_snapshot():
 
 def test_chatter_live_stale_and_the_first_read_of_the_day(regular, monkeypatch):
     monkeypatch.setenv("CHATTER_WSB_SOURCE", "apewisdom")
+    monkeypatch.delenv("TJ_DOT_TRIAL_ENABLED", raising=False)
     state = {"ok_at": NOW - 10 * 60, "error_at": None}
     monkeypatch.setattr(chatter, "load", lambda name, root=None: dict(state))
     regular_window = (int(OPEN), int(OPEN + 390 * 60))
@@ -238,6 +259,12 @@ def test_a_failing_source_is_unknown_and_the_rest_stand(desk, regular, monkeypat
     rows = by_id(read(desk))
     assert rows["tradingview"]["state"] == "unknown"
     assert rows["robinhood"]["state"] == "off"
+
+
+def test_chatter_is_off_where_its_reader_never_runs(monkeypatch):
+    monkeypatch.setenv("CHATTER_WSB_SOURCE", "apewisdom")
+    monkeypatch.setenv("TJ_DOT_TRIAL_ENABLED", "true")
+    assert desk_health.chatter_row(NOW, (int(OPEN), int(OPEN + 390 * 60)))["state"] == "off"
 
 
 def test_overall_is_the_worst_state():

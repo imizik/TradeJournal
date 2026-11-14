@@ -55,11 +55,12 @@ def clear() -> None:
         _issue = None
 
 
-def health() -> tuple[float | None, float | None]:
-    """(when the newest quote read came back, when the newest read failed), for the desk's data health. No I/O."""
+def health() -> dict:
+    """For the desk's data health, no I/O: ``good`` (when the newest quote read came back), ``failed`` (when the newest
+    read failed), ``asked`` (when a desk last asked for a price) and ``reading`` (a read is in flight)."""
     with _lock:
-        good = max((at for at, _row in _kept.values()), default=None)
-        return good, _issue[0] if _issue else None
+        return {"good": max((at for at, _row in _kept.values()), default=None), "failed": _issue[0] if _issue else None,
+                "asked": max(_wanted.values(), default=None), "reading": _flight is not None}
 
 
 def names(symbols: str) -> list[str]:
