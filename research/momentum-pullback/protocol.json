@@ -1,0 +1,63 @@
+{
+  "protocol_id": "momentum-pullback-20261113-v1",
+  "registered": "2026-11-13",
+  "registered_before": "any multi-day return of this rule, or of any momentum ranking, was computed on 2016-2026. Daily bars for these years were downloaded earlier only to pick opening candidates for the opening breakout studies (#788, #796); no study held a position overnight on them. The rule comes from a NotebookLM summary of Grimes, Bellafiore and Sinclair plus momentum papers (relative strength leaders, quiet pullback to the 20-day average, early time exit), fixed here before any data was read. Already known: opening range breakouts on stocks in play lose money after real fills (#803), and intraday price-only setups showed no edge, which is why this test uses a multi-day hold where costs are small next to the move.",
+  "question": "Do US stocks that lead the market over six months, bought the morning after a quiet three-day pullback to their 20-day average and held up to ten sessions, beat the market after costs, and does the pullback timing beat simply buying the same kind of leader that day?",
+  "why_it_matters": "The owner wants a repeatable setup. This one trades long stock or long calls in a Roth IRA, is checked once a day after the close, and holds long enough that spreads are small next to the expected move.",
+  "sessions": "signals on regular sessions from 2016-07-01 (the first with six months of SIP history) to 2026-10-28 (so every hold ends by 2026-11-12), New York; entries and exits on the following sessions",
+  "data": {
+    "names": "common stocks on any of Polygon's reference snapshots already saved for the opening breakout studies: 2016-01-04, 2016-07-01 and every six months to 2024-01-02, then 2024-07-01, 2025-01-02, 2025-07-01, 2026-01-02, 2026-06-12 and 2026-11-12; symbols of capital letters with an optional .X class. Names later delisted are included",
+    "daily": "Alpaca SIP daily bars 2016-01-04 to 2026-11-12 for every name, split-adjusted (prices and volume) and unadjusted closes (for the price filter and the cent cost); SPY and QQQ split-adjusted",
+    "dividends": "not added to the stock or to SPY"
+  },
+  "universe": "on the signal session: unadjusted close at least $10; average unadjusted dollar volume (close x volume) over the last 20 sessions at least $20 million; at least 131 earlier sessions of bars, with no session of the calendar missing in the 131 before it",
+  "rules": {
+    "momentum": "six-month return ending five sessions before the signal session: split-adjusted close 5 sessions ago over the close 131 sessions ago, minus 1",
+    "leader": "in the top fifth of that day's universe by momentum (the first ceil(n/5) after sorting by momentum, ties by symbol), momentum above QQQ's over the same window, and the signal session's close above its 50-session simple average",
+    "pullback": "three lower closes in a row (close below the previous close on the signal session and the two before it); the signal session's low at or below the 20-session exponential average of closes (span 20, started from the simple average of the first 20 closes); and average volume of those three sessions below the average of the 20 sessions before them",
+    "entry": "buy at the next session's open",
+    "stop": "if any later close is below the lowest low of the three pullback sessions, sell at the next open",
+    "no_progress": "if the third session's close after entry (the entry session counts as the first) is at or below the entry price, sell at the next open",
+    "time": "otherwise sell at the open after the tenth session's close (the entry session counts as the first)",
+    "end_of_data": "if a name has no further bar (delisting, halt), the last close it has, counted",
+    "one_position": "a new signal on a name is ignored while its earlier trade is open (until its exit session)",
+    "costs": "each side pays 5 basis points plus one cent a share on the unadjusted price; the stress check doubles both",
+    "measure": "net return per trade in percent: (exit price x (1 - exit cost)) over (entry price x (1 + entry cost)), minus 1"
+  },
+  "tests": {
+    "count": 2,
+    "beats_market": "net return minus SPY's return from the same entry open to the same exit open (or close for an end-of-data exit), per trade",
+    "pullback_adds": "net return minus the mean net return of up to 5 controls: other leaders on the same signal session without a pullback signal, drawn at random (seed 20261113, in signal order), entered at the same open, exited at the same exit session's open with the same costs (a control without a bar that day exits at its last close before it)",
+    "statistic": "mean per trade",
+    "uncertainty": "2,000 bootstrap resamples of entry months (seed 20261113), each month's trades kept together; two-sided percentile interval at 97.5% (Bonferroni for two tests)"
+  },
+  "periods": {"first": "signals 2016-07-01 to 2019-12-31", "second": "2020-01-01 to 2022-12-31", "third": "2023-01-01 to 2026-10-28"},
+  "decisions": {
+    "beats_market": {
+      "worth a paper test": "the interval's lower end is above 0, the mean is above 0 in each of the three periods, and the mean is still above 0 with doubled costs",
+      "loses to the market": "the interval's upper end is below 0",
+      "no evidence either way": "anything else"
+    },
+    "pullback_adds": {
+      "the pullback adds": "the interval's lower end is above 0",
+      "the pullback hurts": "the interval's upper end is below 0",
+      "no evidence either way": "anything else"
+    },
+    "what_each_allows": "Worth a paper test: a daily after-close list on the desk with these exact rules and a paper book (stock fills at the next open) before any money; options expressions are a later, separate question. Otherwise this pullback rule is closed with no variants (other lookbacks, averages, pullback lengths or exits) on any history. The pullback_adds test says whether the pullback timing, rather than leadership alone, carries any result; plain momentum without the pullback is not decided here"
+  },
+  "descriptive_only": [
+    "trades, signals skipped by the one-position rule, mean and median net return, win rate, mean hold in sessions, exits by type",
+    "costs zero; costs doubled; by year; without the best 1% of months",
+    "the controls' own return over SPY (leaders bought on a random day of leadership) and SPY's mean over the trades' holds",
+    "risk: mean return over the distance to the stop (entry minus the pullback low), as R, with a count of trades that opened at or below the stop (left out of R)"
+  ],
+  "limits": [
+    "daily bars fill at the open price; a real open order can fill worse in a fast open, which the cost line only approximates",
+    "dividends are left out for both sides; leaders pay little, so this slightly flatters SPY",
+    "listing snapshots every six months can miss a name listed and delisted between two snapshots",
+    "2016 snapshots are thinner (about 3,000 names against 4,500 or more later)",
+    "split-only adjustment does not handle spin-offs or a ticker reused by another company (e.g. AA in November 2016); such a day looks like a huge one-day move and can create a false stop or distorted momentum"
+  ],
+  "results": "Market data only: the aggregate results are committed beside this protocol after the single run; the downloaded data stays outside the repository.",
+  "one_run": "one historical run under this id. A changed constant is a new protocol id, recorded beside this one"
+}
