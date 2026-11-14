@@ -18,6 +18,7 @@ import FillInterruptCard from "@/components/FillInterruptCard";
 import WatchDayLink from "@/components/replay/WatchDayLink";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { copilotLabHref } from "@/lib/copilot";
+import { redoHref } from "@/lib/paperReplay";
 
 function pnlColor(val: number | null | undefined) {
   if (val == null) return "text-muted-foreground";
@@ -150,6 +151,9 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
           symbol={trade.ticker} label="Watch the day" />}
         {copilotOn && trade.status !== "open" && <Link href={copilotLabHref(trade.ticker, `Review this trade: ${trade.id}`)}
           className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted">Review with copilot</Link>}
+        {copilotOn && trade.status !== "open" && <Link href={redoHref(trade.id)} data-testid="redo-in-replay"
+          title="Paper trade this day again on the desk's Replay, without seeing what you did, then compare"
+          className="inline-flex items-center rounded-md border border-amber-400/60 px-2.5 py-1 text-xs text-foreground hover:bg-muted">Redo in replay</Link>}
         {/* From a position alert the selected alert carries this as its primary action instead. */}
         {askHref && !alert && <Link href={askHref}
           className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted">Ask copilot about this position</Link>}

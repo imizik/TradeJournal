@@ -126,6 +126,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/desk/notes',  # his notes on the book's trades: database reads only; no Robinhood
     'POST /copilot/desk/notes',  # one note saved with a trade (never a plan); no Robinhood, never changes fills or P&L
     'GET /copilot/desk/feed',
+    'GET /copilot/desk/momentum',  # the QQQ intraday momentum paper book: its own SQLite file only; no provider or Robinhood call, never an order
     'GET /copilot/desk/overnight',  # the QQQ overnight paper book: its own SQLite file only; no provider or Robinhood call, never an order
     'GET /copilot/desk/health',  # is each source behind the desk live: in-memory states, saved files and database reads; no provider or Robinhood call
     'GET /copilot/paper',  # his own paper book and scorecard: database reads, the desk's kept prices; settles an expired paper option at its close; no Robinhood
@@ -146,6 +147,9 @@ DOMAIN_ROUTES = frozenset({
     'POST /copilot/paper/replay/orders',  # a share or option paper fill priced from a past bar plus an assumed spread: replay paper rows only; never an order, never Robinhood
     'POST /copilot/paper/replay/orders/cancel',  # cancel a working replay limit: replay paper rows only
     'POST /copilot/paper/replay/auto',  # a replay position's close-automatically switch: replay paper rows only
+    'GET /copilot/paper/replay/redo',  # redo a real trade: its day, ticker and contract from the journal's trade row, read only; nothing about how it went
+    'POST /copilot/paper/replay/redo',  # start a redo: a replay run plus its link to the real trade; replay paper rows only, never the trade
+    'GET /copilot/paper/replay/redo/compare',  # the real trade beside its redo: trade row and replay paper rows, read only
     'GET /copilot/tickets',
     'GET /copilot/tickets/{investigation_id}',
     'GET /copilot/roll',  # the desk's roll ticket: the held contract's terms from the book row in, two contracts' quotes (one paced options-feed pass) and arithmetic out; never Robinhood, never an order

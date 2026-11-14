@@ -17,3 +17,13 @@ def test_the_desk_route_reads_the_book_and_rides_the_minute_request(desk, tmp_pa
     assert desk_minute.allowed("/copilot/desk/overnight")
     monkeypatch.setattr(copilot_desk.copilot, "settings", lambda: SimpleNamespace(enabled=False))
     assert desk.get("/copilot/desk/overnight").status_code == 503
+
+
+def test_the_momentum_route_reads_its_book_and_rides_the_minute_request(desk, tmp_path, monkeypatch):  # noqa: F811
+    monkeypatch.setenv("INTRADAY_MOMENTUM_BOOK_PATH", str(tmp_path / "none.sqlite3"))
+    body = desk.get("/copilot/desk/momentum").json()
+    assert (body["holding"], body["days"], body["symbol"]) == (None, [], "QQQ")
+    assert not (tmp_path / "none.sqlite3").exists()
+    assert desk_minute.allowed("/copilot/desk/momentum")
+    monkeypatch.setattr(copilot_desk.copilot, "settings", lambda: SimpleNamespace(enabled=False))
+    assert desk.get("/copilot/desk/momentum").status_code == 503

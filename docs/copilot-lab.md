@@ -2192,6 +2192,36 @@ Paper trading on a past day, any time (nights and weekends included): "Replay" o
 Proof: `backend/tests/test_paper_replay.py`, `backend/tests/test_paper_replay_options.py`,
 `frontend/e2e/copilot-desk-replay.spec.ts`.
 
+### Redo a real trade
+
+Trade one of his own closed real trades again on Replay, without seeing what he did, then compare
+(`backend/app/engine/replay_redo.py`, the redo mode of `DeskReplay.tsx`, routes `/copilot/paper/replay/redo`, all
+owner-only).
+
+- **Where.** "Redo in replay" on a closed trade's page (`/trades/[id]`, `redoHref`: `/copilot-lab?redo=<trade id>`,
+  read once and dropped from the address), and "Redo my worst" in Replay's day picker: his five biggest real losing
+  trades opened on one of the days Replay offers, Webull and not-followed tickers left out. The desk book and the day
+  report list no closed real trade, so neither carries the button.
+- **The plan** (`GET /copilot/paper/replay/redo?trade_id=`): the trade's New York day and ticker, starting at the open or
+  15 minutes before his first entry (refused with the reason when that is before the open), and its call or put
+  preselected on the ticket when options replay that day; outside option replay's window it is shares with that reason.
+  Nothing about how the trade went (fills, notes, P&L) is in it. A trade still open, or one from today, is refused.
+- **No peeking.** While the redo runs the live desk is hidden as for any replay, the replay chart draws only his replay
+  fills and bars up to the clock, and the badge says "your real trade hidden".
+- **The link.** A redo is an ordinary replay run (`POST /copilot/paper/replay/redo`) plus one `redo` event on it carrying
+  the original trade's id and where it started (no schema change; the fold ignores it). Its trades show `source` `redo`
+  and `redo_of` in the run view and the replay scorecard, for a later "redos vs originals" line. The `trade` row, fills
+  and FIFO are only read.
+- **The comparison** (`GET /copilot/paper/replay/redo/compare?run_id=`), shown when he presses End redo and compare
+  (what is open sells at the clock, as leaving does) or the replayed day closes: entry, exit, most held at once, time
+  held and P&L for the real trade (its journal row; an option's per-contract prices shown a share, as the paper book's
+  are) and the redo (its closed trades, prices size-weighted; shares and options together have no one price or size),
+  the difference (redo less real; skipping counts as $0), and one line of what changed built from those facts: skipped
+  it, shares instead of the option, entered or exited earlier or later (5 minutes or more apart), smaller or bigger
+  size, sold the same day when the real one was held overnight. No AI.
+
+Proof: `backend/tests/test_replay_redo.py`, `frontend/e2e/copilot-desk-redo.spec.ts`.
+
 ## Chatter
 
 Buzz from r/wallstreetbets and NYT business headlines, behind the desk Feed's own **Market › Chatter** pick
@@ -2252,6 +2282,27 @@ The desk shows it under the Paper section (`frontend/components/copilot/DeskOver
 points and dollars on $10,000 a night, missed nights, the last five nights (a sale after 09:35 is marked late) and the
 backtest's +4.2 bp a night beside it. Hidden while switched off and empty; a failed read says so instead of showing old
 rows.
+
+
+### QQQ intraday momentum paper book
+
+The intraday rule that passed its registered exam ([result](../research/notes/qqq-intraday-momentum-2026-11-14.md)),
+with the exam's chosen settings, recorded live at 1x before any money (`backend/app/engine/intraday_momentum_book.py`).
+On each full session (the calendar's 16:00 close; none on early closes or without the calendar) it checks QQQ on the hour
+from 10:00 to 15:00. The noise band is max/min(the 09:30 open, the previous session's official close from the Tradier quote) x (1 +/- 1.25 x the average move from
+the open to that hour over the previous 60 sessions). Flat, it goes long above max(upper band, VWAP) and short below
+min(lower band, VWAP); held, it closes when the price crosses back through that level, and only the opposite side can
+open at that check. Anything open closes at 15:59. Decisions use the close of the minute before the check from the chart
+feed's QQQ timesales; fills are a fresh Tradier quote (the ask to buy, the bid to sell). A check not reached within five
+minutes is recorded as missed; a position left open by an outage closes at the next session's first pass, marked late.
+The 60-session history starts from `intraday_momentum_seed.json` (the study's SIP bars, to 2026-11-13) and each finished
+session adds its own moves. Its own SQLite file (`INTRADAY_MOMENTUM_BOOK_PATH`), no migration, no messages, nothing placed.
+Run by the level alert monitor when `INTRADAY_MOMENTUM_BOOK_ENABLED=true` (the owner's switch; off by default).
+
+The desk shows it under the overnight book (`frontend/components/copilot/DeskMomentum.tsx`, `GET /copilot/desk/momentum`
+on the minute request): long, short or flat now, finished days (a checked day with no trade counts as 0, as in the exam),
+the average in basis points and dollars on $10,000, missed checks, the last five days and the exam's +4.4 bp a day.
+Hidden while switched off and empty; a failed read says so instead of showing old rows.
 
 ### Switching chatter on
 

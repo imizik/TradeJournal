@@ -12,6 +12,7 @@ import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/componen
 import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
 import DeskPaper, { usePaperBook } from "@/components/copilot/DeskPaper";
 import DeskOvernight from "@/components/copilot/DeskOvernight";
+import DeskMomentum from "@/components/copilot/DeskMomentum";
 import DeskReplay, { ReplayPractice } from "@/components/copilot/DeskReplay";
 import PaperReviewCard from "@/components/copilot/PaperReview";
 import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
@@ -326,6 +327,17 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // Anything else that changes the address to such a link (a link inside the copilot, Next's own Back) is followed too,
   // and so is the bare address (the nav's Desk) while the desk shows something other than Now.
   const params = useSearchParams();
+  // "Redo in replay" on a real closed trade (``redoHref``): Replay opens on that trade. The address drops the link once
+  // it is read, so a reload or Back never starts a second redo.
+  const [redo, setRedo] = useState<string | null>(null);
+  useEffect(() => {
+    const id = params.get("redo");
+    if (!id) return;
+    setRedo(id); setReplay(true);
+    const rest = new URLSearchParams(params.toString());
+    rest.delete("redo");
+    window.history.replaceState(null, "", `/copilot-lab${rest.size ? `?${rest}` : ""}`);
+  }, [params]);
   const shownLink = useRef(link);
   useEffect(() => { shownLink.current = link; }, [link]);
   useEffect(() => {
@@ -843,7 +855,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         {on && <ScalpShortlistNudge />}
       </header>
       </div>
-      {on && replay && <DeskReplay symbol={centreSymbol} onLeave={() => setReplay(false)} />}
+      {on && replay && <DeskReplay symbol={centreSymbol} redo={redo} onLeave={() => { setReplay(false); setRedo(null); }} />}
       <div id="desk-cockpit" className={styles.cockpit} style={replay ? { display: "none" } : undefined}>
         {on && (
           <div className={styles.strip}>
@@ -878,6 +890,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
             <DeskPaper book={paper.book} failed={paper.failed} symbol={centreSymbol} top={<PaperReviewCard review={paper.book?.review} onAsk={actions.ask} />} />
             {/* The QQQ overnight paper book: the one rule that passed its registered test, recorded live. Hidden until switched on. */}
             <DeskOvernight on={on} />
+            {/* The QQQ intraday momentum paper book: the rule that passed its registered exam, recorded live at 1x. Hidden until switched on. */}
+            <DeskMomentum on={on} />
             {/* Replay practice: past days paper traded on the desk, scored apart from live paper. */}
             <ReplayPractice />
             {/* Before the open and after the close the day's block (the brief, the day report) comes straight after the
