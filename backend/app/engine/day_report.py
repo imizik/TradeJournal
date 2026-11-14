@@ -23,6 +23,7 @@ same flat way as a planned one. Counts and percentages only: no advice, no "miss
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import date, datetime, time as wall_time, timedelta
 
 from sqlmodel import Session, col, select
@@ -210,9 +211,20 @@ def entries_today(db: Session, day: date, hidden: set[str]) -> dict:
     end = datetime.combine(day + timedelta(days=1), wall_time(0), ET).timestamp()  # not start + 86400: a DST day is 23 or 25 hours
     mine = [e for e in week.get("entries", []) if e["entry_time"] and start <= e["entry_time"] < end
             and e["short"].split(" ")[0] not in hidden]
+    # His notes on each trade (``trade_notes``), beside it: the words only, oldest first.
+    from app.engine import trade_notes
+    notes = trade_notes.for_trades(db, [found for e in mine if (found := _uuid(e.get("trade_id")))])
     return {"state": "ok", "entries": len(mine), "planned": sum(e["state"] == "planned" for e in mine),
             "late": sum(e["state"] == "late" for e in mine), "pending": sum(e["state"] == "pending" for e in mine),
-            "rows": [{"contract": e["short"], "state": e["state"], "at": e["entry_time"]} for e in sorted(mine, key=lambda e: e["entry_time"])]}
+            "rows": [{"contract": e["short"], "state": e["state"], "at": e["entry_time"],
+                      "notes": [n["text"] for n in notes.get(e["trade_id"], [])]} for e in sorted(mine, key=lambda e: e["entry_time"])]}
+
+
+def _uuid(value) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value))
+    except ValueError:
+        return None
 
 
 def not_followed(db: Session) -> set[str]:

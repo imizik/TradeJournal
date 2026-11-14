@@ -1181,15 +1181,23 @@ class CheckLink(SQLModel, table=True):
 
 class TradeCaptureNote(SQLModel, table=True):
     """Something added to a capture later, never replacing it: a transcript
-    correction or a reflection. Always shown as written after the capture."""
+    correction or a reflection. Always shown as written after the capture.
+
+    A note written on the desk about a trade (``engine/trade_notes.py``) also
+    carries that trade's anchor, as a ``CaptureLink`` does: the account and the
+    ``raw_email_id`` of its first entry fill, resolved through that fill on every
+    read. Its ``capture_id`` is the trade's linked plan when it has one, and
+    empty when it has none: a note is never a plan."""
 
     __tablename__ = "trade_capture_note"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    capture_id: uuid.UUID = Field(sa_column=Column(Uuid, ForeignKey("trade_capture.id"), nullable=False, index=True))
+    capture_id: Optional[uuid.UUID] = Field(default=None, sa_column=Column(Uuid, ForeignKey("trade_capture.id"), nullable=True, index=True))
     kind: str  # transcript_correction | note
     text: str = Field(sa_column=Column(Text, nullable=False))
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    account_id: Optional[uuid.UUID] = None  # a desk note's trade anchor (with source_key); None on a plan's own note
+    source_key: Optional[str] = Field(default=None, index=True)  # Fill.raw_email_id of the trade's first entry
 
 
 class StrategyDefinition(SQLModel, table=True):

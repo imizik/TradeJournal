@@ -755,7 +755,8 @@ export type CheckTally = { checked: number; up: number; down: number; flat: numb
 export type DayReport = {
   day: string; as_of: string;
   entries: { entries: number; planned: number; late: number; pending: number;
-    rows: { contract: string; state: "planned" | "late" | "unplanned" | "pending"; at: number }[] } | null;
+    /** ``notes``: his notes on the trade (``trade_notes``), oldest first; absent from an older backend. */
+    rows: { contract: string; state: "planned" | "late" | "unplanned" | "pending"; at: number; notes?: string[] }[] } | null;
   checks: { rows: CheckedCallRow[]; today: CheckTally; window: CheckTally & { days: number }; capped: boolean } | null;
   sections: Record<string, "ok" | "unavailable">;
 };

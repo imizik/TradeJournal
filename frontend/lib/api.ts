@@ -293,7 +293,9 @@ export type DayTradePlan = {
   [key: string]: unknown;
 };
 export type DayTradePlans = { by_trade?: Record<string, DayTradePlan[]>; not_traded?: DayTradePlan[] };
-export type DayJournal = { day: string; entries: DayJournalEntry[]; trade_plans: DayTradePlans };
+/** Notes he wrote on the desk about a trade with no plan (a plan's own notes are its ``later_notes``). */
+export type DayTradeNotes = { trade_id: string; contract: string; notes: { id: string; text: string; at: number | null }[] };
+export type DayJournal = { day: string; entries: DayJournalEntry[]; trade_plans: DayTradePlans; trade_notes?: DayTradeNotes[] };
 export type DayJournalWrite = {
   operation_id: string;
   kind: DayJournalEntry["kind"];

@@ -27,6 +27,8 @@ import { staleSince, tickFor, tickedBook, useDeskTicks } from "@/lib/deskTicks";
 import { Flash, PricesAsOf } from "@/components/copilot/Ticks";
 import { OptionStanding, OptionStandingLine } from "@/components/copilot/OptionStanding";
 import { OrderLines, OrdersGroup } from "@/components/copilot/DeskOrders";
+import { NoteButton, NoteLines, useDeskNotes } from "@/components/copilot/DeskNotes";
+import { fillKey, rowTrade } from "@/lib/deskNotes";
 import { TapeToggle, useTapeOpen } from "@/components/copilot/TapeToggle";
 import { cn } from "@/lib/utils";
 import { deskBeats, everyDeskMinute, onDeskBeat } from "@/lib/deskMinute";
@@ -263,6 +265,8 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
   // One row is marked: the one tapped, else the first on the centre's ticker (two contracts can share a ticker).
   const marked = followed.find(r => r.key === selectedKey && r.symbol === selected)?.key ?? followed.find(r => r.symbol === selected)?.key;
   const ticks = useDeskTicks(followed.flatMap(r => [r.book?.tick?.quote, r.symbol]));
+  // His notes on each row's trade and on the Orders group's fills (DeskNotes.tsx).
+  const notes = useDeskNotes(followed.flatMap(r => rowTrade(r) ?? []), isLive ? (live?.orders ?? []).filter(o => !o.working).map(fillKey) : []);
   const follow = (symbol: string, following: boolean) => {
     setFailed(null);
     onFollow(symbol, following).catch(() => setFailed(`${symbol}: not saved. Try again.`));
@@ -277,7 +281,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
         <PricesAsOf at={staleSince(ticks, followed.map(r => r.book?.tick?.quote))} />
         {updating && <span role="status" data-testid="book-updating" className="text-[11px] text-muted-foreground">Updating…</span>}
       </div>
-      {isLive && <OrdersGroup orders={live?.orders} />}
+      {isLive && <OrdersGroup orders={live?.orders} notes={notes} />}
       {followed.length ? (
         <ul>
           {followed.map(row => {
@@ -321,14 +325,20 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                     {pnl.pct != null && <span className="block text-[11px]">{signedPct(pnl.pct)}</span>}
                   </span>
                 </button>
-                {row.symbol && (
-                  <button type="button" onClick={() => follow(row.symbol!, false)} aria-label={`Hide ${row.symbol}: not following`}
-                    title="Not following: hide this ticker from the desk and every count (Show again undoes it)"
-                    className="flex w-8 shrink-0 items-center justify-center text-muted-foreground/40 hover:bg-secondary hover:text-foreground">
-                    <EyeOff size={13} aria-hidden />
-                  </button>
-                )}
+                {/* The pen and the eye: side by side on a phone, stacked in one column beside the narrow book. */}
+                <span className="flex shrink-0 sm:flex-col-reverse">
+                  {rowTrade(row) && <NoteButton notes={notes} id={row.key} label="this position" className="sm:flex-1" />}
+                  {row.symbol && (
+                    <button type="button" onClick={() => follow(row.symbol!, false)} aria-label={`Hide ${row.symbol}: not following`}
+                      title="Not following: hide this ticker from the desk and every count (Show again undoes it)"
+                      className="flex w-8 shrink-0 items-center justify-center text-muted-foreground/40 hover:bg-secondary hover:text-foreground sm:flex-1">
+                      <EyeOff size={13} aria-hidden />
+                    </button>
+                  )}
+                </span>
               </li>
+              <NoteLines notes={notes} id={row.key} trade={rowTrade(row)} target={rowTrade(row) ? { trade_id: rowTrade(row)! } : null}
+                label="this position" className={cn("px-3 pb-1.5", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")} as="li" />
               {on && book?.option && <li className="bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]"><OptionStandingLine row={row} rows={held} fallback={sparkPrice(sparks, row.symbol)} /></li>}
             </Fragment>);
           })}

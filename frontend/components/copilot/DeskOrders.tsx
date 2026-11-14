@@ -7,7 +7,9 @@
  * an order, and none may be added.
  */
 
+import { NoteButton, NoteLines, type DeskNotesState } from "@/components/copilot/DeskNotes";
 import type { DeskOrder } from "@/lib/desk";
+import { fillKey } from "@/lib/deskNotes";
 import { cn } from "@/lib/utils";
 
 const ET = "America/New_York";
@@ -68,13 +70,29 @@ export function OrderLines({ orders }: { orders?: DeskOrder[] }) {
 
 /** Orders with no followed row to sit on (no position yet, or the fill closed it), at the top of the book. Nothing at
  * all when there are none: no empty heading. */
-export function OrdersGroup({ orders }: { orders?: DeskOrder[] }) {
+export function OrdersGroup({ orders, notes }: { orders?: DeskOrder[]; notes?: DeskNotesState }) {
   if (!orders?.length) return null;
   return (
     <div data-testid="book-orders" className="border-t px-3 py-1.5">
       <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Orders</h3>
       <ul className="mt-0.5 flex flex-col gap-0.5">
-        {orders.map((o, i) => <li key={`${o.contract}:${o.action}:${o.placed_at}:${i}`}><Line order={o} short={false} withContract /></li>)}
+        {orders.map((o, i) => {
+          const id = `fill:${fillKey(o)}:${o.filled_at}:${i}`;
+          // A fresh fill takes a note once the journal has its trade ("why I left"); a working order takes none. Two
+          // fills of one trade share its notes: they show under the first.
+          const trade = !o.working && notes ? notes.data.fills[fillKey(o)] ?? null : null;
+          const first = trade !== null && orders.findIndex(other => !other.working && notes?.data.fills[fillKey(other)] === trade) === i;
+          return (
+            <li key={`${o.contract}:${o.action}:${o.placed_at}:${i}`}>
+              <span className="flex min-w-0 items-center gap-1">
+                <span className="min-w-0 flex-1"><Line order={o} short={false} withContract /></span>
+                {trade && notes && <NoteButton notes={notes} id={id} label="this fill" className="h-6 w-6 self-start rounded" />}
+              </span>
+              {notes && <NoteLines notes={notes} id={id} trade={first ? trade : null} target={trade ? { trade_id: trade } : null} label="this fill"
+                className="mb-1 mt-0.5" />}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

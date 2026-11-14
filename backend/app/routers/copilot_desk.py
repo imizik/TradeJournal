@@ -69,7 +69,7 @@ import logging
 import uuid
 from urllib.parse import parse_qs, urlencode, urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field as PydField
 from sqlalchemy import or_
 from sqlmodel import Session, col, select
@@ -77,6 +77,8 @@ from sqlmodel import Session, col, select
 from app.ai import copilot
 from app.database import get_session
 from app.engine.radar_evidence import rule_side
+from app.engine import trade_notes
+from app.engine.captures import CaptureError
 from app.engine.chart_math import ET, session_windows
 from app.routers import today
 
@@ -1740,6 +1742,47 @@ def desk_day_report(db: Session = Depends(get_session)):
     return {"day": day.isoformat(), "as_of": today._iso(now),
             "entries": entries if entries["state"] == "ok" else None, "checks": checks if checks["state"] == "ok" else None,
             "sections": {"entries": entries["state"], "checks": checks["state"]}}
+
+
+class DeskNoteBody(BaseModel):
+    text: str = PydField(max_length=2000)
+    trade_id: uuid.UUID | None = None
+    # A fill line with no trade id (the book's Orders group): its ticker, contract label and masked account, as the line shows them.
+    symbol: str | None = PydField(default=None, max_length=20)
+    contract: str | None = PydField(default=None, max_length=60)
+    account: str | None = PydField(default=None, max_length=20)
+
+
+@router.get("/desk/notes")
+def desk_notes(trade: list[uuid.UUID] = Query(default=[]), fill: list[str] = Query(default=[]), db: Session = Depends(get_session)):
+    """His one-line notes on the book's positions and fills (``app/engine/trade_notes.py``): ``trades``, each asked trade's
+    notes, oldest first; ``fills``, each asked fill line (``"SYMBOL|contract|••last4"``) and the journal trade it belongs to, or
+    null while the journal does not have it. Database reads only; owner-only, refused while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    fills = {}
+    for key in fill[:20]:
+        symbol, contract, *account = key.split("|")
+        found = trade_notes.trade_for_fill(db, symbol, contract, account[0] if account else None)
+        fills[key] = str(found) if found else None
+    ids = list(dict.fromkeys([*trade[:40], *(uuid.UUID(v) for v in fills.values() if v)]))
+    return {"trades": trade_notes.for_trades(db, ids), "fills": fills}
+
+
+@router.post("/desk/notes")
+def add_desk_note(body: DeskNoteBody, db: Session = Depends(get_session)):
+    """Save one note on a trade: the book row's (``trade_id``) or a fill line's (``symbol`` and ``contract``). Saved with
+    the trade, never as a plan; never changes a fill, a trade or its P&L. Owner-only, refused while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    trade_id = body.trade_id or trade_notes.trade_for_fill(db, body.symbol or "", body.contract or "", body.account)
+    if trade_id is None:
+        raise HTTPException(409, "The journal does not have this fill yet. Add the note once its email is in.")
+    try:
+        note = trade_notes.add(db, trade_id, body.text)
+    except CaptureError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return {"trade_id": str(trade_id), "note": note}
 
 
 def _now() -> float:

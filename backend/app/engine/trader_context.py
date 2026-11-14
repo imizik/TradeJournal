@@ -227,7 +227,9 @@ def _capture_thesis(db: Session, trade, capture) -> dict:
         stop = db.exec(select(PlanTimeStop).where(PlanTimeStop.client_id == capture.client_id)).first()
     text = copilot_plans._thesis(capture.note) if card else None
     text = text or capture.wording or capture.transcript_text or capture.note
-    notes = db.exec(select(TradeCaptureNote).where(TradeCaptureNote.capture_id == capture.id)
+    # A desk note (anchored in a trade's fill) belongs to the trade it was written on, not wherever the plan is linked
+    # later: ``thesis_for`` adds it from its anchor.
+    notes = db.exec(select(TradeCaptureNote).where(TradeCaptureNote.capture_id == capture.id, TradeCaptureNote.source_key.is_(None))
                     .order_by(TradeCaptureNote.created_at)).all()
     return {
         "source": "plan_card" if card else "plan_sheet",
@@ -315,6 +317,14 @@ def thesis_for(db: Session, trade, *, adopted: dict | None = None, horizons: dic
         out = _capture_thesis(db, trade, min(linked, key=lambda c: c.received_at))
     else:
         out = _no_thesis()
+    # His notes from the desk (``trade_notes``) are the owner's words on this trade whatever the plan's source.
+    from app.engine import trade_notes
+    extra = [{"at": datetime.fromtimestamp(n["at"], UTC).isoformat(timespec="seconds"), "by": "owner", "kind": "note",
+              "text": _trim(n["text"], 160)}
+             for n in trade_notes.for_trades(db, [trade.id], with_ids=True).get(str(trade.id), [])
+             if n["at"] is not None and n["anchored"]]
+    if extra:
+        out["revisions"] = sorted([*out["revisions"], *extra], key=lambda r: r.get("at") or "")
     if out["direction"] is None and trade.instrument_type == "option":
         out["direction"] = "long" if (trade.option_type or "") == "call" else "short"
     horizons = day_journal.check_ins(db)[0] if horizons is None else horizons
