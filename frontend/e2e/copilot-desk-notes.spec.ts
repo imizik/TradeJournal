@@ -43,7 +43,7 @@ const DESK = {
 };
 const NOTES = {
   trades: { [TRADE]: [{ id: "n1", text: "Why I'm in: base held at 92", at: at("2026-10-22T14:10:00Z") }] },
-  fills: { "MU|MU 11/13/26 835C": CLOSED, "IREN|IREN 11/20/26 60C": null },
+  fills: { "MU|MU 11/13/26 835C|••8267": CLOSED, "IREN|IREN 11/20/26 60C|••8267": null },
 };
 
 async function open(page: Page) {

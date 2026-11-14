@@ -20,7 +20,7 @@ from app.models import CaptureLink, Fill, Trade, TradeCapture, TradeCaptureNote
 from app.routers import captures as captures_router
 from app.routers import copilot_desk, day_journal as day_journal_router
 from app.routers.fills import _rebuild_trades
-from tests.test_capture_links import CALL, ROTH, capture, db, fill, trade_of  # noqa: F401  (fixtures and helpers)
+from tests.test_capture_links import CALL, OTHER, ROTH, capture, db, fill, trade_of  # noqa: F401  (fixtures and helpers)
 from tests.test_plan_target import _alembic
 
 
@@ -101,9 +101,10 @@ def test_a_fill_line_finds_its_trade_by_contract_and_one_not_in_the_journal_yet_
     contract = "NVDA 1/15/99 900C"
     saved = desk.post("/copilot/desk/notes", json={"symbol": "NVDA", "contract": contract, "text": "Why I left: lost VWAP"})
     assert saved.status_code == 200 and saved.json()["trade_id"] == str(trade.id)
-    key = f"NVDA|{contract}"
-    body = desk.get("/copilot/desk/notes", params={"fill": [key, "AMD|AMD stock", "TSLA|TSLA stock"]}).json()
-    assert body["fills"] == {key: str(trade.id), "AMD|AMD stock": str(trade_of(db, UUID(int=entry.int + 2)).id), "TSLA|TSLA stock": None}
+    key = f"NVDA|{contract}|••8267"
+    body = desk.get("/copilot/desk/notes", params={"fill": [key, "AMD|AMD stock|••8267", "TSLA|TSLA stock|••8267", "AMD|AMD stock|••0000"]}).json()
+    assert body["fills"] == {key: str(trade.id), "AMD|AMD stock|••8267": str(trade_of(db, UUID(int=entry.int + 2)).id),
+                             "TSLA|TSLA stock|••8267": None, "AMD|AMD stock|••0000": None}  # no such account: no trade
     assert [n["text"] for n in body["trades"][str(trade.id)]] == ["Why I left: lost VWAP"]
     refused = desk.post("/copilot/desk/notes", json={"symbol": "TSLA", "contract": "TSLA stock", "text": "new buy"})
     assert refused.status_code == 409 and "does not have this fill yet" in refused.json()["detail"]
@@ -182,3 +183,34 @@ def test_the_migration_only_adds_nullable_columns_and_keeps_every_note(tmp_path)
         assert [dict(r) for r in conn.execute(text("SELECT * FROM trade_capture_note")).mappings()] == [before]
     _alembic(path, "upgrade", "head")
     db.dispose()
+
+
+def test_a_fill_line_never_takes_the_same_contract_in_another_account(db, desk):  # noqa: F811
+    other = fill(db, "AMD", "buy", 10, 150, "2026-09-14T10:00", account=OTHER)  # still open in the other account
+    mine = fill(db, "AMD", "buy", 5, 151, "2026-09-15T10:00")
+    fill(db, "AMD", "sell", 5, 155, "2026-09-15T11:00")  # the Roth's closing fill: its line sits in the Orders group
+    _rebuild_trades(db, "test")
+    roth, elsewhere = trade_of(db, mine), trade_of(db, other)
+    assert elsewhere.status == "open" and roth.status == "closed"
+    body = desk.get("/copilot/desk/notes", params={"fill": ["AMD|AMD stock|••8267", "AMD|AMD stock|••1111"]}).json()
+    assert body["fills"] == {"AMD|AMD stock|••8267": str(roth.id), "AMD|AMD stock|••1111": str(elsewhere.id)}
+    saved = desk.post("/copilot/desk/notes", json={"symbol": "AMD", "contract": "AMD stock", "account": "••8267", "text": "Why I left"})
+    assert saved.json()["trade_id"] == str(roth.id)
+
+
+def test_a_desk_note_stays_with_its_trade_when_the_plan_is_relinked(db, desk):  # noqa: F811
+    plan = capture(db, "2026-09-15T13:40:00")
+    first = fill(db, "NVDA", "buy_to_open", 1, 310, "2026-09-15T09:44", **CALL)
+    fill(db, "NVDA", "sell_to_close", 1, 320, "2026-09-15T09:50", **CALL)
+    second = fill(db, "NVDA", "buy_to_open", 1, 300, "2026-09-15T10:30", **CALL)
+    _rebuild_trades(db, "test")
+    a, b = trade_of(db, first), trade_of(db, second)
+    assert a.id != b.id
+    capture_links.link(db, plan, a.id)
+    trade_notes.add(db, a.id, "Why I left A: lost VWAP")
+    capture_links.unlink(db, plan)
+    capture_links.link(db, plan, b.id)
+    notes = trade_notes.for_trades(db, [a.id, b.id])
+    assert [n["text"] for n in notes[str(a.id)]] == ["Why I left A: lost VWAP"] and str(b.id) not in notes
+    assert trader_context.thesis_for(db, b, adopted={}, horizons={})["revisions"] == []
+    assert [r["text"] for r in trader_context.thesis_for(db, a, adopted={}, horizons={})["revisions"]] == ["Why I left A: lost VWAP"]

@@ -1747,22 +1747,23 @@ def desk_day_report(db: Session = Depends(get_session)):
 class DeskNoteBody(BaseModel):
     text: str = PydField(max_length=2000)
     trade_id: uuid.UUID | None = None
-    # A fill line with no trade id (the book's Orders group): its ticker and contract label, as the line shows them.
+    # A fill line with no trade id (the book's Orders group): its ticker, contract label and masked account, as the line shows them.
     symbol: str | None = PydField(default=None, max_length=20)
     contract: str | None = PydField(default=None, max_length=60)
+    account: str | None = PydField(default=None, max_length=20)
 
 
 @router.get("/desk/notes")
 def desk_notes(trade: list[uuid.UUID] = Query(default=[]), fill: list[str] = Query(default=[]), db: Session = Depends(get_session)):
     """His one-line notes on the book's positions and fills (``app/engine/trade_notes.py``): ``trades``, each asked trade's
-    notes, oldest first; ``fills``, each asked fill line (``"SYMBOL|contract"``) and the journal trade it belongs to, or
+    notes, oldest first; ``fills``, each asked fill line (``"SYMBOL|contract|••last4"``) and the journal trade it belongs to, or
     null while the journal does not have it. Database reads only; owner-only, refused while the lab is off."""
     if not copilot.settings().enabled:
         raise HTTPException(503, "Copilot Lab is off.")
     fills = {}
     for key in fill[:20]:
-        symbol, _, contract = key.partition("|")
-        found = trade_notes.trade_for_fill(db, symbol, contract)
+        symbol, contract, *account = key.split("|")
+        found = trade_notes.trade_for_fill(db, symbol, contract, account[0] if account else None)
         fills[key] = str(found) if found else None
     ids = list(dict.fromkeys([*trade[:40], *(uuid.UUID(v) for v in fills.values() if v)]))
     return {"trades": trade_notes.for_trades(db, ids), "fills": fills}
@@ -1774,7 +1775,7 @@ def add_desk_note(body: DeskNoteBody, db: Session = Depends(get_session)):
     the trade, never as a plan; never changes a fill, a trade or its P&L. Owner-only, refused while the lab is off."""
     if not copilot.settings().enabled:
         raise HTTPException(503, "Copilot Lab is off.")
-    trade_id = body.trade_id or trade_notes.trade_for_fill(db, body.symbol or "", body.contract or "")
+    trade_id = body.trade_id or trade_notes.trade_for_fill(db, body.symbol or "", body.contract or "", body.account)
     if trade_id is None:
         raise HTTPException(409, "The journal does not have this fill yet. Add the note once its email is in.")
     try:

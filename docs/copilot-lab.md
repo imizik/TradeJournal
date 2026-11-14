@@ -1893,11 +1893,13 @@ row or a fill whose email is not in yet has no pen until the journal has the tra
   `TradeCaptureNote` (kind `note`, one line, at most 300 characters) anchored as a capture link is: the account and the
   `raw_email_id` of the trade's first entry fill, resolved through the trade's fills on every read, so a rebuild keeps
   it with its trade. When the trade has a plan linked, the note is that plan's too (its `capture_id`), so the plan
-  sheets and the Journal show it as any later note. A trade with no plan gets no capture and no link: the note does
+  sheets and the Journal show it as any later note; it stays with the trade it was written on if the plan is later
+  linked to another. A trade with no plan gets no capture and no link: the note does
   not count as a plan, the plan streak and day report still say unplanned, the companion still adopts it and a plan
   still links afterwards. Notes never change a fill, a trade or its P&L.
-- **A fill line finds its trade** by its ticker and contract label (the newest such trade, an open one first);
-  `GET /copilot/desk/notes?trade=…&fill=SYMBOL|contract` returns each trade's notes and each fill line's trade (null
+- **A fill line finds its trade** by its account (the line's masked number, matched to the journal account's last four
+  digits), ticker and contract label (the newest such trade, an open one first), never the same contract in another
+  account; `GET /copilot/desk/notes?trade=…&fill=SYMBOL|contract|••last4` returns each trade's notes and each fill line's trade (null
   while the journal does not have it, and a save then says so). One read when the book's set of trades changes; no
   polling, no Robinhood call. Both routes are owner-only and refused while the lab is off.
 - **Where else they show.** The day report lists each entry's notes beside it; the copilot's position record carries

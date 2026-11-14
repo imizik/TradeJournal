@@ -20,7 +20,7 @@ from sqlmodel import Session, select
 from app.engine import capture_links
 from app.engine.captures import CaptureError, epoch
 from app.engine.chart_journal import contract_label
-from app.models import CaptureLink, Fill, Trade, TradeCaptureNote, TradeFill
+from app.models import Account, CaptureLink, Fill, Trade, TradeCaptureNote, TradeFill
 
 MAX = 300  # one line
 RECENT_TRADES = 50  # a fill's contract is looked for among the ticker's newest trades
@@ -57,7 +57,8 @@ def add(db: Session, trade_id: uuid.UUID, text: str) -> dict:
 
 def for_trades(db: Session, trade_ids: list[uuid.UUID], *, with_ids: bool = False) -> dict[str, list[dict]]:
     """Each trade's notes, oldest first: those anchored in any of its fills, and the ``note`` kind written on its linked
-    plans (in the Journal or on the Charts plan sheet). Four queries for any number of trades."""
+    plans (in the Journal or on the Charts plan sheet). A desk note stays with the trade it was written on, even when its
+    plan is later linked to another trade. Four queries for any number of trades."""
     if not trade_ids:
         return {}
     keys = db.exec(select(TradeFill.trade_id, Fill.raw_email_id, Fill.account_id)
@@ -77,23 +78,33 @@ def for_trades(db: Session, trade_ids: list[uuid.UUID], *, with_ids: bool = Fals
         if trade_id is not None:
             plans[link.capture_id] = trade_id
     if plans:
-        for note in db.exec(select(TradeCaptureNote).where(TradeCaptureNote.capture_id.in_(list(plans)),
-                                                            TradeCaptureNote.kind == "note")).all():
+        for note in db.exec(select(TradeCaptureNote).where(TradeCaptureNote.capture_id.in_(list(plans)), TradeCaptureNote.kind == "note",
+                                                            TradeCaptureNote.source_key.is_(None))).all():
             found.setdefault(note.id, (plans[note.capture_id], note))
     out: dict[str, list[dict]] = defaultdict(list)
     for trade_id, note in sorted(found.values(), key=lambda pair: (pair[1].created_at, str(pair[1].id))):
-        out[str(trade_id)].append({**_row(note), "capture_id": str(note.capture_id) if note.capture_id else None} if with_ids else _row(note))
+        out[str(trade_id)].append({**_row(note), "capture_id": str(note.capture_id) if note.capture_id else None,
+                                   "anchored": note.source_key is not None} if with_ids else _row(note))
     return dict(out)
 
 
-def trade_for_fill(db: Session, symbol: str, contract: str) -> uuid.UUID | None:
+def trade_for_fill(db: Session, symbol: str, contract: str, account: str | None = None) -> uuid.UUID | None:
     """The journal trade a Robinhood fill line belongs to (the book's Orders group: a fill that closed a position, or one
-    with no row to sit on), by its ticker and contract label (``chart_journal.contract_label``, as the line has it): the
-    newest such trade, an open one first. None when the journal does not have it yet (a fill whose email is not in)."""
+    with no row to sit on), by its account (the line's masked number, "••8267"), ticker and contract label
+    (``chart_journal.contract_label``, as the line has it): the newest such trade, an open one first. None when the
+    journal does not have it yet (a fill whose email is not in), or has no account with those last four digits: never
+    the same contract in another account."""
     symbol = (symbol or "").strip().upper()
     if not symbol or not contract:
         return None
-    trades = db.exec(select(Trade).where(Trade.ticker == symbol).order_by(Trade.opened_at.desc()).limit(RECENT_TRADES)).all()
+    query = select(Trade).where(Trade.ticker == symbol)
+    if account is not None:
+        last4 = "".join(ch for ch in account if ch.isalnum())
+        owner = db.exec(select(Account).where(Account.last4 == last4)).first() if last4 else None
+        if owner is None:
+            return None
+        query = query.where(Trade.account_id == owner.id)
+    trades = db.exec(query.order_by(Trade.opened_at.desc()).limit(RECENT_TRADES)).all()
     same = [t for t in trades if contract_label(t.ticker, t.instrument_type, t.option_type, t.strike, t.expiration) == contract]
     same.sort(key=lambda t: (t.status == "open", t.opened_at), reverse=True)
     return same[0].id if same else None
@@ -103,5 +114,5 @@ def anchored_only(db: Session, trade_ids: list[uuid.UUID]) -> dict[str, list[dic
     """The desk notes on trades with no plan when written (``capture_id`` empty): the plans' own notes already show
     under their plans."""
     notes = for_trades(db, trade_ids, with_ids=True)
-    return {trade_id: [{k: v for k, v in n.items() if k != "capture_id"} for n in rows if n["capture_id"] is None]
+    return {trade_id: [{k: v for k, v in n.items() if k not in ("capture_id", "anchored")} for n in rows if n["capture_id"] is None]
             for trade_id, rows in notes.items() if any(n["capture_id"] is None for n in rows)}
