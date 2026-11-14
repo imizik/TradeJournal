@@ -16,6 +16,9 @@ export type ReplayDay = { date: string; open_at: number; close_at: number; early
 export type ReplayRunInfo = {
   id: string; day: string; starting_cash: number; started_at: number; open_at: number | null; close_at: number | null;
   symbols: string[]; realized: number; trades: number; left_open: number;
+  /** Why options cannot be replayed on this day (Tradier's minute history is too short, or Tradier is not connected);
+   *  null when they can. Shares still replay. */
+  options_off?: string | null;
 };
 /** A closed replay trade: the paper position with the day replayed. ``verdict.kind`` adds flat (sold at the replayed
  *  close) and left (sold when he left the replay). */
@@ -25,17 +28,21 @@ export type ReplayHome = ReplayScore & { days?: ReplayDay[]; spread_bps: number;
 /** What the bars did while the clock ran: a limit filled, an automatic exit at the stop or target, a level touched with
  *  the switch off, or everything sold at the close (flat) or on leaving (left). */
 export type ReplayHappening = {
-  kind: "limit" | "stop" | "target" | "touch" | "flat" | "left"; symbol: string; label: string; at: number; price: number;
-  side?: "open" | "close"; quantity?: number; pnl?: number; level?: "stop" | "target"; limit?: number;
+  kind: "limit" | "stop" | "target" | "touch" | "flat" | "left" | "expired"; symbol: string; label: string; at: number; price: number;
+  instrument?: "stock" | "option"; side?: "open" | "close"; quantity?: number; pnl?: number; level?: "stop" | "target"; limit?: number;
+  stock?: number;
 };
 export type ReplayView = {
   run: ReplayRunInfo; at: number; ended: boolean; score: PaperStats;
   account: { cash: number; collateral: number; reserved: number; buying_power: number; equity: number | null; pnl: number | null };
   positions: PaperPosition[]; orders: PaperWorkingOrder[]; closed: ReplayTrade[]; happened?: ReplayHappening[];
 };
-/** The confirm: the bar's close, the assumed half-spread and the price either side of it. */
+/** The confirm: the bar's close, the assumed half-spread and the price either side of it. For an option, the contract's
+ *  own trade bar (``low``/``high`` its range, ``half_from`` whether the half-spread is half that range or the floor),
+ *  ``multiplier`` 100 and ``stock`` the stock's price beside it. */
 export type ReplayQuote = {
   label: string; quantity: number; close: number; half_spread: number; bid: number; ask: number; bar: number; spread_bps: number;
+  instrument?: "stock" | "option"; multiplier?: number; stock?: number; half_from?: "range" | "floor"; low?: number; high?: number;
   buying_power: number; buying_power_after?: number; fills_now: boolean; per_share?: number; cash?: number; pnl?: number;
   limit?: number; reserve?: number; expires_at?: number;
 };
@@ -68,7 +75,7 @@ export async function stepReplay(runId: string, at: number, end = false) {
 }
 export type ReplayAsk = {
   action: "open" | "close"; order_type: "market" | "limit"; limit_price?: number | null; quantity?: number | null;
-  symbol?: string; instrument?: "stock"; position_id?: string; note?: string | null; stop?: number | null; target?: number | null; auto?: boolean;
+  symbol?: string; instrument?: "stock" | "option"; option_type?: "call" | "put"; expiry?: string; strike?: number; position_id?: string; note?: string | null; stop?: number | null; target?: number | null; auto?: boolean;
 };
 export const previewReplay = (runId: string, at: number, ask: ReplayAsk) =>
   call<{ preview: ReplayQuote }>("/copilot/paper/replay/orders", { run_id: runId, at, preview: true, ...ask }).then(r => r.preview);
@@ -77,6 +84,21 @@ export async function orderReplay(runId: string, at: number, ask: ReplayAsk, key
   changed();
   return reply;
 }
+/** What the option picker offers at the replay clock: the candidate expirations, and for a picked type and expiration
+ *  the strikes around the stock's price whose contracts traded that day, each with its last trade by the clock. */
+export type ReplayContract = { strike: number; occ: string; label: string; last: { price: number; at: number } | null };
+export type ReplayOptions = {
+  symbol: string; day: string; at: number; off: string | null; rule: string; price: number | null; step: number | null;
+  expiries: string[]; option_type: "call" | "put" | null; expiry: string | null; contracts: ReplayContract[] | null;
+  missing: number[]; waiting: number[]; waiting_reason: string | null;
+};
+export const replayOptions = (ask: { day: string; symbol: string; at: number; option_type?: "call" | "put"; expiry?: string; strike?: number }, signal?: AbortSignal) => {
+  const params = new URLSearchParams({ day: ask.day, symbol: ask.symbol, at: String(ask.at) });
+  if (ask.option_type) params.set("option_type", ask.option_type);
+  if (ask.expiry) params.set("expiry", ask.expiry);
+  if (ask.strike != null) params.set("strike", String(ask.strike));
+  return call<ReplayOptions>(`/copilot/paper/replay/options?${params}`, undefined, signal);
+};
 export const cancelReplay = (runId: string, at: number, orderId: string) =>
   call<ReplayView>("/copilot/paper/replay/orders/cancel", { run_id: runId, at, order_id: orderId });
 export const autoReplay = (runId: string, at: number, positionId: string, on: boolean, key: string) =>
@@ -91,6 +113,8 @@ export const msPerBar = (speed: Speed) => 60_000 / speed;
 
 const ET = "America/New_York";
 export const replayTime = (epoch: number) => new Date(epoch * 1000).toLocaleTimeString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" });
+/** "Nov 21" for an expiration. */
+export const expiryShort = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
 export const replayDate = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
 /** "REPLAY · Thu Nov 13 · 10:42 AM ET": on every replay screen, so it is never taken for live. */
 export const replayBadge = (day: string, at: number) => `REPLAY · ${replayDate(day)} · ${replayTime(at)} ET`;

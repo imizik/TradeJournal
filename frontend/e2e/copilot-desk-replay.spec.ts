@@ -2,7 +2,8 @@ import { expect, test, type Page, type Request } from "@playwright/test";
 
 // Replay on the desk (docs/copilot-lab.md § Paper replay): the chart's Replay opens a past day; a day whose bars cannot be
 // read is greyed out with the reason; the clock starts at 9:30 with only finished bars drawn, steps a bar and plays at a
-// speed; the ticket's confirm shows the bar's close and the assumed half-spread; options are off with the reason; while
+// speed; the ticket's confirm shows the bar's close and the assumed half-spread; one call or put that traded that day
+// fills from its own trade bar plus half its range, ×100 (on an older day options are off with the reason); while
 // it runs the live desk is hidden behind a "REPLAY · <date> <time>" badge; Back to live sells what is open (end) and puts
 // the live desk back, with replay practice scored apart from live paper. Every lab route is stubbed. Invented numbers.
 const ON = {
@@ -34,11 +35,17 @@ const POSITION = {
 const TRADE = { ...POSITION, remaining: 0, status: "closed", closed_at: OPEN_AT + 299, realized: 39.4, day: "2026-11-13", run_id: RUN.id, mark: undefined,
   exits: [{ kind: "close", at: OPEN_AT + 299, quantity: 10, per_share: 103.97, cash: 1039.7, pnl: 39.4, stock: 103.97 }],
   verdict: { kind: "left", text: "Sold when you left the replay" } };
-const OPTIONS = "Options are not replayed yet: the app keeps no past option chain to pick a contract from and no past option quotes for that minute, so there is no honest option price. Shares only.";
+const OPTIONS = "Options: only contracts that traded that day, each priced from its own trade bar for the minute just ended plus an assumed half-spread (half that minute's range, at least 1¢ and 0.5% of the price), ×100 a contract. A minute it did not trade is no price.";
+const OFF = "Option replay needs each contract's own minute trades, and Tradier keeps only about the last 20 days of them: Nov 13 is older. Shares only on this day.";
+const CALL = "NBIS $100 Call 11/20/26";
+const OPTION_POSITION = { ...POSITION, id: "99999999-9999-4999-8999-999999999999", instrument: "option", option_type: "call", expiry: "2026-11-20",
+  label: CALL, multiplier: 100, quantity: 2, remaining: 2, per_share: -2.41, cash: -482, basis: -482, stock: 100, note: null, stop: null, target: null, auto: false,
+  legs: [{ quote: "NBIS261120C00100000", action: "buy", strike: 100 }], mark: { per_share: 2.35, value: 470, pnl: -12, pct: -2.5, at: OPEN_AT + 120 } };
 
-async function open(page: Page, width: number) {
+async function open(page: Page, width: number, run: Partial<typeof RUN> & { options_off?: string | null } = {}) {
   const steps: Request[] = [];
   const orders: Request[] = [];
+  const picks: URLSearchParams[] = [];
   let practiced = false;
   await page.setViewportSize({ width, height: 900 });
   await page.clock.install({ time: NOW });
@@ -57,7 +64,18 @@ async function open(page: Page, width: number) {
     return symbol === "NBIS" ? route.fulfill({ json: { symbol, day: "2026-11-13", open_at: OPEN_AT, close_at: CLOSE_AT, bars: BARS } })
       : route.fulfill({ status: 409, json: { detail: `No minute bars for ${symbol} on Nov 13: history_unavailable` } });
   });
-  const view = (at: number, extra = {}) => ({ run: RUN, at, ended: false, score: stats(0, 0), account: ACCOUNT, positions: [], orders: [], closed: [], happened: [], ...extra });
+  await page.route("**/copilot/paper/replay/options?*", route => {
+    const ask = new URL(route.request().url()).searchParams;
+    picks.push(ask);
+    const base = { symbol: "NBIS", day: "2026-11-13", at: Number(ask.get("at")), off: null, rule: OPTIONS, price: 100, step: 1,
+      expiries: ["2026-11-13", "2026-11-20", "2026-11-27"], option_type: null, expiry: null, contracts: null, missing: [], waiting: [], waiting_reason: null };
+    if (!ask.get("expiry")) return route.fulfill({ json: base });
+    return route.fulfill({ json: { ...base, option_type: ask.get("option_type"), expiry: ask.get("expiry"),
+      contracts: [{ strike: 100, occ: "NBIS261120C00100000", label: CALL, last: { price: 2.35, at: OPEN_AT + 60 } },
+        { strike: 101, occ: "NBIS261120C00101000", label: "NBIS $101 Call 11/20/26", last: null }],
+      missing: [98, 99, 102, 103] } });
+  });
+  const view = (at: number, extra = {}) => ({ run: { ...RUN, ...run }, at, ended: false, score: stats(0, 0), account: ACCOUNT, positions: [], orders: [], closed: [], happened: [], ...extra });
   await page.route("**/copilot/paper/replay/runs", route => route.fulfill({ json: view(OPEN_AT) }));
   await page.route("**/copilot/paper/replay/step", route => {
     steps.push(route.request());
@@ -69,6 +87,15 @@ async function open(page: Page, width: number) {
   });
   await page.route("**/copilot/paper/replay/orders", route => {
     const body = route.request().postDataJSON();
+    if (body.instrument === "option") {
+      const option = { label: CALL, instrument: "option", multiplier: 100, quantity: body.quantity, close: 2.35, half_spread: 0.06, half_from: "range",
+        low: 2.28, high: 2.4, bid: 2.29, ask: 2.41, bar: OPEN_AT, spread_bps: 5, stock: 100, buying_power: 10000, buying_power_after: 9518,
+        fills_now: true, per_share: -2.41, cash: -482 };
+      if (body.preview) return route.fulfill({ json: { preview: option } });
+      orders.push(route.request());
+      return route.fulfill({ json: { ...view(body.at, { positions: [OPTION_POSITION], account: { ...ACCOUNT, cash: 9518, buying_power: 9518 } }),
+        filled: { ...option, at: OPEN_AT + 59 }, working: null } });
+    }
     const quote = { label: "NBIS shares", quantity: body.quantity, close: 100, half_spread: 0.03, bid: 99.97, ask: 100.03, bar: OPEN_AT, spread_bps: 5,
       buying_power: 10000, buying_power_after: 8999.7, fills_now: true, per_share: -100.03, cash: -1000.3 };
     if (body.preview) return route.fulfill({ json: { preview: quote } });
@@ -85,7 +112,7 @@ async function open(page: Page, width: number) {
     await page.getByTestId("desk-view-ticker").click();
   }
   await page.getByTestId("replay-open").click();
-  return { steps, orders };
+  return { steps, orders, picks };
 }
 
 for (const width of [1440, 375]) {
@@ -103,8 +130,7 @@ for (const width of [1440, 375]) {
     await page.getByTestId("replay-start").click();
     await expect(badge).toHaveText("REPLAY · Fri, Nov 13 · 9:30 AM ET");
     await expect(page.getByTestId("replay-chart")).toBeVisible();
-    await expect(page.getByTestId("replay-options-off")).toBeDisabled();
-    await expect(page.getByTestId("replay-options-reason")).toContainText("no honest option price");
+    await expect(page.getByTestId("replay-option")).toBeEnabled();  // a recent day: options can be picked
     // One bar: the 09:30 bar is finished, so the price is its close; the future bars are never shown.
     await page.getByTestId("replay-step").click();
     await expect(badge).toHaveText("REPLAY · Fri, Nov 13 · 9:31 AM ET");
@@ -144,3 +170,47 @@ for (const width of [1440, 375]) {
     await expect(practice.getByTestId("replay-trade")).toContainText("“first push”");
   });
 }
+
+for (const width of [1440, 375]) {
+  test(`an option that traded that day fills from its own trade bar plus half its range, ×100, at ${width}px`, async ({ page }) => {
+    const { orders, picks } = await open(page, width);
+    await expect(page.getByTestId("replay-ready")).toContainText("NBIS on Fri, Nov 13");
+    await page.getByTestId("replay-start").click();
+    await page.getByTestId("replay-step").click();
+    await page.getByTestId("replay-option").click();
+    await expect(page.getByTestId("replay-options-reason")).toContainText("only contracts that traded that day");
+    // Opening the picker reads the expirations only; the strikes are checked when he picks one.
+    await expect(page.getByTestId("replay-expiry")).toHaveCount(3);
+    expect(picks.map(p => p.get("expiry"))).toEqual([null]);
+    await page.getByTestId("replay-expiry").filter({ hasText: "Nov 20" }).click();
+    await expect(page.getByTestId("replay-contract")).toHaveCount(2);
+    expect(picks[1].get("option_type")).toBe("call");
+    expect(picks[1].get("at")).toBe(String(OPEN_AT + 60));
+    await expect(page.getByTestId("replay-option-picker")).toContainText("Not offered, no trades that day: $98, $99, $102, $103.");
+    await expect(page.getByTestId("replay-contract").last()).toContainText("no trade yet");
+    await page.getByTestId("replay-contract").first().click();
+    await page.getByLabel("Replay quantity").fill("2");
+    await page.getByTestId("replay-review").click();
+    const confirm = page.getByTestId("replay-confirm");
+    await expect(confirm).toContainText(`Buy 2 ${CALL} at 2.41: costs $482.00.`);
+    await expect(confirm).toContainText("est. spread ±$0.06, from half that minute's 2.28–2.40 range");
+    await expect(confirm).toContainText("×100 a contract");
+    await page.getByTestId("replay-fill").click();
+    await expect(page.getByTestId("replay-done")).toContainText(`bought 2 ${CALL} at 2.41`);
+    expect(orders[0].postDataJSON()).toMatchObject({ at: OPEN_AT + 60, instrument: "option", option_type: "call", expiry: "2026-11-20", strike: 100, quantity: 2 });
+    await expect(page.getByTestId("replay-position")).toContainText(`2 ${CALL}`);
+  });
+}
+
+test("on a day older than the contracts' minute history options are off with the reason and shares still trade", async ({ page }) => {
+  const { orders, picks } = await open(page, 1440, { options_off: OFF });
+  await page.getByTestId("replay-start").click();
+  await page.getByTestId("replay-step").click();
+  await expect(page.getByTestId("replay-options-off")).toBeDisabled();
+  await expect(page.getByTestId("replay-options-reason")).toContainText("about the last 20 days");
+  await page.getByTestId("replay-review").click();
+  await page.getByTestId("replay-fill").click();
+  await expect(page.getByTestId("replay-done")).toContainText("bought 10 NBIS at 100.03");
+  expect(orders).toHaveLength(1);
+  expect(picks).toHaveLength(0);  // no contract read on that day
+});

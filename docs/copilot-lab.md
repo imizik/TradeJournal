@@ -2134,22 +2134,40 @@ Paper trading on a past day, any time (nights and weekends included): "Replay" o
   replayed minute a second) and one bar. Only bars that ended by the clock are drawn. While it runs the live desk is
   hidden behind an amber `REPLAY · <date> · <time> ET` badge (its keys off, the copilot hidden: nothing live shows beside
   a replayed price); Back to live puts it back exactly as it was, since it stays mounted underneath.
-- **Fills: shares only.** A market order fills at the newest finished regular-session bar's close plus an assumed
+- **Fills: shares.** A market order fills at the newest finished regular-session bar's close plus an assumed
   half-spread to buy (less one to sell): the spread is assumed 0.05% of the price, each half rounded up to the cent,
-  and the confirm says so. A bar more than two minutes old is no price. Options are refused with the reason: the app
-  keeps no past option chain to pick a contract from and no past option quotes, so there is no honest option price.
+  and the confirm says so. A bar more than two minutes old is no price.
+- **Fills: one call or put** (`backend/app/engine/replay_options.py`, `GET /copilot/paper/replay/options`). There is no
+  stored past chain, so the picker derives candidates: expirations from the standard calendars (each Friday, the
+  Thursday before when that Friday is a market holiday, the monthly third Friday, and every trading day for SPY, QQQ and
+  IWM) and the six strikes nearest the stock's price at the clock on the usual grid ($0.50 under $25, $1 to $200 and for
+  SPY/QQQ/IWM, $2.50 to $500, $5 above), plus any strike he names. Each candidate's own 1-minute trades for the day
+  (Tradier time and sales on the OCC symbol, the Contract chart's read) are read lazily: only when he picks a type and an
+  expiration, one contract at a time as a background chart-feed read (its single-flight, four places and 60-a-minute
+  budget), at most 12 new reads a minute (the rest wait, labelled), kept in memory since a past day never changes. Only
+  contracts that traded that day are offered; each shows its last trade by the clock, never one after it. A market order
+  fills at the contract's trade bar for the minute just ended: its close plus an assumed half-spread (half that minute's
+  high−low range rounded up to the cent, at least 1¢ and 0.5% of the price) to buy, less it to sell, ×100 a contract; the
+  confirm shows the bar, its range and the rule ("est. spread ±$0.06, from half that minute's range"). A minute the
+  contract did not trade refuses the order with its last trade's time. Spreads are not replayed. Tradier keeps about the
+  last 20 days of minute history, so on an older day (or with Tradier not connected) options are off with that reason
+  and shares still replay. Never Robinhood.
 - **Limits, stop and target** use the live book's rules on the replayed bars, one bar at a time: a buy limit fills on
   the first bar whose low plus the half-spread reaches it (at the limit, or at the bar's open plus the half-spread when
   lower); stop and target are judged on finished bars after the fill's minute, a bar touching both is the stop; with
   "Close automatically" on, the touch sells at the next bar's open less the half-spread, off it is only recorded. At the
   replayed close working orders lapse and everything is sold at the last close; Back to live sells at the clock's price.
-  The run's clock never goes back.
+  The run's clock never goes back. For an option: a limit is a premium and fills only on a minute the contract traded
+  (that minute's range sets its half-spread); stop and target are stock prices, judged on the stock's bars, and an
+  automatic exit sells at the open of the contract's next traded minute; at the replayed close an option expiring that
+  day settles at intrinsic value from the stock's last bar, any other sells at its last trade less the half-spread.
 - **Its own runs.** Each replay is a `paper_run` with `kind` `replay` and `replay_day` (migration `7f3b276ac082`), on the
   paper book's own events and fold; `paper_book.current_run` reads live runs only, so replay never mixes with live paper
   or real trades. "Replay practice" under the Paper section scores every replay apart: P&L, win rate, and each trade with
-  its day, how it ended and its note.
+  its day, the instrument (an option by its contract), how it ended and its note.
 
-Proof: `backend/tests/test_paper_replay.py`, `frontend/e2e/copilot-desk-replay.spec.ts`.
+Proof: `backend/tests/test_paper_replay.py`, `backend/tests/test_paper_replay_options.py`,
+`frontend/e2e/copilot-desk-replay.spec.ts`.
 
 ## Chatter
 

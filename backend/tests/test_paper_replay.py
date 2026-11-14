@@ -96,11 +96,13 @@ def test_a_market_buy_fills_at_the_newest_completed_bar_plus_the_assumed_half_sp
     assert trade["realized"] == 27.4 and trade["day"] == "2026-11-13" and trade["note"] == "dip buy"
 
 
-def test_a_stale_bar_options_and_the_clock_going_back_are_refused(db, day):  # noqa: F811
+def test_a_stale_bar_options_and_the_clock_going_back_are_refused(db, day, monkeypatch):  # noqa: F811
+    from app.engine import tradier
+    monkeypatch.setattr(tradier, "tradier_configured", lambda: False)
     r = run(db)
     with pytest.raises(paper_replay.ReplayError, match="no fill on a stale price"):
         buy(db, r, at(100))  # the newest bar ended at 09:37, far more than two minutes before
-    with pytest.raises(paper_replay.ReplayError, match="Options are not replayed yet"):
+    with pytest.raises(paper_replay.ReplayError, match="Tradier is not connected"):  # an option replays from Tradier's trades
         paper_replay.order(db, {"run_id": str(r.id), "at": at(3), "action": "open", "symbol": "NBIS", "instrument": "option",
                                 "option_type": "call", "expiry": "2026-11-20", "strike": 100, "quantity": 1, "order_key": key()}, NOW)
     buy(db, r, at(4))
@@ -188,7 +190,7 @@ def test_the_routes_are_owner_only_and_a_day_without_bars_says_why(db, day, monk
     with TestClient(app) as client:
         assert "days" not in client.get("/copilot/paper/replay").json()
         home = client.get("/copilot/paper/replay", params={"with_days": "true"}).json()
-        assert home["days"][0]["date"] == "2026-11-13" and home["score"]["trades"] == 0 and "Shares only" in home["options"]
+        assert home["days"][0]["date"] == "2026-11-13" and home["score"]["trades"] == 0 and "only contracts that traded that day" in home["options"]
         missing = client.get("/copilot/paper/replay/bars", params={"day": "2026-11-13", "symbol": "ZZZZ"})
         assert missing.status_code == 409 and "No minute bars for ZZZZ" in missing.json()["detail"]
         got = client.get("/copilot/paper/replay/bars", params={"day": "2026-11-13", "symbol": "nbis"}).json()
