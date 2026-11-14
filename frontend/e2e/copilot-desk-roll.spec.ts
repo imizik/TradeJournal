@@ -160,6 +160,7 @@ test("Roll: the held call is leg 1, the chain picks leg 2, and the ticket prices
   const writes = await open(page);
   await book(page).getByRole("button", { name: "ORCL 11/20/26 250C" }).click();
   await expect(header(page).getByTestId("close-from-plan").getByRole("button")).toHaveText(["Close at target", "Close at stop", "Roll"]);
+  const before = writes.length; // the desk's own start-up writes (its Main chat) are not the roll's
   await header(page).getByTestId("roll-open").click();
   const r = rollView(page);
   await expect(r).toContainText("ORCL · Roll your 2 ORCL $250 Call 11/20/26");
@@ -219,7 +220,7 @@ test("Roll: the held call is leg 1, the chain picks leg 2, and the ticket prices
   // Closing more than held is said, and the copy waits.
   await r.getByLabel("Contracts to close").fill("3");
   await expect(r).toContainText("You hold 2: a roll closes at most that many.");
-  expect(writes.map(w => `${w.method()} ${new URL(w.url()).pathname}`)).toEqual([]);
+  expect(writes.slice(before).map(w => `${w.method()} ${new URL(w.url()).pathname}`)).toEqual([]);
 });
 
 test("a stale held quote: grey with its time, no net price, the net marked rough", async ({ page }) => {
