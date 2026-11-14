@@ -56,13 +56,14 @@ def record(bind, snapshot: dict) -> int:
     with Session(bind) as session:
         if session.exec(select(DeskAccountValue.id).where(DeskAccountValue.at == at).limit(1)).first() is not None:
             return 0
-        session.add_all(rows)
-        session.exec(delete(DeskAccountValue).where(DeskAccountValue.day < (moment.date() - timedelta(days=KEEP_DAYS)).isoformat()))
         try:
-            session.commit()
-        except IntegrityError:  # another desk read stored this snapshot first
+            session.add_all(rows)
+            session.flush()
+        except IntegrityError:  # another desk read stored this snapshot first (or two accounts share a masked number)
             session.rollback()
             return 0
+        session.exec(delete(DeskAccountValue).where(DeskAccountValue.day < (moment.date() - timedelta(days=KEEP_DAYS)).isoformat()))
+        session.commit()
     return len(rows)
 
 

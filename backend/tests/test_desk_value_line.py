@@ -55,6 +55,16 @@ def test_a_snapshot_is_stored_once_with_masked_accounts_only(engine):
         ("2026-10-21", at(21, 9, 31), ROTH, "Roth IRA", 10_000.0), ("2026-10-21", at(21, 9, 31), MCP, "MCP", 500.0)]
 
 
+def test_a_reading_another_desk_read_stored_first_is_skipped_not_raised(engine, monkeypatch):
+    vl.record(engine, snapshot(at(21, 9, 31)))
+    real = vl.select
+    # The other read lands between this one's check and its insert: the check sees nothing, the insert collides.
+    monkeypatch.setattr(vl, "select", lambda *a: real(DeskAccountValue.id).where(DeskAccountValue.at == -1))
+    assert vl.record(engine, snapshot(at(21, 9, 31))) == 0
+    with Session(engine) as db:
+        assert len(db.exec(real(DeskAccountValue)).all()) == 2
+
+
 def test_a_weekend_reading_is_not_stored_and_a_week_old_day_is_dropped(engine):
     assert vl.record(engine, snapshot(at(24, 12))) == 0  # Saturday
     vl.record(engine, snapshot(at(13, 10)))
