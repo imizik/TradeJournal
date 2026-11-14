@@ -7,6 +7,7 @@ from sqlmodel import Session
 
 from app.database import get_session
 from app.engine import day_journal
+from app.engine.chart_journal import contract_label
 
 router = APIRouter()
 
@@ -47,8 +48,14 @@ def get_day_journal(day: date, session: Session = Depends(get_session)):
 
     trade_ids = daily_review_service.day_trade_ids(session, day)
     trades, _ = daily_review_service.load_trades(session, trade_ids)
+    from app.engine import trade_notes
+    # Notes he wrote on the desk about a trade with no plan (a plan's own notes show under the plan).
+    notes = trade_notes.anchored_only(session, [trade.id for trade in trades])
     return {"day": day.isoformat(), "entries": [_serialize(row) for row in day_journal.entries(session, day)],
-            "trade_plans": review_context.plans(session, day, trades)}
+            "trade_plans": review_context.plans(session, day, trades),
+            "trade_notes": [{"trade_id": str(trade.id), "contract": contract_label(trade.ticker, trade.instrument_type, trade.option_type,
+                                                                                trade.strike, trade.expiration), "notes": notes[str(trade.id)]}
+                            for trade in trades if str(trade.id) in notes]}
 
 
 @router.post("/{day}/entries", response_model=EntryResponse)

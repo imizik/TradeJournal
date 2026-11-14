@@ -19,7 +19,7 @@ const REPORT = {
   day: DAY, as_of: new Date(now * 1000).toISOString(), sections: { entries: "ok", checks: "ok" },
   entries: { entries: 3, planned: 2, late: 0, pending: 0, rows: [
     { contract: "NBIS 100C", state: "planned", at: now - 20000 }, { contract: "MU 90P", state: "planned", at: now - 15000 },
-    { contract: "APLD 30C", state: "unplanned", at: now - 9000 }] },
+    { contract: "APLD 30C", state: "unplanned", at: now - 9000, notes: ["Why I'm in: broke the morning high"] }] },
   checks: {
     today: { checked: 4, up: 1, down: 1, flat: 0, not_measured: 2 }, window: { days: 30, checked: 14, up: 5, down: 7, flat: 0, not_measured: 2 }, capped: false,
     rows: [
@@ -110,6 +110,7 @@ for (const width of [1440, 375]) {
 
     for (const line of await card.locator(":scope > details > summary").all()) await line.click();
     await expect(card.getByTestId("report-entry")).toHaveText([/NBIS 100C.*plan saved first/, /MU 90P.*plan saved first/, /APLD 30C.*no plan/]);
+    await expect(card.getByTestId("report-entry-note")).toHaveText(["“Why I'm in: broke the morning high”"]); // his note beside its trade
     await expect(card.getByTestId("pings-alert").first()).toContainText("Sold for $420 vs $600 at the alert's bid: −$180");
     await expect(card.getByTestId("pings-alert").filter({ hasText: "MU" })).toContainText("Not measured: no price at the alert");
     await expect(card.getByTestId("pings-hit").filter({ hasText: "NBIS up" })).toContainText("Paper −$42 a contract (invalidation)");

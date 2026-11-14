@@ -1880,6 +1880,35 @@ and the answer about 150 words, so a read is about $0.02–0.04 on Sonnet 5.5 (e
 yet). One read a day is under $1 a month; each Refresh adds one. Proof: `backend/tests/test_day_read.py`,
 `frontend/e2e/copilot-day-read.spec.ts`.
 
+### Notes on a trade
+
+Each followed position row in the book has a small pen beside its eye, and so does a fresh fill in the book's Orders
+group once the journal has its trade (a fill that closed a position: "why I left"). Tapping it opens one text line in
+place: Enter saves, Esc (or Enter on nothing) closes, and the desk's keys do nothing while typing there. Saved notes show
+as short grey lines under the row with their time ("10:42" today, "11/12 10:42" before), newest last, three at most
+with "N earlier" above. A fill on a position's own row is that row's trade, so the row's pen covers it. A Robinhood-only
+row or a fill whose email is not in yet has no pen until the journal has the trade. Voice is the phone keyboard's own.
+
+- **Saved with the trade, never as a plan.** `POST /copilot/desk/notes` (`backend/app/engine/trade_notes.py`) writes one
+  `TradeCaptureNote` (kind `note`, one line, at most 300 characters) anchored as a capture link is: the account and the
+  `raw_email_id` of the trade's first entry fill, resolved through the trade's fills on every read, so a rebuild keeps
+  it with its trade. When the trade has a plan linked, the note is that plan's too (its `capture_id`), so the plan
+  sheets and the Journal show it as any later note. A trade with no plan gets no capture and no link: the note does
+  not count as a plan, the plan streak and day report still say unplanned, the companion still adopts it and a plan
+  still links afterwards. Notes never change a fill, a trade or its P&L.
+- **A fill line finds its trade** by its ticker and contract label (the newest such trade, an open one first);
+  `GET /copilot/desk/notes?trade=…&fill=SYMBOL|contract` returns each trade's notes and each fill line's trade (null
+  while the journal does not have it, and a save then says so). One read when the book's set of trades changes; no
+  polling, no Robinhood call. Both routes are owner-only and refused while the lab is off.
+- **Where else they show.** The day report lists each entry's notes beside it; the copilot's position record carries
+  them as the plan's `revisions` (the pack keeps the last two, also for a position with no plan), so its read of that
+  ticker sees them with no new model call; the Journal's day page lists notes on that day's trades with no plan under
+  "Notes on trades". A ticker set to Not following keeps its notes; nothing new appears in the Feed.
+
+The anchor is two nullable columns on `trade_capture_note` (`account_id`, `source_key`), and its `capture_id` may now
+be empty (additive migration `e2c6a8f4b1d9`, no backfill). Proof: `backend/tests/test_desk_trade_notes.py`,
+`frontend/e2e/copilot-desk-notes.spec.ts`.
+
 ## Chatter
 
 Buzz from r/wallstreetbets and NYT business headlines, behind the desk Feed's own **Market › Chatter** pick

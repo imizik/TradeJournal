@@ -134,6 +134,12 @@ export default function DayJournal({ day, review = false, initialData, onEntrySa
         {(entry.day !== day || dateET(entry.created_at) !== day) && <p className="mt-1 text-xs text-muted-foreground">Saved under {entry.day} ET at {timestampET(entry.created_at)}{dateET(entry.created_at) !== entry.day ? ` (recorded on ${dateET(entry.created_at)} ET)` : ""}. Shown while reviewing {day} ET; original date and time are unchanged.</p>}
         <p className="mt-2 whitespace-pre-wrap text-sm text-foreground/90">{entry.text}</p>
       </li>)}</ol>}
+    {!loading && !loadError && !!journal?.trade_notes?.length && <div className="mt-5 border-t pt-4" aria-label="Notes on trades" data-testid="day-journal-trade-notes">
+      <h3 className="text-xs font-medium text-muted-foreground">Notes on trades</h3>
+      <p className="mt-1 text-xs text-muted-foreground">Written on the desk about a trade with no plan. Times are ET.</p>
+      {journal.trade_notes.map(trade => <div key={trade.trade_id} className="mt-3"><p className="mb-1 text-xs"><a className="text-primary underline" href={`/trades/${encodeURIComponent(trade.trade_id)}`}>{trade.contract}</a></p>
+        <ol className="space-y-1 border-l border-border pl-3">{trade.notes.map(note => <li key={note.id} className="text-sm"><span className="text-xs tabular-nums text-muted-foreground">{note.at != null ? timestampET(new Date(note.at * 1000).toISOString()) : ""}</span> {note.text}</li>)}</ol></div>)}
+    </div>}
     {!loading && !loadError && hasPlans && <div className="mt-5 border-t pt-4" aria-label="Saved trade plans and ideas">
       <h3 className="text-xs font-medium text-muted-foreground">Saved trade plans &amp; ideas</h3>
       <p className="mt-1 text-xs text-muted-foreground">Per-trade plans stay separate from these notes. Original capture and later note times are shown in ET.</p>

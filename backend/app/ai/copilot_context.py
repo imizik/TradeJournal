@@ -117,8 +117,10 @@ GIVEBACK = {"watching": "not armed"}  # the pack's word for a watch that has not
 
 def _plan(thesis: dict) -> dict:
     """The record's thesis as the pack shows it: the owner's words whole, the companion's marked as a guess."""
+    revisions = [f"{r['at'][:16]} {r['by']}: {_trim(r['text'], 80)}" for r in thesis.get("revisions", [])[-2:] if r.get("text")] or None
     if thesis.get("source") == "none":
-        return {"source": "none"}
+        # No plan, but his own notes on the trade (``trade_notes``) still come: they are his words on it.
+        return {"source": "none", "revisions": revisions} if revisions else {"source": "none"}
     level = thesis.get("invalidation") or {}
     stop = thesis.get("time_stop") or {}
     entry = thesis.get("entry_trigger") or {}
@@ -131,7 +133,7 @@ def _plan(thesis: dict) -> dict:
         "invalidation": f"{level['price']:,.2f} ({level.get('state')})" if level.get("price") else None,
         "time_stop": f"{_trim(stop.get('text'), 60)} ({stop.get('state')})" if stop.get("text") else None,
         "horizon": thesis.get("horizon"), "captured_at": thesis.get("captured_at"), "timing": thesis.get("timing"),
-        "revisions": [f"{r['at'][:16]} {r['by']}: {_trim(r['text'], 80)}" for r in thesis.get("revisions", [])[-2:] if r.get("text")] or None,
+        "revisions": revisions,
     }.items() if v}
 
 

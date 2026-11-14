@@ -111,6 +111,7 @@ export default function DayReport({ rows = [], rowsRead = true, onOpen }: { rows
                 <li key={`${e.at}-${i}`} data-testid="report-entry" className="flex flex-wrap items-baseline gap-x-2">
                   <span className="font-medium text-foreground">{e.contract}</span>
                   <span className="text-muted-foreground">{new Date(e.at * 1000).toLocaleTimeString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" })} · {ENTRY_WORDS[e.state]}</span>
+                  {e.notes?.map((note, n) => <span key={n} data-testid="report-entry-note" className="basis-full text-muted-foreground">“{note}”</span>)}
                 </li>
               ))}
             </ul>

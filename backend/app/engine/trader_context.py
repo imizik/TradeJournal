@@ -309,12 +309,22 @@ def thesis_for(db: Session, trade, *, adopted: dict | None = None, horizons: dic
     row = adopted.get(str(trade.id))
     # The companion's record speaks for the plan its own Confirm saved (the capture under the row's id): it keeps the
     # entry, the horizon, the updates and that the thesis was a guess. A plan the owner saved themselves wins over it.
+    shown = None  # the plan whose own notes are already the revisions
     if row is not None and all(c.client_id == row.id.hex for c in linked):
         out = _companion_thesis(db, row)
     elif linked:
-        out = _capture_thesis(db, trade, min(linked, key=lambda c: c.received_at))
+        shown = min(linked, key=lambda c: c.received_at)
+        out = _capture_thesis(db, trade, shown)
     else:
         out = _no_thesis()
+    # His notes from the desk (``trade_notes``) are the owner's words on this trade whatever the plan's source.
+    from app.engine import trade_notes
+    extra = [{"at": datetime.fromtimestamp(n["at"], UTC).isoformat(timespec="seconds"), "by": "owner", "kind": "note",
+              "text": _trim(n["text"], 160)}
+             for n in trade_notes.for_trades(db, [trade.id], with_ids=True).get(str(trade.id), [])
+             if n["at"] is not None and (shown is None or n["capture_id"] != str(shown.id))]
+    if extra:
+        out["revisions"] = sorted([*out["revisions"], *extra], key=lambda r: r.get("at") or "")
     if out["direction"] is None and trade.instrument_type == "option":
         out["direction"] = "long" if (trade.option_type or "") == "call" else "short"
     horizons = day_journal.check_ins(db)[0] if horizons is None else horizons
