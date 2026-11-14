@@ -8,12 +8,14 @@
  *
  * The figures are the feed's last read. Between reads, the positions' live prices (#768) move the total, today's change
  * and the open P&L by exactly what they move those positions' P&L. Not live (off, signed out, unavailable, stale): one
- * grey line and no money; a figure Robinhood did not give is a dash, never zero.
+ * grey line and no money; a figure Robinhood did not give is a dash, never zero. The day's value line (``DeskValueLine``)
+ * sits first and follows the tap.
  */
 
 import { liveOn, money, signedPct, type DeskLive, type DeskLiveAccount, type DeskThread } from "@/lib/desk";
 import { tickedBook, useDeskTicks } from "@/lib/deskTicks";
 import { positionRows, tone } from "@/components/copilot/Cockpit";
+import { DeskValueLine } from "@/components/copilot/DeskValueLine";
 import { cn } from "@/lib/utils";
 
 const ET = "America/New_York";
@@ -62,45 +64,53 @@ export function DeskAccounts({ live, rows, active, onPick }: {
   live: DeskLive | null; rows: DeskThread[]; active: string | null; onPick(masked: string | null): void;
 }) {
   const ticks = useDeskTicks(positionRows(rows).map(r => r.book?.account ? r.book.tick?.quote : null));
-  // Off: no account line at all (the book is the journal's, as it always was). Loading: the first read is on its way.
-  if (!live || live.state === "off" || live.state === "loading") return null;
+  // Off: no account line at all (the book is the journal's, as it always was). Loading: the first read is on its way
+  // (the day's value line, from readings kept before a restart, still shows).
+  if (!live || live.state === "off") return null;
+  // The day's value line sits first (outside the swiping row, so its detail is not clipped); it follows the account tap.
+  const line = <DeskValueLine line={live.day_line} active={active} />;
+  const wrap = "flex min-w-0 max-w-full items-center gap-1.5 max-sm:basis-full sm:order-last";
+  if (live.state === "loading") return live.day_line?.series.all ? <div className={wrap}>{line}</div> : null;
   if (!liveOn(live) || !live.accounts?.length) {
     const age = live.state === "stale" && live.as_of
       ? `Accounts as of ${new Date(live.as_of * 1000).toLocaleTimeString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" })}`
       : "Accounts unavailable";
-    return <span data-testid="desk-accounts" className="whitespace-nowrap text-xs text-muted-foreground">{age}</span>;
+    return <div className={wrap}>{line}<span data-testid="desk-accounts" className="min-w-0 truncate whitespace-nowrap text-xs text-muted-foreground">{age}</span></div>;
   }
   return (
-    <div data-testid="desk-accounts" role="group" aria-label="Accounts"
-      className="flex min-w-0 max-w-full snap-x items-center gap-1.5 overflow-x-auto [scrollbar-width:none] max-sm:basis-full sm:order-last [&::-webkit-scrollbar]:hidden">
-      {live.accounts.map(a => {
-        const t = tickedAccount(a, rows, ticks);
-        const on = active === a.masked;
-        return (
-          <button key={a.masked} type="button" aria-pressed={on} onClick={() => onPick(on ? null : a.masked)}
-            data-testid="desk-account" title={on ? "Show every account's positions" : `Show only ${a.label}'s positions in the book`}
-            className={cn("inline-flex min-h-11 shrink-0 snap-start items-baseline gap-1 whitespace-nowrap rounded-md border px-2 py-1 text-xs text-foreground hover:bg-secondary sm:min-h-0 sm:py-0.5",
-              on && "border-foreground/60 bg-secondary")}>
-            <span className="font-medium">{a.label}</span>
-            <span className="tabular-nums text-muted-foreground">{a.masked}</span>
-            <span data-testid="account-total" className={cn("tabular-nums", t.stale && "opacity-50")}>{or(t.total, whole)}</span>
-            {/* Today's change: shown only when every position in the account had yesterday's close (never a guessed zero). */}
-            {t.change != null && (
-              <span data-testid="account-today" title="Today: the move since yesterday's close of the positions open now (an option opened today, since its cost). Trades closed today are in Realized today."
-                className={cn("tabular-nums", tone(t.change), t.stale && "opacity-50")}>
-                {money(t.change)}{t.pct != null && ` ${signedPct(t.pct, 1)}`}
+    <div className={wrap}>
+      {line}
+      <div data-testid="desk-accounts" role="group" aria-label="Accounts"
+        className="flex min-w-0 max-w-full snap-x items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {live.accounts.map(a => {
+          const t = tickedAccount(a, rows, ticks);
+          const on = active === a.masked;
+          return (
+            <button key={a.masked} type="button" aria-pressed={on} onClick={() => onPick(on ? null : a.masked)}
+              data-testid="desk-account" title={on ? "Show every account's positions" : `Show only ${a.label}'s positions in the book`}
+              className={cn("inline-flex min-h-11 shrink-0 snap-start items-baseline gap-1 whitespace-nowrap rounded-md border px-2 py-1 text-xs text-foreground hover:bg-secondary sm:min-h-0 sm:py-0.5",
+                on && "border-foreground/60 bg-secondary")}>
+              <span className="font-medium">{a.label}</span>
+              <span className="tabular-nums text-muted-foreground">{a.masked}</span>
+              <span data-testid="account-total" className={cn("tabular-nums", t.stale && "opacity-50")}>{or(t.total, whole)}</span>
+              {/* Today's change: shown only when every position in the account had yesterday's close (never a guessed zero). */}
+              {t.change != null && (
+                <span data-testid="account-today" title="Today: the move since yesterday's close of the positions open now (an option opened today, since its cost). Trades closed today are in Realized today."
+                  className={cn("tabular-nums", tone(t.change), t.stale && "opacity-50")}>
+                  {money(t.change)}{t.pct != null && ` ${signedPct(t.pct, 1)}`}
+                </span>
+              )}
+              <span className="tabular-nums text-[11px] text-muted-foreground">
+                opt {or(a.options_value, short)} cash {or(a.cash, short)} BP {or(a.buying_power, short)}
               </span>
-            )}
-            <span className="tabular-nums text-[11px] text-muted-foreground">
-              opt {or(a.options_value, short)} cash {or(a.cash, short)} BP {or(a.buying_power, short)}
-            </span>
-            <span data-testid="account-open" className="tabular-nums text-[11px]">
-              <span className="text-muted-foreground">open </span>
-              <span className={cn(tone(t.open), t.stale && "opacity-50")}>{t.open == null ? "—" : money(t.open)}</span>
-            </span>
-          </button>
-        );
-      })}
+              <span data-testid="account-open" className="tabular-nums text-[11px]">
+                <span className="text-muted-foreground">open </span>
+                <span className={cn(tone(t.open), t.stale && "opacity-50")}>{t.open == null ? "—" : money(t.open)}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

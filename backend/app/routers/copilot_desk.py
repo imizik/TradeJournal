@@ -742,6 +742,11 @@ def threads(db: Session, now: float) -> dict:
     hidden = checks.get("hidden", set())
     for row in act + near + draft + new + watch:
         row["hidden"] = bool(row["symbol"]) and row["symbol"] in hidden
+    # The day's account value line, recorded from the snapshot this read already holds (no read of its own).
+    if live.get("view", {}).get("state") not in (None, "off"):
+        value_line = today._section(db, "desk value line", lambda: {"state": "ok", "line": _value_line(db, live.get("snapshot"), now, hidden)})
+        if value_line.get("line") is not None:
+            live["view"]["day_line"] = value_line["line"]
     # Robinhood's working orders and today's fills, on their book rows; display only (no call, no write).
     if live.get("view", {}).get("joined"):
         lines = today._section(db, "desk robinhood orders", lambda: {"state": "ok", "rows": _order_lines(found, act + watch, now, hidden)})
@@ -812,6 +817,31 @@ def _robinhood() -> dict:
     if snapshot is not None and view.get("accounts"):
         unsure_today(view["accounts"], snapshot, robinhood_fills.poller.filled())  # today's change unknown, never wrong
     return {"state": "ok", "view": view, "snapshot": snapshot}
+
+
+def _value_line(db: Session, snapshot: dict | None, now: float, hidden: set[str]) -> dict:
+    """The desk's line of account value through the session (``engine/desk_value_line.py``): stores the healthy snapshot
+    this desk read already holds (once per snapshot), then draws the session's stored readings. The dots are the
+    session's fills from the order-history pass's lines in memory (no call), a ticker he does not follow left out."""
+    from app.engine import desk_value_line, robinhood_fills
+    from app.engine import robinhood_book as rb
+    if snapshot is not None:
+        desk_value_line.record(db.get_bind(), snapshot)
+    day = desk_value_line.session_day(now)
+    try:
+        hours = _regular(day)
+    except Exception:  # noqa: BLE001 - the line stands without the session's hours (none greyed)
+        hours = {}
+    fills = []
+    for o in robinhood_fills.poller.filled(now) or []:
+        if o["filled"] <= 0 or o["filled_at"] is None or o["symbol"] in hidden or datetime.fromtimestamp(o["filled_at"], ET).date() != day:
+            continue
+        contract = rb.label({"symbol": o["symbol"], "instrument": o["instrument"], "side": o["option_type"], "strike": o["strike"],
+                             "expiry": o["expiry"]})
+        action = robinhood_fills.OPTION_ACTIONS.get(o["action"], o["action"])
+        fills.append({"at": int(o["filled_at"]), "masked": rb.mask(o["last4"]), "symbol": o["symbol"],
+                      "text": f"{action} {o['filled']:g} {contract}"})
+    return desk_value_line.line(db, now, rb.ttl, open_at=hours.get("open"), close_at=hours.get("close"), fills=fills)
 
 
 def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict) -> list[dict]:

@@ -69,6 +69,29 @@ The app's own code is the only guard:
 
 Adding a tool to the allowlist is a consequential, user-gated change.
 
+## The value line
+
+The desk draws the day's account value as a small line before the account line (`DeskValueLine`), so the Robinhood
+app is not needed for the portfolio graph. It is built only from readings the app already takes: each healthy snapshot
+a desk read holds is stored once (`backend/app/engine/desk_value_line.py`, table `desk_account_value`: the reading's
+time, each account's label, masked number and total value; kept a week, so a restart keeps the morning). There is no
+read of its own and no faster refresh, so the line has readings only while a desk is open somewhere (about one a minute
+in market hours, one a quarter hour otherwise; the evening review's own desk read adds one).
+
+- **All accounts** is the sum of the accounts the latest reading holds, only at readings where every one of them has a
+  value. Tapping an account in the account line shows that account's line alone.
+- **The change** beside it is since the day's first reading (its time is shown: "since 9:31 AM"), in dollars and in
+  percent of that first value. It is not the account line's "today" (each position's move since yesterday's close).
+  A deposit or withdrawal moves the line like a trade would.
+- **Breaks:** no reading for longer than three of the feed's refreshes (feed off, sign-in expired, app restarted, no
+  desk open), or a reading without that value, leaves a gap, never a straight line or a drop to zero. Hover or tap the
+  line for the high and low of the day, the latest value and every break with its times; a line whose newest reading is
+  older than the feed allows says "last 10:59 AM". Outside regular hours the line is grey. Before the day's first
+  reading there is no line. A weekend shows Friday's.
+- **Dots** are the session's fills from the order-history pass's lines already in memory (no call; a ticker he does not
+  follow has none), on the line at their time; a fill within three minutes of a reading sits on it, one further inside a
+  break has no dot.
+
 ## What the copilot sees
 
 The copilot answers from the same numbers the book shows, and nothing else from Robinhood. Exactly what its owner
