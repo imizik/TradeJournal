@@ -190,7 +190,7 @@ def test_the_ticket_prices_both_legs_from_one_read():
     read = pair_read(leg(100, NOV21, bid=3.90, ask=4.10), leg(105, DEC19, bid=5.30, ask=5.50))
     t = roll(read=read, held=3, cost_per_contract=250)
     assert read.calls == [("NBIS", NOV21, DEC19)]  # one pass for both expiries
-    assert [l["action"] for l in t["legs"]] == ["sell_to_close", "buy_to_open"]
+    assert [leg_["action"] for leg_ in t["legs"]] == ["sell_to_close", "buy_to_open"]
     assert (t["close_mid"], t["open_mid"]) == (4.0, 5.4)
     assert (t["net_mid"], t["net_mid_type"]) == (1.4, "debit")
     # Natural: sell the held one at its 3.90 bid, buy the new one at its 5.50 ask: 1.60 debit, the most he would pay.
