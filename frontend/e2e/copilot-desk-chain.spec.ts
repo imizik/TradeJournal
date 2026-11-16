@@ -130,6 +130,14 @@ test("tap a contract: Check it fills Check a call, and nothing is checked until 
   await expect(actions).toContainText("Wide spread: $20 a contract between bid and ask (50% of the mark)");
   await expect(actions).toContainText("there is no armed NBIS call plan yet, so Plan it first");
   await expect(actions.getByRole("button", { name: "Put on ticket" })).toBeDisabled();
+  // Real actions and Paper are two labelled groups: REAL with Check it…Make it a spread, PAPER with the Paper button alone.
+  const real = actions.getByRole("group", { name: "Real: copy to Robinhood" });
+  const paper = actions.getByRole("group", { name: "Paper, not real money" });
+  await expect(real.getByTestId("mode-mark")).toHaveAttribute("data-mode", "real");
+  await expect(real.getByRole("button", { name: "Make it a spread" })).toBeVisible();
+  await expect(real.getByTestId("paper-button")).toHaveCount(0);
+  await expect(paper.getByTestId("mode-mark")).toHaveText("Paper · not real money");
+  await expect(paper.getByTestId("paper-button")).toHaveText("Paper");
   await actions.getByRole("button", { name: "Check it" }).click();
   await expect(pane.getByRole("tab", { name: "Check a call" })).toHaveAttribute("aria-selected", "true");
   await expect(pane.getByRole("textbox", { name: "The Discord message" })).toHaveValue("NBIS 11/13 105C");

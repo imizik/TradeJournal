@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { cn } from "@/lib/utils";
+import ModeMark, { MODE_FRAME } from "./ModeMark";
 
 /**
  * The QQQ overnight paper book (backend app/engine/overnight_book.py): the one rule that passed its registered test
@@ -51,8 +52,8 @@ export default function DeskOvernight({ on }: { on: boolean }) {
   const held = book?.nights.find(n => n.status === "open");
   const t = book?.totals;
   return (
-    <section data-testid="desk-overnight" aria-label="QQQ overnight paper book" className="mt-3 rounded-md border px-3 py-2">
-      <span className={LABEL}>QQQ overnight · paper</span>
+    <section data-testid="desk-overnight" aria-label="QQQ overnight paper book" className={cn("mt-3 rounded-md px-3 py-2", MODE_FRAME.paper)}>
+      <p className="flex flex-wrap items-center gap-2"><span className={LABEL}>QQQ overnight</span><ModeMark mode="paper" /></p>
       {failed || !book ? (
         <p data-testid="desk-overnight-failed" className="mt-1 text-xs text-muted-foreground">Could not read the overnight book; it reads again in a minute.</p>
       ) : (

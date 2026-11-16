@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
 import { CopyButton, Row } from "@/components/copilot/DeskTicket";
+import { MODE_FRAME, RealTicketLine } from "@/components/copilot/ModeMark";
 import { deskGet } from "@/lib/deskMinute";
 import { optionLabel, rollCopyText, rollFigures, rollSentence, type NetType, type RollFrom } from "@/lib/rollTicket";
 import { cn } from "@/lib/utils";
@@ -90,6 +91,7 @@ export default function DeskRoll({ from, onClose, onPlaced }: { from: RollFrom; 
 
   const head = (
     <div className="space-y-1">
+      <RealTicketLine account={from.account} />
       <p className="text-sm"><span className="font-semibold">{from.symbol}</span><span className="text-muted-foreground"> · Roll your {from.held} {held}</span></p>
       <p className="text-xs text-muted-foreground">Closes the contract you hold and opens another, as one order you copy into Robinhood. It copies; it never sends.</p>
     </div>
@@ -119,7 +121,7 @@ export default function DeskRoll({ from, onClose, onPlaced }: { from: RollFrom; 
   // Leg 2 not picked yet (or being changed): the Chain to pick it, on the held contract's side and expiry.
   if (!to) {
     return (
-      <div data-testid="desk-roll" className="space-y-3">
+      <div data-testid="desk-roll" className={cn("space-y-3", MODE_FRAME.real)}>
         {head}
         <div className="rounded-lg border bg-card px-3 py-1.5">
           {legOne(null)}
@@ -150,7 +152,7 @@ export default function DeskRoll({ from, onClose, onPlaced }: { from: RollFrom; 
   );
   if (error || !roll) {
     return (
-      <div data-testid="desk-roll" className="space-y-3">
+      <div data-testid="desk-roll" className={cn("space-y-3", MODE_FRAME.real)}>
         {head}
         <div className="rounded-lg border bg-card px-3 py-1.5">{legOne(null)}{legTwo(null)}</div>
         {error ? <p role="alert" className="text-sm">{error}</p> : <p className="text-sm text-muted-foreground">Reading both contracts&apos; quotes…</p>}
@@ -200,7 +202,7 @@ export default function DeskRoll({ from, onClose, onPlaced }: { from: RollFrom; 
   const legDollars = (price: number | null, n: number | null) => price !== null && n && m ? usd(price * m * n) : "—";
 
   return (
-    <div data-testid="desk-roll" data-net={fresh ? roll.net_mid_type ?? undefined : undefined} className="space-y-3">
+    <div data-testid="desk-roll" data-net={fresh ? roll.net_mid_type ?? undefined : undefined} className={cn("space-y-3", MODE_FRAME.real)}>
       {head}
       {roll.simulated && <p className="text-xs text-amber-300">Simulated quotes (sandbox fixture).</p>}
       <div className="rounded-lg border bg-card px-3 py-1.5">

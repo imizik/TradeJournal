@@ -31,6 +31,7 @@ import { OrderLines, OrdersGroup } from "@/components/copilot/DeskOrders";
 import { NoteButton, NoteLines, useDeskNotes } from "@/components/copilot/DeskNotes";
 import { FoldMore, useFolds } from "@/components/copilot/DeskUse";
 import { fillKey, rowTrade } from "@/lib/deskNotes";
+import ModeMark from "@/components/copilot/ModeMark";
 import { TapeToggle, useTapeOpen } from "@/components/copilot/TapeToggle";
 import { cn } from "@/lib/utils";
 import { deskBeats, everyDeskMinute, onDeskBeat } from "@/lib/deskMinute";
@@ -280,6 +281,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
         <h2 className={cn(LABEL, "shrink-0")}>
           Your book{shown.length > 0 && <> · <span className="tabular-nums">{shown.length}</span> followed</>}
         </h2>
+        <ModeMark mode="real" />
         <LiveLine live={live} onRefresh={onRefreshLive} />
         <PricesAsOf at={staleSince(ticks, followed.map(r => r.book?.tick?.quote))} />
         {updating && <span role="status" data-testid="book-updating" className="text-[11px] text-muted-foreground">Updating…</span>}

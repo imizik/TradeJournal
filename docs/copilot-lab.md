@@ -2074,6 +2074,23 @@ The anchor is two nullable columns on `trade_capture_note` (`account_id`, `sourc
 be empty (additive migration `e2c6a8f4b1d9`, no backfill). Proof: `backend/tests/test_desk_trade_notes.py`,
 `frontend/e2e/copilot-desk-notes.spec.ts`.
 
+### Real, paper and replay
+
+One mark (`frontend/components/copilot/ModeMark.tsx`) says whose money a ticket, book or figure is, by shape and word,
+never by colour alone (amber also means "needs you"):
+
+- **REAL**: a solid light chip with the account ("Real · Roth IRA ••8267"); its card has a solid left edge. Every real
+  ticket (plan, spread, close at target/stop, close now, roll) opens on it with "you place it in Robinhood · nothing
+  is sent"; "Your book" carries it beside its heading.
+- **PAPER**: a dashed amber chip, "Paper · not real money", on a dashed amber frame: the paper book, the QQQ overnight
+  and momentum books, the paper confirm. On a ticket "Paper trade it" sits in its own PAPER half under a dashed
+  divider, below Copy all; in the Chain the Paper button is its own PAPER group under the real actions (Check it, Plan
+  it, Put on ticket, Make it a spread).
+- **REPLAY**: a filled amber chip with the day ("Replay · Fri, Nov 13"): the replay ticket and the Replay practice card.
+
+Where paper and real sit side by side (the paper score line, Progress, the rules followed/broken line, the Friday
+review) each side carries its mark. Proof: `frontend/e2e/copilot-desk-rules.spec.ts`, `frontend/e2e/copilot-desk-chain.spec.ts`.
+
 ### Paper
 
 His own paper trading on the desk: trade the way he would on Robinhood, with no money, and see whether he is right. It

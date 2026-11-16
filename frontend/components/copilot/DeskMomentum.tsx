@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { cn } from "@/lib/utils";
+import ModeMark, { MODE_FRAME } from "./ModeMark";
 
 /**
  * The QQQ intraday momentum paper book (backend app/engine/intraday_momentum_book.py): the rule and settings that passed
@@ -47,8 +48,8 @@ export default function DeskMomentum({ on }: { on: boolean }) {
   if (book && !book.enabled && book.days.length === 0 && !book.holding) return null; // not switched on yet
   const t = book?.totals;
   return (
-    <section data-testid="desk-momentum" aria-label="QQQ intraday momentum paper book" className="mt-3 rounded-md border px-3 py-2">
-      <span className={LABEL}>QQQ intraday momentum · paper</span>
+    <section data-testid="desk-momentum" aria-label="QQQ intraday momentum paper book" className={cn("mt-3 rounded-md px-3 py-2", MODE_FRAME.paper)}>
+      <p className="flex flex-wrap items-center gap-2"><span className={LABEL}>QQQ intraday momentum</span><ModeMark mode="paper" /></p>
       {failed || !book ? (
         <p data-testid="desk-momentum-failed" className="mt-1 text-xs text-muted-foreground">Could not read the momentum book; it reads again in a minute.</p>
       ) : (

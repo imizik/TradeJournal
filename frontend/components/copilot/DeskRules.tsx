@@ -8,6 +8,7 @@ import {
   type Rule, type RuleEntry, type RuleKind, type RuleResult, type RulesSplit,
 } from "@/lib/tradingRules";
 import { cn } from "@/lib/utils";
+import ModeMark from "./ModeMark";
 
 /**
  * His own trading rules on the desk (docs/copilot-lab.md § My rules): the short list he writes once (Paper › Rules), the
@@ -174,7 +175,7 @@ export function RulesSplitLine({ paper, real }: { paper?: RulesSplit; real?: Rul
   if (!has(paper) && !real?.checklists) return null;
   const side = (name: string, s: RulesSplit | null | undefined, extra?: string) => (
     <span>
-      <span className={name === "Paper" ? "text-amber-200" : "text-muted-foreground"}>{name} </span>
+      <ModeMark mode={name === "Paper" ? "paper" : "real"} short />{" "}
       {has(s) ? <>
         <span className="text-muted-foreground">followed </span><Cell g={s!.followed} />
         <span className="text-muted-foreground"> · broken </span><Cell g={s!.broken} />
@@ -197,7 +198,7 @@ export function RulesSplitLine({ paper, real }: { paper?: RulesSplit; real?: Rul
         <ul data-testid="rules-by-rule" className="mt-1 space-y-1 border-t border-border/50 pt-1">
           {([["Paper", paper], ["Real", real]] as const).flatMap(([name, s]) => rows(s).map(r => (
             <li key={`${name}-${r.id}`} data-testid="rules-by-rule-row">
-              <p><span className={name === "Paper" ? "text-amber-200" : "text-muted-foreground"}>{name}</span> {r.text}{!r.current && <span className="text-muted-foreground"> (removed)</span>}</p>
+              <p><ModeMark mode={name === "Paper" ? "paper" : "real"} short /> {r.text}{!r.current && <span className="text-muted-foreground"> (removed)</span>}</p>
               <p className="flex flex-wrap gap-x-2"><span><span className="text-muted-foreground">followed </span><Cell g={r.followed} /></span>
                 <span><span className="text-muted-foreground">broken </span><Cell g={r.broken} /></span></p>
             </li>

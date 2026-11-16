@@ -5,6 +5,7 @@ import { apiUrl } from "@/lib/api";
 import { tickFor, useDeskTicks } from "@/lib/deskTicks";
 import { useDeskWalls, wallsLine, type DeskWalls } from "@/lib/deskWalls";
 import { PaperButton } from "@/components/copilot/DeskPaper";
+import ModeMark from "@/components/copilot/ModeMark";
 import type { TicketPlan } from "@/components/copilot/DeskTicket";
 import type { UnusualRow } from "@/components/copilot/DeskUnusual";
 import { isBullish, spreadFigures, spreadLabel, spreadNet, spreadWords } from "@/lib/spreadTicket";
@@ -490,19 +491,32 @@ function Actions({ pick, cell, plans, onCheck, onPlan, onTicket, onClose, buildi
           <button type="button" onClick={onBack} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Back to one contract</button>
         </div>
       ) : (
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className={button} onClick={() => onCheck(callText(pick))}>Check it</button>
-          <button type="button" className={button} onClick={() => onPlan(pick, line)}>Plan it</button>
-          <button type="button" className={button} disabled={!plan} onClick={() => plan && onTicket(plan.investigation_id, pick)}>Put on ticket</button>
-          <button type="button" className={button} onClick={onSpread}>Make it a spread</button>
-          <PaperButton key={label} order={{ instrument: "option", symbol: pick.symbol, option_type: pick.side, expiry: pick.expiry, strike: pick.strike }} label="Paper" />
-          <button type="button" onClick={onClose} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Close</button>
-        </div>
+        <>
+          <div role="group" aria-label="Real: copy to Robinhood" data-testid="chain-real-actions" className="flex flex-wrap items-center gap-2">
+            <ModeMark mode="real" />
+            <button type="button" className={button} onClick={() => onCheck(callText(pick))}>Check it</button>
+            <button type="button" className={button} onClick={() => onPlan(pick, line)}>Plan it</button>
+            <button type="button" className={button} disabled={!plan} onClick={() => plan && onTicket(plan.investigation_id, pick)}>Put on ticket</button>
+            <button type="button" className={button} onClick={onSpread}>Make it a spread</button>
+            <button type="button" onClick={onClose} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Close</button>
+          </div>
+          <PaperGroup><PaperButton key={label} order={{ instrument: "option", symbol: pick.symbol, option_type: pick.side, expiry: pick.expiry, strike: pick.strike }} label="Paper" /></PaperGroup>
+        </>
       )}
       <p className="text-[11px] text-muted-foreground">
         {plan ? `Put on ticket opens your saved ${pick.symbol} plan's ticket with this contract, to copy into Robinhood. Nothing is sent from here.`
           : `A ticket opens from a saved plan: there is no armed ${pick.symbol} ${pick.side} plan yet, so Plan it first.`}
       </p>
+    </div>
+  );
+}
+
+/** The Paper button's own row under the real actions, behind a dashed divider and its PAPER mark. */
+function PaperGroup({ children }: { children: React.ReactNode }) {
+  return (
+    <div role="group" aria-label="Paper, not real money" data-testid="chain-paper-actions" className="flex flex-wrap items-center gap-2 border-t border-dashed border-amber-400/40 pt-2">
+      <ModeMark mode="paper" />
+      {children}
     </div>
   );
 }
@@ -580,13 +594,14 @@ function SpreadActions({ long, short, longCell, shortCell, plans, spot, onPlan, 
         {rough.length > 0 && net && <span className="ml-1 rounded border border-amber-300/50 px-1 text-[10px] uppercase tracking-wide text-amber-300">rough</span>}
       </p>
       {rough.length > 0 && <p className="text-xs text-amber-300">Rough: {rough.join("; ")}.</p>}
-      <div className="flex flex-wrap gap-2">
+      <div role="group" aria-label="Real: copy to Robinhood" data-testid="chain-real-actions" className="flex flex-wrap items-center gap-2">
+        <ModeMark mode="real" />
         <button type="button" className={button} onClick={() => onPlan(pick, line)}>Plan it</button>
         <button type="button" className={button} disabled={!plan} onClick={() => plan && onTicket(plan.investigation_id, pick)}>Put on ticket</button>
-        <PaperButton key={label} order={{ instrument: "spread", symbol: long.symbol, option_type: kind, expiry: long.expiry, long_strike: long.strike, short_strike: short.strike }} label="Paper" />
         <button type="button" onClick={onBack} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Back to one contract</button>
         <button type="button" onClick={onClose} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Close</button>
       </div>
+      <PaperGroup><PaperButton key={label} order={{ instrument: "spread", symbol: long.symbol, option_type: kind, expiry: long.expiry, long_strike: long.strike, short_strike: short.strike }} label="Paper" /></PaperGroup>
       <p className="text-[11px] text-muted-foreground">
         {plan ? `Put on ticket opens your saved ${long.symbol} plan's ticket with this spread, both legs and the net price, to copy into Robinhood. Nothing is sent from here.`
           : `A ticket opens from a saved plan: there is no armed ${long.symbol} ${bullish ? "long (call)" : "short (put)"} plan for this ${bullish ? "bullish" : "bearish"} spread yet, so Plan it first.`}
