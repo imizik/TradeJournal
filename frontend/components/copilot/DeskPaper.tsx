@@ -76,7 +76,7 @@ function OrderType({ type, onChange, market = true }: { type: "market" | "limit"
         <button key={t} type="button" role="radio" aria-checked={type === t} disabled={t === "market" && !market} data-testid={`paper-type-${t}`}
           onClick={() => onChange(t)}
           className={cn("min-h-11 px-3 first:rounded-l-md last:rounded-r-md disabled:cursor-not-allowed disabled:opacity-45 sm:min-h-8",
-            type === t ? "bg-amber-400/15 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>{t === "market" ? "Market" : "Limit"}</button>
+            type === t ? "bg-violet-400/15 text-violet-100" : "text-muted-foreground hover:bg-secondary")}>{t === "market" ? "Market" : "Limit"}</button>
       ))}
     </div>
   );
@@ -173,7 +173,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
       <button type="button" data-testid="paper-button" data-use="ticket.paper" data-source={source} disabled={!order} aria-describedby={!order && why ? `paper-why-${ideaId ?? source}` : undefined}
         onClick={() => { const n = quantity && quantity > 0 ? quantity : 1; setQty(String(n)); setType("market"); check(n); }}
         title={!order && why ? why : "Fill this on paper at the live quote, or place a paper limit: no money, nothing sent"}
-        className={cn(BUTTON, strong ? "border-amber-400 bg-amber-400 font-semibold text-black hover:bg-amber-300" : "border-amber-400/60 text-amber-200")}>{label}</button>
+        className={cn(BUTTON, strong ? "border-violet-400 bg-violet-400 font-semibold text-black hover:bg-violet-300" : "border-violet-400/60 text-violet-200")}>{label}</button>
     );
     if (order || !why) return button;
     return (
@@ -192,7 +192,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
   const stopN = stopText.trim() && Number(stopText) > 0 ? Number(stopText) : null;
   const entry = order && form ? { side: "paper" as const, instrument: order.instrument, expiry: order.instrument === "stock" ? null : order.expiry, size, stop: stopN } : null;
   return (
-    <div data-testid="paper-confirm" className="w-full space-y-2 rounded-md border border-dashed border-amber-400/50 p-2.5">
+    <div data-testid="paper-confirm" className="w-full space-y-2 rounded-md border border-dashed border-violet-400/50 p-2.5">
       <p className="flex flex-wrap items-center gap-x-1 text-[11px]"><ModeMark mode="paper" />{source !== "mine" && <span data-testid="paper-idea" className="text-muted-foreground">· {SOURCE_WORD[source]}&apos;s idea{order ? `: ${orderWords(order)}` : ""}</span>}</p>
       {busy && !form && <p className="text-xs text-muted-foreground">Reading a live quote…</p>}
       {form && !done && (
@@ -228,8 +228,8 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
           )}
           <div className="flex flex-wrap gap-2">
             {type === "market"
-              ? <button type="button" data-testid="paper-fill" disabled={busy || !valid || !preview} onClick={fill} className={cn(BUTTON, "border-amber-400/70 text-amber-100")}>Fill on paper</button>
-              : <button type="button" data-testid="paper-place-limit" disabled={busy || !valid || !limitValid} onClick={place} className={cn(BUTTON, "border-amber-400/70 text-amber-100")}>Place limit on paper</button>}
+              ? <button type="button" data-testid="paper-fill" disabled={busy || !valid || !preview} onClick={fill} className={cn(BUTTON, "border-violet-400/70 text-violet-100")}>Fill on paper</button>
+              : <button type="button" data-testid="paper-place-limit" disabled={busy || !valid || !limitValid} onClick={place} className={cn(BUTTON, "border-violet-400/70 text-violet-100")}>Place limit on paper</button>}
             <button type="button" onClick={() => { setOpen(false); setPreview(null); setError(null); setClosedNow(false); }} className={QUIET}>Cancel</button>
           </div>
         </>
@@ -292,7 +292,7 @@ export function CloseRow({ position, trim, onDone }: { position: PaperPosition; 
   };
   const share = preview && valid ? Math.round(preview.per_share * position.multiplier * qtyN * 100) / 100 : null;
   return (
-    <div data-testid="paper-close" className="space-y-1.5 border-t border-dashed border-amber-400/30 px-3 py-2">
+    <div data-testid="paper-close" className="space-y-1.5 border-t border-dashed border-violet-400/30 px-3 py-2">
       {busy && !preview && !error && <p className="text-xs text-muted-foreground">Reading a live quote…</p>}
       {preview && !done && (
         <>
@@ -311,8 +311,8 @@ export function CloseRow({ position, trim, onDone }: { position: PaperPosition; 
               <input aria-label="Paper quantity to trim" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/[^\d]/g, ""))} className={cn(INPUT, "w-16")} />
             </label>}
             {type === "market"
-              ? <button type="button" data-testid="paper-close-fill" disabled={busy || !valid} onClick={fill} className={cn(BUTTON, "border-amber-400/70 text-amber-100")}>Fill on paper</button>
-              : <button type="button" data-testid="paper-close-place" disabled={busy || !valid || !limitValid} onClick={place} className={cn(BUTTON, "border-amber-400/70 text-amber-100")}>Place limit on paper</button>}
+              ? <button type="button" data-testid="paper-close-fill" disabled={busy || !valid} onClick={fill} className={cn(BUTTON, "border-violet-400/70 text-violet-100")}>Fill on paper</button>
+              : <button type="button" data-testid="paper-close-place" disabled={busy || !valid || !limitValid} onClick={place} className={cn(BUTTON, "border-violet-400/70 text-violet-100")}>Place limit on paper</button>}
             <button type="button" onClick={onDone} className={QUIET}>Cancel</button>
           </div>
         </>
@@ -345,7 +345,7 @@ function WorkingOrders({ orders }: { orders: PaperWorkingOrder[] }) {
           return (
             <li key={o.id} data-testid="paper-order" className="flex items-center gap-2 px-3 py-1.5 text-xs tabular-nums">
               <div className="min-w-0 flex-1">
-                <p data-testid="paper-order-terms"><span className="font-medium">{verb} {what}</span> · <span className="text-amber-200">limit {price(o.limit)}</span> {terms}</p>
+                <p data-testid="paper-order-terms"><span className="font-medium">{verb} {what}</span> · <span className="text-violet-200">limit {price(o.limit)}</span> {terms}</p>
                 <p className="text-[11px] text-muted-foreground">until {at(o.expires_at)}{o.reserve > 0 && ` · holds ${usd(o.reserve)}`} · <span data-testid="paper-order-check" title={c?.issue ?? undefined}>{last}</span></p>
               </div>
               <button type="button" data-testid="paper-order-cancel" disabled={busy === o.id} onClick={() => cancel(o.id)} className={cn(BUTTON, "px-2")}>Cancel</button>
@@ -376,8 +376,8 @@ function Levels({ p }: { p: PaperPosition }) {
       {has && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
           <label className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 sm:min-h-0">
-            <input type="checkbox" data-testid="paper-auto" checked={!!p.auto} disabled={busy} onChange={e => flip(e.target.checked)} className="h-4 w-4 accent-amber-400" />
-            <span className={cn(p.auto && "text-amber-100")}>Close automatically at stop/target</span>
+            <input type="checkbox" data-testid="paper-auto" checked={!!p.auto} disabled={busy} onChange={e => flip(e.target.checked)} className="h-4 w-4 accent-violet-400" />
+            <span className={cn(p.auto && "text-violet-100")}>Close automatically at stop/target</span>
           </label>
           {p.exiting && <span data-testid="paper-exiting" className="text-amber-200">Touched: selling at the next fresh bid</span>}
           {!p.exiting && touched.length > 0 && <span data-testid="paper-touched">{touched.join(" · ")}{p.auto ? "" : ", nothing closed"}</span>}
@@ -430,15 +430,15 @@ function Curve({ paper, real }: { paper: PaperStats["curve"]; real: PaperStats["
         <line x1="0" x2="200" y1={y(0)} y2={y(0)} stroke="currentColor" strokeOpacity="0.25" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
         {days.length > 1 ? <>
           <polyline points={line(b)} fill="none" stroke="hsl(var(--muted-foreground))" strokeWidth="1.25" strokeDasharray="3 2" vectorEffect="non-scaling-stroke" />
-          <polyline points={line(a)} fill="none" stroke="rgb(252 211 77)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+          <polyline points={line(a)} fill="none" stroke="rgb(196 181 253)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
         </> : <>
           <circle cx={x(0)} cy={y(b[0])} r="2" fill="hsl(var(--muted-foreground))" />
-          <circle cx={x(0)} cy={y(a[0])} r="2" fill="rgb(252 211 77)" />
+          <circle cx={x(0)} cy={y(a[0])} r="2" fill="rgb(196 181 253)" />
         </>}
       </svg>
       <figcaption className="flex justify-between text-[11px] text-muted-foreground">
         <span>{days[0].slice(5).replace("-", "/")}</span>
-        <span><span className="text-amber-300">— </span><ModeMark mode="paper" short /> · <span>- - </span><ModeMark mode="real" /> · closed P&amp;L by day</span>
+        <span><span className="text-violet-300">— </span><ModeMark mode="paper" short /> · <span>- - </span><ModeMark mode="real" /> · closed P&amp;L by day</span>
         <span>{days[days.length - 1].slice(5).replace("-", "/")}</span>
       </figcaption>
     </figure>
@@ -502,7 +502,7 @@ export default function DeskPaper({ book, failed, symbol, top = null, onPick }: 
     </div>
   );
   const frame = (children: React.ReactNode) => (
-    <section aria-label="Paper book" data-testid="desk-paper" className="rounded-lg border border-dashed border-amber-400/40 bg-card">{head}{children}</section>
+    <section aria-label="Paper book" data-testid="desk-paper" className="rounded-lg border border-dashed border-violet-400/40 bg-card">{head}{children}</section>
   );
   if (!book) return frame(<p className="px-3 pb-2.5 text-xs text-muted-foreground">{failed ? "Your paper book could not be read; it reads again in a minute." : "Reading your paper book…"}</p>);
   const startForm = (reset: boolean) => (
@@ -590,7 +590,7 @@ export default function DeskPaper({ book, failed, symbol, top = null, onPick }: 
                       <span className="min-w-0 flex-1 truncate"><span className="font-medium">{c.label}</span> ×{c.quantity} · {day(c.opened_at)}–{day(c.closed_at!)}<SourceTag source={c.source} /></span>
                       <span className={cn("tabular-nums", toneOf(c.realized))}>{signed(c.realized)}</span>
                     </div>
-                    <p className={cn("text-[11px]", c.verdict?.kind === "stop" || c.verdict?.kind === "target" ? "text-foreground/80" : "text-muted-foreground")}>{c.verdict?.auto && <span data-testid="paper-auto-tag" className="mr-1 rounded border border-amber-400/50 px-1 text-[10px] uppercase tracking-wide text-amber-200">auto</span>}{c.verdict?.text}{c.note ? ` · “${c.note}”` : ""}</p>
+                    <p className={cn("text-[11px]", c.verdict?.kind === "stop" || c.verdict?.kind === "target" ? "text-foreground/80" : "text-muted-foreground")}>{c.verdict?.auto && <span data-testid="paper-auto-tag" className="mr-1 rounded border border-violet-400/50 px-1 text-[10px] uppercase tracking-wide text-violet-200">auto</span>}{c.verdict?.text}{c.note ? ` · “${c.note}”` : ""}</p>
                   </li>
                 ))}
               </ul>

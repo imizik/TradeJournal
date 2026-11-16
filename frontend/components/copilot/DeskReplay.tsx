@@ -36,7 +36,7 @@ const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foregr
 const BUTTON = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-md border px-3 text-xs font-medium hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-45 sm:min-h-8";
 const QUIET = "inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8";
 const INPUT = "min-h-11 rounded-md border bg-background px-2 text-sm tabular-nums sm:min-h-8 sm:text-xs";
-const AMBER = "border-amber-400/70 text-amber-100";
+const VIOLET = "border-violet-400/70 text-violet-100";
 
 const usd = (n: number) => `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${usd(n)}`;
@@ -126,8 +126,8 @@ export function ReplayChart({ symbol, bars, positions, closed, orders }: {
     const marks: SeriesMarker<Time>[] = [];
     for (const pos of [...positions, ...closed]) {
       if (pos.symbol !== symbol) continue;
-      marks.push({ time: minute(pos.opened_at), position: "belowBar", shape: "arrowUp", color: "#fef3c7", text: `P ${pos.quantity}` });
-      for (const exit of pos.exits ?? []) marks.push({ time: minute(exit.at), position: "aboveBar", shape: "arrowDown", color: "#fde68a", text: `P ${exit.quantity}` });
+      marks.push({ time: minute(pos.opened_at), position: "belowBar", shape: "arrowUp", color: "#ddd6fe", text: `P ${pos.quantity}` });
+      for (const exit of pos.exits ?? []) marks.push({ time: minute(exit.at), position: "aboveBar", shape: "arrowDown", color: "#c4b5fd", text: `P ${exit.quantity}` });
     }
     p.markers.setMarkers(marks.filter(m => (m.time as number) <= last).sort((a, b) => (a.time as number) - (b.time as number)));
     for (const line of p.lines) p.candles.removePriceLine(line);
@@ -140,7 +140,7 @@ export function ReplayChart({ symbol, bars, positions, closed, orders }: {
       if (pos.target != null) add(pos.target, "#86efac", "target");
     }
     // An option's limit is a premium, not a stock price: only share limits are drawn on the stock's chart.
-    for (const o of orders) if (o.symbol === symbol && o.instrument === "stock") add(o.limit, "#fcd34d", `limit ${o.side === "close" ? "sell" : "buy"}`, true);
+    for (const o of orders) if (o.symbol === symbol && o.instrument === "stock") add(o.limit, "#a78bfa", `limit ${o.side === "close" ? "sell" : "buy"}`, true);
   }, [bars, positions, closed, orders, symbol]);
 
   return <div ref={host} data-testid="replay-chart" role="img" aria-label={`${symbol} replayed one-minute candles up to the replay clock`}
@@ -169,7 +169,7 @@ function TradeRows({ trades, days = true }: { trades: ReplayTrade[]; days?: bool
           <div className="flex flex-wrap items-baseline gap-x-2">
             {days && <span className="text-muted-foreground">{replayDate(t.day)}</span>}
             <span className="font-medium text-foreground" data-testid="replay-trade-name">{t.quantity.toLocaleString("en-US")} {named(t)}</span>
-            {t.redo_of && <span className="rounded border border-amber-400/40 px-1 text-[10px] uppercase tracking-wide text-amber-200">redo</span>}
+            {t.redo_of && <span className="rounded border border-violet-400/40 px-1 text-[10px] uppercase tracking-wide text-violet-200">redo</span>}
             <span className="tabular-nums text-muted-foreground">in {px(Math.abs(t.per_share))} · {replayTime(t.opened_at)}</span>
             <span className={cn("ml-auto tabular-nums", toneOf(t.realized))}>{signed(t.realized)}</span>
           </div>
@@ -273,7 +273,7 @@ function OptionPicker({ day, symbol, at, picked, onPick }: {
         <div role="radiogroup" aria-label="Call or put" className="inline-flex rounded-md border">
           {(["call", "put"] as const).map(k => (
             <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => expiry ? pick(k, expiry) : setKind(k)}
-              className={cn("min-h-11 px-3 first:rounded-l-md last:rounded-r-md sm:min-h-8", kind === k ? "bg-amber-400/15 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>
+              className={cn("min-h-11 px-3 first:rounded-l-md last:rounded-r-md sm:min-h-8", kind === k ? "bg-violet-400/15 text-violet-100" : "text-muted-foreground hover:bg-secondary")}>
               {k === "call" ? "Call" : "Put"}
             </button>
           ))}
@@ -284,7 +284,7 @@ function OptionPicker({ day, symbol, at, picked, onPick }: {
         <div role="radiogroup" aria-label="Expiration" className="flex flex-wrap gap-1.5">
           {found.expiries.map(e => (
             <button key={e} type="button" role="radio" aria-checked={expiry === e} data-testid="replay-expiry" onClick={() => pick(kind, e)}
-              className={cn("min-h-11 rounded-md border px-2 sm:min-h-8", expiry === e ? "border-amber-400/70 bg-amber-400/10 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>
+              className={cn("min-h-11 rounded-md border px-2 sm:min-h-8", expiry === e ? "border-violet-400/70 bg-violet-400/10 text-violet-100" : "text-muted-foreground hover:bg-secondary")}>
               {expiryShort(e)}{e === day ? " · 0DTE" : ""}
             </button>
           ))}
@@ -301,7 +301,7 @@ function OptionPicker({ day, symbol, at, picked, onPick }: {
                 return (
                   <button key={c.occ} type="button" role="radio" aria-checked={on} data-testid="replay-contract"
                     onClick={() => onPick({ option_type: kind, expiry: strikes.expiry!, strike: c.strike, label: c.label })}
-                    className={cn("min-h-11 rounded-md border px-2 tabular-nums sm:min-h-8", on ? "border-amber-400/70 bg-amber-400/10 text-amber-100" : "text-foreground hover:bg-secondary")}>
+                    className={cn("min-h-11 rounded-md border px-2 tabular-nums sm:min-h-8", on ? "border-violet-400/70 bg-violet-400/10 text-violet-100" : "text-foreground hover:bg-secondary")}>
                     ${c.strike}<span className="ml-1 text-muted-foreground">{px(c.last.price)}</span>
                   </button>
                 );
@@ -388,10 +388,10 @@ function Ticket({ view, at, symbol, options, onView, pause, preset = null }: {
         <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground"><ModeMark mode="replay" detail={modeDay(view.run.day)} /> · not real money</p>
         <div role="radiogroup" aria-label="What to trade" className="ml-auto inline-flex rounded-md border text-xs">
           <button type="button" role="radio" aria-checked={!option} onClick={() => choose("stock")}
-            className={cn("min-h-11 rounded-l-md px-3 sm:min-h-8", !option ? "bg-amber-400/15 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>{symbol} shares</button>
+            className={cn("min-h-11 rounded-l-md px-3 sm:min-h-8", !option ? "bg-violet-400/15 text-violet-100" : "text-muted-foreground hover:bg-secondary")}>{symbol} shares</button>
           <button type="button" role="radio" aria-checked={option} disabled={!!off} title={off ?? undefined} data-testid={off ? "replay-options-off" : "replay-option"}
             onClick={() => choose("option")}
-            className={cn("min-h-11 rounded-r-md px-3 disabled:cursor-not-allowed disabled:opacity-45 sm:min-h-8", option ? "bg-amber-400/15 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>Option</button>
+            className={cn("min-h-11 rounded-r-md px-3 disabled:cursor-not-allowed disabled:opacity-45 sm:min-h-8", option ? "bg-violet-400/15 text-violet-100" : "text-muted-foreground hover:bg-secondary")}>Option</button>
         </div>
       </div>
       {off ? <p className="text-[11px] text-muted-foreground" data-testid="replay-options-reason">{off}</p>
@@ -402,7 +402,7 @@ function Ticket({ view, at, symbol, options, onView, pause, preset = null }: {
         <div role="radiogroup" aria-label="Order type" className="inline-flex rounded-md border text-xs">
           {(["market", "limit"] as const).map(t => (
             <button key={t} type="button" role="radio" aria-checked={type === t} onClick={() => { setType(t); setPreview(null); }}
-              className={cn("min-h-11 px-3 first:rounded-l-md last:rounded-r-md sm:min-h-8", type === t ? "bg-amber-400/15 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>
+              className={cn("min-h-11 px-3 first:rounded-l-md last:rounded-r-md sm:min-h-8", type === t ? "bg-violet-400/15 text-violet-100" : "text-muted-foreground hover:bg-secondary")}>
               {t === "market" ? "Market" : "Limit"}
             </button>
           ))}
@@ -429,7 +429,7 @@ function Ticket({ view, at, symbol, options, onView, pause, preset = null }: {
       </div>
       <input aria-label="Replay note" maxLength={280} placeholder="Why (optional, one line)" value={note} onChange={e => { setNote(e.target.value); setPreview(null); }} className={cn(INPUT, "w-full")} />
       {preview && (
-        <div data-testid="replay-confirm" className="space-y-1 rounded-md bg-amber-400/5 p-2 text-xs">
+        <div data-testid="replay-confirm" className="space-y-1 rounded-md bg-violet-400/5 p-2 text-xs">
           {preview.fills_now ? (
             <p className="text-sm tabular-nums text-foreground">Buy {preview.quantity.toLocaleString("en-US")} {name} at {px(-(preview.per_share ?? 0))}: costs {usd(preview.cash ?? 0)}.</p>
           ) : (
@@ -447,8 +447,8 @@ function Ticket({ view, at, symbol, options, onView, pause, preset = null }: {
       {done && <p role="status" data-testid="replay-done" className="text-xs text-emerald-300">{done}</p>}
       <div className="flex flex-wrap gap-2">
         {preview
-          ? <button type="button" data-testid="replay-fill" disabled={busy || !valid} onClick={send} className={cn(BUTTON, AMBER)}>{preview.fills_now ? "Fill on paper" : "Place limit on paper"}</button>
-          : <button type="button" data-testid="replay-review" disabled={busy || !valid || view.ended} onClick={review} className={cn(BUTTON, AMBER)}>Review at {replayTime(at)}</button>}
+          ? <button type="button" data-testid="replay-fill" disabled={busy || !valid} onClick={send} className={cn(BUTTON, VIOLET)}>{preview.fills_now ? "Fill on paper" : "Place limit on paper"}</button>
+          : <button type="button" data-testid="replay-review" disabled={busy || !valid || view.ended} onClick={review} className={cn(BUTTON, VIOLET)}>Review at {replayTime(at)}</button>}
         {preview && <button type="button" onClick={() => setPreview(null)} className={QUIET}>Cancel</button>}
       </div>
       <p className="text-[11px] text-muted-foreground">Trading pauses the replay; press Play to go on.</p>
@@ -500,11 +500,11 @@ function Position({ p, view, at, onView, pause }: { p: PaperPosition; view: Repl
       )}
       {p.note && <p className="text-foreground/80">“{p.note}”</p>}
       {selling ? (
-        <div data-testid="replay-sell-confirm" className="space-y-1 rounded-md bg-amber-400/5 p-2">
+        <div data-testid="replay-sell-confirm" className="space-y-1 rounded-md bg-violet-400/5 p-2">
           <p className="text-sm tabular-nums text-foreground">Sell {selling.quantity.toLocaleString("en-US")} {named(p)} at {px(selling.bid)}: {selling.pnl != null ? `${selling.pnl >= 0 ? "makes" : "loses"} ${usd(selling.pnl)}` : ""}.</p>
           <p className="text-muted-foreground">{quoteWords(selling, false)}</p>
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" data-testid="replay-sell" disabled={busy} onClick={() => send("market")} className={cn(BUTTON, AMBER)}>Sell on paper</button>
+            <button type="button" data-testid="replay-sell" disabled={busy} onClick={() => send("market")} className={cn(BUTTON, VIOLET)}>Sell on paper</button>
             <label className="flex items-center gap-1.5 text-muted-foreground">or a sell limit $
               <input aria-label={`Sell limit for ${p.symbol}`} inputMode="decimal" value={limit} onChange={e => setLimit(e.target.value.replace(/[^\d.]/g, ""))} className={cn(INPUT, "w-20")} />
             </label>
@@ -583,7 +583,7 @@ export function RedoCompareCard({ data }: { data: RedoCompare }) {
   ];
   const diff = data.difference;
   return (
-    <section aria-label="Redo compared with your real trade" data-testid="redo-compare" className="space-y-2 rounded-md border border-amber-400/50 p-2.5 text-xs">
+    <section aria-label="Redo compared with your real trade" data-testid="redo-compare" className="space-y-2 rounded-md border border-violet-400/50 p-2.5 text-xs">
       <div className="flex flex-wrap items-baseline gap-x-2">
         <span className={LABEL}>Redo vs real</span>
         <span className="text-muted-foreground">{real.label} · {replayDate(data.day)}</span>
@@ -789,29 +789,29 @@ export default function DeskReplay({ symbol, redo = null, onLeave, live = null }
 
   return (
     <div data-testid="desk-replay" className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
-      {/* The badge: amber, first, on every replay screen, so a replayed price is never taken for live. */}
-      <div className="sticky top-0 z-10 -mx-3 -mt-3 flex flex-wrap items-center gap-2 border-b border-amber-400/40 bg-[#1a1408] px-3 py-2">
-        <span data-testid="replay-badge" role="status" className="rounded bg-amber-400 px-2 py-0.5 text-xs font-bold tracking-wide text-black tabular-nums">
+      {/* The badge: violet (replay is paper practice), first, on every replay screen, so a replayed price is never taken for live. */}
+      <div className="sticky top-0 z-10 -mx-3 -mt-3 flex flex-wrap items-center gap-2 border-b border-violet-400/40 bg-[#15101f] px-3 py-2">
+        <span data-testid="replay-badge" role="status" className="rounded bg-violet-400 px-2 py-0.5 text-xs font-bold tracking-wide text-black tabular-nums">
           {view ? replayBadge(view.run.day, at) : day ? `REPLAY · ${replayDate(day)} · not started` : "REPLAY"}
         </span>
-        {(active || (redoId && !view)) && <span data-testid="redo-badge" className="rounded border border-amber-400/60 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-100">
+        {(active || (redoId && !view)) && <span data-testid="redo-badge" className="rounded border border-violet-400/60 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-violet-100">
           {compare ? "Redo · compared with your real trade" : "Redo · your real trade hidden"}</span>}
         {view && (
           <div className="flex flex-wrap items-center gap-1">
             <button type="button" data-testid="replay-play" aria-label={running ? "Pause the replay" : "Play the replay"} disabled={ended} onClick={() => setPlaying(!running)}
-              className={cn(BUTTON, "min-w-11 border-amber-400/60 text-amber-100")}>{running ? <Pause size={14} aria-hidden /> : <Play size={14} aria-hidden />}</button>
+              className={cn(BUTTON, "min-w-11 border-violet-400/60 text-violet-100")}>{running ? <Pause size={14} aria-hidden /> : <Play size={14} aria-hidden />}</button>
             <button type="button" data-testid="replay-step" aria-label="Step one bar" disabled={ended} onClick={() => { setPlaying(false); setAt(a => Math.min(a + 60, closeAt)); }}
               className={cn(BUTTON, "min-w-11")}><SkipForward size={14} aria-hidden /><span className="max-sm:sr-only">1 bar</span></button>
             <div role="radiogroup" aria-label="Replay speed" className="inline-flex rounded-md border text-xs">
               {SPEEDS.map(s => (
                 <button key={s} type="button" role="radio" aria-checked={speed === s} onClick={() => setSpeed(s)}
-                  className={cn("min-h-11 min-w-11 px-2 tabular-nums first:rounded-l-md last:rounded-r-md sm:min-h-8 sm:min-w-0", speed === s ? "bg-amber-400/15 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>{s}×</button>
+                  className={cn("min-h-11 min-w-11 px-2 tabular-nums first:rounded-l-md last:rounded-r-md sm:min-h-8 sm:min-w-0", speed === s ? "bg-violet-400/15 text-violet-100" : "text-muted-foreground hover:bg-secondary")}>{s}×</button>
               ))}
             </div>
           </div>
         )}
         {active && view && !compare && (
-          <button type="button" data-testid="redo-end" disabled={comparing} onClick={() => void endRedo()} className={cn(BUTTON, AMBER, "ml-auto")}>
+          <button type="button" data-testid="redo-end" disabled={comparing} onClick={() => void endRedo()} className={cn(BUTTON, VIOLET, "ml-auto")}>
             {comparing ? "Comparing…" : "End redo and compare"}
           </button>
         )}
@@ -828,7 +828,7 @@ export default function DeskReplay({ symbol, redo = null, onLeave, live = null }
       {!view && (
         <section aria-label="Pick a day" data-testid="replay-setup" className="space-y-3">
           {redoId ? (
-            <section aria-label="Redo a real trade" data-testid="redo-setup" className="space-y-2 rounded-md border border-amber-400/50 p-3">
+            <section aria-label="Redo a real trade" data-testid="redo-setup" className="space-y-2 rounded-md border border-violet-400/50 p-3">
               <span className={LABEL}>Redo a real trade</span>
               {planError ? <p role="alert" data-testid="redo-refused" className="text-xs text-amber-300">{planError}</p>
                 : !plan ? <p className="text-xs text-muted-foreground">Reading the trade…</p>
@@ -839,12 +839,12 @@ export default function DeskReplay({ symbol, redo = null, onLeave, live = null }
                     : plan.shares_reason && <p data-testid="redo-shares-reason" className="text-xs text-amber-300">{plan.shares_reason}</p>}
                   <div role="radiogroup" aria-label="Where the redo starts" className="flex flex-wrap gap-1.5">
                     <button type="button" role="radio" aria-checked={startFrom === "open"} onClick={() => setStartFrom("open")}
-                      className={cn("min-h-11 rounded-md border px-2.5 text-xs sm:min-h-8", startFrom === "open" ? "border-amber-400/70 bg-amber-400/10 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>
+                      className={cn("min-h-11 rounded-md border px-2.5 text-xs sm:min-h-8", startFrom === "open" ? "border-violet-400/70 bg-violet-400/10 text-violet-100" : "text-muted-foreground hover:bg-secondary")}>
                       At the open, {replayTime(plan.open_at)}
                     </button>
                     <button type="button" role="radio" aria-checked={startFrom === "before"} disabled={plan.before_at == null} title={plan.before_reason ?? undefined}
                       data-testid="redo-before" onClick={() => setStartFrom("before")}
-                      className={cn("min-h-11 rounded-md border px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-45 sm:min-h-8", startFrom === "before" ? "border-amber-400/70 bg-amber-400/10 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>
+                      className={cn("min-h-11 rounded-md border px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-45 sm:min-h-8", startFrom === "before" ? "border-violet-400/70 bg-violet-400/10 text-violet-100" : "text-muted-foreground hover:bg-secondary")}>
                       15 min before your entry{plan.before_at != null ? `, ${replayTime(plan.before_at)}` : ""}
                     </button>
                   </div>
@@ -880,7 +880,7 @@ export default function DeskReplay({ symbol, redo = null, onLeave, live = null }
                 return (
                   <button key={d.date} type="button" role="radio" aria-checked={day === d.date} data-testid="replay-day" data-missing={why ? "true" : undefined}
                     title={why ?? (d.early_close ? "Early close" : undefined)} onClick={() => setDay(d.date)}
-                    className={cn("min-h-11 rounded-md border px-2.5 text-xs sm:min-h-8", day === d.date ? "border-amber-400/70 bg-amber-400/10 text-amber-100" : "text-muted-foreground hover:bg-secondary",
+                    className={cn("min-h-11 rounded-md border px-2.5 text-xs sm:min-h-8", day === d.date ? "border-violet-400/70 bg-violet-400/10 text-violet-100" : "text-muted-foreground hover:bg-secondary",
                       why && "line-through opacity-45")}>
                     {replayDate(d.date)}{d.early_close ? " ·½" : ""}
                   </button>
@@ -897,7 +897,7 @@ export default function DeskReplay({ symbol, redo = null, onLeave, live = null }
               {suggested?.day === day && suggested.symbols.slice(0, 8).map(s => (
                 <button key={s.symbol} type="button" onClick={() => { setTyped(true); setTicker(s.symbol); }} title={s.why === "traded" ? "You traded it that day" : "On your watchlist"}
                   className={cn("min-h-11 rounded-md border px-2 text-xs sm:min-h-8", name === s.symbol ? "border-foreground/60 text-foreground" : "text-muted-foreground hover:bg-secondary")}>
-                  {s.symbol}{s.why === "traded" && <span className="ml-1 text-amber-200">•</span>}
+                  {s.symbol}{s.why === "traded" && <span className="ml-1 text-violet-200">•</span>}
                 </button>
               ))}
             </div>
@@ -908,9 +908,9 @@ export default function DeskReplay({ symbol, redo = null, onLeave, live = null }
             : ready ? <p data-testid="replay-ready" className="text-xs text-muted-foreground">{name} on {replayDate(day!)}: {loaded!.bars.filter(b => b.time >= loaded!.open_at && b.time < loaded!.close_at).length} minute bars, from {replayTime(loaded!.open_at)} to {replayTime(loaded!.close_at)} ET.</p>
             : loading ? <p className="text-xs text-muted-foreground">Reading {name}&apos;s minute bars…</p> : null}
           {error && <p role="alert" className="text-xs text-amber-300">{error}</p>}
-          {redoId ? <button type="button" data-testid="replay-start" disabled={!ready || !plan} onClick={start} className={cn(BUTTON, AMBER)}>
+          {redoId ? <button type="button" data-testid="replay-start" disabled={!ready || !plan} onClick={start} className={cn(BUTTON, VIOLET)}>
               Start the redo at {plan ? replayTime(startFrom === "before" && plan.before_at != null ? plan.before_at : plan.open_at) : "the open"}</button>
-            : <button type="button" data-testid="replay-start" disabled={!ready} onClick={start} className={cn(BUTTON, AMBER)}>Start the replay at {loaded && ready ? replayTime(loaded.open_at) : "9:30 AM"}</button>}
+            : <button type="button" data-testid="replay-start" disabled={!ready} onClick={start} className={cn(BUTTON, VIOLET)}>Start the replay at {loaded && ready ? replayTime(loaded.open_at) : "9:30 AM"}</button>}
           {home && home.runs.length > 0 && (
             <div className="space-y-1 border-t pt-3">
               <span className={LABEL}>Replay practice so far</span>
@@ -932,7 +932,7 @@ export default function DeskReplay({ symbol, redo = null, onLeave, live = null }
             <ReplayChart symbol={name} bars={shown} positions={view.positions} closed={view.closed} orders={view.orders} />
             <p className="text-[11px] text-muted-foreground">One-minute candles to the replay clock, premarket included; nothing after it is drawn. Pale arrows are your replay fills.</p>
             {ended && (
-              <div data-testid="replay-over" className="flex flex-wrap items-center gap-2 rounded-md border border-amber-400/40 p-2 text-xs">
+              <div data-testid="replay-over" className="flex flex-wrap items-center gap-2 rounded-md border border-violet-400/40 p-2 text-xs">
                 <span className="text-foreground">{active && at < closeAt ? "You ended the redo" : "The replayed day is over"}{view.closed.length ? `: ${signed(view.score.pnl)} on ${view.score.trades} trade${view.score.trades === 1 ? "" : "s"}` : ""}.</span>
                 <button type="button" onClick={another} className={BUTTON}>Replay another day</button>
               </div>

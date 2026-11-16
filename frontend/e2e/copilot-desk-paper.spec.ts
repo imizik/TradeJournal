@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Request } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
 
 // His own paper book on the desk (docs/copilot-lab.md § Paper): the Paper section under the book shows the paper account
 // and each paper position's P&L from the desk's live ticks; Close reads a live quote first and fills on paper only on
@@ -201,4 +201,45 @@ test("a working limit shows its last quote and Cancel; the stop/target switch is
   const first = paper.getByTestId("paper-closed").first();
   await expect(first.getByTestId("paper-auto-tag")).toHaveText("auto");
   await expect(first).toContainText("Auto exit at the stop: the stock touched 240");
+});
+
+// Paper and replay are violet, so amber on the desk only ever means "needs you" (docs/copilot-lab.md § Real, paper and
+// replay). Read from the computed colours: violet is blue-led with more red than green, amber red-led with the least blue.
+const rgb = (css: string) => (css.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+const isViolet = (css: string) => { const [r, g, b] = rgb(css); return b > r && r > g; };
+const isAmber = (css: string) => { const [r, g, b] = rgb(css); return r > g && g > b; };
+const css = (locator: Locator, property: string) => locator.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), property);
+
+test("paper marks, the Paper button and the replay chip are violet; the Needs-you strip and Send stay amber", async ({ page }) => {
+  const { paper } = await open(page, 1440, true, "ok");
+  // The held NBIS past its invalidation, so the Needs-you strip has an item beside the paper book.
+  await page.route("**/copilot/desk/threads", route => route.fulfill({ json: { ...DESK,
+    threads: [...DESK.threads, { ...HELD, book: { ...HELD.book, state: "past_stop" } }] } }));
+  await page.reload();
+  await expect(paper).toBeVisible();
+
+  const mark = paper.getByTestId("mode-mark").filter({ visible: true }).first();
+  await expect(mark).toHaveAttribute("data-mode", "paper");
+  expect(isViolet(await css(mark, "color"))).toBe(true);
+  expect(isViolet(await css(mark, "border-top-color"))).toBe(true);
+  expect(isViolet(await css(paper, "border-top-color"))).toBe(true);
+  const button = paper.getByTestId("paper-button");
+  await expect(button).toBeVisible();
+  expect(isViolet(await css(button, "color"))).toBe(true);
+  expect(isViolet(await css(button, "border-top-color"))).toBe(true);
+
+  const strip = page.getByTestId("needs-you");
+  await expect(strip).toBeVisible();
+  expect(isAmber(await css(strip, "border-top-color"))).toBe(true);
+  const send = page.getByRole("button", { name: "Send", exact: true }).filter({ visible: true }).first();
+  await expect(send).toBeVisible();
+  expect(isAmber(await css(send, "background-color"))).toBe(true);
+
+  await page.keyboard.press("r");
+  const badge = page.getByTestId("replay-badge");
+  await expect(badge).toBeVisible();
+  expect(isViolet(await css(badge, "background-color"))).toBe(true);
+  const picked = page.getByTestId("desk-replay").getByTestId("mode-replay");
+  await expect(picked).toHaveAttribute("aria-checked", "true");
+  expect(isViolet(await css(picked, "background-color"))).toBe(true);
 });

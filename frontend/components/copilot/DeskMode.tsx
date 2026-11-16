@@ -79,7 +79,7 @@ export function PaperValue({ book, failed, onOpen, className }: { book: PaperBoo
   const pnl = value && book?.run ? Math.round((value.value - book.run.starting_cash) * 100) / 100 : null;
   return (
     <button type="button" onClick={onOpen} data-testid="desk-paper-value" title="Your paper book: positions, orders and score. Not real money. ( P )"
-      className={cn("inline-flex min-h-11 shrink-0 items-baseline gap-1.5 whitespace-nowrap rounded-md border border-dashed border-amber-400/50 px-2 py-1 text-xs hover:bg-secondary sm:min-h-0 sm:py-0.5", className)}>
+      className={cn("inline-flex min-h-11 shrink-0 items-baseline gap-1.5 whitespace-nowrap rounded-md border border-dashed border-violet-400/50 px-2 py-1 text-xs hover:bg-secondary sm:min-h-0 sm:py-0.5", className)}>
       <ModeMark mode="paper" short className="self-center" />
       {!book ? <span className="text-muted-foreground">{failed ? "could not be read" : "reading…"}</span>
         : !book.run ? <span className="text-muted-foreground">not started</span>

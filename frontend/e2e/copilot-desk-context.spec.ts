@@ -141,7 +141,7 @@ test("the chart draws the plan's lines, the fills, pings, Radar and the time sto
   await expect(pane.getByTestId("desk-chart-readout")).toContainText(/ET · O \d+\.\d{2} H .* C /);
   const legend = pane.getByLabel("Legend");
   await expect(legend).toContainText("your fills");
-  await expect(legend).toContainText("■P paper"); // his paper fills, pale squares lettered P
+  await expect(legend).toContainText("■P paper"); // his paper fills, violet squares lettered P
   await expect(legend).toContainText("▲▼ your fills");
   await expect(legend).toContainText("pings");
   await expect(legend).toContainText("Radar");

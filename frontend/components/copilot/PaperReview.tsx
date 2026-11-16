@@ -22,7 +22,7 @@ export default function PaperReviewCard({ review, onAsk }: { review: PaperReview
       <div className="flex flex-wrap items-center gap-2">
         {review && <p className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"><ModeMark mode="paper" short /> review · {friday(review.day)}</p>}
         <button type="button" data-testid="paper-how-am-i-doing" onClick={() => onAsk(PAPER_QUESTION)}
-          className="ml-auto inline-flex min-h-11 items-center rounded-full border border-amber-400/50 px-3 text-xs text-amber-100 hover:bg-amber-400/10 sm:min-h-7">
+          className="ml-auto inline-flex min-h-11 items-center rounded-full border border-violet-400/50 px-3 text-xs text-violet-100 hover:bg-violet-400/10 sm:min-h-7">
           How am I doing?
         </button>
       </div>
