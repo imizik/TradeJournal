@@ -462,6 +462,21 @@ function Score({ paper, real, since }: { paper: PaperStats; real: PaperStats; si
   );
 }
 
+/** Paper next to real: closed P&L and win rate for each, with their marks, since the run started. The Paper section's
+ *  line, and the desk's Close the day checklist shows the same line (``testId`` apart). */
+export function PaperScoreLine({ score, since, testId = "paper-score-line", className = "px-3 pt-1.5" }: {
+  score: NonNullable<PaperBook["score"]>; since: number; testId?: string; className?: string;
+}) {
+  return (
+    <p data-testid={testId} className={cn("flex flex-wrap gap-x-3 text-xs tabular-nums", className)}>
+      <span className="inline-flex items-center gap-1"><ModeMark mode="paper" short />{" "}<span className={toneOf(score.paper.pnl)}>{signed(score.paper.pnl)}</span>{score.paper.win_rate != null && <span className="text-muted-foreground"> · {score.paper.win_rate}% of {score.paper.trades}</span>}</span>
+      <span className="inline-flex items-center gap-1"><ModeMark mode="real" />{" "}{score.real.trades === 0 ? <span className="text-muted-foreground">no closed trades</span> : <>
+        <span className={toneOf(score.real.pnl)}>{signed(score.real.pnl)}</span><span className="text-muted-foreground"> · {score.real.win_rate}% of {score.real.trades}</span></>}</span>
+      <span className="text-muted-foreground">closed, since {day(since)}</span>
+    </p>
+  );
+}
+
 /** The Paper section (the desk's Practice block opens it in place): one panel, folded to its account line and score line
  *  until Progress is opened. His rules and goals are the desk's own line (``RulesAndGoals``): they cover real trades too. */
 export default function DeskPaper({ book, failed, symbol, top = null }: { book: PaperBook | null; failed: boolean; symbol: string | null; top?: React.ReactNode }) {
@@ -552,12 +567,7 @@ export default function DeskPaper({ book, failed, symbol, top = null }: { book: 
         </ul>
       ) : <p className="border-t border-border/60 px-3 py-1.5 text-xs text-muted-foreground">No paper positions. Paper on the Ticket or the Chain{symbol ? `, or ${symbol} shares here` : ""}.</p>}
       {symbol && <div className="flex flex-wrap gap-2 px-3 pt-1.5"><PaperButton key={symbol} order={{ instrument: "stock", symbol }} quantity={10} label={`Paper buy ${symbol} shares`} /></div>}
-      <p data-testid="paper-score-line" className="flex flex-wrap gap-x-3 px-3 pt-1.5 text-xs tabular-nums">
-        <span className="inline-flex items-center gap-1"><ModeMark mode="paper" short />{" "}<span className={toneOf(score.paper.pnl)}>{signed(score.paper.pnl)}</span>{score.paper.win_rate != null && <span className="text-muted-foreground"> · {score.paper.win_rate}% of {score.paper.trades}</span>}</span>
-        <span className="inline-flex items-center gap-1"><ModeMark mode="real" />{" "}{score.real.trades === 0 ? <span className="text-muted-foreground">no closed trades</span> : <>
-          <span className={toneOf(score.real.pnl)}>{signed(score.real.pnl)}</span><span className="text-muted-foreground"> · {score.real.win_rate}% of {score.real.trades}</span></>}</span>
-        <span className="text-muted-foreground">closed, since {day(book.run.started_at)}</span>
-      </p>
+      <PaperScoreLine score={score} since={book.run.started_at} />
       <BySource rows={score.paper.by_source} />
       {progress && (
         <div data-testid="paper-progress" className="space-y-3 px-3 pt-2">
