@@ -37,12 +37,12 @@ def ask(**args):
     return copilot_tools.validate("draft_paper_order", {"symbol": "NBIS", **args})
 
 
-def opened(db, chains=None, **args):
-    return draft._open(db, ask(action="open", **args), NOW, chains or chain_of([FRI], [95, 100, 105]))
+def opened(session, chains=None, **args):
+    return draft._open(session, ask(action="open", **args), NOW, chains or chain_of([FRI], [95, 100, 105]))
 
 
-def events(db):
-    return len(db.exec(select(PaperEvent)).all())
+def events(session):
+    return len(session.exec(select(PaperEvent)).all())
 
 
 # --------------------------------------------------------------------------- the request
@@ -178,7 +178,7 @@ def test_two_positions_in_the_ticker_ask_which(db, market):  # noqa: F811
 
 def test_a_ticker_he_does_not_follow_is_left_alone(monkeypatch):
     from app.engine import day_journal
-    monkeypatch.setattr(day_journal, "quiet", lambda db: {"NBIS"})
+    monkeypatch.setattr(day_journal, "quiet", lambda session: {"NBIS"})
     with pytest.raises(copilot_tools.ToolInputError, match="Not following"):
         draft.live_draft(ask(action="close"))
 
