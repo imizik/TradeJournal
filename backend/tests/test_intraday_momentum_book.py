@@ -268,7 +268,13 @@ def test_today_view_steps_the_band_by_check_and_projects_the_hours_ahead(tmp_pat
     view = ib.today_view(b.store, at(DAY, 16, 5), True)
     assert view["ahead"] == [] and len(view["checks"]) == 6
     [t] = view["trades"]
-    assert t["how"] == "stop" and t["bp"]  # 15:00: the band (101.28) passes the price (101.2) == pytest.approx(round((t["exit"] - t["entry"]) / 100.4 * 1e4, 2))
+    # 15:00: the band (101.28) passes the price (101.2): stopped; a long's bp on the day's open.
+    assert t["how"] == "stop" and t["bp"] == pytest.approx(round((t["exit"] - t["entry"]) / 100.4 * 1e4, 2))
+    # A check whose time has passed but is not recorded yet ends the band drawn before it (none drawn on as if checked).
+    pending = ib.Store(tmp_path / "pending.sqlite3", seed=path)
+    pending.add_check(DAY, 600, "done", price=101.0, upper=100.65, lower=99.75, vwap=100.5)
+    view = ib.today_view(pending, at(DAY, 11, 2), True)
+    assert view["until"] == at(DAY, 11, 0) and [a["minute"] for a in view["ahead"]] == [720, 780, 840, 900]
     # The next day, before its first check: nothing, never yesterday's lines.
     assert ib.today_view(b.store, at("2026-11-17", 9, 45), True) is None
 

@@ -65,7 +65,9 @@ export function useMomentumToday(active: boolean): MomentumToday | null {
       .then(async r => {
         const body = await r.json().catch(() => null);
         if (!r.ok || !body) throw new Error(String(r.status));
-        setToday(body.enabled && body.today?.checks?.length ? body.today : null);
+        // Only a day with something to draw (every check missed and no trade: nothing, chip included).
+        const next: MomentumToday | null = body.enabled && body.today?.checks?.length ? body.today : null;
+        setToday(next && (bandSteps(next).length || next.trades.length) ? next : null);
       })
       .catch(() => { if (!controller.signal.aborted) setToday(null); }); // a failed read draws nothing, never the last one
     load();

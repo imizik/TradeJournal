@@ -40,16 +40,18 @@ function today(day = nyDay(BARS[59].time)) {
   };
 }
 
-function book(state: "on" | "off" | "other-day") {
+function book(state: "on" | "off" | "other-day" | "missed") {
   return {
     enabled: state !== "off", symbol: "QQQ", stake: 10000, now, backtest: { mean_bp: 4.4, years: "2022-2026" }, holding: null, days: [],
     totals: { days: 0, days_traded: 0, mean_bp: null, dollars: null, up: 0, missed_checks: 0 },
-    today: state === "off" ? null : today(state === "other-day" ? "2020-01-02" : undefined),
+    today: state === "off" ? null : state === "missed"
+      ? { ...today(), checks: today().checks.map(c => ({ ...c, status: "missed", price: null, upper: null, lower: null, vwap: null })), ahead: [], trades: [] }
+      : today(state === "other-day" ? "2020-01-02" : undefined),
   };
 }
 
 async function desk(page: Page, symbol = "QQQ") {
-  const reply = { state: "on" as "on" | "off" | "other-day" | "fail" };
+  const reply = { state: "on" as "on" | "off" | "other-day" | "missed" | "fail" };
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route("**/copilot/chat", (route) => route.abort());
@@ -106,7 +108,7 @@ test("nothing on another symbol", async ({ page }) => {
   await expect(pane.getByTestId("desk-study-momentum")).toHaveCount(0);
 });
 
-for (const state of ["off", "other-day", "fail"] as const) {
+for (const state of ["off", "other-day", "missed", "fail"] as const) {
   test(`QQQ draws and says nothing when the book read is ${state}`, async ({ page }) => {
     const { pane, reply } = await desk(page);
     await expect(pane.getByTestId("desk-chart-canvas")).toHaveAttribute("data-momentum", "3");

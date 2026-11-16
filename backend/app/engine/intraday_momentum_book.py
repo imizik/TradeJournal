@@ -245,7 +245,8 @@ def today_view(store: Store, now: float, on: bool) -> dict | None:
     ``checks``: each recorded check with its New York time (``at``) and the band it decided on (none on a missed one).
     ``ahead``: the band at the checks still to come today, from the same 60-session window the checks use and the
     max/min(open, previous close) anchor that today's first done check implies (its band divided by 1 +/- VM x sigma).
-    ``trades``: today's entries and exits, with the closed ones' result in basis points of the day's open (as ``bp``)."""
+    ``trades``: today's entries and exits, with the closed ones' result in basis points of the day's open (as ``bp``).
+    ``until``: where the last recorded band stops: the close, or an overdue check not recorded yet."""
     if not on:
         return None
     moment = datetime.fromtimestamp(now, ET)
@@ -280,7 +281,11 @@ def today_view(store: Store, now: float, on: bool) -> dict | None:
         b = bp(t)
         trades.append({"side": t["side"], "entry_at": t["entry_at"], "entry": t["entry"], "exit_at": t["exit_at"],
                        "exit": t["exit"], "how": t["how"], "bp": None if b is None else round(b, 2)})
-    return {"day": iso, "checks": checks, "ahead": ahead, "trades": trades, "until": stamp(FULL_CLOSE)}
+    # The band drawn so far ends at the close, or at a check whose time has passed but is not recorded yet (the book
+    # retries for a few minutes): never drawn on past a check as if it had held.
+    recorded, minute_now = {c["minute"] for c in rows}, moment.hour * 60 + moment.minute
+    overdue = [m for m in CHECKS if m <= minute_now and m not in recorded]
+    return {"day": iso, "checks": checks, "ahead": ahead, "trades": trades, "until": stamp(overdue[0] if overdue else FULL_CLOSE)}
 
 
 # ------------------------------------------------------------------ the recorder
