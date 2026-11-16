@@ -11,7 +11,7 @@ import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
 import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
 import { usePaperBook } from "@/components/copilot/DeskPaper";
-import { Practice, RulesAndGoals } from "@/components/copilot/DeskPractice";
+import { Practice, RulesAndGoals, openDeskPlace, type DeskPlace } from "@/components/copilot/DeskPractice";
 import DeskReplay from "@/components/copilot/DeskReplay";
 import PaperReviewCard from "@/components/copilot/PaperReview";
 import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
@@ -543,9 +543,11 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // Folded pieces other than the centre's tabs (those have their own commands, which show a folded tab for now).
   const foldedPieces = useMemo(() => [...PIECE.keys()].filter(id => !id.startsWith("tab.") && use.folded(id)), [use]);
   // A place on the book side (or the top bar), from the palette or its key: the phone's Book view comes forward, a piece he
-  // folded away shows for now, and the place scrolls into view, opened (``click``) when it is a fold or an editor.
-  const reveal = useCallback((pieces: string[], where: string | string[], click = false) => {
+  // folded away shows for now, and the place scrolls into view, opened (``click``) when it is a fold or an editor. A
+  // place inside a line under the book (``place``: a Practice line, My rules) opens that line first.
+  const reveal = useCallback((pieces: string[], where: string | string[], click = false, place?: DeskPlace) => {
     for (const piece of pieces) showNow(piece);
+    if (place) openDeskPlace(place);
     showBook();
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const target = (Array.isArray(where) ? where : [`[data-testid="${where}"]`]).map(q => desk.current?.querySelector<HTMLElement>(q)).find(Boolean);
@@ -576,9 +578,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     { id: "go-threads", name: "Threads", hint: "The thread list and previous days", key: "[", run: toggleThreads },
     { id: "go-now", name: "Now", hint: "Today's Main chat in the copilot", run: () => { goNow(true); showCopilot(); } },
     // The book side's places: each also has a button where it lives.
-    { id: "go-paper", name: "Paper book", hint: "Paper positions, orders and score. Not real money.", key: "P", run: () => reveal(["paper"], "desk-paper") },
-    { id: "go-rules", name: "My rules", hint: "Write or change your trading rules", run: () => reveal(["paper", "paper.rules"], "rules-toggle", true) },
-    { id: "go-goals", name: "This week's goals", hint: "Set or change one or two goals for the week", run: () => reveal(["paper", "paper.goals"], "goals-set", true) },
+    { id: "go-paper", name: "Paper book", hint: "Paper positions, orders and score. Not real money.", key: "P", run: () => reveal(["paper"], "desk-paper", false, "paper") },
+    { id: "go-rules", name: "My rules", hint: "Write or change your trading rules", run: () => reveal([], "rules-toggle", true, "rules") },
+    { id: "go-goals", name: "This week's goals", hint: "Set or change one or two goals for the week", run: () => reveal([], "goals-set", true, "rules") },
     { id: "go-watching", name: "Watchlist", hint: "Your watched names: add, import, plan", key: "W", run: () => reveal(["watching"], "desk-watching") },
     { id: "go-note", name: "Note on this position", hint: "A one-line note on the selected position", run: () => reveal([], ['[data-desk-book] li[data-selected] [data-testid="desk-note-button"]', '[data-desk-book] [data-testid="desk-note-button"]'], true) },
     { id: "go-health", name: "Data health", hint: "Is every source live: Robinhood, prices, fill emails, Radar", run: () => desk.current?.querySelector<HTMLElement>('[data-testid="desk-health"]')?.click() },
@@ -640,7 +642,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         if (tab) { event.preventDefault(); countTap("keys"); openCentre(tab.id); }
         else if (key === "f") { event.preventDefault(); countTap("keys"); if (feedKept.current) showCopilot(); else showFeed(); }
         else if (key === "b") { event.preventDefault(); countTap("keys"); focusBook(); }
-        else if (key === "p") { event.preventDefault(); countTap("keys"); reveal(["paper"], "desk-paper"); }
+        else if (key === "p") { event.preventDefault(); countTap("keys"); reveal(["paper"], "desk-paper", false, "paper"); }
         else if (key === "w") { event.preventDefault(); countTap("keys"); reveal(["watching"], "desk-watching"); }
         else if (key === "r") { event.preventDefault(); countTap("keys"); openReplay(); }
         else if (event.key === "/") { event.preventDefault(); countTap("keys"); focusCopilot(); }

@@ -1452,7 +1452,7 @@ Chart, Chain, Ticket, Check a call, Grid, Feed, Copilot, Book, Threads; then Now
 which also has its own button where it lives: Paper book, My rules, This week's goals, Watchlist, Note on this position,
 Data health (the health list), Replay a past day and Redo one of my trades; How I use the desk last). A command
 that spends a model call says "Asks the copilot now" in its hint. A book-side place brings the phone's Book view
-forward, shows a piece folded away (§ How I use the desk) for now, scrolls to it and opens it when it is an editor (rules,
+forward, shows a piece folded away (§ How I use the desk) for now, opens the line it lives in (Practice's paper line, My rules), scrolls to it and opens it when it is an editor (rules,
 goals, the note line). Type to filter, arrows
 and Enter to choose, Escape or a click outside to close. A thread opens through
 the list's own path (in place, or its deep link); Plan a trade opens the same

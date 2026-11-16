@@ -164,3 +164,19 @@ for (const width of [1440, 375]) {
     expect(box.x + box.width).toBeLessThanOrEqual(width);
   });
 }
+
+test("P and Jump to open a place inside its line: the paper line, My rules' editor, the goals editor", async ({ page }) => {
+  await open(page, 1440);
+  await expect(page.getByTestId("practice-line-paper")).toHaveAttribute("aria-expanded", "false");
+  await page.keyboard.press("p");
+  await expect(page.getByTestId("practice-line-paper")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("desk-paper")).toBeVisible();
+  const jump = async (name: string) => {
+    await page.getByRole("button", { name: "Jump to a thread or command" }).click();
+    await page.getByRole("dialog", { name: "Jump to" }).getByRole("option", { name: new RegExp(`^${name}`) }).click();
+  };
+  await jump("My rules");
+  await expect(page.getByTestId("rules-goals").getByTestId("rules-editor")).toBeVisible();
+  await jump("This week's goals");
+  await expect(page.getByTestId("rules-goals").getByTestId("goals-editor")).toBeVisible();
+});
