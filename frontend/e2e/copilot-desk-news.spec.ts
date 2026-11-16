@@ -1,4 +1,10 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+/** The study toggles live in the chart header's "Studies" menu: open it, unless it is open, to reach one. */
+async function studies(pane: Locator) {
+  if (!(await pane.getByTestId("desk-chart-studies").isVisible())) await pane.getByTestId("desk-studies-open").click();
+  return pane.getByTestId("desk-chart-studies");
+}
 
 // Headlines on the desk chart (docs/copilot-lab.md § The desk): a marker at each group's candle, amber beside a big
 // move, hover or tap opens the headlines with their source, time and link, Ask hands one with its move to the copilot,
@@ -71,7 +77,9 @@ test("a headline marker opens its headlines, and Ask hands the headline and the 
   await expect(marks.nth(0)).toHaveAttribute("data-emphasis", "false");
   await expect(marks.nth(1)).toHaveAttribute("data-emphasis", "true");
   await expect(marks.nth(1)).toHaveText("2");
+  await (await studies(pane)).getByTestId("desk-study-news").waitFor();
   await expect(pane.getByTestId("desk-study-news")).toHaveText("News 3");
+  await page.keyboard.press("Escape"); // the menu closes; the markers are the chart's
 
   // Hover: the headlines, newest first, with source, time and a link out.
   await marks.nth(1).hover();
@@ -112,12 +120,14 @@ test("the News toggle hides the markers and is remembered; the 1D chart asks for
   const canvas = pane.getByTestId("desk-chart-canvas");
   const toggle = pane.getByTestId("desk-study-news");
   await expect(canvas).toHaveAttribute("data-news", "2");
+  await studies(pane);
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await expect(pane.getByTestId("desk-news-mark")).toHaveCount(0);
   await expect(canvas).toHaveAttribute("data-news", "off");
   await page.reload();
   await expect(canvas).toHaveAttribute("data-bars", "60");
+  await studies(pane);
   await expect(pane.getByTestId("desk-study-news")).toHaveAttribute("aria-pressed", "false");
   await expect(pane.getByTestId("desk-news-mark")).toHaveCount(0);
   await pane.getByTestId("desk-study-news").click();
@@ -126,6 +136,8 @@ test("the News toggle hides the markers and is remembered; the 1D chart asks for
   const count = reads.length;
   await pane.getByRole("button", { name: "1D", exact: true }).click();
   await expect(canvas).toHaveAttribute("data-timeframe", "1D");
+  await studies(pane);
+  await expect(pane.getByTestId("desk-study-ema21")).toBeVisible(); // the 1D menu, without News
   await expect(pane.getByTestId("desk-study-news")).toHaveCount(0);
   await expect(pane.getByTestId("desk-news-mark")).toHaveCount(0);
   expect(reads.length).toBe(count);

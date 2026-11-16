@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import {
   CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, TickMarkType, createChart, createSeriesMarkers,
   type AutoscaleInfo, type IChartApi, type IPriceLine, type IPrimitivePaneRenderer, type IPrimitivePaneView, type ISeriesApi, type ISeriesMarkersPluginApi,
@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import { drawableWalls, useDeskWalls, type DeskWalls } from "@/lib/deskWalls";
 import { everyDeskMinute } from "@/lib/deskMinute";
 import { bandAt, bandMarks, bandSteps, useMomentumToday, type BandStep } from "@/lib/deskMomentumBand";
-import { useFolds } from "@/components/copilot/DeskUse";
+import type { ChartTools } from "@/components/copilot/DeskChartHead";
 import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type DeskChartNews, type DeskChartMark, type DeskStudySeries, type DeskTimeframe } from "@/lib/desk";
 
 /*
@@ -112,6 +112,23 @@ const STOP_ROOM = 120;
 const REPORT_ROOM = 10;
 /** Pixels from a mark within which the pointer shows what it was. */
 const HOVER_PX = 10;
+/** The chart's height: the candles take the room. A phone keeps the first candle on the first screen; a wide screen
+ * fills the column's height under the header. */
+const CHART_HEIGHT = "h-[clamp(280px,calc(100svh_-_430px),420px)] sm:h-[420px] lg:h-[clamp(420px,calc(100dvh_-_270px),760px)]";
+const NEXT_TIMEFRAME: Partial<Record<DeskTimeframe, DeskTimeframe>> = { "2m": "15m", "15m": "1D" };
+const CANDLE_WORD: Record<DeskTimeframe, string> = { "2m": "2-minute", "15m": "15-minute", "1D": "daily" };
+const nyWeekday = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" });
+/** What an empty timeframe says, in words, claiming no more than the read: the reason under it says why (no bars yet, a
+ * failed source, a slow read). Only a weekend is named as the market being closed: holidays are not known here. */
+export function emptyTitle(timeframe: DeskTimeframe, now = Date.now()): string {
+  const none = `No ${CANDLE_WORD[timeframe]} candles to show`;
+  if (timeframe !== "2m") return none;
+  const day = nyWeekday.formatToParts(now).find(p => p.type === "weekday")?.value;
+  return day === "Sat" || day === "Sun" ? `Market closed · ${none.charAt(0).toLowerCase()}${none.slice(1)}` : none;
+}
+const Key = ({ color, glyph, children }: { color: string; glyph: string; children: ReactNode }) => (
+  <span><span aria-hidden style={{ color }}>{glyph}</span> {children}</span>
+);
 
 const clock = new Intl.DateTimeFormat("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" });
 const dayFmt = new Intl.DateTimeFormat("en-US", { timeZone: ET, month: "short", day: "numeric" });
@@ -585,13 +602,14 @@ export function askAboutLevel(symbol: string, timeframe: DeskTimeframe, level: n
 }
 
 /**
- * The reading line under the symbol: the newest price, the day's change against the previous close, the distance from
- * VWAP and from the plan's invalidation, and volume against usual for the time of day, with their as-of. A part with
- * nothing behind it is left out. ``fallback`` is the book's change today when the read has no previous close. The line
- * holds what it last showed for ``symbol`` rather than blank or step back (``heldReading``).
+ * The chart's reading, in two parts. ``head`` (in the header row, beside the symbol): the newest price and the day's
+ * change against the previous close (``fallback``: the book's change today when the read has no previous close).
+ * ``facts`` (on the quiet line under it): the distance from VWAP and from the plan's invalidation, volume against usual
+ * for the time of day, and the as-of. A part with nothing behind it is left out. Both hold what they last showed for
+ * ``symbol`` rather than blank or step back (``heldReading``).
  */
-export function ReadingLine({ symbol, data, fallback = null, live = null }: {
-  symbol: string; data: DeskChartData | null; fallback?: { pct: number; at: number } | null;
+export function ReadingLine({ symbol, data, fallback = null, live = null, part }: {
+  symbol: string; data: DeskChartData | null; fallback?: { pct: number; at: number } | null; part: "head" | "facts";
   /** The desk's live price (``lib/deskTicks.ts``): newer than the chart's last minute, it is the reading's price and time. */
   live?: { last: number; at: number; stale: boolean } | null;
 }) {
@@ -602,16 +620,17 @@ export function ReadingLine({ symbol, data, fallback = null, live = null }: {
     invalidation: data?.levels.find(level => level.role === "invalidation")?.price ?? null, ticked: fresh,
   } : null;
   const held = heldReading(symbol, next);
-  if (!held) return <p data-testid="desk-reading" className="h-4" />;
+  if (!held) return part === "head" ? <span data-testid="desk-reading" /> : null;
   const { reading, invalidation } = held;
   const ticked = held.ticked && !!live;
   const { last, at, daily } = reading;
   // VWAP and RVol are the regular session's: after the close or before the open their time is not the price's.
   const sessionAt = reading.vwap_at !== null && !daily && Math.abs(reading.vwap_at - at) > 90 ? reading.vwap_at : null;
   const change = reading.prev_close ? (last / reading.prev_close - 1) * 100 : null;
-  const parts: { key: string; text: string; tone?: number; title?: string }[] = [];
-  if (change !== null) parts.push({ key: "change", text: `${signedPct(change, 2)} vs prev close`, tone: change, title: `Previous close ${price(reading.prev_close!)}` });
-  else if (fallback) parts.push({ key: "change", text: `${signedPct(fallback.pct, 2)} today (book, ${nyWhen(fallback.at)})`, tone: fallback.pct });
+  // The change: its figure in the header, its basis first on the facts line.
+  const parts: { key: string; text: string; tone?: number; title?: string; head?: string }[] = [];
+  if (change !== null) parts.push({ key: "change", head: signedPct(change, 2), text: `change vs prev close ${price(reading.prev_close!)}`, tone: change, title: `vs the previous close, ${price(reading.prev_close!)}` });
+  else if (fallback) parts.push({ key: "change", head: `${signedPct(fallback.pct, 2)} today`, text: `change today from the book, ${nyWhen(fallback.at)}`, tone: fallback.pct, title: `The book's change today, as of ${nyWhen(fallback.at)}` });
   if (reading.vwap) {
     const away = (last / reading.vwap - 1) * 100;
     parts.push({ key: "vwap", text: `${signedPct(away, 2)} vs VWAP ${price(reading.vwap)}` });
@@ -621,17 +640,21 @@ export function ReadingLine({ symbol, data, fallback = null, live = null }: {
     parts.push({ key: "invalidation", text: `${Math.abs(away).toFixed(1)}% ${away >= 0 ? "above" : "below"} invalidation ${price(invalidation)}` });
   }
   if (reading.rvol) parts.push({ key: "rvol", text: `vol ${reading.rvol.toFixed(1)}× usual` });
+  if (part === "head") {
+    const change = parts.find(p => p.key === "change");
+    return (
+      <span data-testid="desk-reading" className="flex items-baseline gap-1.5 whitespace-nowrap text-xs tabular-nums">
+        <span data-testid="desk-reading-last" className={cn("text-sm text-foreground", ticked && live!.stale && "opacity-50")}><Flash value={last}>{price(last)}</Flash></span>
+        {change && <span data-part="change" title={change.title} className={change.tone === undefined || change.tone === 0 ? "text-muted-foreground" : change.tone > 0 ? "text-emerald-300" : "text-rose-300"}>{change.head}</span>}
+      </span>
+    );
+  }
   return (
-    // One line that scrolls sideways on a phone; two at most beside the book, so a new minute rarely moves the chart.
-    <p data-testid="desk-reading" className="overflow-x-auto whitespace-nowrap text-xs leading-4 tabular-nums text-muted-foreground [scrollbar-width:none] sm:min-h-8 sm:whitespace-normal">
-      <span data-testid="desk-reading-last" className={cn("text-foreground", ticked && live!.stale && "opacity-50")}><Flash value={last}>{price(last)}</Flash></span>
-      {parts.map(part => (
-        <span key={part.key} data-part={part.key} title={part.title}>
-          {" · "}<span className={part.tone === undefined || part.tone === 0 ? undefined : part.tone > 0 ? "text-emerald-300" : "text-rose-300"}>{part.text}</span>
-        </span>
-      ))}
-      <span> · as of {nyWhen(at, daily)}{sessionAt !== null ? ` (VWAP${reading.rvol ? ", vol" : ""} ${nyWhen(sessionAt)})` : ""}</span>
-    </p>
+    // The as-of first, so it is never the part out of view.
+    <span data-testid="desk-reading-facts" className="shrink-0">
+      <span>as of {nyWhen(at, daily)}{sessionAt !== null ? ` (VWAP${reading.rvol ? ", vol" : ""} ${nyWhen(sessionAt)})` : ""}</span>
+      {parts.map(p => <span key={p.key} data-part={p.key}> · {p.text}</span>)}
+    </span>
   );
 }
 
@@ -674,15 +697,22 @@ export function linePrice(item: PriceLevel | Drawing, timeline: Timeline, last: 
 
 /** The chart for ``id`` (a thread, ``symbol:X`` or ``market``) on ``timeframe``. ``refreshKey`` reads it again. ``onRead``
  * hears each read shown (the reading line); ``actions`` lets the level menu's Plan and Ask reach the desk. */
-export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, actions, live: now = null, guides = NO_GUIDES }: {
+export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, actions, live: now = null, guides = NO_GUIDES, head, reading, under, onTimeframe }: {
   id: string; timeframe: DeskTimeframe; refreshKey?: number; label: string; onRead?(data: DeskChartData | null): void; actions?: DeskChartActions;
+  /** The one header row above the chart (``DeskChartHead``): the chart hands it its tools. */
+  head?(tools: ChartTools): ReactNode;
+  /** The reading's quiet facts (VWAP, invalidation, volume, as of), on the facts line under the header. */
+  reading?: ReactNode;
+  /** Under the header row, above the chart (the Tape). */
+  under?: ReactNode;
+  /** An empty timeframe offers the next one. */
+  onTimeframe?(next: DeskTimeframe): void;
   /** Thin reference lines for this symbol (a Feed Scanner row's levels). */
   guides?: DeskGuide[];
   /** The desk's live price: it moves the last candle (and the price line) between the minute reads. */
   live?: { last: number; at: number; stale: boolean } | null;
 }) {
   const host = useRef<HTMLDivElement>(null);
-  const studiesFolded = useFolds().hidden("chart.studies"); // folded away on the desk: in the chart header's More
   const parts = useRef<Parts | null>(null);
   const painted = useRef<Painted>({ shown: null, byCandle: new Map(), applied: null, timeline: [], guides: [] });
   const latest = useRef<Read | null>(null);
@@ -1134,28 +1164,67 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   };
   const drawn = data ? LINES.filter(k => STUDIES[data.timeframe].includes(k) && isOn(choices, data.timeframe, k) && data.studies?.[k]?.some(v => v != null)) : [];
 
+  const offered = STUDIES[timeframe].filter(study => study !== "momentum" || momentum);
+  const studyButtons = (list: boolean) => (
+    <div role="group" aria-label="Studies" data-testid="desk-chart-studies" data-use="chart.studies" className="flex flex-col text-xs tabular-nums">
+      {offered.map(study => {
+        const on = isOn(choices, timeframe, study);
+        return (
+          <button key={study} type="button" aria-pressed={on} onClick={() => toggle(study)} data-testid={`desk-study-${study}`}
+            title={study === "news" && on && news ? newsTitle(news) : study === "walls" ? wallsTitle(on, wallsRead.data, wallsRead.failed) : `${on ? "Hide" : "Show"} ${STUDY[study].name}`}
+            className={cn("min-h-11 shrink-0 rounded px-2 text-left hover:bg-secondary", list ? "" : "sm:min-h-8", on ? "" : "text-muted-foreground/60 line-through")}
+            style={on ? { color: STUDY[study].color } : undefined}>
+            {STUDY[study].name}{on && value(study) ? <span className="text-foreground/80"> {value(study)}</span> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+  const tools: ChartTools = {
+    studies: studyButtons(false), studyList: studyButtons(true),
+    studiesOn: offered.filter(study => isOn(choices, timeframe, study)).length,
+    alerts: data ? <AlertsButton count={alerts.length} open={alertsOpen} onToggle={() => setAlertsOpen(open => !open)} /> : null,
+    draw: <PencilButton on={drawOn} disabled={!data || !draw.usable} count={draw.shapes.length} onToggle={() => drawOn ? stopDrawing() : setDrawOn(true)} />,
+    drawing: { on: drawOn, disabled: !data || !draw.usable, toggle: () => drawOn ? stopDrawing() : setDrawOn(true) },
+    reset, ready: !!data, narrow,
+  };
+  // The read-out over the chart's top-left corner: the candle under the pointer (else the last), each study's value there.
+  const values = data ? offered.filter(study => study !== "levels" && study !== "news" && isOn(choices, timeframe, study) && value(study)) : [];
+  const paperDrawn = allMarks.some(mark => mark.kind === "paper");
+  const momentumDrawn = allMarks.some(mark => mark.kind === "momentum");
+  const kinds = new Set(allMarks.map(mark => mark.kind));
+  const nextTimeframe = NEXT_TIMEFRAME[timeframe];
+  // One quiet line: the plan's lines, the guides, a time stop, a report, then the reading's as-of and facts. Above the
+  // chart on a computer, where it wraps rather than hide a part; under it on a phone, one line that scrolls sideways.
+  const facts = (
+    <div data-testid="desk-chart-facts" className={cn("flex items-center gap-x-3 text-[11px] leading-4 tabular-nums text-muted-foreground",
+      narrow ? "h-4 overflow-x-auto whitespace-nowrap [scrollbar-width:none]" : "min-h-4 flex-wrap")}>
+        <span data-testid="desk-chart-lines" className="flex shrink-0 items-center gap-x-3 empty:hidden">
+          {data?.levels.map(level => (
+            <span key={level.role} style={{ color: COLOR[level.role] }}>{level.label}{offScale.has(level.role) ? " (off the chart)" : ""}</span>
+          ))}
+          {data && !data.levels.length && id !== "market" && !guides.length && <span>no plan lines saved</span>}
+          {data && guides.length > 0 && <span data-testid="desk-chart-guides" style={{ color: COLOR.guide }}>{guides.map(g => `${g.label} ${price(g.price)}${lastBar && Math.abs(g.price - lastBar.close) / lastBar.close > LEVEL_REACH ? " (off the chart)" : ""}`).join(" · ")}</span>}
+          {data?.time_stop && <span style={{ color: COLOR.stop }}>Time stop {stopWhen(data.time_stop.at)}</span>}
+          {data && earningsHeader(data.events, data.as_of) && <span data-testid="desk-chart-earnings" className="text-sky-200">{earningsHeader(data.events, data.as_of)}</span>}
+        </span>
+        {reading}
+      </div>
+  );
+
   return (
     <div className="space-y-1.5">
-      <div data-testid="desk-chart-lines" className="flex min-h-5 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs tabular-nums text-muted-foreground">
-        {data?.levels.map(level => (
-          <span key={level.role} style={{ color: COLOR[level.role] }}>{level.label}{offScale.has(level.role) ? " (off the chart)" : ""}</span>
-        ))}
-        {data && !data.levels.length && id !== "market" && !guides.length && <span>no plan lines saved</span>}
-        {data && guides.length > 0 && <span data-testid="desk-chart-guides" style={{ color: COLOR.guide }}>{guides.map(g => `${g.label} ${price(g.price)}${lastBar && Math.abs(g.price - lastBar.close) / lastBar.close > LEVEL_REACH ? " (off the chart)" : ""}`).join(" · ")}</span>}
-        {data?.time_stop && <span style={{ color: COLOR.stop }}>Time stop {stopWhen(data.time_stop.at)}</span>}
-        {data && earningsHeader(data.events, data.as_of) && <span data-testid="desk-chart-earnings" className="text-sky-200">{earningsHeader(data.events, data.as_of)}</span>}
-        <span className="ml-auto flex items-center gap-1">
-          {data && <AlertsButton count={alerts.length} open={alertsOpen} onToggle={() => setAlertsOpen(open => !open)} />}
-          <PencilButton on={drawOn} disabled={!data || !draw.usable} count={draw.shapes.length} onToggle={() => drawOn ? stopDrawing() : setDrawOn(true)} />
-          <button type="button" onClick={reset} disabled={!data}
-            className="min-h-11 rounded border border-transparent px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 sm:min-h-0 sm:py-0.5">
-            Reset
-          </button>
-        </span>
-      </div>
+      {head?.(tools)}
+      {under}
+      {!narrow && facts}
       {editing && <DrawBar narrow={narrow} tool={tool} selected={selected} canUndo={draw.canUndo} undoName={draw.undoName} second={second}
         onTool={(next) => { setTool(current => current === next ? null : next); setSelected(null); draw.setError(""); }}
         onDelete={() => { if (selected) deleteLine(selected); }} onUndo={() => { setStatus(null); draw.undo(); }} />}
+      {/* On a phone the pencil waits in More: the way out of drawing sits by the bar. */}
+      {editing && narrow && (
+        <button type="button" onClick={stopDrawing} data-testid="desk-draw-done"
+          className="inline-flex min-h-11 items-center rounded-md border px-3 text-xs text-foreground hover:bg-secondary">Done drawing</button>
+      )}
       {draw.error && <p role="alert" className="text-xs text-rose-300">{draw.error}</p>}
       {data && alertsOpen && <AlertList alerts={alerts} last={lastPrice} onMove={moveOne} onRemove={removeOne} />}
       {status && (
@@ -1164,28 +1233,6 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           {status.undo && <button type="button" onClick={status.undo} className="min-h-11 rounded px-1 text-xs text-muted-foreground underline hover:text-foreground sm:min-h-0">Undo</button>}
         </p>
       )}
-      {/* One line that never wraps (it scrolls sideways on a phone), so values changing under the pointer never move the chart. */}
-      {!studiesFolded && <div role="group" aria-label="Studies" data-testid="desk-chart-studies" data-use="chart.studies"
-        className="flex items-center gap-0.5 overflow-x-auto whitespace-nowrap text-xs tabular-nums [scrollbar-width:none]">
-        {STUDIES[timeframe].filter(study => study !== "momentum" || momentum).map(study => {
-          const on = isOn(choices, timeframe, study);
-          return (
-            <button key={study} type="button" aria-pressed={on} onClick={() => toggle(study)} data-testid={`desk-study-${study}`}
-              title={study === "news" && on && news ? newsTitle(news) : study === "walls" ? wallsTitle(on, wallsRead.data, wallsRead.failed) : `${on ? "Hide" : "Show"} ${STUDY[study].name}`}
-              className={`min-h-11 shrink-0 rounded px-1.5 hover:bg-secondary sm:min-h-0 sm:py-0.5 ${on ? "" : "text-muted-foreground/60 line-through"}`}
-              style={on ? { color: STUDY[study].color } : undefined}>
-              {STUDY[study].name}{on && value(study) ? <span className="text-foreground/80"> {value(study)}</span> : null}
-            </button>
-          );
-        })}
-      </div>}
-      {/* One line that never wraps, so moving the pointer never moves the chart. */}
-      <p className="h-4 truncate text-xs leading-4 tabular-nums text-muted-foreground" data-testid="desk-chart-readout">
-        {readout && <>
-          {nyWhen(readout.time, daily)} · O {price(readout.open)} H {price(readout.high)} L {price(readout.low)} C <span className="text-foreground">{price(readout.close)}</span>
-          {readout.extended && <> · {readout.time < (data?.bars.find(b => !b.extended)?.time ?? Infinity) ? "pre-market" : "after hours"}</>}
-        </>}
-      </p>
       <div className="relative" onPointerDownCapture={onPointerDown} onPointerMoveCapture={onPointerMove} onPointerUpCapture={onPointerUp}
         onPointerCancelCapture={clearPress} onContextMenu={(event) => {
           if (menuBox.current?.contains(event.target as Node)) { event.preventDefault(); return; }
@@ -1207,10 +1254,28 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           data-walls={!wallsOn ? "off" : shownWalls ? shownWalls.levels.length : wallsRead.failed ? "failed" : wallsRead.data?.state ?? "loading"}
           data-momentum={!momentum ? "none" : momentumOn ? bandShown.length : "off"}
           style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
-          className={cn("h-[320px] w-full overflow-hidden rounded border sm:h-[420px]", editing && tool && "cursor-crosshair")} />
+          className={cn(CHART_HEIGHT, "w-full overflow-hidden rounded border", editing && tool && "cursor-crosshair")} />
         {!unavailable && !switching && <ChartEventMarks chart={chartApi} data={data} />}
         {!unavailable && !switching && data && <ChartNewsMarks chart={chartApi} news={news} symbol={data.symbol} timeframe={data.timeframe}
           onAsk={actions ? (text) => actions.ask(data.symbol, text) : undefined} />}
+        {/* The read-out in the chart's top-left corner, under the headline dots: the candle, the studies' values there, and
+            a chip whenever paper fills are drawn. Never takes the pointer. */}
+        {!unavailable && !switching && readout && (
+          <div data-testid="desk-chart-overlay" className="pointer-events-none absolute left-1.5 top-6 z-[3] max-w-[calc(100%-4.5rem)] text-[11px] leading-4 tabular-nums [text-shadow:0_0_3px_#0e0e10,0_0_2px_#0e0e10]">
+            <p className="truncate text-muted-foreground" data-testid="desk-chart-readout">
+              {nyWhen(readout.time, daily)} · O {price(readout.open)} H {price(readout.high)} L {price(readout.low)} C <span className="text-foreground">{price(readout.close)}</span>
+              {readout.extended && <> · {readout.time < (data?.bars.find(b => !b.extended)?.time ?? Infinity) ? "pre-market" : "after hours"}</>}
+            </p>
+            {values.length > 0 && (
+              <p data-testid="desk-chart-values" className="truncate">
+                {values.map((study, i) => <span key={study} style={{ color: STUDY[study].color }}>{i ? " · " : ""}{STUDY[study].name} <span className="text-foreground/80">{value(study)}</span></span>)}
+              </p>
+            )}
+            {(paperDrawn || momentumDrawn) && (
+              <p className="pt-0.5"><span data-testid="desk-chart-paper" className="rounded border border-amber-200/40 bg-background/80 px-1 text-[10px] font-medium tracking-wide text-amber-100 [text-shadow:none]">PAPER fills shown</span></p>
+            )}
+          </div>
+        )}
         {hover && hover.marks.length > 0 && !menu && (
           <div role="tooltip" data-testid="desk-chart-tip"
             className="pointer-events-none absolute top-2 z-10 max-w-[min(20rem,85%)] rounded border bg-popover/95 px-2 py-1.5 text-xs shadow"
@@ -1261,15 +1326,32 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           </div>
         )}
         {(!read || switching) && !unavailable && (
-          <div className="absolute inset-0 flex items-center justify-center rounded bg-background/60 text-sm text-muted-foreground">Reading the chart…</div>
+          <div className="absolute inset-0 z-10 flex items-center justify-center rounded bg-background/60 text-sm text-muted-foreground">Reading the chart…</div>
         )}
         {unavailable && (
-          <div data-testid="desk-chart-empty" className="absolute inset-0 flex flex-col items-center justify-center gap-1 rounded border bg-background px-4 text-center">
-            <p className="text-sm text-foreground">No chart data</p>
-            <p className="text-xs text-muted-foreground">{unavailable}{timeframe === "2m" ? " 15m and 1D show earlier sessions." : ""}</p>
+          // Above the library's canvases (they stack at z-index 2), so an empty timeframe is never a blank box.
+          <div data-testid="desk-chart-empty" className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1.5 rounded border bg-background px-4 text-center">
+            <p className="text-sm text-foreground">{read && "error" in read ? "Chart unavailable" : emptyTitle(timeframe)}</p>
+            <p className="text-xs text-muted-foreground">{unavailable}</p>
+            {nextTimeframe && onTimeframe && (
+              <button type="button" data-testid="desk-chart-empty-next" onClick={() => onTimeframe(nextTimeframe)}
+                className="mt-1 inline-flex min-h-11 items-center rounded-md border px-3 text-xs text-foreground hover:bg-secondary sm:min-h-8">
+                Show {nextTimeframe}: {nextTimeframe === "15m" ? "earlier sessions" : "the last few months"}
+              </button>
+            )}
           </div>
         )}
       </div>
+      {narrow && facts}
+      {/* Every kind of mark drawn has its key: the paper P and the momentum book's M on any ticker, whenever drawn. */}
+      <p aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <Key color={COLOR.fill} glyph="▲▼">your fills</Key>
+        {paperDrawn && <Key color={COLOR.paper} glyph="P">paper</Key>}
+        {momentumDrawn && <Key color={COLOR.momentum} glyph="M">momentum paper book</Key>}
+        <Key color={COLOR.ping} glyph="●">pings</Key>
+        {(id !== "market" || kinds.has("radar")) && <Key color={COLOR.radar} glyph="■">Radar</Key>}
+        {kinds.has("tradingview") && <Key color={COLOR.tradingview} glyph="●">TradingView</Key>}
+      </p>
       {data && (
         <ul aria-label="On the chart" className="sr-only" data-testid="desk-chart-marks">
           {data.levels.map(level => <li key={level.role}>{level.label}</li>)}

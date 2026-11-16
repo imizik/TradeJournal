@@ -461,6 +461,33 @@
   .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] > ul > li[data-selected] {
     border-top: 0;
   }
+
+  /* A short row above the chart: the standing's words (break-even, time value, decay; the full standing follows the
+     chart), the track and the sparkline wait, because the chart under it draws the plan's lines and the price. The
+     contract, its tags, the P&L (the percent beside the dollars), the notes and the Close / Roll buttons stay. */
+  .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] li[data-selected] [data-testid="book-standing"],
+  .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] li[data-selected] > button > span:first-child > [role="img"],
+  .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] li[data-selected] > button > :not(:first-child):not([data-testid="book-pnl"]) {
+    display: none;
+  }
+
+  .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] li[data-selected] > button {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding-top: 0.375rem;
+    padding-bottom: 0.375rem;
+  }
+
+  .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] li[data-selected] > button > span:first-child {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 0.375rem;
+  }
+
+  .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] li[data-selected] [data-testid="book-pnl"] > span:last-child {
+    display: inline;
+    margin-left: 0.25rem;
+  }
 }
 
 /* A wide screen: the desk fills the height beside the nav rail and under the banner; the book, the centre and the

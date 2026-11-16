@@ -338,7 +338,12 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
     // The tiles carry only what the row does not: the stock against SPY and time held.
     const tiles = page.getByTestId("desk-tiles");
     await expect(tiles).toHaveText("vs SPY today+1.2 ptsHeldtoday");
+    // Open in Charts is in the chart header's More (a phone opens on the Book: the chart waits behind its ticker view).
+    if (width === 375) await page.getByTestId("desk-view-ticker").click();
+    await page.getByTestId("desk-chart").getByTestId("desk-chart-more").click();
     await expect(page.getByTestId("desk-chart")).toContainText("Open in Charts →");
+    await page.keyboard.press("Escape");
+    if (width === 375) await page.getByTestId("desk-view-book").click();
     // Mid-session the lower block is Since you looked (a first visit says so); no phase button.
     await expect(page.getByTestId("since-you-looked")).toContainText("First look from this browser");
     await expect(page.getByRole("button", { name: /Close the day|Arm today's plans/ })).toHaveCount(0);

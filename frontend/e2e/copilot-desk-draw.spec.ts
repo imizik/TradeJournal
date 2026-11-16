@@ -294,10 +294,12 @@ test.describe("at 393 px with a finger", () => {
     await page.getByRole("button", { name: "Back to the desk" }).click({ timeout: 2000 }).catch(() => { /* already on the desk */ });
     const canvas = pane.getByTestId("desk-chart-canvas");
     await canvas.scrollIntoViewIfNeeded();
+    await pane.getByTestId("desk-chart-more").tap(); // on a phone the pencil waits in the header's More
     await pane.getByRole("button", { name: "Draw on the chart" }).tap();
     const bar = pane.getByTestId("desk-draw-bar");
     await expect(bar.getByRole("button")).toHaveText(["Line", ""]);  // the line and Delete (an icon)
     await expect(bar.getByRole("button", { name: "Trend line" })).toHaveCount(0);
+    await expect(pane.getByTestId("desk-draw-done")).toBeVisible(); // the way out of drawing, by the bar
     for (const button of await bar.getByRole("button").all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await bar.getByRole("button", { name: "Horizontal line" }).tap();
     let box = (await canvas.boundingBox())!;

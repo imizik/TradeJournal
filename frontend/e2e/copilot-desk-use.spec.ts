@@ -111,7 +111,11 @@ test("after 14 days one card offers to fold what he never opens; folded tabs wai
   await expect(card).toBeHidden();
   const centre = page.locator("#desk-centre");
   await expect(centre.getByRole("tab", { name: "Grid" })).toHaveCount(0);
+  // The folded Tape waits in the chart header's More as a folded entry, one tap from showing; its switch is gone.
+  await centre.getByTestId("desk-chart-more").click();
+  await expect(centre.getByTestId("chart-more-folded-chart.tape")).toContainText("Tape (Level 2)folded");
   await expect(page.getByTestId("tape-toggle")).toHaveCount(0);
+  await page.keyboard.press("Escape");
   // One tap shows it for now; the tab stays while he is on it.
   await centre.getByTestId("fold-more").first().click();
   await centre.getByRole("button", { name: "Grid tab" }).click();
@@ -125,7 +129,9 @@ test("after 14 days one card offers to fold what he never opens; folded tabs wai
   await page.keyboard.press("Control+k");
   await page.keyboard.type("Tape");
   await page.keyboard.press("Enter");
+  await centre.getByTestId("desk-chart-more").click();
   await expect(page.getByTestId("tape-toggle")).toBeVisible();
+  await expect(centre.getByTestId("chart-more-folded-chart.tape")).toContainText("for now");
 });
 
 test("Not now snoozes the card for 14 days and folds nothing", async ({ page }) => {

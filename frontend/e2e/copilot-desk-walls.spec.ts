@@ -1,4 +1,10 @@
-import { expect, test, type Page, type Request } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
+
+/** The study toggles live in the chart header's "Studies" menu: open it, unless it is open, to reach one. */
+async function studies(pane: Locator) {
+  if (!(await pane.getByTestId("desk-chart-studies").isVisible())) await pane.getByTestId("desk-studies-open").click();
+  return pane.getByTestId("desk-chart-studies");
+}
 
 // The desk's walls (docs/copilot-lab.md § Walls): the Charts strike ladder's put wall, call wall, gamma flip, max pain and
 // expected move as an off-by-default study on the desk chart (hover says what each is, the level menu snaps to one), and
@@ -112,6 +118,7 @@ test("Walls is off until turned on, then draws the four lines with plain-words h
   const { pane, reads, posted } = await desk(page);
   const canvas = pane.getByTestId("desk-chart-canvas");
   const toggle = pane.getByTestId("desk-study-walls");
+  await studies(pane);
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await expect(canvas).toHaveAttribute("data-walls", "off");
   expect(reads).toEqual([]); // off: nothing read
@@ -121,6 +128,7 @@ test("Walls is off until turned on, then draws the four lines with plain-words h
   expect(reads).toEqual(["?symbol=NBIS"]);
   await expect(toggle).toHaveText(/^Walls \S+/); // the expiry it is for
   await expect(toggle).toHaveAttribute("title", /Dealer side assumed: long calls, short puts/);
+  await page.keyboard.press("Escape"); // the menu closes; the walls stay drawn
   const marks = pane.getByTestId("desk-chart-marks");
   await expect(marks).toContainText("Call wall 95.00");
   await expect(marks).toContainText("Put wall 93.50");
@@ -148,10 +156,12 @@ test("Walls is off until turned on, then draws the four lines with plain-words h
 
   // Remembered after a reload, and one choice for every timeframe.
   await page.reload();
+  await studies(pane);
   await expect(pane.getByTestId("desk-study-walls")).toHaveAttribute("aria-pressed", "true");
   await expect(canvas).toHaveAttribute("data-walls", "4");
   await pane.getByRole("group", { name: "Timeframe" }).getByRole("button", { name: "15m" }).click();
   await expect(canvas).toHaveAttribute("data-timeframe", "15m");
+  await studies(pane);
   await expect(pane.getByTestId("desk-study-walls")).toHaveAttribute("aria-pressed", "true");
   await expect(canvas).toHaveAttribute("data-walls", "4");
 });
@@ -163,6 +173,8 @@ test("a stale read draws nothing on the chart", async ({ page }) => {
   await page.reload();
   const canvas = pane.getByTestId("desk-chart-canvas");
   await expect(canvas).toHaveAttribute("data-walls", "stale");
+  await expect(pane.getByTestId("desk-chart-values")).toContainText("Walls stale"); // said on the chart, menu closed
+  await studies(pane);
   await expect(pane.getByTestId("desk-study-walls")).toHaveText("Walls stale");
   await expect(pane.getByTestId("desk-chart-marks")).not.toContainText("Call wall");
 });
