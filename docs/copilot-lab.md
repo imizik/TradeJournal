@@ -1877,8 +1877,8 @@ the minute's reads only inside the one request) and the hidden page's zero.
 The desk counts quietly which of its pieces he uses, so after two weeks it can offer to fold away what he never opens
 (`frontend/lib/deskUse.ts`, `frontend/components/copilot/DeskUse.tsx`, `backend/app/engine/desk_use.py`).
 
-- **What is counted.** Each piece in `PIECES` has a stable id (centre tabs, Feed groups, chatter, the book's sections,
-  the strategy books, What's moving, the account line, the health dot, chart studies, Tape and Replay, Ticket actions,
+- **What is counted.** Each piece in `PIECES` has a stable id (centre tabs, Feed groups, chatter, the book's sections
+  (Paper, its rules and weekly goals), the strategy books, What's moving, the account line, the health dot, chart studies, Tape and Replay, Ticket actions,
   ⌘K and the desk keys, the phone's three views). A tap anywhere inside an element marked `data-use="<id>"` is a tap;
   a tab chosen, the Feed or thread list opened, the palette opened is an open; every 15 seconds while the page shows,
   each marked piece with a box on screen gets 15 seconds. No keystrokes, no message text, no tickers.

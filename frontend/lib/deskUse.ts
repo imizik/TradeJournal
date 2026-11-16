@@ -39,6 +39,7 @@ export const PIECES: readonly Piece[] = [
   { id: "book", label: "Book: positions and working orders", area: "Left", fold: null, safety: true },
   { id: "paper", label: "Paper", area: "Left", fold: "stub" },
   { id: "paper.rules", label: "My rules", area: "Left", fold: null },
+  { id: "paper.goals", label: "Weekly goals", area: "Left", fold: null },
   { id: "strategy.overnight", label: "QQQ overnight book", area: "Left", fold: "stub" },
   { id: "strategy.momentum", label: "QQQ momentum book", area: "Left", fold: "stub" },
   { id: "replay.practice", label: "Replay practice", area: "Left", fold: "stub" },
