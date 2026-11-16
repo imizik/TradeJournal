@@ -102,10 +102,11 @@ export function PhoneValue({ live, rows, booked, active, onPick, day, realized, 
         {isLive && live?.as_of && <span className="ml-auto shrink-0 tabular-nums">live · {clock(live.as_of)}</span>}
       </p>
       {isLive ? (
-        <div className="mt-1 flex items-center gap-2">
+        // Wraps: the mode switch (aside) moves under the total when both cannot fit on one line, never over it.
+        <div className="mt-1 flex flex-wrap items-center justify-end gap-2">
         <button type="button" aria-expanded={open} onClick={() => setOpen(o => !o)} data-testid="value-open"
           title={open ? "Hide each account's figures" : "Each account: options, cash, buying power"}
-          className="flex min-h-11 min-w-0 flex-1 flex-col items-start rounded-md text-left hover:bg-secondary/60">
+          className="flex min-h-11 min-w-0 flex-auto flex-col items-start rounded-md text-left hover:bg-secondary/60">
           <span data-testid="value-total" className={cn("text-[28px] font-semibold leading-8 tabular-nums tracking-tight text-foreground", stale && "opacity-50")}>
             {or(total, whole)}<span aria-hidden className="ml-1.5 align-middle text-xs font-normal text-muted-foreground">{open ? "▴" : "▾"}</span>
           </span>

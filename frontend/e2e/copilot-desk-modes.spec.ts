@@ -183,3 +183,26 @@ test("a phone: no status line; the switch sits at the top of Positions", async (
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+test("a phone in Paper with a six-figure account: the total, the switch and the paper value never overlap", async ({ page }) => {
+  await open(page, { width: 375 });
+  const big = { ...LIVE, accounts: [{ ...LIVE.accounts[0], total_value: 184321.55 }] };
+  await page.route("**/copilot/desk/threads", route => route.fulfill({ json: { ...THREADS, robinhood: big } }));
+  await page.reload();
+  const modes = page.getByTestId("mode-switch").filter({ visible: true });
+  await modes.getByRole("radio", { name: "Paper" }).click();
+  const total = page.getByTestId("value-total");
+  await expect(total).toContainText("$184,32");
+  const paperValue = page.getByTestId("desk-paper-value").filter({ visible: true });
+  await expect(paperValue).toContainText("$10,234.50");
+  // The total is never cut short, and nothing sits on top of it.
+  expect(await total.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  const t = (await total.boundingBox())!;
+  for (const other of [modes, paperValue]) {
+    const o = (await other.boundingBox())!;
+    const apart = o.x >= t.x + t.width - 1 || o.y >= t.y + t.height - 1 || o.x + o.width <= t.x + 1 || o.y + o.height <= t.y + 1;
+    expect(apart).toBe(true);
+  }
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
