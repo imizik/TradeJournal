@@ -651,7 +651,7 @@ export function ReadingLine({ symbol, data, fallback = null, live = null, part }
   }
   return (
     // The as-of first, so it is never the part out of view.
-    <span data-testid="desk-reading-facts" className="shrink-0">
+    <span data-testid="desk-reading-facts">
       <span>as of {nyWhen(at, daily)}{sessionAt !== null ? ` (VWAP${reading.rvol ? ", vol" : ""} ${nyWhen(sessionAt)})` : ""}</span>
       {parts.map(p => <span key={p.key} data-part={p.key}> · {p.text}</span>)}
     </span>
@@ -1199,7 +1199,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   const facts = (
     <div data-testid="desk-chart-facts" className={cn("flex items-center gap-x-3 text-[11px] leading-4 tabular-nums text-muted-foreground",
       narrow ? "h-4 overflow-x-auto whitespace-nowrap [scrollbar-width:none]" : "min-h-4 flex-wrap")}>
-        <span data-testid="desk-chart-lines" className="flex shrink-0 items-center gap-x-3 empty:hidden">
+        <span data-testid="desk-chart-lines" className={cn("flex items-center gap-x-3 empty:hidden", narrow ? "shrink-0" : "min-w-0 flex-wrap")}>
           {data?.levels.map(level => (
             <span key={level.role} style={{ color: COLOR[level.role] }}>{level.label}{offScale.has(level.role) ? " (off the chart)" : ""}</span>
           ))}
@@ -1208,7 +1208,8 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           {data?.time_stop && <span style={{ color: COLOR.stop }}>Time stop {stopWhen(data.time_stop.at)}</span>}
           {data && earningsHeader(data.events, data.as_of) && <span data-testid="desk-chart-earnings" className="text-sky-200">{earningsHeader(data.events, data.as_of)}</span>}
         </span>
-        {reading}
+        {/* A phone scrolls the line sideways; a computer wraps it, so no part is out of view. */}
+        <span className={narrow ? "shrink-0" : "min-w-0"}>{reading}</span>
       </div>
   );
 

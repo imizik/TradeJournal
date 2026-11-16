@@ -144,6 +144,8 @@ test("the chart draws the plan's lines, the fills, pings, Radar and the time sto
   const head = (await pane.getByTestId("desk-chart-head").boundingBox())!;
   expect(head.height).toBeLessThanOrEqual(40);
   expect((await canvas.boundingBox())!.y - (head.y + head.height)).toBeLessThanOrEqual(40);
+  // The quiet line under it wraps on a computer: no part (the as-of, a distance) is pushed out of view.
+  expect(await pane.getByTestId("desk-chart-facts").evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
   await pane.screenshot({ path: test.info().outputPath("desk-chart-2m.png") });
 
   // Hovering the chart moves the readout to the candle under the pointer.
