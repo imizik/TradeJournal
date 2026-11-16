@@ -23,6 +23,7 @@ import { ChartNewsMarks, newsWhen, useChartNews } from "@/components/copilot/Cha
 import { cn } from "@/lib/utils";
 import { drawableWalls, useDeskWalls, type DeskWalls } from "@/lib/deskWalls";
 import { everyDeskMinute } from "@/lib/deskMinute";
+import { bandAt, bandMarks, bandSteps, useMomentumToday, type BandStep } from "@/lib/deskMomentumBand";
 import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type DeskChartNews, type DeskChartMark, type DeskStudySeries, type DeskTimeframe } from "@/lib/desk";
 
 /*
@@ -52,19 +53,24 @@ import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type 
  * wall, gamma flip and max pain for the nearest expiry as thin labelled lines, and its expected move as a faint band
  * (``lib/deskWalls.ts``). Hovering one says what it is in plain words and that the dealer side is assumed; the level
  * menu snaps to a wall pressed near it. A stale or missing read draws nothing.
+ *
+ * Momentum band (QQQ on 2m and 15m only, one choice for both): the QQQ intraday momentum paper book's noise band today
+ * as two thin lines stepping at each hourly check (the hours still ahead faint and dashed) and its paper entries and
+ * exits as pale marks lettered M (``lib/deskMomentumBand.ts``). Its chip shows only when the book is on and has checked
+ * today; a failed read or another day's draws nothing.
  */
 
 const ET = "America/New_York";
-const COLOR = { fill: "#e9a23b", paper: "#fef3c7", ping: "#a78bfa", radar: "#60a5fa", tradingview: "#f0abfc", entry: "#7db3f0", invalidation: "#fca5a5", target: "#86efac", stop: "#a1a1aa",
+const COLOR = { fill: "#e9a23b", paper: "#fef3c7", momentum: "#fdba74", ping: "#a78bfa", radar: "#60a5fa", tradingview: "#f0abfc", entry: "#7db3f0", invalidation: "#fca5a5", target: "#86efac", stop: "#a1a1aa",
   alert: "#f4c66bb0", reference: "#9a9aa3a0", pick: "#e4e4e7", guide: "#5eead4c0" };
 
 /** The studies each timeframe offers, in the legend's order; ``levels`` is the previous close and the pre-market high
  * and low; ``news`` the symbol's headlines at their candles (``ChartNews``). All on by default. */
-export type StudyKey = "vwap" | "ema9" | "ema21" | "sma50" | "sma200" | "volume" | "levels" | "news" | "walls";
+export type StudyKey = "vwap" | "ema9" | "ema21" | "sma50" | "sma200" | "volume" | "levels" | "news" | "walls" | "momentum";
 const LINES = ["vwap", "ema9", "ema21", "sma50", "sma200"] as const;
 type LineKey = typeof LINES[number];
 export const STUDIES: Record<DeskTimeframe, StudyKey[]> = {
-  "2m": ["vwap", "ema9", "ema21", "volume", "levels", "news", "walls"], "15m": ["vwap", "ema9", "ema21", "volume", "levels", "news", "walls"],
+  "2m": ["vwap", "ema9", "ema21", "volume", "levels", "news", "walls", "momentum"], "15m": ["vwap", "ema9", "ema21", "volume", "levels", "news", "walls", "momentum"],
   "1D": ["ema21", "sma50", "sma200", "volume", "walls"],
 };
 /** Studies that start hidden until he turns them on. */
@@ -75,7 +81,7 @@ const STUDY: Record<StudyKey, { name: string; color: string }> = {
   vwap: { name: "VWAP", color: "#f5e6a1" }, ema9: { name: "EMA 9", color: "#67d5eb" }, ema21: { name: "EMA 21", color: "#f4c66b" },
   sma50: { name: "SMA 50", color: "#b494f5" }, sma200: { name: "SMA 200", color: "#ee86bd" }, volume: { name: "Vol", color: "#8d8d96" },
   levels: { name: "Prev close · PM high/low", color: "#9a9aa3" }, news: { name: "News", color: "#7dd3fc" },
-  walls: { name: "Walls", color: "#c4b5fd" },
+  walls: { name: "Walls", color: "#c4b5fd" }, momentum: { name: "Momentum band · paper", color: "#fdba74" },
 };
 /** The ladder's colours (``OptionsLadder``), thin and a little faded: context, never louder than the plan. */
 const WALL_COLOR: Record<DeskWalls["levels"][number]["kind"], string> = { put_wall: "#fb7185cc", call_wall: "#34d399cc", gamma_flip: "#e4e4e7b0", max_pain: "#fcd34db0" };
@@ -85,7 +91,7 @@ const STUDY_STORE = "desk.chart.studies.v1";
 type Shown = Partial<Record<StudyKey, boolean>>;
 /** Choices per timeframe; ``all`` holds the ones kept across timeframes (Walls: strikes mean the same on any candles). */
 type Choices = Partial<Record<DeskTimeframe | "all", Shown>>;
-const SHARED = new Set<StudyKey>(["walls"]);
+const SHARED = new Set<StudyKey>(["walls", "momentum"]);
 const slot = (timeframe: DeskTimeframe, key: StudyKey): DeskTimeframe | "all" => SHARED.has(key) ? "all" : timeframe;
 const readChoices = (): Choices => {
   try { const saved = JSON.parse(window.localStorage.getItem(STUDY_STORE) ?? "{}"); return saved && typeof saved === "object" ? saved : {}; } catch { return {}; }
@@ -94,7 +100,7 @@ const saveChoices = (choices: Choices) => { try { window.localStorage.setItem(ST
 const isOn = (choices: Choices, timeframe: DeskTimeframe, key: StudyKey) => choices[slot(timeframe, key)]?.[key] ?? !OFF_BY_DEFAULT.has(key);
 const REFERENCE_TITLE = { prev_close: "Prev close", pm_high: "PM high", pm_low: "PM low" } as const;
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
-const KIND_WORD: Record<DeskChartMark["kind"], string> = { fill: "Fill", paper: "Paper", ping: "Ping", radar: "Radar", tradingview: "TradingView" };
+const KIND_WORD: Record<DeskChartMark["kind"], string> = { fill: "Fill", paper: "Paper", momentum: "Momentum book", ping: "Ping", radar: "Radar", tradingview: "TradingView" };
 /** A plan line further than this from the last price does not stretch the price scale; the row above still names it. */
 const LEVEL_REACH = 0.1;
 const NO_GUIDES: DeskGuide[] = [];
@@ -150,9 +156,9 @@ export function markCandle(bars: Bar[], step: number, at: number): Bar | undefin
 }
 
 /** Each mark on its candle, keyed by the candle's time. A mark off the candles shown is left out. */
-export function marksByCandle(data: DeskChartData): Map<number, DeskChartMark[]> {
+export function marksByCandle(data: DeskChartData, extra: DeskChartMark[] = []): Map<number, DeskChartMark[]> {
   const out = new Map<number, DeskChartMark[]>();
-  for (const mark of data.marks) {
+  for (const mark of [...data.marks, ...extra]) {
     const bar = markCandle(data.bars, data.step, mark.at);
     if (!bar) continue;
     out.set(bar.time, [...(out.get(bar.time) ?? []), mark]);
@@ -166,10 +172,11 @@ function seriesMarkers(byCandle: Map<number, DeskChartMark[]>): SeriesMarker<Tim
     marks.forEach((mark, i) => {
       const at = time as UTCTimestamp;
       const id = `${mark.kind}:${mark.at}:${i}`;
-      if (mark.kind === "fill" || mark.kind === "paper") {
-        // A paper fill is drawn like a real one, pale and lettered "P", so the two are never mistaken.
+      if (mark.kind === "fill" || mark.kind === "paper" || mark.kind === "momentum") {
+        // A paper fill is drawn like a real one, pale and lettered "P" (the momentum book's "M"), so none is mistaken.
         const buy = mark.side !== "sell";
-        const look = mark.kind === "paper" ? { color: COLOR.paper, text: "P", size: 0.7 } : { color: COLOR.fill };
+        const look = mark.kind === "paper" ? { color: COLOR.paper, text: "P", size: 0.7 }
+          : mark.kind === "momentum" ? { color: COLOR.momentum, text: "M", size: 0.7 } : { color: COLOR.fill };
         if (mark.side === null) { out.push({ id, time: at, position: "belowBar", shape: "circle", size: 0.8, ...look }); return; }
         out.push(mark.price != null
           ? { id, time: at, position: "atPriceMiddle", price: mark.price, shape: buy ? "arrowUp" : "arrowDown", ...look }
@@ -318,6 +325,71 @@ class ExpectedBand implements ISeriesPrimitive<Time> {
   }
 }
 
+/** Where a time falls on the candles as a logical index: inside a candle by its share of the step, past the last one by
+ * steps (a check still ahead), null before the first. */
+export function logicalAt(bars: Bar[], step: number, at: number): number | null {
+  if (!bars.length || at < bars[0].time) return null;
+  let low = 0, high = bars.length;
+  while (low < high) { const mid = (low + high) >>> 1; if (bars[mid].time <= at) low = mid + 1; else high = mid; }
+  const i = low - 1, into = (at - bars[i].time) / step;
+  return i + (i === bars.length - 1 ? into : Math.min(1, into));
+}
+
+/** The momentum paper book's band: two thin lines stepping at each check, the hours ahead faint and dashed. Outside the
+ * price scale's fit, under the candles. */
+class MomentumBand implements ISeriesPrimitive<Time> {
+  private chart: IChartApi | null = null;
+  private series: SeriesAttachedParameter<Time>["series"] | null = null;
+  private requestUpdate: (() => void) | null = null;
+  private steps: BandStep[] = [];
+  private drawn: { x0: number; x1: number; up: number; low: number; ahead: boolean }[] = [];
+  private readonly renderer: IPrimitivePaneRenderer = { draw: (target) => this.draw(target) };
+  private readonly views: readonly IPrimitivePaneView[] = [{ zOrder: () => "bottom", renderer: () => this.renderer }];
+
+  constructor(private readonly bars: () => Bar[], private readonly step: () => number) {}
+
+  attached({ chart, series, requestUpdate }: SeriesAttachedParameter<Time>) { this.chart = chart; this.series = series; this.requestUpdate = requestUpdate; }
+  detached() { this.chart = null; this.series = null; this.requestUpdate = null; }
+  set(steps: BandStep[]) { this.steps = steps; this.requestUpdate?.(); }
+
+  updateAllViews() {
+    this.drawn = [];
+    const scale = this.chart?.timeScale(), series = this.series, bars = this.bars();
+    if (!scale || !series || !bars.length) return;
+    for (const s of this.steps) {
+      const a = logicalAt(bars, this.step(), s.from), b = logicalAt(bars, this.step(), s.to);
+      const x0 = a === null ? null : scale.logicalToCoordinate(a as Logical), x1 = b === null ? null : scale.logicalToCoordinate(b as Logical);
+      const up = series.priceToCoordinate(s.upper), low = series.priceToCoordinate(s.lower);
+      if (x0 !== null && x1 !== null && up !== null && low !== null && x1 > x0) this.drawn.push({ x0, x1, up, low, ahead: s.ahead });
+    }
+  }
+
+  paneViews() { return this.views; }
+
+  private draw(target: Target) {
+    const { drawn } = this;
+    if (!drawn.length) return;
+    target.useMediaCoordinateSpace(({ context }) => {
+      context.lineWidth = 1;
+      drawn.forEach((d, i) => {
+        context.strokeStyle = d.ahead ? "rgba(253, 186, 116, 0.3)" : "rgba(253, 186, 116, 0.75)";
+        context.setLineDash(d.ahead ? [3, 4] : []);
+        const prev = drawn[i - 1];
+        for (const key of ["up", "low"] as const) {
+          context.beginPath();
+          // A step from the previous check's value when the two meet.
+          if (prev && Math.abs(prev.x1 - d.x0) < 1) context.moveTo(Math.round(d.x0) + 0.5, Math.round(prev[key]) + 0.5);
+          else context.moveTo(Math.round(d.x0) + 0.5, Math.round(d[key]) + 0.5);
+          context.lineTo(Math.round(d.x0) + 0.5, Math.round(d[key]) + 0.5);
+          context.lineTo(Math.round(d.x1) + 0.5, Math.round(d[key]) + 0.5);
+          context.stroke();
+        }
+      });
+      context.setLineDash([]);
+    });
+  }
+}
+
 /** The wall (or expected-move edge) within ``slop`` pixels of ``y``, nearest first; null when none is drawn there. */
 type WallSpot = { key: string; name: string; price: number; hint: string; color: string; y: number };
 function wallNear(series: ISeriesApi<"Candlestick">, walls: DeskWalls | null, y: number, slop: number): WallSpot | null {
@@ -340,7 +412,7 @@ function wallNear(series: ISeriesApi<"Candlestick">, walls: DeskWalls | null, y:
 type Parts = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram"> | null; markers: ISeriesMarkersPluginApi<Time>;
   shade: SessionShade; stop: TimeStopLine; lines: IPriceLine[]; studies: Record<LineKey, ISeriesApi<"Line">>;
-  layer: DrawingLayer; timeline: Timeline; gestures: DrawingGestures; band: ExpectedBand; wallLines: IPriceLine[];
+  layer: DrawingLayer; timeline: Timeline; gestures: DrawingGestures; band: ExpectedBand; wallLines: IPriceLine[]; momentum: MomentumBand;
 };
 type Hover = { bar: Bar; marks: DeskChartMark[]; x: number; width: number };
 
@@ -416,11 +488,11 @@ function setVolume(current: Parts, data: DeskChartData | null, on: boolean) {
 /** The read's candles, lines and marks onto the chart, with the studies ``shown``; the view resets only for a new symbol
  * or timeframe. ``alerts`` (the symbol's other armed alerts) and ``pick`` (the level menu's price) are thin lines. */
 function paint(current: Parts, read: Read, state: Painted, host: HTMLElement | null, shown: (key: StudyKey) => boolean,
-  alerts: DeskChartAlert[], pick: number | null, guides: DeskGuide[] = []) {
+  alerts: DeskChartAlert[], pick: number | null, guides: DeskGuide[] = [], extra: DeskChartMark[] = []) {
   const fresh = read.key !== state.applied;
   const next = "data" in read && read.data.state === "ok" && read.data.bars.length ? read.data : null;
   state.shown = next;
-  state.byCandle = next ? marksByCandle(next) : new Map();
+  state.byCandle = next ? marksByCandle(next, extra) : new Map();
   // The drawings' time axis: each candle from its start to the next step (Charts' ``Timeline``).
   state.timeline = next ? next.bars.map(b => ({ ...b, end_time: b.time + next.step }) as unknown as ChartBar) : [];
   state.applied = next ? read.key : null;  // after an empty read, the next good one opens on the default view
@@ -687,6 +759,8 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     candles.attachPrimitive(stop);
     const band = new ExpectedBand();
     candles.attachPrimitive(band);
+    const momentum = new MomentumBand(() => painted.current.shown?.bars ?? [], () => painted.current.shown?.step ?? 60);
+    candles.attachPrimitive(momentum);
     // His Charts levels and drawings, on Charts' drawing layer and gestures.
     const timeline = new Timeline(() => painted.current.timeline, () => painted.current.shown?.step ?? 60);
     const layer = new DrawingLayer(timeline);
@@ -714,7 +788,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
       const hit = event.point && (event.paneIndex ?? 0) === 0 ? layer.hit(event.point.x, event.point.y, touched.current ? TOUCH_SLOP : MOUSE_SLOP) : null;
       now.onSelect?.(hit?.id ?? null);
     });
-    parts.current = { chart, candles, volume: null, markers, shade, stop, lines: [], studies, layer, timeline, gestures, band, wallLines: [] };
+    parts.current = { chart, candles, volume: null, markers, shade, stop, lines: [], studies, layer, timeline, gestures, band, wallLines: [], momentum };
     setChartApi(chart);
     painted.current.applied = null;  // a new chart starts from the default view
     if (latest.current) paint(parts.current, latest.current, painted.current, host.current, () => true, [], null, painted.current.guides);
@@ -830,14 +904,22 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     current.band.set(move ? { low: move.low, high: move.high, label: `Expected move ±${move.move.toFixed(2)}` } : null,
       (shownWalls?.levels ?? []).map(level => ({ price: level.price, text: `${WALL_TITLE[level.kind]} ${price(level.price)}`, color: WALL_COLOR[level.kind] })));
   }, [shownWalls, chartApi]);
+  // The momentum paper book's band and marks: QQQ intraday only, today's records only (the chart's latest day).
+  const momentumRead = useMomentumToday(data?.symbol === "QQQ" && data.timeframe !== "1D");
+  const momentum = momentumRead && data && momentumRead.day === nyDayOf(data.bars[data.bars.length - 1].time) ? momentumRead : null;
+  const momentumOn = !!momentum && isOn(choices, timeframe, "momentum");
+  const bandShown = useMemo(() => momentumOn && momentum ? bandSteps(momentum) : [], [momentumOn, momentum]);
+  const bookMarks = useMemo(() => momentumOn && momentum ? bandMarks(momentum) : [], [momentumOn, momentum]);
+  useEffect(() => { parts.current?.momentum.set(bandShown); }, [bandShown, chartApi]);
   // The read onto the chart (and onto a chart built again, e.g. after a hot reload, from the last read), with the
   // studies chosen for its timeframe, the alerts and the level the menu is open on.
   useEffect(() => {
     latest.current = read;
     const tf = read && "data" in read ? read.data.timeframe : timeframe;
     // A new ticker's guides wait for its own read: never drawn on the previous ticker's candles.
-    if (parts.current && read) paint(parts.current, read, painted.current, host.current, k => isOn(choices, tf, k), alerts, pick, read.key === key ? guides : NO_GUIDES);
-  }, [read, choices, alerts, pick, shownKey, timeframe, guides, key]);
+    if (parts.current && read) paint(parts.current, read, painted.current, host.current, k => isOn(choices, tf, k), alerts, pick, read.key === key ? guides : NO_GUIDES,
+      read.key === key ? bookMarks : []);
+  }, [read, choices, alerts, pick, shownKey, timeframe, guides, key, bookMarks]);
 
   // The live price onto the candle still forming: its close, and its high or low when it goes past them. A price after
   // that candle waits for the next read (a new candle needs its volume and studies); a stale one is left off.
@@ -1018,7 +1100,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   const switching = !!read && read.key !== key;
   const unavailable = read && read.key === key ? ("error" in read ? read.error : read.data.state !== "ok" || !read.data.bars.length ? (read.data.reason ?? "No bars came back.") : null) : null;
   const daily = data?.timeframe === "1D";
-  const byCandle = useMemo(() => data ? marksByCandle(data) : new Map<number, DeskChartMark[]>(), [data]);
+  const byCandle = useMemo(() => data ? marksByCandle(data, bookMarks) : new Map<number, DeskChartMark[]>(), [data, bookMarks]);
   const allMarks = useMemo(() => [...byCandle.values()].flat(), [byCandle]);
   const index = useMemo(() => new Map((data?.bars ?? []).map((bar, i) => [bar.time, i])), [data]);
   const lastBar = data ? data.bars[data.bars.length - 1] : null;
@@ -1032,6 +1114,11 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     : wallsRead.failed || wallsRead.data?.state === "stale" ? "stale" : !wallsRead.data || wallsRead.data.state === "loading" ? "…" : "none";
   const value = (study: StudyKey): string => {
     if (study === "walls") return wallsWord;
+    if (study === "momentum") {
+      // At the crosshair's candle; without one, the band in force now (the last one checked).
+      const step = hover ? bandAt(bandShown, hover.bar.time) : bandShown.filter(s => !s.ahead).at(-1);
+      return step ? `${price(step.lower)}–${price(step.upper)}` : "";
+    }
     if (!data || at_i === null) return "";
     if (study === "levels") return "";
     if (study === "news") return headlines ? String(headlines) : "";
@@ -1078,7 +1165,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
       {/* One line that never wraps (it scrolls sideways on a phone), so values changing under the pointer never move the chart. */}
       <div role="group" aria-label="Studies" data-testid="desk-chart-studies"
         className="flex items-center gap-0.5 overflow-x-auto whitespace-nowrap text-xs tabular-nums [scrollbar-width:none]">
-        {STUDIES[timeframe].map(study => {
+        {STUDIES[timeframe].filter(study => study !== "momentum" || momentum).map(study => {
           const on = isOn(choices, timeframe, study);
           return (
             <button key={study} type="button" aria-pressed={on} onClick={() => toggle(study)} data-testid={`desk-study-${study}`}
@@ -1116,6 +1203,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           data-alerts={alerts.length} data-drawings={draw.shapes.length} data-selected={editing && selected ? selected : undefined} data-tool={editing && tool ? tool : undefined}
           data-news={!isOn(choices, timeframe, "news") ? "off" : news?.state === "ok" ? news.groups.length : news?.state ?? "loading"}
           data-walls={!wallsOn ? "off" : shownWalls ? shownWalls.levels.length : wallsRead.failed ? "failed" : wallsRead.data?.state ?? "loading"}
+          data-momentum={!momentum ? "none" : momentumOn ? bandShown.length : "off"}
           style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
           className={cn("h-[320px] w-full overflow-hidden rounded border sm:h-[420px]", editing && tool && "cursor-crosshair")} />
         {!unavailable && !switching && <ChartEventMarks chart={chartApi} data={data} />}
@@ -1191,6 +1279,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           {shownWalls?.levels.map(level => <li key={level.kind}>{level.name} {price(level.price)} · {level.hint}</li>)}
           {shownWalls?.expected_move && <li>Expected move {price(shownWalls.expected_move.low)} to {price(shownWalls.expected_move.high)} · {shownWalls.expected_move.hint}</li>}
           {shownWalls && <li>{shownWalls.assumption}</li>}
+          {bandShown.map(s => <li key={s.from}>Momentum band{s.ahead ? " (ahead)" : ""} from {nyWhen(s.from)}: {price(s.lower)} to {price(s.upper)}</li>)}
           {chartEvents(data.events, nyDayOf(data.as_of)).map(e => <li key={e.key}>{e.lines.join(" ")}</li>)}
           {news?.state === "ok" && news.groups.flatMap(g => g.items.map(item => <li key={item.url}>Headline · {item.source} · {newsWhen(item.at, news.as_of)} · {item.headline}</li>))}
         </ul>

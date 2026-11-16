@@ -239,3 +239,46 @@ def test_the_session_record_waits_for_the_1559_bar(tmp_path):
     clock.t += 30
     b.run()
     assert b.store.has_session(DAY)
+
+
+def test_today_view_steps_the_band_by_check_and_projects_the_hours_ahead(tmp_path, monkeypatch):
+    # sigma grows by the hour (0.2% at 10:00 .. 0.7% at 15:00); open 100.4 against a previous close of 100: the upper band
+    # anchors on 100.4, the lower on 100.
+    path = tmp_path / "seed.json"
+    moves = {str(m): 0.002 + 0.001 * i for i, m in enumerate(ib.CHECKS)}
+    path.write_text(json.dumps({"sessions": [{"day": f"2026-09-{k + 1:02d}" if k < 30 else f"2026-10-{k - 29:02d}", "open": 100.0,
+                                              "close": 100.0, "moves": moves} for k in range(ib.LOOKBACK)]}))
+    clock = Clock(at(DAY, 9, 59, 30))
+    feed = Feed(clock, base=100.4, path={590: 101.2})
+    b = book(tmp_path, clock, feed, seed_path=path)
+    run_until(b, clock, DAY, 11, 30)
+    assert ib.today_view(b.store, clock.t, False) is None  # the book is off: nothing to draw
+    view = ib.today_view(b.store, clock.t, True)
+    assert view["day"] == DAY and view["until"] == at(DAY, 16, 0)
+    assert [(c["minute"], c["at"], c["status"]) for c in view["checks"]] == [(600, at(DAY, 10, 0), "done"), (660, at(DAY, 11, 0), "done")]
+    assert view["checks"][0]["upper"] == pytest.approx(100.4 * (1 + 1.25 * 0.002))
+    assert view["checks"][0]["lower"] == pytest.approx(100.0 * (1 - 1.25 * 0.002))
+    assert view["checks"][1]["upper"] == pytest.approx(100.4 * (1 + 1.25 * 0.003))
+    assert [a["minute"] for a in view["ahead"]] == [720, 780, 840, 900]
+    for a, s in zip(view["ahead"], (0.004, 0.005, 0.006, 0.007)):
+        assert a["upper"] == pytest.approx(100.4 * (1 + 1.25 * s)) and a["lower"] == pytest.approx(100.0 * (1 - 1.25 * s))
+    [t] = view["trades"]
+    assert (t["side"], t["exit"], t["bp"]) == (1, None, None) and t["entry_at"] == pytest.approx(at(DAY, 10, 0), abs=60)
+    run_until(b, clock, DAY, 16, 1)
+    view = ib.today_view(b.store, at(DAY, 16, 5), True)
+    assert view["ahead"] == [] and len(view["checks"]) == 6
+    [t] = view["trades"]
+    assert t["how"] == "stop" and t["bp"]  # 15:00: the band (101.28) passes the price (101.2) == pytest.approx(round((t["exit"] - t["entry"]) / 100.4 * 1e4, 2))
+    # The next day, before its first check: nothing, never yesterday's lines.
+    assert ib.today_view(b.store, at("2026-11-17", 9, 45), True) is None
+
+
+def test_read_carries_today_only_while_the_book_is_on(tmp_path, monkeypatch):
+    path = tmp_path / "book.sqlite3"
+    monkeypatch.setenv("INTRADAY_MOMENTUM_BOOK_PATH", str(path))
+    assert ib.read(at(DAY, 11, 0))["today"] is None  # no file
+    ib.Store(path, seed=None).add_check(DAY, 600, "done", price=101.0, upper=100.5, lower=99.5, vwap=100.2)
+    assert ib.read(at(DAY, 11, 0))["today"] is None  # off
+    monkeypatch.setenv("INTRADAY_MOMENTUM_BOOK_ENABLED", "true")
+    today = ib.read(at(DAY, 11, 0))["today"]
+    assert today["checks"][0]["upper"] == 100.5 and today["ahead"] == []  # no window in this store: nothing projected
