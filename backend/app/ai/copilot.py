@@ -456,6 +456,22 @@ class FakeAdapter:
                 yield "text", piece
             yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
             return
+        if any(t.get("name") == "draft_paper_order" for t in tools or ()):  # a desk turn: a paper trade (simulated reading)
+            from app.ai import copilot_fixture
+            from app.engine.chart_math import ET
+            asked = copilot_fixture.paper_request(prompt, symbol, datetime.now(ET).date())
+            if asked is not None:
+                if isinstance(asked, list) and allow_tools and isinstance(last["content"], str):
+                    yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_{i}", "name": "draft_paper_order", "input": a}
+                                          for i, a in enumerate(asked)], "tool_use", _zero_usage(), self.model)
+                    return
+                text = asked if isinstance(asked, str) else copilot_fixture.paper_answer(_desk_outcomes(messages, "draft_paper_order"))
+                for piece in re.findall(r"\S+\s*", text):
+                    if self.delay_s:
+                        await asyncio.sleep(self.delay_s)
+                    yield "text", piece
+                yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+                return
         if any(t.get("name") == "desk_action" for t in tools or ()):  # a desk turn: a request the desk can do (simulated reading)
             from app.ai import copilot_fixture
             from app.engine.chart_math import ET
@@ -1177,10 +1193,10 @@ def _results(messages: list[dict]) -> dict:
     return out
 
 
-def _desk_outcomes(messages: list[dict]) -> list[tuple[dict, str | None]]:
-    """The fake adapter's desk_action results this turn: each call's input and, when it was refused, the reason."""
+def _desk_outcomes(messages: list[dict], name: str = "desk_action") -> list[tuple[dict, str | None]]:
+    """The fake adapter's desk_action (or ``name``) results this turn: each call's input and, when refused, the reason."""
     calls = {b["id"]: b["input"] for m in messages if m["role"] == "assistant" and isinstance(m["content"], list)
-             for b in m["content"] if b.get("type") == "tool_use" and b.get("name") == "desk_action"}
+             for b in m["content"] if b.get("type") == "tool_use" and b.get("name") == name}
     out = []
     for m in messages:
         if m["role"] == "user" and isinstance(m["content"], list):
@@ -1227,6 +1243,9 @@ def _summary(name: str, data: dict) -> str:
     if name == "desk_action":
         from app.ai import copilot_actions
         return copilot_actions.summary(data)
+    if name == "draft_paper_order":
+        from app.ai import copilot_paper_draft
+        return copilot_paper_draft.summary(data)
     if name == "propose_plan":
         p = data.get("proposal") or {}
         if p.get("kind") == "memory":
@@ -1480,6 +1499,8 @@ async def _run_tool(evidence, block: dict, cfg: Settings, turn: dict | None = No
             event["proposal"] = {"id": block["id"], **data["proposal"]}
         if name == "desk_action":
             event["proposal"] = {"id": block["id"], "kind": "desk_action", **data["action"]}
+        if name == "draft_paper_order":
+            event["proposal"] = {"id": block["id"], "kind": "paper_order", **data["order"]}
         if name == "get_level_history" and (card := level_history_card(data)):
             event["history"] = card
         if name == "get_option_candidates" and (picks := option_candidates_card(data)):

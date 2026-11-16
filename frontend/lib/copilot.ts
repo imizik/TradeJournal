@@ -3,6 +3,7 @@ import { deskGet } from "./deskMinute";
 import type { AlertsPayload } from "./alerts";
 import type { Capture, CaptureOrigin, CaptureSide, OriginKind } from "./captures";
 import type { DeskAction } from "./deskAction";
+import type { PaperDraft } from "./paperBook";
 import type { PlanPosition } from "@/components/dashboard/PlansCard";
 
 export type CopilotStatus =
@@ -101,7 +102,9 @@ export type Proposal = { id: string; client_id?: string; outcome?: ProposalOutco
   | { kind: "practice"; text: string; measure: PracticeMeasure; label: string; target: number | null; why: string }
   /** A desk action (desk_action, ``lib/deskAction.ts``): what the owner asked the desk to do, done only by their tap
    * (a view change applies itself when it arrives). */
-  | ({ kind: "desk_action" } & DeskAction));
+  | ({ kind: "desk_action" } & DeskAction)
+  /** A paper order card (draft_paper_order, ``components/copilot/PaperOrderCard.tsx``): filled on paper only by their tap. */
+  | ({ kind: "paper_order" } & PaperDraft));
 /** ``confirmed``: Confirm ran (``note``: what it said; ``text``: the words a memory or practice saved; a plan card's
  * part results and fields as confirmed). ``dismissed``: the card stays hidden. Only a record of what happened on the
  * page: restoring one creates nothing. */
@@ -128,6 +131,7 @@ export function cardLine(card: Proposal): string {
       + `${card.action === "ticket" ? ` ${card.strike}${card.short_strike != null ? `/${card.short_strike}` : ""} ${card.option_type} ${card.expiry}` : ""}`
       + `${"contract" in card ? ` ${card.contract}` : ""}${card.action === "trim" ? ` sell ${card.contracts} of ${card.held}` : ""}`
       + `${card.action === "note" ? ` "${words(card.text)}"` : ""}${card.action === "plan_idea" ? ` ${card.direction} setup` : ""}`
+    : card.kind === "paper_order" ? `${card.action} ${card.quantity} ${words(card.label, 40)}`
     : `"${words(card.question)}" in ${card.horizon_days}d`;
   return `[card ${card.kind} ${what}: ${card.outcome?.state ?? "waiting"}]`;
 }
@@ -265,7 +269,7 @@ export function rememberSpeakRate(rate: number) {
   try { if (rate === 1) window.localStorage.removeItem(SPEAK_RATE_KEY); else window.localStorage.setItem(SPEAK_RATE_KEY, String(rate)); } catch { /* per-browser convenience only */ }
 }
 
-const CARD_NAME: Record<Proposal["kind"], string> = { trade_plan: "plan", watch: "watch", revisit: "revisit", memory: "memory", practice: "practice", desk_action: "desk" };
+const CARD_NAME: Record<Proposal["kind"], string> = { trade_plan: "plan", watch: "watch", revisit: "revisit", memory: "memory", practice: "practice", desk_action: "desk", paper_order: "paper" };
 const SCALE: Record<string, string> = { k: "thousand", K: "thousand", M: "million", B: "billion" };
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SIGN: Record<string, string> = { "+": "plus ", "-": "minus ", "−": "minus " };
@@ -609,7 +613,7 @@ export function toSaved(messages: LabMessage[]): Pick<InvestigationFields, "tran
       ...(m.role === "assistant" && savedMetrics(m) ? { metrics: savedMetrics(m) } : {}),
       // A card from the stream still carries its event type, which is not part of the proposal.
       ...(m.proposals?.length ? { proposals: m.proposals.slice(0, MAX_SAVED_PROPOSALS).map(card => Object.fromEntries(Object.entries(card).filter(([key]) => key !== "type")) as Proposal) } : {}) })),
-    evidence: messages.flatMap((m, i) => (m.tools ?? []).filter(t => t.status === "ok" && t.provenance && t.name !== "propose_plan" && t.name !== "desk_action")
+    evidence: messages.flatMap((m, i) => (m.tools ?? []).filter(t => t.status === "ok" && t.provenance && t.name !== "propose_plan" && t.name !== "desk_action" && t.name !== "draft_paper_order")
       .map(t => ({ tool: t.name, as_of: t.provenance!.as_of, kind: t.provenance!.kind, message: i }))),
   };
 }

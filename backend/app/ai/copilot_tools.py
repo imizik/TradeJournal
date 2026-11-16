@@ -439,10 +439,39 @@ TOOLS: list[dict] = [
                                         "text": {"type": "string", "description": f"note: one line, at most {DESK_NOTE_MAX} characters"},
                                         "direction": {"type": "string", "enum": list(DESK_DIRECTIONS)}}},
     },
+    {
+        "name": "draft_paper_order",
+        "description": "Draft a paper order card for the owner to fill with one tap: paper trading is practice with no money, "
+                       "in the app only, and never a real order. Only when they asked for a paper trade in this message, in their "
+                       "words (\"paper 2 NBIS 100c Friday, stop 96\", \"paper 50 shares of PLTR\", \"close my paper NBIS\", "
+                       "\"sell half\"), or said yes to paper trading an idea you gave. It never fills: the card shows the "
+                       "contract, the live price it would fill at (the ask to buy, the bid to sell) and its time, the cost and the "
+                       "paper buying power left, and his tap fills. action=open: `instrument` stock (shares) or option (one call or "
+                       "put: `option_type`, `expiry` YYYY-MM-DD, `strike`), `quantity` (shares or contracts), optional `stop` and "
+                       "`target` (stock prices), `idea` mine when he named the trade, copilot when it was your suggestion. The "
+                       "option is matched to the listed contracts (the nearest expiry, then the nearest strike) and `picked` says "
+                       "each substitution: tell him plainly. action=close (all of his open paper position in `symbol`) or "
+                       "action=trim (`quantity`, or `half` true for half rounded down, at least one); `option_type`, `strike` and "
+                       "`expiry` pick the position when he holds more than one. A missing quantity, contract or expiry is a short "
+                       "question, never a guess. When the result has an `issue` (market closed, no fresh quote, not enough buying "
+                       "power), the card's button is off: say why in a sentence.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["action", "symbol"],
+                         "properties": {"action": {"type": "string", "enum": ["open", "close", "trim"]},
+                                        "symbol": _SYMBOL_SCHEMA,
+                                        "instrument": {"type": "string", "enum": ["stock", "option"]},
+                                        "option_type": {"type": "string", "enum": ["call", "put"]},
+                                        "expiry": {"type": "string", "description": "YYYY-MM-DD, the date he named"},
+                                        "strike": {"type": "number"},
+                                        "quantity": {"type": "integer", "description": "shares or contracts, at least 1"},
+                                        "half": {"type": "boolean", "description": "trim: half the position, rounded down, at least 1"},
+                                        "stop": {"type": "number", "description": "open: his stop, a stock price"},
+                                        "target": {"type": "number", "description": "open: his target, a stock price"},
+                                        "idea": {"type": "string", "enum": ["mine", "copilot"]}}},
+    },
 ]
 TOOL_NAMES = frozenset(t["name"] for t in TOOLS)
 # The tools whose result is a card for the owner, not evidence: never carried, cited or counted as a read.
-CARD_TOOLS = frozenset({"propose_plan", "desk_action"})
+CARD_TOOLS = frozenset({"propose_plan", "desk_action", "draft_paper_order"})
 
 
 class ToolInputError(ValueError):
@@ -670,6 +699,9 @@ def validate(name: str, args: Any) -> dict:
     if name == "desk_action":
         from app.ai import copilot_actions
         return copilot_actions.validate(args)
+    if name == "draft_paper_order":
+        from app.ai import copilot_paper_draft
+        return copilot_paper_draft.validate(args)
     if name == "get_quotes":
         symbols = args.get("symbols")
         if not isinstance(symbols, list) or not 1 <= len(symbols) <= MAX_SYMBOLS:
@@ -1139,6 +1171,12 @@ class LiveEvidence:
         from app.ai import copilot_paper_book
         return copilot_paper_book.live_paper_book(symbol)
 
+    def paper_draft(self, request: dict) -> dict:
+        """draft_paper_order's card (copilot_paper_draft.live_draft): the paper book, the options feed's list and one
+        quote through the chart feed; nothing written."""
+        from app.ai import copilot_paper_draft
+        return copilot_paper_draft.live_draft(request)
+
     def week_exit_reviews(self, week_start: str) -> dict:
         """The week's exit reviews with each plan's thread, for the owner's page only (never the model)."""
         from app.ai import copilot_review
@@ -1207,6 +1245,7 @@ PROVENANCE = {
     "get_positioning": ("Tradier quotes (Cboe volatility indexes) · options feed chains (Tradier, ORATS IV hourly)", "fetched"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
     "desk_action": ("A desk action for the owner to tap; nothing done", "proposal"),
+    "draft_paper_order": ("A paper order card for the owner to tap; nothing filled", "proposal"),
 }
 
 
@@ -1259,5 +1298,10 @@ def call(evidence, name: str, args: dict) -> dict:
     if name == "desk_action":
         from app.ai import copilot_actions
         return copilot_actions.act(evidence, args)
+    if name == "draft_paper_order":
+        draft = getattr(evidence, "paper_draft", None)
+        if draft is None:
+            raise ToolInputError("paper order cards are not available here (a replay or a turn away from the desk)")
+        return draft(args)
     method: Callable[..., dict] = getattr(evidence, name)
     return method(**args)

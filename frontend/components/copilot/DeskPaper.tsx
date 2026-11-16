@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { useDeskTicks } from "@/lib/deskTicks";
 import {
@@ -97,10 +97,16 @@ function limitWords(limit: number, spread: boolean, pays: boolean, closing: bool
  * On an idea (Paper it on a copilot plan, a Radar setup or a scanner pick) ``source`` and ``ideaId`` record whose idea it
  * was, and the confirm opens prefilled from it; an idea without enough to place an order (``order`` null) shows the
  * button disabled with ``why``. ``strong``: the main action where it stands (a ticket in the desk's Paper mode).
+ *
+ * The confirm is short: what it fills at, the quantity, Market or Limit and the button. His stop, target, note and rules
+ * checklist fold behind one More line, which opens on its own when an idea prefilled any of them or when he has a
+ * tick-box rule to answer (an unticked one counts as not followed). ``autoOpen``: open at once (a copilot card's Edit);
+ * ``onClose``: told when the confirm closes; ``onFilled``: told what a fill or a placed limit did; ``fixedKey``: the order
+ * key to use instead of a new one per opening (a copilot card's, so its Edit can never fill a second time).
  */
-export function PaperButton({ order, quantity = 1, note = null, stop = null, target = null, label = "Paper trade it", source = "mine", ideaId = null, why = null, strong = false }: {
+export function PaperButton({ order, quantity = 1, note = null, stop = null, target = null, label = "Paper trade it", source = "mine", ideaId = null, why = null, strong = false, autoOpen = false, onClose, onFilled, fixedKey }: {
   order: PaperOrder | null; quantity?: number | null; note?: string | null; stop?: number | null; target?: number | null; label?: string;
-  source?: PaperSource; ideaId?: string | null; why?: string | null; strong?: boolean;
+  source?: PaperSource; ideaId?: string | null; why?: string | null; strong?: boolean; autoOpen?: boolean; onClose?(): void; onFilled?(text: string): void; fixedKey?: string;
 }) {
   const multiplier = order?.instrument === "stock" ? 1 : 100;
   const [open, setOpen] = useState(false);
@@ -117,6 +123,9 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
   const [done, setDone] = useState<string | null>(null);
   const [key, setKey] = useState("");
   const [ticked, setTicked] = useState<Record<string, boolean>>({});  // his tick-box rules, answered here
+  // Stop, target, note and his rules: folded unless an idea prefilled them, or he has a tick-box rule to answer.
+  const [more, setMore] = useState(!!note?.trim() || stop != null || target != null);
+  const [broken, setBroken] = useState(0);
   const qtyN = Number(qty);
   const valid = Number.isInteger(qtyN) && qtyN > 0;
   const limitN = Number(limitText);
@@ -127,7 +136,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
 
   const check = async (count = qtyN) => {
     if (!order) return;
-    setOpen(true); setBusy(true); setError(null); setDone(null); setKey(orderKey()); setClosedNow(false);
+    setOpen(true); setBusy(true); setError(null); setDone(null); setKey(fixedKey ?? orderKey()); setClosedNow(false);
     try {
       const found = await previewOpen(order, count);
       setPreview(found); setLimitText(price(Math.abs(found.per_share)));
@@ -148,7 +157,8 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
     setBusy(true); setError(null);
     try {
       const filled = await fillOpen(order, qtyN, levels(), key);
-      setDone(filled ? `Paper: ${fillLine(filled, true, multiplier)}.` : "Already filled on paper.");
+      const text = filled ? `Paper: ${fillLine(filled, true, multiplier)}.` : "Already filled on paper.";
+      setDone(text); onFilled?.(text);
       setPreview(null);
     } catch (e) { refuse(e); } finally { setBusy(false); }
   };
@@ -157,9 +167,10 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
     setBusy(true); setError(null);
     try {
       const placed = await placeLimitOpen(order, qtyN, limitN, levels(), key);
-      setDone(placed.filled ? `Paper limit filled: ${fillLine(placed.filled, true, multiplier)}.`
+      const text = placed.filled ? `Paper limit filled: ${fillLine(placed.filled, true, multiplier)}.`
         : placed.working ? `Paper limit working: ${spread ? "open" : "buy"} ${qtyN.toLocaleString("en-US")} at ${price(limitN)}${spread ? (credit ? " credit or more" : " debit or less") : " or better"}, until ${at(placed.working.expires_at)} or until you cancel it below.`
-        : "Already placed on paper.");
+        : "Already placed on paper.";
+      setDone(text); onFilled?.(text);
       setPreview(null); setClosedNow(false);
     } catch (e) { refuse(e); } finally { setBusy(false); }
   };
@@ -167,6 +178,13 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
     setBusy(true);
     try { await startPaper(10_000); await check(); } catch (e) { refuse(e); } finally { setBusy(false); }
   };
+  const close = () => { setOpen(false); setPreview(null); setError(null); setClosedNow(false); setDone(null); onClose?.(); };
+  const opened = useRef(false);
+  useEffect(() => {
+    if (!autoOpen || opened.current || !order) return;
+    opened.current = true;
+    void check(quantity && quantity > 0 ? quantity : 1);
+  }, [autoOpen]); // eslint-disable-line react-hooks/exhaustive-deps -- once, when an Edit opens it
 
   if (!open) {
     const button = (
@@ -197,14 +215,6 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
       {busy && !form && <p className="text-xs text-muted-foreground">Reading a live quote…</p>}
       {form && !done && (
         <>
-          <div className="flex flex-wrap items-center gap-2">
-            <OrderType type={type} onChange={setType} market={!closedNow} />
-            {type === "limit" && (
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Limit $
-                <input aria-label="Paper limit price" data-testid="paper-limit" inputMode="decimal" value={limitText} onChange={e => setLimitText(e.target.value.replace(/[^\d.]/g, ""))} className={cn(INPUT, "w-20")} />
-              </label>
-            )}
-          </div>
           {closedNow && <p className="text-xs text-muted-foreground">The market is closed, so there is no live quote to fill at. A limit placed before the open works from 9:30 AM ET until the close.</p>}
           {preview && type === "market" && <p data-testid="paper-preview" className="text-sm tabular-nums">{fillLine({ ...preview, quantity: valid ? qtyN : preview.quantity, cash: cost ?? preview.cash }, true, multiplier)}.</p>}
           {preview && type === "limit" && <p className="text-xs tabular-nums text-muted-foreground">Now: {fillLine({ ...preview, quantity: valid ? qtyN : preview.quantity, cash: cost ?? preview.cash }, true, multiplier)}.</p>}
@@ -212,25 +222,39 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground">{multiplier === 1 ? "Shares" : order?.instrument === "spread" ? "Spreads" : "Contracts"}
               <input aria-label="Paper quantity" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/[^\d]/g, ""))} className={cn(INPUT, "w-20")} />
             </label>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Stop
-              <input aria-label="Paper stop (stock price)" inputMode="decimal" placeholder="stock $" value={stopText} onChange={e => setStopText(e.target.value)} className={cn(INPUT, "w-20")} />
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Target
-              <input aria-label="Paper target (stock price)" inputMode="decimal" placeholder="stock $" value={targetText} onChange={e => setTargetText(e.target.value)} className={cn(INPUT, "w-20")} />
-            </label>
+            <OrderType type={type} onChange={setType} market={!closedNow} />
+            {type === "limit" && (
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Limit $
+                <input aria-label="Paper limit price" data-testid="paper-limit" inputMode="decimal" value={limitText} onChange={e => setLimitText(e.target.value.replace(/[^\d.]/g, ""))} className={cn(INPUT, "w-20")} />
+              </label>
+            )}
           </div>
-          <input aria-label="Paper note" maxLength={280} placeholder="Why (optional, one line)" value={words} onChange={e => setWords(e.target.value)} className={cn(INPUT, "w-full")} />
-          <RulesChecklist entry={entry} ticked={ticked} onTick={(id, on) => setTicked(t => ({ ...t, [id]: on }))} />
           {type === "market" && preview ? (
             <p className="text-[11px] text-muted-foreground">Fill on paper re-reads the quote and fills at that moment&apos;s {Object.values(preview.legs).length > 1 ? "natural price" : "ask"}. {preview.buying_power != null && preview.need_each != null && valid && <>Paper buying power after: {preview.buying_power - preview.need_each * qtyN < 0 ? "−" : ""}{usd(preview.buying_power - preview.need_each * qtyN)}{preview.buying_power - preview.need_each * qtyN < 0 ? " (not enough)" : ""}.</>}</p>
           ) : (
             <p data-testid="paper-limit-words" className="text-[11px] text-muted-foreground">{limitValid ? <>{limitWords(limitN, spread, !credit, false)}, on a live quote only. A day order: it works until the close or until you cancel it{hold != null && <>, and holds {usd(hold)} of paper buying power meanwhile</>}.</> : "Name the limit price."}</p>
           )}
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {type === "market"
               ? <button type="button" data-testid="paper-fill" disabled={busy || !valid || !preview} onClick={fill} className={cn(BUTTON, "border-violet-400/70 text-violet-100")}>Fill on paper</button>
               : <button type="button" data-testid="paper-place-limit" disabled={busy || !valid || !limitValid} onClick={place} className={cn(BUTTON, "border-violet-400/70 text-violet-100")}>Place limit on paper</button>}
-            <button type="button" onClick={() => { setOpen(false); setPreview(null); setError(null); setClosedNow(false); }} className={QUIET}>Cancel</button>
+            <button type="button" onClick={close} className={QUIET}>Cancel</button>
+            <button type="button" data-testid="paper-more" aria-expanded={more} onClick={() => setMore(m => !m)}
+              className={cn(QUIET, "ml-auto")}>{more ? "Less" : "More"}: stop, target, note, your rules{!more && broken > 0 && <span className="ml-1 text-amber-300">· breaks {broken}</span>}</button>
+          </div>
+          <div data-testid="paper-more-fields" hidden={!more} className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Stop
+                <input aria-label="Paper stop (stock price)" inputMode="decimal" placeholder="stock $" value={stopText} onChange={e => setStopText(e.target.value)} className={cn(INPUT, "w-20")} />
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Target
+                <input aria-label="Paper target (stock price)" inputMode="decimal" placeholder="stock $" value={targetText} onChange={e => setTargetText(e.target.value)} className={cn(INPUT, "w-20")} />
+              </label>
+            </div>
+            <input aria-label="Paper note" maxLength={280} placeholder="Why (optional, one line)" value={words} onChange={e => setWords(e.target.value)} className={cn(INPUT, "w-full")} />
+            {/* Mounted while folded, so a tick-box rule to answer opens More on its own. */}
+            <RulesChecklist entry={entry} ticked={ticked} onTick={(id, on) => setTicked(t => ({ ...t, [id]: on }))}
+              onResults={results => { setBroken(results.filter(r => r.status === "fail").length); if (results.some(r => r.kind === "tick")) setMore(true); }} />
           </div>
         </>
       )}
@@ -238,13 +262,13 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
         <div className="flex flex-wrap items-center gap-2">
           <p role="alert" data-testid="paper-refused" className="text-xs text-amber-300">{error.text}</p>
           {error.start && <button type="button" disabled={busy} onClick={start} className={BUTTON}>Start a $10,000 paper account</button>}
-          {!form && <button type="button" onClick={() => { setOpen(false); setError(null); }} className={QUIET}>Close</button>}
+          {!form && <button type="button" onClick={close} className={QUIET}>Close</button>}
         </div>
       )}
       {done && (
         <div className="flex flex-wrap items-center gap-2">
           <p role="status" data-testid="paper-done" className="text-xs text-emerald-300">{done}</p>
-          <button type="button" onClick={() => { setOpen(false); setDone(null); }} className={QUIET}>Done</button>
+          <button type="button" onClick={close} className={QUIET}>Done</button>
         </div>
       )}
     </div>
@@ -253,16 +277,22 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
 
 /** Close or trim an open paper position: a live quote first, then Fill on paper at the bid (the ask to buy a leg back),
  *  or a sell limit that waits for its price until the close. What a working sell limit holds cannot be sold twice. */
-export function CloseRow({ position, trim, onDone }: { position: PaperPosition; trim: boolean; onDone(): void }) {
+export function CloseRow({ position, trim, quantity, onDone, onFilled, fixedKey }: {
+  position: Pick<PaperPosition, "id" | "remaining" | "held" | "multiplier" | "instrument" | "credit">; trim: boolean;
+  /** The count to start from (a copilot card's Edit); half, rounded down, for a trim otherwise. */
+  quantity?: number; onDone(): void;
+  /** Told what a fill or a placed limit did. ``fixedKey``: the order key to use (a copilot card's), not a new one. */
+  onFilled?(text: string): void; fixedKey?: string;
+}) {
   const free = position.remaining - (position.held ?? 0);
-  const [qty, setQty] = useState(String(trim ? Math.max(1, Math.floor(free / 2)) : free));
+  const [qty, setQty] = useState(String(quantity ?? (trim ? Math.max(1, Math.floor(free / 2)) : free)));
   const [preview, setPreview] = useState<PaperFill | null>(null);
   const [type, setType] = useState<"market" | "limit">("market");
   const [limitText, setLimitText] = useState("");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
-  const [key] = useState(orderKey);
+  const [key] = useState(() => fixedKey ?? orderKey());
   const qtyN = Number(qty);
   const valid = Number.isInteger(qtyN) && qtyN > 0 && qtyN <= free;
   const limitN = Number(limitText);
@@ -279,15 +309,17 @@ export function CloseRow({ position, trim, onDone }: { position: PaperPosition; 
     setBusy(true); setError(null);
     try {
       const filled = await fillClose(position.id, qtyN, key);
-      setDone(filled ? `Paper: ${fillLine(filled, false, position.multiplier)}; ${filled.pnl! >= 0 ? "made" : "lost"} ${usd(filled.pnl!)}.` : "Already filled on paper.");
+      const text = filled ? `Paper: ${fillLine(filled, false, position.multiplier)}; ${filled.pnl! >= 0 ? "made" : "lost"} ${usd(filled.pnl!)}.` : "Already filled on paper.";
+      setDone(text); onFilled?.(text);
     } catch (e) { setError(e instanceof Error ? e.message : "Not filled."); } finally { setBusy(false); }
   };
   const place = async () => {
     setBusy(true); setError(null);
     try {
       const placed = await placeLimitClose(position.id, qtyN, limitN, key);
-      setDone(placed.filled ? `Paper limit filled: ${fillLine(placed.filled, false, position.multiplier)}; ${placed.filled.pnl! >= 0 ? "made" : "lost"} ${usd(placed.filled.pnl!)}.`
-        : placed.working ? `Paper limit working: ${spread ? "close" : "sell"} ${qtyN} at ${price(limitN)}, until ${at(placed.working.expires_at)} or until you cancel it.` : "Already placed on paper.");
+      const text = placed.filled ? `Paper limit filled: ${fillLine(placed.filled, false, position.multiplier)}; ${placed.filled.pnl! >= 0 ? "made" : "lost"} ${usd(placed.filled.pnl!)}.`
+        : placed.working ? `Paper limit working: ${spread ? "close" : "sell"} ${qtyN} at ${price(limitN)}, until ${at(placed.working.expires_at)} or until you cancel it.` : "Already placed on paper.";
+      setDone(text); onFilled?.(text);
     } catch (e) { setError(e instanceof Error ? e.message : "Not placed."); } finally { setBusy(false); }
   };
   const share = preview && valid ? Math.round(preview.per_share * position.multiplier * qtyN * 100) / 100 : null;

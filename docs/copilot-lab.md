@@ -420,6 +420,9 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     NBIS profile and proof card. Tests: `backend/tests/test_copilot_profile.py`.
   - `get_paper_book(symbol?)` reads his paper book, read only (§ Paper). Book
     context, never offered to research jobs. Tests: `backend/tests/test_copilot_paper.py`.
+  - `draft_paper_order(action, symbol, …)` drafts a paper order card he fills with
+    one tap; it never fills (§ Paper, "Tell the copilot"). Desk turns only.
+    Tests: `backend/tests/test_copilot_paper_draft.py`.
 - **Chart and book tools** (`backend/app/ai/copilot_book.py`):
   - `get_chart_context(symbol, timeframe 1m/5m/15m/1h/1D)` reads the same
     `chart_feed.workspace` as the Charts page. It returns:
@@ -2275,7 +2278,7 @@ ever means "needs you":
   is sent"; "Your book" carries it beside its heading.
 - **PAPER**: a dashed violet chip, "Paper · not real money", on a dashed violet frame: the paper book, the QQQ overnight
   and momentum books, the paper confirm. On a ticket "Paper trade it" sits in its own PAPER half under a dashed
-  divider, below Copy all (in Paper mode the half leads instead, below); in the Chain the Paper button is its own PAPER group under the real actions (Check it, Plan
+  divider, below Copy all (in Paper mode the ticket's main action is paper instead, with no half); in the Chain the Paper button is its own PAPER group under the real actions (Check it, Plan
   it, Put on ticket, Make it a spread).
 - **REPLAY**: a filled violet chip with the day ("Replay · Fri, Nov 13"): the replay ticket and the Replay practice card.
 
@@ -2287,8 +2290,10 @@ mark's look when picked. It is a view only: nothing is sent, and no order, accou
 
 - **Real**: the desk as it always was.
 - **Paper**: paper first without hiding real money. The centre (chart and dock) wears the dashed PAPER frame with a
-  "Paper · fills shown" chip on its top-right corner; a plan or spread ticket leads with its paper half (the order in
-  words, **Fill on paper** as the main button) and the real half follows under it, labelled REAL and unchanged; the
+  "Paper · fills shown" chip on its top-right corner; a plan or spread ticket's main action is paper, **Buy on paper**
+  (**Open spread on paper** for a vertical), where Copy all would lead, through the same confirm and with no separate
+  PAPER half; the real order follows, labelled REAL, and still only copies. A closing ticket (it closes a real
+  holding) is unchanged; the
   top bar shows the paper book's value and P&L since the run started beside the real accounts, each with its mark (a
   tap opens the paper book). The real book on the left stays as it is.
 - **Replay**: Replay a past day, the same screen as **R**. The switch shows Replay whenever Replay is open, however it
@@ -2309,6 +2314,27 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   plan's thesis, invalidation and target as the note, stop and target), "Paper" on the Chain tab's picked contract or
   spread, and "Paper buy SYMBOL shares" in the Paper section for the selected ticker. A tap reads one live quote and
   shows what it would fill at; nothing fills until "Fill on paper", which re-reads the quote and fills at that moment's.
+  The confirm is short (since 2026-11-16): what it fills at, the quantity, Market or Limit and the button. Stop, target,
+  note and his rules checklist fold behind one **More** line, which opens on its own when an idea prefilled any of them
+  or when he has a tick-box rule to answer (unticked counts as not followed); folded, it still says "· breaks N" when an
+  automatic rule breaks. With nothing to answer, one tap after Paper fills.
+- **Tell the copilot** (`draft_paper_order`, `backend/app/ai/copilot_paper_draft.py`,
+  `frontend/components/copilot/PaperOrderCard.tsx`; Isaac's yes on 2026-11-16). He types "paper 2 NBIS 100c Friday,
+  stop 96", "paper 50 shares of PLTR", "close my paper NBIS" or "sell half"; the copilot answers with one card: the
+  contract in words, the live price it would fill at (the ask to buy, the bid to sell) and the quote's time, the cost
+  and the paper buying power left (closing: what it brings in and the P&L), his stop and target, and **Fill on paper**
+  (**Close on paper**, **Trim on paper**), with Edit opening the full confirm prefilled. The tool only drafts: an option
+  is matched to what is listed (the options feed's expiration list and that expiry's chain, under its cache and pacing:
+  the nearest listed expiry, then the nearest strike), each substitution said on the card, and his contract drafted as
+  named, saying so, when the list cannot be read; the price is `paper_book`'s own preview (one quote through the chart
+  feed); nothing is stored. A closed market, a stale or missing quote, no buying power or no paper account leaves the
+  card with no price and the reason, its button off; a price older than two minutes greys with its time until
+  **Refresh price**. Only his tap fills, through `POST /copilot/paper/orders` with one key per card (a second tap or a
+  reload records nothing more), `source` mine when he named the trade and copilot when it was the copilot's idea. A
+  close or trim names his one open paper position in the ticker (type, strike or expiry pick one; more than one is a
+  question). A ticker he does not follow is refused; replay turns have no card; the phone keeps its own Paper it. The
+  card keeps its outcome with the conversation (`copilot_investigations`). Proof:
+  `frontend/e2e/copilot-desk-paper-card.spec.ts`.
 - **Paper it on an idea.** "Paper it" on the desk's ideas opens the same confirm, prefilled from the idea, and goes
   through the same order route and fresh-quote rule: a copilot trade-plan card (its contract, read from the card's
   Contract words such as "Nov 21 100C", its invalidation and target as stop and target, its thesis as the note; a

@@ -5,8 +5,8 @@
  * a view only: nothing is sent, and no order, account or book behaves differently.
  *
  * - Real: the desk as it always was.
- * - Paper: paper comes first without hiding real money. The centre wears the dashed PAPER frame, a ticket leads with its
- *   paper half ("Fill on paper"), the top bar shows the paper book's value beside the real accounts, each with its mark.
+ * - Paper: paper comes first without hiding real money. The centre wears the dashed PAPER frame, a ticket's main action
+ *   is Buy on paper, the top bar shows the paper book's value beside the real accounts, each with its mark.
  * - Replay: Replay a past day (``DeskReplay``), however it opened (R, ⌘K, the copilot, Practice). Its own header carries
  *   the same switch, so one tap comes back to Real or Paper.
  *
@@ -43,7 +43,7 @@ export function setDeskMode(next: ViewMode) {
 
 const MODES: readonly { id: Mode; word: string; hint: string }[] = [
   { id: "real", word: "Real", hint: "Real: your accounts, as the desk always shows them" },
-  { id: "paper", word: "Paper", hint: "Paper first: tickets lead with Fill on paper, the paper value beside the real. Nothing is sent; your real book stays." },
+  { id: "paper", word: "Paper", hint: "Paper first: a ticket's main button is Buy on paper, the paper value beside the real. Nothing is sent; your real book stays." },
   { id: "replay", word: "Replay", hint: "Replay a past day ( R ). Not live, not real money." },
 ];
 

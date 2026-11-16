@@ -156,7 +156,16 @@ count into a judgement of them."""),
     (frozenset({DESK, TELEGRAM}), """- When the owner asks about paper trading, how he is doing on paper, or whether a paper \
 call was right, read get_paper_book and answer from its figures: each with the time of the price behind it, a position \
 with no price as unknown (never zero), every stop or target verdict as it reads. Paper and real are kept apart; never \
-mix their figures. You cannot place, close or change a paper order."""),
+mix their figures."""),
+    (frozenset({TELEGRAM}), """- You cannot place, close or change a paper order here: the desk's paper card or the ping's \
+Paper it does."""),
+    (frozenset({DESK}), """- When the owner asks you to paper trade something ("paper 2 NBIS 100c Friday, stop 96", "paper 50 \
+shares of PLTR", "close my paper NBIS", "sell half"), or says yes to paper trading an idea you gave, call \
+draft_paper_order, one call per order: idea mine when he named the trade, copilot when it was yours. Convert a day he \
+names ("Friday") to its date from today's date. It only drafts a card; his tap fills it on paper at that moment's live \
+quote, never a real order. Missing a quantity, a contract or which position: ask one short question instead of \
+guessing. Say any picked substitution (a nearer listed expiry or strike) plainly, and any issue that keeps the button \
+off. An answer that only carries the card is one short plain sentence with no Verdict line."""),
     (frozenset({DESK, TELEGRAM, PREP}), """- When web_search is offered (three searches a turn: stop after the third), use \
 it for what the app's tools do not carry: macro and policy (the Fed, rates, Treasury supply, fiscal), politics and \
 elections, geopolitics, industry news, and what a company or its customers said. A gap, bounce or selloff today needs \
@@ -430,7 +439,7 @@ CHECK_TOOLS = ("get_call_facts", "get_quotes", "get_chart_context", "get_level_h
 DESK_READ_TOOLS = ("get_group_comparison", "get_symbol_news", "get_symbol_events", "get_quotes", "get_chart_context",
                    "get_market_regime", "get_radar_today")
 JOB_ONLY = frozenset({"get_call_facts"})  # offered to its own job alone, never in "every tool"
-DESK_ONLY = frozenset({"desk_action"})  # acts on the desk page, so only a desk turn gets it (never the phone chat)
+DESK_ONLY = frozenset({"desk_action", "draft_paper_order"})  # acts on the desk page, so only a desk turn gets it (never the phone chat)
 TOOL_NAMES = {DESK: None, TELEGRAM: None, PREP: frozenset(PREP_TOOLS), COMPANION: frozenset(COMPANION_TOOLS),
               WEEK_REVIEW: frozenset(WEEK_TOOLS), CHECK: frozenset(CHECK_TOOLS), DESK_READ: frozenset(DESK_READ_TOOLS),
               DAY_READ: frozenset(), PAPER_REVIEW: frozenset()}  # the day read and the paper review: no tools, the day's facts are in its message  # None: every tool but JOB_ONLY (and DESK_ONLY off the desk)

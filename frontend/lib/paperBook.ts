@@ -80,6 +80,34 @@ export type PaperFill = {
   buying_power_after?: number; buying_power?: number; need_each?: number; pnl?: number; all?: boolean; position_id?: string;
 };
 
+/** The copilot's paper order card (backend ``app/ai/copilot_paper_draft.py``): drafted from his words, never filled until
+ *  his tap. ``preview`` is the paper book's own preview at the draft (null with ``issue`` when there was no live price);
+ *  ``picked`` says each part of the contract that was matched to a nearer listed one. */
+export type PaperDraftPreview = {
+  per_share: number; cash: number; quoted_at: number; stock: number | null; price?: number; side?: "ask" | "bid";
+  buying_power?: number; buying_power_after?: number; pnl?: number;
+};
+export type PaperDraft = { symbol: string; label: string; multiplier: number; picked: string[]; preview: PaperDraftPreview | null; issue: string | null; made_at: number } & (
+  | { action: "open"; instrument: "stock" | "option"; quantity: number; option_type?: "call" | "put"; expiry?: string; strike?: number;
+      stop?: number; target?: number; idea: "mine" | "copilot" }
+  | { action: "close" | "trim"; position_id: string; instrument: "stock" | "option" | "spread"; credit: boolean; held: number; quantity: number;
+      remains: number; half?: boolean });
+
+/** A draft's opening order as the Paper confirm takes it, or null for a close or trim. */
+export function draftOrder(draft: PaperDraft): PaperOrder | null {
+  if (draft.action !== "open") return null;
+  if (draft.instrument === "stock") return { instrument: "stock", symbol: draft.symbol };
+  return { instrument: "option", symbol: draft.symbol, option_type: draft.option_type!, expiry: draft.expiry!, strike: draft.strike! };
+}
+
+/** A preview read now, in the card's own shape. */
+export function draftPreview(fill: PaperFill, closing: boolean): PaperDraftPreview {
+  const legs = Object.values(fill.legs);
+  return { per_share: fill.per_share, cash: fill.cash, quoted_at: fill.quoted_at, stock: fill.stock,
+    ...(legs.length === 1 ? { price: legs[0].price, side: legs[0].action === "buy" ? "ask" as const : "bid" as const } : {}),
+    ...(closing ? { pnl: fill.pnl } : { buying_power: fill.buying_power, buying_power_after: fill.buying_power_after }) };
+}
+
 export class PaperRefused extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }

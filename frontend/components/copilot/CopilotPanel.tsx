@@ -16,6 +16,7 @@ import LongHolds from "@/components/copilot/LongHolds";
 import LinkedActivity from "@/components/copilot/LinkedActivity";
 import ProposalCard from "@/components/copilot/ProposalCard";
 import DeskActionCard from "@/components/copilot/DeskActionCard";
+import PaperOrderCard from "@/components/copilot/PaperOrderCard";
 import { markArrived } from "@/lib/deskAction";
 import ResearchDeeper from "@/components/copilot/ResearchDeeper";
 import { DayRead } from "@/components/copilot/DayRead";
@@ -46,7 +47,7 @@ const MAX_CHARS = 4000, MAX_MESSAGES = 23, MAX_TOTAL = 38_000;
 const UNAVAILABLE = new Set(["off", "unavailable", "failed", "error", "ungrouped", "not_configured"]);
 const TOOL_LABEL: Record<string, string> = {
   get_group_comparison: "Group comparison", get_peer_moves: "Peer moves", get_symbol_news: "News",
-  get_symbol_events: "Earnings", get_quotes: "Quotes", get_saved_research: "Saved research", propose_plan: "Proposal", desk_action: "Desk action", get_investigation_changes: "What changed",
+  get_symbol_events: "Earnings", get_quotes: "Quotes", get_saved_research: "Saved research", propose_plan: "Proposal", desk_action: "Desk action", draft_paper_order: "Paper order", get_investigation_changes: "What changed",
   get_chart_context: "Chart", get_positions: "Positions", get_trades: "Trades", get_memories: "Memories",
   owner_context: "Your context", get_owner_context: "Your context", get_trade_review: "Trade review",
   get_week_review: "Week review", get_level_history: "Your history here", get_option_candidates: "Option candidates",
@@ -214,7 +215,7 @@ function RateAnswer({ rating, onRate, ask }: { rating?: Rating; onRate: (next: R
 }
 
 function Sources({ tools, metrics }: { tools: ToolEvent[]; metrics?: TurnMetrics }) {
-  const read = tools.filter(tool => tool.name !== "propose_plan" && tool.name !== "desk_action"); // a card is not a source
+  const read = tools.filter(tool => tool.name !== "propose_plan" && tool.name !== "desk_action" && tool.name !== "draft_paper_order"); // a card is not a source
   if (!read.length && !metrics) return null;
   const missing = (tool: ToolEvent) => tool.status === "error" || UNAVAILABLE.has(tool.provenance?.state ?? "");
   const count = (test: (tool: ToolEvent) => boolean) => read.filter(test).length;
@@ -1560,6 +1561,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
               </button>
             ) : proposal.kind === "desk_action" ? (
               <DeskActionCard key={proposal.id} proposal={proposal} onOutcome={outcome => recordOutcome(proposal.id, outcome)} />
+            ) : proposal.kind === "paper_order" ? (
+              <PaperOrderCard key={proposal.id} proposal={proposal} onOutcome={outcome => recordOutcome(proposal.id, outcome)} />
             ) : proposal.kind === "trade_plan" ? (
               <TradePlanCard key={proposal.id} plan={proposal} investigationId={current?.id ?? null} origin={origin} drawn={drawn}
                 history={historyFor(message.tools ?? [], proposal)} candidates={candidatesFor(message.tools ?? [], proposal)}
