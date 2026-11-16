@@ -116,16 +116,19 @@ test("tapping an account narrows the book to it, tapping again shows every row",
   await expect(heading(page)).toHaveText("Your book · 4 followed");
 });
 
-test("on a phone the accounts are one row that swipes", async ({ page }) => {
+test("on a phone the accounts open from the value block as rows, one under another", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await open(page, desk(LIVE));
-  const line = page.getByTestId("desk-accounts");
-  await expect(account(page, "MCP")).toBeVisible(); // evaluateAll does not wait: measure once the line has rendered
-  const tops = await line.getByTestId("desk-account").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().top)));
-  expect(new Set(tops).size).toBe(1);
+  // Since 2026-11-16 a phone has the value block at the top of Positions in the account line's place (§ Phone).
+  const value = page.getByTestId("desk-value");
+  await value.getByTestId("value-open").click();
+  const rows = value.getByTestId("value-account");
+  await expect(rows.filter({ hasText: "MCP" })).toBeVisible(); // evaluateAll does not wait: measure once the rows have rendered
+  const tops = await rows.evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().top)));
+  expect(new Set(tops).size).toBe(tops.length);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await page.screenshot({ path: test.info().outputPath("desk-accounts-375.png") });
-  await account(page, "MCP").click();
+  await rows.filter({ hasText: "MCP" }).click();
   await expect(heading(page)).toHaveText("Your book · 1 followed");
 });
 
@@ -179,12 +182,15 @@ test("the value line stays when the feed goes stale and says since when", async 
   await page.setViewportSize({ width: 375, height: 812 });
   const quiet = { ...DAY_LINE, series: { all: series("All accounts", 10_000, 4, minute(89)) } };
   await open(page, desk({ state: "stale", as_of: minute(89), issue: null, day_line: quiet }));
-  const line = page.getByTestId("desk-value-line");
+  // A phone's line sits in the value block at the top of Positions (the top bar's account line is the laptop's).
+  const block = page.getByTestId("desk-value");
+  const line = block.getByTestId("desk-value-line");
   await expect(line.getByTestId("value-quiet")).toHaveText("· last 10:59 AM");
   await expect(page.getByTestId("desk-accounts")).toHaveText("Accounts as of 10:59 AM");
+  await expect(block.getByTestId("value-off")).toHaveText("Robinhood stale · from the journal · as of 10:59 AM");
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await line.click(); // a phone's tap opens the detail
-  await expect(page.getByTestId("value-detail")).toContainText("No reading since 10:59 AM");
+  await expect(block.getByTestId("value-detail")).toContainText("No reading since 10:59 AM");
   await page.screenshot({ path: test.info().outputPath("desk-value-line-375.png") });
 });
 

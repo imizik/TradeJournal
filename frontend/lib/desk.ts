@@ -102,6 +102,9 @@ export type DeskBook = {
   live?: "matched" | "new" | "not_on_robinhood";
   quantity?: number | null;
   mark?: number | null;
+  /** Its move today in dollars at the read, by the account line's own formula (``robinhood_book.day_move``): only while
+   * live and its account's change today is known; else null, never zero. */
+  day_change?: number | null;
   account?: { label: string; masked: string };
   /** What the live prices need to move the P&L in place (``_tick`` in copilot_desk.py; ``tickedBook`` in deskTicks.ts):
    * the symbol to quote (an option's OCC symbol), 100 for a contract or 1 for a share, the cost and quantity in those

@@ -70,9 +70,12 @@ export const PIECES: readonly Piece[] = [
   { id: "feed.market", label: "Feed: Market", area: "Right", fold: null },
   { id: "feed.all", label: "Feed: All", area: "Right", fold: null },
   { id: "feed.chatter", label: "Chatter", area: "Right", fold: "more" },
-  { id: "view.book", label: "Phone: Book view", area: "Phone", fold: null },
-  { id: "view.ticker", label: "Phone: ticker view", area: "Phone", fold: null },
+  { id: "view.book", label: "Phone: Positions view", area: "Phone", fold: null },
+  { id: "view.ticker", label: "Phone: Chart view (the ticker)", area: "Phone", fold: null },
   { id: "view.feed", label: "Phone: Feed view", area: "Phone", fold: null },
+  { id: "view.chain", label: "Phone: Chain view", area: "Phone", fold: null },
+  { id: "view.orders", label: "Phone: Orders view", area: "Phone", fold: null },
+  { id: "view.ask", label: "Phone: Ask (the copilot)", area: "Phone", fold: null },
 ];
 export const PIECE = new Map(PIECES.map(p => [p.id, p]));
 export const foldable = (id: string) => { const p = PIECE.get(id); return !!p?.fold && !p.safety; };

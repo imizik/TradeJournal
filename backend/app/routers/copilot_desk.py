@@ -737,7 +737,8 @@ def threads(db: Session, now: float) -> dict:
     # The live book from Robinhood (docs/robinhood-read-feed.md): off, signed out or stale, the rows stay the journal's.
     live = today._section(db, "desk robinhood", lambda: _robinhood())
     if live.get("snapshot") is not None and found["state"] == "ok":
-        joined = today._section(db, "desk robinhood join", lambda: {"state": "ok", "rows": _live_book(db, found, act + watch, live["snapshot"])})
+        joined = today._section(db, "desk robinhood join", lambda: {"state": "ok", "rows": _live_book(db, found, act + watch, live["snapshot"],
+                                                                                                   live["view"].get("accounts"))})
         watch += joined.get("rows", [])
         live["view"]["joined"] = joined["state"] == "ok"
     _horizons(act + near + watch, checks.get("horizons", {}))
@@ -846,10 +847,12 @@ def _value_line(db: Session, snapshot: dict | None, now: float, hidden: set[str]
     return desk_value_line.line(db, now, rb.ttl, open_at=hours.get("open"), close_at=hours.get("close"), fills=fills)
 
 
-def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict) -> list[dict]:
+def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict, accounts: list[dict] | None = None) -> list[dict]:
     """Joins the Robinhood snapshot onto the journal's position rows (in place) and returns a row for each position
     Robinhood shows that the journal does not have yet. A matched row keeps its plan, meter, state and thread; its P&L,
-    quantity and mark come from Robinhood. Display only: nothing is written."""
+    quantity and mark come from Robinhood, and so does its move today (``day_change``, the account line's own formula,
+    ``robinhood_book.day_move``), only while its account's change today is known (``accounts``: the view's, after
+    ``unsure_today``), so the rows never show a move the account line would not. Display only: nothing is written."""
     from app.engine import robinhood_book as rb
     from app.models import Account, Trade
     ids = [uuid.UUID(p["trade_id"]) for p in found["positions"]]
@@ -871,9 +874,14 @@ def _live_book(db: Session, found: dict, rows: list[dict], snapshot: dict) -> li
 
     as_of = snapshot.get("at")
 
+    day = rb.session_day(as_of) if as_of is not None else None
+    known = {a["masked"] for a in accounts or [] if a.get("day_change") is not None}
+
     def facts(live: dict) -> dict:
+        tag = rb.account_tag(live)
+        move = rb.day_move(live, day) if day is not None and tag["masked"] in known else None
         return {"usd": live["usd"], "pct": live["pct"], "quantity": live["quantity"], "mark": live["mark"],
-                "account": rb.account_tag(live)}
+                "day_change": None if move is None else round(move, 2), "account": tag}
 
     positions = {p["trade_id"]: p for p in found["positions"]}
     for trade_id, live in matched.items():

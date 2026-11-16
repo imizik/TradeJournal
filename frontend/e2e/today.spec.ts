@@ -127,8 +127,8 @@ test("while the lab is on the desk is home: Today forwards to it, and Desk leads
   await page.goto("/today");
   await expect(page).toHaveURL((url) => url.pathname === "/copilot-lab");
   const tabs = page.getByRole("navigation", { name: "Main tabs" });
-  await expect(tabs.getByRole("link").first()).toHaveText("Desk");
-  await expect(tabs.getByRole("link", { name: "Desk" })).toHaveAttribute("aria-current", "page");
+  // On the desk itself the bar is the desk's own (docs/copilot-lab.md § Phone), with More last.
+  await expect(tabs.getByTestId("desk-view-book")).toHaveText("Positions");
   await expect(tabs.getByRole("link", { name: "Today", exact: true })).toHaveCount(0);
   await tabs.getByRole("button", { name: "Open menu" }).click();
   const menu = page.getByRole("dialog", { name: "Menu" });
@@ -136,12 +136,13 @@ test("while the lab is on the desk is home: Today forwards to it, and Desk leads
   await expect(menu.getByRole("link", { name: "Today", exact: true })).toHaveCount(0);
   await expect(menu.getByRole("link", { name: "Copilot", exact: true })).toHaveCount(0); // one entry for one page
   // The Dashboard leaves the tab bar for More → Journal, at its own address.
-  await expect(tabs.getByRole("link")).toHaveText(["Desk", "Charts", /Plan/, "Trades"]);
   await menu.getByRole("button", { name: "Journal", exact: true }).click();
   await expect(menu.getByRole("link", { name: "Dashboard", exact: true })).toHaveAttribute("href", "/dashboard");
   await menu.getByRole("link", { name: "Dashboard", exact: true }).click();
   await expect(page).toHaveURL((url) => url.pathname === "/dashboard");
   await expect(page.getByTestId("owner-dashboard")).toBeVisible();
+  // Every other page: the app's bar, Desk first, the Dashboard not on it.
+  await expect(tabs.getByRole("link")).toHaveText(["Desk", "Charts", /Plan/, "Trades"]);
   await expect(tabs.getByRole("link", { name: "Desk" })).toHaveAttribute("href", "/copilot-lab");
 });
 

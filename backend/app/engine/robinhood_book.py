@@ -157,20 +157,25 @@ def _totals(account: dict, rows: list[dict], day: str) -> dict:
     the book could not show, make the figure unknown (None), never a partial sum or zero."""
     known = account["complete"] and account.get("whole", True)
     pnl = [p["usd"] for p in rows]
-    moves = []
-    for p in rows:
-        if p["instrument"] == "option":
-            basis = None if p["opened_on"] is None else p["avg_cost"] if p["opened_on"] == day else p["prev_close"]
-        else:
-            basis = p["prev_close"]
-        sign = -1 if p["direction"] == "short" else 1
-        moves.append(None if p["mark"] is None or basis is None else sign * (p["mark"] - basis) * p["quantity"])  # a contract's or a share's
+    moves = [day_move(p, day) for p in rows]
     open_pnl = _round(sum(pnl)) if known and None not in pnl else None
     change = _round(sum(moves)) if known and None not in moves else None
     total = account["values"]["total_value"]
     start = total - change if total is not None and change is not None else None
     return {"open_pnl": open_pnl, "day_change": change,
             "day_change_pct": _round(100 * change / start, 2) if start is not None and start > 0 else None}
+
+
+def day_move(p: dict, day: str) -> float | None:
+    """One position's move today in dollars: its mark less yesterday's close (an option opened in ``day``'s session: less
+    its cost), times its size and side, a contract's or a share's. None when a figure it needs is missing (an option's
+    open date included), never zero."""
+    if p["instrument"] == "option":
+        basis = None if p["opened_on"] is None else p["avg_cost"] if p["opened_on"] == day else p["prev_close"]
+    else:
+        basis = p["prev_close"]
+    sign = -1 if p["direction"] == "short" else 1
+    return None if p["mark"] is None or basis is None else sign * (p["mark"] - basis) * p["quantity"]
 
 
 def _paged(read, account: str) -> list[dict]:

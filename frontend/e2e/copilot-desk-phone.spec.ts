@@ -94,20 +94,24 @@ for (const width of [375, 393, 440]) {
     await open(page, { width });
     await expect(page.getByTestId("needs-you")).toBeVisible();
     expect(await sideways(page)).toBeLessThanOrEqual(0);
-    // The first screen: the strip, then the book's heading and its first rows above the tab bar.
+    // The first screen: the value block (since 2026-11-16, in the old account line's place), the strip, then the book's
+    // heading and its first rows above the tab bar.
     const tabBar = await page.getByRole("navigation", { name: "Main tabs" }).evaluate(el => el.getBoundingClientRect().top);
-    expect(await top(page, "needs-you")).toBeLessThan(260);
+    expect(await top(page, "desk-value")).toBeLessThan(await top(page, "needs-you"));
+    expect(await top(page, "needs-you")).toBeLessThan(300);
     const third = await page.getByTestId("desk-book").locator("li").nth(2).evaluate(el => el.getBoundingClientRect().bottom);
     expect(third).toBeLessThanOrEqual(tabBar);
-    // The accounts are one row that swipes sideways inside itself (the page does not); the numbers stay masked.
-    const line = page.getByTestId("desk-accounts");
-    await expect(line.getByTestId("desk-account").first()).toContainText("Roth IRA••8267$18,898");
-    const boxes = await line.getByTestId("desk-account").evaluateAll(els => els.map(el => el.getBoundingClientRect().top));
-    expect(new Set(boxes.map(Math.round)).size).toBe(1); // one row
-    expect(await line.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
-    await line.evaluate(el => { el.scrollLeft = el.scrollWidth; });
-    await expect(line.getByTestId("desk-account").last()).toBeInViewport();
+    // The accounts open from the value as rows, one under another (nothing swipes sideways); the numbers stay masked.
+    const value = page.getByTestId("desk-value");
+    await expect(value.getByTestId("value-total")).toContainText("$28,736");
+    await value.getByTestId("value-open").click();
+    const accounts = value.getByTestId("value-account");
+    await expect(accounts.first()).toContainText("Roth IRA••8267$18,898");
+    const boxes = await accounts.evaluateAll(els => els.map(el => el.getBoundingClientRect().top));
+    expect(new Set(boxes.map(Math.round)).size).toBe(3); // a row each
+    await expect(accounts.last()).toBeInViewport();
     expect(await sideways(page)).toBeLessThanOrEqual(0);
+    await value.getByTestId("value-open").click();
     // A five-figure P&L stays in its own column, clear of the hide button.
     const amd = page.getByTestId("desk-book").getByRole("listitem").filter({ hasText: "AMD" });
     const figure = await amd.getByText("+$12,345").evaluate(el => el.getBoundingClientRect().right);

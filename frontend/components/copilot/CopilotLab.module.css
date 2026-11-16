@@ -6,8 +6,8 @@
  *
  * Layout by the screen's width: from 1180 px the book, the centre and the side (the copilot, with the Feed behind its
  * tab) sit side by side and each scrolls on its own; from 768 px the book and the centre do, and the copilot and the
- * Feed each open as a sheet on the right; below that one view shows at a time under the switch (the book, the selected
- * ticker's tools, or the Feed) and the copilot is a full-screen sheet. The thread list is a drawer at every width.
+ * Feed each open as a sheet on the right; below that one view shows at a time, picked on the desk's own tab bar at the
+ * bottom (Positions, the ticker's Chart, Chain, Orders) or the Feed chip, and the copilot is a full-screen sheet. The thread list is a drawer at every width.
  */
 .desk {
   --background: 240 6% 6%;
@@ -167,7 +167,10 @@
 .sideTabs,
 .feedBar,
 .feedButton,
-.feed {
+.feed,
+.value,
+.orders,
+.chainPick {
   display: none;
 }
 
@@ -382,9 +385,9 @@
     border-radius: 0;
   }
 
-  /* The first row is the switch between the desk's views and the desk's buttons; it stays at the top of the screen. The
-     bar under it is the clock and indices, then the day's P&L and the Accounts button. The word "Desk" is left to the
-     app's own tab bar. */
+  /* The first row is the Feed chip and the desk's buttons; it stays at the top of the screen. The bar under it is the
+     clock and indices (the day's money and the accounts are the value block's). The views are the desk's tab bar's, at
+     the bottom (Nav.tsx keeps its slot). */
   .head {
     display: contents;
   }
@@ -435,22 +438,28 @@
     white-space: nowrap;
   }
 
+  /* The copilot's Ask is the desk's tab bar's on a phone: no round button over the page (it covered the Grid's icon). */
   .desk[data-on="true"][data-sheet="closed"] .ask {
-    margin-right: 8px;
+    display: none;
   }
 
-  /* One view at a time under the switch (the head's first row), which stays at the top of the screen: the Book (what needs a decision, the
-     positions, Watching, the day's block, What's moving), the selected ticker's tools, or the Feed. The Needs-you strip
-     shows on every view. */
+  /* The top bar keeps the clock and SPY / QQQ / VIX; the day's money and the accounts are the value block's. */
+  .desk .wideOnly {
+    display: none;
+  }
+
+  /* One view at a time, picked on the desk's own tab bar at the bottom (Positions, the ticker's chart, Chain, Orders)
+     or the Feed chip in the head's first row, which stays at the top of the screen. Positions: the value block, what
+     needs a decision, the positions, Watching, the day's block, What's moving. The Needs-you strip shows on Positions. */
   .cockpit {
     display: flex;
     flex-direction: column;
     padding-inline: 8px;
-    /* A view starts right under the switch's row (52 px with its border). */
+    /* A view starts right under the top row (52 px with its border). */
     scroll-margin-top: calc(52px + env(safe-area-inset-top));
   }
 
-  /* A Ticket opened on a phone scrolls the dock up to just under the switch. */
+  /* A Ticket opened on a phone scrolls the dock up to just under the top row. */
   .dock {
     scroll-margin-top: calc(52px + env(safe-area-inset-top));
   }
@@ -466,6 +475,15 @@
     display: contents;
   }
 
+  .value {
+    display: block;
+    order: 0;
+  }
+
+  .needs {
+    order: 1;
+  }
+
   .book {
     order: 2;
   }
@@ -475,7 +493,8 @@
   }
 
   .centre,
-  .feed {
+  .feed,
+  .orders {
     order: 4;
   }
 
@@ -483,15 +502,28 @@
     order: 5;
   }
 
-  .desk[data-on="true"][data-view="feed"] .book,
+  .desk[data-on="true"]:is([data-view="feed"], [data-view="chain"], [data-view="orders"]) .book,
+  .desk[data-on="true"]:not([data-view="book"]) .value,
   .desk[data-on="true"]:not([data-view="book"]) .needs,
   .desk[data-on="true"]:not([data-view="book"]) .moving,
-  .desk[data-on="true"]:not([data-view="ticker"]) .centre {
+  .desk[data-on="true"]:not([data-view="ticker"]):not([data-view="chain"]) .centre {
     display: none;
   }
 
-  .desk[data-view="feed"] .feed {
+  .desk[data-view="feed"] .feed,
+  .desk[data-on="true"][data-view="orders"] .orders,
+  .desk[data-on="true"][data-view="chain"] .chainPick {
     display: block;
+  }
+
+  /* The Chain view: the chips, then the Chain itself; the chart and the dock's tab row wait on the Chart tab. */
+  .desk[data-on="true"][data-view="chain"] .chartPart,
+  .desk[data-on="true"][data-view="chain"] .dockTabs {
+    display: none;
+  }
+
+  .desk[data-on="true"][data-view="chain"] .dock {
+    border-top: 0;
   }
 
   /* The ticker's view keeps a held position's own row above its chart (its P&L and its standing line; the Position
