@@ -102,15 +102,27 @@ test("tapping an account narrows the book to it, tapping again shows every row",
   await page.setViewportSize({ width: 1440, height: 900 });
   await open(page, desk(LIVE));
   await expect(heading(page)).toHaveText("Your book · 4 followed");
+  // The chips say they filter the book; the book says when it is filtered, with one tap back to every row.
+  await expect(page.getByTestId("desk-accounts-hint")).toHaveText("Tap to filter the book");
+  const shelf = page.getByTestId("desk-book");
+  await expect(shelf.getByTestId("book-filter")).toHaveCount(0);
   await account(page, "MCP").click();
   await expect(account(page, "MCP")).toHaveAttribute("aria-pressed", "true");
   await expect(heading(page)).toHaveText("Your book · 1 followed");
-  const shelf = page.getByTestId("desk-book");
+  await expect(shelf.getByTestId("book-filter")).toHaveText("Showing MCP only·Show all");
+  await expect(page.getByTestId("desk-accounts-hint")).toHaveText("Book filtered");
   await expect(shelf.getByRole("button", { name: /^APLD/ })).toBeVisible();
   await expect(shelf.getByRole("button", { name: /^NBIS/ })).toHaveCount(0);
   await account(page, "Roth IRA").click(); // another account: switches
   await expect(heading(page)).toHaveText("Your book · 2 followed");
+  await expect(shelf.getByTestId("book-filter")).toHaveText("Showing Roth IRA only·Show all");
   await expect(shelf.getByRole("button", { name: /^NBIS/ })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("desk-accounts-filtered-1440.png") });
+  await shelf.getByTestId("book-filter-all").click(); // Show all: every row, no chip pressed
+  await expect(heading(page)).toHaveText("Your book · 4 followed");
+  await expect(account(page, "Roth IRA")).toHaveAttribute("aria-pressed", "false");
+  await expect(shelf.getByTestId("book-filter")).toHaveCount(0);
+  await account(page, "Roth IRA").click();
   await account(page, "Roth IRA").click(); // the same one again: every row
   await expect(account(page, "Roth IRA")).toHaveAttribute("aria-pressed", "false");
   await expect(heading(page)).toHaveText("Your book · 4 followed");
@@ -128,8 +140,14 @@ test("on a phone the accounts open from the value block as rows, one under anoth
   expect(new Set(tops).size).toBe(tops.length);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await page.screenshot({ path: test.info().outputPath("desk-accounts-375.png") });
+  await expect(value.getByTestId("value-accounts-hint")).toHaveText("Tap an account to show only its positions in the book");
   await rows.filter({ hasText: "MCP" }).click();
   await expect(heading(page)).toHaveText("Your book · 1 followed");
+  const filter = page.getByTestId("desk-book").getByTestId("book-filter");
+  await expect(filter).toHaveText("Showing MCP only·Show all");
+  expect((await filter.getByTestId("book-filter-all").boundingBox())!.height).toBeGreaterThanOrEqual(43); // thumb-sized
+  await filter.getByTestId("book-filter-all").click();
+  await expect(heading(page)).toHaveText("Your book · 4 followed");
 });
 
 // The day's account value line (docs/robinhood-read-feed.md § The value line): invented readings each minute from 9:31,

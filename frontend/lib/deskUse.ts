@@ -22,7 +22,8 @@ export type Piece = { id: string; label: string; area: string; fold: FoldMode;
   /** Holds safety information (open positions and their risk, working orders, sources down, alerts): never suggested,
    * never folded. */
   safety?: boolean;
-  /** Foldable by his own choice in "How I use the desk", but never suggested (it shows his plan levels). */
+  /** Foldable by his own choice in "How I use the desk", but never suggested (it shows his plan levels, or it is read at a
+   * glance with nothing to tap, so a count of taps says nothing about its use). */
   quiet?: boolean };
 
 /** Every piece the desk counts, by area. Folding one never changes what the app reads or pings. */
@@ -39,6 +40,7 @@ export const PIECES: readonly Piece[] = [
   { id: "day", label: "Day button (Start / Close the day)", area: "Top", fold: null },
   { id: "book", label: "Book: positions and working orders", area: "Left", fold: null, safety: true },
   { id: "paper", label: "Paper", area: "Left", fold: "stub" },
+  { id: "scorecard", label: "How I'm doing", area: "Left", fold: "stub", quiet: true },
   { id: "paper.rules", label: "My rules", area: "Left", fold: null },
   { id: "paper.goals", label: "Weekly goals", area: "Left", fold: null },
   { id: "strategy.overnight", label: "QQQ overnight book", area: "Left", fold: "stub" },

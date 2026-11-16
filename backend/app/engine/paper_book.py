@@ -52,7 +52,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
@@ -1175,6 +1175,18 @@ def real_trades(db: Session, since: datetime) -> dict:
     return stats(results, [(closed.date(), float(pnl)) for pnl, closed in rows])
 
 
+def week_score(db: Session, closed: list[dict], now: float) -> dict:
+    """This week's closed trades, paper and real side by side, from Monday 00:00 New York (on a weekend, the week just
+    ended): the desk's "How I'm doing · this week" block. Paper counts a position on its close day, as ``view`` does."""
+    today = _ny_day(now)
+    monday = today - timedelta(days=today.weekday())
+    mine = [p for p in closed if _ny_day(p["closed_at"]) >= monday]
+    start = datetime.combine(monday, time(0), ET).astimezone(UTC).replace(tzinfo=None)
+    return {"monday": monday.isoformat(),
+            "paper": stats([p["realized"] for p in mine], [(_ny_day(p["closed_at"]), p["realized"]) for p in mine]),
+            "real": real_trades(db, start)}
+
+
 def _order_view(o: dict) -> dict:
     keep = ("id", "side", "symbol", "instrument", "label", "multiplier", "quantity", "limit", "pays", "reserve", "placed_at",
             "expires_at", "position", "note", "stop", "target", "idea_id")
@@ -1257,7 +1269,8 @@ def view(db: Session, now: float, settle_expired: bool = True) -> dict:
         "positions": shown,
         "orders": [_order_view(o) for o in reversed(working)],
         "closed": [_position_view(p, None) for p in sorted(closed, key=lambda p: p["closed_at"], reverse=True)[:CLOSED_SHOWN]],
-        "score": {"paper": paper, "real": real_trades(db, run.started_at), "real_rules": trading_rules.real_split(db, rules)},
+        "score": {"paper": paper, "real": real_trades(db, run.started_at), "real_rules": trading_rules.real_split(db, rules),
+                  "week": week_score(db, closed, now)},
         "my_rules": rules,
         "earlier": list(reversed(earlier)), "market_open": _market_open(now), "fresh_seconds": FRESH_SECONDS,
     }

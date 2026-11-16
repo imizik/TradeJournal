@@ -264,6 +264,33 @@ def test_his_real_closed_trades_over_the_same_dates_sit_beside_paper_and_are_nev
     assert db.exec(select(Fill)).all() == []
 
 
+def test_this_weeks_score_counts_paper_and_real_closed_since_monday_new_york(db, market):
+    # The desk's "How I'm doing · this week": paper and real closed trades from Monday 00:00 New York, whatever the run's start.
+    paper_book.start_run(db, None, False, NOW)  # Friday Nov 13
+
+    def trade(pnl, closed, account=ROTH):
+        db.add(Trade(account_id=account, ticker="NVDA", instrument_type="option", contracts=1, avg_entry_premium=1,
+                     total_premium_paid=100, realized_pnl=pnl, opened_at=closed, closed_at=closed, status="closed"))
+    trade(300, datetime(2026, 11, 9, 0, 5))  # Monday just after midnight New York: this week, before the run
+    trade(-100, datetime(2026, 11, 12, 15, 0))  # Thursday
+    trade(999, datetime(2026, 11, 8, 23, 55))  # Sunday night: last week
+    trade(777, datetime(2026, 11, 10, 12, 0), account=WEBULL)  # Webull stays out
+    db.commit()
+    market.quotes = {CALL: q(CALL, 3.30, 3.40), "NBIS": q("NBIS", 98.0, 98.1, last=98.05)}
+    filled = buy_call(db, qty=1)["filled"]
+    market.quotes = {CALL: q(CALL, 3.90, 4.10, now=NOW + 600), "NBIS": q("NBIS", 101, 101.1, last=101.05, now=NOW + 600)}
+    paper_book.close_order(db, {"position_id": filled["position_id"], "order_key": key()}, NOW + 600)
+    week = paper_book.view(db, NOW + 700)["score"]["week"]
+    assert week["monday"] == "2026-11-09"
+    assert week["real"] == {**week["real"], "trades": 2, "pnl": 200.0, "win_rate": 50.0}
+    assert week["paper"] == {**week["paper"], "trades": 1, "pnl": 50.0, "win_rate": 100.0}
+    # Saturday still reads the week just ended; the next Monday starts a fresh one.
+    saturday = datetime(2026, 11, 14, 16, 0, tzinfo=UTC).timestamp()
+    assert paper_book.view(db, saturday)["score"]["week"]["real"]["trades"] == 2
+    next_monday = paper_book.view(db, datetime(2026, 11, 16, 15, 0, tzinfo=UTC).timestamp())["score"]["week"]
+    assert next_monday["monday"] == "2026-11-16" and next_monday["real"]["trades"] == 0 and next_monday["paper"]["trades"] == 0
+
+
 def test_the_routes_are_owner_only_batched_and_refuse_simulated_evidence(db, market, monkeypatch):
     for route in ("GET /copilot/paper", "POST /copilot/paper/runs", "POST /copilot/paper/orders"):
         assert route in DOMAIN_ROUTES

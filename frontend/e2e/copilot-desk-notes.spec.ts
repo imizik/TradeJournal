@@ -103,6 +103,36 @@ for (const width of [1440, 375]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     await shelf.screenshot({ path: test.info().outputPath(`desk-notes-${width}.png`) });
   });
+
+  test(`the note line's Save and Cancel buttons at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const posts = await open(page);
+    const shelf = page.getByTestId("desk-book");
+    const pen = shelf.locator("li", { has: page.getByRole("button", { name: "NBIS 10/30/26 100C" }) }).getByRole("button", { name: "Note on this position" });
+    await pen.click();
+    const input = shelf.getByTestId("desk-note-input");
+    const saveButton = shelf.getByTestId("desk-note-save");
+    const cancelButton = shelf.getByTestId("desk-note-cancel");
+    await expect(saveButton).toHaveText("Save");
+    await expect(cancelButton).toHaveText("Cancel");
+    // Thumb-sized on a phone (44 px tall), compact on a desktop; the line never widens the page.
+    const tall = width < 640 ? 44 : 32;
+    for (const control of [input, saveButton, cancelButton]) expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(tall - 1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await shelf.screenshot({ path: test.info().outputPath(`desk-note-line-${width}.png`) });
+    // Cancel closes without saving.
+    await input.fill("never mind");
+    await cancelButton.click();
+    await expect(input).toHaveCount(0);
+    expect(posts).toHaveLength(0);
+    // Save saves, as Enter does.
+    await pen.click();
+    await shelf.getByTestId("desk-note-input").fill("Holding over the 92 base");
+    await shelf.getByTestId("desk-note-save").click();
+    await expect(shelf.getByTestId("desk-note-input")).toHaveCount(0);
+    expect(posts[0].postDataJSON()).toEqual({ trade_id: TRADE, text: "Holding over the 92 base" });
+    await expect(shelf.getByTestId("desk-notes").first().getByTestId("desk-note").nth(1)).toContainText("Holding over the 92 base");
+  });
 }
 
 test("a failed save keeps the words and says why", async ({ page }) => {

@@ -54,7 +54,9 @@ export type PaperBook = {
   default_cash?: number;
   account?: { cash: number; collateral: number; reserved?: number; buying_power: number; equity: number | null; pnl: number | null; unpriced: number; prices_at: number | null };
   positions?: PaperPosition[]; closed?: PaperPosition[]; orders?: PaperWorkingOrder[];
-  score?: { paper: PaperStats; real: PaperStats; real_rules?: RulesSplit | null };
+  score?: { paper: PaperStats; real: PaperStats; real_rules?: RulesSplit | null;
+    /** This week (from Monday, New York; a weekend reads the week just ended): closed paper and real trades side by side. */
+    week?: { monday: string; paper: PaperStats; real: PaperStats } };
   /** His own trading rules now. */
   my_rules?: Rule[];
   earlier: { number: number; started_at: number; ended_at: number; starting_cash: number; realized: number; trades: number; left_open: number }[];

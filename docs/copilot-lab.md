@@ -576,8 +576,11 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   opening fill today on a position held from before, that account's change is left off (the new contracts or shares
   would count from yesterday's close); with the order history switched off it cannot be told. Whenever any position
   lacks a figure (an option's open date included) the figure is left off, never shown as $0. Between Robinhood reads the
-  live prices move the total, today and open by what they move those positions' P&L. Tapping an account narrows the
-  book (and its Orders group) to that account's rows, and to a journal row carrying one of its orders; a journal row
+  live prices move the total, today and open by what they move those positions' P&L. A small funnel in front of the
+  chips says what they do ("Tap to filter the book", "Book filtered" while one is picked; the words from 1280 px, the
+  funnel and its tooltip below). Tapping an account narrows the
+  book (and its Orders group) to that account's rows, and the book says so under its heading: "Showing Roth IRA only ·
+  **Show all**" (Show all clears it), and to a journal row carrying one of its orders; a journal row
   Robinhood does not show belongs to no account and waits until the filter is cleared. Tapping it again shows every
   row; the line going unavailable clears it too. Not live (signed out, expired, unavailable): one grey **Accounts
   unavailable**, or **Accounts as of 10:04 AM** when the read is stale, and no money; with the feed switched off, no
@@ -664,7 +667,13 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
 
   **The left column, top to bottom** (since 2026-11-16, money and safety first): the book (real positions and working
   orders, At risk now under its heading); **Watching**; the time of day's block (below: the morning brief, Since you
-  looked or the day report with Close the day) with the practice goal under it; **My rules** (`DeskPractice.tsx`
+  looked or the day report with Close the day) with the practice goal under it; **How I'm doing · this week**
+  (`DeskPractice.tsx` `HowImDoing`), one neutral block outside any paper frame: two labelled columns, REAL and PAPER,
+  each with closed trades, P&L and win rate since Monday 00:00 New York (a weekend reads the week just ended; a side
+  with no closed trade shows dashes). It reads the paper book's `score.week` (`paper_book.week_score`: paper positions
+  by close day, real trades as the journal counts them, Webull left out), so it adds no read of its own; nothing shows
+  until that read lands or while no paper run exists. Replay keeps its score in its own REPLAY line. It folds like the
+  column's other sections (piece `scorecard`, a slim stub; foldable by hand, never suggested); **My rules** (`DeskPractice.tsx`
   `RulesAndGoals`), one neutral line outside any paper frame, since rules and goals cover real trades too ("My 4 rules ·
   followed on 3 of 5 trades · goals 1 of 2 this week ▸": followed counts closed paper and matched real trades together;
   goals count those met so far), opening in place to the followed / broken split, Edit my rules (the editor) and the
@@ -712,8 +721,9 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   thread; a position only Robinhood shows (the fill email has not arrived) is a `robinhood:` row tagged **New · not in
   the journal yet** with no plan; a journal position Robinhood does not show stays as the journal has it, tagged **Not
   on Robinhood** (only when every account's positions read). Options come first; stocks with no plan wait behind
-  "N stock positions ▾". A quiet line beside the heading says **live from Robinhood · as of HH:MM** (tap: read again,
-  `POST /copilot/desk/robinhood/refresh`, no input) or, signed out, expired or stale, says so; then the book is exactly
+  "N stock positions ▾". A quiet line beside the heading says **live from Robinhood · as of HH:MM** with a bordered
+  **↻ Read again** after it, so it reads as the button it is (tap: read again, `POST /copilot/desk/robinhood/refresh`,
+  no input) or, signed out, expired or stale, says so; then the book is exactly
   the journal's. Off, nothing changes and no line shows. Not followed tickers stay hidden. Display only: nothing is
   written to the journal. The copilot sees the same snapshot's numbers (§ Owner context), never a Robinhood tool.
   With the order-history pass on (`ROBINHOOD_FILLS_ENABLED` `shadow` or `true`), working orders and today's fills show
@@ -839,8 +849,9 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   second row: **Radar** (the default: every Radar event and setup card), **Scanner** (only while the setup scanner is
   on, § Scanner on the desk) and **Unusual options** (§ Unusual options); **Market**, the rest (headlines and the
   calendar), with a second row **News & calendar** · **Chatter** only while a chatter source has rows; and **All**
-  (Mine, Radar and Market's news together; never the Scanner, Unusual or Chatter lists). Opening the Feed starts on
-  Mine. Tapping a symbol shows only its story, with **All items** back. Actions: **Ask the copilot** puts the item, quoted, in the box unsent, in the item's plan thread,
+  (Mine, Radar and Market's news together; never the Scanner, Unusual or Chatter lists). The Feed opens on the group
+  he picked last in this browser (`localStorage` `desk.feed.group.v1`), Mine the first time; a ping's link that opens
+  Ideas is not kept as his pick. Tapping a symbol shows only its story, with **All items** back. Actions: **Ask the copilot** puts the item, quoted, in the box unsent, in the item's plan thread,
   else the symbol's open conversation, else the symbol's desk view (an item with no symbol: today's conversation; a
   phone opens the sheet); **Open in Charts**; **Read at <publisher> ↗** for a headline (a new tab); **Open** for a
   Radar event or the brief; and **Plan it** only on a Radar setup card (it opens the desk's Radar card, whose Plan it
@@ -923,7 +934,8 @@ in its menu; Plan a trade is in the desk's top row). Each tab counts as its view
   line; Realized today whenever a trade closed (live or not); then one line of how the book is doing, counted from the book's own rows and tags: "12 open ·
   +$1,420 · 1 near stop · 2 orders working" (past stop, near stop, giving back, expires today and working orders, each
   only when there is one). A tap on the value opens each account as a row (its value and change today, options, cash,
-  buying power, open P&L; numbers masked); a tap on an account narrows the book to it, as the account line does wider.
+  buying power, open P&L; numbers masked), under a hint ("Tap an account to show only its positions in the book"); a
+  tap on an account narrows the book to it, as the account line does wider, with the book's "Showing … only · Show all".
   Not live, the block says so in grey with its time ("Robinhood stale · from the journal · as of 10:40 AM") and shows
   no money, never a zero. Then the Needs-you strip, the book, Watching, the day's block and What's moving. Each book row
   adds the contract's price now and its move today under the contract ("$3.00 · today +$40"): the live tick of the
@@ -1002,9 +1014,10 @@ The cockpit's panes in detail:
   below).
 - **Conversation** (the copilot column): the page variant of `CopilotPanel.tsx` in `desk` mode. Its
   message box stays in reach while the conversation scrolls. One quiet line
-  names the model (in its picker when the server offers several) and only what is unusual: the simulated model,
-  simulated or replay data, the day's API spend once past half the budget, a missing key (read-only live data,
-  the usual case, needs no label). It ends with **New** and a **…** menu (the
+  shows only what is unusual: the simulated model, simulated or replay data, the day's API spend once past half the
+  budget, a missing key (read-only live data, the usual case, needs no label). The engineering detail (the model's
+  name, the backend and model pickers, "follow-ups on Haiku 5.5") folds behind a small **Model ▸** at the line's start,
+  closed on each load (nothing to open with the simulated model, which is a warning and always shows). It ends with **New** and a **…** menu (the
   thread's one-line conclusion or lesson, Save, Close thread / Reopen, and
   Mark plan done on a plan's thread; see Plans end below) at its end. There is no Recent row (the thread list does that) and no Symbol box:
   the message box carries a scope chip, "About NBIS ×", where × asks across
@@ -2042,7 +2055,8 @@ The desk counts quietly which of its pieces he uses, so after two weeks it can o
   the list reads, or if it cannot be read, no numbers show.
 - **The suggestion.** Once this device size has 14 calendar days with desk use, one quiet card under the book lists
   the foldable pieces opened at most once and tapped at most once in the last 14 days (and on screen at some point,
-  so a book switched off is not "unused"; Watching, which shows plan levels, is foldable by hand but never suggested):
+  so a book switched off is not "unused"; Watching, which shows plan levels, and How I'm doing, read at a glance with
+  nothing to tap, are foldable by hand but never suggested):
   "You haven't opened Grid or Tape in 2 weeks. Fold them?" with Fold all /
   Pick (the view) / Not now (14 days' snooze). Nothing folds without his tap.
 - **Folded is one tap away.** A section folds to a slim labelled stub; a dock tab (or the Grid's button), a chart tool (studies, Tape,
@@ -2201,7 +2215,8 @@ yet). One read a day is under $1 a month; each Refresh adds one. Proof: `backend
 
 Each followed position row in the book has a small pen beside its eye, and so does a fresh fill in the book's Orders
 group once the journal has its trade (a fill that closed a position: "why I left"). Tapping it opens one text line in
-place: Enter saves, Esc (or Enter on nothing) closes, and the desk's keys do nothing while typing there. Saved notes show
+place with **Save** and **Cancel** beside it (thumb-sized, 44 px, on a phone): Save or Enter saves, Cancel or Esc (or
+saving nothing) closes, and the desk's keys do nothing while typing there. The dock's Notes tab has the same line. Saved notes show
 as short grey lines under the row with their time ("10:42" today, "11/12 10:42" before), newest last, three at most
 with "N earlier" above. A fill on a position's own row is that row's trade, so the row's pen covers it. A Robinhood-only
 row or a fill whose email is not in yet has no pen until the journal has the trade. Voice is the phone keyboard's own.
@@ -2341,7 +2356,9 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   budget of 6 a day of its own (`PING_BUDGET_PAPER`), so they never spend Radar's or the position alerts'; a ticker he
   does not follow stays silent; only in the regular session. A tap opens the desk on the ticker.
 - **Chart marks.** His paper entries and exits are marks on the desk chart for that ticker (`kind` `paper`, at the
-  stock's price when each filled), drawn like his fills but pale and lettered "P", with "paper" in the legend.
+  stock's price when each filled), told apart from his real fills by shape, not colour alone: his real fills are solid
+  arrows, a paper fill a pale square lettered "P" (the momentum paper book's marks are squares lettered "M"; the chart
+  library draws no hollow marks), below the candle when bought and above it when sold, with "■P paper" in the legend.
 - **The account** (`POST /copilot/paper/runs`): he names the starting cash (default $10,000). Cash is the start plus
   every fill's cash; options use the ×100 multiplier; a credit spread holds its width as collateral, as Robinhood does,
   so buying power is the cash less it and falls by the spread's most-to-lose. An order he cannot pay for is refused with
@@ -2360,7 +2377,9 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   closed paper trade with its note and how it ended against his stop and target (stock prices: took the target, out at
   the stop and how far past it, out before either, held to expiry). Under the line, once a paper trade has closed, one
   more line splits closed paper P&L, trade count and win rate by whose idea it was (Mine, Copilot, Radar, Scanner;
-  `score.paper.by_source`), and each paper position not from his own ticket carries a small source tag.
+  `score.paper.by_source`), and each paper position not from his own ticket carries a small source tag. The same read
+  carries this week's closed trades, paper and real side by side (`score.week`, from Monday 00:00 New York), which the
+  desk's How I'm doing block shows outside the paper frame.
 - **Stored apart and append-only.** `paper_run` (one row per run) and `paper_event` (each fill: open, close or expire;
   a position is their fold; and the orders' and switches' own facts: `order`, its fill or one `cancel`/`lapse`, `auto`,
   `touch`, `trigger`, `levels`), additive migration `a7c3e9f1b5d2`, no new table. Nothing here writes fills, trades, accounts, real P&L,
@@ -3204,7 +3223,7 @@ budget are unchanged. The `done` metrics and the `copilot_turn` row record the
 model actually used, so the answer scorecard's `by_model` shows Helped rates and
 first-text latency per model. `GET /copilot/status` returns `followup_model`
 (`null` when off) and the panel's status line says "follow-ups on Haiku 5.5"
-while the API backend is picked and no model is picked. Why: on Sonnet 5.5 the
+while the API backend is picked and no model is picked (on the desk, behind its **Model ▸**). Why: on Sonnet 5.5 the
 API holds the whole answer after tool results (§ Live measurements), while
 Haiku 5.5 streams after the same tool result; a follow-up on carried evidence
 makes no new reads, so it is the safe turn to switch.

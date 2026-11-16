@@ -9,7 +9,7 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { EyeOff } from "lucide-react";
+import { EyeOff, RefreshCw } from "lucide-react";
 import { useKeptState } from "@/components/copilot/DeskMemory";
 import { NotFollowed } from "@/components/copilot/SessionTape";
 import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
@@ -79,7 +79,8 @@ export const LIVE_WORDS: Record<DeskLive["state"], string> = {
 };
 
 /** One quiet line beside the book's heading: where its numbers come from, and as of when (nothing while the feed is off:
- * the book is the journal's, as it always was). Live, it is a button that reads Robinhood again. */
+ * the book is the journal's, as it always was). Live, it is a button that reads Robinhood again, and looks it: "live from
+ * Robinhood · as of 10:42 AM" then a bordered "↻ Read again". */
 function LiveLine({ live, onRefresh }: { live: DeskLive | null; onRefresh?(): void }) {
   if (!live || live.state === "off") return null;
   const on = liveOn(live);
@@ -88,9 +89,12 @@ function LiveLine({ live, onRefresh }: { live: DeskLive | null; onRefresh?(): vo
   const text = `${words}${on || live.state === "stale" ? at : ""}`;
   return on && onRefresh ? (
     <button type="button" data-testid="book-live" onClick={onRefresh} title="Read Robinhood again"
-      className="ml-auto min-h-11 text-[11px] text-muted-foreground hover:text-foreground sm:min-h-0">
+      className="group ml-auto inline-flex min-h-11 items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground sm:min-h-0">
       {/* A phone keeps the heading on one line: "live · as of 10:04 AM" (the words stay for a screen reader). */}
-      {words === LIVE_WORDS.ok ? <>live<span className="max-sm:sr-only"> from Robinhood</span>{at}</> : text}
+      <span>{words === LIVE_WORDS.ok ? <>live<span className="max-sm:sr-only"> from Robinhood</span>{at}</> : text}</span>
+      <span data-testid="book-live-again" className="inline-flex items-center gap-0.5 rounded border px-1.5 py-px text-foreground/80 group-hover:bg-secondary group-hover:text-foreground">
+        <RefreshCw size={10} aria-hidden />Read again
+      </span>
     </button>
   ) : <span data-testid="book-live" className="ml-auto text-[11px] text-muted-foreground">{text}</span>;
 }
@@ -270,8 +274,10 @@ const left = (expiry: string | null, day: string) => {
  * and those sit behind "N not followed" at the bottom. The selected row (and its standing line) carry ``data-selected``:
  * a phone's ticker view keeps just that row above the chart (CopilotLab.module.css).
  */
-export function Book({ rows, sparks, selected, selectedKey = null, day, read, updating = false, live = null, earnings = null, risk = null, onRefreshLive, onSelect, onFollow, children }: {
+export function Book({ rows, sparks, selected, selectedKey = null, day, read, updating = false, live = null, earnings = null, risk = null, filter = null, onRefreshLive, onSelect, onFollow, children }: {
   rows: DeskThread[]; sparks: DeskSparks | null; selected: string | null; selectedKey?: string | null; day: string; read: boolean;
+  /** The book narrowed to one account (an account chip): "Showing Roth IRA only · Show all" under the heading. */
+  filter?: { label: string; onShowAll(): void } | null;
   /** The safety line under the heading (``ExposureLine``: what is at risk now). Never folded. */
   risk?: ReactNode;
   /** Earnings tags (``useDeskEvents``), by symbol. */
@@ -313,6 +319,14 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
         <PricesAsOf at={staleSince(ticks, followed.map(r => r.book?.tick?.quote))} />
         {updating && <span role="status" data-testid="book-updating" className="text-[11px] text-muted-foreground">Updating…</span>}
       </div>
+      {filter && (
+        <p data-testid="book-filter" className="flex flex-wrap items-center gap-x-1.5 px-3 pb-1 text-xs text-muted-foreground">
+          <span>Showing <span className="font-medium text-foreground">{filter.label}</span> only</span>
+          <span aria-hidden>·</span>
+          <button type="button" data-testid="book-filter-all" onClick={filter.onShowAll}
+            className="inline-flex min-h-11 items-center text-foreground underline underline-offset-2 hover:text-foreground sm:min-h-0">Show all</button>
+        </p>
+      )}
       {risk}
       {isLive && <OrdersGroup orders={live?.orders} notes={notes} />}
       {followed.length ? (

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import {
   CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, TickMarkType, createChart, createSeriesMarkers,
   type AutoscaleInfo, type IChartApi, type IPriceLine, type IPrimitivePaneRenderer, type IPrimitivePaneView, type ISeriesApi, type ISeriesMarkersPluginApi,
-  type ISeriesPrimitive, type LineData, type Logical, type SeriesAttachedParameter, type SeriesMarker, type Time, type UTCTimestamp, type WhitespaceData,
+  type ISeriesPrimitive, type LineData, type Logical, type SeriesAttachedParameter, type SeriesMarker, type SeriesMarkerShape, type Time, type UTCTimestamp, type WhitespaceData,
 } from "lightweight-charts";
 import { SessionShade } from "@/lib/sessionShade";
 import type { ChartBar, Interval } from "@/lib/charts";
@@ -30,7 +30,7 @@ import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type 
 /*
  * The cockpit centre's chart (docs/copilot-lab.md § The desk): the selected symbol's candles from the desk's chart read
  * (`GET /copilot/desk/{id}/chart`) on the library the Charts workspace uses, with the plan's entry and invalidation as
- * labelled lines, the owner's fills (his paper ones pale and lettered P), today's phone pings, Radar hits and his TradingView alerts as marks, and a time stop still ahead as a
+ * labelled lines, the owner's fills (real ones solid arrows, paper ones pale squares lettered P), today's phone pings, Radar hits and his TradingView alerts as marks, and a time stop still ahead as a
  * dashed vertical line. Crosshair, wheel or pinch zoom, drag to pan, Reset. It reads again each minute while bars can
  * still change; no stream.
  *
@@ -185,6 +185,16 @@ export function marksByCandle(data: DeskChartData, extra: DeskChartMark[] = []):
   return out;
 }
 
+/** A mark's shape, so real and paper are told apart by shape, not colour alone: his real fills are solid arrows (up bought,
+ * down sold; a circle when the side is unknown); a paper fill is a square lettered P (the momentum paper book's M), below
+ * the candle when bought and above it when sold (the library draws no hollow marks). Pings and TradingView alerts are
+ * circles, Radar hits blue squares above the candle with no letter. */
+function markShape(mark: DeskChartMark): SeriesMarkerShape {
+  if (mark.kind === "paper" || mark.kind === "momentum") return "square";
+  if (mark.kind === "fill") return mark.side === null ? "circle" : mark.side === "sell" ? "arrowDown" : "arrowUp";
+  return mark.kind === "radar" ? "square" : "circle";
+}
+
 function seriesMarkers(byCandle: Map<number, DeskChartMark[]>): SeriesMarker<Time>[] {
   const out: SeriesMarker<Time>[] = [];
   for (const [time, marks] of [...byCandle.entries()].sort((a, b) => a[0] - b[0])) {
@@ -192,16 +202,17 @@ function seriesMarkers(byCandle: Map<number, DeskChartMark[]>): SeriesMarker<Tim
       const at = time as UTCTimestamp;
       const id = `${mark.kind}:${mark.at}:${i}`;
       if (mark.kind === "fill" || mark.kind === "paper" || mark.kind === "momentum") {
-        // A paper fill is drawn like a real one, pale and lettered "P" (the momentum book's "M"), so none is mistaken.
+        // A paper fill is a pale square lettered "P" (the momentum book's "M"); his real fills are solid arrows.
         const buy = mark.side !== "sell";
+        const shape = markShape(mark);
         const look = mark.kind === "paper" ? { color: COLOR.paper, text: "P", size: 0.7 }
           : mark.kind === "momentum" ? { color: COLOR.momentum, text: "M", size: 0.7 } : { color: COLOR.fill };
-        if (mark.side === null) { out.push({ id, time: at, position: "belowBar", shape: "circle", size: 0.8, ...look }); return; }
+        if (mark.side === null) { out.push({ id, time: at, position: "belowBar", shape, size: 0.8, ...look }); return; }
         out.push(mark.price != null
-          ? { id, time: at, position: "atPriceMiddle", price: mark.price, shape: buy ? "arrowUp" : "arrowDown", ...look }
-          : { id, time: at, position: buy ? "belowBar" : "aboveBar", shape: buy ? "arrowUp" : "arrowDown", ...look });
+          ? { id, time: at, position: "atPriceMiddle", price: mark.price, shape, ...look }
+          : { id, time: at, position: buy ? "belowBar" : "aboveBar", shape, ...look });
       } else {
-        out.push({ id, time: at, position: "aboveBar", shape: mark.kind === "radar" ? "square" : "circle", color: COLOR[mark.kind], size: 0.8 });
+        out.push({ id, time: at, position: "aboveBar", shape: markShape(mark), color: COLOR[mark.kind], size: 0.8 });
       }
     });
   }
@@ -1248,7 +1259,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           openMenu(spot);
         }}>
         <div ref={host} role="img" aria-label={label} data-testid="desk-chart-canvas" data-timeframe={data?.timeframe ?? ""}
-          data-bars={data?.bars.length ?? 0} data-marks={allMarks.length} data-studies={drawn.join(",")}
+          data-bars={data?.bars.length ?? 0} data-marks={allMarks.length} data-mark-shapes={allMarks.map(m => `${m.kind}:${markShape(m)}`).join(",")} data-studies={drawn.join(",")}
           data-volume={data && STUDIES[data.timeframe].includes("volume") && isOn(choices, data.timeframe, "volume") ? "on" : "off"}
           data-reference={data && isOn(choices, data.timeframe, "levels") && STUDIES[data.timeframe].includes("levels") ? (data.reference ?? []).length : 0}
           data-alerts={alerts.length} data-drawings={draw.shapes.length} data-selected={editing && selected ? selected : undefined} data-tool={editing && tool ? tool : undefined}
@@ -1350,8 +1361,8 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
       {/* Every kind of mark drawn has its key: the paper P and the momentum book's M on any ticker, whenever drawn. */}
       <p aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <Key color={COLOR.fill} glyph="▲▼">your fills</Key>
-        {paperDrawn && <Key color={COLOR.paper} glyph="P">paper</Key>}
-        {momentumDrawn && <Key color={COLOR.momentum} glyph="M">momentum paper book</Key>}
+        {paperDrawn && <Key color={COLOR.paper} glyph="■P">paper</Key>}
+        {momentumDrawn && <Key color={COLOR.momentum} glyph="■M">momentum paper book</Key>}
         <Key color={COLOR.ping} glyph="●">pings</Key>
         {(id !== "market" || kinds.has("radar")) && <Key color={COLOR.radar} glyph="■">Radar</Key>}
         {kinds.has("tradingview") && <Key color={COLOR.tradingview} glyph="●">TradingView</Key>}
