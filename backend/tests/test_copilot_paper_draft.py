@@ -98,7 +98,7 @@ def test_no_listed_options_or_an_adjusted_contract_is_refused():
 
 # --------------------------------------------------------------------------- the price, and nothing stored
 
-def test_an_open_card_shows_the_ask_the_cost_and_the_buying_power_left_and_stores_nothing(db, market):
+def test_an_open_card_shows_the_ask_the_cost_and_the_buying_power_left_and_stores_nothing(db, market):  # noqa: F811
     paper_book.start_run(db, 10_000, False, NOW)
     market.quotes = {CALL: q(CALL, 3.30, 3.40), "NBIS": q("NBIS", 97.9, 98.1, last=98.0)}
     before = events(db)
@@ -113,7 +113,7 @@ def test_an_open_card_shows_the_ask_the_cost_and_the_buying_power_left_and_store
     assert draft.line(card) == "Paper: buy 2 × NBIS $100 Call 11/20/26"
 
 
-def test_shares_have_no_multiplier_and_no_chain_read(db, market):
+def test_shares_have_no_multiplier_and_no_chain_read(db, market):  # noqa: F811
     paper_book.start_run(db, 10_000, False, NOW)
     market.quotes = {"NBIS": q("NBIS", 97.9, 98.1, last=98.0)}
     chains = chain_of([FRI], [100])
@@ -123,7 +123,7 @@ def test_shares_have_no_multiplier_and_no_chain_read(db, market):
     assert draft.line(card) == "Paper: buy 50 NBIS shares"
 
 
-def test_a_stale_quote_a_closed_market_or_no_account_greys_the_card_with_why(db, market):
+def test_a_stale_quote_a_closed_market_or_no_account_greys_the_card_with_why(db, market):  # noqa: F811
     args = dict(instrument="option", option_type="call", expiry="2026-11-20", strike=100, quantity=1)
     assert opened(db, **args)["issue"] == "Start a paper account first."
     paper_book.start_run(db, 10_000, False, NOW)
@@ -137,14 +137,14 @@ def test_a_stale_quote_a_closed_market_or_no_account_greys_the_card_with_why(db,
     assert "Not enough paper buying power" in opened(db, **{**args, "quantity": 5})["issue"]
 
 
-def test_a_stop_on_the_wrong_side_is_the_models_to_ask_about(db, market):
+def test_a_stop_on_the_wrong_side_is_the_models_to_ask_about(db, market):  # noqa: F811
     paper_book.start_run(db, 10_000, False, NOW)
     market.quotes = {CALL: q(CALL, 3.30, 3.40), "NBIS": q("NBIS", 97.9, 98.1, last=98.0)}
     with pytest.raises(copilot_tools.ToolInputError, match="stop is a stock price below 98"):
         opened(db, instrument="option", option_type="call", expiry="2026-11-20", strike=100, quantity=1, stop=99)
 
 
-def test_close_and_trim_name_his_open_paper_position_at_the_bid(db, market):
+def test_close_and_trim_name_his_open_paper_position_at_the_bid(db, market):  # noqa: F811
     paper_book.start_run(db, 10_000, False, NOW)
     market.quotes = {CALL: q(CALL, 3.30, 3.40), "NBIS": q("NBIS", 97.9, 98.1, last=98.0)}
     position = buy_call(db, qty=5)["filled"]["position_id"]
@@ -166,7 +166,7 @@ def test_close_and_trim_name_his_open_paper_position_at_the_bid(db, market):
         draft._close(db, ask(action="close", option_type="put"), NOW)
 
 
-def test_two_positions_in_the_ticker_ask_which(db, market):
+def test_two_positions_in_the_ticker_ask_which(db, market):  # noqa: F811
     paper_book.start_run(db, 10_000, False, NOW)
     market.quotes = {CALL: q(CALL, 3.30, 3.40), "NBIS": q("NBIS", 97.9, 98.1, last=98.0)}
     buy_call(db, qty=1)
@@ -236,7 +236,7 @@ def test_a_scripted_desk_turn_carries_the_card_as_a_proposal_event():
     assert "Fill on paper" in "".join(e["delta"] for e in found if e["type"] == "text")
 
 
-def test_a_close_says_what_a_working_limit_keeps_open(db, market):
+def test_a_close_says_what_a_working_limit_keeps_open(db, market):  # noqa: F811
     paper_book.start_run(db, 10_000, False, NOW)
     market.quotes = {CALL: q(CALL, 3.30, 3.40), "NBIS": q("NBIS", 97.9, 98.1, last=98.0)}
     position = buy_call(db, qty=5)["filled"]["position_id"]
