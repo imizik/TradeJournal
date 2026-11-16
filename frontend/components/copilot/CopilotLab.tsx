@@ -548,7 +548,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     setDayList(true); setArming(false); setAnswering(false); showCopilot();
     if (dayPhase === "pre") { const day = nyDay(); setStarted(day); try { window.localStorage.setItem(STARTED_KEY, day); } catch { /* this visit only */ } }
   }, [dayList, copilotShown, dayPhase, showCopilot]);
-  useCountOpen("day", on && dayList);
+  const dayShown = dayList && copilotShown; // on screen: not under Arm or the close pass, a closed sheet or the Feed
+  useCountOpen("day", on && dayShown);
   // Your day: the day read sits at the top of Now; the checklist gives way to it.
   const openDayRead = useCallback(() => {
     setDayList(false);
@@ -918,10 +919,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
             {/* Is every source behind the desk live: one dot, a list on a tap. */}
             <div data-use="health" className="contents"><DeskHealthDot /></div>
             {/* The Day button: the day's routine as one checklist, by the New York clock. A phone keeps an icon and one word. */}
-            <button type="button" onClick={toggleDay} aria-pressed={dayList} data-testid="desk-day-button" data-use="day" data-phase={dayPhase ?? "session"}
+            <button type="button" onClick={toggleDay} aria-pressed={dayShown} data-testid="desk-day-button" data-use="day" data-phase={dayPhase ?? "session"}
               title={dayPhase === "pre" ? "Start the day: brief, plans to arm, goals, prep ( D )" : dayPhase === "close" ? "Close the day: your day, to review, paper next to real, rules, goals ( D )" : "The day's checklist ( D )"}
               className={cn("inline-flex min-h-11 min-w-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border px-2 text-xs sm:min-w-11 max-sm:flex-col max-sm:gap-0.5 max-sm:px-1 max-sm:text-[10px] max-sm:leading-none sm:min-h-8 sm:px-2.5",
-                dayToDo ? "border-primary bg-primary font-semibold text-primary-foreground hover:bg-primary/90" : cn("text-muted-foreground hover:text-foreground", dayList && "bg-secondary"))}>
+                dayToDo ? "border-primary bg-primary font-semibold text-primary-foreground hover:bg-primary/90" : cn("text-muted-foreground hover:text-foreground", dayShown && "bg-secondary"))}>
               {dayPhase === "pre" ? <Sunrise size={14} aria-hidden /> : dayPhase === "close" ? <Moon size={14} aria-hidden /> : <CalendarCheck size={14} aria-hidden />}
               {dayPhase === "pre" ? <><span className="sm:hidden">Start</span><span className="max-sm:hidden">Start the day</span></>
                 : dayPhase === "close" ? <><span className="sm:hidden">Close{dayLeft ? ` · ${dayLeft}` : ""}</span><span className="max-sm:hidden">Close the day{dayLeft ? ` · ${dayLeft} to review` : ""}</span></>
@@ -1100,7 +1101,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               change={(plan, text) => { setArming(false); setCommand({ kind: "open", id: plan.investigationId!, text, n: ++sent.current }); showCopilot(); }} />
           )}
           {on && !arming && !closeStep && dayList && (
-            <DayChecklist kind={dayKind} prep={session.data?.prep} plans={plans} book={paper.book} bookFailed={paper.failed} toReview={dayLeft} fill={fill}
+            <DayChecklist kind={dayKind} early={dayPhase === "pre"} prep={session.data?.prep} plans={plans} book={paper.book} bookFailed={paper.failed} toReview={dayLeft} fill={fill}
               onClose={() => setDayList(false)} onArm={() => { setArming(true); showCopilot(); }} onPrep={() => fill(PREP_PROMPT)}
               onDayRead={openDayRead} onReview={() => { setDayList(false); closeDay(); }} onTomorrow={() => fill(CLOSE_PROMPT)} />
           )}

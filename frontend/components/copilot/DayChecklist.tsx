@@ -50,8 +50,10 @@ function Step({ id, n, name, state, run, open, body, done }: {
  * Opening it reads nothing new and sends nothing to the model: it shows what the desk already read (the session, the
  * thread list's plans, the paper book). Only a step that already sends something does, and none here sends a turn.
  */
-export default function DayChecklist({ kind, prep, plans, book, bookFailed, toReview, onClose, onArm, onPrep, onDayRead, onReview, onTomorrow, fill }: {
+export default function DayChecklist({ kind, early = false, prep, plans, book, bookFailed, toReview, onClose, onArm, onPrep, onDayRead, onReview, onTomorrow, fill }: {
   kind: DayKind;
+  /** Before the open on a weekday (Start the day also shows in the session and at weekends). */
+  early?: boolean;
   prep: DeskSession["prep"] | undefined;
   /** The thread list's plans (armed ones are Arm's list). */
   plans: DeskPlan[];
@@ -82,7 +84,7 @@ export default function DayChecklist({ kind, prep, plans, book, bookFailed, toRe
       className="mb-4 space-y-2 rounded-lg border bg-card p-3 text-sm">
       <div className="flex items-baseline gap-2">
         <h2 className="font-semibold text-foreground">{kind === "start" ? "Start the day" : "Close the day"}</h2>
-        <span className="text-xs text-muted-foreground">{kind === "start" ? "before the open" : "after the close"}</span>
+        <span className="text-xs text-muted-foreground">{kind === "close" ? "after the close" : early ? "before the open" : "today"}</span>
         <button type="button" onClick={onClose} className="-my-2 ml-auto min-h-11 px-1 text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Close</button>
       </div>
       {kind === "start" ? (
