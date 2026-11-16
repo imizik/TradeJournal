@@ -195,7 +195,8 @@ export function Fold({ id, compact = false, children }: { id: string; compact?: 
         <button type="button" data-testid={`fold-now-${id}`} onClick={() => void folds.setFolded([id], false)} title={`${label} is folded; shown for now`}
           className="shrink-0 text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground">Keep showing</button>
       )}
-      <div ref={box} data-use={id} style={{ display: hidden ? "none" : "contents" }}>{children}</div>
+      {/* Classes, not an inline style: the phone's ticker view hides the book column's other sections by CSS. */}
+      <div ref={box} data-use={id} className={hidden ? "hidden" : "contents"}>{children}</div>
     </>
   );
 }

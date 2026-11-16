@@ -101,7 +101,8 @@ async function open(page: Page, { width = 1440, height = 900, roll = rollReply }
     rolls.push(url.search);
     return route.fulfill(roll(url.searchParams));
   });
-  page.on("request", request => { if (request.method() !== "GET") writes.push(request); });
+  // The desk's quiet use counts (POST /copilot/desk/use, piece ids only) are not a write about any order or position.
+  page.on("request", request => { if (request.method() !== "GET" && !request.url().includes("/copilot/desk/use")) writes.push(request); });
   await page.goto("/copilot-lab");
   await expect(page.getByTestId("desk-book")).toBeVisible();
   return writes;
