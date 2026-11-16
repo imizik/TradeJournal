@@ -38,7 +38,8 @@ chose to be told the minute it turns, and the first-hour window would be over by
 stock a session across setup kinds and versions: a later one waits for the digest. When the event has a setup card
 (``RadarSetup``, ``RADAR_SETUP_CARDS=true``) the ping is the card (``radar_setup.card_text``), it skips the
 ``RADAR_ALERTS_LEAD_UNSEEN`` Movers demotion (its value is the trigger, not novelty), and on Telegram it also carries
-Plan it (``telegram_replies.plan_button``) on its own row after the ratings. A card ping is policy kind ``radar_setup``,
+Plan it (``telegram_replies.plan_button``) on its own row after the ratings, with Paper it (``engine/telegram_paper.py``)
+beside it when the card names a candidate contract. A card ping is policy kind ``radar_setup``,
 with its own daily budget (``PING_BUDGET_RADAR_SETUP``, default 4) ranked just above ``radar_event``, so strong movers
 and setups never spend each other's budget; a setup event without a card stays ``radar_event``. ``RADAR_SETUP_SIDES``
 is ``both`` (default) or ``up``: with ``up`` a down-side setup event (a put idea) keeps its card and paper record but
@@ -241,12 +242,15 @@ def desk_path(event_id: str, symbol: str | None) -> str:
     return phone.desk_link(event_path(event_id), symbol=symbol, radar=event_id if symbol else None, feed=f"radar:{event_id}")
 
 
-def reply_buttons(alert_id, setup_id=None) -> tuple[tuple[str, str], ...]:
-    """A single's Telegram buttons: the four ratings, then Plan it when the event has a setup card. ``telegram.keyboard``
-    puts more than three buttons two to a row and ``phone.send`` adds Why? last, so the four ratings fill two rows and
-    Plan it shares the third with Why? only: a rating tap (``telegram_replies._mark``) never takes Plan it with it."""
+def reply_buttons(alert_id, setup_id=None, paper: tuple[str, str] | None = None) -> tuple[tuple[str, str], ...]:
+    """A single's Telegram buttons: the four ratings, then Plan it when the event has a setup card, and Paper it
+    (``telegram_paper.radar_button``) when that card names a contract. ``telegram.keyboard`` puts more than three
+    buttons two to a row and ``phone.send`` adds Why? last, so the four ratings fill two rows and Plan it (and Paper it)
+    share the third with Why? only: a rating tap (``telegram_replies._mark``) never takes them with it."""
     buttons = telegram_replies.rating_buttons(alert_id)
-    return buttons + (telegram_replies.plan_button(setup_id),) if setup_id is not None else buttons
+    if setup_id is None:
+        return buttons
+    return buttons + (telegram_replies.plan_button(setup_id),) + ((paper,) if paper else ())
 
 
 def _setup(db: Session, event_id: str) -> RadarSetup | None:
@@ -449,6 +453,8 @@ class RadarAlerts:
                 self._settle(db, alert)
                 db.commit()
                 return
+            from app.engine import telegram_paper  # here: the paper book's imports reach back to this module
+            paper = telegram_paper.radar_button(db, setup_id) if setup_id is not None and not digest else None
             image = ping_images.picture(ping_images.radar(alert.title, self.store, alert.event_id, alert.session_date, now)
                                         if self.store is not None and alert.attempts == 0 and not digest else None)  # a retry goes as text
             alert.attempts += 1
@@ -461,7 +467,7 @@ class RadarAlerts:
                         alert.title, alert.body + ticket.append, kind=kind, image=image, priority=4, tags=("satellite",),
                         path=desk_path(alert.event_id, symbol), direct_click=True,
                         more=tuple((label, event_path(alert.event_id, rating)) for label, rating in RATING_ACTIONS),
-                        buttons=reply_buttons(alert.id, setup_id))  # all four ratings; ntfy keeps RATING_ACTIONS
+                        buttons=reply_buttons(alert.id, setup_id, paper))  # all four ratings; ntfy keeps RATING_ACTIONS
             except phone.SendError as exc:
                 if not _surely_unsent(exc):
                     alert.delivery, alert.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."

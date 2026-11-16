@@ -660,7 +660,9 @@ still pending or open after its session is `unresolved`. It makes at most one
 batched quote request a minute and never touches the pass.
 
 **Plan it.** On Telegram a card ping carries Plan it on its own row with Why?,
-under the four ratings (so a rating tap never removes it). One tap
+under the four ratings (so a rating tap never removes it), and, while Copilot Lab
+is on and the card names a contract, **📝 Paper it** beside it: one paper market
+order of that contract (docs/copilot-lab.md, Paper it from the phone). One tap
 (`radar_setup_plan.plan`) checks a fresh quote is still on the idea's side of
 the invalidation, then saves the card as a plan in the journal (a Copilot plan
 on the default account, long calls or puts, the candidate contract, origin

@@ -450,8 +450,13 @@ def _note(body: dict) -> str | None:
     return text or None
 
 
-def open_order(db: Session, body: dict, now: float, preview: bool = False) -> dict:
-    """Open a paper position at the live quote (``preview``: what it would fill at, nothing stored)."""
+PHONE_UNANSWERED = "Not answered (phone)."
+
+
+def open_order(db: Session, body: dict, now: float, preview: bool = False, phone: bool = False) -> dict:
+    """Open a paper position at the live quote (``preview``: what it would fill at, nothing stored). ``phone``: Paper it
+    on a Telegram ping (``engine/telegram_paper.py``), where there is no checklist to tick: his tick-box rules are kept
+    as not answered (``ask``, reason ``PHONE_UNANSWERED``), never as broken. The fill carries its checklist (``rules``)."""
     run = current_run(db, lock=not preview)
     if run is None:
         raise PaperError("Start a paper account first.", 409)
@@ -484,8 +489,11 @@ def open_order(db: Session, body: dict, now: float, preview: bool = False) -> di
     data = {**spec, "quantity": qty, "per_share": per, "cash": cash, "legs_filled": fill["legs"], "stock": stock,
             "note": note, "stop": stop, "target": target, **origin}
     if not preview:  # his rules at the fill: a broken one is recorded, never a refusal
-        data["rules"] = _rules_at(db, trading_rules.current(db), trading_rules.answers_of(body.get("rule_answers")), spec,
-                                  need, stop, fill["quoted_at"], events, run)
+        answers = None if phone else trading_rules.answers_of(body.get("rule_answers"))
+        data["rules"] = _rules_at(db, trading_rules.current(db), answers, spec, need, stop, fill["quoted_at"], events, run)
+        for rule in data["rules"]:
+            if phone and rule["status"] == "ask":
+                rule["reason"] = PHONE_UNANSWERED
     result = {"label": spec["label"], "quantity": qty, "per_share": per, "cash": cash, "quoted_at": fill["quoted_at"],
               "legs": fill["legs"], "stock": stock, "buying_power_after": round(book["buying_power"] - need, 2),
               "buying_power": book["buying_power"], "need_each": round(need / qty, 4)}
@@ -494,7 +502,7 @@ def open_order(db: Session, body: dict, now: float, preview: bool = False) -> di
     position_id = uuid.uuid4()
     if not _store(db, run, position_id, "open", key, fill["quoted_at"], data):
         return {"filled": None, "duplicate": True}
-    return {"filled": {**result, "position_id": str(position_id)}}
+    return {"filled": {**result, "position_id": str(position_id), "rules": data["rules"]}}
 
 
 def close_order(db: Session, body: dict, now: float, preview: bool = False) -> dict:

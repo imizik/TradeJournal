@@ -839,3 +839,23 @@ def test_a_group_move_names_no_ticker_so_its_desk_link_is_the_feed_card_alone(mo
     assert radar_alerts.desk_path("g1", None) == "/copilot-lab?feed=radar%3Ag1"
     monkeypatch.delenv("COPILOT_ENABLED")
     assert radar_alerts.desk_path("g1", None) == "/radar?event=g1"
+
+
+def test_with_the_lab_on_a_card_with_a_contract_also_carries_paper_it_beside_plan_it(engine, monkeypatch):
+    from app.engine import telegram
+    monkeypatch.setenv("RADAR_SETUP_CARDS", "true")
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    sent = []
+    monkeypatch.setattr(telegram, "publish", lambda title, body, **kw: sent.append(kw) or "9")
+    event = _reversal()
+    setup = _card(engine, event)
+    alerts = RadarAlerts(engine, clock=Clock(at(22)))
+    [row] = alerts.record([event])
+    alerts.deliver()
+    [kw] = sent
+    assert kw["buttons"] == (*telegram_replies.rating_buttons(row.id), ("Plan it", f"rp:{setup.id}"),
+                             ("📝 Paper it", f"pp:r:{setup.id.hex}"), ("Why?", "ask:radar_setup"))
+    keyboard = telegram.keyboard(buttons=kw["buttons"])["inline_keyboard"]
+    assert [b["text"] for b in keyboard[-1]] == ["Plan it", "📝 Paper it", "Why?"]
