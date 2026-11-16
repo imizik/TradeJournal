@@ -16,7 +16,8 @@ import { cn } from "@/lib/utils";
  * to pick a contract without opening Robinhood. Read only: ``GET /copilot/chain`` (Tradier through the options feed),
  * asked again every 15 s while the tab is open and visible in the regular session, never outside it. The price line
  * moves with the desk's shared ticker (``useDeskTicks``). Tapping a contract opens a small row: Check it (Check a call,
- * pre-filled), Plan it (the plan flow) and Put on ticket (a saved plan's ticket, copy to Robinhood). Nothing here
+ * pre-filled), Plan it (the plan flow) and Put on ticket (a saved plan's ticket, copy to Robinhood; with no plan yet, the
+ * plan flow for this contract, whose confirmed plan's ticket then opens on it: ``planPick``). Nothing here
  * places, sends or stages an order. Contracts on the desk's unusual-options list (``DeskUnusual``) carry a small mark; a
  * Feed row picked there (``focus``) opens here on its expiry with the contract selected, the strike window widened to it.
  * Make it a spread turns a picked contract into the long leg of a same-expiry vertical: the next contract tapped on the
@@ -122,6 +123,35 @@ const chipDate = (e: Expiry) => { const [, m, d] = e.date.split("-"); return `${
 export const contractLabel = (p: ChainPick) => `${p.symbol} $${strikeText(p.strike)} ${kindWord(p.side)} ${shortDate(p.expiry)}`;
 /** As a Discord call reads, for Check a call: "NBIS 11/14 105C". */
 export const callText = (p: ChainPick) => { const [, m, d] = p.expiry.split("-"); return `${p.symbol} ${Number(m)}/${Number(d)} ${strikeText(p.strike)}${p.side === "call" ? "C" : "P"}`; };
+
+/**
+ * The contract a plan was started on, read back from the plan flow's opening line, so the confirmed plan's ticket opens
+ * on it with no second pick: the Chain's Plan it or Put on ticket ("NBIS $100 Call 11/13/26 (mark …", a spread's "NBIS
+ * $95/$105 Call Debit Spread 11/13/26") and a checked call's Plan it ("NBIS 105 call 11/13", its year the one nearest
+ * ``today``). Null when the line names no one contract of ``symbol`` plainly.
+ */
+export function planPick(text: string | null | undefined, symbol: string, today: string): ChainPick | null {
+  if (!text || !symbol) return null;
+  const sym = symbol.replace(/[.-]/g, "\\$&"), num = String.raw`(\d+(?:\.\d+)?)`;
+  const day = (y: number, m: string, d: string) => `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  const spread = new RegExp(String.raw`(?:^|\s)${sym} \$${num}/\$${num} (Call|Put) (Debit|Credit) Spread (\d{1,2})/(\d{1,2})/(\d{2})\b`).exec(text);
+  if (spread) {
+    const [, a, b, kind, type, m, d, y] = spread;
+    const side: ChainSide = kind === "Call" ? "call" : "put";
+    const low = Math.min(+a, +b), high = Math.max(+a, +b);
+    const [near, far] = side === "call" ? [low, high] : [high, low];
+    const [long, short] = type === "Debit" ? [near, far] : [far, near]; // a debit buys the strike nearer the money
+    return { symbol, expiry: day(2000 + Number(y), m, d), strike: long, side, short };
+  }
+  const one = new RegExp(String.raw`(?:^|\s)${sym} \$${num} (Call|Put) (\d{1,2})/(\d{1,2})/(\d{2})\b`).exec(text);
+  if (one) return { symbol, expiry: day(2000 + Number(one[5]), one[3], one[4]), strike: +one[1], side: one[2] === "Call" ? "call" : "put" };
+  const checked = new RegExp(String.raw`(?:^|\s)${sym} ${num} (call|put) (\d{1,2})/(\d{1,2})\b`).exec(text);
+  if (!checked) return null;
+  const year = Number(today.slice(0, 4)), at = Date.parse(today);
+  const expiry = [year - 1, year, year + 1].map(y => day(y, checked[3], checked[4]))
+    .sort((x, y) => Math.abs(Date.parse(x) - at) - Math.abs(Date.parse(y) - at))[0];
+  return Number.isNaN(Date.parse(expiry)) ? null : { symbol, expiry, strike: +checked[1], side: checked[2] as ChainSide };
+}
 
 type Column = { key: string; label: string; title: string; show(c: Cell): string };
 const COL: Record<string, Column> = {
@@ -496,7 +526,7 @@ function Actions({ pick, cell, plans, onCheck, onPlan, onTicket, onClose, buildi
             <ModeMark mode="real" />
             <button type="button" className={button} onClick={() => onCheck(callText(pick))}>Check it</button>
             <button type="button" className={button} onClick={() => onPlan(pick, line)}>Plan it</button>
-            <button type="button" className={button} disabled={!plan} onClick={() => plan && onTicket(plan.investigation_id, pick)}>Put on ticket</button>
+            <button type="button" className={button} onClick={() => plan ? onTicket(plan.investigation_id, pick) : onPlan(pick, line)}>Put on ticket</button>
             <button type="button" className={button} onClick={onSpread}>Make it a spread</button>
             <button type="button" onClick={onClose} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Close</button>
           </div>
@@ -505,7 +535,7 @@ function Actions({ pick, cell, plans, onCheck, onPlan, onTicket, onClose, buildi
       )}
       <p className="text-[11px] text-muted-foreground">
         {plan ? `Put on ticket opens your saved ${pick.symbol} plan's ticket with this contract, to copy into Robinhood. Nothing is sent from here.`
-          : `A ticket opens from a saved plan: there is no armed ${pick.symbol} ${pick.side} plan yet, so Plan it first.`}
+          : `No armed ${pick.symbol} ${pick.side} plan yet, so Put on ticket starts one for this contract, as Plan it does. Confirm the plan and Open its ticket has this contract on it, ready to copy. Nothing is sent from here.`}
       </p>
     </div>
   );
@@ -597,14 +627,14 @@ function SpreadActions({ long, short, longCell, shortCell, plans, spot, onPlan, 
       <div role="group" aria-label="Real: copy to Robinhood" data-testid="chain-real-actions" className="flex flex-wrap items-center gap-2">
         <ModeMark mode="real" />
         <button type="button" className={button} onClick={() => onPlan(pick, line)}>Plan it</button>
-        <button type="button" className={button} disabled={!plan} onClick={() => plan && onTicket(plan.investigation_id, pick)}>Put on ticket</button>
+        <button type="button" className={button} onClick={() => plan ? onTicket(plan.investigation_id, pick) : onPlan(pick, line)}>Put on ticket</button>
         <button type="button" onClick={onBack} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Back to one contract</button>
         <button type="button" onClick={onClose} className="inline-flex min-h-11 items-center rounded-md px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">Close</button>
       </div>
       <PaperGroup><PaperButton key={label} order={{ instrument: "spread", symbol: long.symbol, option_type: kind, expiry: long.expiry, long_strike: long.strike, short_strike: short.strike }} label="Paper" /></PaperGroup>
       <p className="text-[11px] text-muted-foreground">
         {plan ? `Put on ticket opens your saved ${long.symbol} plan's ticket with this spread, both legs and the net price, to copy into Robinhood. Nothing is sent from here.`
-          : `A ticket opens from a saved plan: there is no armed ${long.symbol} ${bullish ? "long (call)" : "short (put)"} plan for this ${bullish ? "bullish" : "bearish"} spread yet, so Plan it first.`}
+          : `No armed ${long.symbol} ${bullish ? "long (call)" : "short (put)"} plan for this ${bullish ? "bullish" : "bearish"} spread yet, so Put on ticket starts one for this spread, as Plan it does. Confirm the plan and Open its ticket has both legs on it, ready to copy. Nothing is sent from here.`}
       </p>
     </div>
   );

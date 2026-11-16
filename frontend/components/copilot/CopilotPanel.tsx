@@ -956,6 +956,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     else if (command.kind === "home") startNew("");
     else if (command.kind === "link") enter(command.link);
     else if (command.kind === "now") openNow();
+    else if (command.here) void send(command.text);
     else { setSymbol(""); void send(command.text, ""); }
   }, [desk?.command, busy, status?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps -- each command acts once
 

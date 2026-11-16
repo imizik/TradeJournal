@@ -19,7 +19,9 @@ export type DeskTab = "threads" | "thread" | "context";
 /** What the desk asks the conversation to do: open a saved investigation (with ``text`` in the box, unsent), send one
  * prompt across everything, put a question in the message box unsent (the decision bar's Ask why), or leave the open
  * conversation saved and go back to Main (``home``). */
-export type DeskCommand = { kind: "open"; id: string; n: number; text?: string } | { kind: "ask"; text: string; n: number } | { kind: "fill"; text: string; n: number } | { kind: "home"; n: number }
+export type DeskCommand = { kind: "open"; id: string; n: number; text?: string }
+  /** ``here``: in the open conversation as its message box would send it (⌘K's ask), else across everything. */
+  | { kind: "ask"; text: string; n: number; here?: boolean } | { kind: "fill"; text: string; n: number } | { kind: "home"; n: number }
   /** A desk link the desk follows in place (``deskLinkIn``): a new conversation on it, as a fresh load of it starts. */
   | { kind: "link"; link: PanelLink; n: number }
   /** Now in place: today's Main chat, as the desk's bare address opens it. */
