@@ -102,7 +102,7 @@ export type DeskBook = {
   live?: "matched" | "new" | "not_on_robinhood";
   quantity?: number | null;
   mark?: number | null;
-  /** Its move today in dollars at the read, by the account line's own formula (``robinhood_book.day_move``): only while
+  /** Its move today in dollars at the read, by the account line's own formula (the feed's ``day_move``, docs/robinhood-read-feed.md): only while
    * live and its account's change today is known; else null, never zero. */
   day_change?: number | null;
   account?: { label: string; masked: string };
