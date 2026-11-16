@@ -543,10 +543,28 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   }, [showBook]);
   // Folded pieces other than the centre's tabs (those have their own commands, which show a folded tab for now).
   const foldedPieces = useMemo(() => [...PIECE.keys()].filter(id => !id.startsWith("tab.") && use.folded(id)), [use]);
+  // A place on the book side (or the top bar), from the palette or its key: the phone's Book view comes forward, a piece he
+  // folded away shows for now, and the place scrolls into view, opened (``click``) when it is a fold or an editor.
+  const reveal = useCallback((pieces: string[], where: string | string[], click = false) => {
+    for (const piece of pieces) showNow(piece);
+    showBook();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const target = (Array.isArray(where) ? where : [`[data-testid="${where}"]`]).map(q => desk.current?.querySelector<HTMLElement>(q)).find(Boolean);
+      if (!target) return;
+      target.scrollIntoView({ block: "nearest" });
+      if (click && target.getAttribute("aria-expanded") !== "true") target.click();
+      else target.focus({ preventScroll: true });
+    }));
+  }, [showNow, showBook]);
+  // Replay a past day; Redo opens the same screen on its "Redo my worst" list.
+  const openReplay = useCallback((redoList = false) => {
+    setReplay(true);
+    if (redoList) setTimeout(() => document.querySelector<HTMLElement>('[data-testid="redo-worst"]')?.scrollIntoView({ block: "center" }), 600);
+  }, []);
   const commands = useMemo<PaletteCommand[]>(() => [
     { id: "plan", name: "Plan a trade", hint: "A new plan; you name the symbol. Nothing is sent.", key: "N", run: planTrade },
-    { id: "week", name: "Review my week", hint: "One turn: planned vs unplanned, follow-through, exits", run: () => actions.ask(WEEK_REVIEW_CONTEXT) },
-    { id: "matters", name: "What matters right now?", hint: "One turn across your positions, watches and investigations", run: () => actions.ask(WHAT_MATTERS_PROMPT) },
+    { id: "week", name: "Review my week", hint: "Asks the copilot now: planned vs unplanned, follow-through, exits", run: () => actions.ask(WEEK_REVIEW_CONTEXT) },
+    { id: "matters", name: "What matters right now?", hint: "Asks the copilot now, across your positions, watches and investigations", run: () => actions.ask(WHAT_MATTERS_PROMPT) },
     ...(dayPhase === "pre" ? [
       { id: "arm", name: "Arm today's plans", hint: "Each armed plan: still good, change or drop. Nothing is sent.", run: () => { setArming(true); showCopilot(); } },
       { id: "prep", name: "Prep the day", hint: "Puts a prep question in the box, unsent", run: () => fill(PREP_PROMPT) }] : []),
@@ -557,6 +575,16 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     { id: "go-copilot", name: "Copilot", hint: "The conversation and its message box", key: "/", run: focusCopilot },
     { id: "go-book", name: "Book", hint: "Your positions and what needs you", key: "B", run: focusBook },
     { id: "go-threads", name: "Threads", hint: "The thread list and previous days", key: "[", run: toggleThreads },
+    { id: "go-now", name: "Now", hint: "Today's Main chat in the copilot", run: () => { goNow(true); showCopilot(); } },
+    // The book side's places: each also has a button where it lives.
+    { id: "go-paper", name: "Paper book", hint: "Paper positions, orders and score. Not real money.", key: "P", run: () => reveal(["paper"], "desk-paper") },
+    { id: "go-rules", name: "My rules", hint: "Write or change your trading rules", run: () => reveal(["paper", "paper.rules"], "rules-toggle", true) },
+    { id: "go-goals", name: "This week's goals", hint: "Set or change one or two goals for the week", run: () => reveal(["paper", "paper.goals"], "goals-set", true) },
+    { id: "go-watching", name: "Watchlist", hint: "Your watched names: add, import, plan", key: "W", run: () => reveal(["watching"], "desk-watching") },
+    { id: "go-note", name: "Note on this position", hint: "A one-line note on the selected position", run: () => reveal([], ['[data-desk-book] li[data-selected] [data-testid="desk-note-button"]', '[data-desk-book] [data-testid="desk-note-button"]'], true) },
+    { id: "go-health", name: "What feeds the desk", hint: "Is every source live: Robinhood, prices, fill emails, Radar", run: () => desk.current?.querySelector<HTMLElement>('[data-testid="desk-health"]')?.click() },
+    { id: "go-replay", name: "Replay a past day", hint: "Practice on a past day's bars. Not live, not real money.", key: "R", run: () => openReplay() },
+    { id: "go-redo", name: "Redo one of my trades", hint: "Re-trade a past real trade in replay, then compare", run: () => openReplay(true) },
     { id: "desk-use", name: "How I use the desk", hint: "What you use most and least; fold away what you don't", run: openUse },
     // A piece he folded away is still one command away: it shows for now, where it lives.
     ...foldedPieces.map(id => ({ id: `fold-${id}`, name: PIECE.get(id)!.label, hint: "Folded · shows it for now", run: () => {
@@ -565,7 +593,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       if (area === "Left") showBook(); else if (area === "Centre") { setCentreTab("chart"); showCentre(); } else if (area === "Right") showFeed();
       requestAnimationFrame(() => document.querySelector(`[data-use="${id}"]`)?.scrollIntoView({ block: "nearest" }));
     } })),
-  ], [actions, dayPhase, fill, planTrade, closeDay, openCentre, showFeed, focusCopilot, focusBook, toggleThreads, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre]);
+  ], [actions, dayPhase, fill, planTrade, closeDay, openCentre, showFeed, focusCopilot, focusBook, toggleThreads, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre, goNow, reveal, openReplay]);
 
   // J / K walk the conversations the thread list shows, subthreads included, in its order.
   const [walk, setWalk] = useState<string[]>([]);
@@ -613,12 +641,15 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         if (tab) { event.preventDefault(); countTap("keys"); openCentre(tab.id); }
         else if (key === "f") { event.preventDefault(); countTap("keys"); if (feedKept.current) showCopilot(); else showFeed(); }
         else if (key === "b") { event.preventDefault(); countTap("keys"); focusBook(); }
+        else if (key === "p") { event.preventDefault(); countTap("keys"); reveal(["paper"], "desk-paper"); }
+        else if (key === "w") { event.preventDefault(); countTap("keys"); reveal(["watching"], "desk-watching"); }
+        else if (key === "r") { event.preventDefault(); countTap("keys"); openReplay(); }
         else if (event.key === "/") { event.preventDefault(); countTap("keys"); focusCopilot(); }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [on, replay, step, planTrade, toggleThreads, openCentre, showFeed, focusBook, showCopilot, focusCopilot]);
+  }, [on, replay, step, planTrade, toggleThreads, openCentre, showFeed, focusBook, showCopilot, focusCopilot, reveal, openReplay]);
 
   // The open symbol's row in the thread list (a position or a plan): its close question and horizon, as the list shows them.
   const deskRow = useCallback((symbol: string | null | undefined) =>

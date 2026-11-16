@@ -1433,7 +1433,12 @@ words, up to the newest 50 matches, from `GET /copilot/investigations?q=`, so a
 closed or old thread stays reachable) and Commands (Plan a trade, Review
 my week, What matters right now?, the day's phase commands: Arm today's plans
 and Prep the day before 9:30 on a weekday, Close the day after 16:00; then every place on the desk with its key:
-Chart, Chain, Ticket, Check a call, Grid, Feed, Copilot, Book, Threads). Type to filter, arrows
+Chart, Chain, Ticket, Check a call, Grid, Feed, Copilot, Book, Threads; then Now, and the book side's places, each of
+which also has its own button where it lives: Paper book, My rules, This week's goals, Watchlist, Note on this position,
+What feeds the desk (the health list), Replay a past day and Redo one of my trades; How I use the desk last). A command
+that spends a model call says "Asks the copilot now" in its hint. A book-side place brings the phone's Book view
+forward, shows a piece folded away (§ How I use the desk) for now, scrolls to it and opens it when it is an editor (rules,
+goals, the note line). Type to filter, arrows
 and Enter to choose, Escape or a click outside to close. A thread opens through
 the list's own path (in place, or its deep link); Plan a trade opens the same
 unsent "Plan a trade: " link as the desk bar's Plan a trade; Review my week and What
@@ -1460,7 +1465,7 @@ prices are marked: the book shows **Updating…** with its P&L dimmed and the to
 a thread header's price block is dimmed until its read lands; "Since you entered" keeps its own as-of time. Only the
 very first load shows "Reading positions…". While not typing in a field: J / K open the next or previous
 conversation as the list shows it (those under Main, then each ticker's
-subthreads when shown, else its newest; folded ones are skipped), N opens Plan a trade (not while the message box holds unsent words), `[` opens or closes the thread list's drawer, a place's key opens it (**C** Chart, **O** Chain, **T** Ticket, **L** Check a call, **G** Grid, **F** the Feed and back to the copilot, **B** the Book, **/** the copilot's message box), and Escape closes the drawer, else the Feed's drawer, else the copilot's sheet. No desk key fires in an
+subthreads when shown, else its newest; folded ones are skipped), N opens Plan a trade (not while the message box holds unsent words), `[` opens or closes the thread list's drawer, a place's key opens it (**C** Chart, **O** Chain, **T** Ticket, **L** Check a call, **G** Grid, **F** the Feed and back to the copilot, **B** the Book, **P** the paper book, **W** the watchlist, **R** Replay, **/** the copilot's message box), and Escape closes the drawer, else the Feed's drawer, else the copilot's sheet. No desk key fires in an
 input, text area or editable field, ⌘K included, and no other browser shortcut
 is taken (**/** is Firefox's quick find outside a field; on the desk it goes to the message box). A one-line key hint sits at the foot of the thread list on a wide
 screen. Browser proof: `frontend/e2e/copilot-desk-keys.spec.ts` (palette,
