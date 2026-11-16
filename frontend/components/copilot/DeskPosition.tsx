@@ -112,9 +112,11 @@ type Open = "levels" | "trim" | "note" | null;
  * ``plan`` its saved plan (null: none), ``levels`` the plan lines the chart drew (for the What if…, when there is no
  * ``plan`` to edit), ``earnings`` the next report's date and ``onPlan`` the plan flow for a symbol.
  */
-export function DeskPosition({ row, rows, fallback = null, change = null, plan, levels = {}, earnings = null, onPlan }: {
+export function DeskPosition({ row, rows, fallback = null, change = null, plan, levels = {}, earnings = null, onPlan, ordersLive = false }: {
   row: DeskThread; rows: readonly DeskThread[]; fallback?: { last: number; at: number } | null; change?: number | null;
   plan: PanelPlan | null; levels?: PlanLevels; earnings?: string | null; onPlan?(symbol: string): void;
+  /** The Robinhood feed is live: its working orders on this position show (none from a stale or signed-out read). */
+  ordersLive?: boolean;
 }) {
   const book = row.book;
   const symbol = row.symbol ?? "";
@@ -148,7 +150,7 @@ export function DeskPosition({ row, rows, fallback = null, change = null, plan, 
   const closing = standing?.closing ?? [];
   const side = planSide({ entry: current?.entry, stop: current?.stop }, { option: book.option, sign: book.tick?.sign });
   const trade = rowTrade(row);
-  const working = (book.orders ?? []).filter(o => o.working);
+  const working = ordersLive ? (book.orders ?? []).filter(o => o.working) : [];
 
   const toggle = (next: Open) => { setSaid(null); setOpen(open === next ? null : next); };
   const openTrim = () => { setTrimText(half ? String(half) : ""); toggle("trim"); };

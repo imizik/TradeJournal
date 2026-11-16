@@ -47,7 +47,7 @@ import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { WHAT_MATTERS_PROMPT, copilotLabHref, mainChatLabel, type FeedLink, type InvestigationSummary } from "@/lib/copilot";
 import { useKept } from "@/components/copilot/DeskMemory";
-import { afterClose, answerSymbol, deskLinkIn, deskNeeds, refreshRobinhood, type DeskLive, deskSymbolThread, nyDay, readOpened, saveFollow, saveHorizon, saveOpened, threadInUrl, toReview, type DeskCommand, type DeskPlan, type DeskThreads, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
+import { afterClose, answerSymbol, deskLinkIn, deskNeeds, liveOn, refreshRobinhood, type DeskLive, deskSymbolThread, nyDay, readOpened, saveFollow, saveHorizon, saveOpened, threadInUrl, toReview, type DeskCommand, type DeskPlan, type DeskThreads, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import { DeskAccounts, activeAccount, forAccount } from "@/components/copilot/DeskAccounts";
 import DeskHealthDot from "@/components/copilot/DeskHealth";
@@ -1005,7 +1005,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 onPlaced={symbol => { setTicketFor(null); setTicketClose(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
                 : <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events} onReplay={() => setReplay(true)}
                   guides={scanLines && scanLines.symbol === centreSymbol ? scanLines.lines : undefined}
-                  paper={centrePaper} paperOrders={paper.book?.orders} onPlan={planWatched} />}
+                  paper={centrePaper} paperOrders={paper.book?.orders} onPlan={planWatched} ordersLive={liveOn(booked.live)} />}
             </div>
           </section>
         )}

@@ -485,7 +485,7 @@ function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
  * its book row does not carry (the stock against SPY today, time held: P&L, the distance to the stop and expiry are the
  * row's) and, folded, what touched the thread. No symbol: QQQ with the owner's fills and pings.
  */
-export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], earnings = null, guides, onReplay, paper = NO_PAPER, paperOrders, onPlan }: {
+export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], earnings = null, guides, onReplay, paper = NO_PAPER, paperOrders, onPlan, ordersLive = false }: {
   symbol: string | null; thread: DeskThreadRef | null; row: DeskThread | null; sparks: DeskSparks | null; actions?: DeskChartActions;
   /** Opens Replay: paper trading on a past day (``DeskReplay``). */
   onReplay?(): void;
@@ -493,6 +493,8 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
   paper?: readonly PaperPosition[]; paperOrders?: PaperWorkingOrder[];
   /** The plan flow for a held position with no saved plan (the panel's Plan it). */
   onPlan?(symbol: string): void;
+  /** The Robinhood feed is live: the panel shows the position's working orders, as the book does. */
+  ordersLive?: boolean;
   /** The desk's rows, so a held option's standing can tell a lone long option from one leg of a structure. */
   rows?: DeskThread[];
   /** Earnings tags (``useDeskEvents``): a held option's header says when a report falls inside its life. */
@@ -555,7 +557,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
       {/* The Position panel sits under the chart: the chart comes first. A held position's figures (an option's full
           standing) and every button that manages it; its book row keeps only the short standing line. A paper position
           in this ticker has its own panel, marked PAPER. */}
-      {row?.book && <DeskPosition key={row.key} row={row} rows={rows} plan={plan} levels={chartLevels} change={change} onPlan={onPlan}
+      {row?.book && <DeskPosition key={row.key} row={row} rows={rows} plan={plan} levels={chartLevels} change={change} onPlan={onPlan} ordersLive={ordersLive}
         fallback={reading?.state === "ok" && reading.reading ? { last: reading.reading.last, at: reading.reading.at } : sparkPrice(sparks, symbol)}
         earnings={symbol ? earnings?.rows[symbol]?.date ?? null : null} />}
       {paper.map(p => <DeskPaperPosition key={p.id} position={p} orders={paperOrders} />)}
