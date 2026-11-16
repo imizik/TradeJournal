@@ -131,7 +131,7 @@ test("⌘K opens the palette: type to filter, Enter opens the thread, Escape and
   // The thread list's rows in list order, tickers first and Main's Radar hits after (pinned rows are the commands), then the commands.
   // The threads, the desk's commands, then every place on the desk with its key.
   await expect(options).toHaveText([/^NBIS/, /^CRWV/, /^APLD/, /^MU/, /^Plan a trade/, /^Review my week/, /^What matters right now\?/,
-    /^Chart.*C$/, /^Chain.*O$/, /^Ticket.*T$/, /^Check a call.*L$/, /^Grid.*G$/, /^Feed.*F$/, /^Copilot.*\/$/, /^Book.*B$/, /^Threads.*\[$/]);
+    /^Chart.*C$/, /^Chain.*O$/, /^Ticket.*T$/, /^Check a call.*L$/, /^Grid.*G$/, /^Feed.*F$/, /^Copilot.*\/$/, /^Book.*B$/, /^Threads.*\[$/, /^How I use the desk/]);
   await expect(options.first()).toContainText("1.0% from invalidation 92.30");
   await expect(options.first()).toContainText("+$180.00");
   await page.keyboard.type("crw");

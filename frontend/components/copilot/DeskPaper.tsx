@@ -170,7 +170,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
 
   if (!open) {
     const button = (
-      <button type="button" data-testid="paper-button" data-source={source} disabled={!order} aria-describedby={!order && why ? `paper-why-${ideaId ?? source}` : undefined}
+      <button type="button" data-testid="paper-button" data-use="ticket.paper" data-source={source} disabled={!order} aria-describedby={!order && why ? `paper-why-${ideaId ?? source}` : undefined}
         onClick={() => { const n = quantity && quantity > 0 ? quantity : 1; setQty(String(n)); setType("market"); check(n); }}
         title={!order && why ? why : "Fill this on paper at the live quote, or place a paper limit: no money, nothing sent"}
         className={cn(BUTTON, "border-amber-400/60 text-amber-200")}>{label}</button>
@@ -480,7 +480,7 @@ export default function DeskPaper({ book, failed, symbol, top = null }: { book: 
       <h2 className={cn(LABEL, "text-amber-200")}>Paper</h2>
       <span className="rounded border border-amber-400/50 px-1 text-[10px] uppercase tracking-wide text-amber-200">not real money</span>
       {book?.run && <span className="text-[11px] text-muted-foreground">run {book.run.number} · since {day(book.run.started_at)}</span>}
-      {book && <button type="button" aria-expanded={editing} data-testid="rules-toggle" onClick={() => setEditing(e => !e)}
+      {book && <button type="button" aria-expanded={editing} data-testid="rules-toggle" data-use="paper.rules" onClick={() => setEditing(e => !e)}
         title="Your own trading rules, checked at each entry" className="ml-auto text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
         Rules{book.my_rules?.length ? ` (${book.my_rules.length})` : ""}</button>}
       {book?.run && <button type="button" aria-expanded={progress} data-testid="paper-progress-toggle" onClick={() => setProgress(p => !p)} className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">{progress ? "Hide progress" : "Progress"}</button>}

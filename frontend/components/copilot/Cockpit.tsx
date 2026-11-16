@@ -29,6 +29,7 @@ import { Flash, PricesAsOf } from "@/components/copilot/Ticks";
 import { OptionStanding, OptionStandingLine } from "@/components/copilot/OptionStanding";
 import { OrderLines, OrdersGroup } from "@/components/copilot/DeskOrders";
 import { NoteButton, NoteLines, useDeskNotes } from "@/components/copilot/DeskNotes";
+import { FoldMore, useFolds } from "@/components/copilot/DeskUse";
 import { fillKey, rowTrade } from "@/lib/deskNotes";
 import { TapeToggle, useTapeOpen } from "@/components/copilot/TapeToggle";
 import { cn } from "@/lib/utils";
@@ -504,6 +505,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
   const contract = useContractView(held);
   const onContract = contract.view === "contract" && held && contract.data;
   const [tape, setTape] = useTapeOpen();
+  const folds = useFolds(); // the chart's tools he folded away wait in its More (DeskUse.tsx)
   return (
     <div className="space-y-3" data-testid="desk-chart">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -523,12 +525,13 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
           ))}
         </div>}
         <span className="ml-auto" />
-        {onReplay && <button type="button" data-testid="replay-open" onClick={onReplay} title="Paper trade a past day, any time: the day replays bar by bar"
+        {onReplay && !folds.hidden("chart.replay") && <button type="button" data-testid="replay-open" data-use="chart.replay" onClick={onReplay} title="Paper trade a past day, any time: the day replays bar by bar"
           className="inline-flex min-h-11 items-center rounded px-1.5 text-xs text-amber-200/80 hover:text-amber-100 sm:min-h-0">Replay</button>}
-        <TapeToggle open={tape} onToggle={setTape} />
+        {!folds.hidden("chart.tape") && <TapeToggle open={tape} onToggle={setTape} />}
+        <FoldMore ids={["chart.studies", "chart.tape", "chart.replay"]} onOpen={id => { if (id === "chart.tape") setTape(true); }} />
         <Link href={charts} className="inline-flex min-h-11 items-center whitespace-nowrap text-xs text-muted-foreground hover:text-foreground sm:min-h-0"><span><span className="max-sm:sr-only">Open in </span>Charts<span className="max-sm:sr-only"> →</span></span></Link>
       </div>
-      {tape && <DeskTape symbol={symbol ?? "QQQ"} option={!!row?.book?.option} />}
+      {tape && !folds.hidden("chart.tape") && <DeskTape symbol={symbol ?? "QQQ"} option={!!row?.book?.option} />}
       {onContract ? <ContractChart held={held} data={contract.data!} /> : <>
       <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0} onRead={setShown} actions={actions} live={live} guides={guides}
         label={`${symbol ?? "QQQ"} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />
@@ -557,7 +560,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
       {row && !book && <p className="text-xs text-muted-foreground">{row.status.text}</p>}
       {ref?.symbol && (
         <div className="border-t pt-2">
-          <button type="button" aria-expanded={timeline} onClick={() => setTimeline(open => !open)}
+          <button type="button" aria-expanded={timeline} onClick={() => setTimeline(open => !open)} data-use="chart.timeline"
             className="min-h-11 text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Timeline {timeline ? "▴" : "▾"}</button>
           {timeline && <div className="pt-2"><DeskTimeline thread={ref} /></div>}
         </div>

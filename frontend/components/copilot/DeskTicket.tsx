@@ -156,7 +156,7 @@ export function CopyButton({ text, label, disabled = false, wide = false, onCopy
   const copy = () => copyText(text).then(() => { setState("copied"); onCopy?.(); }, () => setState("failed"))
     .finally(() => setTimeout(() => setState("idle"), 1800));
   return (
-    <button type="button" onClick={copy} disabled={disabled} aria-label={wide ? label : `Copy ${label}`}
+    <button type="button" onClick={copy} disabled={disabled} aria-label={wide ? label : `Copy ${label}`} data-use="ticket.copy"
       className={cn("inline-flex min-h-11 items-center justify-center gap-1.5 rounded-md border px-3 text-xs font-medium hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-45 sm:min-h-8",
         wide ? "border-foreground/70 text-foreground" : "text-muted-foreground")}>
       {state === "copied" ? <Check size={13} aria-hidden className="text-emerald-400" /> : <Copy size={13} aria-hidden />}
@@ -451,7 +451,7 @@ function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, 
   const field = "w-24 rounded border bg-background px-2 py-1.5 text-base tabular-nums sm:text-sm";
   const per = (n: number | null) => n === null ? "—" : `${n.toFixed(2)} ${s.type}`;
   return (
-    <div data-testid="desk-ticket" data-spread={s.type} className="space-y-3">
+    <div data-testid="desk-ticket" data-spread={s.type} data-use="ticket.spread" className="space-y-3">
       {head}
       {switcher}
       <div className="rounded-lg border bg-card px-3 py-1.5">

@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { drawableWalls, useDeskWalls, type DeskWalls } from "@/lib/deskWalls";
 import { everyDeskMinute } from "@/lib/deskMinute";
 import { bandAt, bandMarks, bandSteps, useMomentumToday, type BandStep } from "@/lib/deskMomentumBand";
+import { useFolds } from "@/components/copilot/DeskUse";
 import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type DeskChartNews, type DeskChartMark, type DeskStudySeries, type DeskTimeframe } from "@/lib/desk";
 
 /*
@@ -681,6 +682,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   live?: { last: number; at: number; stale: boolean } | null;
 }) {
   const host = useRef<HTMLDivElement>(null);
+  const studiesFolded = useFolds().hidden("chart.studies"); // folded away on the desk: in the chart header's More
   const parts = useRef<Parts | null>(null);
   const painted = useRef<Painted>({ shown: null, byCandle: new Map(), applied: null, timeline: [], guides: [] });
   const latest = useRef<Read | null>(null);
@@ -1163,7 +1165,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
         </p>
       )}
       {/* One line that never wraps (it scrolls sideways on a phone), so values changing under the pointer never move the chart. */}
-      <div role="group" aria-label="Studies" data-testid="desk-chart-studies"
+      {!studiesFolded && <div role="group" aria-label="Studies" data-testid="desk-chart-studies" data-use="chart.studies"
         className="flex items-center gap-0.5 overflow-x-auto whitespace-nowrap text-xs tabular-nums [scrollbar-width:none]">
         {STUDIES[timeframe].filter(study => study !== "momentum" || momentum).map(study => {
           const on = isOn(choices, timeframe, study);
@@ -1176,7 +1178,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
             </button>
           );
         })}
-      </div>
+      </div>}
       {/* One line that never wraps, so moving the pointer never moves the chart. */}
       <p className="h-4 truncate text-xs leading-4 tabular-nums text-muted-foreground" data-testid="desk-chart-readout">
         {readout && <>

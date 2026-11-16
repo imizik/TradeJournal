@@ -8,7 +8,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import PlanATrade from "@/components/copilot/PlanATrade";
 import PlanStreakChip from "@/components/PlanStreak";
-import { Bot, Crosshair, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Rocket, Scale, Target, Telescope, ChevronRight, ClipboardCheck, Menu, Sun, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { Bot, Crosshair, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Rocket, Scale, SlidersHorizontal, Target, Telescope, ChevronRight, ClipboardCheck, Menu, Sun, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
 import { useGmailHealth } from "@/lib/useGmailHealth";
@@ -173,13 +173,15 @@ function SyncTrigger({ open, running, onToggle, compact = false }: { open: boole
  * phone's tab bar (Today forwards there), and the Dashboard leaves the bar for More → Journal at `/dashboard`. */
 const DESK = { href: "/copilot-lab", label: "Desk", icon: MessagesSquare };
 const DASHBOARD: NavItem = { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard };
+/** "How I use the desk" (the desk's own view of what he uses and folds): opens over the desk. */
+const DESK_USE: NavItem = { href: "/copilot-lab?desk=use", label: "How I use the desk", icon: SlidersHorizontal };
 function withDesk<T extends { href: string }>(items: T[], copilot: boolean): T[] {
   if (!copilot) return items;
   return items.filter(item => item.href !== "/").map(item => (item.href === "/today" ? { ...item, ...DESK } : item));
 }
 /** The folded groups; while the desk is home the Dashboard heads Journal. */
 function navGroups(copilot: boolean) {
-  return copilot ? GROUPS.map(group => group.name === "Journal" ? { ...group, items: [DASHBOARD, ...group.items] } : group) : GROUPS;
+  return copilot ? GROUPS.map(group => group.name === "Journal" ? { ...group, items: [DASHBOARD, DESK_USE, ...group.items] } : group) : GROUPS;
 }
 
 /** Which pages this viewer may open: the owner sees all; an assistant sees the practice pages and, with journal access, the journal. */

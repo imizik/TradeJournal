@@ -1872,6 +1872,41 @@ Cold load did not change (first paint ~50 ms; a usable book ~0.9 s, bound by the
 busy, no dropped frames, before and after. `frontend/e2e/copilot-desk-load.spec.ts` pins the idle rate (≤ 20 a minute,
 the minute's reads only inside the one request) and the hidden page's zero.
 
+### How I use the desk
+
+The desk counts quietly which of its pieces he uses, so after two weeks it can offer to fold away what he never opens
+(`frontend/lib/deskUse.ts`, `frontend/components/copilot/DeskUse.tsx`, `backend/app/engine/desk_use.py`).
+
+- **What is counted.** Each piece in `PIECES` has a stable id (centre tabs, Feed groups, chatter, the book's sections,
+  the strategy books, What's moving, the account line, the health dot, chart studies, Tape and Replay, Ticket actions,
+  ⌘K and the desk keys, the phone's three views). A tap anywhere inside an element marked `data-use="<id>"` is a tap;
+  a tab chosen, the Feed or thread list opened, the palette opened is an open; every 15 seconds while the page shows,
+  each marked piece with a box on screen gets 15 seconds. No keystrokes, no message text, no tickers.
+- **Where counts go.** They wait on the device (localStorage, by New York day and device size) and are sent to
+  `POST /copilot/desk/use` at most once every five minutes, checked on the 15-second tick and when the page shows again.
+  Nothing is sent while the page is hidden and there is no timer of its own, so the idle desk's pinned request rate
+  (§ What an open desk asks) did not move. Daily totals per piece and size live in the app's own `desk_use_day` table;
+  nothing goes to an outside service. A failed save keeps the counts on the device, and "How I use the desk" says
+  "Counts paused since 10:42" (with those device counts included) instead of showing zeros.
+- **How I use the desk** (⌘K, or More → Journal): every piece's last-14-day opens, taps and time on screen and its
+  last use, least used first, each with a Fold / Show switch. Safety pieces (the book's positions and working orders,
+  Needs you, the health dot, Day facts with its "at risk now" line) and pieces counted only (the Chart tab, the
+  copilot, Ticket actions, the phone's views) say "Always shown"; a safety id in a saved fold list is ignored. While
+  the list reads, or if it cannot be read, no numbers show.
+- **The suggestion.** Once this device size has 14 calendar days with desk use, one quiet card under the book lists
+  the foldable pieces opened at most once and tapped at most once in the last 14 days (and on screen at some point,
+  so a book switched off is not "unused"; Watching, which shows plan levels, is foldable by hand but never suggested):
+  "You haven't opened Grid or Tape in 2 weeks. Fold them?" with Fold all /
+  Pick (the view) / Not now (14 days' snooze). Nothing folds without his tap.
+- **Folded is one tap away.** A section folds to a slim labelled stub; a centre tab, a chart tool (studies, Tape,
+  Replay) or Chatter moves into its row's More. One tap shows it for now (nothing saved); "Keep showing" unfolds it.
+  A folded tab's key and ⌘K still open it, and ⌘K lists every other folded piece. Folding the Account line ends a
+  narrowed book, so no account's positions are hidden unsaid. A folded piece stays mounted while
+  hidden, so its reads do not change. Folds are saved per device size (`desk` from 768 px, `phone` below) as the
+  `chart_settings` row `desk-folds` (`PUT /copilot/desk/folds`, `GET /copilot/desk/use?size=`).
+
+The copilot does not see folds or counts (no tool change).
+
 ### Data health
 
 One dot at the left of the desk's buttons says whether every source behind the desk is live, so a quiet desk on a bad

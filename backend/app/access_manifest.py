@@ -134,6 +134,9 @@ DOMAIN_ROUTES = frozenset({
     'POST /copilot/paper/orders',  # a paper fill at one live quote read through the chart feed: paper tables only; never an order, never Robinhood
     'POST /copilot/paper/orders/cancel',  # cancel a working paper limit order: paper tables only
     'POST /copilot/paper/auto',  # a paper position's close-automatically switch: paper tables only
+    'POST /copilot/desk/use',  # the desk's quiet use counts (piece ids, opens, taps, seconds on screen): the desk-use table only; no text, no tickers
+    'GET /copilot/desk/use',  # how he uses the desk: the desk-use table and his folds, read only
+    'PUT /copilot/desk/folds',  # which desk pieces he folded away, per device size: the desk-folds settings row only
     'GET /copilot/rules',  # his own trading rules: the rules table only
     'PUT /copilot/rules',  # save his own trading rules: the rules table only
     'POST /copilot/rules/check',  # an entry's checklist: his rules, the paper book, the journal's open trades, the desk's account line and the market calendar, read only; no quote, no Robinhood

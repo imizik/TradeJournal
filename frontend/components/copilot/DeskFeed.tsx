@@ -12,6 +12,7 @@ import { FOCUSED, ScannerList, useInView, type DeskScannerReply, type DeskScanne
 import { RadarPaperIt } from "@/components/copilot/RadarDecision";
 import { todayNewYork } from "@/lib/charts";
 import type { FeedLink } from "@/lib/copilot";
+import { FoldMore, useFolds } from "@/components/copilot/DeskUse";
 
 export type FeedSource = "Alert" | "Plan" | "Radar" | "Radar setup" | "News" | "Calendar" | "Copilot note" | "TradingView" | "r/wallstreetbets" | "NYT";
 /** One feed row (``app/engine/desk_feed.py``). ``plan``: "setup" (a Radar setup card's own Plan it) or "own" (his own
@@ -177,7 +178,10 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, onChart, 
   const chatterOn = (chatter?.items.length ?? 0) > 0;
   const scannerOn = !!scanner && scanner.state !== "off";
   const idea: Idea = ideaPick === "scanner" && !scannerOn ? "radar" : ideaPick;
-  const marketShown: MarketPick = marketPick === "chatter" && !chatterOn ? "news" : marketPick;
+  // Chatter folded away on the desk (DeskUse.tsx) waits in the Market row's More until shown for now.
+  const folds = useFolds();
+  const chatterShown = chatterOn && !folds.hidden("feed.chatter");
+  const marketShown: MarketPick = marketPick === "chatter" && !chatterShown ? "news" : marketPick;
   const filter: Filter = group === "ideas" ? idea : group === "market" ? marketShown : group;
   // Chatter gone (nothing to show this minute): back to News & calendar for good, so it never reopens without a tap.
   useEffect(() => { if (marketPick === "chatter" && data && !chatterOn) setMarket("news"); }, [marketPick, data, chatterOn, setMarket]); // follows the feed's own read
@@ -191,7 +195,7 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, onChart, 
   const day = data?.day ?? "";
   const notMine = (data?.items ?? []).filter(i => !i.mine).length;
   const ideas: readonly (readonly [Idea, string])[] = [["radar", "Radar"], ...(scannerOn ? [["scanner", "Scanner"] as const] : []), ["unusual", "Unusual options"]];
-  const markets: readonly (readonly [MarketPick, string])[] = chatterOn ? [["news", "News & calendar"], ["chatter", "Chatter"]] : [];
+  const markets: readonly (readonly [MarketPick, string])[] = chatterShown ? [["news", "News & calendar"], ["chatter", "Chatter"]] : [];
   const chatterNote = chatterWhy(chatter);
   const quietLine = data && filter === "mine" && !symbol ? tradingViewQuiet(data) : null;
 
@@ -206,17 +210,18 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, onChart, 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <div role="group" aria-label="Show" className="inline-flex flex-wrap rounded-md border p-0.5">
             {GROUPS.map(([id, label]) => (
-              <button key={id} type="button" aria-pressed={group === id} onClick={() => setGroup(id)}
+              <button key={id} type="button" aria-pressed={group === id} onClick={() => setGroup(id)} data-use={`feed.${id}`}
                 className={cn("min-h-11 rounded px-2.5 text-xs sm:min-h-7", group === id ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}>
                 {label}
               </button>
             ))}
           </div>
           {group === "ideas" && <SubPicks<Idea> label="Ideas" picks={ideas} value={idea} onPick={setIdea} />}
-          {group === "market" && markets.length > 0 && <SubPicks<MarketPick> label="Market" picks={markets} value={marketShown} onPick={setMarket} />}
+          {group === "market" && markets.length > 0 && <SubPicks<MarketPick> label="Market" picks={markets} value={marketShown} onPick={setMarket} use={{ chatter: "feed.chatter" }} />}
+          {group === "market" && chatterOn && <FoldMore ids={["feed.chatter"]} onOpen={() => setMarket("chatter")} />}
         </div>
       )}
-      {filter === "chatter" && !symbol && chatter && <ChatterHead chatter={chatter} day={day} />}
+      {filter === "chatter" && !symbol && chatter && <div data-use="feed.chatter" className="contents"><ChatterHead chatter={chatter} day={day} /></div>}
       {filter === "unusual" && !symbol ? <UnusualList reply={unusual} onPick={pick => onUnusual?.(pick)} />
         : filter === "scanner" && !symbol ? <ScannerList reply={scanner} onOpen={row => onScanner?.(row)} onPlan={href => onScannerPlan?.(href)}
           focused={focus?.kind === "scanner" ? focus.id : null} /> : <>
@@ -247,11 +252,12 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, onChart, 
 }
 
 /** A group's second row: plain words, the picked one underlined. */
-function SubPicks<T extends string>({ label, picks, value, onPick }: { label: string; picks: readonly (readonly [T, string])[]; value: T; onPick(pick: T): void }) {
+function SubPicks<T extends string>({ label, picks, value, onPick, use }: { label: string; picks: readonly (readonly [T, string])[]; value: T; onPick(pick: T): void;
+  /** A pick's desk piece, counted by ``DeskUse.tsx``. */ use?: Partial<Record<T, string>> }) {
   return (
     <div role="group" aria-label={label} className="inline-flex flex-wrap gap-x-2.5">
       {picks.map(([id, text]) => (
-        <button key={id} type="button" aria-pressed={value === id} onClick={() => onPick(id)}
+        <button key={id} type="button" aria-pressed={value === id} onClick={() => onPick(id)} data-use={use?.[id]}
           className={cn("min-h-11 border-b text-xs sm:min-h-7", value === id ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
           {text}
         </button>
