@@ -218,10 +218,11 @@ def fill_line(spec: dict, quantity: int, per_share: float, quoted_at: float, siz
     return " · ".join([*parts, NOT_REAL])
 
 
-def _goals_broken(db: Session, spec: dict, quantity: int, per_share: float, stop, now: float) -> list[str]:
+def _goals_broken(db: Session, spec: dict, quantity: int, per_share: float, stop, now: float, rules: list[dict] | None = None) -> list[str]:
     """His paper-book weekly goals this entry breaks: more paper trades today than his daily limit, a most-to-lose above
-    his max loss per trade (an option's premium; shares down to the stop, none without one), or the week's rules-followed
-    share now below his goal. Real-book goals are about real trades and are not judged here."""
+    his max loss per trade (an option's premium; shares down to the stop, none without one), or, when this entry broke a
+    rule, the week's rules-followed share now below his goal. Real-book goals are about real trades and are not judged
+    here."""
     from app.engine import weekly_goals
     goals = [g for g in weekly_goals.current(db) if g.get("book") == "paper"]
     if not goals:
@@ -241,11 +242,16 @@ def _goals_broken(db: Session, spec: dict, quantity: int, per_share: float, stop
                     else (paid - stop) * quantity if isinstance(stop, (int, float)) else None)
             if risk is not None and risk > n + 0.005:
                 out.append(f"goal: can lose {paper_book.usd(risk)} (max loss {paper_book.usd(n)})")
-        elif goal["kind"] == "rules_pct":
+        elif goal["kind"] == "rules_pct" and trading_outcome(rules) == "broken":
             [line] = weekly_goals.progress(db, [goal], weekly_goals.monday_of(today), now)
             if line.get("ok") is False:
                 out.append(f"goal: {line['text']}")
     return out
+
+
+def trading_outcome(rules: list[dict] | None) -> str | None:
+    from app.engine import trading_rules
+    return trading_rules.outcome(rules)
 
 
 def breaks_line(rules: list[dict] | None, goals: list[str]) -> str | None:
@@ -275,8 +281,20 @@ def _already(db: Session, key: str) -> str | None:
     return "Already papered from this ping: " + fill_line(data, data["quantity"], data["per_share"], paper_book._epoch(event.effective_at))
 
 
+FAILED = "PAPER · not placed: something failed unexpectedly; nothing was saved. Try again in a moment."
+
+
 def tap(engine, rest: str, now: float | None = None) -> tuple[str, str | None]:
-    """Paper it on a ping (``rest``: ``<kind>:<key>`` from ``pp:``): ``(chat line, PAPERED or None)``."""
+    """Paper it on a ping (``rest``: ``<kind>:<key>`` from ``pp:``): ``(chat line, PAPERED or None)``. An unexpected
+    failure is answered too (``FAILED``), never silence; nothing is stored before the order's own commit."""
+    try:
+        return _tap(engine, rest, now)
+    except Exception:  # noqa: BLE001 -- the owner hears that it failed
+        log.exception("Paper it from Telegram failed")
+        return FAILED, None
+
+
+def _tap(engine, rest: str, now: float | None) -> tuple[str, str | None]:
     from app.ai import copilot
     kind, _, key = (rest or "").partition(":")
     if kind == RADAR:
@@ -314,7 +332,7 @@ def tap(engine, rest: str, now: float | None = None) -> tuple[str, str | None]:
             return _already(db, ordered) or "Already papered from this ping.", PAPERED
         spec = {**idea["order"], "multiplier": 1 if idea["order"]["instrument"] == "stock" else paper_book.MULTIPLIER}
         try:
-            goals = _goals_broken(db, spec, filled["quantity"], filled["per_share"], idea["stop"], now)
+            goals = _goals_broken(db, spec, filled["quantity"], filled["per_share"], idea["stop"], now, filled.get("rules"))
         except Exception:  # noqa: BLE001 -- the order stands; the goals line is left out
             log.warning("Paper it goals not checked", exc_info=True)
             db.rollback()

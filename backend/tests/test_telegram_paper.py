@@ -286,3 +286,30 @@ def test_a_confirm_tap_on_a_plan_card_keeps_paper_it():
     replies._mark({"message_id": 55, "reply_markup": {"inline_keyboard": rows}}, f"pl:{PLAN_KEY}:confirm", "Confirmed")
     assert edits[0]["reply_markup"]["inline_keyboard"] == [[{"text": "✓ Confirmed", "callback_data": f"done:{PLAN_KEY}"},
                                                              {"text": "📝 Paper it", "callback_data": f"pp:p:{PLAN_KEY}"}]]
+
+
+def test_the_rules_goal_is_named_only_when_this_entry_broke_a_rule(engine, market):
+    run_paper(engine)
+    with Session(engine) as db:
+        trading_rules.save(db, [{"text": "", "check": {"kind": "stop_set"}}], NOW - 7200)
+        weekly_goals.save(db, [{"kind": "rules_pct", "n": 100, "book": "paper"}], NOW - 7200)
+        paper_book.open_order(db, {"symbol": "AMD", "instrument": "stock", "quantity": 1, "order_key": uuid.uuid4().hex}, NOW - 60)
+    setup = setup_row(engine)  # its stop is set, so this entry follows the rule though the week is below the goal
+    bot = Bot()
+    asyncio.run(telegram_replies.Replies(engine, call=bot).handle(tap(f"pp:r:{setup.id.hex}", radar_keyboard(engine, setup))))
+    assert "\n" not in bot.named("sendMessage")[0]["text"]
+
+
+def test_an_unexpected_failure_is_answered_and_stores_nothing(engine, market, monkeypatch):
+    run_paper(engine)
+    setup = setup_row(engine)
+
+    def broken(symbols):
+        raise RuntimeError("feed down")
+    monkeypatch.setattr(paper_book, "_live_quotes", broken)
+    bot = Bot()
+    asyncio.run(telegram_replies.Replies(engine, call=bot).handle(tap(f"pp:r:{setup.id.hex}", radar_keyboard(engine, setup))))
+    assert bot.named("sendMessage")[0]["text"] == telegram_paper.FAILED
+    assert bot.named("answerCallbackQuery")[0]["text"] == "Not placed: why is in the chat."
+    with Session(engine) as db:
+        assert db.exec(select(PaperEvent)).all() == []
