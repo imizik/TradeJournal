@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { useDeskMode } from "@/components/copilot/DeskMode";
 import { PaperButton } from "@/components/copilot/DeskPaper";
 import { RealRules } from "@/components/copilot/DeskRules";
 import { MODE_FRAME, PaperHalf, RealTicketLine } from "@/components/copilot/ModeMark";
@@ -230,6 +231,8 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
   const seededQty = useRef("");  // the count the plan's size gave, re-seeded on a re-read until he edits it
   // The server judges the quote's age once; an open ticket keeps judging it on this clock.
   const [nowS, setNowS] = useState(() => Date.now() / 1000);
+  // The desk's Paper mode: the ticket leads with its paper half, Fill on paper the main action; the real half follows.
+  const paperFirst = useDeskMode() === "paper";
   useEffect(() => { const timer = setInterval(() => setNowS(Date.now() / 1000), 30_000); return () => clearInterval(timer); }, []);
 
   useEffect(() => {
@@ -346,8 +349,15 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
   const fresh = q?.state === "ok" && !aged;
   const all = copyAllText({ symbol: ticket.symbol, type: k.type, expiry: k.expiry, strike: k.strike, limit: limitN !== null ? limitN.toFixed(2) : "", contracts: qtyN ? String(qtyN) : "" });
   const field = "w-24 rounded border bg-background px-2 py-1.5 text-base tabular-nums sm:text-sm";
+  const paperHalf = (lead: boolean) => (
+    <PaperHalf lead={lead ? k.label : null}>
+      <PaperButton order={{ instrument: "option", symbol: ticket.symbol, option_type: k.type, expiry: k.expiry, strike: k.strike }} quantity={qtyN}
+        note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} label={lead ? "Fill on paper" : undefined} strong={lead} />
+    </PaperHalf>
+  );
   return (
     <div data-testid="desk-ticket" className={cn("space-y-3", MODE_FRAME.real)}>
+      {paperFirst && paperHalf(true)}
       {head}
       {switcher}
       <div className="rounded-lg border bg-card px-3 py-1.5">
@@ -409,10 +419,7 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
           </div>
         )}
       </RealRules>
-      <PaperHalf>
-        <PaperButton order={{ instrument: "option", symbol: ticket.symbol, option_type: k.type, expiry: k.expiry, strike: k.strike }} quantity={qtyN}
-          note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} />
-      </PaperHalf>
+      {!paperFirst && paperHalf(false)}
       {foot(true)}
     </div>
   );
@@ -439,6 +446,7 @@ function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, 
   ticket: Ticket; spread: Spread; head: React.ReactNode; switcher: React.ReactNode; foot: React.ReactNode; last4?: string | null;
   limit: string; setLimit(v: string): void; qty: string; setQty(v: string): void; nowS: number; onReread(): void;
 }) {
+  const paperFirst = useDeskMode() === "paper"; // as the single contract's ticket: the paper half first
   const limitN = limit.trim() && Number(limit) > 0 ? Number(limit) : null;
   const qtyN = /^\d+$/.test(qty.trim()) && Number(qty) > 0 ? Number(qty) : null;
   const spot = ticket.underlying?.state === "ok" ? ticket.underlying.last ?? null : null;
@@ -454,8 +462,15 @@ function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, 
     limit: limitN !== null ? limitN.toFixed(2) : "", contracts: qtyN ? String(qtyN) : "" });
   const field = "w-24 rounded border bg-background px-2 py-1.5 text-base tabular-nums sm:text-sm";
   const per = (n: number | null) => n === null ? "—" : `${n.toFixed(2)} ${s.type}`;
+  const paperHalf = (lead: boolean) => (
+    <PaperHalf lead={lead ? s.label : null}>
+      <PaperButton order={{ instrument: "spread", symbol: ticket.symbol, option_type: s.kind, expiry: s.expiry, long_strike: s.long, short_strike: s.short }} quantity={qtyN}
+        note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} label={lead ? "Fill on paper" : undefined} strong={lead} />
+    </PaperHalf>
+  );
   return (
     <div data-testid="desk-ticket" data-spread={s.type} data-use="ticket.spread" className={cn("space-y-3", MODE_FRAME.real)}>
+      {paperFirst && paperHalf(true)}
       {head}
       {switcher}
       <div className="rounded-lg border bg-card px-3 py-1.5">
@@ -532,10 +547,7 @@ function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, 
         <CopyButton text={all} label="Copy all for Robinhood" wide onCopy={onCopy} />
         <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {ticket.symbol}, Trade, Trade options, pick both legs (Buy the ${s.long}, Sell the ${s.short}, {shortDate(s.expiry)}), then the limit as a {s.type} and the quantity. Nothing is sent from here.</p>
       </div>)}</RealRules>
-      <PaperHalf>
-        <PaperButton order={{ instrument: "spread", symbol: ticket.symbol, option_type: s.kind, expiry: s.expiry, long_strike: s.long, short_strike: s.short }} quantity={qtyN}
-          note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} />
-      </PaperHalf>
+      {!paperFirst && paperHalf(false)}
       {foot}
     </div>
   );

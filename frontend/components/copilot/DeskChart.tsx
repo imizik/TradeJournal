@@ -1300,9 +1300,11 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
             <p className="text-muted-foreground">{shownWalls.expiration ? `${expiryWord(shownWalls.expiration, data?.as_of)} expiry · ` : ""}dealer side assumed (long calls, short puts), not known</p>
           </div>
         )}
+        {/* Above the chart library's own pane divider (its row-resize handle sits at z-index 50), which otherwise takes
+            the click on an item the menu lays over the volume pane's top edge. */}
         {menu && data && (
           <div ref={menuBox} role="menu" aria-label={`At ${price(menu.price)}`} data-testid="desk-level-menu"
-            className="absolute z-20 rounded-md border bg-popover/95 p-1 text-xs shadow-lg"
+            className="absolute z-[51] rounded-md border bg-popover/95 p-1 text-xs shadow-lg"
             style={{ left: menu.x, top: menu.y, width: MENU_W }}>
             <p className="flex items-center justify-between px-2 py-1 tabular-nums text-muted-foreground">
               <span>{menu.item ? <span data-testid="desk-level-menu-line" className="text-foreground">{menu.item.name}{menu.item.at ? ` (${menu.item.at})` : ""} · </span>

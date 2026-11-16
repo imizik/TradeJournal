@@ -16,6 +16,7 @@ import { liveOn, money, signedPct, type DeskLive, type DeskLiveAccount, type Des
 import { tickedBook, useDeskTicks } from "@/lib/deskTicks";
 import { positionRows, tone } from "@/components/copilot/Cockpit";
 import { DeskValueLine } from "@/components/copilot/DeskValueLine";
+import ModeMark from "@/components/copilot/ModeMark";
 import { cn } from "@/lib/utils";
 
 const ET = "America/New_York";
@@ -60,15 +61,17 @@ export function tickedAccount(account: DeskLiveAccount, rows: DeskThread[], tick
   };
 }
 
-export function DeskAccounts({ live, rows, active, onPick }: {
+export function DeskAccounts({ live, rows, active, onPick, mark = false }: {
   live: DeskLive | null; rows: DeskThread[]; active: string | null; onPick(masked: string | null): void;
+  /** The desk's Paper mode: the line opens on its REAL mark, beside the paper book's value. */
+  mark?: boolean;
 }) {
   const ticks = useDeskTicks(positionRows(rows).map(r => r.book?.account ? r.book.tick?.quote : null));
   // Off: no account line at all (the book is the journal's, as it always was). Loading: the first read is on its way
   // (the day's value line, from readings kept before a restart, still shows).
   if (!live || live.state === "off") return null;
   // The day's value line sits first (outside the swiping row, so its detail is not clipped); it follows the account tap.
-  const line = <DeskValueLine line={live.day_line} active={active} />;
+  const line = <>{mark && <ModeMark mode="real" className="self-center" />}<DeskValueLine line={live.day_line} active={active} /></>;
   const wrap = "flex min-w-0 max-w-full items-center gap-1.5 max-sm:basis-full sm:order-last";
   if (live.state === "loading") return live.day_line?.series.all ? <div className={wrap}>{line}</div> : null;
   if (!liveOn(live) || !live.accounts?.length) {

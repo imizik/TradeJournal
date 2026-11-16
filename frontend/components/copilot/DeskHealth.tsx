@@ -4,17 +4,19 @@
  * Is everything behind the desk live? (docs/copilot-lab.md § Data health) One dot in the desk's top bar: green alone
  * when every running source is live ("All live" is its name and tooltip), amber naming what is stale or down, grey alone
  * when one cannot be told. A tap opens the list: each source, its state and last good time in plain words; a tap on a source says what
- * it affects and, where one already exists, the fix.
+ * it affects and, where one already exists, the fix. From 768 px the status line along the desk's bottom
+ * (``DeskStatusLine``) shows the same rows as a dot and a name each, and opens the same list.
  *
- * The server's rows (``GET /copilot/desk/health``) ride the desk's minute request (``deskMinute``): no poll of its own.
- * Level 2 is the Tape's own moomoo session, so its row comes from the Tape (``reportLevel2``): "off" with no session,
- * never an error.
+ * The server's rows (``GET /copilot/desk/health``) ride the desk's minute request (``deskMinute``): one read shared by
+ * the dot and the status line, no poll of its own. Level 2 is the Tape's own moomoo session, so its row comes from the
+ * Tape (``reportLevel2``): "off" with no session, never an error.
  */
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { api } from "@/lib/api";
 import { getHealth, type DeskHealth, type HealthRow, type HealthState } from "@/lib/desk";
 import { everyDeskMinute } from "@/lib/deskMinute";
+import { STALE_SECONDS, useHeldTicks, type DeskTicks } from "@/lib/deskTicks";
 import { cn } from "@/lib/utils";
 
 // --------------------------------------------------------------------------- Level 2, from the Tape
@@ -41,10 +43,77 @@ export function level2Row(state: Level2Health): HealthRow {
   return { id: "level2", name: "Level 2", state: "off", line: "Off · no Tape session open", last_at: null, affects: LEVEL2_AFFECTS, fix: null };
 }
 
-// --------------------------------------------------------------------------- the strip
+// --------------------------------------------------------------------------- the server's rows, one read for the desk
 
 const BAD: HealthState[] = ["stale", "down", "low"];
 const SETTLE_MS = 8_000; // after an open or a return to the page: the desk's own first reads have landed by then
+
+type HealthRead = { data: DeskHealth | null; failed: boolean };
+const NOT_READ: HealthRead = { data: null, failed: false };
+let health: HealthRead = NOT_READ;
+const healthListeners = new Set<() => void>();
+let stopReading: (() => void) | null = null;
+let stopSoon: ReturnType<typeof setTimeout> | null = null;
+
+function setHealth(next: HealthRead) {
+  health = next;
+  for (const listener of healthListeners) listener();
+}
+
+/** The read itself: once now, once more a few seconds after the desk opens or comes back into view, then on the minute. */
+function startReading(): () => void {
+  let controller = new AbortController();
+  const read = () => {
+    controller.abort();
+    controller = new AbortController();
+    getHealth(controller.signal).then(next => setHealth({ data: next, failed: false }))
+      .catch(error => { if ((error as Error).name !== "AbortError") setHealth({ data: health.data, failed: true }); });
+  };
+  read();
+  // Robinhood and prices are read because the desk asks: a few seconds after it opens or comes back into view, once
+  // its own first reads have landed, ask again so a cold start never reads as "behind" for a minute.
+  let again = window.setTimeout(read, SETTLE_MS);
+  let hiddenAt: number | null = null;
+  const seen = () => {
+    if (document.hidden) { hiddenAt = Date.now(); return; }
+    if (hiddenAt !== null && Date.now() - hiddenAt > SETTLE_MS) { window.clearTimeout(again); again = window.setTimeout(read, SETTLE_MS); }
+    hiddenAt = null;
+  };
+  document.addEventListener("visibilitychange", seen);
+  const stop = everyDeskMinute(read);
+  return () => { controller.abort(); stop(); window.clearTimeout(again); document.removeEventListener("visibilitychange", seen); };
+}
+
+/** The first piece that shows health starts the one read; the last one to go stops it. */
+function subscribeHealth(listener: () => void) {
+  healthListeners.add(listener);
+  if (stopSoon) { clearTimeout(stopSoon); stopSoon = null; }
+  if (!stopReading) stopReading = startReading();
+  return () => {
+    healthListeners.delete(listener);
+    if (healthListeners.size) return;
+    // A remount in the same moment (React's development double mount) keeps the read going rather than asking twice.
+    stopSoon = setTimeout(() => {
+      stopSoon = null;
+      if (healthListeners.size) return;
+      stopReading?.();
+      stopReading = null;
+      health = NOT_READ;
+    }, 0);
+  };
+}
+
+/** Every source behind the desk (Level 2, the Tape's own, after prices) and the summary, from the one shared read.
+ * After a failed read the last rows are not given at all: an old "Live" is not known to be live now. */
+export function useDeskHealth(): { rows: HealthRow[] | null; failed: boolean; said: ReturnType<typeof summary>; tape: Level2Health } {
+  const read = useSyncExternalStore(subscribeHealth, () => health, () => NOT_READ);
+  const tape = useSyncExternalStore(subscribeLevel2, () => level2, () => OFF);
+  const rows = read.data && !read.failed ? read.data.sources.flatMap(r => r.id === "prices" ? [r, level2Row(tape)] : [r]) : null;
+  return { rows, failed: read.failed, said: summary(rows, read.failed), tape };
+}
+
+// --------------------------------------------------------------------------- the dot
+
 const DOT: Record<HealthState, string> = {
   live: "bg-emerald-400", closed: "bg-muted-foreground/50", off: "bg-muted-foreground/50", quiet: "bg-muted-foreground/50",
   unknown: "bg-muted-foreground/50", stale: "bg-amber-400", down: "bg-amber-400", low: "bg-amber-400",
@@ -65,52 +134,44 @@ export function summary(rows: HealthRow[] | null, failed: boolean): { tone: "ok"
   return { tone: "ok", text: rows.some(r => r.state === "live") ? "All live" : "All fine · market closed" };
 }
 
-export default function DeskHealthDot() {
-  const [data, setData] = useState<DeskHealth | null>(null);
-  const [failed, setFailed] = useState(false);
+/** Open and closed by its button; a tap away closes it, and Escape closes this list only, not the desk's drawer or sheet
+ * behind it (the desk listens on window). */
+function useHealthOpen() {
   const [open, setOpen] = useState(false);
-  const [picked, setPicked] = useState<string | null>(null);
-  const tape = useSyncExternalStore(subscribeLevel2, () => level2, () => OFF);
   const box = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    let controller = new AbortController();
-    const read = () => {
-      controller.abort();
-      controller = new AbortController();
-      getHealth(controller.signal).then(next => { setData(next); setFailed(false); })
-        .catch(error => { if ((error as Error).name !== "AbortError") setFailed(true); });
-    };
-    read();
-    // Robinhood and prices are read because the desk asks: a few seconds after it opens or comes back into view, once
-    // its own first reads have landed, ask again so a cold start never reads as "behind" for a minute.
-    let again = window.setTimeout(read, SETTLE_MS);
-    let hiddenAt: number | null = null;
-    const seen = () => {
-      if (document.hidden) { hiddenAt = Date.now(); return; }
-      if (hiddenAt !== null && Date.now() - hiddenAt > SETTLE_MS) { window.clearTimeout(again); again = window.setTimeout(read, SETTLE_MS); }
-      hiddenAt = null;
-    };
-    document.addEventListener("visibilitychange", seen);
-    const stop = everyDeskMinute(read);
-    return () => { controller.abort(); stop(); window.clearTimeout(again); document.removeEventListener("visibilitychange", seen); };
-  }, []);
-
   useEffect(() => {
     if (!open) return;
     const away = (event: MouseEvent | TouchEvent) => { if (box.current && !box.current.contains(event.target as Node)) setOpen(false); };
-    // Escape closes this list only, not the desk's drawer or sheet behind it (the desk listens on window).
     const key = (event: KeyboardEvent) => { if (event.key === "Escape") { event.stopPropagation(); setOpen(false); } };
     document.addEventListener("mousedown", away);
     document.addEventListener("touchstart", away);
     document.addEventListener("keydown", key);
     return () => { document.removeEventListener("mousedown", away); document.removeEventListener("touchstart", away); document.removeEventListener("keydown", key); };
   }, [open]);
+  return { open, setOpen, box };
+}
 
-  // Level 2 sits after prices, where it belongs among the market data.
-  // After a failed read the last rows are not shown at all: an old "Live" is not known to be live now.
-  const rows = data && !failed ? data.sources.flatMap(r => r.id === "prices" ? [r, level2Row(tape)] : [r]) : null;
-  const said = summary(rows, failed);
+/** The list of every source, under the dot or (``up``) above the status line. */
+function HealthList({ rows, failed, tape, up = false }: { rows: HealthRow[] | null; failed: boolean; tape: Level2Health; up?: boolean }) {
+  const [picked, setPicked] = useState<string | null>(null);
+  return (
+    <div role="dialog" aria-label="Data health" data-testid="desk-health-list"
+      className={cn("absolute z-50 w-[min(22rem,calc(100vw-2rem))] rounded-md border bg-card p-1 text-xs shadow-lg",
+        up ? "bottom-full left-2 mb-1" : "right-0 top-full mt-1 max-sm:fixed max-sm:left-4 max-sm:right-4 max-sm:top-14 max-sm:w-auto")}>
+      <p className="px-2 pb-1 pt-1.5 text-muted-foreground">
+        {failed ? "Could not check just now; the next minute asks again." : "What feeds the desk. Tap one for what it affects."}
+      </p>
+      <ul>
+        {/* Without the server's rows the Tape's own still shows. */}
+        {(rows ?? [level2Row(tape)]).map(row => <Source key={row.id} row={row} open={picked === row.id} onPick={() => setPicked(picked === row.id ? null : row.id)} />)}
+      </ul>
+    </div>
+  );
+}
+
+export default function DeskHealthDot() {
+  const { rows, failed, said, tape } = useDeskHealth();
+  const { open, setOpen, box } = useHealthOpen();
   const dot = said.tone === "bad" ? "bg-amber-400" : said.tone === "ok" ? "bg-emerald-400" : "bg-muted-foreground/50";
 
   return (
@@ -123,18 +184,7 @@ export default function DeskHealthDot() {
         {/* Words only when something is behind: a dot that never changes width keeps the top bar from jumping. */}
         {said.tone === "bad" && <span data-testid="desk-health-words" className="hidden whitespace-nowrap sm:inline">{said.text}</span>}
       </button>
-      {open && (
-        <div role="dialog" aria-label="Data health" data-testid="desk-health-list"
-          className="absolute right-0 top-full z-50 mt-1 w-[min(22rem,calc(100vw-2rem))] rounded-md border bg-card p-1 text-xs shadow-lg max-sm:fixed max-sm:left-4 max-sm:right-4 max-sm:top-14 max-sm:w-auto">
-          <p className="px-2 pb-1 pt-1.5 text-muted-foreground">
-            {failed ? "Could not check just now; the next minute asks again." : "What feeds the desk. Tap one for what it affects."}
-          </p>
-          <ul>
-            {/* Without the server's rows the Tape's own still shows. */}
-            {(rows ?? [level2Row(tape)]).map(row => <Source key={row.id} row={row} open={picked === row.id} onPick={() => setPicked(picked === row.id ? null : row.id)} />)}
-          </ul>
-        </div>
-      )}
+      {open && <HealthList rows={rows} failed={failed} tape={tape} />}
     </div>
   );
 }
@@ -185,5 +235,72 @@ function GmailReconnect() {
       </button>
       {error && <p className="text-amber-300">{error}</p>}
     </>
+  );
+}
+
+// --------------------------------------------------------------------------- the status line
+
+const ET = "America/New_York";
+/** Sources whose being behind leaves positions, fills or prices wrong: red. The rest are amber. */
+const MONEY = new Set(["robinhood", "prices", "gmail"]);
+const clock = (at: number, seconds = false) => new Date(at * 1000).toLocaleTimeString("en-US",
+  { timeZone: ET, hour: "numeric", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}), hourCycle: "h23" });
+
+/** A source behind, in words: "Robinhood behind since 10:31", "Fill emails down since 9:12", "Copilot budget low". */
+export function behindWords(row: HealthRow): string {
+  if (row.state === "low") return `${row.name} low`;
+  return `${row.name} ${row.state === "stale" ? "behind" : "down"}${row.last_at ? ` since ${clock(row.last_at)}` : ""}`;
+}
+
+/** How fresh the desk's prices are: the newest live price while the session runs, else what the Prices row says. */
+function pricesWords(ticks: DeskTicks, row: HealthRow | undefined): { text: string; late: boolean } | null {
+  const times = ticks.open ? Object.values(ticks.rows).map(t => t.at) : [];
+  if (times.length) {
+    const newest = Math.max(...times);
+    return { text: `Prices ${clock(newest, true)}`, late: Date.now() / 1000 - newest > STALE_SECONDS };
+  }
+  if (!row) return null;
+  if (row.state === "closed") return { text: "Prices · market closed", late: false };
+  return row.last_at ? { text: `Prices ${clock(row.last_at)}`, late: BAD.includes(row.state) } : { text: "Prices · no read yet", late: false };
+}
+
+/**
+ * The status line along the desk's bottom, from 768 px (a phone has its tab bar there, and the top bar's dot): the mode's
+ * mark with whose book (``mark``), how fresh prices are, then each source as a dot and its name. A source behind is in
+ * words, red when it leaves positions, fills or prices wrong ("Robinhood behind since 10:31"), amber for the rest. A tap
+ * opens the Data health list. It shares the dot's read and the desk's live prices: it asks for nothing of its own.
+ */
+export function DeskStatusLine({ mark, className }: { mark: ReactNode; className?: string }) {
+  const { rows, failed, said, tape } = useDeskHealth();
+  const { open, setOpen, box } = useHealthOpen();
+  const ticks = useHeldTicks();
+  const prices = pricesWords(ticks, rows?.find(r => r.id === "prices"));
+  // Behind first, so a narrow line never cuts one off.
+  const shown = rows ? [...rows.filter(r => BAD.includes(r.state)), ...rows.filter(r => !BAD.includes(r.state))] : [];
+  return (
+    <div ref={box} className={cn("relative", className)}>
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="dialog" data-testid="desk-status-line" data-tone={said.tone}
+        title="Data health: what feeds the desk"
+        className={cn("flex h-7 w-full min-w-0 items-center gap-3 overflow-hidden whitespace-nowrap px-3.5 text-left text-[11px] text-muted-foreground hover:bg-secondary/60",
+          open && "bg-secondary/60")}>
+        {mark}
+        {prices && <span data-testid="status-prices" className={cn("shrink-0 tabular-nums", prices.late && "text-amber-300")}>{prices.text}</span>}
+        <span aria-hidden className="h-3 w-px shrink-0 bg-border" />
+        {failed ? <span className="shrink-0">Health unknown · the next minute asks again</span>
+          : !rows ? <span className="shrink-0">Checking sources…</span>
+          : shown.map(row => {
+            const bad = BAD.includes(row.state);
+            const red = bad && MONEY.has(row.id);
+            return (
+              <span key={row.id} data-testid={`status-${row.id}`} data-state={row.state} data-tone={red ? "red" : bad ? "amber" : undefined}
+                className={cn("inline-flex shrink-0 items-center gap-1", red ? "font-medium text-rose-300" : bad && "text-amber-300")}>
+                <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", red ? "bg-rose-500" : DOT[row.state])} />
+                {bad ? behindWords(row) : <>{row.name}<span className="sr-only"> {WORD[row.state]}</span></>}
+              </span>
+            );
+          })}
+      </button>
+      {open && <HealthList rows={rows} failed={failed} tape={tape} up />}
+    </div>
   );
 }

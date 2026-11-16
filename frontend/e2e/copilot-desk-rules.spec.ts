@@ -163,6 +163,24 @@ test("the Ticket's Copy all keeps the real checklist with the plan and the accou
   expect(seen.tickets[0]).toMatchObject({ investigation_id: "inv-nbis", symbol: "NBIS", side: "real", last4: "8267", answers: { r_aplus00001: true } });
 });
 
+test("in the desk's Paper mode the ticket leads with its paper half and Fill on paper; the real half follows, labelled", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("desk.mode.v1", "paper"));
+  await open(page, 1440, "/copilot-lab?ticket=inv-nbis");
+  const ticket = page.getByTestId("desk-ticket");
+  const paper = ticket.getByRole("group", { name: "Paper, not real money" });
+  await expect(paper).toHaveAttribute("data-lead", "true");
+  await expect(paper).toContainText("paper first · NBIS");
+  await expect(paper.getByTestId("paper-button")).toHaveText("Fill on paper");
+  await expect(ticket.getByTestId("paper-button")).toHaveCount(1);
+  // The real half is still there, under it, with its REAL mark and Copy all.
+  const real = ticket.getByTestId("ticket-real");
+  await expect(real.getByTestId("mode-mark")).toHaveText("Real · Roth ••8267");
+  const half = await paper.boundingBox();
+  expect((await real.boundingBox())!.y).toBeGreaterThan(half!.y + half!.height - 1);
+  await expect(ticket.getByRole("button", { name: "Copy all for Robinhood" })).toBeVisible();
+  await page.getByTestId("desk-dock").screenshot({ path: test.info().outputPath("ticket-paper-first.png") });
+});
+
 for (const width of [1440, 375]) {
   test(`a real ticket opens on REAL and the account; Paper trade it sits apart in its own PAPER group at ${width}px`, async ({ page }) => {
     await open(page, width, "/copilot-lab?ticket=inv-nbis");

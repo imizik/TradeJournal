@@ -12,7 +12,8 @@ import { cn } from "@/lib/utils";
 export type Mode = "real" | "paper" | "replay";
 
 const WORD: Record<Mode, string> = { real: "Real", paper: "Paper", replay: "Replay" };
-const CHIP: Record<Mode, string> = {
+/** Each mode's chip: the mark's own look, and the picked segment of the desk's mode switch (`DeskMode.tsx`). */
+export const MODE_CHIP: Record<Mode, string> = {
   real: "border border-foreground/60 bg-foreground/10 text-foreground",
   paper: "border border-dashed border-amber-400/70 text-amber-200",
   replay: "border border-amber-400 bg-amber-400 text-black",
@@ -39,7 +40,7 @@ export default function ModeMark({ mode, detail, short = false, className }: {
   const extra = mode === "paper" && !short ? detail ?? "not real money" : detail;
   return (
     <span data-testid="mode-mark" data-mode={mode}
-      className={cn("inline-flex shrink-0 items-center whitespace-nowrap rounded px-1 text-[10px] font-semibold uppercase leading-4 tracking-wide", CHIP[mode], className)}>
+      className={cn("inline-flex shrink-0 items-center whitespace-nowrap rounded px-1 text-[10px] font-semibold uppercase leading-4 tracking-wide", MODE_CHIP[mode], className)}>
       {WORD[mode]}{extra && <span className="font-medium normal-case tracking-normal"> · {extra}</span>}
     </span>
   );
@@ -55,13 +56,15 @@ export function RealTicketLine({ account }: { account: string | null | undefined
   );
 }
 
-/** A ticket's paper half: below a dashed divider, apart from the real order's buttons, with its own PAPER mark. */
-export function PaperHalf({ children }: { children: React.ReactNode }) {
+/** A ticket's paper half: below a dashed divider, apart from the real order's buttons, with its own PAPER mark. In the
+ * desk's Paper mode it leads the ticket instead (``lead``: the order in words), above a dashed divider and the real half. */
+export function PaperHalf({ lead = null, children }: { lead?: string | null; children: React.ReactNode }) {
   return (
-    <div role="group" aria-label="Paper, not real money" data-testid="ticket-paper" className="space-y-2 border-t border-dashed border-amber-400/40 pt-3">
+    <div role="group" aria-label="Paper, not real money" data-testid="ticket-paper" data-lead={lead ? "true" : undefined}
+      className={cn("space-y-2 border-dashed border-amber-400/40", lead ? "border-b pb-3" : "border-t pt-3")}>
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
         <ModeMark mode="paper" />
-        <span>practise the same order with no money</span>
+        <span>{lead ? <>paper first · <span className="text-foreground">{lead}</span>, no money</> : "practise the same order with no money"}</span>
       </p>
       {children}
     </div>

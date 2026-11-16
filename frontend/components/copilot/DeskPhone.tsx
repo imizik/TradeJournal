@@ -7,7 +7,7 @@
  * changes or cancels an order, or tells the owner to buy, sell or hold.
  */
 
-import { useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { LABEL, LIVE_WORDS, bookTag, positionRows, tone } from "@/components/copilot/Cockpit";
 import { tickedAccount } from "@/components/copilot/DeskAccounts";
 import { Line } from "@/components/copilot/DeskOrders";
@@ -63,9 +63,10 @@ export function bookRead(rows: DeskThread[], live: DeskLive | null, ticks: Retur
  * The value block at the top of a phone's Positions: REAL and the account (or "2 accounts") with the feed's time, the
  * total value large with today's change under it, and one line of how the book is doing. A tap on the value opens each
  * account as a row (options, cash, buying power, open P&L); a tap on an account narrows the book to it, as the top
- * bar's account line does wider. Not live, it says so in grey with its time and shows no money, never a zero.
+ * bar's account line does wider. Not live, it says so in grey with its time and shows no money, never a zero. ``aside``
+ * (the desk's mode switch) sits at the right of the total, where it takes no height of its own.
  */
-export function PhoneValue({ live, rows, booked, active, onPick, day, realized }: {
+export function PhoneValue({ live, rows, booked, active, onPick, day, realized, aside = null }: {
   /** The feed (null until this mount's read) and every row: the accounts' figures move with all their positions. */
   live: DeskLive | null; rows: DeskThread[];
   /** The book as shown (narrowed to the picked account): the one-line read counts these. */
@@ -73,6 +74,7 @@ export function PhoneValue({ live, rows, booked, active, onPick, day, realized }
   active: string | null; onPick(masked: string | null): void; day: string;
   /** Realized today (the session read's), shown beside today's change when a trade closed today. */
   realized?: number | null;
+  aside?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const ticks = useDeskTicks(positionRows(rows).map(r => r.book?.tick?.quote));
@@ -100,9 +102,11 @@ export function PhoneValue({ live, rows, booked, active, onPick, day, realized }
         {isLive && live?.as_of && <span className="ml-auto shrink-0 tabular-nums">live · {clock(live.as_of)}</span>}
       </p>
       {isLive ? (
+        // Wraps: the mode switch (aside) moves under the total when both cannot fit on one line, never over it.
+        <div className="mt-1 flex flex-wrap items-center justify-end gap-2">
         <button type="button" aria-expanded={open} onClick={() => setOpen(o => !o)} data-testid="value-open"
           title={open ? "Hide each account's figures" : "Each account: options, cash, buying power"}
-          className="mt-1 flex min-h-11 w-full flex-col items-start rounded-md text-left hover:bg-secondary/60">
+          className="flex min-h-11 min-w-0 flex-auto flex-col items-start rounded-md text-left hover:bg-secondary/60">
           <span data-testid="value-total" className={cn("text-[28px] font-semibold leading-8 tabular-nums tracking-tight text-foreground", stale && "opacity-50")}>
             {or(total, whole)}<span aria-hidden className="ml-1.5 align-middle text-xs font-normal text-muted-foreground">{open ? "▴" : "▾"}</span>
           </span>
@@ -114,7 +118,12 @@ export function PhoneValue({ live, rows, booked, active, onPick, day, realized }
             <span className="text-muted-foreground">today</span>
           </span>
         </button>
-      ) : quiet ? <p data-testid="value-off" className="mt-1 text-xs text-muted-foreground">{quiet}</p> : null}
+        {aside}
+        </div>
+      ) : <>
+        {quiet && <p data-testid="value-off" className="mt-1 text-xs text-muted-foreground">{quiet}</p>}
+        {aside && <div className="mt-1.5 flex">{aside}</div>}
+      </>}
       {/* The day's account value line (kept while the feed is stale or signed out), as the top bar has it wider. */}
       {live && live.state !== "off" && <div className="-ml-1 mt-0.5"><DeskValueLine line={live.day_line} active={active} /></div>}
       {/* Realized today (the journal's closed trades), live or not. */}
