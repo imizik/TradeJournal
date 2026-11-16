@@ -1080,7 +1080,7 @@ The cockpit's panes in detail:
     candle shown (amber arrows, up for a buy and down for a sell; at the fill's price for shares, at the underlying's
     recorded price for an option, else on the candle; a mark with no candle of its own, such as an extended-hours
     fill on the 15m candles, sits on the nearest one; Webull left out; at most 40); today's **phone pings** sent on
-    the symbol (violet circles, the session strip's ping reader), **Radar hits** (blue squares, the Radar store
+    the symbol (light grey circles, the session strip's ping reader), **Radar hits** (blue squares, the Radar store
     read-only, none when it is off) and his **TradingView alerts** today on the symbol (pink circles, stored rows only,
     what fired on hover; none on a ticker he does not follow); and on 2m and 15m a **time stop** still ahead as a dashed vertical line at its
     time past the last candle, labelled, with room kept for it on the right. Hovering a mark (within 10 px, so a full
@@ -1946,7 +1946,7 @@ call the Charts ladder makes, so it shares that chain cache, budget and pacing; 
 shared quote. Never Robinhood, nothing written; a ticker set to Not following answers `none` without a read.
 
 - **Chart:** **Walls** in the Studies menu (off until turned on, then on for every timeframe, remembered in this browser) draws the four as thin
-  labelled dashed lines in the ladder's colours and the expected move as a faint band. Hovering one says what it is in
+  labelled dashed lines in the ladder's colours and the expected move as a faint grey band. Hovering one says what it is in
   plain words and that the dealer side is assumed (long calls, short puts); a long-press, right-click or price-scale
   tap near one opens the level menu at its price (alert there, plan from it, ask about it).
 - **Assumed, never fact:** every hint and the answer's `assumption` say the dealer side is assumed; open interest does
@@ -2267,16 +2267,17 @@ be empty (additive migration `e2c6a8f4b1d9`, no backfill). Proof: `backend/tests
 ### Real, paper and replay
 
 One mark (`frontend/components/copilot/ModeMark.tsx`) says whose money a ticket, book or figure is, by shape and word,
-never by colour alone (amber also means "needs you"):
+never by colour alone. Paper is violet and replay the same violet, filled (chosen 2026-11-16), so amber on the desk only
+ever means "needs you":
 
 - **REAL**: a solid light chip with the account ("Real · Roth IRA ••8267"); its card has a solid left edge. Every real
   ticket (plan, spread, close at target/stop, close now, roll) opens on it with "you place it in Robinhood · nothing
   is sent"; "Your book" carries it beside its heading.
-- **PAPER**: a dashed amber chip, "Paper · not real money", on a dashed amber frame: the paper book, the QQQ overnight
+- **PAPER**: a dashed violet chip, "Paper · not real money", on a dashed violet frame: the paper book, the QQQ overnight
   and momentum books, the paper confirm. On a ticket "Paper trade it" sits in its own PAPER half under a dashed
   divider, below Copy all (in Paper mode the half leads instead, below); in the Chain the Paper button is its own PAPER group under the real actions (Check it, Plan
   it, Put on ticket, Make it a spread).
-- **REPLAY**: a filled amber chip with the day ("Replay · Fri, Nov 13"): the replay ticket and the Replay practice card.
+- **REPLAY**: a filled violet chip with the day ("Replay · Fri, Nov 13"): the replay ticket and the Replay practice card.
 
 Where paper and real sit side by side (the paper score line, Progress, the rules followed/broken line, the Friday
 review) each side carries its mark. Proof: `frontend/e2e/copilot-desk-rules.spec.ts`, `frontend/e2e/copilot-desk-chain.spec.ts`.
@@ -2378,13 +2379,13 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   does not follow stays silent; only in the regular session. A tap opens the desk on the ticker.
 - **Chart marks.** His paper entries and exits are marks on the desk chart for that ticker (`kind` `paper`, at the
   stock's price when each filled), told apart from his real fills by shape, not colour alone: his real fills are solid
-  arrows, a paper fill a pale square lettered "P" (the momentum paper book's marks are squares lettered "M"; the chart
+  arrows, a paper fill a violet square lettered "P" (the momentum paper book's marks are deeper violet squares lettered "M"; the chart
   library draws no hollow marks), below the candle when bought and above it when sold, with "■P paper" in the legend.
 - **The account** (`POST /copilot/paper/runs`): he names the starting cash (default $10,000). Cash is the start plus
   every fill's cash; options use the ×100 multiplier; a credit spread holds its width as collateral, as Robinhood does,
   so buying power is the cash less it and falls by the spread's most-to-lose. An order he cannot pay for is refused with
   what it needs. A new run starts fresh cash; every older run keeps its history ("Earlier runs" under Progress).
-- **Positions** sit in the Paper section (Practice's paper line, under the book), its dashed amber frame and "not real money" tag keeping it
+- **Positions** sit in the Paper section (Practice's paper line, under the book), its dashed violet frame and "not real money" tag keeping it
   apart from real money. The account's value is its cash plus each position's worth at those same prices. Each shows P&L
   from the desk's own live ticks (its legs ride the one ticks read; no new
   polling), else the server's newest kept price greyed with its time, else "No price yet", never a zero. Close and Trim
@@ -2488,7 +2489,7 @@ Paper trading on a past day, any time (nights and weekends included): "Replay" o
   own budget and lock), never Tradier or Robinhood. A day whose bars cannot be read is greyed out with the reason.
 - **The clock.** The chart starts at 9:30 ET with the premarket and nothing after; Play, Pause, 1×/5×/20×/60× (60× is a
   replayed minute a second) and one bar. Only bars that ended by the clock are drawn. While it runs the live desk is
-  hidden behind an amber `REPLAY · <date> · <time> ET` badge (its keys off, the copilot hidden); Back to live puts it
+  hidden behind a violet `REPLAY · <date> · <time> ET` badge (its keys off, the copilot hidden); Back to live puts it
   back exactly as it was, since it stays mounted underneath.
 - **Real money never hides.** One line across the foot of Replay's header (`ReplayLiveLine.tsx`), marked REAL: "3 open ·
   +$1,420 · 1 near stop · 1 order working" (the phone value block's own count, `bookRead`), the Needs-you strip's first
@@ -2651,8 +2652,8 @@ the average in basis points and dollars on $10,000, missed checks, the last five
 Hidden while switched off and empty; a failed read says so instead of showing old rows.
 
 On the desk chart, QQQ on 2m and 15m only, the same read's `today` (`today_view`, from the book's own records) draws
-today's noise band as two thin orange lines stepping at each recorded check, the checks still ahead faint and dashed
-(today's 60-session window over the anchor today's first check implies), and the paper entries and exits as pale marks
+today's noise band as two thin violet lines stepping at each recorded check, the checks still ahead faint and dashed
+(today's 60-session window over the anchor today's first check implies), and the paper entries and exits as violet marks
 lettered M (`frontend/lib/deskMomentumBand.ts`). One chip, "Momentum band · paper", toggles it (on by default, one
 choice for both timeframes, kept in the browser) and shows the band at the crosshair. Nothing, chip included, when the
 book is off, has no check today, the read fails or its day is not the chart's latest day.

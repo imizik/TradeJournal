@@ -414,7 +414,7 @@ function StrikeCell({ row, sides, marks, walls = [] }: { row: Row; sides: ChainS
           {planned && <span data-testid="chain-planned" className="ml-1 text-amber-300" title="The contract a saved plan names">plan</span>}
           {row.levels.map(l => <span key={l} data-testid="chain-level" className="ml-1 text-muted-foreground" title={`Your plan's ${l} price is at this strike`}>{l}</span>)}
           {odd.length > 0 && <span data-testid="chain-unusual" className="ml-1 text-orange-300" title={odd.join("; ")}>unusual</span>}
-          {walls.map(w => <span key={w.name} data-testid="chain-wall" className="ml-1 text-violet-300" title={`${w.hint} Dealer side assumed.`}>{w.name}</span>)}
+          {walls.map(w => <span key={w.name} data-testid="chain-wall" className="ml-1 text-slate-300" title={`${w.hint} Dealer side assumed.`}>{w.name}</span>)}
         </span>
       )}
     </td>
@@ -544,7 +544,7 @@ function Actions({ pick, cell, plans, onCheck, onPlan, onTicket, onClose, buildi
 /** The Paper button's own row under the real actions, behind a dashed divider and its PAPER mark. */
 function PaperGroup({ children }: { children: React.ReactNode }) {
   return (
-    <div role="group" aria-label="Paper, not real money" data-testid="chain-paper-actions" className="flex flex-wrap items-center gap-2 border-t border-dashed border-amber-400/40 pt-2">
+    <div role="group" aria-label="Paper, not real money" data-testid="chain-paper-actions" className="flex flex-wrap items-center gap-2 border-t border-dashed border-violet-400/40 pt-2">
       <ModeMark mode="paper" />
       {children}
     </div>

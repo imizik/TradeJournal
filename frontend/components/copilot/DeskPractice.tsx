@@ -269,7 +269,7 @@ export function Practice({ on, paper, symbol, review, onReplay, onPick }: {
         <Line id="replay" mode="replay" name={replayed ? plural(card!.score.trades, "trade") : "Past days"} open={isOpen("replay")}
           onToggle={replayed ? () => set("replay", !isOpen("replay")) : undefined} section={<ReplayPractice card={card} />}
           extra={<button type="button" data-testid="practice-replay-open" onClick={onReplay} title="Paper trade a past day, any time: the day replays bar by bar"
-            className="inline-flex min-h-11 shrink-0 items-center px-3 text-xs text-amber-200/80 hover:text-amber-100 sm:min-h-8">Replay a day</button>}>
+            className="inline-flex min-h-11 shrink-0 items-center px-3 text-xs text-violet-200/80 hover:text-violet-100 sm:min-h-8">Replay a day</button>}>
           {replayed ? <span className={tone(card!.score.pnl)}>{signed(card!.score.pnl)}</span> : <span>bar by bar, scored apart</span>}
         </Line>
       </Fold>

@@ -30,7 +30,7 @@ import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type 
 /*
  * The cockpit centre's chart (docs/copilot-lab.md § The desk): the selected symbol's candles from the desk's chart read
  * (`GET /copilot/desk/{id}/chart`) on the library the Charts workspace uses, with the plan's entry and invalidation as
- * labelled lines, the owner's fills (real ones solid arrows, paper ones pale squares lettered P), today's phone pings, Radar hits and his TradingView alerts as marks, and a time stop still ahead as a
+ * labelled lines, the owner's fills (real ones solid arrows, paper ones violet squares lettered P), today's phone pings, Radar hits and his TradingView alerts as marks, and a time stop still ahead as a
  * dashed vertical line. Crosshair, wheel or pinch zoom, drag to pan, Reset. It reads again each minute while bars can
  * still change; no stream.
  *
@@ -57,12 +57,12 @@ import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type 
  *
  * Momentum band (QQQ on 2m and 15m only, one choice for both): the QQQ intraday momentum paper book's noise band today
  * as two thin lines stepping at each hourly check (the hours still ahead faint and dashed) and its paper entries and
- * exits as pale marks lettered M (``lib/deskMomentumBand.ts``). Its chip shows only when the book is on and has checked
+ * exits as violet marks lettered M (``lib/deskMomentumBand.ts``). Its chip shows only when the book is on and has checked
  * today; a failed read or another day's draws nothing.
  */
 
 const ET = "America/New_York";
-const COLOR = { fill: "#e9a23b", paper: "#fef3c7", momentum: "#fdba74", ping: "#a78bfa", radar: "#60a5fa", tradingview: "#f0abfc", entry: "#7db3f0", invalidation: "#fca5a5", target: "#86efac", stop: "#a1a1aa",
+const COLOR = { fill: "#e9a23b", paper: "#c4b5fd", momentum: "#a78bfa", ping: "#d4d4d8", radar: "#60a5fa", tradingview: "#f0abfc", entry: "#7db3f0", invalidation: "#fca5a5", target: "#86efac", stop: "#a1a1aa",
   alert: "#f4c66bb0", reference: "#9a9aa3a0", pick: "#e4e4e7", guide: "#5eead4c0" };
 
 /** The studies each timeframe offers, in the legend's order; ``levels`` is the previous close and the pre-market high
@@ -82,7 +82,7 @@ const STUDY: Record<StudyKey, { name: string; color: string }> = {
   vwap: { name: "VWAP", color: "#f5e6a1" }, ema9: { name: "EMA 9", color: "#67d5eb" }, ema21: { name: "EMA 21", color: "#f4c66b" },
   sma50: { name: "SMA 50", color: "#b494f5" }, sma200: { name: "SMA 200", color: "#ee86bd" }, volume: { name: "Vol", color: "#8d8d96" },
   levels: { name: "Prev close · PM high/low", color: "#9a9aa3" }, news: { name: "News", color: "#7dd3fc" },
-  walls: { name: "Walls", color: "#c4b5fd" }, momentum: { name: "Momentum band · paper", color: "#fdba74" },
+  walls: { name: "Walls", color: "#cbd5e1" }, momentum: { name: "Momentum band · paper", color: "#a78bfa" },
 };
 /** The ladder's colours (``OptionsLadder``), thin and a little faded: context, never louder than the plan. */
 const WALL_COLOR: Record<DeskWalls["levels"][number]["kind"], string> = { put_wall: "#fb7185cc", call_wall: "#34d399cc", gamma_flip: "#e4e4e7b0", max_pain: "#fcd34db0" };
@@ -202,7 +202,7 @@ function seriesMarkers(byCandle: Map<number, DeskChartMark[]>): SeriesMarker<Tim
       const at = time as UTCTimestamp;
       const id = `${mark.kind}:${mark.at}:${i}`;
       if (mark.kind === "fill" || mark.kind === "paper" || mark.kind === "momentum") {
-        // A paper fill is a pale square lettered "P" (the momentum book's "M"); his real fills are solid arrows.
+        // A paper fill is a violet square lettered "P" (the momentum book's "M"); his real fills are solid arrows.
         const buy = mark.side !== "sell";
         const shape = markShape(mark);
         const look = mark.kind === "paper" ? { color: COLOR.paper, text: "P", size: 0.7 }
@@ -334,9 +334,9 @@ class ExpectedBand implements ISeriesPrimitive<Time> {
       if (!ys || !band) return;
       const y0 = Math.max(0, Math.min(...ys)), y1 = Math.min(mediaSize.height, Math.max(...ys));
       if (y1 <= y0) return;
-      context.fillStyle = "rgba(196, 181, 253, 0.06)";
+      context.fillStyle = "rgba(203, 213, 225, 0.06)";
       context.fillRect(0, y0, mediaSize.width, y1 - y0);
-      context.strokeStyle = "rgba(196, 181, 253, 0.25)";
+      context.strokeStyle = "rgba(203, 213, 225, 0.25)";
       context.setLineDash([2, 4]);
       context.lineWidth = 1;
       for (const y of ys) {
@@ -347,7 +347,7 @@ class ExpectedBand implements ISeriesPrimitive<Time> {
         context.stroke();
       }
       context.setLineDash([]);
-      context.fillStyle = "rgba(196, 181, 253, 0.7)";
+      context.fillStyle = "rgba(203, 213, 225, 0.7)";
       context.textAlign = "right";
       // Inside the band when it has room, else just above it.
       if (Math.min(...ys) >= 0) context.fillText(band.label, mediaSize.width - 4, y1 - y0 >= 16 ? y0 + 11 : y0 - 3);
@@ -402,7 +402,7 @@ class MomentumBand implements ISeriesPrimitive<Time> {
     target.useMediaCoordinateSpace(({ context }) => {
       context.lineWidth = 1;
       drawn.forEach((d, i) => {
-        context.strokeStyle = d.ahead ? "rgba(253, 186, 116, 0.3)" : "rgba(253, 186, 116, 0.75)";
+        context.strokeStyle = d.ahead ? "rgba(167, 139, 250, 0.3)" : "rgba(167, 139, 250, 0.75)";
         context.setLineDash(d.ahead ? [3, 4] : []);
         const prev = drawn[i - 1];
         for (const key of ["up", "low"] as const) {
@@ -427,8 +427,8 @@ function wallNear(series: ISeriesApi<"Candlestick">, walls: DeskWalls | null, y:
   const move = walls.expected_move;
   const spots = [
     ...walls.levels.map(level => ({ key: level.kind, name: level.name, price: level.price, hint: level.hint, color: WALL_COLOR[level.kind] })),
-    ...(move ? [{ key: "em_high", name: "Expected move high", price: move.high, hint: move.hint, color: "#c4b5fd" },
-      { key: "em_low", name: "Expected move low", price: move.low, hint: move.hint, color: "#c4b5fd" }] : []),
+    ...(move ? [{ key: "em_high", name: "Expected move high", price: move.high, hint: move.hint, color: "#cbd5e1" },
+      { key: "em_low", name: "Expected move low", price: move.low, hint: move.hint, color: "#cbd5e1" }] : []),
   ];
   let best: (WallSpot & { gap: number }) | null = null;
   for (const spot of spots) {
@@ -1285,7 +1285,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
               </p>
             )}
             {(paperDrawn || momentumDrawn) && (
-              <p className="pt-0.5"><span data-testid="desk-chart-paper" className="rounded border border-amber-200/40 bg-background/80 px-1 text-[10px] font-medium tracking-wide text-amber-100 [text-shadow:none]">PAPER fills shown</span></p>
+              <p className="pt-0.5"><span data-testid="desk-chart-paper" className="rounded border border-violet-200/40 bg-background/80 px-1 text-[10px] font-medium tracking-wide text-violet-100 [text-shadow:none]">PAPER fills shown</span></p>
             )}
           </div>
         )}

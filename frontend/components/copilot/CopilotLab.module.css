@@ -131,11 +131,11 @@
   background: hsl(var(--card));
 }
 
-/* The desk's Paper mode (DeskMode.tsx): the centre wears the dashed PAPER frame (ModeMark's amber), with its chip on
+/* The desk's Paper mode (DeskMode.tsx): the centre wears the dashed PAPER frame (ModeMark's violet), with its chip on
    the frame's top-right corner from 768 px, laid over the centre's own grid area so it never takes the chart's room. */
 .centre[data-mode="paper"] {
   border-style: dashed;
-  border-color: rgb(251 191 36 / 0.45);
+  border-color: rgb(167 139 250 / 0.45);
 }
 
 .paperChip,

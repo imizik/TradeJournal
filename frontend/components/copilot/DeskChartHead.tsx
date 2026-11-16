@@ -152,7 +152,7 @@ export function ChartHead({ symbol, reading, held, view, timeframe, onTimeframe,
             {onReplay && (
               <FoldItem id="chart.replay" onOpen={() => { close(); onReplay(); }}>
                 <button type="button" data-testid="replay-open" data-use="chart.replay" onClick={() => { close(); onReplay(); }}
-                  title="Paper trade a past day, any time: the day replays bar by bar" className={cn(ITEM, "text-amber-200/90")}>Replay a past day</button>
+                  title="Paper trade a past day, any time: the day replays bar by bar" className={cn(ITEM, "text-violet-200/90")}>Replay a past day</button>
               </FoldItem>
             )}
             {owner && (

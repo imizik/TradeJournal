@@ -366,7 +366,7 @@ function StatusLine({ status, error, model, onModel, backend, onBackend, quiet =
     <span key="followups" data-testid="copilot-followup-model">follow-ups on {followupLabel(status.followup_model)}</span>
   );
   const evidence = status.evidence === "replay" ? (
-    <span key="evidence" className={status.replay && "error" in status.replay ? cn(chip("bg-rose-500/10"), "text-rose-300") : chip("bg-violet-500/10 text-violet-300")}>
+    <span key="evidence" className={status.replay && "error" in status.replay ? cn(chip("bg-rose-500/10"), "text-rose-300") : chip("bg-secondary text-foreground")}>
       {!status.replay ? "Replay" : "error" in status.replay ? `Replay unavailable: ${status.replay.error}`
         : `Replay · clock frozen at ${new Date(status.replay.at).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET · recorded Radar data`}
     </span>
