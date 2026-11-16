@@ -117,10 +117,10 @@ async function putTarget(investigationId: string, target: number | null) {
  * past); the target is the plan card's price, a line with no alert. Returns what it said in words. */
 export async function savePlanLevels({ symbol, plan, side, stop, target }: {
   symbol: string; plan: PanelPlan; side: PlanSide; stop: number | null; target: number | null;
-}): Promise<string> {
+}): Promise<{ text: string; stop: number | null; target: number | null }> {
   const stopMoved = stop !== null && (plan.stop === null || Math.abs(stop - plan.stop) >= 0.005);
   const targetMoved = target === null ? plan.target !== null : plan.target === null || Math.abs(target - plan.target) >= 0.005;
-  if (!stopMoved && !targetMoved) return "Nothing changed.";
+  if (!stopMoved && !targetMoved) return { text: "Nothing changed.", stop: plan.stop, target: plan.target };
   let last: number | null = null;
   let alertId: string | null = null;
   if (stopMoved) {
@@ -136,10 +136,19 @@ export async function savePlanLevels({ symbol, plan, side, stop, target }: {
     await rearmAlert(alertId!, stop!, last!);
     said.push(`stop ${price(stop!)}${plan.stop !== null ? ` (was ${price(plan.stop)})` : ""}`);
   }
+  let savedTarget = plan.target;
+  let failed = "";
   if (targetMoved) {
-    await putTarget(plan.investigationId, target);
-    said.push(target === null ? "no target" : `target ${price(target)}${plan.target !== null ? ` (was ${price(plan.target)})` : ""}`);
+    try {
+      await putTarget(plan.investigationId, target);
+      savedTarget = target;
+      said.push(target === null ? "no target" : `target ${price(target)}${plan.target !== null ? ` (was ${price(plan.target)})` : ""}`);
+    } catch (error) {
+      if (!stopMoved) throw error;
+      // The stop has already moved: say so, and why the target did not.
+      failed = ` The target was not saved: ${error instanceof Error ? error.message : "try again"}`;
+    }
   }
   window.dispatchEvent(new CustomEvent(DESK_CHANGED_EVENT, { detail: {} }));
-  return `Plan updated: ${symbol} ${said.join(", ")}.`;
+  return { text: `Plan updated: ${symbol} ${said.join(", ")}.${failed}`, stop: stopMoved ? stop : plan.stop, target: savedTarget };
 }

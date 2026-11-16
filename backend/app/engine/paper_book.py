@@ -298,8 +298,12 @@ def fold(events: list[PaperEvent]) -> list[dict]:
         if event.kind == "levels":  # a stop, target or note changed after entry: the newest wins while it is open
             position = out.get(event.position_id)
             if position is not None and position["status"] == "open":
-                position.update(json.loads(event.data_json))
-                position["levels_id"], position["levels_at"] = str(event.id), _epoch(event.effective_at)
+                data = json.loads(event.data_json)
+                # Only a new stop or target starts the touches afresh; a note alone leaves them (and a waiting exit) be.
+                moved = any(k in data and data[k] != position.get(k) for k in ("stop", "target"))
+                position.update(data)
+                if moved:
+                    position["levels_id"], position["levels_at"] = str(event.id), _epoch(event.effective_at)
             continue
         if event.kind not in POSITION_KINDS:
             continue

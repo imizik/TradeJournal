@@ -226,9 +226,9 @@ export function DeskPosition({ row, rows, fallback = null, change = null, plan, 
       {open === "levels" && current && side && (
         <LevelsEditor symbol={symbol} side={side} last={stock?.last ?? null} stop={current.stop} target={current.target} needStop={current.stop !== null}
           save={async (stop, target) => {
-            const words = await savePlanLevels({ symbol, plan: current, side, stop, target });
-            setSaved({ stop: stop ?? current.stop, target });
-            return words;
+            const done = await savePlanLevels({ symbol, plan: current, side, stop, target });
+            setSaved({ stop: done.stop, target: done.target });
+            return done.text;
           }}
           onDone={words => { setOpen(null); setSaid(words); }}
           note={<p className="text-[11px] text-muted-foreground">The stop is the plan&apos;s phone alert, armed again at the new price from a live quote; the target is a line. Nothing is sent to Robinhood.</p>} />

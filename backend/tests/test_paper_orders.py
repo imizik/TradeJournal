@@ -298,6 +298,27 @@ def test_moving_the_stop_after_entry_never_closes_by_itself_and_counts_touches_f
     assert closed["verdict"]["text"].startswith("Auto exit at the stop: the stock touched 93")
 
 
+def test_a_note_alone_never_drops_a_waiting_exit_or_tells_a_touch_twice(db, market):  # noqa: F811
+    paper_book.start_run(db, None, False, NOW)
+    market.quotes = {CALL: q(CALL, 3.30, 3.40), "NBIS": q("NBIS", 98.0, 98.1, last=98.05)}
+    order = {"symbol": "NBIS", "instrument": "option", "option_type": "call", "expiry": "2026-11-20", "strike": 100, "quantity": 1, "stop": 95}
+    auto = paper_book.open_order(db, {**order, "order_key": key()}, NOW)["filled"]["position_id"]
+    told = paper_book.open_order(db, {**order, "order_key": key()}, NOW)["filled"]["position_id"]
+    paper_book.set_auto(db, {"position_id": auto, "on": True, "order_key": key()}, NOW + 10)
+    bars = [bar(NOW + 60, 94.5, 96)]
+    market.quotes = {}
+    [touch] = passes(db, NOW + 151, bars)  # the switch-off position is told; the switch-on one waits for a bid
+    assert touch["source"].startswith(f"touch:{told}:stop")
+    for pid in (auto, told):
+        paper_book.set_levels(db, {"position_id": pid, "note": "still in", "order_key": key()}, NOW + 160)
+    positions = {p["id"]: p for p in paper_book.view(db, NOW + 161)["positions"]}
+    assert positions[auto]["exiting"] is True and positions[auto]["note"] == "still in"
+    assert positions[told]["touched"] == {"stop": NOW + 120}
+    market.quotes = {CALL: q(CALL, 2.0, 2.1, now=NOW + 211), "NBIS": q("NBIS", 95, 95.1, last=95.0, now=NOW + 211)}
+    [sold] = passes(db, NOW + 211, bars)  # the waiting exit still sells; the told touch is not told again
+    assert sold["title"] == "PAPER · NBIS auto exit at the stop"
+
+
 def test_a_level_change_is_checked_against_the_stock_and_the_switch_off_tells_the_new_level_once(db, market):  # noqa: F811
     paper_book.start_run(db, None, False, NOW)
     market.quotes = {CALL: q(CALL, 3.30, 3.40), "NBIS": q("NBIS", 98.0, 98.1, last=98.05)}

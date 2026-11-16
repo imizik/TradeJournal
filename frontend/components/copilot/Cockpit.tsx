@@ -525,7 +525,10 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
   // the book row's plan levels with the position's own thread. None without a stop.
   const levelAt = (role: "entry" | "invalidation" | "target") => reading?.levels.find(l => l.role === role)?.price ?? null;
   const chartLevels = { entry: levelAt("entry"), stop: levelAt("invalidation"), target: levelAt("target") };
-  const readPlan = reading && ref && ref.id !== DESK_MARKET && !ref.id.startsWith("symbol:") && chartLevels.stop !== null;
+  // The chart's plan only when it is the selected position's own (another conversation on the ticker may be another
+  // plan, or another contract's): the panel never edits a plan that is not the row's.
+  const readPlan = reading && ref && ref.id !== DESK_MARKET && !ref.id.startsWith("symbol:") && chartLevels.stop !== null
+    && (!row?.investigationId || ref.id === row.investigationId);
   const plan: PanelPlan | null = readPlan
     ? { investigationId: ref!.id, ...chartLevels }
     : row?.investigationId && row.book?.plan_levels?.stop != null
@@ -557,7 +560,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
       {/* The Position panel sits under the chart: the chart comes first. A held position's figures (an option's full
           standing) and every button that manages it; its book row keeps only the short standing line. A paper position
           in this ticker has its own panel, marked PAPER. */}
-      {row?.book && <DeskPosition key={row.key} row={row} rows={rows} plan={plan} levels={chartLevels} change={change} onPlan={onPlan} ordersLive={ordersLive}
+      {row?.book && <DeskPosition key={row.key} row={row} rows={rows} plan={plan} levels={!row.investigationId || ref?.id === row.investigationId ? chartLevels : undefined} change={change} onPlan={onPlan} ordersLive={ordersLive}
         fallback={reading?.state === "ok" && reading.reading ? { last: reading.reading.last, at: reading.reading.at } : sparkPrice(sparks, symbol)}
         earnings={symbol ? earnings?.rows[symbol]?.date ?? null : null} />}
       {paper.map(p => <DeskPaperPosition key={p.id} position={p} orders={paperOrders} />)}

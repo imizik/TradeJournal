@@ -2227,7 +2227,7 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   quote read). Recorded as a `levels` event (the newest wins); the fold carries them, so a closed trade is graded against
   the levels as they stood at its exit. A change never fills or closes anything by itself and leaves the switch as it
   is: touches of the new levels count only from the change on (a touch or trigger is keyed to the change), and a
-  trigger found before the change no longer sells.
+  trigger found before the change no longer sells. A note alone changes neither: a waiting exit still sells.
 - **The Position panel on paper.** Tapping a paper position's name in the Paper section shows its ticker on the desk;
   under the chart each open paper position in that ticker has its own panel (`DeskPaperPosition` in
   `frontend/components/copilot/DeskPosition.tsx`), marked PAPER: its P&L, the price now and the stock's change today,
