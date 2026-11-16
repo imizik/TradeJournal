@@ -163,6 +163,13 @@ export function Practice({ on, paper, symbol, review, onReplay }: {
   const risk = positions.length > 0 || orders.length > 0;
   const paperKey = risk ? "paper.risk" : "paper";
   const isOpen = (key: string, fallback = false) => kept[key] ?? fallback;
+  // The last position closed (or order canceled) while the line was open: it stays open, so the fill's result and the
+  // section's own state stay on screen. Adjusted during render, so the section never unmounts in between.
+  const [riskWas, setRiskWas] = useState(risk);
+  if (riskWas !== risk) {
+    setRiskWas(risk);
+    if (riskWas && !risk && isOpen("paper.risk", true)) set("paper", true);
+  }
   useOpenPlace(useCallback((place: DeskPlace) => {
     if (place === "paper") openAll(["paper", "paper.risk"]);
     else if (place !== "rules") openAll([place]);
@@ -176,6 +183,8 @@ export function Practice({ on, paper, symbol, review, onReplay }: {
       <span>· {positions.length ? `${positions.length} open` : orders.length ? "nothing open" : "nothing open or working"}</span>
       {orders.length > 0 && <span>· {orders.length} working</span>}
       {positions.length > 0 && openPnl !== null && <span data-testid="practice-paper-pnl" className={pnls.some(p => p.stale) ? "text-muted-foreground" : tone(openPnl)}>{signed(openPnl)}</span>}
+      {/* A position with no price yet is left out of that sum, and the line says so rather than passing it as the total. */}
+      {positions.length > pnls.length && <span data-testid="practice-paper-unpriced">· {positions.length - pnls.length} not priced</span>}
       {positions.length === 0 && book.score && book.score.paper.trades > 0 && <span><span className={tone(book.score.paper.pnl)}>{signed(book.score.paper.pnl)}</span> closed</span>}
     </>;
 

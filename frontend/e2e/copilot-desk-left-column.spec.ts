@@ -77,6 +77,7 @@ async function open(page: Page, width: number, book: object = BOOK) {
   }) } }));
   await page.goto("/copilot-lab");
   if (width < 768) await page.getByTestId("desk-view-book").click();
+  return reads; // a test may change what the next read returns
 }
 
 const top = async (page: Page, id: string) => (await page.getByTestId(id).boundingBox())!.y;
@@ -137,6 +138,16 @@ for (const width of [1440, 375]) {
     expect(box.x + box.width).toBeLessThanOrEqual(width);
   });
 }
+
+test("closing the last paper position keeps the open paper line open", async ({ page }) => {
+  const reads = await open(page, 1440, { ...BOOK, positions: [OPEN] });
+  await expect(page.getByTestId("desk-paper").getByTestId("paper-position")).toHaveCount(1);
+  reads["/copilot/paper"] = BOOK; // the next read: the position closed, nothing open or working
+  await page.evaluate(() => window.dispatchEvent(new Event("tradejournal:paper-changed")));
+  await expect(page.getByTestId("practice-line-paper")).toContainText("nothing open or working");
+  await expect(page.getByTestId("practice-line-paper")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("desk-paper").getByTestId("paper-account")).toBeVisible();
+});
 
 test("with nothing open the paper line waits closed and opens on a tap", async ({ page }) => {
   await open(page, 1440);
