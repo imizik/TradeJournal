@@ -83,8 +83,10 @@ async function open(page: Page, cards: Record<string, unknown>[] = []) {
 }
 
 const jump = async (page: Page, text: string) => {
-  await page.keyboard.press("ControlOrMeta+k");
   const dialog = page.getByRole("dialog", { name: "Jump to" });
+  // The desk ignores ⌘K while a dialog is still open: an Escape just pressed must have closed it first.
+  await expect(dialog).toBeHidden();
+  await page.keyboard.press("ControlOrMeta+k");
   await dialog.getByRole("combobox", { name: "Jump to" }).fill(text);
   return dialog;
 };
