@@ -56,15 +56,14 @@ export function RealTicketLine({ account }: { account: string | null | undefined
   );
 }
 
-/** A ticket's paper half: below a dashed divider, apart from the real order's buttons, with its own PAPER mark. In the
- * desk's Paper mode it leads the ticket instead (``lead``: the order in words), above a dashed divider and the real half. */
-export function PaperHalf({ lead = null, children }: { lead?: string | null; children: React.ReactNode }) {
+/** A ticket's paper half: below a dashed divider, apart from the real order's buttons, with its own PAPER mark. (In the
+ * desk's Paper mode the ticket's main action is paper instead, with no half: ``DeskTicket``'s ``PaperMain``.) */
+export function PaperHalf({ children }: { children: React.ReactNode }) {
   return (
-    <div role="group" aria-label="Paper, not real money" data-testid="ticket-paper" data-lead={lead ? "true" : undefined}
-      className={cn("space-y-2 border-dashed border-amber-400/40", lead ? "border-b pb-3" : "border-t pt-3")}>
+    <div role="group" aria-label="Paper, not real money" data-testid="ticket-paper" className="space-y-2 border-t border-dashed border-amber-400/40 pt-3">
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
         <ModeMark mode="paper" />
-        <span>{lead ? <>paper first · <span className="text-foreground">{lead}</span>, no money</> : "practise the same order with no money"}</span>
+        <span>practise the same order with no money</span>
       </p>
       {children}
     </div>

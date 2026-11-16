@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, CircleHelp, Minus, X } from "lucide-react";
 import { orderKey } from "@/lib/paperBook";
 import {
@@ -51,9 +51,17 @@ function useChecklist(entry: RuleEntry | null): { results: RuleResult[] | null; 
   return { results, failed };
 }
 
-/** The checklist: each rule's mark and reason; a tick-box rule is his to tick. Nothing at all when he has no rules. */
-export function RulesChecklist({ entry, ticked, onTick }: { entry: RuleEntry | null; ticked: Record<string, boolean>; onTick(id: string, on: boolean): void }) {
+/** The checklist: each rule's mark and reason; a tick-box rule is his to tick. Nothing at all when he has no rules.
+ *  ``onResults``: told each time the checklist is read, or with none when it could not be (the Paper confirm opens its
+ *  More line for a tick-box rule; a copilot paper card waits for it before Fill). */
+export function RulesChecklist({ entry, ticked, onTick, onResults }: {
+  entry: RuleEntry | null; ticked: Record<string, boolean>; onTick(id: string, on: boolean): void; onResults?(results: RuleResult[]): void;
+}) {
   const { results, failed } = useChecklist(entry);
+  const told = useRef(onResults);
+  useEffect(() => { told.current = onResults; });
+  // A checklist that could not be read reports none, so a caller waiting on it is never stuck.
+  useEffect(() => { if (results) told.current?.(results); else if (failed) told.current?.([]); }, [results, failed]);
   if (failed && !results) return <p className="text-[11px] text-muted-foreground">Your rules could not be checked just now.</p>;
   if (!results || results.length === 0) return null;
   const shown = answered(results, ticked);

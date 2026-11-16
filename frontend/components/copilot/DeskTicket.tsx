@@ -349,15 +349,12 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
   const fresh = q?.state === "ok" && !aged;
   const all = copyAllText({ symbol: ticket.symbol, type: k.type, expiry: k.expiry, strike: k.strike, limit: limitN !== null ? limitN.toFixed(2) : "", contracts: qtyN ? String(qtyN) : "" });
   const field = "w-24 rounded border bg-background px-2 py-1.5 text-base tabular-nums sm:text-sm";
-  const paperHalf = (lead: boolean) => (
-    <PaperHalf lead={lead ? k.label : null}>
-      <PaperButton order={{ instrument: "option", symbol: ticket.symbol, option_type: k.type, expiry: k.expiry, strike: k.strike }} quantity={qtyN}
-        note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} label={lead ? "Fill on paper" : undefined} strong={lead} />
-    </PaperHalf>
+  const paperOrder = (main: boolean) => (
+    <PaperButton order={{ instrument: "option", symbol: ticket.symbol, option_type: k.type, expiry: k.expiry, strike: k.strike }} quantity={qtyN}
+      note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} label={main ? "Buy on paper" : undefined} strong={main} />
   );
   return (
     <div data-testid="desk-ticket" className={cn("space-y-3", MODE_FRAME.real)}>
-      {paperFirst && paperHalf(true)}
       {head}
       {switcher}
       <div className="rounded-lg border bg-card px-3 py-1.5">
@@ -402,6 +399,7 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
         </Row>
       </div>
       {ticket.check && <PlayCheck check={ticket.check} investigationId={ticket.investigation_id} symbol={ticket.symbol} contracts={qtyN} paid={f.cost} />}
+      {paperFirst && <PaperMain>{paperOrder(true)}</PaperMain>}
       <RealRules investigationId={ticket.investigation_id} symbol={ticket.symbol}
         entry={{ side: "real", instrument: "option", expiry: k.expiry, size: f.cost, stop: ticket.invalidation, last4: chosen?.last4 ?? null }}>
         {onCopy => chosen?.kind === "mcp" ? (
@@ -419,7 +417,7 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
           </div>
         )}
       </RealRules>
-      {!paperFirst && paperHalf(false)}
+      {!paperFirst && <PaperHalf>{paperOrder(false)}</PaperHalf>}
       {foot(true)}
     </div>
   );
@@ -434,6 +432,17 @@ function quotedAt(ticket: Ticket | null, simulated = false): number | null {
   return times.length ? Math.min(...times) : null;
 }
 
+/** The desk's Paper mode: the ticket's main action is paper ("Buy on paper", "Open spread on paper"), where Copy all would
+ *  lead, with no box of its own; the same confirm fills it at the live quote. Copy all for the real order follows. */
+function PaperMain({ children }: { children: React.ReactNode }) {
+  return (
+    <div data-testid="ticket-paper-main" className="space-y-1">
+      {children}
+      <p className="text-xs text-muted-foreground">Paper, not real money: fills in the app at the live quote. The real order below still copies; nothing is sent.</p>
+    </div>
+  );
+}
+
 const ROLE_WORD = { entry: "entry", target: "target", stop: "stop" } as const;
 
 /**
@@ -446,7 +455,7 @@ function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, 
   ticket: Ticket; spread: Spread; head: React.ReactNode; switcher: React.ReactNode; foot: React.ReactNode; last4?: string | null;
   limit: string; setLimit(v: string): void; qty: string; setQty(v: string): void; nowS: number; onReread(): void;
 }) {
-  const paperFirst = useDeskMode() === "paper"; // as the single contract's ticket: the paper half first
+  const paperFirst = useDeskMode() === "paper"; // as the single contract's ticket: Open spread on paper is the main action
   const limitN = limit.trim() && Number(limit) > 0 ? Number(limit) : null;
   const qtyN = /^\d+$/.test(qty.trim()) && Number(qty) > 0 ? Number(qty) : null;
   const spot = ticket.underlying?.state === "ok" ? ticket.underlying.last ?? null : null;
@@ -462,15 +471,12 @@ function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, 
     limit: limitN !== null ? limitN.toFixed(2) : "", contracts: qtyN ? String(qtyN) : "" });
   const field = "w-24 rounded border bg-background px-2 py-1.5 text-base tabular-nums sm:text-sm";
   const per = (n: number | null) => n === null ? "—" : `${n.toFixed(2)} ${s.type}`;
-  const paperHalf = (lead: boolean) => (
-    <PaperHalf lead={lead ? s.label : null}>
-      <PaperButton order={{ instrument: "spread", symbol: ticket.symbol, option_type: s.kind, expiry: s.expiry, long_strike: s.long, short_strike: s.short }} quantity={qtyN}
-        note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} label={lead ? "Fill on paper" : undefined} strong={lead} />
-    </PaperHalf>
+  const paperOrder = (main: boolean) => (
+    <PaperButton order={{ instrument: "spread", symbol: ticket.symbol, option_type: s.kind, expiry: s.expiry, long_strike: s.long, short_strike: s.short }} quantity={qtyN}
+      note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} label={main ? "Open spread on paper" : undefined} strong={main} />
   );
   return (
     <div data-testid="desk-ticket" data-spread={s.type} data-use="ticket.spread" className={cn("space-y-3", MODE_FRAME.real)}>
-      {paperFirst && paperHalf(true)}
       {head}
       {switcher}
       <div className="rounded-lg border bg-card px-3 py-1.5">
@@ -541,13 +547,14 @@ function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, 
       {!fresh && (
         <button type="button" onClick={onReread} className="text-xs text-foreground underline underline-offset-2">Read the quotes again</button>
       )}
+      {paperFirst && <PaperMain>{paperOrder(true)}</PaperMain>}
       <RealRules investigationId={ticket.investigation_id} symbol={ticket.symbol}
         entry={{ side: "real", instrument: "spread", expiry: s.expiry, size: f.warning ? null : f.maxLoss, stop: ticket.invalidation, last4 }}>{onCopy => (
       <div className="space-y-2">
         <CopyButton text={all} label="Copy all for Robinhood" wide onCopy={onCopy} />
         <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {ticket.symbol}, Trade, Trade options, pick both legs (Buy the ${s.long}, Sell the ${s.short}, {shortDate(s.expiry)}), then the limit as a {s.type} and the quantity. Nothing is sent from here.</p>
       </div>)}</RealRules>
-      {!paperFirst && paperHalf(false)}
+      {!paperFirst && <PaperHalf>{paperOrder(false)}</PaperHalf>}
       {foot}
     </div>
   );

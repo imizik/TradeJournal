@@ -106,6 +106,15 @@ def _saved_proposal(card: dict) -> dict:
         except copilot_tools.ToolInputError as exc:
             raise ValueError(f"proposal {pid}: {exc}") from None
         return _with_outcome(out, pid, client_id, outcome)
+    if rest.get("kind") == "paper_order":
+        # A paper order card keeps its own checked fields (copilot_paper_draft.saved); it never had a last or as_of.
+        from app.ai import copilot_paper_draft
+        rest.pop("kind")
+        try:
+            out = {"id": pid, "kind": "paper_order", **copilot_paper_draft.saved(rest)}
+        except copilot_tools.ToolInputError as exc:
+            raise ValueError(f"proposal {pid}: {exc}") from None
+        return _with_outcome(out, pid, client_id, outcome)
     try:
         out = {"id": pid, **copilot_tools._proposal(rest)}
     except copilot_tools.ToolInputError as exc:

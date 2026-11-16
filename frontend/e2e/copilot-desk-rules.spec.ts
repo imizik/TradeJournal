@@ -163,22 +163,27 @@ test("the Ticket's Copy all keeps the real checklist with the plan and the accou
   expect(seen.tickets[0]).toMatchObject({ investigation_id: "inv-nbis", symbol: "NBIS", side: "real", last4: "8267", answers: { r_aplus00001: true } });
 });
 
-test("in the desk's Paper mode the ticket leads with its paper half and Fill on paper; the real half follows, labelled", async ({ page }) => {
+test("in the desk's Paper mode the ticket's main action is Buy on paper, with no paper box; Copy all still follows", async ({ page }) => {
   await page.addInitScript(() => window.localStorage.setItem("desk.mode.v1", "paper"));
-  await open(page, 1440, "/copilot-lab?ticket=inv-nbis");
+  const seen = await open(page, 1440, "/copilot-lab?ticket=inv-nbis");
   const ticket = page.getByTestId("desk-ticket");
-  const paper = ticket.getByRole("group", { name: "Paper, not real money" });
-  await expect(paper).toHaveAttribute("data-lead", "true");
-  await expect(paper).toContainText("paper first · NBIS");
-  await expect(paper.getByTestId("paper-button")).toHaveText("Fill on paper");
+  await expect(ticket.getByRole("group", { name: "Paper, not real money" })).toHaveCount(0);
+  const main = ticket.getByTestId("ticket-paper-main");
+  await expect(main.getByTestId("paper-button")).toHaveText("Buy on paper");
   await expect(ticket.getByTestId("paper-button")).toHaveCount(1);
-  // The real half is still there, under it, with its REAL mark and Copy all.
-  const real = ticket.getByTestId("ticket-real");
-  await expect(real.getByTestId("mode-mark")).toHaveText("Real · Roth ••8267");
-  const half = await paper.boundingBox();
-  expect((await real.boundingBox())!.y).toBeGreaterThan(half!.y + half!.height - 1);
-  await expect(ticket.getByRole("button", { name: "Copy all for Robinhood" })).toBeVisible();
-  await page.getByTestId("desk-dock").screenshot({ path: test.info().outputPath("ticket-paper-first.png") });
+  // It sits where Copy all would lead; the real order still copies under it, and nothing is placed by either.
+  const copy = ticket.getByRole("button", { name: "Copy all for Robinhood" });
+  await expect(copy).toBeVisible();
+  expect((await copy.boundingBox())!.y).toBeGreaterThan((await main.boundingBox())!.y);
+  await main.scrollIntoViewIfNeeded();
+  await page.getByTestId("desk-dock").screenshot({ path: test.info().outputPath("ticket-paper-main.png") });
+  // The same confirm: the live quote first, then Fill on paper.
+  await main.getByTestId("paper-button").click();
+  await expect(main.getByTestId("paper-preview")).toBeVisible();
+  expect(seen.orders.filter(o => !o.preview)).toHaveLength(0);
+  await main.getByTestId("paper-fill").click();
+  await expect(main.getByTestId("paper-done")).toBeVisible();
+  expect(seen.orders.filter(o => !o.preview)).toEqual([expect.objectContaining({ action: "open", instrument: "option", symbol: "NBIS" })]);
 });
 
 for (const width of [1440, 375]) {

@@ -226,6 +226,10 @@ class FixtureEvidence:
         from app.ai import copilot_paper_book
         return copilot_paper_book.fixture_paper_book(symbol)
 
+    def paper_draft(self, request: dict) -> dict:
+        from app.ai import copilot_paper_draft
+        return copilot_paper_draft.fixture_draft(request)
+
     def get_week_review(self, week_start: str | None = None) -> dict:
         """SIMULATED: shaped like ``copilot_review.week_review`` for a week of eight closed trades, mostly unplanned, with
         one invalidation that fired while held and was ridden past 15 minutes."""
@@ -658,6 +662,64 @@ def _held_request(line: str, symbol: str, today) -> list[dict] | str | None:
     if lower.startswith("trim"):
         return f"How many {symbol} contracts: a number, or half?"
     return None
+
+
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday")
+
+
+def paper_request(prompt: str, symbol: str, today) -> list[dict] | str | None:
+    """SIMULATED: the scripted model's reading of a paper trade request by keyword rules ("paper 2 NBIS 100c Friday, stop
+    96", "paper 50 shares of PLTR", "close my paper NBIS", "sell half of my paper NBIS"): the draft_paper_order arguments,
+    a short question when the quantity or contract is missing, or None when the message asks for no paper trade."""
+    import re
+    from datetime import date, timedelta
+    # "paper book", "paper trading", "paper mode" ... are places or questions, not a paper order.
+    opened = re.search(r"(?im)^\s*(?:please\s+|can you\s+)?(paper\b(?!\s+(?:book|trad\w*|account|review|mode|score|progress|positions?)\b)"
+                       r"|close my paper|sell half of my paper|trim my paper)\b.*$", prompt)
+    if not opened:
+        return None
+    text = opened.group(0)
+    lower = " ".join(text.lower().split())
+    named = re.findall(r"\b[A-Z]{2,5}\b", text)
+    symbol = named[0] if named else symbol
+    if lower.startswith(("close my paper", "sell half of my paper", "trim my paper")):
+        if "close" in lower:
+            return [{"action": "close", "symbol": symbol}]
+        if "half" in lower:
+            return [{"action": "trim", "symbol": symbol, "half": True}]
+        count = re.search(r"\b(\d+)\b", lower)
+        return [{"action": "trim", "symbol": symbol, "quantity": int(count.group(1))}] if count else f"How many of your paper {symbol} to sell?"
+    count = re.search(r"^\s*(?:please\s+|can you\s+)?paper\s+(\d+)\b", lower)
+    if not count:
+        return f"How many {symbol} for the paper trade?"
+    out: dict = {"action": "open", "symbol": symbol, "quantity": int(count.group(1)), "idea": "mine"}
+    for level in ("stop", "target"):
+        if m := re.search(rf"\b{level}\s+(?:at\s+)?{_NUM}", lower):
+            out[level] = float(m.group(1))
+    if re.search(r"\bshares?\b", lower):
+        return [{**out, "instrument": "stock"}]
+    strike = re.search(rf"\b{_NUM}\s*(c|calls?|p|puts?)\b", lower)
+    weekday = next((i for i, d in enumerate(_WEEKDAYS) if re.search(rf"\b{d}\b", lower)), None)
+    when = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\.?\s+(\d{1,2})\b", lower)
+    if not strike or (weekday is None and not when):
+        return f"Which {symbol} contract for the paper trade: the strike, call or put, and the expiry?"
+    if when:
+        month, day = _MONTHS[when.group(1)], int(when.group(2))
+        expiry = date(today.year, month, day)
+        if expiry < today:
+            expiry = date(today.year + 1, month, day)
+    else:
+        expiry = today + timedelta(days=(weekday - today.weekday()) % 7)
+    kind = "put" if strike.group(2).startswith("p") else "call"
+    return [{**out, "instrument": "option", "option_type": kind, "expiry": expiry.isoformat(), "strike": float(strike.group(1))}]
+
+
+def paper_answer(outcomes: list[tuple[dict, str | None]]) -> str:
+    """SIMULATED: the scripted model's one line under a paper order card, or why there is none."""
+    refused = [reason for _, reason in outcomes if reason]
+    parts = ["Here it is on paper: tap Fill on paper to fill it at the live quote, or Edit to change it."] if len(refused) < len(outcomes) else []
+    parts += [f"I did not draft that: {reason}." for reason in refused]
+    return " ".join(parts) + " (Simulated demo model.)"
 
 
 def desk_answer(outcomes: list[tuple[dict, str | None]]) -> str:
