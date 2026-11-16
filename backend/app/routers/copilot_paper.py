@@ -19,6 +19,10 @@ to make (``side`` paper or real), before he answers its tick-boxes; database rea
 keeps a real order's checklist when he copies it from the Ticket, keyed to its saved plan. An opening paper order
 carries his tick-box answers (``rule_answers``) and is checked at its fill. A broken rule never refuses an order.
 
+His weekly goals (``engine/weekly_goals.py``): ``PUT /copilot/goals`` saves one or two (an empty list clears them);
+``GET /copilot/paper`` carries ``goals`` (his goals and this week's progress, computed from his trades and the paper
+book) and the review's ``goals`` row (the goals in force that week, measured over it). No ping, no quote.
+
 Paper only: nothing here places an order anywhere, calls Robinhood, or writes fills, trades or accounts. Owner-only like
 every ``/copilot`` route; refuses while the lab is off, and fills only on live evidence.
 """
@@ -31,7 +35,7 @@ from sqlmodel import Session
 
 from app.ai import copilot
 from app.database import get_session
-from app.engine import paper_book, paper_replay, paper_review, replay_redo, trading_rules
+from app.engine import paper_book, paper_replay, paper_review, replay_redo, trading_rules, weekly_goals
 
 router = APIRouter()
 
@@ -78,7 +82,11 @@ class OrderAsk(BaseModel):
 @router.get("/paper")
 def paper(db: Session = Depends(get_session)):
     _settings()
-    return {**paper_book.view(db, time.time()), "review": paper_review.latest()}
+    now = time.time()
+    review = paper_review.latest()
+    if review is not None:
+        review = {**review, "goals": weekly_goals.for_review(db, review["monday"], now)}
+    return {**paper_book.view(db, now), "review": review, "goals": weekly_goals.desk(db, now)}
 
 
 @router.post("/paper/runs")
@@ -182,6 +190,26 @@ def save_rules(body: RulesAsk, db: Session = Depends(get_session)):
         return {"rules": trading_rules.save(db, [r.model_dump() for r in body.rules], time.time())}
     except trading_rules.RulesError as exc:
         raise HTTPException(exc.status, str(exc)) from None
+
+
+class GoalAsk(BaseModel):
+    kind: str = Field(..., max_length=20)
+    n: float
+    book: Literal["real", "paper"] = "real"
+
+
+class GoalsAsk(BaseModel):
+    goals: list[GoalAsk] = Field(..., max_length=5)
+
+
+@router.put("/goals")
+def save_goals(body: GoalsAsk, db: Session = Depends(get_session)):
+    _settings()
+    try:
+        weekly_goals.save(db, [g.model_dump() for g in body.goals], time.time())
+    except weekly_goals.GoalsError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    return weekly_goals.desk(db, time.time())
 
 
 @router.post("/rules/check")

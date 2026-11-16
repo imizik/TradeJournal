@@ -362,6 +362,27 @@ def real_split(db: Session, rules: list[dict]) -> dict | None:
     """Real orders he copied with a checklist, matched to a closed real trade only through the saved plan's own link
     (the plan's capture linked to its fill, or the position companion's adopted trade). The newest checklist per plan
     counts. Unmatched ones (no linked trade yet, or never placed) and still-open ones are counted, never guessed."""
+    found = matched(db)
+    if found is None:
+        return None
+    newest, trades = found
+    items, still_open = [], 0
+    for plan_id, results in newest.items():
+        trade = trades.get(plan_id)
+        if trade is None:
+            continue
+        if trade.status not in ("closed", "expired") or trade.realized_pnl is None:
+            still_open += 1
+            continue
+        items.append((results, float(trade.realized_pnl)))
+    unmatched = len(newest) - len(items) - still_open
+    return {**split(items, rules), "checklists": len(newest), "matched": len(items), "open": still_open, "unmatched": unmatched}
+
+
+def matched(db: Session) -> tuple[dict[str, list[dict]], dict] | None:
+    """Each saved plan's newest copied checklist, and the real trade it is linked to through the plan's own link (the
+    plan's capture linked to its fill, or the position companion's adopted trade); a plan with no linked trade is left
+    out of the second. None when no checklist was ever copied."""
     rows = db.exec(select(TradingRuleRecord).where(TradingRuleRecord.kind == "ticket")
                    .order_by(col(TradingRuleRecord.recorded_at), col(TradingRuleRecord.id))).all()
     if not rows:
@@ -383,14 +404,4 @@ def real_split(db: Session, rules: list[dict]) -> dict | None:
         if link and link.get("trade_id"):
             trade_ids[plan["investigation_id"]] = uuid.UUID(link["trade_id"])
     trades = {t.id: t for t in db.exec(select(Trade).where(col(Trade.id).in_(set(trade_ids.values())))).all()} if trade_ids else {}
-    items, still_open = [], 0
-    for plan_id, results in newest.items():
-        trade = trades.get(trade_ids.get(plan_id))
-        if trade is None:
-            continue
-        if trade.status not in ("closed", "expired") or trade.realized_pnl is None:
-            still_open += 1
-            continue
-        items.append((results, float(trade.realized_pnl)))
-    unmatched = len(newest) - len(items) - still_open
-    return {**split(items, rules), "checklists": len(newest), "matched": len(items), "open": still_open, "unmatched": unmatched}
+    return newest, {plan: trades[tid] for plan, tid in trade_ids.items() if tid in trades}

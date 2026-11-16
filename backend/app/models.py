@@ -2125,13 +2125,14 @@ class PaperEvent(SQLModel, table=True):
 class TradingRuleRecord(SQLModel, table=True):
     """His own trading rules and the checklists of real orders he copied (``engine/trading_rules.py``). Insert-only:
     ``kind`` ``rules`` is one saved list (the newest is the list); ``ticket`` is one real order's checklist, kept when he
-    copied it from the Ticket, keyed to its saved plan (``investigation_id``). A paper entry's checklist lives in its own
-    paper event instead. Never touches fills, trades, accounts or P&L."""
+    copied it from the Ticket, keyed to its saved plan (``investigation_id``); ``goals`` is one saved list of his weekly
+    goals (``engine/weekly_goals.py``; the newest is the list). A paper entry's checklist lives in its own paper event
+    instead. Never touches fills, trades, accounts or P&L."""
 
     __tablename__ = "trading_rule_record"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    kind: str = Field(index=True)  # rules | ticket
+    kind: str = Field(index=True)  # rules | ticket | goals
     record_key: str = Field(unique=True)
     investigation_id: Optional[str] = Field(default=None, index=True)
     recorded_at: datetime = Field(default_factory=utc_now_naive, index=True)  # UTC

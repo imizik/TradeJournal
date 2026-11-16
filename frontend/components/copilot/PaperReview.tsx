@@ -1,6 +1,7 @@
 "use client";
 
 import type { PaperReview } from "@/lib/paperBook";
+import { GoalsReviewRow } from "./DeskGoals";
 
 /**
  * The top of the desk's Paper section (docs/copilot-lab.md § Paper): the "How am I doing?" chip, which asks the copilot
@@ -32,6 +33,7 @@ export default function PaperReviewCard({ review, onAsk }: { review: PaperReview
               ? <p key={i}><span className="text-muted-foreground">{label[1]}: </span>{line.slice(label[0].length)}</p>
               : <p key={i} className="text-muted-foreground">{line}</p>;
           })}
+          <GoalsReviewRow goals={review.goals} />
         </div>
       )}
     </div>
