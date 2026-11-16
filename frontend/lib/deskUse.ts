@@ -214,9 +214,10 @@ export function suggestions(summary: UseSummary | null, folded: ReadonlySet<stri
   if (summary.folds.snoozed_until && summary.folds.snoozed_until > summary.today) return [];
   return PIECES.filter(p => foldable(p.id) && !p.quiet && !folded.has(p.id) && (summary.pieces[p.id]?.seen_s ?? 0) > 0 && nearZero(summary.pieces[p.id])).map(p => p.id);
 }
-/** "Tape, chatter or Grid". */
-export function nameList(ids: string[]): string {
+/** "Tape, chatter or Grid"; past three, "Tape, chatter, Grid or 4 more" (Pick lists them all). */
+export function nameList(ids: string[], most = 3): string {
   const names = ids.map(shortName);
+  if (names.length > most) return `${names.slice(0, most).join(", ")} or ${names.length - most} more`;
   return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`;
 }
 export function addDays(day: string, n: number): string {

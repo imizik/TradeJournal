@@ -304,8 +304,11 @@ function DeskUseView({ open, onClose, onRead }: { open: boolean; onClose(): void
     return { opens: saved.opens + here[0], taps: saved.taps + here[1], seen_s: saved.seen_s + here[2],
       last_used: here[0] + here[1] > 0 && summary ? summary.today : saved.last_used };
   };
+  // What he can fold comes first, least used first; then what always stays on the desk, the same way.
   const rows = PIECES.map(p => ({ piece: p, use: use(p.id) }))
-    .sort((a, b) => (a.use.opens + a.use.taps) - (b.use.opens + b.use.taps) || a.use.seen_s - b.use.seen_s);
+    .sort((a, b) => Number(!foldable(a.piece.id)) - Number(!foldable(b.piece.id))
+      || (a.use.opens + a.use.taps) - (b.use.opens + b.use.taps) || a.use.seen_s - b.use.seen_s);
+  const firstFixed = rows.findIndex(r => !foldable(r.piece.id));
   const days = summary?.days_with_use ?? 0;
   return (
     <dialog ref={dialog} aria-label="How I use the desk" data-testid="desk-use-view" onClose={onClose} onCancel={onClose}
@@ -330,12 +333,13 @@ function DeskUseView({ open, onClose, onRead }: { open: boolean; onClose(): void
         {summary && days < WINDOW_DAYS && <p className="text-muted-foreground">{days} of {WINDOW_DAYS} days counted so far. Suggestions to fold start after {WINDOW_DAYS} days.</p>}
         {folds.error && <p role="alert" className="text-amber-300">{folds.error}</p>}
         {summary && <ul className="divide-y rounded-md border">
-          {rows.map(({ piece, use: u }) => {
+          {rows.map(({ piece, use: u }, i) => {
             const folded = folds.folded(piece.id);
             const words = [u.opens ? `${u.opens} open${u.opens === 1 ? "" : "s"}` : "", u.taps ? `${u.taps} tap${u.taps === 1 ? "" : "s"}` : "",
               u.seen_s ? `on screen ${minutes(u.seen_s)}` : ""].filter(Boolean).join(" · ") || "not used";
             return (
-              <li key={piece.id} data-testid={`desk-use-${piece.id}`} className="flex min-h-11 items-center gap-2 px-2.5 py-1.5">
+              <li key={piece.id} data-testid={`desk-use-${piece.id}`} className="flex min-h-11 flex-wrap items-center gap-2 px-2.5 py-1.5">
+                {i === firstFixed && <span className="w-full pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Always on the desk</span>}
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium text-foreground">{piece.label}<span className="ml-1.5 font-normal text-muted-foreground">{piece.area}</span></span>
                   <span className="block text-muted-foreground">{words}{u.last_used ? ` · last used ${shortDay(u.last_used)}` : " · never used"}</span>
