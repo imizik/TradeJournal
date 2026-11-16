@@ -246,6 +246,18 @@ for (const kind of ["one contract", "a spread"] as const) {
   });
 }
 
+test("a plan the copilot moved to another expiry keeps its own words: its ticket is not opened on the chain's pick", async ({ page }) => {
+  const { pane, tickets } = await lab(page, [], { ...TICKET, investigation_id: NEW });
+  await planning(page, "NBIS 11/20 100C");
+  await pane.getByTestId("desk-chain").getByRole("button", { name: "100 call" }).click();
+  await pane.getByTestId("chain-actions").getByRole("button", { name: "Put on ticket" }).click();
+  const card = await sendConfirmOpen(page);
+  await expect(card.getByTestId("plan-ticket-pick")).toHaveCount(0);
+  await card.getByRole("button", { name: "Open its ticket" }).click();
+  await expect(pane.getByTestId("desk-ticket")).toBeVisible();
+  expect(tickets).toEqual([NEW]); // the plan's own words decide
+});
+
 test("a checked call's Plan it carries its contract to the confirmed plan's ticket too", async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-11-12T16:00:00Z")); // the call's 11/13 is this year's
   const { pane, tickets } = await lab(page, [], { ...TICKET, investigation_id: NEW, contract: { ...TICKET.contract, strike: 105, label: "NBIS $105 Call 11/13/26" } });

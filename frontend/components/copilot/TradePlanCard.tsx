@@ -96,6 +96,17 @@ export function sizedNote(sized: string, note: string): string {
   return both.length <= SIZE_MAX ? both : `${both.slice(0, SIZE_MAX - 1).trimEnd()}…`;
 }
 
+const MONTH_WORDS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+/** Whether the card's contract words name no date, or name ``expiry`` ("11/13", "11/13/26", "Nov 13"). */
+export function sameDate(words: string, expiry: string): boolean {
+  const [, m, d] = expiry.split("-").map(Number);
+  const said = [
+    ...[...words.matchAll(/\b(\d{1,2})\/(\d{1,2})\b/g)].map(x => [Number(x[1]), Number(x[2])]),
+    ...[...words.matchAll(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})\b/gi)].map(x => [MONTH_WORDS.indexOf(x[1].toLowerCase()) + 1, Number(x[2])]),
+  ].filter(([month, day]) => month >= 1 && month <= 12 && day >= 1 && day <= 31); // "95/90P" is two strikes, not a date
+  return !said.length || said.some(([month, day]) => month === m && day === d);
+}
+
 /** A confirmed card's saved part results; parts it never ran start idle. */
 const restored = (outcome: ProposalOutcome | null): Record<Part, Result> =>
   ({ plan: IDLE, entry: IDLE, invalidation: IDLE, timeStop: IDLE, ...outcome?.parts });
@@ -223,12 +234,13 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
 
   // The contract this conversation was started on (the Chain's Plan it or Put on ticket, or a checked call's Plan it):
   // its ticket opens on it, so he never picks it twice. Only on the plan's own side, and only while the card's contract
-  // does not name other strikes (a plan he or the copilot moved to another contract keeps its own words).
+  // names no other strike or date (a plan he or the copilot moved to another contract keeps its own words).
   const ticketSide = side === "buy_calls" ? "call" : side === "buy_puts" ? "put" : null;
   const startedOn = planPick(origin?.text, plan.symbol, todayNewYork());
   const named = (contract.match(/\d+(?:\.\d+)?/g) ?? []).map(Number);
   const carried = startedOn && ticketSide && (startedOn.short != null ? isBullish(startedOn.side, startedOn.strike, startedOn.short) === (ticketSide === "call") : startedOn.side === ticketSide)
-    && [startedOn.strike, ...(startedOn.short != null ? [startedOn.short] : [])].every(k => !contract.trim() || named.includes(k)) ? startedOn : null;
+    && [startedOn.strike, ...(startedOn.short != null ? [startedOn.short] : [])].every(k => !contract.trim() || named.includes(k))
+    && sameDate(contract, startedOn.expiry) ? startedOn : null;
   const numbers = planNumbers({ symbol: plan.symbol, stock: plan.instrument === "stock", long, last: plan.last, entry: entryLevel.price, stop: stopLevel.price, target: targetPrice });
   const sizing = sizeIt();
   const sizeText = sizing?.note && !sizeEdited ? sizedNote(sizing.note, size) : size.trim();

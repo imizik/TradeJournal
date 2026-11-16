@@ -950,7 +950,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     const ready = !busy && status?.enabled === true;
     if ((command.kind === "link" || command.kind === "now") && !ready) return;
     handled.current = command.n;
-    if (!ready) return;
+    // ⌘K's ask while a turn runs: its words wait in the message box, unsent, rather than being lost.
+    if (!ready) { if (command.kind === "ask" && command.here) fill(command.text); return; }
     if (command.kind === "open") void resume(command.id, command.text);
     else if (command.kind === "fill") fill(command.text);
     else if (command.kind === "home") startNew("");
