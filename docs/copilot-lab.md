@@ -1555,7 +1555,7 @@ that match no place, command or thread make the top option **Ask the copilot: "â
 now"; when something else matches it is the last option instead, and saved conversations found by the search list
 under it, so a search landing a moment later never changes what Enter does. Enter or a click on it sends the words
 through the desk's ask path, in the open conversation and on its ticker, as the message box would; nothing is sent while
-typing, and Escape sends nothing. A place phrase ("nvda chain", "rules") still goes to its place first.
+typing, and Escape sends nothing; while a turn is still running the words wait in the message box, unsent. A place phrase ("nvda chain", "rules") still goes to its place first.
 Type to filter, arrows and Enter to choose, Escape or a click outside to close. A thread opens through
 the list's own path (in place, or its deep link); Plan a trade opens the same
 unsent "Plan a trade: " link as the desk bar's Plan a trade; Review my week and What
@@ -1790,7 +1790,7 @@ that nothing in it places or sends anything.
   (Plan it or Put on ticket, one contract or a spread) or on a checked call's Plan it reads that contract back from the
   conversation's opening line (`DeskChain.planPick`), and its **Open its ticket** opens the Ticket on it as the Chain's
   pick, saying "with NBIS $100 Call 11/13/26, the contract you started from" beside the button. Only on the plan's own
-  side, and only while the card's contract words name no other strike; otherwise the plan's own words decide as above.
+  side, and only while the card's contract words name no other strike or date; otherwise the plan's own words decide as above.
   Client only: no route changed.
 - **Copy all stays in view** (since 2026-11-16): from a tablet up the dock scrolls in its own box under the chart, and a
   plan ticket's Copy all row sits at that box's foot until its own place scrolls up, so it shows as soon as the ticket
