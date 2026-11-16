@@ -106,7 +106,7 @@ export function useDeskUse(enabled: boolean): DeskUse {
     document.addEventListener("click", onTap, true);
     document.addEventListener("visibilitychange", shown);
     const timer = setInterval(tick, TICK_MS);
-    void flush();
+    if (document.visibilityState === "visible") void flush(); // a desk loaded in a hidden tab waits until it shows
     return () => { document.removeEventListener("click", onTap, true); document.removeEventListener("visibilitychange", shown); clearInterval(timer); };
   }, [enabled]);
 

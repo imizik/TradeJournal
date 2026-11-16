@@ -1883,9 +1883,11 @@ The desk counts quietly which of its pieces he uses, so after two weeks it can o
   a tab chosen, the Feed or thread list opened, the palette opened is an open; every 15 seconds while the page shows,
   each marked piece with a box on screen gets 15 seconds. No keystrokes, no message text, no tickers.
 - **Where counts go.** They wait on the device (localStorage, by New York day and device size) and are sent to
-  `POST /copilot/desk/use` at most once every five minutes, checked on the 15-second tick and when the page shows again.
-  Nothing is sent while the page is hidden and there is no timer of its own, so the idle desk's pinned request rate
-  (§ What an open desk asks) did not move. Daily totals per piece and size live in the app's own `desk_use_day` table;
+  `POST /copilot/desk/use` at most once every five minutes, checked on the desk's own 15-second counting tick (which
+  sends nothing by itself), when the desk loads and when the page shows again; never while the page is hidden. A
+  visible desk always has new seconds on screen, so an open desk saves once every five minutes: about 0.2 requests a
+  minute on top of the pinned idle rate (§ What an open desk asks), whose 3-minute window ends before the first save. A
+  lost answer after the server saved can count those minutes twice (over-counting only, which never suggests a fold). Daily totals per piece and size live in the app's own `desk_use_day` table;
   nothing goes to an outside service. A failed save keeps the counts on the device, and "How I use the desk" says
   "Counts paused since 10:42" (with those device counts included) instead of showing zeros.
 - **How I use the desk** (⌘K, or More → Journal): every piece's last-14-day opens, taps and time on screen and its
