@@ -533,7 +533,7 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
 ## The desk
 
 The desk is the owner's home while the lab is on (2026-11-12): opening the app at `/` (the installed phone app's start
-URL too) lands here, Desk leads the sidebar and the phone's tab bar, and Today and the Dashboard leave the bar. Today
+URL too) lands here, Desk leads the sidebar and the phone's tab bar (on the desk itself a phone's bar is the desk's own, § Phone), and Today and the Dashboard leave the bar. Today
 already forwards here; the Dashboard stays one tap away at `/dashboard` under More → Journal for the journal tables,
 all-time and weekly closed P&L and performance. Assistant and sample viewers, and the owner while the lab is off, keep
 the Dashboard at `/` as before.
@@ -557,7 +557,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   stays on the desk). Picking a book or Watching row while the Feed shows leaves the Feed up (the copilot opens that
   ticker behind its tab, which names it); anything that asks the copilot (a Feed row's Ask or Plan it, the strip's
   answers, the palette, the thread list) brings the copilot forward. From 768 to 1179 px the Feed is a drawer on the
-  right opened by the top bar's **Feed** button; a phone has it as a view (§ Phone). Every place has a key while not
+  right opened by the top bar's **Feed** button; a phone has it as a view, opened by the Feed chip in the top row (§ Phone). Every place has a key while not
   typing and a ⌘K command (§ Keys and the palette). Nothing was removed: each piece is at most two taps from the desk.
 - **Top bar.** Desk, the market phase with the New York clock of the session read ("Live · 11:48 ET", "Pre-market ·
   8:52 ET", "Closed 16:00"), SPY / QQQ / VIX's change, **Realized today** (the trades closed today, New York's day,
@@ -580,7 +580,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   Robinhood does not show belongs to no account and waits until the filter is cleared. Tapping it again shows every
   row; the line going unavailable clears it too. Not live (signed out, expired, unavailable): one grey **Accounts
   unavailable**, or **Accounts as of 10:04 AM** when the read is stale, and no money; with the feed switched off, no
-  account line at all (on a phone it is one row that swipes sideways, § Phone). Before it, **the day's value line**:
+  account line at all (on a phone the value block at the top of Positions takes its place, § Phone). Before it, **the day's value line**:
   total account value through the session (the tapped account's alone), change since the first reading, fills as dots,
   breaks as gaps; hover or tap for the high and low ([the feed § The value line](robinhood-read-feed.md#the-value-line)).
 - **Needs you** (`NeedsStrip`), **the Needs-you strip**. Only what needs a decision now, in amber; most of the day
@@ -615,7 +615,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   tag); a time stop coming due; Act now's give-back reason from an alert on an earlier day; Close the day and its
   count; and the Seen button.
 - **What's moving** (`components/copilot/MovingStrip.tsx`, `GET /copilot/desk/moving`, `app/engine/desk_moving.py`,
-  since 2026-11-12), under the Needs-you strip and across the book and the centre (on a phone, on the Book view under the book): one thin
+  since 2026-11-12), under the Needs-you strip and across the book and the centre (on a phone, on Positions under the book): one thin
   row (36 px) that says where the action is today. It starts **folded** to a 24 px "Moving ▸" line (since 2026-11-13: it
   is the market's, not his book's), and opening or folding it is remembered in this browser's `localStorage`
   `desk.moving.collapsed.v1` ("0" open, "1" folded); folded, it still reads once a minute, so opening it shows today's
@@ -745,7 +745,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   chart; a phone runs the chart, then the dock's tabs and content, one after the other. **Grid** (below) is a button at
   the dock's right, not a tab: it opens over the whole centre with **Back to chart** (or C). The keys keep their
   meaning: C the chart (closing the Grid), O / T / L open Chain / Ticket / Check a call in the dock, G the Grid
-  (Position and Notes have no key). On a phone a Ticket opened from anywhere scrolls the dock into view. A dock tab folded away (§ How I use the desk) waits in the dock's More. The Feed is
+  (Position and Notes have no key; ⌘K and the copilot's show reach them as places). On a phone a Ticket opened from anywhere scrolls the dock into view. A dock tab folded away (§ How I use the desk) waits in the dock's More. The Feed is
   not in the centre (since 2026-11-13): it sits beside the copilot. Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
   position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's
   fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D, with studies (VWAP, EMAs, SMAs,
@@ -906,32 +906,56 @@ and a symbol whose session was never cached reads "not measured": more rows say 
 symbols he checks. The 30-day total counts every check in the window, today's included. Radar's own quotes are not used
 for a closing price.
 
-**Phone (375 to 440 px).** One view at a time, picked on a switch that stays at the top of the screen (since
-2026-11-13; before, one long page): **Book** (the Needs-you strip, the book, Watching, the day's block, What's moving), the
-selected ticker (the button carries its symbol, "Market" with none: the chart first, then the dock's Position, Chain,
-Ticket, Notes and Check tabs and the Grid's icon, which fit the width) and **Feed** (with its grey count). It opens on the Book, so what needs a decision
-and the book's first rows are the first screen; a link that names a ticker (a ping's `?symbol=`) opens on that
-ticker's view, under the copilot's sheet. The strip shows on the Book; on the other two views the Book button
-carries an amber count of what needs him. A book or Watching row, a What's moving tile, a Feed row's chart, a closing
-ticket and `?ticket=` go to the ticker's view, which keeps a held position's own book row above the centre (its P&L and
-its standing line), with the Position panel and its buttons under the chart, so closing is row, then Close or Close
-at target. The Book starts at the page's
-top; the ticker and the Feed start right under the switch. The chart sets its default view again when it is first laid
-out (it had no width while another view showed). The top is three short rows: the switch with the desk's buttons
-(Threads, Jump to…, Plan a trade, as icons) in the row that stays put (the word "Desk" is the app's tab bar's, not
-repeated here), the clock and SPY / QQQ / VIX, then Realized today and Open, and the account line as one row that
-swipes sideways (numbers masked). Installed on the home screen it runs full screen: the desk's top clears the notch and the
-status bar, and the sheet's message box clears the home indicator (`env(safe-area-inset-*)`). The copilot is a
-full-screen sheet opened by the round **Ask the copilot** button at the bottom right (its name says "about NBIS" when
-a picked position differs; on a phone it is an icon so it never covers a book row's P&L) and by any Ask action;
-**Desk** closes it. Behind the closed sheet the copilot never scrolls the page: tapping a position keeps its chart in
-view while the copilot opens its conversation. Open, the sheet follows a streaming answer and keeps the message box
-in view above the keyboard. A deep link or a saved thread opens on the sheet; the bare address opens on the cockpit,
-and `?ticket=` opens the ticker's view on the Ticket. Controls are at least 44 px tall on a phone; the row of
-canned questions fades at its right edge to show it scrolls. One tab bar only: the app's. From 768 to 1179 px the book
-and the centre sit side by side, the copilot is a sheet on the right and the Feed a drawer there (the top bar's Feed
-button; Escape or its Desk button closes it). The thread list is a drawer at every width
-(over the whole screen on a phone). Browser proof: `frontend/e2e/copilot-desk-phone.spec.ts` (375, 393 and 440 px).
+**Phone (375 to 440 px).** A quick look at Robinhood, without opening it (since 2026-11-16; a view switch at the top
+from 2026-11-13, one long page before). One view at a time, picked on **the desk's own tab bar** at the bottom, in the
+app's tab bar's place on the desk only (every other page keeps the app's bar): **Positions** · **Chart** (named for the
+selected ticker, "Market" with none) · **Chain** · **Orders** · **Ask**, then the app's **More** (Charts and Trades are
+in its menu; Plan a trade is in the desk's top row). Each tab counts as its view's piece (`view.book`, `view.ticker`,
+`view.chain`, `view.orders`, `view.ask`; § How I use the desk).
+- **Positions** (it opens here): **the value block** first: REAL and the account (or "3 accounts") with the feed's
+  time; the total value in large figures with today's change in dollars and percent under it, and the day's value
+  line; Realized today whenever a trade closed (live or not); then one line of how the book is doing, counted from the book's own rows and tags: "12 open ·
+  +$1,420 · 1 near stop · 2 orders working" (past stop, near stop, giving back, expires today and working orders, each
+  only when there is one). A tap on the value opens each account as a row (its value and change today, options, cash,
+  buying power, open P&L; numbers masked); a tap on an account narrows the book to it, as the account line does wider.
+  Not live, the block says so in grey with its time ("Robinhood stale · from the journal · as of 10:40 AM") and shows
+  no money, never a zero. Then the Needs-you strip, the book, Watching, the day's block and What's moving. Each book row
+  adds the contract's price now and its move today under the contract ("$3.00 · today +$40"): the live tick of the
+  contract, else Robinhood's mark at its read; today is Robinhood's move for that position (`book.day_change`, the
+  account line's own formula, and unknown whenever its account's change today is) carried to the live price, or with
+  the feed not live a share held since before today: its move from its tick. Unknown is "—", never zero. The top bar keeps the clock and
+  SPY / QQQ / VIX on one line; Realized today, Open and the account line are the block's.
+- **Chart**: the selected ticker's chart, then the dock's Position, Chain, Ticket, Notes and Check tabs and the Grid's
+  icon (which fit the width), with a held position's own book row above the chart (its P&L and its standing line), so
+  closing is row, then Close or Close at target. A Chain the Chain tab opened goes back to the dock's default.
+- **Chain**: the same ticker's view on its Chain, with a row of ticker chips over it (the book's tickers, then the
+  watched names; none set to Not following) and the chart and the dock's tab row out of the way: the held ticker's
+  chain is one tap, another ticker's two. A contract's Put on ticket (or anything else that moves the dock) goes to the
+  Chart view with the tab it opened.
+- **Orders**: Robinhood's working orders first, then today's fills, each with its contract, from the book's own lines.
+  Read only: no button places, changes or cancels an order. Not live, it says so.
+- **Ask**: the copilot, as a full-screen sheet (its name says "about NBIS" when a picked position differs); **Desk**
+  closes it. The open sheet covers the bar, which keeps only More under it. There is no round Ask button on a phone
+  any more (it covered the Grid's icon). In Replay the bar keeps only More; Replay's own Leave returns to the desk.
+- **Feed** is a chip at the start of the top row, which stays at the top of the screen with the health dot, Day,
+  Threads, Jump to… and Plan a trade: one tap from every view (pings land there with `?feed=`), its grey count never
+  cut short, rather than two taps under More.
+
+On any view but Positions the Positions tab carries an amber count of what needs him. A link that names a ticker (a
+ping's `?symbol=`) opens on the Chart view, under the copilot's sheet; `?feed=` on the Feed; `?ticket=` on the Chart
+view's Ticket; `?close=1` starts the close pass. A book or Watching row, a What's moving tile, a Feed row's chart and
+a closing ticket go to the Chart view. Positions starts at the page's top; the other views start right under the top
+row. The chart sets its default view again when it is first laid out (it had no width while another view showed).
+Installed on the home screen it runs full screen: the desk's top clears the notch and the status bar, and the sheet's
+message box clears the home indicator (`env(safe-area-inset-*)`). Behind the closed sheet the copilot never scrolls the
+page: tapping a position keeps its chart in view while the copilot opens its conversation. Open, the sheet follows a
+streaming answer and keeps the message box in view above the keyboard. A deep link or a saved thread opens on the
+sheet; the bare address opens on Positions. Controls are at least 44 px tall on a phone; the row of canned questions
+and the Chain's chips scroll inside themselves, never the page. From 768 to 1179 px the book and the centre sit side
+by side, the copilot is a sheet on the right opened by the round Ask button, and the Feed a drawer there (the top
+bar's Feed button; Escape or its Desk button closes it). The thread list is a drawer at every width (over the whole
+screen on a phone). Browser proof: `frontend/e2e/copilot-desk-phone.spec.ts` (375, 393 and 440 px) and
+`frontend/e2e/copilot-desk-phone-tabs.spec.ts` (the value block, rows, each tab, the chips, Orders, other pages' bars).
 
 **Not following.** A ticker the owner does not follow (an old position no longer watched)
 is hidden in one tap from its book row (the eye) or its thread header (**Not following**), and back with **Show again**
@@ -1486,7 +1510,7 @@ drop counts on that visit, and the plan leaves the list on the next read).
 unsent (check each plan against the pre-market and propose what is missing).
 Opening a thread or Close leaves the checklist. Nothing in it arms, sizes or
 sends an order. On a
-phone Jump to…, Threads and Plan a trade show as icons beside the view switch. One
+phone Jump to…, Threads and Plan a trade show as icons beside the Feed chip. One
 read, `GET /copilot/desk/session` (owner only, refused while the lab is off),
 once a minute while the page is visible, read once by the desk
 (`useDeskSession`) for its top bar, strip and lower block, composed in `copilot_desk.py` from readers
@@ -1509,10 +1533,10 @@ closed or old thread stays reachable) and Commands (Plan a trade, Review
 my week, What matters right now?, the day's phase commands: Arm today's plans
 and Prep the day before 9:30 on a weekday, Close the day after 16:00; the Day button's checklist (**D**: "Start the
 day" before 9:30, "Close-of-day checklist" after 16:00, "Day checklist" otherwise); then every place on the desk with its key:
-Chart, Chain, Ticket, Check a call, Grid, Feed, Copilot, Book, Threads; then Now, and the book side's places, each of
+Chart, Chain, Ticket, Check a call, Position, Notes, Grid, Feed, Copilot, Book, Threads; then Now, and the book side's places, each of
 which also has its own button where it lives: Paper book, My rules, This week's goals, Watchlist, Note on this position,
 Data health (the health list), Replay a past day and Redo one of my trades; How I use the desk last). A command
-that spends a model call says "Asks the copilot now" in its hint. A book-side place brings the phone's Book view
+that spends a model call says "Asks the copilot now" in its hint. A book-side place brings the phone's Positions view
 forward, shows a piece folded away (§ How I use the desk) for now, opens the line it lives in (Practice's paper line, My rules), scrolls to it and opens it when it is an editor (rules,
 goals, the note line). The places come from one list, `lib/deskPlaces.ts` (id, name, key, hint), which the copilot's
 `show` also takes (§ Desk actions). *Go to* (since 2026-11-16): a short phrase naming a place goes straight there
@@ -1993,7 +2017,7 @@ The desk counts quietly which of its pieces he uses, so after two weeks it can o
 
 - **What is counted.** Each piece in `PIECES` has a stable id (centre tabs, Feed groups, chatter, the book's sections
   (Paper, its rules and weekly goals), the strategy books, What's moving, the account line, the health dot, chart studies, Tape and Replay, Ticket actions,
-  ⌘K and the desk keys, the phone's three views). A tap anywhere inside an element marked `data-use="<id>"` is a tap;
+  ⌘K and the desk keys, the phone's tab bar and Feed chip). A tap anywhere inside an element marked `data-use="<id>"` is a tap;
   a tab chosen, the Feed or thread list opened, the palette opened is an open; every 15 seconds while the page shows,
   each marked piece with a box on screen gets 15 seconds. No keystrokes, no message text, no tickers.
 - **Where counts go.** They wait on the device (localStorage, by New York day and device size) and are sent to

@@ -45,13 +45,14 @@ export function DeskStatus({ data }: { data: DeskSession | null }) {
     : data.close !== null && data.now >= data.close ? `Closed ${hhmm(data.close)}` : "Market closed";
   const closed = data.phase !== "regular" && data.phase !== "pre";
   return (
-    <div data-testid="desk-status" className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+    // A phone keeps the clock and the three indices on one line (tighter, "Pre" for Pre-market), so its positions start higher.
+    <div data-testid="desk-status" className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs max-md:gap-x-2.5">
       <span className="flex items-center gap-1.5 whitespace-nowrap text-muted-foreground">
         <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", data.phase === "regular" ? "bg-emerald-400 ring-[3px] ring-emerald-400/15" : "bg-muted-foreground")} />
-        {word}{!closed && <> · <span data-testid="desk-clock" className="tabular-nums">{hhmm(data.now)} ET</span></>}
+        {data.phase === "pre" ? <span>Pre<span className="max-md:hidden">-market</span></span> : word}{!closed && <> · <span data-testid="desk-clock" className="tabular-nums">{hhmm(data.now)} ET</span></>}
       </span>
       {data.indices.length > 0 && (
-        <span data-testid="desk-indices" className="flex gap-3 whitespace-nowrap">
+        <span data-testid="desk-indices" className="flex gap-3 whitespace-nowrap max-md:gap-2">
           {data.indices.map(row => (
             <span key={row.symbol}>
               <span className="text-muted-foreground">{row.symbol}</span>{" "}

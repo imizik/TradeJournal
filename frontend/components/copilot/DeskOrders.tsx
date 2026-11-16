@@ -49,7 +49,7 @@ const MARK: Record<string, { label: string; title: string; className: string }> 
     className: "border-amber-300/40 text-amber-300" },
 };
 
-function Line({ order, short, withContract }: { order: DeskOrder; short: boolean; withContract?: boolean }) {
+export function Line({ order, short, withContract }: { order: DeskOrder; short: boolean; withContract?: boolean }) {
   const mark = order.pairing ? MARK[order.pairing] : undefined;
   return (
     <span data-testid="book-order" data-working={order.working ? "true" : "false"}

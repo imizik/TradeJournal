@@ -22,7 +22,9 @@ history's fills already held, an opening fill today added to a position held fro
 account money); and each open position: options with strike,
 call or put, expiry, quantity, Robinhood's average price, mark, bid, ask, the day's change and the Greeks; stocks with
 quantity, average cost and quote; each with unrealized P&L in dollars and percent from Robinhood's own average price and
-mark. A missing or odd field shows as unavailable, never as zero.
+mark, and its move today in dollars (`robinhood_book.day_move`, the same move the account's change sums; on the
+desk's book row as `day_change`, and unknown whenever its account's change today is). A missing or odd field shows as
+unavailable, never as zero.
 
 Accounts shown: those named in `ROBINHOOD_ACCOUNTS` (default `Roth IRA,MCP`; a label, a type such as `ira_roth`, or the
 last four digits), plus any other account only while it holds something.

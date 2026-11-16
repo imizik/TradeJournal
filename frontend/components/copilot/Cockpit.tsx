@@ -72,7 +72,7 @@ export function DayPnl({ session, rows, read }: { session: DeskSession | null; r
   );
 }
 
-const LIVE_WORDS: Record<DeskLive["state"], string> = {
+export const LIVE_WORDS: Record<DeskLive["state"], string> = {
   off: "", signed_out: "Robinhood signed out · from the journal", expired: "Robinhood sign-in expired · from the journal",
   loading: "reading Robinhood…", unavailable: "Robinhood unavailable · from the journal", stale: "Robinhood stale · from the journal",
   ok: "live from Robinhood",
@@ -235,6 +235,28 @@ const sparkPrice = (sparks: DeskSparks | null, symbol: string | null) => {
   return last != null && Number.isFinite(at) ? { last, at } : null;
 };
 
+const premium = (value: number) => `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** A held contract's (or share's) price now and its move today, for the phone's row line: the live tick of the
+ * contract, else Robinhood's mark at its read; today is Robinhood's move at the read (``book.day_change``) carried to
+ * the live price, or, with the feed not live, a share held since before today: its move since yesterday's close from its tick. Null when unknown:
+ * shown as a dash, never zero. */
+export function rowNow(book: DeskThread["book"], ticks: ReturnType<typeof useDeskTicks>): { price: number | null; today: number | null; stale: boolean } {
+  if (!book) return { price: null, today: null, stale: false };
+  const terms = book.tick;
+  const tick = terms ? tickFor(ticks, terms.quote) : null;
+  const scale = terms?.scale ?? (book.option || book.expiry ? 100 : 1); // an option's mark is a contract's
+  const price = tick ? tick.last : book.live && book.live !== "not_on_robinhood" && book.mark ? book.mark / scale : null;
+  let today: number | null = null;
+  if (book.day_change != null) {
+    const moved = tickedBook(book, ticks);
+    today = Math.round((book.day_change + (moved.usd != null && book.usd != null ? moved.usd - book.usd : 0)) * 100) / 100;
+  } else if (!book.live && terms && tick && scale === 1 && tick.prev_close && book.days_held != null && book.days_held > 0) {
+    today = Math.round(terms.sign * (tick.last - tick.prev_close) * terms.quantity * 100) / 100;
+  }
+  return { price, today, stale: !!tick?.stale };
+}
+
 const left = (expiry: string | null, day: string) => {
   if (!expiry) return null;
   const n = daysTo(expiry, day);
@@ -306,6 +328,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
             const on = row.key === marked;
             const pnl = tickedBook(book, ticks);
             const under = tickFor(ticks, row.symbol);
+            const now = rowNow(book, ticks);
             // The line's newest point follows the live price, so the row moves between the minute reads.
             const points = spark?.points.length && under && !under.stale ? [...spark.points.slice(0, -1), under.last] : spark?.points;
             return (<Fragment key={row.key}>
@@ -317,6 +340,11 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                       <span className="text-sm font-semibold text-foreground">{row.symbol}</span>
                       <span className="min-w-0 truncate text-xs tabular-nums text-muted-foreground">{contract}{count}</span>
                     </span>
+                    {/* A phone (as Robinhood's list does): the contract's price now and its move today. */}
+                    {book && <span data-testid="book-now" className={cn("block text-[11px] tabular-nums text-muted-foreground md:hidden", now.stale && "opacity-50")}>
+                      <span data-testid="book-price">{now.price == null ? "—" : premium(now.price)}</span> · today{" "}
+                      <span data-testid="book-today" className={tone(now.today)}>{now.today == null ? "—" : money(now.today)}</span>
+                    </span>}
                     {book ? <Track track={book.track} /> : <span className="block truncate text-xs text-muted-foreground">{row.status.text}</span>}
                     {/* Wraps rather than spilling: a tag never runs under the sparkline or the P&L, at any width. */}
                     <span data-testid="book-meta" className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground [&>*]:max-w-full [&>*]:truncate [&>*]:whitespace-nowrap">

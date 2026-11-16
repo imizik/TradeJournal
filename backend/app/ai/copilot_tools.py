@@ -36,7 +36,8 @@ DESK_TIMEFRAMES = ("2m", "15m", "1D")
 DESK_TABS = ("chart", "chain", "tape")
 # Every place on the desk a show can move to, with its name: one list, frontend/lib/deskPlaces.ts DESK_PLACES (the ⌘K
 # palette's places are built from it; test_copilot_desk_actions holds the two the same).
-DESK_PLACES = {"chart": "Chart", "chain": "Chain", "ticket": "Ticket", "check": "Check a call", "grid": "Grid", "feed": "Feed",
+DESK_PLACES = {"chart": "Chart", "chain": "Chain", "ticket": "Ticket", "check": "Check a call", "position": "Position",
+               "notes": "Notes", "grid": "Grid", "feed": "Feed",
                "copilot": "Copilot", "book": "Book", "threads": "Threads", "now": "Now", "paper": "Paper book",
                "rules": "My rules", "goals": "This week's goals", "watchlist": "Watchlist", "note": "Note on this position",
                "health": "Data health", "replay": "Replay a past day", "redo": "Redo one of my trades", "day": "Day checklist"}
@@ -395,7 +396,8 @@ TOOLS: list[dict] = [
         "description": "Do something on the owner's desk that they asked for in this message, which the desk can already "
                        "do by hand. It changes nothing itself: a view change (action=show: `symbol` on the desk chart, "
                        "optional `timeframe` 2m, 15m or 1D, optional `tab` chart, chain or tape, or instead of `tab` a "
-                       "`place` to move the desk to: chart, chain, ticket, check (Check a call), grid, feed, copilot, "
+                       "`place` to move the desk to: chart, chain, ticket, check (Check a call), position (the selected "
+                       "position's panel under the chart), notes (its notes tab), grid, feed, copilot, "
                        "book, threads, now (today's Main chat), paper (the paper book), rules (My rules), goals (this "
                        "week's goals), watchlist, note (the note line on the selected position), health (data health), "
                        "replay (Replay a past day), redo (Redo one of my trades) or day (the day's checklist); `symbol` "

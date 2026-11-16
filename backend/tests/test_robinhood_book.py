@@ -345,6 +345,8 @@ def test_a_matched_position_takes_robinhoods_pnl_and_keeps_its_plan(desk, engine
     [row] = [r for r in body["threads"] if r["key"] == f"trade:{trade}"]
     assert row["book"]["live"] == "matched" and row["book"]["account"] == {"label": "Roth IRA", "masked": "••8267"}
     assert (row["book"]["usd"], row["book"]["pct"], row["book"]["quantity"], row["book"]["mark"]) == (220.0, 35.5, 2.0, 420.0)
+    # Its move today, by the account line's own formula: opened in this session (Oct 21), so from its cost, (420 - 310) x 2.
+    assert row["book"]["day_change"] == 220.0 and body["robinhood"]["accounts"][0]["day_change"] == 220.0
     # Live prices move it from Robinhood's own numbers: the cost that gives +$220 at its 420 mark, not the journal's.
     assert row["book"]["tick"] == {"quote": "NBIS261023C00100000", "scale": 100, "cost": 310.0, "quantity": 2.0, "sign": 1}
     assert row["value"] == {"text": "+$220.00", "tone": "gain"}
@@ -377,8 +379,9 @@ def test_robinhood_only_positions_are_new_and_journal_only_ones_not_on_robinhood
         ("robinhood:••7884:APLD 11/27/26 30P", "APLD 11/27/26 30P", "11/27/26 30P", "watch")]
     nbis, apld = new
     assert nbis["status"] == {"text": "New · not in the journal yet", "tone": "info"} and nbis["trade_id"] is None
+    # Today: opened in this session, so from its cost, (100 - 120) a contract.
     assert apld["book"] | {} == {"usd": -20.0, "pct": -16.7, "expiry": "2026-11-27", "days_held": None, "track": None, "state": "no_plan",
-                                 "planned": False, "stop_pct": None, "quantity": 1.0, "mark": 100.0,
+                                 "planned": False, "stop_pct": None, "quantity": 1.0, "mark": 100.0, "day_change": -20.0,
                                  "account": {"label": "MCP", "masked": "••7884"}, "live": "new",
                                  "option": {"side": "put", "strike": 30.0, "expiry": "2026-11-27", "direction": "long", "quantity": 1.0,
                                             "multiplier": 100.0, "cost": 120.0,
@@ -679,3 +682,27 @@ def test_signed_out_the_morning_stays_and_off_there_is_no_line(desk, engine, quo
     assert body["state"] == "signed_out" and body["day_line"]["series"]["all"]["first"] == first["first"]
     monkeypatch.setattr(rb, "feed", rb.Feed(settings_fn=lambda: rb.Settings(False, None, ())))
     assert read(desk)["robinhood"] == {"state": "off"}
+
+
+def test_a_rows_move_today_shows_only_while_its_accounts_change_is_known(desk, engine, quotes, live, monkeypatch):  # noqa: F811
+    """The book row's ``day_change`` is the account line's own move for that position (``day_move``) and goes unknown
+    with its account's (``unsure_today``), so a row never shows a move the account line would not."""
+    assert rb.day_move({"instrument": "option", "opened_on": "2026-11-13", "avg_cost": 200.0, "prev_close": 300.0, "mark": 260.0,
+                        "direction": "long", "quantity": 1.0}, "2026-11-13") == 60.0  # opened today: from its cost
+    assert rb.day_move({"instrument": "option", "opened_on": None, "avg_cost": 200.0, "prev_close": 300.0, "mark": 260.0,
+                        "direction": "long", "quantity": 1.0}, "2026-11-13") is None  # no open date: unknown, never zero
+    assert rb.day_move({"instrument": "stock", "opened_on": None, "avg_cost": 50.0, "prev_close": 56.0, "mark": 55.0,
+                        "direction": "short", "quantity": 10.0}, "2026-11-13") == 10.0  # a short gains as it falls
+    trade = planned_nbis(engine)
+    from app.routers import copilot_desk
+    real = copilot_desk._robinhood
+
+    def unsure():
+        out = real()
+        for a in out["view"]["accounts"]:
+            a["day_change"] = a["day_change_pct"] = None
+        return out
+
+    monkeypatch.setattr(copilot_desk, "_robinhood", unsure)
+    [row] = [r for r in read(desk)["threads"] if r["key"] == f"trade:{trade}"]
+    assert row["book"]["live"] == "matched" and row["book"]["usd"] == 220.0 and row["book"]["day_change"] is None

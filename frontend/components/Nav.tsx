@@ -42,6 +42,19 @@ const subscribeFolded = (listener: () => void) => { foldListeners.add(listener);
 export const useFoldedNav = () => useSyncExternalStore(subscribeFolded, () => folded, () => false);
 export const openNavMenu = () => opener?.();
 
+// On the desk a phone's tab bar is the desk's own (Positions, Chart, Chain, Orders, Ask, then More): the bar keeps an
+// empty slot and the desk renders its tabs into it (CopilotLab.tsx). The slot is held here, so either may mount first.
+let deskSlot: HTMLElement | null = null;
+const slotListeners = new Set<() => void>();
+const setDeskSlot = (el: HTMLElement | null) => {
+  if (deskSlot === el) return;
+  deskSlot = el;
+  slotListeners.forEach(listener => listener());
+};
+const subscribeSlot = (listener: () => void) => { slotListeners.add(listener); return () => { slotListeners.delete(listener); }; };
+/** The phone tab bar's slot for the desk's own tabs: an element while the bar is the desk's, else null. */
+export const useDeskTabSlot = () => useSyncExternalStore(subscribeSlot, () => deskSlot, () => null);
+
 type NavItem = { href: string; label: string; icon: typeof Bot };
 
 /** The three pages always in view (two while the desk is home: Desk and Charts, see ``withDesk``). */
@@ -328,6 +341,8 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
   };
   // The desk folds the rail into its bar's Menu button; the full sidebar still shows when this device asked for it.
   const deskMenu = pathname === "/copilot-lab" && !wide;
+  // The phone's tab bar on the desk is the desk's own (the owner's, while the lab is on).
+  const deskBar = pathname === "/copilot-lab" && copilot && access.owner;
   const rail = chartsRoute && !wide && !deskMenu;
   const groups = useNavGroups(pathname, copilot);
   useEffect(() => {
@@ -389,9 +404,11 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
         </div>
       )}
 
-      {/* Phone: the pages used most are one tap away at the bottom; More opens the full menu. */}
+      {/* Phone: the pages used most are one tap away at the bottom; More opens the full menu. On the desk the bar is the
+          desk's own (its tabs come from CopilotLab.tsx into the slot), with More still last: Charts and Trades are in its
+          menu, and Plan a trade is in the desk's own top row. */}
       <nav aria-label="Main tabs" className="fixed inset-x-0 bottom-0 z-40 flex border-t bg-card pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:hidden">
-        {withDesk(TABS, copilot).filter(({ href }) => shownHref(href, access.owner, enabled, journalOn, access.grants.market_decision_write) && !(href === "/daily" && access.owner)).map(({ href, label, icon: Icon }) => {
+        {deskBar ? <div ref={setDeskSlot} data-testid="desk-tabs" className="contents" /> : withDesk(TABS, copilot).filter(({ href }) => shownHref(href, access.owner, enabled, journalOn, access.grants.market_decision_write) && !(href === "/daily" && access.owner)).map(({ href, label, icon: Icon }) => {
           const active = isCurrent(pathname, href);
           return (
             <Link key={href} href={href} aria-current={active ? "page" : undefined}

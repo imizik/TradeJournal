@@ -205,10 +205,12 @@ test("B straight after ⌘K's Enter, before the next frame, still puts the keys 
   await expect(page.getByRole("dialog", { name: "Jump to" })).toBeHidden();
 });
 
-test("a phone: one view at a time under the switch, the strip on the Book, the ticker named on its button", async ({ page }) => {
+test("a phone: one view at a time from the desk's tab bar, the strip on Positions, the ticker named on its tab", async ({ page }) => {
   await open(page, { width: 390, height: 844 });
-  const views = page.getByTestId("desk-views").getByRole("button");
-  await expect(views).toHaveText(["Book", "ORCL", "Feed1 new"]);
+  // Positions, the ticker's Chart and the Feed chip (since 2026-11-16 the bar's tabs and the top row's chip).
+  const views = { nth: (i: number) => page.getByTestId(["desk-view-book", "desk-view-ticker", "desk-view-feed"][i]) };
+  const names = async () => [await views.nth(0).textContent(), await views.nth(1).textContent(), await views.nth(2).textContent()];
+  await expect.poll(names).toEqual(["Positions", "ORCL", "Feed1 new"]);
   // It opens on the Book: what needs him, then his positions; the ticker's tools and the Feed wait behind the switch.
   await expect(views.nth(0)).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("needs-you")).toBeVisible();
@@ -225,7 +227,7 @@ test("a phone: one view at a time under the switch, the strip on the Book, the t
   await expect(page.getByTestId("desk-view-needs")).toHaveText("1 need you");
   // A Feed row's Show on chart goes to the ticker's view, named for it, with a chart that fills its width.
   await page.getByTestId("desk-feed").getByTestId("feed-item").getByRole("button", { name: "Show on chart" }).click();
-  await expect(views).toHaveText(["Book1 need you", "NVDA", "Feed"]);
+  await expect.poll(names).toEqual(["Positions1 need you", "NVDA", "Feed"]);
   await expect(views.nth(1)).toHaveAttribute("aria-pressed", "true");
   await expect(centre(page).getByTestId("desk-chart").getByText("NVDA", { exact: true }).first()).toBeVisible();
   // The chart on top; the ticker's tools dock under it, and the Grid is a button beside them.
@@ -244,7 +246,7 @@ test("a phone: one view at a time under the switch, the strip on the Book, the t
   await expect(views.nth(1)).toHaveAttribute("aria-pressed", "true");
   await expect(views.nth(1)).toHaveText("ORCL");
   await expect(centre(page).getByTestId("desk-chart")).toBeVisible();
-  // The copilot is still its sheet, behind the round button.
+  // The copilot is still its sheet, behind the bar's Ask.
   await expect(conversation(page)).toBeHidden();
   await page.getByRole("button", { name: /^Ask the copilot/ }).click();
   await expect(conversation(page)).toBeVisible();

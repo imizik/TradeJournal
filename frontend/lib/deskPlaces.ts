@@ -9,7 +9,7 @@
  * Moving to a place only moves the desk: an editor opens, nothing is saved, armed, filled or sent.
  */
 
-export type DeskPlaceId = "chart" | "chain" | "ticket" | "check" | "grid" | "feed" | "copilot" | "book" | "threads" | "now"
+export type DeskPlaceId = "chart" | "chain" | "ticket" | "check" | "position" | "notes" | "grid" | "feed" | "copilot" | "book" | "threads" | "now"
   | "paper" | "rules" | "goals" | "watchlist" | "note" | "health" | "replay" | "redo" | "day";
 export type DeskPlaceEntry = { id: DeskPlaceId; label: string; key?: string; hint: string; words: readonly string[]; ticker?: boolean };
 
@@ -18,6 +18,8 @@ export const DESK_PLACES: readonly DeskPlaceEntry[] = [
   { id: "chain", label: "Chain", key: "O", hint: "The selected ticker's option chain", words: ["chain", "options", "option chain"], ticker: true },
   { id: "ticket", label: "Ticket", key: "T", hint: "A plan's ticket to copy. Nothing is sent.", words: ["ticket"] },
   { id: "check", label: "Check a call", key: "L", hint: "Paste a call and check it", words: ["check", "check a call"] },
+  { id: "position", label: "Position", hint: "The selected position's panel and every button that manages it", words: ["position", "position panel"], ticker: true },
+  { id: "notes", label: "Notes", hint: "Your notes on the selected position or ticker", words: ["notes", "my notes"], ticker: true },
   { id: "grid", label: "Grid", key: "G", hint: "Your positions and watched names, several charts at once", words: ["grid"] },
   { id: "feed", label: "Feed", key: "F", hint: "Yours, ideas and the market today", words: ["feed"] },
   { id: "copilot", label: "Copilot", key: "/", hint: "The conversation and its message box", words: ["copilot"] },
