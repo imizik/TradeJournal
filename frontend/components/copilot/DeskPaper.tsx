@@ -9,6 +9,7 @@ import {
   type PaperBook, type PaperFill, type PaperOrder, type PaperPosition, type PaperSource, type PaperStats, type PaperWorkingOrder,
 } from "@/lib/paperBook";
 import { cn } from "@/lib/utils";
+import { GoalsLine } from "./DeskGoals";
 import { RulesChecklist, RulesEditor, RulesSplitLine } from "./DeskRules";
 
 /**
@@ -502,9 +503,12 @@ export default function DeskPaper({ book, failed, symbol, top = null }: { book: 
   );
   if (!book.run) {
     return frame(
-      <div className="space-y-2 px-3 pb-3">
-        <p className="text-xs text-muted-foreground">Trade the way you would on Robinhood, with no money: Paper on the Ticket or the Chain fills at the live ask (the bid to sell), or places a day limit, and keeps score against your real trades.</p>
-        {startForm(false)}
+      <div className="pb-3">
+        <div className="space-y-2 px-3">
+          <p className="text-xs text-muted-foreground">Trade the way you would on Robinhood, with no money: Paper on the Ticket or the Chain fills at the live ask (the bid to sell), or places a day limit, and keeps score against your real trades.</p>
+          {startForm(false)}
+        </div>
+        <GoalsLine goals={book.goals} />
       </div>,
     );
   }
@@ -562,6 +566,7 @@ export default function DeskPaper({ book, failed, symbol, top = null }: { book: 
       </p>
       <BySource rows={score.paper.by_source} />
       <RulesSplitLine paper={score.paper.rules} real={score.real_rules} />
+      <GoalsLine goals={book.goals} />
       {progress && (
         <div data-testid="paper-progress" className="space-y-3 px-3 pt-2">
           <Score paper={score.paper} real={score.real} since={book.run.started_at} />

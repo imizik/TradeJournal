@@ -129,7 +129,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/desk/momentum',  # the QQQ intraday momentum paper book: its own SQLite file only; no provider or Robinhood call, never an order
     'GET /copilot/desk/overnight',  # the QQQ overnight paper book: its own SQLite file only; no provider or Robinhood call, never an order
     'GET /copilot/desk/health',  # is each source behind the desk live: in-memory states, saved files and database reads; no provider or Robinhood call
-    'GET /copilot/paper',  # his own paper book and scorecard: database reads, the desk's kept prices; settles an expired paper option at its close; no Robinhood
+    'GET /copilot/paper',  # his own paper book and scorecard, and his weekly goals' progress: database reads, the desk's kept prices, the fill feed's local state; settles an expired paper option at its close; no Robinhood
     'POST /copilot/paper/runs',  # start or reset his paper account: paper tables only
     'POST /copilot/paper/orders',  # a paper fill at one live quote read through the chart feed: paper tables only; never an order, never Robinhood
     'POST /copilot/paper/orders/cancel',  # cancel a working paper limit order: paper tables only
@@ -138,6 +138,7 @@ DOMAIN_ROUTES = frozenset({
     'PUT /copilot/rules',  # save his own trading rules: the rules table only
     'POST /copilot/rules/check',  # an entry's checklist: his rules, the paper book, the journal's open trades, the desk's account line and the market calendar, read only; no quote, no Robinhood
     'POST /copilot/rules/ticket',  # keep a copied real order's checklist: the rules table only; never an order, never Robinhood
+    'PUT /copilot/goals',  # save his weekly goals: the rules table only; never an order, never Robinhood, no ping
     'GET /copilot/paper/replay',  # replay days and the replay scorecard: replay runs' paper rows; the market calendar
     'GET /copilot/paper/replay/day',  # tickers to suggest for a past day: his fills, watchlist and follow settings, read only
     'GET /copilot/paper/replay/bars',  # a past day's minute bars from the Charts history store (Alpaca SIP); never Tradier or Robinhood

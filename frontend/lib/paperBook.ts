@@ -6,6 +6,7 @@
 import { apiUrl } from "@/lib/api";
 import { tickFor, type DeskTicks } from "@/lib/deskTicks";
 import type { Rule, RuleOutcome, RuleResult, RulesSplit } from "@/lib/tradingRules";
+import type { GoalProgress, WeeklyGoals } from "@/lib/weeklyGoals";
 
 export const PAPER_EVENT = "tradejournal:paper-changed";
 
@@ -60,9 +61,11 @@ export type PaperBook = {
   market_open: boolean;
   /** The newest Friday paper review (backend engine/paper_review.py), shown until the next one. */
   review?: PaperReview | null;
+  /** His weekly goals and this week's progress (backend engine/weekly_goals.py). */
+  goals?: WeeklyGoals;
 };
 /** The copilot's weekly paper review: ``day`` the Friday it was written, ``monday`` its week. */
-export type PaperReview = { day: string; monday: string; at: number; text: string };
+export type PaperReview = { day: string; monday: string; at: number; text: string; goals?: GoalProgress[] };
 
 /** What the Paper button opens: shares, one call or put, or a vertical (the leg bought and the leg sold). */
 export type PaperOrder =

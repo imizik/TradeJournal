@@ -2123,6 +2123,21 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   left out), for paper and for matched real tickets; a tap opens the split per rule (`score.paper.rules`,
   `score.real_rules`). The copilot's paper read carries each row's `my_rules` (outcome, broken and can't-check rules
   with reasons) and the score's `paper_by_my_rules` / `real_by_my_rules`; no tool changed.
+- **Weekly goals** (`backend/app/engine/weekly_goals.py`, `components/copilot/DeskGoals.tsx`). One or two goals for
+  the week, set in seconds from a small "Set this week's goals" control under the score line (with none set, only that
+  control shows): follow all my rules on N% of trades, max loss per trade $N, no more than N trades a day, each about his
+  real trades (the default) or his paper book. Only kinds the data can measure; the rules goal is offered once he has
+  rules. `PUT /copilot/goals` saves the list as a `trading_rule_record` row (`kind` `goals`; the rules table, no
+  migration); the newest is the list and carries over week to week until he changes or clears it. `GET /copilot/paper`
+  carries `goals`: his goals and progress over Monday to Friday New York, computed, never typed, as one compact line
+  ("This week: max loss $220 (goal $300) ✓ · …"; ✓ met so far, ✗ missed). Real counts the journal's trades (Webull
+  left out): a loss in the week its trade closed, a trade on the day it opened; rules followed counts trades opened that
+  week whose copied Ticket checklist links to them through the saved plan (as § My rules), trades without one counted
+  apart, never guessed. Paper reads every live run's positions and each entry's checklist. When the Gmail fill feed is
+  down (`gmail_health`) the real side is grey with the last import's time and never ticked; an unreadable source is
+  grey with why. On a weekend the line names next week's goals with nothing measured. The Friday review card's Goals
+  row (`review.goals`) is the goals in force when that week ended, measured over it. Counts and dollars only, never a
+  ticker; no ping, no quote, never Robinhood.
 - **How am I doing?** A chip at the top of the Paper section (`components/copilot/PaperReview.tsx`) sends that question
   to the copilot, which reads `get_paper_book` and answers from its figures.
 - **The weekly paper review** (`backend/app/engine/paper_review.py`, job `paper_review`): after Friday's close (16:45
@@ -2140,7 +2155,8 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   `unknown`, never resent; one not sent within two hours is `expired`).
 
 Proof: `backend/tests/test_paper_book.py`, `backend/tests/test_paper_orders.py`, `backend/tests/test_copilot_paper.py`, `frontend/e2e/copilot-desk-paper.spec.ts`,
-`frontend/e2e/copilot-desk-paper-review.spec.ts`, `backend/tests/test_trading_rules.py`, `frontend/e2e/copilot-desk-rules.spec.ts`.
+`frontend/e2e/copilot-desk-paper-review.spec.ts`, `backend/tests/test_trading_rules.py`, `frontend/e2e/copilot-desk-rules.spec.ts`,
+`backend/tests/test_weekly_goals.py`, `frontend/e2e/copilot-desk-goals.spec.ts`.
 
 ### Paper replay
 
