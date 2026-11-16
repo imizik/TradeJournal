@@ -60,7 +60,7 @@ export function ChartMenu({ label, title, testId, use, open, onOpen, align = "ri
         {label}{chevron && <ChevronDown size={12} aria-hidden />}
       </button>
       {open && (
-        <div className={cn("absolute top-full z-30 mt-1 max-h-[70svh] overflow-y-auto rounded-md border bg-popover p-1 text-xs shadow-lg", align === "right" ? "right-0" : "left-0",
+        <div className={cn("absolute top-full z-[60] mt-1 max-h-[70svh] overflow-y-auto rounded-md border bg-popover p-1 text-xs shadow-lg", align === "right" ? "right-0" : "left-0",
           wide ? "w-[min(20rem,calc(100vw-2rem))]" : "min-w-52")}>
           {children}
         </div>

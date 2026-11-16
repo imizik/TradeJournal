@@ -299,7 +299,7 @@ export function ContractChart({ held, data }: { held: HeldContract; data: DeskCo
         <div ref={host} role="img" data-testid="desk-contract-canvas" data-style={style} data-bars={bars.length} data-marks={marks.length} data-fills={fills.length}
           aria-label={`${held.label} ${earlier ?? "today"}: ${style === "candles" ? "2-minute candles" : "a line"} from its trades${marks.length ? ", its mark where the desk saw it" : ""}, and your fills`}
           style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
-          className="h-[320px] w-full overflow-hidden rounded border sm:h-[420px]" />
+          className="h-[320px] w-full overflow-hidden rounded border sm:h-[420px] lg:h-[var(--desk-candles,420px)]" />
         {hover && at && (
           <div role="tooltip" data-testid="desk-contract-tip"
             className="pointer-events-none absolute top-2 z-10 max-w-[min(18rem,85%)] rounded border bg-popover/95 px-2 py-1.5 text-xs tabular-nums shadow"

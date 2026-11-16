@@ -149,8 +149,8 @@ test("a planned call: the target line on the chart, then Close at target fills a
     "ORCL\nSell · Call\nExpiration 11/20/26\nStrike $250\nLimit price 8.28\nContracts 2");
   expect(writes.slice(before).map(r => `${r.method()} ${new URL(r.url()).pathname}`)).toEqual([]);
 
-  // Close at stop, back on the Chart: 4.10 + 0.38 x (240 − 247) = 1.44.
-  await page.getByRole("tab", { name: "Chart" }).click();
+  // Close at stop, back on the dock's Position tab: 4.10 + 0.38 x (240 − 247) = 1.44.
+  await page.getByRole("tab", { name: "Position" }).click();
   await panel(page).getByRole("button", { name: "Close at stop" }).click();
   await expect(ticket(page)).toHaveAttribute("data-closing", "stop");
   await expect(ticket(page).getByLabel("Limit price per share")).toHaveValue("1.44");

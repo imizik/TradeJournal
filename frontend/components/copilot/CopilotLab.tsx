@@ -1,16 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { CalendarCheck, ChartCandlestick, Menu, MessageCircle, MessagesSquare, Moon, PanelLeft, Plus, Search, Sunrise, X } from "lucide-react";
+import { ArrowLeft, CalendarCheck, ChartCandlestick, LayoutGrid, Menu, MessageCircle, MessagesSquare, Moon, PanelLeft, Plus, Search, Sunrise, X } from "lucide-react";
 import { openNavMenu, useFoldedNav } from "@/components/Nav";
 import CheckACall from "@/components/copilot/CheckACall";
 import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
 import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
 import { usePaperBook } from "@/components/copilot/DeskPaper";
+import { PositionNotes } from "@/components/copilot/DeskNotes";
 import { Practice, RulesAndGoals, openDeskPlace, type DeskPlace } from "@/components/copilot/DeskPractice";
 import DeskReplay from "@/components/copilot/DeskReplay";
 import PaperReviewCard from "@/components/copilot/PaperReview";
@@ -75,11 +76,31 @@ const CLOSE_PROMPT = "Close the day: for each position and plan today, did I fol
 const sheetLayout = () => typeof window !== "undefined" && window.matchMedia("(max-width: 1179px)").matches;
 const narrow = () => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
 
-type CentreTab = "chart" | "chain" | "ticket" | "check" | "grid";
-/** The centre's tabs: the selected ticker's tools in the order he works (see it, pick a contract, build the ticket),
- * then Check a call and the Grid of many tickers. ``key`` is the tab's desk key. */
+/** The dock's tabs under the chart: the selected ticker's tools in the order he works (his position, pick a contract,
+ * build the ticket), then his notes and Check a call. ``use`` is the tab's counted piece (lib/deskUse.ts). */
+type DockTab = "position" | "chain" | "ticket" | "notes" | "check";
+const DOCK_TABS: readonly { id: DockTab; label: string; key?: string; use: string }[] = [
+  { id: "position", label: "Position", use: "tab.position" },
+  { id: "chain", label: "Chain", key: "O", use: "tab.chain" },
+  { id: "ticket", label: "Ticket", key: "T", use: "tab.ticket" },
+  { id: "notes", label: "Notes", use: "tab.notes" },
+  { id: "check", label: "Check a call", key: "L", use: "tab.check" },
+];
+/** A place in the centre (the copilot's view cards and ⌘K name these): the chart, a dock tab, or the Grid. */
+type CentreTab = "chart" | "chain" | "ticket" | "check" | "grid" | "position" | "notes";
+/** The centre's places with a key (``lib/deskPlaces.ts``): the chart (always on top), the dock's Chain, Ticket and Check
+ * a call, and the Grid of many tickers, which takes the whole centre until Back to chart. ``key`` is the place's desk key. */
 const CENTRE_TABS: readonly { id: CentreTab; label: string; key: string; hint: string }[] = (["chart", "chain", "ticket", "check", "grid"] as const)
   .map(id => { const place = PLACE.get(id)!; return { id, label: place.label, key: place.key!, hint: place.hint }; });
+/** The chart's share of the centre's height over the dock, kept for this browser (the splitter between them). */
+const SHARE_KEY = "desk.dock.share.v1";
+const SHARE = { min: 0.4, max: 0.8, start: 0.62 };
+/** A phone runs the chart, then the dock: a Ticket opened there comes into view under the switch, after the view's own
+ * scroll (``toView``). Wider, the dock sits under the chart on screen already. */
+function showDock() {
+  if (!narrow()) return;
+  requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="desk-dock"]')?.scrollIntoView({ block: "start" })));
+}
 /** A phone's three views (CopilotLab.module.css): one shows at a time under the switch. */
 type DeskView = "book" | "ticker" | "feed";
 /** A phone's view changed: the page goes to where that view starts. */
@@ -134,7 +155,8 @@ function typing(target: EventTarget | null) {
  * History API and the copilot starts that conversation, so the book, the top bar, the strip and the centre stay mounted.
  *
  * Where things live (the 2026-11-13 layout pass): what needs him and his positions keep the top and the left; the centre
- * is the selected ticker's tools only (Chart, Chain, Ticket, then Check a call and the Grid); the right is the copilot
+ * is the selected ticker's tools only (the chart always on top, the dock under it: Position, Chain, Ticket, Notes, Check
+ * a call; the Grid over both until Back to chart); the right is the copilot
  * with the Feed behind its tab, so the chart stays while he reads ideas. A phone shows one of three views under a
  * switch (Book, the ticker, Feed) and the copilot as its sheet. Every place has a key (C O T L G, F, B, /) and a ⌘K
  * command.
@@ -189,10 +211,44 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // or the Feed.
   const [picked, setPicked] = useState<string | null>(null);
   const [pickedKey, setPickedKey] = useState<string | null>(null);
-  const [centreTab, setCentreTab] = useState<CentreTab>("chart");
-  // The tab survives a link that reopens the desk (a checked call's Plan it) for this browser tab.
-  // A ping's card (?feed=) opens on the chart.
-  useEffect(() => { if (feedLink) return; try { const kept = window.sessionStorage.getItem(CENTRE_KEY); if (kept === "check" || kept === "chain" || kept === "grid") setCentreTab(kept); } catch { /* chart */ } }, [feedLink]); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+  // The centre: the chart always on top, the dock under it (``dockPick``; null: Position when a position is selected,
+  // else Chain), or the Grid over both until Back to chart.
+  const [grid, setGrid] = useState(false);
+  const [dockPick, setDockPick] = useState<DockTab | null>(null);
+  // The dock's tab and the Grid survive a link that reopens the desk (a checked call's Plan it) for this browser tab.
+  // A ping's card (?feed=) opens on the chart's default dock.
+  useEffect(() => {
+    if (feedLink) return;
+    try {
+      const kept = window.sessionStorage.getItem(CENTRE_KEY);
+      if (kept === "grid") setGrid(true); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+      else if (kept === "check" || kept === "chain" || kept === "notes") setDockPick(kept);
+    } catch { /* the chart's default dock */ }
+  }, [feedLink]);
+  // The splitter between the chart and the dock (from 1024 px): the chart's share of the centre, kept for this browser.
+  const [share, setShare] = useState(SHARE.start);
+  useEffect(() => { try { const kept = Number(window.localStorage.getItem(SHARE_KEY)); if (kept >= SHARE.min && kept <= SHARE.max) setShare(kept); } catch { /* the default share */ } }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+  const keepShare = useCallback((next: number) => {
+    const value = Math.round(Math.min(SHARE.max, Math.max(SHARE.min, next)) * 100) / 100;
+    setShare(value);
+    try { window.localStorage.setItem(SHARE_KEY, String(value)); } catch { /* this visit only */ }
+  }, []);
+  // Dragging the splitter: the chart's part ends about where the pointer is.
+  const dragSplit = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    const centre = document.getElementById("desk-centre");
+    if (!centre || event.button !== 0) return;
+    event.preventDefault();
+    const box = centre.getBoundingClientRect();
+    const at = (y: number) => Math.min(SHARE.max, Math.max(SHARE.min, (y - box.top) / box.height));
+    const move = (e: PointerEvent) => setShare(at(e.clientY));
+    const up = (e: PointerEvent) => {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up);
+      keepShare(at(e.clientY));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }, [keepShare]);
   // The Feed sits beside the copilot, never over the chart: from 1180 px it takes the copilot's column while shown (the
   // Copilot | Feed tabs), from 768 px it is a drawer on the right, and a phone shows it as one of its three views.
   const [feedShown, setFeedShown] = useState(!!feedLink);
@@ -228,8 +284,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     if (narrow()) { setPhoneView("feed"); toView("feed"); }
     else { setFeedShown(true); if (sheetLayout()) setSheet(false); }
   }, []);
-  useEffect(() => { try { window.sessionStorage.setItem(CENTRE_KEY, centreTab); } catch { /* this view only */ } }, [centreTab]);
-  // On a phone the tab strip scrolls: keep the chosen tab in it (a link can choose Ticket), never moving the page.
+  useEffect(() => { try { window.sessionStorage.setItem(CENTRE_KEY, grid ? "grid" : dockPick ?? "chart"); } catch { /* this view only */ } }, [grid, dockPick]);
+  // On a phone the dock's tab strip scrolls: keep the chosen tab in it (a link can choose Ticket), never moving the page.
   useEffect(() => {
     const strip = document.querySelector<HTMLElement>('[role="tablist"][aria-label="Centre"]');
     const tab = strip?.querySelector<HTMLElement>('[aria-selected="true"]');
@@ -237,7 +293,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     const box = strip.getBoundingClientRect(), at = tab.getBoundingClientRect();
     if (at.left < box.left) strip.scrollLeft -= box.left - at.left + 8;
     else if (at.right > box.right) strip.scrollLeft += at.right - box.right + 8;
-  }, [centreTab]);
+  }, [dockPick, grid]);
   // The Ticket tab: a saved plan's ticket opens from its card, its thread's header, a book row or the tab's own list
   // (``openTicket``), or from a link (?ticket=) made where the desk was not open.
   const tickets = useTicketPlans(on);
@@ -247,10 +303,12 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const [ticketClose, setTicketClose] = useState<AnyClosingTicket | null>(null); // a held option's Close at target / stop, or a copilot close card
   const [ticketRoll, setTicketRoll] = useState<RollFrom | null>(null); // a held option's Roll
   const [checkSeed, setCheckSeed] = useState<{ text: string; n: number } | null>(null); // the Chain tab's Check it
-  useEffect(() => { if (centreTab !== "check") setCheckSeed(null); }, [centreTab]); // eslint-disable-line react-hooks/set-state-in-effect -- the Chain's contract fills Check a call once, not on every later visit
+  const checkOpen = !grid && dockPick === "check";
+  useEffect(() => { if (!checkOpen) setCheckSeed(null); }, [checkOpen]); // eslint-disable-line react-hooks/set-state-in-effect -- the Chain's contract fills Check a call once, not on every later visit
   const ticketLinked = useRef(false); // a ?ticket= link on a phone: the Ticket comes into view once the book above it has read
   useEffect(() => {
-    const show = (id: string | null, pick: TicketPick | null = null, close: AnyClosingTicket | null = null, roll: RollFrom | null = null) => { setTicketFor(id); setTicketPick(pick); setTicketClose(close); setTicketRoll(roll); setCentreTab("ticket"); showCentre(); };
+    // The Ticket comes up in the dock; the chart above it stays as it is (a phone, one column, scrolls to the Ticket).
+    const show = (id: string | null, pick: TicketPick | null = null, close: AnyClosingTicket | null = null, roll: RollFrom | null = null) => { setTicketFor(id); setTicketPick(pick); setTicketClose(close); setTicketRoll(roll); setGrid(false); setDockPick("ticket"); showCentre(); showDock(); };
     const onTicket = (event: Event) => {
       event.preventDefault();
       const detail = (event as CustomEvent<{ investigationId?: string; pick?: TicketPick; close?: AnyClosingTicket; roll?: RollFrom }>).detail;
@@ -270,7 +328,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const scanner = useDeskScanner(on);
   const [scanLines, setScanLines] = useState<{ symbol: string; lines: DeskGuide[] } | null>(null); // a Scanner row's levels on the chart
   const [chainFocus, setChainFocus] = useState<{ pick: ChainPick; n: number } | null>(null); // a Feed row's unusual contract
-  useEffect(() => { if (centreTab !== "chain") setChainFocus(null); }, [centreTab]); // eslint-disable-line react-hooks/set-state-in-effect -- the pick opens the Chain once, not on every later visit
+  const chainOpen = !grid && dockPick === "chain";
+  useEffect(() => { if (!chainOpen) setChainFocus(null); }, [chainOpen]); // eslint-disable-line react-hooks/set-state-in-effect -- the pick opens the Chain once, not on every later visit
   // The tickers opened today in this browser: opening one clears its strip items (``deskNeeds``); nothing is dismissed.
   const [opened, setOpened] = useState<Record<string, number>>({});
   useEffect(() => { setOpened(readOpened(nyDay())); }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
@@ -279,12 +338,6 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const use = useDeskUse(on);
   // The account line folded away: a narrowed book would hide the other accounts with nothing on screen saying so.
   if (pickedAccount !== null && use.hidden("accounts")) setAccount(null);
-  const centreOpened = useRef<CentreTab | null>(null);
-  useEffect(() => {
-    if (!on) return;
-    if (centreOpened.current !== null && centreOpened.current !== centreTab) countOpen(`tab.${centreTab}`);
-    centreOpened.current = centreTab;
-  }, [on, centreTab]);
   useCountOpen("side.feed", on && feedOpen);
   useCountOpen("threads", on && threadsShown);
   useCountOpen("palette", on && palette);
@@ -376,10 +429,18 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const planTrade = useCallback(() => go(PLAN_HREF), [go]);
   const [refresh, setRefresh] = useState(0);
   // The copilot's desk action cards: a view card moves the centre (Undo puts it back); a tap that changed a list reads again.
+  // A card names the chart, a dock tab or the Grid. "Chart" (and an Undo back to it) closes the Grid and puts a Chain,
+  // Ticket or Check a call the card opened back to the dock's default; his own Position or Notes stays.
+  const placeCentre = useCallback((tab: CentreTab) => {
+    if (tab === "grid") { setGrid(true); return; }
+    setGrid(false);
+    setDockPick(was => tab !== "chart" ? tab : was === "position" || was === "notes" ? was : null);
+  }, []);
+  const viewTab = grid ? "grid" : dockPick === "chain" || dockPick === "ticket" || dockPick === "check" ? dockPick : "chart";
   // A show card's place moves the desk the way ⌘K does (``moveTo``, below), and hands back its Undo.
   const moveRef = useRef<(place: DeskPlaceId, symbol?: string | null) => () => void>(() => () => undefined);
   const moveCard = useCallback((place: DeskPlaceId, symbol?: string | null) => moveRef.current(place, symbol), []);
-  useDeskActionHost({ picked, tab: centreTab, rows, go, setPicked, setPickedKey, setTab: setCentreTab, setRefresh, setSheet, showCentre, moveTo: moveCard });
+  useDeskActionHost({ picked, tab: viewTab, rows, go, setPicked, setPickedKey, setTab: placeCentre, setRefresh, setSheet, showCentre, moveTo: moveCard });
   // Mark plan done in the thread menu: only for a plan row (armed and not entered, or exited), never a held position's.
   const [planSymbol, setPlanSymbol] = useState<string | null>(null);
   // A decision or an alert still asking today: a conversation opens on it, at the top of the thread.
@@ -498,6 +559,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     if (!ticketLinked.current || !rowsFresh || !sessionRead) return;
     ticketLinked.current = false;
     showCentre(false);
+    showDock();
   }, [rowsFresh, sessionRead, showCentre]);
   useEffect(() => {
     if (!closeLink.current || !rows.length || !sessionRead) return;
@@ -558,7 +620,13 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   }, [goNow, showCopilot]);
   // A centre tab by its key or the palette: the tab, and on a phone the ticker's view with it.
   const showNow = use.showNow;
-  const openCentre = useCallback((tab: CentreTab) => { showNow(`tab.${tab}`); setCentreTab(tab); showCentre(); }, [showCentre, showNow]);
+  // C (the chart) leaves the dock as it is and closes the Grid; a dock tab opens under the chart; G opens the Grid.
+  const openCentre = useCallback((tab: CentreTab) => {
+    showNow(`tab.${tab}`);
+    if (tab === "grid") setGrid(true);
+    else { setGrid(false); if (tab !== "chart") setDockPick(tab); }
+    showCentre();
+  }, [showCentre, showNow]);
   // The copilot's message box: the copilot comes forward, then the box takes the keys.
   const focusCopilot = useCallback(() => {
     showCopilot();
@@ -608,8 +676,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     replay: () => openReplay(), redo: () => openReplay(true), day: toggleDay,
   }), [openCentre, showFeed, focusCopilot, focusBook, toggleThreads, goNow, showCopilot, reveal, openReplay, toggleDay]);
   // The desk as a move found it, for the move's Undo: the views a place changes, and which lines and editors were open.
-  const shownNow = useRef({ centreTab, feedShown, phoneView, threadsShown, dayList, replay, sheet });
-  useEffect(() => { shownNow.current = { centreTab, feedShown, phoneView, threadsShown, dayList, replay, sheet }; });
+  const shownNow = useRef({ grid, dockPick, feedShown, phoneView, threadsShown, dayList, replay, sheet });
+  useEffect(() => { shownNow.current = { grid, dockPick, feedShown, phoneView, threadsShown, dayList, replay, sheet }; });
   // A move to a place from the copilot's show card or ⌘K's "Go to" (with the ticker it names): as its palette command,
   // except that a place which toggles (the thread list, the Day checklist, Data health) only opens. It only moves the desk:
   // an editor opens, nothing is saved, armed or sent. Returns its Undo: the views back as they were, and every line or
@@ -627,7 +695,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     return () => {
       const opened = Array.from(desk.current?.querySelectorAll<HTMLElement>('[aria-expanded="true"][data-testid]') ?? []).filter(el => !open.has(el));
       for (const el of opened.reverse()) el.click(); // the editor inside a line first, then the line
-      setCentreTab(was.centreTab); setFeedShown(was.feedShown); setPhoneView(was.phoneView); setThreadsShown(was.threadsShown);
+      setGrid(was.grid); setDockPick(was.dockPick); setFeedShown(was.feedShown); setPhoneView(was.phoneView); setThreadsShown(was.threadsShown);
       setDayList(was.dayList); setReplay(was.replay); setSheet(was.sheet);
     };
   }, [placeRun, dayShown, toggleDay, reveal]);
@@ -650,7 +718,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     ...foldedPieces.map(id => ({ id: `fold-${id}`, name: PIECE.get(id)!.label, hint: "Folded · shows it for now", run: () => {
       showNow(id);
       const area = PIECE.get(id)!.area;
-      if (area === "Left") showBook(); else if (area === "Centre") { setCentreTab("chart"); showCentre(); } else if (area === "Right") showFeed();
+      if (area === "Left") showBook(); else if (area === "Centre") { setGrid(false); showCentre(); } else if (area === "Right") showFeed();
       requestAnimationFrame(() => document.querySelector(`[data-use="${id}"]`)?.scrollIntoView({ block: "nearest" }));
     } })),
   ], [actions, dayPhase, dayKind, placeRun, fill, planTrade, closeDay, showFeed, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre]);
@@ -768,6 +836,32 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     ?? rows.find(r => r.symbol === centreSymbol && r.key.startsWith("trade:")) ?? null : null;
   // His open paper positions in the centre's ticker: each gets its own Position panel under the chart, marked PAPER.
   const centrePaper = useMemo(() => centreSymbol ? (paper.book?.positions ?? []).filter(p => p.symbol === centreSymbol) : [], [centreSymbol, paper.book]);
+  // The dock's tab: his pick, else Position when he holds the ticker (real or paper), else the Chain. A ticker set to Not
+  // following stays quiet: no chain read until he opens the Chain.
+  const quietTicker = !!centreSymbol && rows.some(r => r.symbol === centreSymbol && r.hidden);
+  // A Chain he folded away is not opened for him either.
+  const dockTab: DockTab = dockPick ?? (centreRow?.book || centrePaper.length || quietTicker || use.hidden("tab.chain") ? "position" : "chain");
+  // How he uses the desk: the Grid's opens, the chart's when he comes back from it, and each dock tab he picks (the
+  // dock's own default, which follows the ticker, is not an open of his; a tap inside it counts as its tab's).
+  const centreOpened = useRef<{ grid: boolean; pick: DockTab | null } | null>(null);
+  useEffect(() => {
+    if (!on) return;
+    const was = centreOpened.current;
+    centreOpened.current = { grid, pick: dockPick };
+    if (!was) return;
+    if (grid && !was.grid) countOpen("tab.grid");
+    if (!grid && was.grid) countOpen("tab.chart");
+    if (!grid && dockPick && dockPick !== was.pick) countOpen(DOCK_TABS.find(t => t.id === dockPick)!.use);
+  }, [on, grid, dockPick]);
+  // The keyboard's place follows the Grid: Back to chart when it opens, the Grid's button when it closes (only when
+  // nothing else holds the focus).
+  const gridShown = useRef(grid);
+  useEffect(() => {
+    if (gridShown.current === grid) return;
+    gridShown.current = grid;
+    const idle = !document.activeElement || document.activeElement === document.body;
+    if (idle) requestAnimationFrame(() => document.querySelector<HTMLElement>(grid ? '[data-testid="grid-back"]' : '[data-testid="grid-open"]')?.focus({ preventScroll: true }));
+  }, [grid]);
   // The chart reads by the conversation when it is about that ticker (its plan's lines), else by the position's plan.
   const centreThread = useMemo<DeskThreadRef | null>(() => {
     if (!centreSymbol) return null;
@@ -808,7 +902,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const select = useCallback((row: DeskThread) => {
     setPicked(row.symbol);
     setPickedKey(row.key);
-    setCentreTab("chart");
+    setGrid(false);
+    setDockPick(null); // the dock's default: its Position
     // Beside the Feed, the copilot opens it behind the Feed's tab: picking a row never takes the Feed away.
     if (!sheetLayout()) { if (row.symbol !== talking) { openRow(row); setFeedShown(feedKept.current); } }
     else showCentre();
@@ -824,7 +919,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const selectWatched = useCallback((symbol: string) => {
     setPicked(symbol);
     setPickedKey(null);
-    setCentreTab("chart");
+    setGrid(false);
+    setDockPick(null);
     if (!sheetLayout()) { if (symbol !== talking) { openWatched(symbol); setFeedShown(feedKept.current); } }
     else showCentre();
   }, [openWatched, talking, showCentre]);
@@ -861,16 +957,17 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const askFeed = useCallback((item: FeedItem) => askAbout(item.symbol, feedQuestion(item, today), item.investigation_id), [askAbout, today]);
   // The chart's level menu: Plan from here follows its desk link in place; Ask scopes the copilot like a feed item's Ask.
   // The Chain tab's actions: Check a call with the contract in the box, the plan flow, a saved plan's ticket.
-  const chainCheck = useCallback((text: string) => { setCheckSeed(seed => ({ text, n: (seed?.n ?? 0) + 1 })); setCentreTab("check"); showCentre(); }, [showCentre]);
+  const chainCheck = useCallback((text: string) => { setCheckSeed(seed => ({ text, n: (seed?.n ?? 0) + 1 })); setGrid(false); setDockPick("check"); showCentre(); }, [showCentre]);
   const chainPlan = useCallback((pick: ChainPick, line: string) => go(copilotLabHref(pick.symbol, planContext(line), { kind: "copilot", ref: null })), [go]);
   const chainTicket = useCallback((id: string, pick: ChainPick) => openTicket(id, { expiry: pick.expiry, strike: pick.strike,
     ...(pick.short != null ? { short: pick.short, kind: pick.side } : {}) }), []);
   // An Unusual options row: its contract selected in the Chain tab, in place.
-  const openUnusual = useCallback((pick: ChainPick) => { setPicked(pick.symbol); setPickedKey(null); setChainFocus(f => ({ pick, n: (f?.n ?? 0) + 1 })); setCentreTab("chain"); showCentre(); }, [showCentre]);
-  // A TradingView alert row: its ticker on the desk chart, in place, where the alert's marker sits.
-  const openFeedChart = useCallback((symbol: string) => { setPicked(symbol); setPickedKey(null); setCentreTab("chart"); showCentre(); }, [showCentre]);
+  const openUnusual = useCallback((pick: ChainPick) => { setPicked(pick.symbol); setPickedKey(null); setChainFocus(f => ({ pick, n: (f?.n ?? 0) + 1 })); setGrid(false); setDockPick("chain"); showCentre(); }, [showCentre]);
+  // A TradingView alert row: its ticker on the desk chart, in place, where the alert's marker sits; the dock under it
+  // opens on its default (the position, else the Chain).
+  const openFeedChart = useCallback((symbol: string) => { setPicked(symbol); setPickedKey(null); setGrid(false); setDockPick(null); showCentre(); }, [showCentre]);
   // A Scanner row: its ticker on the desk chart, in place, with the scanner's levels as thin lines.
-  const openScanner = useCallback((row: DeskScannerRow) => { setPicked(row.symbol); setPickedKey(null); setScanLines({ symbol: row.symbol, lines: scannerGuides(row) }); setCentreTab("chart"); showCentre(); }, [showCentre]);
+  const openScanner = useCallback((row: DeskScannerRow) => { setPicked(row.symbol); setPickedKey(null); setScanLines({ symbol: row.symbol, lines: scannerGuides(row) }); setGrid(false); setDockPick(null); showCentre(); }, [showCentre]);
   // A scanner ping's card: its ticker on the chart with the scanner's levels, once the scanner has read, without moving
   // a phone off the Feed.
   const scanLinked = useRef(false);
@@ -1060,35 +1157,70 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           </div>
         )}
         {on && (
-          <section id="desk-centre" aria-label="Chart and tools" className={styles.centre}>
-            {/* The selected ticker's tools in the order he works: Chart, Chain, Ticket; then Check a call and, set apart, the
-                Grid of many tickers. The Feed is not here: it sits beside the copilot, so the chart stays while he reads it. */}
-            {/* The strip's bottom line is an inset shadow, so a tab's underline paints over it without spilling past the scroll box. */}
-            {/* A tab he folded away waits in More at the strip's end (one tap shows it for now); its key and ⌘K still open it. */}
-            <div className="flex items-center pr-1.5 shadow-[inset_0_-1px_0_hsl(var(--border))]">
-            <div role="tablist" aria-label="Centre" className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto px-1.5 pt-1.5 [scrollbar-width:none] sm:gap-1 sm:px-2">
-              {CENTRE_TABS.filter(t => !use.hidden(`tab.${t.id}`) || centreTab === t.id).map(({ id, label, key }) => (
-                <button key={id} type="button" role="tab" aria-selected={centreTab === id} onClick={() => setCentreTab(id)} title={`${label} ( ${key} )`} data-use={`tab.${id}`}
-                  className={cn("min-h-11 shrink-0 whitespace-nowrap border-b-2 px-2 text-sm sm:min-h-9 sm:px-2.5", id === "grid" && "ml-auto",
-                    centreTab === id ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <FoldMore ids={CENTRE_TABS.map(t => `tab.${t.id}`)} onOpen={id => openCentre(id.slice(4) as CentreTab)} />
-            </div>
-            <div role="tabpanel" aria-label={CENTRE_TABS.find(t => t.id === centreTab)!.label} className="p-3">
-              {centreTab === "check" ? <CheckACall seed={checkSeed} />
-                : centreTab === "grid" ? <DeskGrid held={gridHeld} watched={watched} hidden={gridHidden} sparks={sparks} earnings={events} selected={centreSymbol} onOpen={openFromGrid} />
-                : centreTab === "chain" ? <DeskChain symbol={centreSymbol} plans={tickets.plans} onCheck={chainCheck} onPlan={chainPlan} onTicket={chainTicket} unusual={unusual?.rows} focus={chainFocus} />
-                : centreTab === "ticket" && ticketRoll ? <div data-use="ticket.roll" className="contents"><DeskRoll key={`${ticketRoll.symbol}|${ticketRoll.expiry}|${ticketRoll.strike}|${ticketRoll.held}`} from={ticketRoll} onClose={() => setTicketRoll(null)}
-                  onPlaced={symbol => { setTicketRoll(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} /></div>
-                : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} pick={ticketPick} close={ticketClose} onOpen={id => { setTicketFor(id); setTicketPick(null); setTicketClose(null); }} onClose={() => { setTicketFor(null); setTicketPick(null); setTicketClose(null); }}
-                onPlaced={symbol => { setTicketFor(null); setTicketClose(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
-                : <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events} onReplay={() => setReplay(true)}
-                  guides={scanLines && scanLines.symbol === centreSymbol ? scanLines.lines : undefined}
-                  paper={centrePaper} paperOrders={paper.book?.orders} onPlan={planWatched} ordersLive={liveOn(booked.live)} />}
-            </div>
+          <section id="desk-centre" aria-label="Chart and tools" className={styles.centre} data-grid={grid ? "open" : undefined}
+            style={{ "--desk-share": share } as CSSProperties}>
+            {/* The chart never leaves: it stays on top, and the selected ticker's tools dock under it (Position, Chain,
+                Ticket, Notes, Check a call). The Grid of many tickers takes the whole centre until Back to chart. The Feed
+                is not here: it sits beside the copilot, so the chart stays while he reads it. */}
+            {grid ? (
+              <div data-testid="desk-grid-view" className={styles.gridView}>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pt-2.5">
+                  <button type="button" onClick={() => openCentre("chart")} data-testid="grid-back" title="Back to the selected ticker's chart ( C )"
+                    className="inline-flex min-h-11 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-8">
+                    <ArrowLeft size={14} aria-hidden />Back to chart
+                  </button>
+                  <span className="text-sm font-semibold">Grid</span>
+                  <span className="text-xs text-muted-foreground">Your positions and watched names</span>
+                  {/* A folded Grid shown for now: Keep showing is here too. */}
+                  <FoldMore ids={["tab.grid"]} onOpen={() => openCentre("grid")} className="ml-auto" />
+                </div>
+                <div className="p-3"><DeskGrid held={gridHeld} watched={watched} hidden={gridHidden} sparks={sparks} earnings={events} selected={centreSymbol} onOpen={openFromGrid} /></div>
+              </div>
+            ) : (
+              <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events} onReplay={() => setReplay(true)}
+                guides={scanLines && scanLines.symbol === centreSymbol ? scanLines.lines : undefined}
+                paper={centrePaper} paperOrders={paper.book?.orders} onPlan={planWatched} ordersLive={liveOn(booked.live)}
+                className={styles.centreBody} chartClassName={styles.chartPart} dock={position => (
+                  <div data-testid="desk-dock" className={styles.dock}>
+                    {/* From 1024 px: drag (or arrow keys) to give the chart or the dock more room; kept for this browser. */}
+                    <div role="separator" aria-orientation="horizontal" aria-label="Chart and dock size" aria-valuemin={SHARE.min * 100} aria-valuemax={SHARE.max * 100}
+                      aria-valuenow={Math.round(share * 100)} tabIndex={0} data-testid="dock-splitter" className={styles.splitter} onPointerDown={dragSplit}
+                      onKeyDown={event => { if (event.key === "ArrowUp" || event.key === "ArrowDown") { event.preventDefault(); keepShare(share + (event.key === "ArrowUp" ? -0.04 : 0.04)); } }} />
+                    {/* The strip's bottom line is an inset shadow, so a tab's underline paints over it without spilling past the
+                        scroll box. A tab he folded away waits in More at the strip's end (one tap shows it for now); its key and
+                        ⌘K still open it. */}
+                    <div className="flex items-center gap-1 pr-1.5 shadow-[inset_0_-1px_0_hsl(var(--border))]">
+                      <div role="tablist" aria-label="Centre" className="flex min-w-0 flex-1 overflow-x-auto px-1 pt-1 [scrollbar-width:none] sm:gap-1 sm:px-2">
+                        {DOCK_TABS.filter(t => !use.hidden(t.use) || dockTab === t.id).map(({ id, label, key, use: piece }) => (
+                          <button key={id} type="button" role="tab" aria-selected={dockTab === id} onClick={() => setDockPick(id)} title={key ? `${label} ( ${key} )` : label} data-use={piece}
+                            className={cn("min-h-11 shrink-0 whitespace-nowrap border-b-2 px-1.5 text-sm sm:min-h-9 sm:px-2.5",
+                              dockTab === id ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+                            {/* A phone shows "Check" so the five tabs and the Grid fit its width; the name stays whole. */}
+                            {id === "check" ? <>Check<span className="max-sm:sr-only"> a call</span></> : label}
+                          </button>
+                        ))}
+                      </div>
+                      {!use.hidden("tab.grid") && (
+                        <button type="button" onClick={() => openCentre("grid")} data-use="tab.grid" data-testid="grid-open" title="Your positions and watched names, several charts at once ( G )"
+                          className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8 sm:min-w-0">
+                          <LayoutGrid size={14} aria-hidden /><span className="max-sm:sr-only">Grid</span>
+                        </button>
+                      )}
+                      <FoldMore ids={[...DOCK_TABS.map(t => t.use), "tab.grid"]} onOpen={id => openCentre(id.slice(4) as CentreTab)} />
+                    </div>
+                    <div role="tabpanel" aria-label={DOCK_TABS.find(t => t.id === dockTab)!.label} data-testid="dock-panel" data-use={DOCK_TABS.find(t => t.id === dockTab)!.use} className={styles.dockPanel}>
+                      {dockTab === "check" ? <CheckACall seed={checkSeed} />
+                        : dockTab === "chain" ? <DeskChain symbol={centreSymbol} plans={tickets.plans} onCheck={chainCheck} onPlan={chainPlan} onTicket={chainTicket} unusual={unusual?.rows} focus={chainFocus} />
+                        : dockTab === "ticket" && ticketRoll ? <div data-use="ticket.roll" className="contents"><DeskRoll key={`${ticketRoll.symbol}|${ticketRoll.expiry}|${ticketRoll.strike}|${ticketRoll.held}`} from={ticketRoll} onClose={() => setTicketRoll(null)}
+                          onPlaced={symbol => { setTicketRoll(null); setPicked(symbol); setPickedKey(null); setDockPick(null); }} /></div>
+                        : dockTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} pick={ticketPick} close={ticketClose} onOpen={id => { setTicketFor(id); setTicketPick(null); setTicketClose(null); }} onClose={() => { setTicketFor(null); setTicketPick(null); setTicketClose(null); }}
+                          onPlaced={symbol => { setTicketFor(null); setTicketClose(null); setPicked(symbol); setPickedKey(null); setDockPick(null); }} onPlan={planTrade} />
+                        : dockTab === "notes" ? <PositionNotes key={centreRow?.key ?? centreSymbol ?? ""} row={centreRow?.book ? centreRow : null} symbol={centreSymbol} paper={centrePaper} />
+                        : position}
+                    </div>
+                  </div>
+                )} />
+            )}
           </section>
         )}
         {/* The right side: the copilot, and the Feed behind its tab (CopilotLab.module.css lays the two out by width). */}

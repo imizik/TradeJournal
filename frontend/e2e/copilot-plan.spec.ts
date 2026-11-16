@@ -76,9 +76,10 @@ async function lab(page: Page, server: Server, { alertsSupported = true, url = "
   await page.goto(url);
 }
 
-/** The centre's Timeline, under the open thread's chart, unfolded. */
+/** The centre's Timeline, in the dock's Position tab under the open thread's chart, unfolded. */
 async function timeline(page: Page) {
   const centre = page.getByRole("region", { name: "Chart and tools" });
+  await centre.getByRole("tab", { name: "Position" }).click();
   const fold = centre.getByRole("button", { name: /^Timeline/ });
   if (await fold.getAttribute("aria-expanded") !== "true") await fold.click();
   return centre.getByRole("list", { name: "Timeline" });

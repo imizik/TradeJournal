@@ -79,8 +79,8 @@ const PIECE_ID = /^[a-z][a-z0-9.-]{0,39}$/;
 
 test("counts are piece ids only, and wait at least five minutes before one save", async ({ page }) => {
   const seen = await open(page, 1440, { days_with_use: 2, pieces: {}, folds: { folded: [], snoozed_until: null } });
-  await page.getByRole("tab", { name: "Grid" }).click();
-  await page.getByRole("tab", { name: "Chart" }).click();
+  await page.locator("#desk-centre").getByRole("button", { name: "Grid", exact: true }).click();
+  await page.getByRole("button", { name: "Back to chart" }).click();
   await page.clock.runFor(4 * 60_000);
   expect(seen.posts).toEqual([]); // nothing sent before five minutes
   await page.clock.runFor(75_000);
@@ -110,7 +110,7 @@ test("after 14 days one card offers to fold what he never opens; folded tabs wai
   await expect.poll(() => seen.puts.at(-1)).toEqual({ size: "desk", folded: ["chart.tape", "tab.grid"], snoozed_until: null });
   await expect(card).toBeHidden();
   const centre = page.locator("#desk-centre");
-  await expect(centre.getByRole("tab", { name: "Grid" })).toHaveCount(0);
+  await expect(centre.getByRole("button", { name: "Grid", exact: true })).toHaveCount(0);
   // The folded Tape waits in the chart header's More as a folded entry, one tap from showing; its switch is gone.
   await centre.getByTestId("desk-chart-more").click();
   await expect(centre.getByTestId("chart-more-folded-chart.tape")).toContainText("Tape (Level 2)folded");
@@ -119,7 +119,7 @@ test("after 14 days one card offers to fold what he never opens; folded tabs wai
   // One tap shows it for now; the tab stays while he is on it.
   await centre.getByTestId("fold-more").first().click();
   await centre.getByRole("button", { name: "Grid tab" }).click();
-  await expect(centre.getByRole("tab", { name: "Grid" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("desk-grid")).toBeVisible();
   expect(seen.puts).toHaveLength(1); // showing for now saves nothing
   // A second tap keeps it showing.
   await centre.getByTestId("fold-more").first().click();
@@ -139,7 +139,7 @@ test("Not now snoozes the card for 14 days and folds nothing", async ({ page }) 
   await page.getByTestId("fold-suggestion").getByRole("button", { name: "Not now" }).click();
   await expect.poll(() => seen.puts.at(-1)).toEqual({ size: "desk", folded: [], snoozed_until: "2026-11-27" });
   await expect(page.getByTestId("fold-suggestion")).toBeHidden();
-  await expect(page.locator("#desk-centre").getByRole("tab", { name: "Grid" })).toBeVisible();
+  await expect(page.locator("#desk-centre").getByRole("button", { name: "Grid", exact: true })).toBeVisible();
 });
 
 test("How I use the desk lists every piece least used first, with its switch, and says when counts are paused", async ({ page }) => {

@@ -215,7 +215,7 @@ test("an Unusual options row in the Feed selects its contract in the Chain tab, 
   await expect(tab.locator("tr[data-strike='97.5']").getByTestId("chain-unusual")).toHaveText("unusual");
   expect(chainReads.slice(before).filter(q => !q.includes("expiration"))).toEqual([]); // the pick's expiry is the first read
   // Leaving the Chain and coming back is a fresh look: the nearest expiry, nothing selected.
-  await pane.getByRole("tab", { name: "Chart" }).click();
+  await pane.getByRole("tab", { name: "Position" }).click();
   await pane.getByRole("tab", { name: "Chain" }).click();
   await expect(tab.getByRole("radiogroup", { name: "Expiry" }).getByRole("radio", { checked: true })).toContainText("Nov 13");
   await expect(tab.getByTestId("chain-actions")).toHaveCount(0);

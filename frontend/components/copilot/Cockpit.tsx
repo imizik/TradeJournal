@@ -480,12 +480,18 @@ function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
 /**
  * The centre's Chart: the selected symbol's interactive chart (``DeskChart``: candles with the plan's entry and invalidation
  * lines, the owner's fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D; the timeframe
- * holds across positions) under its one header row (``DeskChartHead``), then the held position's Position panel (``DeskPosition``:
- * its figures, an option's standing and every button that manages it) and any paper position's in the ticker, then two tiles for a held position that
- * its book row does not carry (the stock against SPY today, time held: P&L, the distance to the stop and expiry are the
- * row's) and, folded, what touched the thread. No symbol: QQQ with the owner's fills and pings.
+ * holds across positions) under its one header row (``DeskChartHead``), then the Position content: the held position's
+ * Position panel (``DeskPosition``: its figures, an option's standing and every button that manages it) and any paper
+ * position's in the ticker, then two tiles for a held position that its book row does not carry (the stock against SPY
+ * today, time held: P&L, the distance to the stop and expiry are the row's) and, folded, what touched the thread. No
+ * symbol: QQQ with the owner's fills and pings. ``dock`` places the Position content (the desk's dock under the chart,
+ * its Position tab); without it the content follows the chart.
  */
-export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], earnings = null, guides, onReplay, paper = NO_PAPER, paperOrders, onPlan, ordersLive = false }: {
+export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], earnings = null, guides, onReplay, paper = NO_PAPER, paperOrders, onPlan, ordersLive = false, dock, className, chartClassName }: {
+  /** The dock under the chart, given the Position content for its Position tab. */
+  dock?(position: ReactNode): ReactNode;
+  /** The whole (chart and dock) and the chart's own part: the desk's layout classes. */
+  className?: string; chartClassName?: string;
   symbol: string | null; thread: DeskThreadRef | null; row: DeskThread | null; sparks: DeskSparks | null; actions?: DeskChartActions;
   /** Opens Replay: paper trading on a past day (``DeskReplay``). */
   onReplay?(): void;
@@ -544,22 +550,11 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
       timeframe={onContract ? null : timeframe} onTimeframe={pickTimeframe} tools={tools} onReplay={onReplay}
       tape={tape} onTape={setTape} charts={charts} />
   );
-  return (
-    <div className="space-y-2" data-testid="desk-chart">
-      {onContract && <>
-        {head(null)}
-        {tapePanel}
-        {/* The stock's reading, with its as-of and basis, beside the contract's own chart. */}
-        <p className="text-[11px] leading-4 tabular-nums text-muted-foreground"><ReadingLine part="facts" symbol={name} data={reading} fallback={fallback} live={live} /></p>
-      </>}
-      {onContract ? <ContractChart held={held} data={contract.data!} /> : (
-        <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0} onRead={setShown} actions={actions} live={live} guides={guides}
-          head={head} under={tapePanel} reading={<ReadingLine part="facts" symbol={name} data={reading} fallback={fallback} live={live} />} onTimeframe={pickTimeframe}
-          label={`${name} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />
-      )}
-      {/* The Position panel sits under the chart: the chart comes first. A held position's figures (an option's full
-          standing) and every button that manages it; its book row keeps only the short standing line. A paper position
-          in this ticker has its own panel, marked PAPER. */}
+  // The Position content: under the chart, or the dock's Position tab.
+  const position = (
+    <div className="space-y-2">
+      {/* A held position's figures (an option's full standing) and every button that manages it; its book row keeps only
+          the short standing line. A paper position in this ticker has its own panel, marked PAPER. */}
       {row?.book && <DeskPosition key={row.key} row={row} rows={rows} plan={plan} levels={!row.investigationId || ref?.id === row.investigationId ? chartLevels : undefined} change={change} onPlan={onPlan} ordersLive={ordersLive}
         fallback={reading?.state === "ok" && reading.reading ? { last: reading.reading.last, at: reading.reading.at } : sparkPrice(sparks, symbol)}
         earnings={symbol ? earnings?.rows[symbol]?.date ?? null : null} />}
@@ -572,6 +567,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
         </div>
       )}
       {row && !book && <p className="text-xs text-muted-foreground">{row.status.text}</p>}
+      {!book && !paper.length && <p data-testid="desk-position-none" className="text-xs text-muted-foreground">No open position in {name}. The Chain picks a contract.</p>}
       {ref?.symbol && (
         <div className="border-t pt-2">
           <button type="button" aria-expanded={timeline} onClick={() => setTimeline(open => !open)} data-use="chart.timeline"
@@ -579,6 +575,25 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
           {timeline && <div className="pt-2"><DeskTimeline thread={ref} /></div>}
         </div>
       )}
+    </div>
+  );
+  return (
+    <div className={className ?? "space-y-2"} data-testid="desk-chart">
+      {/* The chart part: it stays on top while the dock under it changes. Its time on screen counts as the Chart's. */}
+      <div className={cn("space-y-2", chartClassName)} data-use="tab.chart">
+      {onContract && <>
+        {head(null)}
+        {tapePanel}
+        {/* The stock's reading, with its as-of and basis, beside the contract's own chart. */}
+        <p className="text-[11px] leading-4 tabular-nums text-muted-foreground"><ReadingLine part="facts" symbol={name} data={reading} fallback={fallback} live={live} /></p>
+      </>}
+      {onContract ? <ContractChart held={held} data={contract.data!} /> : (
+        <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0} onRead={setShown} actions={actions} live={live} guides={guides}
+          head={head} under={tapePanel} reading={<ReadingLine part="facts" symbol={name} data={reading} fallback={fallback} live={live} />} onTimeframe={pickTimeframe}
+          label={`${name} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />
+      )}
+      </div>
+      {dock ? dock(position) : position}
     </div>
   );
 }

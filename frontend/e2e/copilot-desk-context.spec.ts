@@ -94,8 +94,9 @@ async function lab(page: Page, desk: Desk = {}) {
 test("the centre opens on the open thread's chart beside the conversation, and its Timeline reads only when unfolded", async ({ page }) => {
   const { reads, pane } = await lab(page);
   await expect(page.getByRole("region", { name: "Conversation" }).getByText("It held the open; the group leads.")).toBeVisible();
-  await expect(pane.getByRole("tab", { name: "Chart" })).toHaveAttribute("aria-selected", "true");
-  await expect(pane.getByRole("tab")).toHaveText(["Chart", "Chain", "Ticket", "Check a call", "Grid"]); // the ticker's tools; the Feed sits beside the copilot
+  await expect(pane.getByTestId("desk-dock")).toBeVisible(); // the chart on top, the ticker's tools docked under it
+  await expect(pane.getByRole("tab")).toHaveText(["Position", "Chain", "Ticket", "Notes", "Check a call"]); // the Feed sits beside the copilot
+  await expect(pane.getByRole("button", { name: "Grid", exact: true })).toBeVisible();
   await expect(pane.getByTestId("desk-chart")).toContainText("NBIS");
   await pane.getByTestId("desk-chart-more").click(); // Open in Charts is in the chart header's More
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
@@ -103,6 +104,7 @@ test("the centre opens on the open thread's chart beside the conversation, and i
   await page.waitForTimeout(200);
   expect(reads).toEqual(["GET chart", "GET news"]); // the timeline waits; the headlines are read with the chart
 
+  await pane.getByRole("tab", { name: "Position" }).click(); // the Timeline sits in the dock's Position tab
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
   const timeline = pane.getByRole("list", { name: "Timeline" });
   await expect(timeline.getByRole("listitem")).toHaveCount(4);
@@ -193,6 +195,7 @@ test("the chart and the timeline each say what is unavailable or missing", async
   await expect(pane.getByRole("group", { name: "Timeframe" }).getByRole("button", { name: "15m" })).toHaveAttribute("aria-pressed", "true");
   await expect(empty).toContainText("No 15-minute candles to show");
   await expect(empty.getByRole("button", { name: "Show 1D: the last few months" })).toBeVisible();
+  await pane.getByRole("tab", { name: "Position" }).click(); // the Timeline sits in the dock's Position tab
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
   await expect(pane).toContainText("Nothing has touched this thread in the last 7 days.");
   await expect(pane).toContainText("Could not read: pings.");
@@ -207,6 +210,7 @@ test("on a 375 px phone the centre is the ticker's view and the copilot is a she
   await expect(pane.getByRole("img", { name: /NBIS today: 2-minute candles/ })).toBeVisible();
   await expect(pane.getByTestId("desk-chart-canvas")).toHaveAttribute("data-bars", "60");
   expect((await pane.getByRole("button", { name: "15m" }).boundingBox())!.height).toBeGreaterThanOrEqual(36);
+  await pane.getByRole("tab", { name: "Position" }).click(); // the Timeline sits in the dock's Position tab
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
   await expect(pane.getByRole("list", { name: "Timeline" }).getByRole("listitem")).toHaveCount(4);
   expect((await pane.getByRole("tab", { name: "Chain" }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
@@ -233,6 +237,7 @@ test("a symbol opened with no saved conversation charts it by the symbol", async
   await expect(pane.getByRole("list", { name: "On the chart" }).getByRole("listitem")).toHaveCount(4); // its fill, paper fill, ping and Radar marks
   await pane.getByTestId("desk-chart-more").click(); // Open in Charts is in the chart header's More
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
+  await pane.getByRole("tab", { name: "Position" }).click(); // the Timeline sits in the dock's Position tab
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
   await expect(pane.getByRole("list", { name: "Timeline" }).getByRole("listitem")).toHaveText([/Bought 5 NBIS stock at 94.20.*the open position/]);
   expect(reads).toEqual(["GET chart", "GET news", "GET timeline"]); // reads only, nothing posted

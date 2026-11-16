@@ -96,7 +96,7 @@ test("an alert that fired today: a row under Mine, counted as new, and Show on c
   await expect(row.getByRole("button", { name: "Ask the copilot" })).toBeVisible();
   await expect(feedList.getByTestId("feed-tradingview-quiet")).toHaveCount(0);
   await row.getByRole("button", { name: "Show on chart" }).click();
-  await expect(centre.getByRole("tab", { name: "Chart" })).toHaveAttribute("aria-selected", "true");
+  await expect(centre.getByTestId("desk-dock")).toBeVisible(); // the chart with its dock, not the Grid
   await expect(page.locator("[data-marks]")).toHaveAttribute("data-marks", "1");
   await expect(page.getByTestId("desk-chart-marks")).toContainText("TradingView · ORB break long · 5m at 94.12 · 10:46 AM ET");
   await expect(page.getByLabel("Legend")).toContainText("TradingView");

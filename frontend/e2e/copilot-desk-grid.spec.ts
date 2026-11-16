@@ -88,7 +88,7 @@ async function open(page: Page, { width = 1440, height = 900, pins }: { width?: 
   await expect(page.getByTestId("desk-book")).toBeVisible();
   const ticker = page.getByTestId("desk-view-ticker");
   if (await ticker.isVisible()) await ticker.click(); // a phone opens on its Book: the centre is its second view
-  await page.getByRole("tablist", { name: "Centre" }).getByRole("tab", { name: "Grid" }).click();
+  await page.locator("#desk-centre").getByRole("button", { name: "Grid", exact: true }).click(); // beside the dock's tabs
   await expect(page.getByTestId("desk-grid")).toBeVisible();
   return seen;
 }
@@ -160,19 +160,19 @@ test("pins: a pinned name keeps its slot, the rest fill around it, and a hidden 
   expect(saved.slice(0, 5)).toEqual(["SMCI", "IREN", null, null, "RKLB"]);
 });
 
-test("a tile's click opens the name on the full Chart tab in place, the copilot following", async ({ page }) => {
+test("a tile's click opens the name on the chart in place, the copilot following", async ({ page }) => {
   const seen = await open(page);
   await expect(page.getByTestId("grid-chart")).toHaveCount(6);
   await page.evaluate(() => { (window as unknown as { kept: string }).kept = "still here"; });
   await page.getByRole("button", { name: "Open RKLB on the chart" }).click();
-  await expect(page.getByRole("tablist", { name: "Centre" }).getByRole("tab", { name: "Chart" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("desk-grid")).toHaveCount(0); // the Grid gives way to the chart
   await expect(page.getByTestId("desk-chart")).toContainText("RKLB");
   await expect.poll(() => seen.charts).toContain("symbol:RKLB");
   await expect(page).toHaveURL(/\/copilot-lab\?symbol=RKLB$/);
   await expect(page.getByRole("region", { name: "Conversation" }).getByTestId("desk-breadcrumb")).toContainText("RKLB");
   expect(await page.evaluate(() => (window as unknown as { kept?: string }).kept)).toBe("still here"); // no reload
   // A held name opens as its book row does: the row is marked.
-  await page.getByRole("tablist", { name: "Centre" }).getByRole("tab", { name: "Grid" }).click();
+  await page.locator("#desk-centre").getByRole("button", { name: "Grid", exact: true }).click(); // beside the dock's tabs
   await page.getByRole("button", { name: "Open MU on the chart" }).click();
   await expect(page.getByTestId("desk-chart")).toContainText("MU");
 });

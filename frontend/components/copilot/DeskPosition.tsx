@@ -3,7 +3,7 @@
 /**
  * The Position panel (docs/copilot-lab.md § Where a held option stands): one place under the chart for the selected
  * position, with a button for every way he manages it. ``DeskPosition`` is a real position (a book row), ``DeskPaperPosition``
- * a paper one; each takes props only, so the desk shell can place it anywhere (under the chart today, a dock tab later).
+ * a paper one; each takes props only, so the desk shell can place it anywhere (the dock's Position tab, under the chart).
  *
  * It shows the REAL or PAPER mark, the contract and size, the P&L, the price now and the stock's change today, the plan's
  * entry, stop and target, break-even and days left (a real option's full standing, ``OptionStanding``), and any working
