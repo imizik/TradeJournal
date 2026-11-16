@@ -582,7 +582,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     { id: "go-goals", name: "This week's goals", hint: "Set or change one or two goals for the week", run: () => reveal(["paper", "paper.goals"], "goals-set", true) },
     { id: "go-watching", name: "Watchlist", hint: "Your watched names: add, import, plan", key: "W", run: () => reveal(["watching"], "desk-watching") },
     { id: "go-note", name: "Note on this position", hint: "A one-line note on the selected position", run: () => reveal([], ['[data-desk-book] li[data-selected] [data-testid="desk-note-button"]', '[data-desk-book] [data-testid="desk-note-button"]'], true) },
-    { id: "go-health", name: "What feeds the desk", hint: "Is every source live: Robinhood, prices, fill emails, Radar", run: () => desk.current?.querySelector<HTMLElement>('[data-testid="desk-health"]')?.click() },
+    { id: "go-health", name: "Data health", hint: "Is every source live: Robinhood, prices, fill emails, Radar", run: () => desk.current?.querySelector<HTMLElement>('[data-testid="desk-health"]')?.click() },
     { id: "go-replay", name: "Replay a past day", hint: "Practice on a past day's bars. Not live, not real money.", key: "R", run: () => openReplay() },
     { id: "go-redo", name: "Redo one of my trades", hint: "Re-trade a past real trade in replay, then compare", run: () => openReplay(true) },
     { id: "desk-use", name: "How I use the desk", hint: "What you use most and least; fold away what you don't", run: openUse },

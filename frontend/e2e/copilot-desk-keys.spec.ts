@@ -132,7 +132,7 @@ test("⌘K opens the palette: type to filter, Enter opens the thread, Escape and
   // The threads, the desk's commands, then every place on the desk with its key.
   await expect(options).toHaveText([/^NBIS/, /^CRWV/, /^APLD/, /^MU/, /^Plan a trade/, /^Review my week/, /^What matters right now\?/,
     /^Chart.*C$/, /^Chain.*O$/, /^Ticket.*T$/, /^Check a call.*L$/, /^Grid.*G$/, /^Feed.*F$/, /^Copilot.*\/$/, /^Book.*B$/, /^Threads.*\[$/,
-    /^Now/, /^Paper book.*P$/, /^My rules/, /^This week's goals/, /^Watchlist.*W$/, /^Note on this position/, /^What feeds the desk/,
+    /^Now/, /^Paper book.*P$/, /^My rules/, /^This week's goals/, /^Watchlist.*W$/, /^Note on this position/, /^Data health/,
     /^Replay a past day.*R$/, /^Redo one of my trades/, /^How I use the desk/]);
   await expect(options.first()).toContainText("1.0% from invalidation 92.30");
   await expect(options.first()).toContainText("+$180.00");
@@ -1014,7 +1014,7 @@ test("every place is in Jump to: Replay opens from the palette and from R, and t
   await expect(page.getByTestId("desk-replay")).toBeVisible();
   await page.getByTestId("replay-leave").click();
   for (const [typed, name] of [["rules", "My rules"], ["goals", "This week's goals"], ["redo", "Redo one of my trades"], ["paper", "Paper book"],
-    ["watch", "Watchlist"], ["note", "Note on this position"], ["feeds", "What feeds the desk"]]) {
+    ["watch", "Watchlist"], ["note", "Note on this position"], ["health", "Data health"]]) {
     await page.getByRole("button", { name: "Jump to a thread or command" }).click();
     await page.keyboard.type(typed);
     await expect(palette(page).getByRole("option", { name: new RegExp(`^${name}`) })).toBeVisible();
