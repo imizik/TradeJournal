@@ -4,7 +4,8 @@
  * The desk's account line (docs/copilot-lab.md § The desk, top bar): in the top bar, one tappable figure group per
  * Robinhood account — its label and number masked to the last four, total value, today's change in dollars and percent,
  * options value, cash and buying power, and the open P&L of its positions. Tapping an account narrows the book to its
- * rows; tapping it again shows every row. A phone gets the same line as one row that swipes sideways.
+ * rows; tapping it again shows every row. A small hint in front of the chips says so, and the narrowed book says
+ * "Showing Roth IRA only · Show all" under its heading. A phone gets the same line as one row that swipes sideways.
  *
  * The figures are the feed's last read. Between reads, the positions' live prices (#768) move the total, today's change
  * and the open P&L by exactly what they move those positions' P&L. Not live (off, signed out, unavailable, stale): one
@@ -18,6 +19,7 @@ import { positionRows, tone } from "@/components/copilot/Cockpit";
 import { DeskValueLine } from "@/components/copilot/DeskValueLine";
 import ModeMark from "@/components/copilot/ModeMark";
 import { cn } from "@/lib/utils";
+import { ListFilter } from "lucide-react";
 
 const ET = "America/New_York";
 const whole = (value: number) => `$${value.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
@@ -83,6 +85,11 @@ export function DeskAccounts({ live, rows, active, onPick, mark = false }: {
   return (
     <div className={wrap}>
       {line}
+      {/* The chips filter the book: a funnel and, on a wide screen, the words (a screen reader always has them). */}
+      <span data-testid="desk-accounts-hint" title="Tap an account to show only its positions in the book; tap it again to show all"
+        className="inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+        <ListFilter size={12} aria-hidden /><span className="max-xl:sr-only">{active ? "Book filtered" : "Tap to filter the book"}</span>
+      </span>
       <div data-testid="desk-accounts" role="group" aria-label="Accounts"
         className="flex min-w-0 max-w-full snap-x items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {live.accounts.map(a => {

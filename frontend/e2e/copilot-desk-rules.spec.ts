@@ -174,7 +174,8 @@ test("in the desk's Paper mode the ticket's main action is Buy on paper, with no
   // It sits where Copy all would lead; the real order still copies under it, and nothing is placed by either.
   const copy = ticket.getByRole("button", { name: "Copy all for Robinhood" });
   await expect(copy).toBeVisible();
-  expect((await copy.boundingBox())!.y).toBeGreaterThan((await main.boundingBox())!.y);
+  // In document order (from a tablet up the Copy all bar sticks to the dock's foot, so its box can sit higher on screen).
+  expect(await main.evaluate((el, copyEl) => !!(el.compareDocumentPosition(copyEl!) & Node.DOCUMENT_POSITION_FOLLOWING), await copy.elementHandle())).toBe(true);
   await main.scrollIntoViewIfNeeded();
   await page.getByTestId("desk-dock").screenshot({ path: test.info().outputPath("ticket-paper-main.png") });
   // The same confirm: the live quote first, then Fill on paper.

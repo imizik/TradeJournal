@@ -30,6 +30,9 @@ import { cn } from "@/lib/utils";
 export const TICKET_EVENT = "tradejournal:open-ticket";
 const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
 const STALE_S = 15 * 60;  // the server's QUOTE_STALE_S
+/** A plan ticket's Copy all block: from a tablet up the dock scrolls in its own box under the chart, and this block stays
+ *  at the box's foot until its own place scrolls up, so Copy all shows as soon as the ticket opens. */
+const COPY_BAR = "md:sticky md:-bottom-3 md:z-10 md:-mx-1 md:border-t md:bg-background md:px-1 md:py-2";
 
 /** A contract he picked for a ticket (the Chain tab's Put on ticket): it replaces the contract the plan names. With
  *  ``short`` it is the long leg of a vertical spread that sells ``short`` (``kind``: its type) in the same expiry. */
@@ -402,20 +405,16 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
       {paperFirst && <PaperMain>{paperOrder(true)}</PaperMain>}
       <RealRules investigationId={ticket.investigation_id} symbol={ticket.symbol}
         entry={{ side: "real", instrument: "option", expiry: k.expiry, size: f.cost, stop: ticket.invalidation, last4: chosen?.last4 ?? null }}>
-        {onCopy => chosen?.kind === "mcp" ? (
-          <div className="space-y-2">
-            <div className="flex flex-wrap gap-2">
-              <button type="button" disabled aria-disabled="true" title="Sending is off" className="inline-flex min-h-11 cursor-not-allowed items-center rounded-md border px-3 text-xs opacity-45 sm:min-h-8">Send to Robinhood for your approval</button>
-              <CopyButton text={all} label="Copy all for Robinhood" wide onCopy={onCopy} />
-            </div>
-            <p className="text-xs text-muted-foreground">Sending is off: Robinhood has not given your account the approvals setting, and the MCP account is empty. Copy the fields and place it yourself in Robinhood.</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
+        {onCopy => chosen?.kind === "mcp" ? (<>
+          <div className={cn("flex flex-wrap gap-2", COPY_BAR)}>
+            <button type="button" disabled aria-disabled="true" title="Sending is off" className="inline-flex min-h-11 cursor-not-allowed items-center rounded-md border px-3 text-xs opacity-45 sm:min-h-8">Send to Robinhood for your approval</button>
             <CopyButton text={all} label="Copy all for Robinhood" wide onCopy={onCopy} />
-            <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {ticket.symbol}, Trade, Trade options, then enter each field. Nothing is sent from here.</p>
           </div>
-        )}
+          <p className="text-xs text-muted-foreground">Sending is off: Robinhood has not given your account the approvals setting, and the MCP account is empty. Copy the fields and place it yourself in Robinhood.</p>
+        </>) : (<>
+          <div className={COPY_BAR}><CopyButton text={all} label="Copy all for Robinhood" wide onCopy={onCopy} /></div>
+          <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {ticket.symbol}, Trade, Trade options, then enter each field. Nothing is sent from here.</p>
+        </>)}
       </RealRules>
       {!paperFirst && <PaperHalf>{paperOrder(false)}</PaperHalf>}
       {foot(true)}
@@ -549,11 +548,10 @@ function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, 
       )}
       {paperFirst && <PaperMain>{paperOrder(true)}</PaperMain>}
       <RealRules investigationId={ticket.investigation_id} symbol={ticket.symbol}
-        entry={{ side: "real", instrument: "spread", expiry: s.expiry, size: f.warning ? null : f.maxLoss, stop: ticket.invalidation, last4 }}>{onCopy => (
-      <div className="space-y-2">
-        <CopyButton text={all} label="Copy all for Robinhood" wide onCopy={onCopy} />
-        <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {ticket.symbol}, Trade, Trade options, pick both legs (Buy the ${s.long}, Sell the ${s.short}, {shortDate(s.expiry)}), then the limit as a {s.type} and the quantity. Nothing is sent from here.</p>
-      </div>)}</RealRules>
+        entry={{ side: "real", instrument: "spread", expiry: s.expiry, size: f.warning ? null : f.maxLoss, stop: ticket.invalidation, last4 }}>{onCopy => (<>
+      <div className={COPY_BAR}><CopyButton text={all} label="Copy all for Robinhood" wide onCopy={onCopy} /></div>
+      <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {ticket.symbol}, Trade, Trade options, pick both legs (Buy the ${s.long}, Sell the ${s.short}, {shortDate(s.expiry)}), then the limit as a {s.type} and the quantity. Nothing is sent from here.</p>
+      </>)}</RealRules>
       {!paperFirst && <PaperHalf>{paperOrder(false)}</PaperHalf>}
       {foot}
     </div>

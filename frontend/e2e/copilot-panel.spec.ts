@@ -316,6 +316,11 @@ test("the Model picker sends the chosen model with each turn and remembers it in
   await page.route("**/copilot/status", (route) => route.fulfill({ json: { ...ON, backend: "anthropic", key_configured: true,
     model: "claude-sonnet-5-5", models: ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"] } }));
   await page.goto("/copilot-lab?symbol=MRVL");
+  // On the desk the model and its picker fold behind "Model ▸" above the conversation: engineering detail, off the trading screen.
+  const toggle = page.getByTestId("copilot-model-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByLabel("Model")).toHaveCount(0);
+  await toggle.click();
   const picker = page.getByLabel("Model");
   await expect(picker).toHaveValue("claude-sonnet-5-5");
   await picker.selectOption("claude-opus-5-5");
@@ -326,6 +331,7 @@ test("the Model picker sends the chosen model with each turn and remembers it in
   await expect(page.getByText(ANSWER)).toBeVisible();
   expect(lab.chats[0].model).toBe("claude-opus-5-5");
   await page.reload();
+  await page.getByTestId("copilot-model-toggle").click();
   await expect(page.getByLabel("Model")).toHaveValue("claude-opus-5-5"); // remembered in this browser
   await page.getByLabel("Model").selectOption("claude-sonnet-5-5"); // back to the server's default: nothing sent
   await page.getByLabel("Message").fill("And now?");
@@ -345,6 +351,36 @@ test("the desk shows the API day budget beside the model once half of it is spen
   await expect(page.getByText(/^API today/)).toHaveCount(0);
   spent = 1.2;
   await page.reload();
-  await expect(page.getByText("API today $1.20 of $2.00")).toBeVisible();
+  await expect(page.getByText("API today $1.20 of $2.00")).toBeVisible(); // a warning: in view with "Model ▸" closed
+  await expect(page.getByTestId("copilot-model-toggle")).toHaveAttribute("aria-expanded", "false");
+  await page.getByTestId("copilot-model-toggle").click();
   await expect(page.getByLabel("Backend")).toHaveCount(0); // one backend: no picker
 });
+
+for (const width of [1440, 375]) {
+  test(`the desk folds the model line behind Model ▸ and keeps warnings in view, at ${width}px`, async ({ page }) => {
+    const lab: Lab = { saved: new Map(), chats: [] };
+    await stubLab(page, lab);
+    await page.setViewportSize({ width, height: 900 });
+    let status: Record<string, unknown> = { ...ON, backend: "anthropic", key_configured: true, model: "claude-opus-5-5", followup_model: "claude-haiku-5-5" };
+    await page.route("**/copilot/status", (route) => route.fulfill({ json: status }));
+    await page.goto("/copilot-lab?symbol=MRVL"); // a phone opens the copilot sheet on a symbol's link
+    const line = page.getByTestId("copilot-status");
+    const toggle = line.getByTestId("copilot-model-toggle");
+    await expect(toggle).toHaveText("Model▸");
+    await expect(line).not.toContainText("Claude API");
+    await expect(line.getByTestId("copilot-followup-model")).toHaveCount(0);
+    if (width < 640) expect((await toggle.boundingBox())!.height).toBeGreaterThanOrEqual(43); // thumb-sized on a phone
+    await line.screenshot({ path: test.info().outputPath(`copilot-head-closed-${width}.png`) });
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(line).toContainText("Claude API · claude-opus-5-5");
+    await expect(line.getByTestId("copilot-followup-model")).toHaveText("follow-ups on Haiku 5.5");
+    await line.screenshot({ path: test.info().outputPath(`copilot-head-open-${width}.png`) });
+    // A simulated model is a warning: always in view, with nothing to open.
+    status = { ...ON };
+    await page.reload();
+    await expect(page.getByTestId("copilot-status").getByText("Simulated model — no API calls", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("copilot-model-toggle")).toHaveCount(0);
+  });
+}

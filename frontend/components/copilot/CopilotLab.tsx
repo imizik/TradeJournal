@@ -13,7 +13,7 @@ import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/componen
 import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
 import { usePaperBook } from "@/components/copilot/DeskPaper";
 import { PositionNotes } from "@/components/copilot/DeskNotes";
-import { Practice, RulesAndGoals, openDeskPlace, type DeskPlace } from "@/components/copilot/DeskPractice";
+import { HowImDoing, Practice, RulesAndGoals, openDeskPlace, type DeskPlace } from "@/components/copilot/DeskPractice";
 import DeskReplay from "@/components/copilot/DeskReplay";
 import PaperReviewCard from "@/components/copilot/PaperReview";
 import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
@@ -152,7 +152,7 @@ function typing(target: EventTarget | null) {
  * close pass or checklist on top) with the Feed of what the app knows today behind its tab. Selecting a position drives
  * the centre and the copilot. Below 1180 px the copilot is a sheet opened by "Ask the copilot" and by any Ask action
  * and the Feed a drawer; a phone shows one view at a time (Positions, Chart, Chain, Orders on its own tab bar; the Feed chip). The thread list is a drawer. While
- * the lab is off only the conversation shows, saying so. ⌘K (Ctrl+K) or Jump to… opens the palette; while not typing,
+ * the lab is off only the conversation shows, saying so. ⌘K (Ctrl+K) or Jump to or ask… opens the palette; while not typing,
  * J / K open the next or previous thread, N starts a plan, [ toggles the thread list, a place's key opens it and Escape
  * closes the drawer or the sheet.
  *
@@ -408,6 +408,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     home: () => goNow(true),
   }), [goNow, showCopilot]);
   const fill = useCallback((text: string) => { setCommand({ kind: "fill", text, n: ++sent.current }); showCopilot(); }, [showCopilot]);
+  // ⌘K's "Ask the copilot": the words sent now in the open conversation, as its message box would send them.
+  const askHere = useCallback((text: string) => { setCommand({ kind: "ask", text, here: true, n: ++sent.current }); showCopilot(); }, [showCopilot]);
   const go = useCallback((href: string) => {
     const next = deskLinkIn(href);
     if (!next) { router.push(href); return; }
@@ -1123,10 +1125,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               className={cn("inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground sm:min-h-8", threadsShown && "bg-secondary")}>
               <PanelLeft size={15} aria-hidden /><span className="hidden sm:inline">Threads</span>
             </button>
-            <button type="button" onClick={() => setPalette(true)} aria-label="Jump to a thread or command" aria-haspopup="dialog" data-use="palette"
+            <button type="button" onClick={() => setPalette(true)} aria-label="Jump to a thread or command, or ask the copilot" aria-haspopup="dialog" data-use="palette"
               className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md border bg-card px-2.5 text-xs text-muted-foreground hover:text-foreground sm:min-h-8">
               {/* A phone keeps the bar short: icons only, as the button's label already says. */}
-              <Search size={14} aria-hidden /><span className="hidden sm:inline">Jump to…</span><kbd className={cn(KBD, "hidden md:inline")}>{jumpKey}</kbd>
+              <Search size={14} aria-hidden /><span className="hidden sm:inline">Jump to or ask…</span><kbd className={cn(KBD, "hidden md:inline")}>{jumpKey}</kbd>
             </button>
             <button type="button" onClick={planTrade} data-use="plan" title="A new plan; you name the symbol. Nothing is sent. ( N )"
               className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">
@@ -1203,6 +1205,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 (never folded). Then Watching, the day's block, his rules and goals, and Practice (paper and replay). */}
             <div data-use="book" className="contents"><Book rows={booked.rows} sparks={sparks} earnings={events} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} updating={rowsRead && !rowsFresh} onSelect={select} onFollow={changeFollow}
               risk={<ExposureLine session={session.data} />}
+              filter={account ? { label: live?.accounts?.find(a => a.masked === account)?.label ?? account, onShowAll: () => setAccount(null) } : null}
               live={booked.live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} /></div>
             {/* After 14 days of desk use: one quiet card offering to fold what he never opens. Never folds unasked. */}
             <FoldSuggestion />
@@ -1210,6 +1213,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               onSelect={selectWatched} onAsk={askWatched} onPlan={planWatched} onChange={watching.set} /></Fold>
             {/* The day's block (the brief, Since you looked, the day report) and the practice goal under it. */}
             <div data-use="dayblock" className="contents">{lower}<DayFacts /></div>
+            {/* How I'm doing this week: real beside paper, outside the paper frame (replay keeps its own score in Practice). */}
+            <Fold id="scorecard"><HowImDoing book={paper.book} /></Fold>
             {/* His rules and goals: one neutral line, outside the paper frame, since they cover real trades too. */}
             <RulesAndGoals book={paper.book} />
             {/* Practice: his paper book, the QQQ overnight and momentum paper books and Replay, one line each. Never real money. */}
@@ -1412,7 +1417,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       {on && !replay && <button type="button" onClick={askCopilot} className={cn(styles.ask, "min-h-11 items-center gap-1.5 rounded-full border border-foreground/30 bg-card px-4 text-sm font-medium text-foreground shadow-lg hover:bg-secondary max-sm:size-12 max-sm:justify-center max-sm:px-0")}>
         <MessageCircle size={15} aria-hidden className="text-muted-foreground max-sm:size-5 max-sm:text-foreground" /><span className="max-sm:sr-only">Ask the copilot{picked && picked !== talking ? ` about ${picked}` : ""}</span>
       </button>}
-      {on && !replay && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} onConversation={actions.open} goTo={goTo} />}
+      {on && !replay && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} onConversation={actions.open} goTo={goTo} onAsk={askHere} />}
       </DeskUseRoot>
     </div>
   );

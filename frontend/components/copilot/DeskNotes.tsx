@@ -2,7 +2,7 @@
 
 /**
  * Notes on the book (docs/copilot-lab.md § Notes on a trade): a small Note control on each position row and each fresh
- * fill line opens one text line in place (Enter saves, Esc cancels); saved notes show as short grey lines under the row
+ * fill line opens one text line in place (Save or Enter saves, Cancel or Esc closes); saved notes show as short grey lines under the row
  * with their time, newest last. Saved with the trade (``lib/deskNotes.ts``), so the Journal, the day report and the
  * copilot's read of the ticker see the same words. Never a plan, never a change to a fill, a trade or its P&L.
  */
@@ -82,16 +82,14 @@ export function NoteButton({ notes, id, label, className }: { notes: DeskNotesSt
   );
 }
 
-/** One text line: Enter saves, Esc (or Enter on nothing) closes. The desk's keys never fire while typing here. */
+/** One text line with Save and Cancel beside it (thumb-sized on a phone): Enter or Save saves, Esc or Cancel (or saving
+ * nothing) closes. The desk's keys never fire while typing here. */
 function NoteInput({ label, onSave, onClose, autoFocus = true }: { label: string; onSave(text: string): Promise<void>; onClose(): void; autoFocus?: boolean }) {
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const lock = useRef(false);
-  const key = async (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); return; }
-    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-    event.preventDefault();
+  const submit = async () => {
     const words = text.trim();
     if (!words) { onClose(); return; }
     if (lock.current) return;
@@ -100,12 +98,25 @@ function NoteInput({ label, onSave, onClose, autoFocus = true }: { label: string
     catch (error) { setFailed(error instanceof Error ? error.message : "Not saved. Try again."); }
     finally { lock.current = false; setSaving(false); }
   };
+  const key = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); return; }
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    void submit();
+  };
+  const button = "h-11 shrink-0 rounded border px-3 text-xs font-medium disabled:opacity-60 sm:h-8 sm:px-2.5";
   return (
     <span className="block">
-      <input autoFocus={autoFocus} type="text" data-testid="desk-note-input" aria-label={`Note on ${label}`} value={text} maxLength={NOTE_MAX}
-        disabled={saving} onChange={event => setText(event.target.value)} onKeyDown={event => void key(event)}
-        placeholder="Why you're in, or why you left · Enter saves, Esc cancels"
-        className="h-8 w-full rounded border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground/70 disabled:opacity-60" />
+      <span className="flex min-w-0 items-center gap-1.5">
+        <input autoFocus={autoFocus} type="text" data-testid="desk-note-input" aria-label={`Note on ${label}`} value={text} maxLength={NOTE_MAX}
+          disabled={saving} onChange={event => setText(event.target.value)} onKeyDown={key}
+          placeholder="Why you're in, or why you left"
+          className="h-11 min-w-0 flex-1 rounded border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground/70 disabled:opacity-60 sm:h-8" />
+        <button type="button" data-testid="desk-note-save" disabled={saving} onClick={() => void submit()}
+          className={cn(button, "border-transparent bg-primary text-primary-foreground hover:bg-primary/90")}>{saving ? "Saving…" : "Save"}</button>
+        <button type="button" data-testid="desk-note-cancel" disabled={saving} onClick={onClose}
+          className={cn(button, "text-muted-foreground hover:bg-secondary hover:text-foreground")}>Cancel</button>
+      </span>
       {failed && <span role="alert" className="mt-0.5 block text-[11px] text-rose-300">{failed}</span>}
     </span>
   );
