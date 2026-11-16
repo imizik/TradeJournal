@@ -2088,10 +2088,15 @@ The copilot does not see folds or counts (no tool change).
 
 One dot at the left of the desk's buttons says whether every source behind the desk is live, so a quiet desk on a bad
 morning can be told from a dead feed. A green dot alone when every running source is live ("All live" is its name and
-tooltip); amber naming what is behind ("Robinhood down", "2 sources behind"); a grey dot alone when one cannot be told
-("Prices unknown", or "Health unknown" when the read itself failed): unknown is never green. Words show only when
-something is amber, so the top bar never jumps. A phone shows the dot alone. A tap lists each source with
-its state and last good time in plain words; a tap on a source says what it affects and, where one exists, the fix
+tooltip); red naming it when a source that leaves positions, fills or prices wrong is stale, down or low (the `MONEY`
+set: Robinhood, Prices, Fill emails; "Robinhood down", or "Robinhood + 1 behind" when others are behind too, the money
+source named first); amber naming any other ("Chatter behind", "2 sources behind"); a grey dot alone when one cannot be
+told ("Prices unknown", or "Health unknown" when the read itself failed): unknown is never green. Its accessible name
+says the same words ("Data health: Robinhood + 1 behind"). Words show only when something is red or amber, so the top
+bar never jumps. A phone shows the dot alone, except when it is red: then the money source's name sits under the dot in
+red ("Robinhood", or "Fill emails", the longest, which still fits at 375 px), since a phone has no status line. A tap
+lists each source with its state and last good time in plain words, a money source behind in red and any other in amber,
+as the dot shows them; a tap on a source says what it affects and, where one exists, the fix
 already in the app (Gmail's Reconnect; the Robinhood sign-in steps in docs/robinhood-read-feed.md). No new fix flow. It
 reads again a few seconds after the desk opens or comes back into view, once the desk's own first reads have landed.
 
@@ -2483,8 +2488,20 @@ Paper trading on a past day, any time (nights and weekends included): "Replay" o
   own budget and lock), never Tradier or Robinhood. A day whose bars cannot be read is greyed out with the reason.
 - **The clock.** The chart starts at 9:30 ET with the premarket and nothing after; Play, Pause, 1×/5×/20×/60× (60× is a
   replayed minute a second) and one bar. Only bars that ended by the clock are drawn. While it runs the live desk is
-  hidden behind an amber `REPLAY · <date> · <time> ET` badge (its keys off, the copilot hidden: nothing live shows beside
-  a replayed price); Back to live puts it back exactly as it was, since it stays mounted underneath.
+  hidden behind an amber `REPLAY · <date> · <time> ET` badge (its keys off, the copilot hidden); Back to live puts it
+  back exactly as it was, since it stays mounted underneath.
+- **Real money never hides.** One line across the foot of Replay's header (`ReplayLiveLine.tsx`), marked REAL: "3 open ·
+  +$1,420 · 1 near stop · 1 order working" (the phone value block's own count, `bookRead`), the Needs-you strip's first
+  item when one is active, and the money source behind when the Data health dot would be red ("Robinhood down"). A tap
+  opens a read-only list of the real positions (P&L and tag) and Robinhood's working orders: no button, nothing sent;
+  Back to live to act. It covers every account (the account line's pick does not narrow it) and never a ticker set to
+  "Not following". It reads nothing of its own: the hidden live desk keeps its minute reads (the thread list's rows and
+  feed, the session, the one health read) and the live prices it already asks for (`useHeldTicks`), and the line shows
+  those. When the newest read fails, or the server could not read the positions, the line says "Positions could not be
+  read · as of 11:00 AM" (the last good read) instead of any count, P&L or "No open positions", and its list shows
+  neither positions nor orders until a read succeeds. A P&L with a price no longer live is greyed, as the book greys it.
+  A redo still hides the real trade being redone: the line shows open positions and working orders, never fills.
+  Proof: `frontend/e2e/copilot-desk-modes.spec.ts`.
 - **Fills: shares.** A market order fills at the newest finished regular-session bar's close plus an assumed
   half-spread to buy (less one to sell): the spread is assumed 0.05% of the price, each half rounded up to the cent,
   and the confirm says so. A bar more than two minutes old is no price.

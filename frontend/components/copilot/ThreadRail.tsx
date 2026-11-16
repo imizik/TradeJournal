@@ -240,7 +240,7 @@ function DayLine({ data, needYou }: { data: DeskThreads; needYou: number }) {
  * the breadcrumb. All | Plans switches to the Plans view (``PlanList``) from the same read, remembered in this browser.
  */
 export default function ThreadRail({ actions, active = null, activeSymbol = null, main = false, onRows, onReadFailed, onWalk, onSaved, phase = null, refresh = 0, follow = {}, onFollow, onFollowRead, pick }: {
-  actions: HomeActions; active?: string | null; activeSymbol?: string | null; main?: boolean; onRows?(rows: DeskThread[], live: DeskLive, read?: { plans: DeskPlan[]; sections: DeskThreads["sections"] }): void;
+  actions: HomeActions; active?: string | null; activeSymbol?: string | null; main?: boolean; onRows?(rows: DeskThread[], live: DeskLive, read?: { plans: DeskPlan[]; sections: DeskThreads["sections"]; asOf: string }): void;
   /** The list's read failed (its reason) or read again (null): the strip says it cannot check rather than showing nothing. */
   onReadFailed?(reason: string | null): void; onWalk?(ids: string[]): void;
   onSaved?(saved: InvestigationSummary[]): void; phase?: ReactNode; refresh?: number; pick(row: DeskThread): void;
@@ -327,7 +327,7 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
   }, [rows, saved]);
   const ordered = useMemo(() => [...rows.filter(r => r.group === "pinned"), ...tickers.flatMap(t => t.rows), ...hiddenTickers.flatMap(t => t.rows),
     ...rows.filter(isRadar)], [rows, tickers, hiddenTickers]);
-  useEffect(() => { if (data) onRows?.(ordered, data.robinhood, { plans: data.plans, sections: data.sections }); }, [data, ordered, onRows]);
+  useEffect(() => { if (data) onRows?.(ordered, data.robinhood, { plans: data.plans, sections: data.sections, asOf: data.asOf }); }, [data, ordered, onRows]);
   useEffect(() => { onReadFailed?.(error); }, [error, onReadFailed]); // once read: the placeholder is not the list
   const jumpKey = useJumpKey();
   const livePlans = data?.plans.filter(p => p.stage === "armed" || p.stage === "in_position").length ?? 0;

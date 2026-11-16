@@ -15,6 +15,7 @@ import { usePaperBook } from "@/components/copilot/DeskPaper";
 import { PositionNotes } from "@/components/copilot/DeskNotes";
 import { HowImDoing, Practice, RulesAndGoals, openDeskPlace, type DeskPlace } from "@/components/copilot/DeskPractice";
 import DeskReplay from "@/components/copilot/DeskReplay";
+import ReplayLiveLine from "@/components/copilot/ReplayLiveLine";
 import PaperReviewCard from "@/components/copilot/PaperReview";
 import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
 import DeskRoll from "@/components/copilot/DeskRoll";
@@ -202,14 +203,16 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const [plans, setPlans] = useState<DeskPlan[]>([]);
   const [sections, setSections] = useState<DeskThreads["sections"] | null>(null);
   const [rowsFailed, setRowsFailed] = useState<string | null>(null);
-  const readRows = useCallback((next: DeskThread[], feed?: DeskLive, read?: { plans: DeskPlan[]; sections: DeskThreads["sections"] }) => {
+  // When the positions last read (ISO): Replay's live line says "as of" it when a later read fails.
+  const [positionsAt, setPositionsAt] = useState<string | null>(null);
+  const readRows = useCallback((next: DeskThread[], feed?: DeskLive, read?: { plans: DeskPlan[]; sections: DeskThreads["sections"]; asOf: string }) => {
     setRows(next); setLive(feed ?? null); setRowsRead(true); setRowsFresh(true); keepRows({ rows: next, live: feed ?? null });
-    if (read) { setPlans(read.plans); setSections(read.sections); }
+    if (read) { setPlans(read.plans); setSections(read.sections); if (read.sections?.positions !== "unavailable") setPositionsAt(read.asOf); }
   }, [keepRows]);
   const [saved, setSaved] = useState<InvestigationSummary[]>([]);
   const [palette, setPalette] = useState(false);
   // Replay (DeskReplay): paper trading on a past day. While it runs the live desk stays mounted but hidden, so leaving
-  // puts it back exactly as it was, and none of its live pieces shows beside a replayed price.
+  // puts it back exactly as it was; of its live pieces only the REAL line in Replay's header shows beside a replayed price.
   const [replay, setReplay] = useState(false);
   // The desk's mode (DeskMode.tsx): Real or Paper as kept for this browser, Replay whenever a replay is open, however it
   // opened. A view only: nothing is sent and no order or account behaves differently.
@@ -1157,7 +1160,11 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         {on && <ScalpShortlistNudge />}
       </header>
       </div>
-      {on && replay && <DeskReplay symbol={centreSymbol} redo={redo} onLeave={to => { setReplay(false); setRedo(null); if (to) setDeskMode(to); }} />}
+      {/* Replay never hides real money: one REAL line in its header from the rows, feed and session the hidden desk
+          keeps reading (every account, whatever the account line's pick), read only. */}
+      {on && replay && <DeskReplay symbol={centreSymbol} redo={redo} onLeave={to => { setReplay(false); setRedo(null); if (to) setDeskMode(to); }}
+        live={<ReplayLiveLine rows={rows} live={rowsFresh ? live : null} read={rowsRead} day={today} need={needs[0] ?? null}
+          failed={!!rowsFailed || sections?.positions === "unavailable"} asOf={positionsAt} />} />}
       <div id="desk-cockpit" className={styles.cockpit} style={replay ? { display: "none" } : undefined}>
         {/* A phone's Positions opens on what the account is worth and how the book is doing, in one block. */}
         {on && phone && (
