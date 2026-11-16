@@ -544,13 +544,15 @@ def desk_requests(prompt: str, symbol: str, today) -> list[dict] | str | None:
     from datetime import date
     # Only a message that opens with a request (a line starting "alert me", "show me", "watch", "mark", ...), so a question
     # that merely mentions watching or a stop is never read as one.
-    opened = re.search(r"(?m)^\s*(?:please\s+|can you\s+)?(alert me|set an alert|ping me|show me|pull up|open the|switch to|"
-                     r"stop watching|unwatch|watch|mark|draw|build the|move my stop|close my|close out|sell half|sell \d+|"
-                     r"take \d+ off|trim|note on|plan the|plan that)\b.*$", prompt, re.I)
+    opened = re.search(r"(?m)^\s*(?:please\s+|can you\s+)?(alert me|set an alert|ping me|show me|pull up|open the|open my|"
+                     r"go to|take me to|switch to|stop watching|unwatch|watch|mark|draw|build the|move my stop|close my|"
+                     r"close out|sell half|sell \d+|take \d+ off|trim|note on|plan the|plan that)\b.*$", prompt, re.I)
     if not opened:
         return None
     lower = " ".join(prompt.lower().split())
     named = re.findall(r"\b[A-Z]{2,5}\b", prompt)  # a ticker the request names wins over the desk's selected one
+    if place := _place_request(opened.group(0).strip().lower()):  # "open my rules", "take me to replay for AAPL"
+        return [{"action": "show", "place": place, **({"symbol": named[0]} if named else {})}]
     symbol = named[0] if named else symbol
     if held := _held_request(opened.group(0).strip(), symbol, today):
         return held
@@ -606,6 +608,22 @@ def desk_requests(prompt: str, symbol: str, today) -> list[dict] | str | None:
     return out[:3] or None
 
 
+# SIMULATED: the words the scripted model reads as one of the desk's places (copilot_tools.DESK_PLACES), first match wins.
+_PLACE_WORDS = (("my rules", "rules"), ("rules", "rules"), ("goals", "goals"), ("paper", "paper"), ("watchlist", "watchlist"),
+                ("redo", "redo"), ("replay", "replay"), ("grid", "grid"), ("the feed", "feed"), ("data health", "health"),
+                ("day checklist", "day"), ("check a call", "check"), ("threads", "threads"), ("my book", "book"))
+
+
+def _place_request(line: str) -> str | None:
+    """SIMULATED: a request line asking to go to one of the desk's places ("open my rules", "go to the paper book",
+    "show me my watchlist"), as a place id; None for anything else (a chain or a tape stays the show's tab)."""
+    import re
+    line = re.sub(r"^(?:please\s+|can you\s+)", "", line)
+    if not re.match(r"(open my|open the|go to|take me to|show me|pull up|switch to)\b", line):
+        return None
+    return next((place for words, place in _PLACE_WORDS if re.search(rf"\b{words}\b", line)), None)
+
+
 def _held_request(line: str, symbol: str, today) -> list[dict] | str | None:
     """SIMULATED: a request line about a position he holds (close it, trim it, note on it) or a Feed idea to plan. One
     card; a note's words are everything after the colon, so nothing in them is read as another request."""
@@ -650,7 +668,9 @@ def desk_answer(outcomes: list[tuple[dict, str | None]]) -> str:
     shown = [c for c in made if c.get("action") == "show"]
     parts = []
     if shown:
-        parts.append(f"{shown[0]['symbol']} is on the desk now (Undo is on the card).")
+        from app.ai.copilot_tools import DESK_PLACES
+        what = " · ".join(w for w in (shown[0].get("symbol"), DESK_PLACES.get(shown[0].get("place") or "")) if w)
+        parts.append(f"{what} is on the desk now (Undo is on the card).")
     if len(made) > len(shown):
         parts.append("Tap the card to do it; nothing happens until you do.")
     parts += [f"I did not make that card: {reason}." for reason in refused]

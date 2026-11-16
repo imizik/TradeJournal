@@ -3,7 +3,8 @@
 ``desk_action`` is a tool like ``propose_plan``: the model calls it, this module checks the request against the desk as
 it stands (the ticker is one he follows, the price is sane, the plan exists and is his, the name is or is not on his
 Watching list) and returns the card. The browser shows it; a view change (the ticker on the desk chart, its timeframe,
-the Chain tab, the Tape) is applied when the card arrives, with Undo; anything that saves waits for his tap, and the tap
+the Chain tab, the Tape, or any place on the desk's one list, ``DESK_PLACES``) is applied when the card arrives, with Undo
+and nothing saved, armed or sent (a place that opens an editor only opens it); anything that saves waits for his tap, and the tap
 calls the desk's own route, the one the same action by hand calls:
 
 - ``alert``: ``POST /charts/alerts`` (the chart's alerts);
@@ -30,11 +31,12 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from app.ai.copilot_tools import (DESK_ACTIONS as ACTIONS, DESK_DIRECTIONS as DIRECTIONS, DESK_LABEL_MAX as LABEL_MAX,
-                                   DESK_NOTE_MAX as NOTE_MAX, DESK_OPTION_TYPES as OPTION_TYPES, DESK_SIDES as SIDES,
+                                   DESK_NOTE_MAX as NOTE_MAX, DESK_OPTION_TYPES as OPTION_TYPES, DESK_PLACES as PLACES,
+                                   DESK_SIDES as SIDES,
                                    DESK_TABS as TABS, DESK_TIMEFRAMES as TIMEFRAMES, ToolInputError, _symbol)
 # The constants live beside the tool's schema in copilot_tools; this module is its checks and its words.
 
-KEYS = {"show": {"timeframe", "tab"}, "alert": {"price", "side", "label"}, "watch": set(), "unwatch": set(),
+KEYS = {"show": {"timeframe", "tab", "place"}, "alert": {"price", "side", "label"}, "watch": set(), "unwatch": set(),
         "draw": {"price", "label"}, "ticket": {"expiry", "strike", "short_strike", "option_type"}, "plan_stop": {"price"},
         # A held position: the contract picks one when he holds more than one in the ticker.
         "close": {"expiry", "strike", "option_type"}, "trim": {"expiry", "strike", "option_type", "quantity", "half"},
@@ -96,14 +98,25 @@ def validate(args: dict) -> dict:
     extra = set(args) - KEYS[action] - {"action", "symbol"}
     if extra:
         raise ToolInputError(f"unexpected arguments for {action}: {sorted(extra)}")
-    out: dict[str, Any] = {"action": action, "symbol": _symbol(args.get("symbol"))}
+    place = args.get("place")
+    if place is not None and place not in PLACES:
+        raise ToolInputError(f"place must be one of the desk's places: {', '.join(PLACES)}")
+    # Only a show with a place may leave the ticker out: the desk moves to the place on whatever it shows now.
+    symbol = None if action == "show" and place is not None and args.get("symbol") is None else _symbol(args.get("symbol"))
+    out: dict[str, Any] = {"action": action, "symbol": symbol}
     if action == "show":
-        timeframe, tab = args.get("timeframe"), args.get("tab", "chart")
+        timeframe = args.get("timeframe")
         if timeframe is not None and timeframe not in TIMEFRAMES:
             raise ToolInputError("the desk chart's timeframes are 2m, 15m and 1D")
-        if tab not in TABS:
-            raise ToolInputError("tab must be chart, chain or tape")
-        out.update(timeframe=timeframe, tab=tab)
+        if place is not None:
+            if args.get("tab") is not None:
+                raise ToolInputError("a show takes a place or a tab, not both")
+            out.update(timeframe=timeframe, place=place)
+        else:
+            tab = args.get("tab", "chart")
+            if tab not in TABS:
+                raise ToolInputError("tab must be chart, chain or tape")
+            out.update(timeframe=timeframe, tab=tab)
     elif action == "alert":
         if args.get("side") not in SIDES:
             raise ToolInputError("an alert's side is above or below")
@@ -410,6 +423,9 @@ def act(evidence, request: dict, now: float | None = None) -> dict:
     if state_of is None:
         raise ToolInputError("desk actions are not available here (a replay or a turn away from the desk)")
     symbol, action = request["symbol"], request["action"]
+    if symbol is None:  # a show with a place and no ticker: no ticker to check, only where the desk moves
+        return {"state": "ok", "action": {**request, "made_at": int(now if now is not None else time.time())},
+                "note": _show_note(request)}
     need = frozenset({"held"} if action in HELD else {"ideas"} if action == "plan_idea" else ())
     desk = state_of(symbol, need) if need else state_of(symbol)
     if desk["hidden"]:
@@ -482,8 +498,20 @@ def act(evidence, request: dict, now: float | None = None) -> dict:
         card.update(direction=idea["direction"], event_id=idea["event_id"], words=idea["words"][:200],
                     levels_line=idea["levels_line"][:200])
     return {"state": "ok", "action": card,
-            "note": "Shown at once with an Undo." if action == "show"
+            "note": _show_note(request) if action == "show"
             else "Shown to the owner as a card: nothing happens until they tap it."}
+
+
+# Places that take the copilot's own pane or the whole desk: the card waits for his tap (frontend/lib/deskAction.ts).
+TAPPED_PLACES = ("now", "day", "replay", "redo")
+
+
+def _show_note(request: dict) -> str:
+    if request.get("place") in TAPPED_PLACES:
+        return "Shown as a card that moves the desk when the owner taps it. Nothing is saved, armed or sent."
+    if request.get("place"):
+        return "Shown at once with an Undo. It only moves the desk: nothing is saved, armed or sent."
+    return "Shown at once with an Undo."
 
 
 # --------------------------------------------------------------------------- words, and the card as saved
@@ -496,8 +524,8 @@ def line(card: dict) -> str:
     """What the card will do, in one line: "Set alert: NBIS below 98.00"."""
     a, s = card["action"], card["symbol"]
     if a == "show":
-        where = {"chain": " · Chain", "tape": " · Tape"}.get(card.get("tab") or "chart", "")
-        return f"Show {s}{' · ' + card['timeframe'] if card.get('timeframe') else ''}{where}"
+        where = [PLACES[card["place"]]] if card.get("place") else {"chain": ["Chain"], "tape": ["Tape"]}.get(card.get("tab") or "chart", [])
+        return "Show " + " · ".join([*([s] if s else []), *([card["timeframe"]] if card.get("timeframe") else []), *where])
     if a == "alert":
         return f"Set alert: {s} {card['side']} {_money(card['price'])}"
     if a == "watch":

@@ -262,7 +262,8 @@ trade-offs and let them choose."""),
     (ALL, """- If the context line or a tool result marks the data as SIMULATED, say plainly in your answer that the \
 numbers are simulated demo data, not real market data, and never present them as recorded or live."""),
     (frozenset({DESK}), """- When the owner asks you to do something the desk can do by hand (set a price alert, show a \
-ticker or a timeframe, open the Chain or the Tape, watch or stop watching a name, draw a level, open a saved plan's \
+ticker or a timeframe, open the Chain or the Tape, go to a place on the desk such as My rules, the paper book or \
+Replay, watch or stop watching a name, draw a level, open a saved plan's \
 ticket with a contract, move a saved plan's stop, close or trim a position they hold, write a note on a position, plan \
 a Radar setup or a scanner pick from the Feed), call desk_action, one call per action and at most three per answer. \
 Only when they asked for it in this message: never offer one unprompted, and never to suggest a trade or an exit. A \

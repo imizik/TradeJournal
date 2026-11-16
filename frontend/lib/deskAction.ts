@@ -6,11 +6,13 @@ import { closeNowTicket, type CloseNowTicket } from "@/lib/closingTicket";
 import { addDeskNote, NOTE_SAVED_EVENT } from "@/lib/deskNotes";
 import { tickFor, type DeskTicks } from "@/lib/deskTicks";
 import type { DeskBook, DeskThread } from "@/lib/desk";
+import { PLACE, type DeskPlaceId } from "@/lib/deskPlaces";
 
 /**
  * The copilot's desk actions (docs/copilot-lab.md § Desk actions). The server's ``desk_action`` checked the request
  * against the desk and sent this card; nothing has happened yet. A view change (``show``) is applied when the card
- * arrives, with Undo; every other card waits for the owner's tap, which calls the desk's own route, the one the same
+ * arrives, with Undo (a ticker, a timeframe, the Chain or the Tape, or any place on the desk's one list, ``lib/deskPlaces.ts``:
+ * a place only moves the desk, an editor opens and nothing is saved, armed or sent); every other card waits for the owner's tap, which calls the desk's own route, the one the same
  * action by hand calls (alerts, the Watching list, the chart settings' levels, the Ticket tab, a plan's stop alert).
  * The ticket stays copy-only: nothing here places, stages or sends an order, and nothing reaches Robinhood.
  *
@@ -21,7 +23,8 @@ import type { DeskBook, DeskThread } from "@/lib/desk";
 
 export type DeskTab = "chart" | "chain" | "tape";
 export type DeskAction = { made_at: number } & (
-  | { action: "show"; symbol: string; timeframe: DeskTimeframe | null; tab: DeskTab }
+  /** ``symbol`` is null only with a ``place``; a card has a ``tab`` or a ``place``, never both. */
+  | { action: "show"; symbol: string | null; timeframe: DeskTimeframe | null; tab?: DeskTab; place?: DeskPlaceId }
   | { action: "alert"; symbol: string; price: number; side: "above" | "below"; label: string | null; last: number; as_of?: string | number | null }
   | { action: "watch" | "unwatch"; symbol: string }
   | { action: "draw"; symbol: string; price: number; label: string | null; last: number; as_of?: string | number | null }
@@ -51,7 +54,7 @@ const money = (value: number) => value.toLocaleString("en-US", { minimumFraction
 /** What the card will do, in one line (the server's ``copilot_actions.line``): "Set alert: NBIS below 98.00". */
 export function actionLine(card: DeskAction): string {
   switch (card.action) {
-    case "show": return `Show ${card.symbol}${card.timeframe ? ` · ${card.timeframe}` : ""}${card.tab === "chain" ? " · Chain" : card.tab === "tape" ? " · Tape" : ""}`;
+    case "show": return `Show ${shownWhere(card)}`;
     case "alert": return `Set alert: ${card.symbol} ${card.side} ${money(card.price)}`;
     case "watch": return `Watch ${card.symbol}`;
     case "unwatch": return `Stop watching ${card.symbol}`;
@@ -70,6 +73,12 @@ export function actionLine(card: DeskAction): string {
     case "note": return `Note on ${card.symbol} ${card.contract}: ${card.text}`;
     case "plan_idea": return `Plan it: ${card.symbol} ${card.words}`;
   }
+}
+
+/** Where a show card moves the desk: "NVDA · Chain", "NBIS · 15m", "My rules". */
+export function shownWhere(card: Extract<DeskAction, { action: "show" }>): string {
+  const where = card.place ? PLACE.get(card.place)?.label ?? card.place : card.tab === "chain" ? "Chain" : card.tab === "tape" ? "Tape" : null;
+  return [card.symbol, card.timeframe, where].filter(Boolean).join(" · ");
 }
 
 /** Dollars, signed when asked: "+$420", "−$63", "$1,230"; cents under $10 ("$4.50"), never one decimal. */
@@ -151,7 +160,10 @@ export const DESK_VIEW_EVENT = "tradejournal:desk-view";
 /** The desk's lists changed by a card's tap (the Watching list, alerts, levels): read them again now. */
 export const DESK_CHANGED_EVENT = "tradejournal:desk-changed";
 export type CentreTab = "chart" | "grid" | "chain" | "check" | "ticket";
-export type DeskView = { symbol?: string | null; tab?: CentreTab; timeframe?: DeskTimeframe; tape?: boolean; reveal?: boolean };
+/** ``place`` moves the desk to a place on its one list (the host's ``moveTo``, as ⌘K's Go to); ``undo`` puts back what a
+ * place move changed (the host fills it in ``was``). */
+export type DeskView = { symbol?: string | null; tab?: CentreTab; timeframe?: DeskTimeframe; tape?: boolean; reveal?: boolean;
+  place?: DeskPlaceId; undo?: () => void };
 type ViewDetail = DeskView & { was: DeskView };
 
 export const DESK_TIMEFRAME_KEY = "desk.chart.timeframe.v1";
@@ -187,9 +199,15 @@ export function showOnDesk(view: DeskView): DeskView | null {
 
 /** The view a show card asks for. */
 export function viewOf(card: Extract<DeskAction, { action: "show" }>): DeskView {
+  if (card.place) return { ...(card.symbol ? { symbol: card.symbol } : {}), place: card.place, ...(card.timeframe ? { timeframe: card.timeframe } : {}) };
   return { symbol: card.symbol, tab: card.tab === "chain" ? "chain" : "chart", ...(card.timeframe ? { timeframe: card.timeframe } : {}),
     ...(card.tab === "tape" ? { tape: true } : {}) };
 }
+
+/** Places that take the copilot's own pane or the whole desk (Now's conversation, the Day checklist, Replay): a card that
+ * moves there waits for its tap, so the answer that holds the card and its Undo stay on screen. */
+const LEAVES_ANSWER: ReadonlySet<DeskPlaceId> = new Set(["now", "day", "replay", "redo"]);
+export const appliesItself = (card: Extract<DeskAction, { action: "show" }>) => !card.place || !LEAVES_ANSWER.has(card.place);
 
 /** The show cards applied in this tab (by card id) and what each replaced, for Undo; a reopened conversation's cards are
  * not here, so they are never applied again by themselves. */

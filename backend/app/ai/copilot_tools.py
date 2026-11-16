@@ -34,6 +34,12 @@ _LEVEL_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["
 DESK_ACTIONS = ("show", "alert", "watch", "unwatch", "draw", "ticket", "plan_stop", "close", "trim", "note", "plan_idea")
 DESK_TIMEFRAMES = ("2m", "15m", "1D")
 DESK_TABS = ("chart", "chain", "tape")
+# Every place on the desk a show can move to, with its name: one list, frontend/lib/deskPlaces.ts DESK_PLACES (the ⌘K
+# palette's places are built from it; test_copilot_desk_actions holds the two the same).
+DESK_PLACES = {"chart": "Chart", "chain": "Chain", "ticket": "Ticket", "check": "Check a call", "grid": "Grid", "feed": "Feed",
+               "copilot": "Copilot", "book": "Book", "threads": "Threads", "now": "Now", "paper": "Paper book",
+               "rules": "My rules", "goals": "This week's goals", "watchlist": "Watchlist", "note": "Note on this position",
+               "health": "Data health", "replay": "Replay a past day", "redo": "Redo one of my trades", "day": "Day checklist"}
 DESK_SIDES = ("above", "below")
 DESK_OPTION_TYPES = ("call", "put")
 DESK_LABEL_MAX = 40
@@ -388,8 +394,14 @@ TOOLS: list[dict] = [
         "name": "desk_action",
         "description": "Do something on the owner's desk that they asked for in this message, which the desk can already "
                        "do by hand. It changes nothing itself: a view change (action=show: `symbol` on the desk chart, "
-                       "optional `timeframe` 2m, 15m or 1D, optional `tab` chart, chain or tape) is shown at once with an "
-                       "Undo, and everything else is a card the owner taps to do it: action=alert (a price alert: `price` "
+                       "optional `timeframe` 2m, 15m or 1D, optional `tab` chart, chain or tape, or instead of `tab` a "
+                       "`place` to move the desk to: chart, chain, ticket, check (Check a call), grid, feed, copilot, "
+                       "book, threads, now (today's Main chat), paper (the paper book), rules (My rules), goals (this "
+                       "week's goals), watchlist, note (the note line on the selected position), health (data health), "
+                       "replay (Replay a past day), redo (Redo one of my trades) or day (the day's checklist); `symbol` "
+                       "is optional with a place, e.g. 'open my rules' is place=rules alone and 'show me NVDA's chain' is "
+                       "symbol=NVDA with place=chain. A place only moves the desk: an editor opens, nothing is saved, "
+                       "armed or sent) is shown at once with an Undo, and everything else is a card the owner taps to do it: action=alert (a price alert: `price` "
                        "and `side` above or below, optional `label`), action=watch or unwatch (the desk's Watching list), "
                        "action=draw (a horizontal level on the desk chart at `price`, optional `label` such as resistance), "
                        "action=ticket (the copy-only order ticket of the owner's saved plan in `symbol`, filled with "
@@ -405,11 +417,14 @@ TOOLS: list[dict] = [
                        "holds more than one. At most three in one answer. The result says what the card will do, or why "
                        "it cannot (a ticker not followed, a price on the wrong side, no plan or more than one, no such "
                        "position or more than one): then say so or ask, never guess.",
-        "input_schema": {"type": "object", "additionalProperties": False, "required": ["action", "symbol"],
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["action"],
                          "properties": {"action": {"type": "string", "enum": list(DESK_ACTIONS)},
-                                        "symbol": _SYMBOL_SCHEMA,
+                                        "symbol": {**_SYMBOL_SCHEMA, "description": "US stock or ETF ticker, e.g. NBIS; "
+                                                   "every action needs one but a show with a place"},
                                         "timeframe": {"type": "string", "enum": list(DESK_TIMEFRAMES)},
                                         "tab": {"type": "string", "enum": list(DESK_TABS)},
+                                        "place": {"type": "string", "enum": list(DESK_PLACES),
+                                                  "description": "show: the desk place to move to, instead of tab"},
                                         "price": {"type": "number", "description": "The underlying's price, positive"},
                                         "side": {"type": "string", "enum": list(DESK_SIDES)},
                                         "label": {"type": "string", "description": f"At most {DESK_LABEL_MAX} characters"},

@@ -1498,8 +1498,13 @@ which also has its own button where it lives: Paper book, My rules, This week's 
 Data health (the health list), Replay a past day and Redo one of my trades; How I use the desk last). A command
 that spends a model call says "Asks the copilot now" in its hint. A book-side place brings the phone's Book view
 forward, shows a piece folded away (§ How I use the desk) for now, opens the line it lives in (Practice's paper line, My rules), scrolls to it and opens it when it is an editor (rules,
-goals, the note line). Type to filter, arrows
-and Enter to choose, Escape or a click outside to close. A thread opens through
+goals, the note line). The places come from one list, `lib/deskPlaces.ts` (id, name, key, hint), which the copilot's
+`show` also takes (§ Desk actions). *Go to* (since 2026-11-16): a short phrase naming a place goes straight there
+without a model call, as the top option under "Go to", so Enter takes it: a place's word alone ("rules", "paper",
+"replay") brings that place's command to the top, and a ticker the desk already shows (a book or thread-list row, the
+Watching list; never one set to Not following) with a place that shows a ticker (chart, chain, note, replay) is "Go to
+NVDA · Chain" for "nvda chain" or "chain nvda". An unknown word adds nothing, and nothing typed is sent to the model.
+Type to filter, arrows and Enter to choose, Escape or a click outside to close. A thread opens through
 the list's own path (in place, or its deep link); Plan a trade opens the same
 unsent "Plan a trade: " link as the desk bar's Plan a trade; Review my week and What
 matters right now? send their one turn exactly as their pinned rows do; Prep
@@ -3651,7 +3656,7 @@ quote read), in fixture turns too, so the sandbox exercises the cards end to end
 
 | Card | The line | After the tap (`frontend/lib/deskAction.ts`) |
 | --- | --- | --- |
-| `show` (ticker, `2m` / `15m` / `1D`, Chart, Chain or Tape) | "Show NBIS · 15m" | Applied when it arrives in this tab, with **Undo**; a reopened card waits for **Show again**. |
+| `show` (ticker, `2m` / `15m` / `1D`, Chart, Chain or Tape, or a `place`) | "Show NBIS · 15m", "Show NVDA · Chain", "Show My rules" | Applied when it arrives in this tab, with **Undo**, the card saying "Moved the desk: NVDA · Chain"; a reopened card waits for **Show again**. A place moves the desk as ⌘K does (below). |
 | `alert` | "Set alert: NBIS below 98.00" | `POST /charts/alerts` as the desk chart's own Alert here (`source_kind="level"`, `source_id="desk"`, crosses, regular hours), the fresh quote as the reference. |
 | `watch` / `unwatch` | "Watch IREN" | `POST` / `DELETE /copilot/desk/watching` (the app's own list; never Robinhood's). |
 | `draw` | "Draw 102.50 on NBIS · resistance" | A level in the shared chart settings (`useChartSettings`, `PUT /charts/settings`), on the desk chart and in Charts. |
@@ -3661,6 +3666,19 @@ quote read), in fixture turns too, so the sandbox exercises the cards end to end
 | `trim` | "Trim NBIS 100 call Nov 20 · sell 1 of 3, 2 left" | The same view for that many contracts, saying how many are left. |
 | `note` | "Note on NBIS 100 call Nov 20: took profit into the wall" | `POST /copilot/desk/notes` on the journal trade, as the book row's pen; the note shows under the row at once. |
 | `plan_idea` | "Plan it: IREN dip turning up", the setup card's levels under it | Today's setup card opened on the desk (`/copilot-lab?symbol=…&radar=…`, the Feed's and the Scanner's own Plan it link), whose Plan it he taps to save the plan. |
+
+*Places* (since 2026-11-16). A `show` may name a `place` instead of a `tab`: any id on the desk's one place list,
+`frontend/lib/deskPlaces.ts` `DESK_PLACES` (chart, chain, ticket, check, grid, feed, copilot, book, threads, now, paper,
+rules, goals, watchlist, note, health, replay, redo, day), which the backend keeps as `copilot_tools.DESK_PLACES` and
+the schema offers as its enum ("open my rules" is `place=rules`; "show me NVDA's chain" is `symbol=NVDA` with the Chain).
+`copilot_actions.validate` refuses any other place and a place with a tab; the ticker is optional only with a place
+(with one, a ticker set to Not following is refused as always). The desk applies it through the same move as ⌘K's Go to
+(`CopilotLab.tsx` `moveTo`: the ticker, then the place's own command, except that the thread list, the Day checklist and
+Data health only open), and Undo puts the views back and closes every line or editor the move opened. Now, the Day
+checklist, Replay and Redo take the copilot's pane or the whole desk, so a card for them waits for his **Show it** tap
+instead of moving by itself. A note on a named ticker opens only that ticker's own book row's note line. A place only moves
+the desk: an editor opens, nothing is saved, armed, filled or sent. `backend/tests/test_copilot_desk_actions.py` holds the
+backend's places to the TypeScript list; `frontend/e2e/copilot-desk-places.spec.ts` covers the card and its Undo.
 
 A card more than a day old, a price card whose ticker has moved more than 5% since it was made (or whose level is now on
 the other side), a plan card whose stop alert has changed or gone, and a close or trim card whose position the book no
