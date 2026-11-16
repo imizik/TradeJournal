@@ -203,9 +203,11 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const [plans, setPlans] = useState<DeskPlan[]>([]);
   const [sections, setSections] = useState<DeskThreads["sections"] | null>(null);
   const [rowsFailed, setRowsFailed] = useState<string | null>(null);
-  const readRows = useCallback((next: DeskThread[], feed?: DeskLive, read?: { plans: DeskPlan[]; sections: DeskThreads["sections"] }) => {
+  // When the positions last read (ISO): Replay's live line says "as of" it when a later read fails.
+  const [positionsAt, setPositionsAt] = useState<string | null>(null);
+  const readRows = useCallback((next: DeskThread[], feed?: DeskLive, read?: { plans: DeskPlan[]; sections: DeskThreads["sections"]; asOf: string }) => {
     setRows(next); setLive(feed ?? null); setRowsRead(true); setRowsFresh(true); keepRows({ rows: next, live: feed ?? null });
-    if (read) { setPlans(read.plans); setSections(read.sections); }
+    if (read) { setPlans(read.plans); setSections(read.sections); if (read.sections?.positions !== "unavailable") setPositionsAt(read.asOf); }
   }, [keepRows]);
   const [saved, setSaved] = useState<InvestigationSummary[]>([]);
   const [palette, setPalette] = useState(false);
@@ -1159,7 +1161,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       {/* Replay never hides real money: one REAL line in its header from the rows, feed and session the hidden desk
           keeps reading (every account, whatever the account line's pick), read only. */}
       {on && replay && <DeskReplay symbol={centreSymbol} redo={redo} onLeave={to => { setReplay(false); setRedo(null); if (to) setDeskMode(to); }}
-        live={<ReplayLiveLine rows={rows} live={rowsFresh ? live : null} read={rowsRead} day={today} need={needs[0] ?? null} />} />}
+        live={<ReplayLiveLine rows={rows} live={rowsFresh ? live : null} read={rowsRead} day={today} need={needs[0] ?? null}
+          failed={!!rowsFailed || sections?.positions === "unavailable"} asOf={positionsAt} />} />}
       <div id="desk-cockpit" className={styles.cockpit} style={replay ? { display: "none" } : undefined}>
         {/* A phone's Positions opens on what the account is worth and how the book is doing, in one block. */}
         {on && phone && (

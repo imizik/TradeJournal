@@ -168,6 +168,9 @@ test("the status line names a source behind in words, red where it moves positio
   const list = page.getByTestId("desk-health-list");
   await expect(list).toBeInViewport({ ratio: 1 });
   await expect(list.getByTestId("health-robinhood")).toContainText("Last read 10:58");
+  // The list colours them as the dot and the line do: Robinhood red, Chatter amber.
+  await expect(list.getByTestId("health-robinhood")).toHaveAttribute("data-tone", "red");
+  await expect(list.getByTestId("health-chatter")).toHaveAttribute("data-tone", "amber");
 });
 
 test("a phone: no status line; the switch sits at the top of Positions", async ({ page }) => {
@@ -295,6 +298,59 @@ test("replay's live line keeps reading with the hidden desk's minute, and says w
   await expect(page.getByTestId("replay-live-health")).toHaveText("Robinhood down");
 });
 
+test("a failed book read is never shown as current: the line says so with the last good read's time", async ({ page }) => {
+  const { reads } = await open(page, { threads: HELD });
+  await replayStubs(page);
+  await page.keyboard.press("r");
+  const line = page.getByTestId("replay-live-line");
+  await expect(line).toContainText("3 open·+$1,420");
+  // The next minute's read of the positions fails: the desk still holds the last rows, but the line does not show them.
+  delete reads["/copilot/desk/threads"];
+  await page.clock.runFor(61_000);
+  await expect(line.getByTestId("replay-live-unread")).toHaveText("Positions could not be read · as of 11:00 AM");
+  await expect(line).not.toContainText("open·");
+  await expect(line).not.toContainText("$1,420");
+  await expect(line).not.toContainText("order working");
+  await line.click();
+  const list = page.getByTestId("replay-live-list");
+  await expect(list).toContainText("Positions could not be read · as of 11:00 AM");
+  await expect(list.getByTestId("replay-live-position")).toHaveCount(0);
+  await expect(list.getByTestId("replay-live-order")).toHaveCount(0);
+  // Read again: the numbers come back.
+  reads["/copilot/desk/threads"] = HELD;
+  await page.clock.runFor(61_000);
+  await expect(line).toContainText("3 open·+$1,420");
+});
+
+test("positions the server could not read are never '0 open' or 'No open positions'", async ({ page }) => {
+  await open(page, { threads: { ...THREADS, sections: { positions: "unavailable", plans: "ok" } } });
+  await replayStubs(page);
+  await page.keyboard.press("r");
+  const line = page.getByTestId("replay-live-line");
+  await expect(line.getByTestId("replay-live-unread")).toHaveText("Positions could not be read");
+  await expect(line).not.toContainText("0 open");
+  await line.click();
+  await expect(page.getByTestId("replay-live-list")).not.toContainText("No open positions");
+});
+
+test("a P&L whose price is no longer live is greyed, on the line and in its list", async ({ page }) => {
+  const OCC = "NBIS261120C00100000";
+  const ticked = { ...HELD, threads: [position("NBIS", 1200, "on_plan", { tick: { quote: OCC, scale: 100, cost: 300, quantity: 2, sign: 1 } }), ...HELD.threads.slice(1)] };
+  const started = Date.now();
+  await open(page, { threads: ticked });
+  // A price 35 s old (stale after 20 s, dropped after 60 s): 9.00 a share, so the same +$1,200.
+  await page.route("**/copilot/desk/ticks?*", route => route.fulfill({ json: { state: "ok", as_of: NOW.toISOString(), poll_seconds: 5,
+    rows: { [OCC]: { last: 9, change_pct: null, prev_close: null, at: Math.floor(NOW.getTime() / 1000 + (Date.now() - started) / 1000 - 35) } } } }));
+  await replayStubs(page);
+  await page.keyboard.press("r");
+  await page.clock.runFor(6_000); // the ticker's next try after the first read found no route
+  const pnl = page.getByTestId("replay-live-pnl");
+  await expect(pnl).toHaveText("+$1,420");
+  await expect(pnl).toHaveCSS("opacity", "0.5");
+  await page.getByTestId("replay-live-line").click();
+  await expect(page.getByTestId("replay-live-position").first().getByText("+$1,200")).toHaveCSS("opacity", "0.5");
+});
+
 for (const width of [1440, 375]) {
   test(`the health dot is red and named when Robinhood is behind at ${width}px`, async ({ page }) => {
     await open(page, { width, sources: SOURCES.map(r => r.id === "robinhood" ? row("robinhood", "Robinhood", "stale", "Last read 10:58") : r) });
@@ -315,6 +371,27 @@ for (const width of [1440, 375]) {
     await page.screenshot({ path: test.info().outputPath(`health-red-${width}.png`) });
   });
 }
+
+test("a phone with Fill emails down: the longest money name fits under the dot, apart from its neighbours, nothing sideways", async ({ page }) => {
+  await open(page, { width: 375, sources: [...SOURCES, row("gmail", "Fill emails", "down", "Gmail disconnected")] });
+  const dot = page.getByTestId("desk-health");
+  await expect(dot).toHaveAttribute("data-tone", "red");
+  await expect(dot).toHaveAccessibleName("Data health: Fill emails down");
+  const short = dot.getByTestId("desk-health-short");
+  await expect(short).toHaveText("Fill emails");
+  await expect(short).toBeInViewport({ ratio: 1 });
+  expect(await short.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  // Inside its own button, and that button clear of the Feed chip and the Day button on either side.
+  const s = (await short.boundingBox())!, d = (await dot.boundingBox())!;
+  expect(s.x).toBeGreaterThanOrEqual(d.x - 1);
+  expect(s.x + s.width).toBeLessThanOrEqual(d.x + d.width + 1);
+  const feed = (await page.getByTestId("desk-view-feed").boundingBox())!, day = (await page.getByTestId("desk-day-button").boundingBox())!;
+  expect(d.x).toBeGreaterThanOrEqual(feed.x + feed.width - 1);
+  expect(day.x).toBeGreaterThanOrEqual(d.x + d.width - 1);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  await page.screenshot({ path: test.info().outputPath("health-red-fill-emails-375.png") });
+});
 
 for (const width of [1440, 375]) {
   test(`the health dot stays amber when only Chatter is behind at ${width}px`, async ({ page }) => {

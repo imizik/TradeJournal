@@ -2064,8 +2064,9 @@ source named first); amber naming any other ("Chatter behind", "2 sources behind
 told ("Prices unknown", or "Health unknown" when the read itself failed): unknown is never green. Its accessible name
 says the same words ("Data health: Robinhood + 1 behind"). Words show only when something is red or amber, so the top
 bar never jumps. A phone shows the dot alone, except when it is red: then the money source's name sits under the dot in
-red ("Robinhood"), since a phone has no status line. A tap lists each source with
-its state and last good time in plain words; a tap on a source says what it affects and, where one exists, the fix
+red ("Robinhood", or "Fill emails", the longest, which still fits at 375 px), since a phone has no status line. A tap
+lists each source with its state and last good time in plain words, a money source behind in red and any other in amber,
+as the dot shows them; a tap on a source says what it affects and, where one exists, the fix
 already in the app (Gmail's Reconnect; the Robinhood sign-in steps in docs/robinhood-read-feed.md). No new fix flow. It
 reads again a few seconds after the desk opens or comes back into view, once the desk's own first reads have landed.
 
@@ -2461,7 +2462,10 @@ Paper trading on a past day, any time (nights and weekends included): "Replay" o
   Back to live to act. It covers every account (the account line's pick does not narrow it) and never a ticker set to
   "Not following". It reads nothing of its own: the hidden live desk keeps its minute reads (the thread list's rows and
   feed, the session, the one health read) and the live prices it already asks for (`useHeldTicks`), and the line shows
-  those. A redo still hides the real trade being redone: the line shows open positions and working orders, never fills.
+  those. When the newest read fails, or the server could not read the positions, the line says "Positions could not be
+  read · as of 11:00 AM" (the last good read) instead of any count, P&L or "No open positions", and its list shows
+  neither positions nor orders until a read succeeds. A P&L with a price no longer live is greyed, as the book greys it.
+  A redo still hides the real trade being redone: the line shows open positions and working orders, never fills.
   Proof: `frontend/e2e/copilot-desk-modes.spec.ts`.
 - **Fills: shares.** A market order fills at the newest finished regular-session bar's close plus an assumed
   half-spread to buy (less one to sell): the spread is assumed 0.05% of the price, each half rounded up to the cent,

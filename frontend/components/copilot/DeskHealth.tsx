@@ -202,13 +202,14 @@ export default function DeskHealthDot() {
 
 function Source({ row, open, onPick }: { row: HealthRow; open: boolean; onPick(): void }) {
   const bad = BAD.includes(row.state);
+  const red = bad && MONEY.has(row.id); // as the dot and the status line show it
   return (
-    <li data-testid={`health-${row.id}`} data-state={row.state}>
+    <li data-testid={`health-${row.id}`} data-state={row.state} data-tone={red ? "red" : bad ? "amber" : undefined}>
       <button type="button" onClick={onPick} aria-expanded={open}
         className="flex min-h-9 w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-secondary">
-        <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", DOT[row.state])} />
+        <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", red ? "bg-rose-500" : DOT[row.state])} />
         <span className="w-24 shrink-0 font-medium text-foreground">{row.name}</span>
-        <span className={cn("min-w-0 flex-1", bad ? "text-amber-300" : "text-muted-foreground")}>
+        <span className={cn("min-w-0 flex-1", red ? "text-rose-300" : bad ? "text-amber-300" : "text-muted-foreground")}>
           {row.line}<span className="sr-only"> ({WORD[row.state]})</span>
         </span>
       </button>
