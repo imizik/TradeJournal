@@ -101,6 +101,7 @@ async function open(page: Page, { width = 1440, height = 900 } = {}) {
 
 const book = (page: Page) => page.getByTestId("desk-book");
 const header = (page: Page) => page.getByTestId("desk-chart").getByTestId("option-standing");
+const panel = (page: Page) => page.getByTestId("desk-chart").getByTestId("desk-position");
 const ticket = (page: Page) => page.getByTestId("desk-ticket");
 
 test("a planned call: the target line on the chart, then Close at target fills a sell-to-close ticket to copy", async ({ page }) => {
@@ -114,10 +115,14 @@ test("a planned call: the target line on the chart, then Close at target fills a
   await expect(whatIf.getByTestId("what-if-target")).toHaveText("At my target 258.00");
   await whatIf.getByTestId("what-if-target").click();
   await expect(whatIf).toContainText("258.00 (+4.5% from now)");
-  const buttons = header(page).getByTestId("close-from-plan");
-  await expect(buttons.getByRole("button")).toHaveText(["Close at target", "Close at stop", "Roll"]);
-  // The same two (and Roll) under the book row's detail line.
-  await expect(book(page).getByTestId("close-from-plan").getByRole("button")).toHaveText(["Close at target", "Close at stop", "Roll"]);
+  // The Position panel under the chart holds every button that manages it; the book row keeps only its standing line.
+  await expect(panel(page).getByTestId("position-actions").getByRole("button"))
+    .toHaveText(["Stop / target", "Trim", "Close", "Roll", "Note", "Close at target", "Close at stop"]);
+  const buttons = panel(page).getByTestId("close-from-plan");
+  await expect(buttons.getByRole("button")).toHaveText(["Close at target", "Close at stop"]);
+  await expect(book(page).getByTestId("book-standing")).toBeVisible();
+  await expect(book(page).getByTestId("close-from-plan")).toHaveCount(0);
+  await expect(book(page).getByTestId("roll-open")).toHaveCount(0);
   await page.clock.runFor(6_000); // the live option tick has arrived: the ticket's mark is live, not the last read
   const before = writes.length;
   await buttons.getByRole("button", { name: "Close at target" }).click();
@@ -144,8 +149,9 @@ test("a planned call: the target line on the chart, then Close at target fills a
     "ORCL\nSell · Call\nExpiration 11/20/26\nStrike $250\nLimit price 8.28\nContracts 2");
   expect(writes.slice(before).map(r => `${r.method()} ${new URL(r.url()).pathname}`)).toEqual([]);
 
-  // Close at stop, from the book row while the Ticket has the centre: 4.10 + 0.38 x (240 − 247) = 1.44.
-  await book(page).getByRole("button", { name: "Close at stop" }).click();
+  // Close at stop, back on the Chart: 4.10 + 0.38 x (240 − 247) = 1.44.
+  await page.getByRole("tab", { name: "Chart" }).click();
+  await panel(page).getByRole("button", { name: "Close at stop" }).click();
   await expect(ticket(page)).toHaveAttribute("data-closing", "stop");
   await expect(ticket(page).getByLabel("Limit price per share")).toHaveValue("1.44");
   // A sell under today's bid fills at once: the ticket says to place it only once ORCL is at the stop.
@@ -157,8 +163,9 @@ test("a planned call: the target line on the chart, then Close at target fills a
 test("a put with a stop and no target offers only Close at stop; a journal-only position offers neither", async ({ page }) => {
   await open(page);
   await book(page).getByRole("button", { name: "APLD 11/27/26 30P" }).click();
-  await expect(header(page).getByTestId("close-from-plan").getByRole("button")).toHaveText(["Close at stop", "Roll"]);
-  await header(page).getByRole("button", { name: "Close at stop" }).click();
+  await expect(panel(page).getByTestId("close-from-plan").getByRole("button")).toHaveText(["Close at stop"]);
+  await expect(panel(page).getByTestId("roll-open")).toBeVisible();
+  await panel(page).getByRole("button", { name: "Close at stop" }).click();
   // 1.48 − 0.42 x (29.5 − 28.6) = 1.102 → 1.10, on Robinhood's Individual account.
   await expect(ticket(page).getByLabel("Limit price per share")).toHaveValue("1.10");
   await expect(ticket(page)).toContainText("Individual ••1234");
@@ -167,13 +174,15 @@ test("a put with a stop and no target offers only Close at stop; a journal-only 
   await book(page).getByRole("button", { name: "MU 11/20/26 120C" }).click();
   await expect(header(page)).toBeVisible();
   await expect(page.getByRole("button", { name: /^Close at/ })).toHaveCount(0); // no closing ticket without Robinhood's account
-  await expect(header(page).getByTestId("roll-open")).toBeVisible(); // a roll needs no account: it names none
+  await expect(panel(page).getByTestId("roll-open")).toBeVisible(); // a roll needs no account: it names none
 });
 
 test("on a phone the closing buttons are full-size taps and the ticket fits", async ({ page }) => {
   await open(page, { width: 375, height: 812 });
   await book(page).getByRole("button", { name: "ORCL 11/20/26 250C" }).click();
-  const button = book(page).getByRole("button", { name: "Close at target" });
+  // The panel sits under the chart on the ticker view; the book row above it keeps no buttons.
+  await expect(book(page).getByRole("button", { name: "Close at target" })).toHaveCount(0);
+  const button = panel(page).getByRole("button", { name: "Close at target" });
   await expect(button).toBeVisible();
   expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await button.click();

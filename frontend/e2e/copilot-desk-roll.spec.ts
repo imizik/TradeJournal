@@ -146,7 +146,7 @@ function rollReply(q: URLSearchParams, stale = false) {
 }
 
 const book = (page: Page) => page.getByTestId("desk-book");
-const header = (page: Page) => page.getByTestId("desk-chart").getByTestId("option-standing");
+const panel = (page: Page) => page.getByTestId("desk-chart").getByTestId("desk-position");
 const rollView = (page: Page) => page.getByTestId("desk-roll");
 
 async function pickDec255(page: Page) {
@@ -160,9 +160,10 @@ async function pickDec255(page: Page) {
 test("Roll: the held call is leg 1, the chain picks leg 2, and the ticket prices the roll to copy", async ({ page }) => {
   const writes = await open(page);
   await book(page).getByRole("button", { name: "ORCL 11/20/26 250C" }).click();
-  await expect(header(page).getByTestId("close-from-plan").getByRole("button")).toHaveText(["Close at target", "Close at stop", "Roll"]);
+  await expect(panel(page).getByTestId("close-from-plan").getByRole("button")).toHaveText(["Close at target", "Close at stop"]);
+  await expect(book(page).getByTestId("roll-open")).toHaveCount(0); // the panel's, not the book row's
   const before = writes.length; // the desk's own start-up writes (its Main chat) are not the roll's
-  await header(page).getByTestId("roll-open").click();
+  await panel(page).getByTestId("roll-open").click();
   const r = rollView(page);
   await expect(r).toContainText("ORCL · Roll your 2 ORCL $250 Call 11/20/26");
   await expect(r).toContainText("Roth IRA ••8267");
@@ -235,7 +236,7 @@ test("Roll: the held call is leg 1, the chain picks leg 2, and the ticket prices
 test("a stale held quote: grey with its time, no net price, the net marked rough", async ({ page }) => {
   await open(page, { roll: q => rollReply(q, true) });
   await book(page).getByRole("button", { name: "ORCL 11/20/26 250C" }).click();
-  await header(page).getByTestId("roll-open").click();
+  await panel(page).getByTestId("roll-open").click();
   await pickDec255(page);
   const r = rollView(page);
   await expect(r.getByTestId("roll-leg-quote").first()).toContainText("Quote stale (last 10:00 AM ET)");
@@ -249,7 +250,7 @@ test("a stale held quote: grey with its time, no net price, the net marked rough
 test("a closing ticket offers Roll it instead", async ({ page }) => {
   await open(page);
   await book(page).getByRole("button", { name: "ORCL 11/20/26 250C" }).click();
-  await header(page).getByRole("button", { name: "Close at target" }).click();
+  await panel(page).getByRole("button", { name: "Close at target" }).click();
   await page.getByTestId("closing-roll").click();
   await expect(rollView(page)).toContainText("Roll your 2 ORCL $250 Call 11/20/26");
 });
@@ -257,7 +258,7 @@ test("a closing ticket offers Roll it instead", async ({ page }) => {
 test("on a phone Roll is a full-size tap and the roll ticket fits", async ({ page }) => {
   await open(page, { width: 375, height: 812 });
   await book(page).getByRole("button", { name: "ORCL 11/20/26 250C" }).click();
-  const button = book(page).getByTestId("roll-open");
+  const button = panel(page).getByTestId("roll-open"); // the Position panel under the chart on the ticker view
   await expect(button).toBeVisible();
   expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await button.click();

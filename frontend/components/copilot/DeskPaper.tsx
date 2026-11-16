@@ -253,7 +253,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
 
 /** Close or trim an open paper position: a live quote first, then Fill on paper at the bid (the ask to buy a leg back),
  *  or a sell limit that waits for its price until the close. What a working sell limit holds cannot be sold twice. */
-function CloseRow({ position, trim, onDone }: { position: PaperPosition; trim: boolean; onDone(): void }) {
+export function CloseRow({ position, trim, onDone }: { position: PaperPosition; trim: boolean; onDone(): void }) {
   const free = position.remaining - (position.held ?? 0);
   const [qty, setQty] = useState(String(trim ? Math.max(1, Math.floor(free / 2)) : free));
   const [preview, setPreview] = useState<PaperFill | null>(null);
@@ -479,7 +479,11 @@ export function PaperScoreLine({ score, since, testId = "paper-score-line", clas
 
 /** The Paper section (the desk's Practice block opens it in place): one panel, folded to its account line and score line
  *  until Progress is opened. His rules and goals are the desk's own line (``RulesAndGoals``): they cover real trades too. */
-export default function DeskPaper({ book, failed, symbol, top = null }: { book: PaperBook | null; failed: boolean; symbol: string | null; top?: React.ReactNode }) {
+export default function DeskPaper({ book, failed, symbol, top = null, onPick }: {
+  book: PaperBook | null; failed: boolean; symbol: string | null; top?: React.ReactNode;
+  /** Shows a position's ticker on the desk: its chart, with the position's own panel (stop and target, trim, close, note) under it. */
+  onPick?(symbol: string): void;
+}) {
   const [progress, setProgress] = useState(false);
   const [closing, setClosing] = useState<{ id: string; trim: boolean } | null>(null);
   const [cash, setCash] = useState("10000");
@@ -546,7 +550,10 @@ export default function DeskPaper({ book, failed, symbol, top = null }: { book: 
             return (
               <li key={p.id} data-testid="paper-position" className="border-t border-border/60">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5">
-                  <span className="min-w-0 flex-1 text-sm sm:truncate"><span className="font-semibold">{p.label}</span> <span className="text-xs text-muted-foreground">×{p.remaining.toLocaleString("en-US")}</span><SourceTag source={p.source} /></span>
+                  <span className="min-w-0 flex-1 text-sm sm:truncate">
+                    {onPick ? <button type="button" data-testid="paper-position-show" onClick={() => onPick(p.symbol)} title={`Show ${p.symbol} on the desk, with this position's panel under the chart`}
+                      className="font-semibold underline-offset-2 hover:underline">{p.label}</button> : <span className="font-semibold">{p.label}</span>}
+                    {" "}<span className="text-xs text-muted-foreground">×{p.remaining.toLocaleString("en-US")}</span><SourceTag source={p.source} /></span>
                   {pnl ? (
                     <span data-testid="paper-pnl" className={cn("text-sm tabular-nums", pnl.stale ? "text-muted-foreground" : toneOf(pnl.pnl))} title={pnl.stale ? `Price from ${at(pnl.at)}, not live` : undefined}>
                       {signed(pnl.pnl)}{pnl.pct != null && <span className="ml-1 text-xs">{pnl.pct > 0 ? "+" : pnl.pct < 0 ? "−" : ""}{Math.abs(pnl.pct)}%</span>}

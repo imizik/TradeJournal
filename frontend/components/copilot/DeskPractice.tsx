@@ -144,12 +144,14 @@ function Line({ id, mode, name, open, onToggle, extra, children, section }: {
  * its piece id (``paper``, ``strategy.overnight``, ``strategy.momentum``, ``replay.practice``), so a piece he folded
  * away is still a slim stub here.
  */
-export function Practice({ on, paper, symbol, review, onReplay }: {
+export function Practice({ on, paper, symbol, review, onReplay, onPick }: {
   on: boolean; paper: { book: PaperBook | null; failed: boolean }; symbol: string | null;
   /** The newest Friday paper review, at the top of the paper section. */
   review?: ReactNode;
   /** Opens Replay: paper trading on a past day. */
   onReplay(): void;
+  /** Shows a paper position's ticker on the desk, with its Position panel under the chart. */
+  onPick?(symbol: string): void;
 }) {
   const overnight = useOvernightBook(on);
   const momentum = useMomentumBook(on);
@@ -201,7 +203,7 @@ export function Practice({ on, paper, symbol, review, onReplay }: {
       <h2 className={cn(LABEL, "px-3 pb-1.5 pt-2")}>Practice<span className="font-normal normal-case tracking-normal"> · not real money</span></h2>
       <Fold id="paper">
         <Line id="paper" mode="paper" name="Mine" open={isOpen(paperKey, risk)} onToggle={() => set(paperKey, !isOpen(paperKey, risk))}
-          section={<DeskPaper book={book} failed={paper.failed} symbol={symbol} top={review} />}>{paperWords}</Line>
+          section={<DeskPaper book={book} failed={paper.failed} symbol={symbol} top={review} onPick={onPick} />}>{paperWords}</Line>
       </Fold>
       <Fold id="strategy.overnight">
         {overnightShown(overnight) && (

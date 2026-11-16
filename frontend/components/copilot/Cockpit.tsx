@@ -26,7 +26,10 @@ import {
 } from "@/lib/desk";
 import { staleSince, tickFor, tickedBook, useDeskTicks } from "@/lib/deskTicks";
 import { Flash, PricesAsOf } from "@/components/copilot/Ticks";
-import { OptionStanding, OptionStandingLine } from "@/components/copilot/OptionStanding";
+import { OptionStandingLine } from "@/components/copilot/OptionStanding";
+import { DeskPaperPosition, DeskPosition } from "@/components/copilot/DeskPosition";
+import type { PanelPlan } from "@/lib/deskPosition";
+import type { PaperPosition, PaperWorkingOrder } from "@/lib/paperBook";
 import { OrderLines, OrdersGroup } from "@/components/copilot/DeskOrders";
 import { NoteButton, NoteLines, useDeskNotes } from "@/components/copilot/DeskNotes";
 import { useFolds } from "@/components/copilot/DeskUse";
@@ -450,7 +453,8 @@ function Tile({ label, children, className }: { label: string; children: ReactNo
   );
 }
 
-const SPAN: Record<DeskTimeframe, string> = { "2m": "today: 2-minute candles", "15m": "recent sessions: 15-minute candles", "1D": "the last few months: daily candles" };
+const NO_PAPER: readonly PaperPosition[] = [];
+const SPAN: Record<DeskTimeframe, string> ={ "2m": "today: 2-minute candles", "15m": "recent sessions: 15-minute candles", "1D": "the last few months: daily candles" };
 const TIMEFRAME_KEY = DESK_TIMEFRAME_KEY;
 
 /** The chart's timeframe, kept for the tab's session so it holds its place across positions and tab switches. */
@@ -476,14 +480,21 @@ function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
 /**
  * The centre's Chart: the selected symbol's interactive chart (``DeskChart``: candles with the plan's entry and invalidation
  * lines, the owner's fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D; the timeframe
- * holds across positions) under its one header row (``DeskChartHead``), then a held option's standing, then two tiles for a held position that
+ * holds across positions) under its one header row (``DeskChartHead``), then the held position's Position panel (``DeskPosition``:
+ * its figures, an option's standing and every button that manages it) and any paper position's in the ticker, then two tiles for a held position that
  * its book row does not carry (the stock against SPY today, time held: P&L, the distance to the stop and expiry are the
  * row's) and, folded, what touched the thread. No symbol: QQQ with the owner's fills and pings.
  */
-export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], earnings = null, guides, onReplay }: {
+export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], earnings = null, guides, onReplay, paper = NO_PAPER, paperOrders, onPlan, ordersLive = false }: {
   symbol: string | null; thread: DeskThreadRef | null; row: DeskThread | null; sparks: DeskSparks | null; actions?: DeskChartActions;
   /** Opens Replay: paper trading on a past day (``DeskReplay``). */
   onReplay?(): void;
+  /** His open paper positions in this ticker, each with its own Position panel, and the paper book's working orders. */
+  paper?: readonly PaperPosition[]; paperOrders?: PaperWorkingOrder[];
+  /** The plan flow for a held position with no saved plan (the panel's Plan it). */
+  onPlan?(symbol: string): void;
+  /** The Robinhood feed is live: the panel shows the position's working orders, as the book does. */
+  ordersLive?: boolean;
   /** The desk's rows, so a held option's standing can tell a lone long option from one leg of a structure. */
   rows?: DeskThread[];
   /** Earnings tags (``useDeskEvents``): a held option's header says when a report falls inside its life. */
@@ -510,7 +521,20 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
   const [tape, setTape] = useTapeOpen();
   const folds = useFolds(); // the chart's tools he folded away wait in its More (DeskChartHead.tsx)
   const name = symbol ?? "QQQ";
-  const tapePanel = tape && !folds.hidden("chart.tape") ? <DeskTape symbol={name} option={!!row?.book?.option} /> : null;
+  // The held position's plan for its panel: the chart's own read of its thread's plan (entry, invalidation, target), else
+  // the book row's plan levels with the position's own thread. None without a stop.
+  const levelAt = (role: "entry" | "invalidation" | "target") => reading?.levels.find(l => l.role === role)?.price ?? null;
+  const chartLevels = { entry: levelAt("entry"), stop: levelAt("invalidation"), target: levelAt("target") };
+  // The chart's plan only when it is the selected position's own (another conversation on the ticker may be another
+  // plan, or another contract's): the panel never edits a plan that is not the row's.
+  const readPlan = reading && ref && ref.id !== DESK_MARKET && !ref.id.startsWith("symbol:") && chartLevels.stop !== null
+    && (!row?.investigationId || ref.id === row.investigationId);
+  const plan: PanelPlan | null = readPlan
+    ? { investigationId: ref!.id, ...chartLevels }
+    : row?.investigationId && row.book?.plan_levels?.stop != null
+      ? { investigationId: row.investigationId, entry: null, stop: row.book.plan_levels.stop, target: row.book.plan_levels.target ?? null }
+      : null;
+  const tapePanel =tape && !folds.hidden("chart.tape") ? <DeskTape symbol={name} option={!!row?.book?.option} /> : null;
   // The one row above the chart: the ticker, its price and change, the held contract, the switch and the timeframes, then
   // the chart's own tools (none on a held option's own chart).
   const head = (tools: ChartTools | null) => (
@@ -533,13 +557,13 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
           head={head} under={tapePanel} reading={<ReadingLine part="facts" symbol={name} data={reading} fallback={fallback} live={live} />} onTimeframe={pickTimeframe}
           label={`${name} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />
       )}
-      {/* The held option's standing sits under the chart: the chart comes first, and its book row already carries the
-          short form (break-even, time value, decay) with the same Close buttons. */}
-      {row?.book?.option && <OptionStanding row={row} rows={rows}
+      {/* The Position panel sits under the chart: the chart comes first. A held position's figures (an option's full
+          standing) and every button that manages it; its book row keeps only the short standing line. A paper position
+          in this ticker has its own panel, marked PAPER. */}
+      {row?.book && <DeskPosition key={row.key} row={row} rows={rows} plan={plan} levels={!row.investigationId || ref?.id === row.investigationId ? chartLevels : undefined} change={change} onPlan={onPlan} ordersLive={ordersLive}
         fallback={reading?.state === "ok" && reading.reading ? { last: reading.reading.last, at: reading.reading.at } : sparkPrice(sparks, symbol)}
-        levels={{ entry: reading?.levels.find(l => l.role === "entry")?.price, stop: reading?.levels.find(l => l.role === "invalidation")?.price,
-          target: reading?.levels.find(l => l.role === "target")?.price }}
         earnings={symbol ? earnings?.rows[symbol]?.date ?? null : null} />}
+      {paper.map(p => <DeskPaperPosition key={p.id} position={p} orders={paperOrders} />)}
       <PositionEarnings row={row} earnings={earnings} />
       {book && (versus !== null || book.days_held != null) && (
         <div data-testid="desk-tiles" className="grid grid-cols-[repeat(auto-fit,minmax(104px,1fr))] gap-1.5">

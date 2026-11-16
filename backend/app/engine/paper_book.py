@@ -23,6 +23,11 @@ whether he is right.
   per level (``touch``) for a ping. The session's final minute is not judged (it completes after the close). With the position's switch on (``auto``), the first such bar after the switch
   triggers (``trigger``; a bar touching both is the stop) a sell of all that is left at the next fresh bid, and the
   exit's grade says "auto".
+- **Changing them after entry.** ``set_levels`` records a ``levels`` event (the newest wins) with a new stop, target
+  or note; the fold carries them, so the grade reads the levels as they stood at the exit. A change never fills or
+  closes anything by itself: touches of the new levels are looked for only from the change on (a ``touch`` or
+  ``trigger`` is keyed to the change, ``_level_key``), and a trigger found before the change no longer acts. Whether a
+  touch sells is still the switch's to decide.
 - **Expiry.** An option or spread still open after its expiration's close settles at intrinsic value from the
   underlying's regular-session close (``_close_for``: the stored close, else one daily-history read through the feed).
 - **Append-only.** Every fill is a ``PaperEvent``; a position is their fold, so nothing is ever edited. An order's life
@@ -290,6 +295,16 @@ def fold(events: list[PaperEvent]) -> list[dict]:
     ``applied`` is the cash the fold actually used, the only cash the account counts."""
     out: dict[uuid.UUID, dict] = {}
     for event in events:
+        if event.kind == "levels":  # a stop, target or note changed after entry: the newest wins while it is open
+            position = out.get(event.position_id)
+            if position is not None and position["status"] == "open":
+                data = json.loads(event.data_json)
+                # Only a new stop or target starts the touches afresh; a note alone leaves them (and a waiting exit) be.
+                moved = any(k in data and data[k] != position.get(k) for k in ("stop", "target"))
+                position.update(data)
+                if moved:
+                    position["levels_id"], position["levels_at"] = str(event.id), _epoch(event.effective_at)
+            continue
         if event.kind not in POSITION_KINDS:
             continue
         data = json.loads(event.data_json)
@@ -337,7 +352,7 @@ def orders(events: list[PaperEvent]) -> list[dict]:
                                            "placed_at": _epoch(event.effective_at), "status": "working", "ended_at": None,
                                            "reason": None, "filled": None}
     for event in sorted(events, key=lambda e: (e.recorded_at, str(e.id))):
-        if event.kind in ("order", "auto", "touch", "trigger", "expire"):
+        if event.kind in ("order", "auto", "touch", "trigger", "expire", "levels"):
             continue
         data = json.loads(event.data_json)
         found = out.get(str(event.position_id) if event.kind in ("cancel", "lapse") else str(data.get("order_id") or ""))
@@ -672,6 +687,45 @@ def set_auto(db: Session, body: dict, now: float) -> dict:
     return {"auto": on}
 
 
+def _level_key(key: str, position: dict) -> str:
+    """A touch's or trigger's event key, tied to the position's newest change of levels (none: the entry's levels)."""
+    return f"{key}:{position['levels_id']}" if position.get("levels_id") else key
+
+
+def set_levels(db: Session, body: dict, now: float) -> dict:
+    """Change an open position's stop, target or note after entry (a ``levels`` event; the newest wins). Only the keys
+    ``body`` names change (``None`` clears one). The stop and target are stock prices on the same sides as at entry
+    (``_levels``), checked against the desk's newest kept price for the stock when it has one: no quote is read. It
+    never fills, closes or changes the switch."""
+    run = current_run(db, lock=True)
+    if run is None:
+        raise PaperError("Start a paper account first.", 409)
+    position_id = str(body.get("position_id") or "")
+    position = next((p for p in fold(_events(db, run)) if p["id"] == position_id), None)
+    try:
+        if position is None or position["status"] != "open":
+            raise PaperError("That paper position is not open.", 409)
+        key = _key(body)
+        stop = _money(body["stop"]) if "stop" in body else position.get("stop")
+        target = _money(body["target"]) if "target" in body else position.get("target")
+        note = _note(body) if "note" in body else position.get("note")
+        row = _marks([position["symbol"]]).get(position["symbol"])
+        stock = row["last"] if row and isinstance(row.get("last"), (int, float)) and row["last"] > 0 else None
+        _levels({"stop": stop, "target": target}, position["bias"], stock)
+        long = position["bias"] == "long"
+        if stop is not None and target is not None and (target <= stop if long else target >= stop):
+            raise PaperError(f"For this trade the target is a stock price {'above' if long else 'below'} the stop.")
+    except PaperError:
+        db.rollback()
+        raise
+    data = {"stop": stop, "target": target, "note": note}
+    if all(data[k] == position.get(k) for k in data):
+        db.rollback()
+        return data
+    _store(db, run, uuid.UUID(position_id), "levels", f"levels:{key}", now, data)
+    return data
+
+
 def _tidy(db: Session, run: PaperRun, now: float) -> None:
     """End each working order whose day is over (``lapse`` at the close) or whose position closed (``cancel``)."""
     def due(events: list[PaperEvent]) -> list[tuple[dict, str, float, str]]:
@@ -787,7 +841,8 @@ def _pending_exits(events: list[PaperEvent], positions: dict[str, dict]) -> list
         position = positions.get(str(event.position_id))
         switch = sw.get(str(event.position_id))
         if (position is None or position["status"] != "open" or not switch or not switch["on"]
-                or switch["id"] != trigger["auto_id"] or f"autoexit:{position['id']}:{trigger['auto_id']}" in keys):
+                or switch["id"] != trigger["auto_id"] or trigger.get("levels_id") != position.get("levels_id")
+                or f"autoexit:{position['id']}:{trigger['auto_id']}" in keys):
             continue
         out.append((position, trigger))
     return out
@@ -806,7 +861,8 @@ def _try_exit(db: Session, position: dict, trigger: dict, quotes: dict, now: flo
     events = _events(db, run)
     current = next((p for p in fold(events) if p["id"] == position["id"]), None)
     switch = switches(events).get(position["id"])
-    if current is None or current["status"] != "open" or not switch or not switch["on"] or switch["id"] != trigger["auto_id"]:
+    if (current is None or current["status"] != "open" or not switch or not switch["on"] or switch["id"] != trigger["auto_id"]
+            or trigger.get("levels_id") != current.get("levels_id")):
         db.rollback()
         return None
     qty = current["remaining"]
@@ -905,18 +961,19 @@ def _watch(db: Session, run: PaperRun, events: list[PaperEvent], now: float, min
         if not bars:
             continue
         switch = sw.get(position["id"])
+        since = max(position["opened_at"], position.get("levels_at") or 0.0)  # a changed level counts from the change
         if switch and switch["on"]:
-            key = f"trigger:{position['id']}:{switch['id']}"
-            found = None if key in keys else _touch(position, bars, max(position["opened_at"], switch["at"]), now)
+            key = _level_key(f"trigger:{position['id']}:{switch['id']}", position)
+            found = None if key in keys else _touch(position, bars, max(since, switch["at"]), now)
             if found is not None:
                 _store(db, run, uuid.UUID(position["id"]), "trigger", key, found["condition_at"],
-                       {**found, "auto_id": switch["id"], "noticed_at": now})
+                       {**found, "auto_id": switch["id"], "levels_id": position.get("levels_id"), "noticed_at": now})
             continue
         for level in ("stop", "target"):
-            key = f"touch:{position['id']}:{level}"
+            key = _level_key(f"touch:{position['id']}:{level}", position)
             if position.get(level) is None or key in keys:
                 continue
-            found = _touch(position, bars, position["opened_at"], now, only=level)
+            found = _touch(position, bars, since, now, only=level)
             if found is None:
                 continue
             late = now - found["condition_at"] > LATE_PING_SECONDS
@@ -1170,7 +1227,7 @@ def view(db: Session, now: float, settle_expired: bool = True) -> dict:
     def extra(p: dict) -> dict:
         touched = {}
         for level in ("stop", "target"):
-            found = keys.get(f"touch:{p['id']}:{level}")
+            found = keys.get(_level_key(f"touch:{p['id']}:{level}", p))
             if found is not None:
                 touched[level] = _epoch(found.effective_at)
         return {"auto": bool(sw.get(p["id"], {}).get("on")), "touched": touched, "exiting": p["id"] in exiting,

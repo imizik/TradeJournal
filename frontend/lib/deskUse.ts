@@ -56,6 +56,7 @@ export const PIECES: readonly Piece[] = [
   { id: "chart.tape", label: "Tape (Level 2)", area: "Centre", fold: "more" },
   { id: "chart.replay", label: "Replay", area: "Centre", fold: "more" },
   { id: "chart.timeline", label: "Timeline", area: "Centre", fold: null },
+  { id: "position", label: "Position panel", area: "Centre", fold: null, safety: true },
   { id: "ticket.copy", label: "Ticket: Copy", area: "Centre", fold: null },
   { id: "ticket.paper", label: "Paper it", area: "Centre", fold: null },
   { id: "ticket.spread", label: "Ticket: spread", area: "Centre", fold: null },
