@@ -137,7 +137,7 @@ test("⌘K opens the palette: type to filter, Enter opens the thread, Escape and
   await expect(options.first()).toContainText("1.0% from invalidation 92.30");
   await expect(options.first()).toContainText("+$180.00");
   await page.keyboard.type("crw");
-  await expect(options).toHaveText([/^CRWV/]);
+  await expect(options).toHaveText([/^CRWV/, /^Ask the copilot: “crw”/]); // a match first; asking is last, one arrow away
   await page.keyboard.press("Enter");
   await expect(box).toBeHidden();
   await expect(conversation(page).getByText("CRWV answer: short under 99.00.")).toBeVisible();
@@ -167,7 +167,7 @@ test("Plan a trade from the palette opens a new plan, unsent; after 16:00 Close 
   await expect(page.getByTestId("needs-you")).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type("close");
-  await expect(palette(page).getByRole("option")).toHaveText([/^Close the day/, /^Close-of-day checklist/]); // the pass, then the Day button's checklist
+  await expect(palette(page).getByRole("option")).toHaveText([/^Close the day/, /^Close-of-day checklist/, /^Ask the copilot/]); // the pass, then the Day button's checklist
   await page.keyboard.press("Enter");
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Close the day: /);
   await expect(page.getByRole("textbox", { name: "Message" })).toBeFocused();
@@ -868,7 +868,9 @@ test("the palette finds a saved conversation that is not on the list, by what it
   await expect(conversation(page).getByText("OKLO answer: rolled.")).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type("zzzz");
-  await expect(palette(page).getByText("Nothing matches.")).toBeVisible();
+  // Nothing on the desk matches: the one option asks the copilot, and only on Enter or a click.
+  await expect(palette(page).getByRole("option")).toHaveText([/^Ask the copilot: “zzzz”/]);
+  await page.keyboard.press("Escape");
 });
 
 for (const width of [1440, 375] as const) {

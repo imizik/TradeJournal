@@ -973,12 +973,14 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     const ready = !busy && status?.enabled === true;
     if ((command.kind === "link" || command.kind === "now") && !ready) return;
     handled.current = command.n;
-    if (!ready) return;
+    // ⌘K's ask while a turn runs: its words wait in the message box, unsent, rather than being lost.
+    if (!ready) { if (command.kind === "ask" && command.here) fill(command.text); return; }
     if (command.kind === "open") void resume(command.id, command.text);
     else if (command.kind === "fill") fill(command.text);
     else if (command.kind === "home") startNew("");
     else if (command.kind === "link") enter(command.link);
     else if (command.kind === "now") openNow();
+    else if (command.here) void send(command.text);
     else { setSymbol(""); void send(command.text, ""); }
   }, [desk?.command, busy, status?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps -- each command acts once
 

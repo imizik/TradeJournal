@@ -152,7 +152,7 @@ function typing(target: EventTarget | null) {
  * close pass or checklist on top) with the Feed of what the app knows today behind its tab. Selecting a position drives
  * the centre and the copilot. Below 1180 px the copilot is a sheet opened by "Ask the copilot" and by any Ask action
  * and the Feed a drawer; a phone shows one view at a time (Positions, Chart, Chain, Orders on its own tab bar; the Feed chip). The thread list is a drawer. While
- * the lab is off only the conversation shows, saying so. ⌘K (Ctrl+K) or Jump to… opens the palette; while not typing,
+ * the lab is off only the conversation shows, saying so. ⌘K (Ctrl+K) or Jump to or ask… opens the palette; while not typing,
  * J / K open the next or previous thread, N starts a plan, [ toggles the thread list, a place's key opens it and Escape
  * closes the drawer or the sheet.
  *
@@ -408,6 +408,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     home: () => goNow(true),
   }), [goNow, showCopilot]);
   const fill = useCallback((text: string) => { setCommand({ kind: "fill", text, n: ++sent.current }); showCopilot(); }, [showCopilot]);
+  // ⌘K's "Ask the copilot": the words sent now in the open conversation, as its message box would send them.
+  const askHere = useCallback((text: string) => { setCommand({ kind: "ask", text, here: true, n: ++sent.current }); showCopilot(); }, [showCopilot]);
   const go = useCallback((href: string) => {
     const next = deskLinkIn(href);
     if (!next) { router.push(href); return; }
@@ -1123,10 +1125,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               className={cn("inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground sm:min-h-8", threadsShown && "bg-secondary")}>
               <PanelLeft size={15} aria-hidden /><span className="hidden sm:inline">Threads</span>
             </button>
-            <button type="button" onClick={() => setPalette(true)} aria-label="Jump to a thread or command" aria-haspopup="dialog" data-use="palette"
+            <button type="button" onClick={() => setPalette(true)} aria-label="Jump to a thread or command, or ask the copilot" aria-haspopup="dialog" data-use="palette"
               className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md border bg-card px-2.5 text-xs text-muted-foreground hover:text-foreground sm:min-h-8">
               {/* A phone keeps the bar short: icons only, as the button's label already says. */}
-              <Search size={14} aria-hidden /><span className="hidden sm:inline">Jump to…</span><kbd className={cn(KBD, "hidden md:inline")}>{jumpKey}</kbd>
+              <Search size={14} aria-hidden /><span className="hidden sm:inline">Jump to or ask…</span><kbd className={cn(KBD, "hidden md:inline")}>{jumpKey}</kbd>
             </button>
             <button type="button" onClick={planTrade} data-use="plan" title="A new plan; you name the symbol. Nothing is sent. ( N )"
               className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">
@@ -1415,7 +1417,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       {on && !replay && <button type="button" onClick={askCopilot} className={cn(styles.ask, "min-h-11 items-center gap-1.5 rounded-full border border-foreground/30 bg-card px-4 text-sm font-medium text-foreground shadow-lg hover:bg-secondary max-sm:size-12 max-sm:justify-center max-sm:px-0")}>
         <MessageCircle size={15} aria-hidden className="text-muted-foreground max-sm:size-5 max-sm:text-foreground" /><span className="max-sm:sr-only">Ask the copilot{picked && picked !== talking ? ` about ${picked}` : ""}</span>
       </button>}
-      {on && !replay && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} onConversation={actions.open} goTo={goTo} />}
+      {on && !replay && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} onConversation={actions.open} goTo={goTo} onAsk={askHere} />}
       </DeskUseRoot>
     </div>
   );

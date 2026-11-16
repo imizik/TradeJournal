@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils";
 /** A palette command: one of the desk's existing paths (ask, fill, plan a trade), never a new one. */
 export type PaletteCommand = { id: string; name: string; hint: string; key?: string; run(): void };
 
-type Item = { kind: "thread"; row: DeskThread } | { kind: "talk"; talk: InvestigationSummary } | { kind: "command"; command: PaletteCommand } | { kind: "go"; command: PaletteCommand };
+type Item = { kind: "thread"; row: DeskThread } | { kind: "talk"; talk: InvestigationSummary } | { kind: "command"; command: PaletteCommand } | { kind: "go"; command: PaletteCommand }
+  | { kind: "ask"; text: string };
 
 /** How long typing rests before saved conversations are searched, and the shortest search. */
 const SEARCH_MS = 200, SEARCH_MIN = 2;
@@ -26,7 +27,7 @@ const still = () => () => undefined;
 
 export const KBD = "rounded border border-border px-1 py-px font-mono text-[10px] leading-none text-muted-foreground";
 
-const words = (item: Exclude<Item, { kind: "talk" | "go" }>) => (item.kind === "thread"
+const words = (item: Exclude<Item, { kind: "talk" | "go" | "ask" }>) => (item.kind === "thread"
   ? [item.row.symbol, item.row.title, item.row.instrument, item.row.status.text, item.row.value?.text]
   : [item.command.name, item.command.hint]).filter(Boolean).join(" ").toLowerCase();
 
@@ -36,12 +37,16 @@ const words = (item: Exclude<Item, { kind: "talk" | "go" }>) => (item.kind === "
  * the desk's commands. Type to filter, arrows and Enter to choose, Escape or a click outside to close. A native modal
  * dialog, so it sits over the page wherever the desk is scrolled and keeps focus inside while open. Choosing only hands
  * the choice back; nothing here sends a turn of its own. A short phrase that names a place (``goTo``: "rules", "nvda
- * chain") is a "Go to" option above everything else, so Enter goes straight there; nothing typed is sent to the model.
+ * chain") is a "Go to" option above everything else, so Enter goes straight there. Words that name no place, command or
+ * thread make "Ask the copilot" the top option (``onAsk``, the desk's own ask, in the current conversation); it is
+ * listed last when something else matches. Typing sends nothing: only Enter or a click on that option asks.
  */
-export default function CommandPalette({ open, onClose, threads, commands, onThread, onConversation, goTo }: {
+export default function CommandPalette({ open, onClose, threads, commands, onThread, onConversation, goTo, onAsk }: {
   open: boolean; onClose(): void; threads: DeskThread[]; commands: PaletteCommand[]; onThread(row: DeskThread): void; onConversation(id: string): void;
   /** The place a short phrase names, as a command, or null. */
   goTo?(query: string): PaletteCommand | null;
+  /** Asks the copilot these words now, as the message box would. */
+  onAsk?(text: string): void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [query, setQuery] = useState("");
@@ -82,16 +87,24 @@ export default function CommandPalette({ open, onClose, threads, commands, onThr
 
   const items = useMemo<Item[]>(() => {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-    const matches = (item: Exclude<Item, { kind: "talk" | "go" }>) => { const text = words(item); return terms.every(t => text.includes(t)); };
+    const matches = (item: Exclude<Item, { kind: "talk" | "go" | "ask" }>) => { const text = words(item); return terms.every(t => text.includes(t)); };
     const listed = new Set(threads.map(row => row.investigationId));
     const go = query.trim() ? goTo?.(query) ?? null : null;
+    const rows = threads.map(row => ({ kind: "thread" as const, row })).filter(matches);
+    const found = commands.filter(command => command.id !== go?.id).map(command => ({ kind: "command" as const, command })).filter(matches);
+    // Words that name nothing on the desk: asking the copilot comes first. The saved conversations a search finds come
+    // under it, so a result landing a moment later never moves what Enter does.
+    const ask = onAsk && query.trim() ? [{ kind: "ask" as const, text: query.trim() }] : [];
+    const first = !go && !rows.length && !found.length;
     return [
       ...(go ? [{ kind: "go" as const, command: go }] : []),
-      ...threads.map(row => ({ kind: "thread" as const, row })).filter(matches),
+      ...(first ? ask : []),
+      ...rows,
       ...(answer?.talks ?? []).filter(talk => !listed.has(talk.id)).map(talk => ({ kind: "talk" as const, talk })),
-      ...commands.filter(command => command.id !== go?.id).map(command => ({ kind: "command" as const, command })).filter(matches),
+      ...found,
+      ...(first ? [] : ask),
     ];
-  }, [query, threads, commands, answer, goTo]);
+  }, [query, threads, commands, answer, goTo, onAsk]);
   const current = Math.min(active, Math.max(0, items.length - 1));
 
   useEffect(() => { document.getElementById(`${id}-${current}`)?.scrollIntoView({ block: "nearest" }); }, [current, id]);
@@ -106,12 +119,20 @@ export default function CommandPalette({ open, onClose, threads, commands, onThr
     shut();
     if (item.kind === "thread") onThread(item.row);
     else if (item.kind === "talk") onConversation(item.talk.id);
+    else if (item.kind === "ask") onAsk?.(item.text);
     else item.command.run();
   };
 
   const option = (item: Item, index: number) => {
     const selected = index === current;
     const base = cn("flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm sm:min-h-0", selected && "bg-secondary");
+    if (item.kind === "ask") return (
+      <li key="ask" id={`${id}-${index}`} role="option" aria-selected={selected} className={base} data-testid="palette-ask"
+        onMouseMove={() => setActive(index)} onClick={() => choose(item)}>
+        <span className="min-w-0 truncate font-medium text-foreground">Ask the copilot: &ldquo;{item.text}&rdquo;</span>
+        <span className="ml-auto shrink-0 text-xs text-muted-foreground">Asks the copilot now</span>
+      </li>
+    );
     if (item.kind === "command" || item.kind === "go") return (
       <li key={`${item.kind}-${item.command.id}`} id={`${id}-${index}`} role="option" aria-selected={selected} className={base}
         data-testid={item.kind === "go" ? "palette-go" : undefined}
@@ -142,17 +163,24 @@ export default function CommandPalette({ open, onClose, threads, commands, onThr
     );
   };
 
-  const goCount = items.filter(i => i.kind === "go").length;
+  // The ask option is first (under a Go to) or last, under its own heading either way.
+  const goOnly = items.filter(i => i.kind === "go").length;
+  const askAt = items[goOnly]?.kind === "ask" ? 1 : 0;
+  const goCount = goOnly + askAt;
   const threadCount = goCount + items.filter(i => i.kind === "thread").length;
   const talkEnd = threadCount + items.filter(i => i.kind === "talk").length;
+  const commandEnd = talkEnd + items.filter(i => i.kind === "command").length;
   const heading = (text: string) => <li role="presentation" className="px-2.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{text}</li>;
   return (
     // A click on the dialog itself is a click on its backdrop: the panel inside fills the box.
     // Escape: closed and let go of in its own keystroke, not in the close event's later task.
-    <dialog ref={dialog} aria-label="Jump to" onCancel={release} onClose={shut} onClick={event => { if (event.target === dialog.current) shut(); }}
+    // Escape also hands the closed state back at once, so a ⌘K pressed before the close event's later task reopens it;
+    // that close event, landing after a reopen, is ignored.
+    <dialog ref={dialog} aria-label="Jump to" onCancel={() => { release(); shut(); }} onClose={() => { if (!dialog.current?.open) shut(); }}
+      onClick={event => { if (event.target === dialog.current) shut(); }}
       className="mx-auto mb-auto mt-[12vh] w-[min(560px,calc(100%-32px))] max-w-none overflow-hidden rounded-xl border bg-card p-0 text-foreground shadow-2xl backdrop:bg-background/70">
       <div>
-        <input autoFocus value={query} placeholder="Jump to a symbol, plan, conversation or command…" aria-label="Jump to"
+        <input autoFocus value={query} placeholder="Jump to a place, symbol, plan or command, or ask the copilot…" aria-label="Jump to"
           role="combobox" aria-expanded="true" aria-controls={`${id}-list`} aria-activedescendant={items.length ? `${id}-${current}` : undefined}
           onChange={event => { setQuery(event.target.value); setActive(0); }}
           onKeyDown={event => {
@@ -167,16 +195,20 @@ export default function CommandPalette({ open, onClose, threads, commands, onThr
           className="h-12 w-full border-0 border-b bg-transparent px-4 text-base outline-none placeholder:text-muted-foreground sm:text-[15px]" />
         <ul id={`${id}-list`} role="listbox" aria-label="Threads and commands" className="max-h-[min(60vh,420px)] overflow-y-auto p-1.5">
           {!items.length && !searching && !answer?.failed && <li className="px-2.5 py-3 text-sm text-muted-foreground">Nothing matches.</li>}
-          {goCount > 0 && heading("Go to")}
-          {items.slice(0, goCount).map(option)}
+          {goOnly > 0 && heading("Go to")}
+          {items.slice(0, goOnly).map(option)}
+          {askAt > 0 && heading("Ask")}
+          {askAt > 0 && option(items[goOnly], goOnly)}
           {threadCount > goCount && heading("Threads")}
           {items.slice(goCount, threadCount).map((item, i) => option(item, goCount + i))}
           {talkEnd > threadCount && heading("Conversations")}
           {items.slice(threadCount, talkEnd).map((item, i) => option(item, threadCount + i))}
           {searching && <li role="status" className="px-2.5 py-2 text-xs text-muted-foreground">Searching saved conversations…</li>}
           {answer?.failed && <li role="status" className="px-2.5 py-2 text-xs text-muted-foreground">Saved conversations could not be searched.</li>}
-          {items.length > talkEnd && heading("Commands")}
-          {items.slice(talkEnd).map((item, i) => option(item, talkEnd + i))}
+          {commandEnd > talkEnd && heading("Commands")}
+          {items.slice(talkEnd, commandEnd).map((item, i) => option(item, talkEnd + i))}
+          {items.length > commandEnd && heading("Ask")}
+          {items.slice(commandEnd).map((item, i) => option(item, commandEnd + i))}
         </ul>
       </div>
     </dialog>

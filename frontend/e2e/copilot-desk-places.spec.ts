@@ -51,7 +51,7 @@ const sse = (cards: Record<string, unknown>[]) => [
 ].map(e => `data: ${JSON.stringify(e)}\n\n`).join("");
 
 async function open(page: Page, cards: Record<string, unknown>[] = []) {
-  const seen = { chats: 0, chains: [] as string[], writes: [] as string[] };
+  const seen = { chats: 0, asked: [] as string[], chains: [] as string[], writes: [] as string[] };
   let current = main();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.clock.install({ time: NOW });
@@ -76,7 +76,11 @@ async function open(page: Page, cards: Record<string, unknown>[] = []) {
     await route.fulfill({ json: current });
   });
   await page.route(`**/copilot/investigations/${MAIN}/proposals/*/outcome`, route => route.fulfill({ json: current }));
-  await page.route("**/copilot/chat", route => { seen.chats += 1; return route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: sse(cards) }); });
+  await page.route("**/copilot/chat", route => {
+    seen.chats += 1;
+    seen.asked.push(route.request().postDataJSON().messages.at(-1).content);
+    return route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: sse(cards) });
+  });
   await page.goto(`/copilot-lab?thread=${MAIN}`);
   await expect(page.getByTestId("desk-book")).toBeVisible();
   return seen;
@@ -107,6 +111,7 @@ test("\"nvda chain\" in ⌘K goes straight to NVDA's chain with no model call; a
   dialog = await jump(page, "nvda chain");
   await expect(dialog.getByTestId("palette-go")).toHaveText(/^Go to NVDA · Chain/);
   await expect(dialog.getByRole("option").first()).toHaveAttribute("data-testid", "palette-go");
+  await expect(dialog.getByRole("option").last()).toHaveAttribute("data-testid", "palette-ask"); // asking stays one arrow away, last
   await page.keyboard.press("Enter");
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole("tab", { name: "Chain" })).toHaveAttribute("aria-selected", "true");
@@ -118,6 +123,30 @@ test("\"nvda chain\" in ⌘K goes straight to NVDA's chain with no model call; a
   await expect(page.getByTestId("desk-chart")).toContainText("AAPL");
   expect(seen.chats).toBe(0);
   expect(seen.writes).toEqual([]);
+});
+
+test("⌘K is Jump to or ask: words that name no place ask the copilot on Enter, in the open conversation, never while typing", async ({ page }) => {
+  const seen = await open(page);
+  await expect(page.getByRole("button", { name: /Jump to a thread or command/ })).toContainText("Jump to or ask…");
+  const dialog = await jump(page, "is the semis group bid today");
+  const ask = dialog.getByTestId("palette-ask");
+  await expect(dialog.getByRole("option").first()).toHaveAttribute("data-testid", "palette-ask");
+  await expect(ask).toHaveText(/^Ask the copilot: “is the semis group bid today”\s*Asks the copilot now$/);
+  await expect(dialog.getByRole("option").first()).toHaveAttribute("aria-selected", "true");
+  await page.waitForTimeout(500); // past the saved-conversation search's pause: still nothing asked
+  expect(seen.chats).toBe(0);
+  await page.keyboard.press("Enter");
+  await expect(dialog).not.toBeVisible();
+  await expect.poll(() => seen.chats).toBe(1);
+  expect(seen.asked).toEqual(["is the semis group bid today"]);
+  await expect(page.getByRole("region", { name: "Conversation" }).getByText("is the semis group bid today")).toBeVisible();
+  // Escape asks nothing; a click on the option asks.
+  await jump(page, "what moved after the open");
+  await page.keyboard.press("Escape");
+  expect(seen.chats).toBe(1);
+  await (await jump(page, "what moved after the open")).getByTestId("palette-ask").click();
+  await expect.poll(() => seen.asked).toEqual(["is the semis group bid today", "what moved after the open"]);
+  expect(seen.writes.filter(w => !w.includes("/exchange") && !w.includes("/desk/use"))).toEqual([]);
 });
 
 test("\"rules\" in ⌘K opens My rules and its editor", async ({ page }) => {

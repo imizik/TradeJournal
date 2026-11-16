@@ -183,7 +183,7 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     is unseen in this browser); alert and Radar ratings are optional and never counted here. Open conversations about no ticker (an older
     turn, a week review) are listed under it, title and date: today's, the open one and the latest automatic week
     review, the rest under **Earlier · N**. **What matters right now?** (one turn, the fixed `lib/copilot.ts`
-    `WHAT_MATTERS_PROMPT`) and Review my week are ⌘K commands (Jump to… on a phone).
+    `WHAT_MATTERS_PROMPT`) and Review my week are ⌘K commands (Jump to or ask… on a phone).
   - **Tickers**: one row per symbol the owner has something on: an open
     position, a plan (armed, near a trigger, or exited with its exit review
     waiting), a plan or alert card waiting on Confirm, a thesis-watch trigger
@@ -566,7 +566,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   followed or not). Then the **Day button** (§ The day's checklist: "Start the day" before 9:30 on a weekday, "Close
   the day · N to review" after 16:00, a quiet "Day" in between; amber only while something is still to do; on a phone
   an icon over one word), **Now** (back to today's Main chat; dropped on a phone while already there), **Threads** (the
-  thread list's drawer; no count on the button, since the strip counts what needs him), Jump to… (⌘K) and Plan a trade (the same words as ⌘K).
+  thread list's drawer; no count on the button, since the strip counts what needs him), Jump to or ask… (⌘K) and Plan a trade (the same words as ⌘K).
   Then **the account line** while the Robinhood feed is live ([the feed](robinhood-read-feed.md)): one tappable group
   per account (Roth IRA, MCP; Individual only while it holds something), its label and number masked to the last four,
   total value, today's change in dollars and percent, options value, cash, buying power and **open** (its positions'
@@ -956,7 +956,7 @@ in its menu; Plan a trade is in the desk's top row). Each tab counts as its view
   closes it. The open sheet covers the bar, which keeps only More under it. There is no round Ask button on a phone
   any more (it covered the Grid's icon). In Replay the bar keeps only More; Replay's own Leave returns to the desk.
 - **Feed** is a chip at the start of the top row, which stays at the top of the screen with the health dot, Day,
-  Threads, Jump to… and Plan a trade: one tap from every view (pings land there with `?feed=`), its grey count never
+  Threads, Jump to or ask… and Plan a trade: one tap from every view (pings land there with `?feed=`), its grey count never
   cut short, rather than two taps under More.
 
 On any view but Positions the Positions tab carries an amber count of what needs him. A link that names a ticker (a
@@ -1490,7 +1490,7 @@ the Check service's pre-trade check does not see it.
 
 **The top bar's day** (`DeskStatus` in `SessionTape.tsx`, `DayPnl` in `Cockpit.tsx`): **Live** (green dot) with the
 New York clock in the regular session, **Pre-market** with the clock, **Closed 16:00** (the calendar's close) after it,
-or **Market closed**; SPY, QQQ and VIX's change; Realized today and Open. The phase actions are ⌘K commands (Jump to… on
+or **Market closed**; SPY, QQQ and VIX's change; Realized today and Open. The phase actions are ⌘K commands (Jump to or ask… on
 a phone) and steps of the Day button's checklist (below): **Arm today's plans** and **Prep the day** before 9:30 on a
 weekday, and **Close the day** after 16:00 (also one quiet link under the day report), which walks each thread's close
 question (see Close of day).
@@ -1529,7 +1529,7 @@ drop counts on that visit, and the plan leaves the list on the next read).
 unsent (check each plan against the pre-market and propose what is missing).
 Opening a thread or Close leaves the checklist. Nothing in it arms, sizes or
 sends an order. On a
-phone Jump to…, Threads and Plan a trade show as icons beside the Feed chip. One
+phone Jump to or ask…, Threads and Plan a trade show as icons beside the Feed chip. One
 read, `GET /copilot/desk/session` (owner only, refused while the lab is off),
 once a minute while the page is visible, read once by the desk
 (`useDeskSession`) for its top bar, strip and lower block, composed in `copilot_desk.py` from readers
@@ -1543,7 +1543,7 @@ event ids those answers save against; no other ids go out. Each source fails on
 its own. No futures quote is read yet.
 
 **Keys and the palette.** ⌘K (Ctrl+K off a Mac; either works), or the desk bar's
-"Jump to…" button, opens a palette over the desk (`CommandPalette.tsx`, a
+"Jump to or ask…" button, opens a palette over the desk (`CommandPalette.tsx`, a
 modal dialog): a search box, then Threads (the thread list's rows in list
 order, each with its status line and value), Conversations (from two letters
 typed, every saved conversation whose title, symbol or conclusion holds the
@@ -1563,7 +1563,12 @@ goals, the note line). The places come from one list, `lib/deskPlaces.ts` (id, n
 without a model call, as the top option under "Go to", so Enter takes it: a place's word alone ("rules", "paper",
 "replay") brings that place's command to the top, and a ticker the desk already shows (a book or thread-list row, the
 Watching list; never one set to Not following) with a place that shows a ticker (chart, chain, note, replay) is "Go to
-NVDA · Chain" for "nvda chain" or "chain nvda". An unknown word adds nothing, and nothing typed is sent to the model.
+NVDA · Chain" for "nvda chain" or "chain nvda". An unknown word adds no Go to. *Ask* (since 2026-11-16): typed words
+that match no place, command or thread make the top option **Ask the copilot: "…"** with the hint "Asks the copilot
+now"; when something else matches it is the last option instead, and saved conversations found by the search list
+under it, so a search landing a moment later never changes what Enter does. Enter or a click on it sends the words
+through the desk's ask path, in the open conversation and on its ticker, as the message box would; nothing is sent while
+typing, and Escape sends nothing; while a turn is still running the words wait in the message box, unsent. A place phrase ("nvda chain", "rules") still goes to its place first.
 Type to filter, arrows and Enter to choose, Escape or a click outside to close. A thread opens through
 the list's own path (in place, or its deep link); Plan a trade opens the same
 unsent "Plan a trade: " link as the desk bar's Plan a trade; Review my week and What
@@ -1794,6 +1799,15 @@ that nothing in it places or sends anything.
   Robinhood's email as today) and returns to the symbol's chart; **Not now** closes the ticket.
 - **A pick from the Chain tab** (`?expiration=&strike=`, Put on ticket) replaces the contract the plan names, on the
   plan's own side; the plan's own words still show under it.
+- **The contract a plan was started on** (since 2026-11-16): a plan card whose conversation opened on a Chain contract
+  (Plan it or Put on ticket, one contract or a spread) or on a checked call's Plan it reads that contract back from the
+  conversation's opening line (`DeskChain.planPick`), and its **Open its ticket** opens the Ticket on it as the Chain's
+  pick, saying "with NBIS $100 Call 11/13/26, the contract you started from" beside the button. Only on the plan's own
+  side, and only while the card's contract words name no other strike or date; otherwise the plan's own words decide as above.
+  Client only: no route changed.
+- **Copy all stays in view** (since 2026-11-16): from a tablet up the dock scrolls in its own box under the chart, and a
+  plan ticket's Copy all row sits at that box's foot until its own place scrolls up, so it shows as soon as the ticket
+  opens (at 1440×900 with the contract row above it). Your rules' checklist stays just above its own place.
 - **Vertical spreads** (two legs, same expiry and type: call or put, debit or credit). On the Chain tab, **Make it a
   spread** makes the picked contract the leg bought and the next contract tapped on the same side the leg sold; the row
   shows both legs, the net at the mid and at the natural price, and per spread the most it can lose and make. **Put on
@@ -1911,8 +1925,10 @@ Robinhood; `backend/tests/test_desk_chain.py` checks that nothing in it sends an
 - **Tap a contract:** a row with its numbers and **Check it** (opens Check a call with the contract in the box, e.g.
   "NBIS 11/14 105C"; nothing runs until he taps Check it), **Plan it** (the plan flow with the contract and its mark
   as text he edits) and **Put on ticket** (the newest armed saved plan in that ticker on the same side opens its
-  ticket with this contract; a stock or sell-side plan has no option ticket and is not offered; with none the button
-  is off and says to plan it first). No order path of any kind.
+  ticket with this contract; a stock or sell-side plan has no option ticket and is not offered). With no such plan
+  (since 2026-11-16) Put on ticket starts the plan flow for this contract, exactly as Plan it does, and says so; once
+  that plan is confirmed, its card's **Open its ticket** opens the Ticket on this contract (or both legs of a spread)
+  with no second pick (§ Ticket). No order path of any kind.
 - **Unusual marks:** a contract on the desk's unusual-options list (§ Unusual options) is marked **unusual** on its
   strike, with its volume and open interest in the tooltip. A Feed row opens here on its expiry with the contract
   selected; a strike outside the ten-a-side window widens it (`strike=` on the chain read).

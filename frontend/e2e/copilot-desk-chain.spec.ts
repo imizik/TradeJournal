@@ -128,8 +128,8 @@ test("tap a contract: Check it fills Check a call, and nothing is checked until 
   const actions = tab.getByTestId("chain-actions");
   await expect(actions).toContainText("NBIS $105 Call 11/13/26");
   await expect(actions).toContainText("Wide spread: $20 a contract between bid and ask (50% of the mark)");
-  await expect(actions).toContainText("there is no armed NBIS call plan yet, so Plan it first");
-  await expect(actions.getByRole("button", { name: "Put on ticket" })).toBeDisabled();
+  await expect(actions).toContainText("No armed NBIS call plan yet, so Put on ticket starts one for this contract, as Plan it does.");
+  await expect(actions.getByRole("button", { name: "Put on ticket" })).toBeEnabled();
   // Real actions and Paper are two labelled groups: REAL with Check it…Make it a spread, PAPER with the Paper button alone.
   const real = actions.getByRole("group", { name: "Real: copy to Robinhood" });
   const paper = actions.getByRole("group", { name: "Paper, not real money" });
@@ -153,6 +153,130 @@ test("tap a contract: Plan it opens the plan flow with the contract as text he e
   await expect.poll(() => new URL(page.url()).searchParams.get("context"))
     .toBe("Plan a trade: NBIS $100 Call 11/13/26 (mark 2.50, from the chain). My entry trigger, invalidation and time stop:");
   expect(new URL(page.url()).searchParams.get("symbol")).toBe("NBIS");
+});
+
+test("Put on ticket with no plan yet starts the plan flow for this exact contract, as Plan it does", async ({ page }) => {
+  const { pane, tickets } = await lab(page);
+  const tab = pane.getByTestId("desk-chain");
+  await tab.getByRole("button", { name: "100 call" }).click();
+  await tab.getByTestId("chain-actions").getByRole("button", { name: "Put on ticket" }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get("context"))
+    .toBe("Plan a trade: NBIS $100 Call 11/13/26 (mark 2.50, from the chain). My entry trigger, invalidation and time stop:");
+  await expect(page.getByLabel("Message")).toHaveValue(/Plan a trade: NBIS \$100 Call 11\/13\/26/); // in the box, unsent
+  expect(tickets).toEqual([]);
+});
+
+// --- From a chain contract to a copyable ticket: the plan's ticket opens on the contract he started from ----------------
+
+const NEW = "88888888-8888-4888-8888-888888888888";
+const ROTH = "00000000-0000-0000-0000-000000000001";
+const draft = (contract: string) => ({ id: "p1", kind: "trade_plan", symbol: "NBIS", direction: "long", instrument: "calls", contract,
+  thesis: "Reclaims VWAP with the group", entry_trigger: { condition: "closes_beyond", price: 95.9, interval: "5m" },
+  invalidation: { condition: "crosses", price: 92.3, interval: null }, time_stop: "out by 15:30", size_note: "2 contracts", last: 95.4,
+  as_of: "2026-11-12T14:00:00Z" });
+const turn = (contract: string) => [
+  { type: "tool", id: "p1", name: "propose_plan", status: "ok", summary: "proposed plan", ms: 1, provenance: { source: "proposal", kind: "proposal", as_of: null } },
+  { type: "proposal", ...draft(contract) }, { type: "text", delta: "NBIS plan (draft)." },
+  { type: "done", metrics: { backend: "fake", evidence: "fixture", model: "fake-scripted", first_text_ms: 1, total_ms: 2, rounds: 1, tool_calls: [],
+    usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, cost_usd: 0 } },
+].map(e => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
+
+/** What a Send and a Confirm need, on top of ``lab``'s reads: the copilot's turn drafts a long-call plan naming
+ *  ``contract`` (words that alone name no single contract), and the plan, its alerts and its horizon save in the browser. */
+async function planning(page: Page, contract: string) {
+  const sends: string[] = [];
+  let saved = { ...record, id: NEW, transcript: [] as object[], message_count: 0 };
+  await page.route("**/copilot/investigations", route => route.fulfill({ status: 201, json: saved }));
+  await page.route(`**/copilot/investigations/${NEW}**`, route => {
+    if (route.request().method() === "PUT") saved = { ...saved, ...route.request().postDataJSON(), revision: saved.revision + 1 };
+    return route.fulfill({ json: saved });
+  });
+  await page.route("**/copilot/chat", route => { sends.push(route.request().method()); return route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turn(contract) }); });
+  await page.route("**/copilot/quote?*", route => route.fulfill({ json: { symbol: "NBIS", last: 95.4, trade_time: 1, fetched_at: 1, age_s: 2, issue: null, fresh: true } }));
+  await page.route("**/charts/captures/setup", route => route.fulfill({ json: { accounts: [{ id: ROTH, label: "Roth IRA ··8267", broker: "robinhood" }],
+    default_account_id: ROTH, templates: [], max_templates: 3, transcriber: { configured: false, provider: "off", note: "" } } }));
+  await page.route("**/charts/captures", route => route.fulfill({ status: 201, json: { id: "c1", ...route.request().postDataJSON() } }));
+  await page.route("**/day-journal/*/entries", route => route.fulfill({ json: { id: "j1", day: "2026-11-12", not_traded: false, actor: "owner", created_at: "2026-11-12T14:01:00Z", ...route.request().postDataJSON() } }));
+  await page.route("**/copilot/time-stops/preview?*", route => route.fulfill({ json: { due_at: null, reason: "Kept as a note.", enabled: true } }));
+  await page.route("**/charts/alerts", route => route.fulfill({ json: { alerts: [], phone: true } }));
+  return sends;
+}
+
+/** Send the plan line in the box, Confirm the copilot's card, then Open its ticket. */
+async function sendConfirmOpen(page: Page) {
+  await page.getByRole("button", { name: "Send" }).click();
+  const card = page.getByRole("region", { name: "Proposed trade plan" });
+  await card.getByRole("button", { name: "Confirm" }).click();
+  await expect(card.getByRole("status")).toHaveText("Plan confirmed.");
+  return card;
+}
+
+for (const kind of ["one contract", "a spread"] as const) {
+  test(`a plan started from the chain on ${kind} opens its ticket on it after Confirm, Copy all in view at 1440×900`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const spread = kind === "a spread";
+    const ticket = spread ? { ...SPREAD_TICKET, investigation_id: NEW } : { ...TICKET, investigation_id: NEW, contract: { ...TICKET.contract, strike: 100, label: "NBIS $100 Call 11/13/26" } };
+    const { pane, methods, tickets } = await lab(page, [], ticket);
+    const sends = await planning(page, spread ? "NBIS 100/105C debit spread" : "NBIS 100C");
+    const tab = pane.getByTestId("desk-chain");
+    await tab.getByRole("button", { name: "100 call" }).click();
+    if (spread) {
+      await tab.getByTestId("chain-actions").getByRole("button", { name: "Make it a spread" }).click();
+      await tab.getByRole("button", { name: "105 call" }).click();
+      await expect(tab.getByTestId("chain-spread")).toContainText("Confirm the plan and Open its ticket has both legs on it");
+      await tab.getByTestId("chain-spread").getByRole("button", { name: "Put on ticket" }).click();
+    } else {
+      await tab.getByTestId("chain-actions").getByRole("button", { name: "Put on ticket" }).click();
+    }
+    await expect(page.getByLabel("Message")).toHaveValue(/Plan a trade: NBIS \$100/);
+    const card = await sendConfirmOpen(page);
+    expect(sends).toHaveLength(1);
+    await expect(card.getByTestId("plan-ticket-pick")).toHaveText(spread ? "with NBIS $100/$105 Call Debit Spread 11/13/26, the contract you started from"
+      : "with NBIS $100 Call 11/13/26, the contract you started from");
+    await card.getByRole("button", { name: "Open its ticket" }).click();
+    await expect(pane.getByRole("tab", { name: "Ticket" })).toHaveAttribute("aria-selected", "true");
+    // The contract he picked on the chain, with no second pick: the ticket is read on it straight away.
+    expect(tickets).toEqual([spread ? `${NEW}?expiration=2026-11-13&strike=100&short_strike=105&option_type=call` : `${NEW}?expiration=2026-11-13&strike=100`]);
+    const open = pane.getByTestId("desk-ticket");
+    await expect(open).toContainText(spread ? "NBIS $100/$110 Call Debit Spread 11/13/26" : "NBIS $100 Call 11/13/26");
+    await expect(open.getByRole("button", { name: "Use this" })).toHaveCount(0);
+    await expect(open.getByRole("button", { name: "Copy all for Robinhood" })).toBeInViewport({ ratio: 1 });
+    await expect(open.getByText("Send to Robinhood")).toHaveCount(0);
+    expect(methods.filter(m => m !== "GET" && !m.endsWith("checks"))).toEqual([]); // the chain and the ticket only read
+  });
+}
+
+test("a plan the copilot moved to another expiry keeps its own words: its ticket is not opened on the chain's pick", async ({ page }) => {
+  const { pane, tickets } = await lab(page, [], { ...TICKET, investigation_id: NEW });
+  await planning(page, "NBIS 11/20 100C");
+  await pane.getByTestId("desk-chain").getByRole("button", { name: "100 call" }).click();
+  await pane.getByTestId("chain-actions").getByRole("button", { name: "Put on ticket" }).click();
+  const card = await sendConfirmOpen(page);
+  await expect(card.getByTestId("plan-ticket-pick")).toHaveCount(0);
+  await card.getByRole("button", { name: "Open its ticket" }).click();
+  await expect(pane.getByTestId("desk-ticket")).toBeVisible();
+  expect(tickets).toEqual([NEW]); // the plan's own words decide
+});
+
+test("a checked call's Plan it carries its contract to the confirmed plan's ticket too", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-11-12T16:00:00Z")); // the call's 11/13 is this year's
+  const { pane, tickets } = await lab(page, [], { ...TICKET, investigation_id: NEW, contract: { ...TICKET.contract, strike: 105, label: "NBIS $105 Call 11/13/26" } });
+  await planning(page, "NBIS 105C");
+  const check = { id: "c0ffee00-0000-4000-8000-000000000001", checked_at: "2026-11-12T15:41:00Z", day: "2026-11-12", source: "desk", raw: "NBIS 11/13 105C",
+    symbol: "NBIS", reading: { ticker: "NBIS", expiry: "2026-11-13", strike: 105, side: "call", entry: null, stop: null, target: null }, verdict: "Draft",
+    underlying_price: 95.4, outcome: null, outcome_at: null, planned: false, plan_href: null,
+    card: { headline: "NBIS needs +10% by Friday", tiles: [], against: null, changes_if: null, others: [], note: null } };
+  await page.route("**/copilot/checks", route => route.fulfill({ json: route.request().method() === "POST" ? check : { day: "2026-11-12", checks: [] } }));
+  const tab = pane.getByTestId("desk-chain");
+  await tab.getByRole("button", { name: "105 call" }).click();
+  await tab.getByTestId("chain-actions").getByRole("button", { name: "Check it" }).click();
+  await pane.getByTestId("call-check-run").click();
+  await pane.getByTestId("call-check-plan").click();
+  await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue(/Plan a trade: NBIS 105 call 11\/13, from a Discord call I checked/);
+  const card = await sendConfirmOpen(page);
+  await card.getByRole("button", { name: "Open its ticket" }).click();
+  await expect(pane.getByTestId("desk-ticket")).toContainText("NBIS $105 Call 11/13/26");
+  expect(tickets).toEqual([`${NEW}?expiration=2026-11-13&strike=105`]);
 });
 
 test("tap a contract: Put on ticket opens the saved plan's ticket with that contract, and only reads", async ({ page }) => {
@@ -287,7 +411,7 @@ test("a wide leg makes the chain's spread rough; Plan it carries the spread's wo
   await tab.getByRole("button", { name: "105 call" }).click(); // the wide 105 (50% of its mark)
   await expect(tab.getByTestId("chain-spread")).toContainText("Rough: the $105 leg's market is wide.");
   await expect(tab.getByTestId("chain-spread-net")).toContainText("Net debit 2.10 at the mid");
-  await expect(tab.getByTestId("chain-spread")).toContainText("there is no armed NBIS long (call) plan for this bullish spread yet");
+  await expect(tab.getByTestId("chain-spread")).toContainText("No armed NBIS long (call) plan for this bullish spread yet, so Put on ticket starts one for this spread");
   await tab.getByTestId("chain-spread").getByRole("button", { name: "Plan it" }).click();
   await expect.poll(() => new URL(page.url()).searchParams.get("context"))
     .toBe("Plan a trade: NBIS $95/$105 Call Debit Spread 11/13/26. Contract: NBIS 11/13/26 95/105C debit spread. My entry trigger, invalidation and time stop:");

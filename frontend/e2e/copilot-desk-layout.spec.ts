@@ -168,7 +168,7 @@ test("every place has a key and a ⌘K command; keys typed in the message box ar
   await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type("chain");
   const palette = page.getByRole("dialog", { name: "Jump to" });
-  await expect(palette.getByRole("option")).toHaveText([/^Chain.*O$/]);
+  await expect(palette.getByRole("option")).toHaveText([/^Chain.*O$/, /^Ask the copilot/]); // the place first; asking last
   await page.keyboard.press("Enter");
   await expect(tab("Chain")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("ControlOrMeta+k");
@@ -195,7 +195,7 @@ test("B straight after ⌘K's Enter, before the next frame, still puts the keys 
   await open(page);
   await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type("feed");
-  await expect(page.getByRole("dialog", { name: "Jump to" }).getByRole("option")).toHaveText([/^Feed.*F$/]);
+  await expect(page.getByRole("dialog", { name: "Jump to" }).getByRole("option")).toHaveText([/^Feed.*F$/, /^Ask the copilot/]);
   // Both keys in one task, each to whatever holds focus as it arrives, as the browser routes them.
   await page.evaluate(() => {
     for (const key of ["Enter", "b"]) (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
