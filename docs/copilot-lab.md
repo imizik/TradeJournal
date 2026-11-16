@@ -649,9 +649,24 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   its conversation (its own, else the ticker's newest open one, else its link; a position whose link leaves the desk
   opens the symbol's desk view). The desk never reloads for it: a symbol's desk view opens in place (see *The address*
   below), so the book, the top bar, the strip and the centre keep their data. Each row's eye sets its ticker to **Not following**; those sit behind "N not followed
-  ▾" at the bottom, each with Show again. Under the book, Watching and the time of day's block (below: straight after
-  the book before the open and after the close, when the brief or the day report is the job; under Watching in the
-  session), then one quiet facts line: **At risk now** (see Exposure) and the practice goal.
+  ▾" at the bottom, each with Show again. **At risk now** (see Exposure) sits under the book's heading, a safety line
+  that never folds.
+
+  **The left column, top to bottom** (since 2026-11-16, money and safety first): the book (real positions and working
+  orders, At risk now under its heading); **Watching**; the time of day's block (below: the morning brief, Since you
+  looked or the day report with Close the day) with the practice goal under it; **My rules** (`DeskPractice.tsx`
+  `RulesAndGoals`), one neutral line outside any paper frame, since rules and goals cover real trades too ("My 4 rules ·
+  followed on 3 of 5 trades · goals 1 of 2 this week ▸": followed counts closed paper and matched real trades together;
+  goals count those met so far), opening in place to the followed / broken split, Edit my rules (the editor) and the
+  goals line with its editor; then **Practice** (`DeskPractice.tsx` `Practice`), one block with a line each for his
+  paper book ("PAPER Mine · 2 open · 1 working +$29.30 ▸"), QQQ overnight, QQQ momentum ("PAPER QQQ overnight · holding
+  · +19.1 bp avg ▸") and Replay ("REPLAY 4 trades +$132.00 ▸" and **Replay a day**, which opens Replay). Each line
+  carries its mark and opens its full section in place (`DeskPaper`, `DeskOvernight`, `DeskMomentum`,
+  `ReplayPractice`); which are open is kept for the browser tab (`sessionStorage` `desk.practice.v1`). The paper line
+  opens by itself while a paper position or working paper order exists, and closing it then is kept apart from closing
+  it on a quiet day, so open paper risk never starts hidden. Each line keeps its fold id (`paper`,
+  `strategy.overnight`, `strategy.momentum`, `replay.practice`); the rules checklist at entry stays on the paper
+  confirm and the Ticket. Reads are unchanged: the lines use the reads their sections already made.
 - **Watching** (`components/copilot/Watching.tsx`, `GET /copilot/desk/watching`, `app/engine/desk_watch.py`), under
   the book: the names he watches and does not hold. The list of record is the app's own watchlist, the Charts one (the
   `chart_settings` row's `watchlist`, at most 30; never saved, both screens show Charts' starting names), so Charts and
@@ -810,7 +825,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   Timing · Contract read as three tiles, the body, **Against** and **Changes if** labelled; what is sent to or stored
   from the model is unchanged.
 
-**Time of day.** The book's lower block follows the New York clock, one block each: before 9:30 on a weekday it is the
+**Time of day.** The day's block (under Watching) follows the New York clock, one block each: before 9:30 on a weekday it is the
 **Morning brief** (`MorningBrief.tsx`, cut to three lines with **Read the whole brief** a tap away; nothing before it
 is written); after 16:00 it is the **day report** (below), with a quiet **Watch today** link under it once Watch your
 day kept today's replay; otherwise **Since you looked**: what changed since the
@@ -1897,7 +1912,7 @@ The desk counts quietly which of its pieces he uses, so after two weeks it can o
   "Counts paused since 10:42" (with those device counts included) instead of showing zeros.
 - **How I use the desk** (⌘K, or More → Journal): every piece's last-14-day opens, taps and time on screen and its
   last use, least used first, each with a Fold / Show switch. Safety pieces (the book's positions and working orders,
-  Needs you, the health dot, Day facts with its "at risk now" line) and pieces counted only (the Chart tab, the
+  Needs you, the health dot, the "at risk now" line under the book's heading) and pieces counted only (the Chart tab, the
   copilot, Ticket actions, the phone's views) say "Always shown"; a safety id in a saved fold list is ignored. While
   the list reads, or if it cannot be read, no numbers show.
 - **The suggestion.** Once this device size has 14 calendar days with desk use, one quiet card under the book lists
@@ -2166,7 +2181,7 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   every fill's cash; options use the ×100 multiplier; a credit spread holds its width as collateral, as Robinhood does,
   so buying power is the cash less it and falls by the spread's most-to-lose. An order he cannot pay for is refused with
   what it needs. A new run starts fresh cash; every older run keeps its history ("Earlier runs" under Progress).
-- **Positions** sit in the Paper section under the book, its dashed amber frame and "not real money" tag keeping it
+- **Positions** sit in the Paper section (Practice's paper line, under the book), its dashed amber frame and "not real money" tag keeping it
   apart from real money. The account's value is its cash plus each position's worth at those same prices. Each shows P&L
   from the desk's own live ticks (its legs ride the one ticks read; no new
   polling), else the server's newest kept price greyed with its time, else "No price yet", never a zero. Close and Trim
@@ -2198,7 +2213,8 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   lists and stay in the totals. Desk and Telegram turns get it; it is book context, never offered to research jobs;
   replay says it is unavailable, the fixture serves a simulated book. Paper actions from the copilot, if ever wanted,
   would go through the action cards (`copilot_actions.py`); none exist.
-- **My rules** (`backend/app/engine/trading_rules.py`, `components/copilot/DeskRules.tsx`). Paper › Rules holds his own
+- **My rules** (`backend/app/engine/trading_rules.py`, `components/copilot/DeskRules.tsx`). The desk's My rules line
+  (under the day's block, outside the paper frame; Edit my rules) holds his own
   trading rules: up to eight, each in his own words, each with at most one automatic check the app can verify honestly
   (size at most N% of the account; a stop set before entry; no entry in the first N minutes after the open; at most N
   open positions; an option at least N days to expiry); a rule without one is a tick-box he answers. Each save is a new
@@ -2217,11 +2233,11 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   real trade only through that plan's own capture link or the position companion's adopted trade; the rest are counted
   as unmatched (or still open), never guessed. Under the score line, one line splits closed trades with every rule
   followed versus any broken (P&L, win rate / trades; unclear ones counted apart, trades entered before he had rules
-  left out), for paper and for matched real tickets; a tap opens the split per rule (`score.paper.rules`,
+  left out; inside My rules), for paper and for matched real tickets; a tap opens the split per rule (`score.paper.rules`,
   `score.real_rules`). The copilot's paper read carries each row's `my_rules` (outcome, broken and can't-check rules
   with reasons) and the score's `paper_by_my_rules` / `real_by_my_rules`; no tool changed.
 - **Weekly goals** (`backend/app/engine/weekly_goals.py`, `components/copilot/DeskGoals.tsx`). One or two goals for
-  the week, set in seconds from a small "Set this week's goals" control under the score line (with none set, only that
+  the week, set in seconds from a small "Set this week's goals" control inside My rules (with none set, only that
   control shows): follow all my rules on N% of trades, max loss per trade $N, no more than N trades a day, each about his
   real trades (the default) or his paper book. Only kinds the data can measure; the rules goal is offered once he has
   rules. `PUT /copilot/goals` saves the list as a `trading_rule_record` row (`kind` `goals`; the rules table, no
@@ -2299,7 +2315,7 @@ Paper trading on a past day, any time (nights and weekends included): "Replay" o
   day settles at intrinsic value from the stock's last bar, any other sells at its last trade less the half-spread.
 - **Its own runs.** Each replay is a `paper_run` with `kind` `replay` and `replay_day` (migration `7f3b276ac082`), on the
   paper book's own events and fold; `paper_book.current_run` reads live runs only, so replay never mixes with live paper
-  or real trades. "Replay practice" under the Paper section scores every replay apart: P&L, win rate, and each trade with
+  or real trades. "Replay practice" (Practice's Replay line) scores every replay apart: P&L, win rate, and each trade with
   its day, the instrument (an option by its contract), how it ended and its note.
 
 Proof: `backend/tests/test_paper_replay.py`, `backend/tests/test_paper_replay_options.py`,
@@ -2390,7 +2406,7 @@ that cannot fill asks again once a minute through that session, never sells afte
 it is sold. Normally one to three quote requests at 15:59 and one at the open, its own SQLite file (`OVERNIGHT_BOOK_PATH`), no migration, no messages, nothing
 placed. Run by the level alert monitor when `OVERNIGHT_BOOK_ENABLED=true` (the owner's switch; off by default).
 
-The desk shows it under the Paper section (`frontend/components/copilot/DeskOvernight.tsx`, read through
+The desk shows it as a line in Practice, opening in place (`frontend/components/copilot/DeskOvernight.tsx`, read through
 `GET /copilot/desk/overnight` on the desk's minute request): holding or flat, the running nights, average in basis
 points and dollars on $10,000 a night, missed nights, the last five nights (a sale after 09:35 is marked late) and the
 backtest's +4.2 bp a night beside it. Hidden while switched off and empty; a failed read says so instead of showing old
@@ -2412,7 +2428,7 @@ The 60-session history starts from `intraday_momentum_seed.json` (the study's SI
 session adds its own moves. Its own SQLite file (`INTRADAY_MOMENTUM_BOOK_PATH`), no migration, no messages, nothing placed.
 Run by the level alert monitor when `INTRADAY_MOMENTUM_BOOK_ENABLED=true` (the owner's switch; off by default).
 
-The desk shows it under the overnight book (`frontend/components/copilot/DeskMomentum.tsx`, `GET /copilot/desk/momentum`
+The desk shows it as a line in Practice under the overnight one (`frontend/components/copilot/DeskMomentum.tsx`, `GET /copilot/desk/momentum`
 on the minute request): long, short or flat now, finished days (a checked day with no trade counts as 0, as in the exam),
 the average in basis points and dollars on $10,000, missed checks, the last five days and the exam's +4.4 bp a day.
 Hidden while switched off and empty; a failed read says so instead of showing old rows.
@@ -3364,7 +3380,7 @@ additive table `practice_goal`).
   - `max_trades_per_day`: trading days with at most the cap of trades opened.
 - `GET /copilot/practice` (owner-only) returns the active goal and its score
   for the week holding today (the week just ended, on a weekend), or no score
-  before its first week. The desk shows it in the facts line under the book and the
+  before its first week. The desk shows it in the facts line under the day's block and the
   Dashboard's Review my week button carries it as a second line:
   "Practicing: exit at my invalidation · 2 of 3 this week" (or "starts Mon,
   Oct 26"). Nothing shows while no goal is active.
@@ -3383,7 +3399,7 @@ additive table `practice_goal`).
 
 ### Exposure
 
-One deterministic line beside the practice goal in the desk's facts line under the book,
+One deterministic line under the heading of the desk's book (never folded),
 and in the 09:00 brief: "At risk now: $6,400 in 3 options · usual day $2,100"
 (`backend/app/engine/exposure.py`, `GET /copilot/exposure`, owner-only, refused
 while the lab is off; no model call). The owner sometimes panics at large

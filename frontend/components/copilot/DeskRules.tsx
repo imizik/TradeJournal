@@ -11,9 +11,9 @@ import { cn } from "@/lib/utils";
 import ModeMark from "./ModeMark";
 
 /**
- * His own trading rules on the desk (docs/copilot-lab.md § My rules): the short list he writes once (Paper › Rules), the
+ * His own trading rules on the desk (docs/copilot-lab.md § My rules): the short list he writes once (My rules, under the book), the
  * checklist beside Paper and beside the Ticket's Copy (automatic checks already ticked or crossed with the reason; his
- * tick-boxes to answer), and the followed-versus-broken line under the paper score. A broken rule never blocks an order:
+ * tick-boxes to answer), and the followed-versus-broken line inside My rules. A broken rule never blocks an order:
  * it says so in one line and he can still go ahead.
  */
 
@@ -130,7 +130,7 @@ export function RulesEditor({ rules, onDone }: { rules: Rule[]; onDone(): void }
     } catch (e) { setError(e instanceof Error ? e.message : "Not saved."); } finally { setBusy(false); }
   };
   return (
-    <div data-testid="rules-editor" className="space-y-2 border-t border-dashed border-amber-400/30 px-3 py-2">
+    <div data-testid="rules-editor" className="space-y-2 border-t px-3 py-2">
       <p className="text-xs text-muted-foreground">Your trading rules, in your own words. Each can have one check the app makes for you; the rest are tick-boxes you answer at each entry. Breaking one never blocks an order.</p>
       <ol className="space-y-1.5">
         {drafts.map((d, i) => (

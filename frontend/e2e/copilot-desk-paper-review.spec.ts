@@ -48,6 +48,7 @@ async function open(page: Page, width: number, book: object = BOOK) {
   await page.route("**/copilot/chat", route => { chats.push(route.request().postDataJSON()); return route.abort(); });
   await page.goto("/copilot-lab");
   if (width < 768) await page.getByTestId("desk-view-book").click();
+  await page.getByTestId("practice-line-paper").click(); // nothing open on paper: Practice's paper line waits closed
   const paper = page.getByTestId("desk-paper");
   await expect(paper).toBeVisible();
   return { paper, chats };

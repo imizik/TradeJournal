@@ -163,6 +163,7 @@ for (const width of [1440, 375]) {
     await expect(page.getByTestId("desk-replay")).toHaveCount(0);
     await expect(page.locator("#desk-cockpit")).toBeVisible();
     if (width < 768) await page.getByTestId("desk-view-book").click();
+    await page.getByTestId("practice-line-replay").click(); // Practice's Replay line opens the section in place
     const practice = page.getByTestId("replay-practice");
     await expect(practice).toContainText("Replay practice");
     await expect(practice.getByTestId("replay-score")).toContainText("+$39.40");

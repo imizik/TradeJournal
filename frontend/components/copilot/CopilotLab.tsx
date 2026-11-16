@@ -10,10 +10,9 @@ import CheckACall from "@/components/copilot/CheckACall";
 import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
 import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
-import DeskPaper, { usePaperBook } from "@/components/copilot/DeskPaper";
-import DeskOvernight from "@/components/copilot/DeskOvernight";
-import DeskMomentum from "@/components/copilot/DeskMomentum";
-import DeskReplay, { ReplayPractice } from "@/components/copilot/DeskReplay";
+import { usePaperBook } from "@/components/copilot/DeskPaper";
+import { Practice, RulesAndGoals } from "@/components/copilot/DeskPractice";
+import DeskReplay from "@/components/copilot/DeskReplay";
 import PaperReviewCard from "@/components/copilot/PaperReview";
 import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
 import DeskRoll from "@/components/copilot/DeskRoll";
@@ -34,7 +33,7 @@ import DeskFeed, { feedQuestion, useDeskFeed, useFeedNew, type FeedItem } from "
 import { useDeskUnusual } from "@/components/copilot/DeskUnusual";
 import { scannerGuides, useDeskScanner, type DeskScannerRow } from "@/components/copilot/DeskScanner";
 import { DeskStatus, useDeskSession } from "@/components/copilot/SessionTape";
-import { Book, CentreChart, DayFacts, DayPnl, NeedsStrip, SinceYouLooked, positionRows, useSparks } from "@/components/copilot/Cockpit";
+import { Book, CentreChart, DayFacts, DayPnl, ExposureLine, NeedsStrip, SinceYouLooked, positionRows, useSparks } from "@/components/copilot/Cockpit";
 import type { DeskChartActions, DeskGuide } from "@/components/copilot/DeskChart";
 import MorningBrief from "@/components/copilot/MorningBrief";
 import Watching, { useWatching } from "@/components/copilot/Watching";
@@ -844,8 +843,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     }
   };
 
-  // The book's lower block by the time of day, one block each: the morning brief before the open (nothing until it is
-  // written), the day report after the close, else what changed since the owner last looked. Arm today's plans and Close
+  // The day's block by the time of day, one block each, under Watching: the morning brief before the open (nothing until
+  // it is written), the day report after the close, else what changed since the owner last looked. Arm today's plans and Close
   // the day are not repeated here: Close the day is one quiet link under the day report (and in ⌘K), never the strip.
   const booked = forAccount(rows, live, account);
   const lower = dayPhase === "pre" ? <MorningBrief prep={session.data?.prep} fill={fill} max={3} />
@@ -954,25 +953,21 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         )}
         {on && (
           <div className={styles.book}>
+            {/* Money and safety first: his real positions and working orders, with what is at risk now under the heading
+                (never folded). Then Watching, the day's block, his rules and goals, and Practice (paper and replay). */}
             <div data-use="book" className="contents"><Book rows={booked.rows} sparks={sparks} earnings={events} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} updating={rowsRead && !rowsFresh} onSelect={select} onFollow={changeFollow}
+              risk={<ExposureLine session={session.data} />}
               live={booked.live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} /></div>
             {/* After 14 days of desk use: one quiet card offering to fold what he never opens. Never folds unasked. */}
             <FoldSuggestion />
-            {/* His own paper book: paper positions, Close and Trim, and the scorecard beside his real trades. Never real money. */}
-            <Fold id="paper"><DeskPaper book={paper.book} failed={paper.failed} symbol={centreSymbol} top={<PaperReviewCard review={paper.book?.review} onAsk={actions.ask} />} /></Fold>
-            {/* The QQQ overnight paper book: the one rule that passed its registered test, recorded live. Hidden until switched on. */}
-            <Fold id="strategy.overnight"><DeskOvernight on={on} /></Fold>
-            {/* The QQQ intraday momentum paper book: the rule that passed its registered exam, recorded live at 1x. Hidden until switched on. */}
-            <Fold id="strategy.momentum"><DeskMomentum on={on} /></Fold>
-            {/* Replay practice: past days paper traded on the desk, scored apart from live paper. */}
-            <Fold id="replay.practice"><ReplayPractice /></Fold>
-            {/* Before the open and after the close the day's block (the brief, the day report) comes straight after the
-                book; in the session it waits under Watching. */}
-            {dayPhase !== null && <div data-use="dayblock" className="contents">{lower}</div>}
             <Fold id="watching"><Watching data={rowsRead ? watching.data : null} failed={watching.failed} sparks={sparks} earnings={events} held={held} selected={centreSymbol}
               onSelect={selectWatched} onAsk={askWatched} onPlan={planWatched} onChange={watching.set} /></Fold>
-            {dayPhase === null && <div data-use="dayblock" className="contents">{lower}</div>}
-            <div data-use="dayfacts" className="contents"><DayFacts session={session.data} /></div>
+            {/* The day's block (the brief, Since you looked, the day report) and the practice goal under it. */}
+            <div data-use="dayblock" className="contents">{lower}<DayFacts /></div>
+            {/* His rules and goals: one neutral line, outside the paper frame, since they cover real trades too. */}
+            <RulesAndGoals book={paper.book} />
+            {/* Practice: his paper book, the QQQ overnight and momentum paper books and Replay, one line each. Never real money. */}
+            <Practice on={on} paper={paper} symbol={centreSymbol} review={<PaperReviewCard review={paper.book?.review} onAsk={actions.ask} />} onReplay={() => setReplay(true)} />
           </div>
         )}
         {on && (
