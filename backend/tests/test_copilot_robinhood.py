@@ -4,6 +4,7 @@ shows with no plan, and say so when the numbers are not fresh; off, nothing chan
 words pass; never an account number, Robinhood's names or its text. Runs against tests/robinhood_fake.py; nothing here
 reaches Robinhood, and no turn triggers a read."""
 import json
+import re
 from datetime import timedelta
 
 import pytest
@@ -59,8 +60,14 @@ def _text(value) -> str:
     return json.dumps(value, default=str, separators=(",", ":"))
 
 
+UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
 def _no_robinhood_strings(text: str) -> None:
-    assert not any(n in text for n in ACCOUNT_NUMBERS), text
+    # A random record id (a uuid) can hold four digits that match a masked account by chance ("…f6621a8267d1"):
+    # the short masks are looked for with the ids taken out; the full numbers and "••" in the text as it is.
+    assert not any(n in text for n in ACCOUNT_NUMBERS if len(n) != 4), text
+    assert not any(n in UUID.sub("<id>", text) for n in ACCOUNT_NUMBERS if len(n) == 4), text
     assert GUIDE not in text and "IGNORE" not in text and "opt-" not in text and "chain-" not in text
     assert not any(secret in text for secret in SECRETS)
     assert "Roth IRA" not in text and '"MCP"' not in text  # Robinhood's account names never: the journal's label only
