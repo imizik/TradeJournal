@@ -1,7 +1,8 @@
 """Is everything behind the desk live? (``GET /copilot/desk/health``, docs/copilot-lab.md § Data health)
 
 One row per source the desk draws on: Robinhood (positions and orders), prices (Tradier), chatter (ApeWisdom),
-TradingView alerts, fill emails (Gmail), Radar and the copilot's API budget left today. Level 2 (moomoo) is a session
+TradingView alerts, fill emails (Gmail), Radar, the copilot's API budget left today and the newest open self-check
+(``engine/self_check.py``). Level 2 (moomoo) is a session
 the browser opens itself, so the desk adds that row from its own Tape; the server never sees it.
 
 Each row: ``state`` (below), a plain ``line`` with its last-good time, ``last_at`` (epoch seconds or None), what it
@@ -263,6 +264,42 @@ def budget(db: Session) -> dict:
     return _row("budget", name, state, f"${left:.2f} left of ${cap:.2f} today", None, BUDGET_AFFECTS)
 
 
+RUNNING_SECONDS = 3 * 60  # a run lasts well under this (six checks of 15 s at most); longer means it never finished
+SELF_CHECK_AFFECTS = ("A minute after each open the server tries the desk's paper pricing, paper runner, replay, minute "
+                      "request, ping links and this strip on live data, and sends one Telegram line.")
+
+
+def self_check(now: float) -> dict:
+    """The newest open self-check (``engine/self_check.py``): today's result, else the last one and when the next runs."""
+    from app.engine import self_check as check
+    name = "Self-check"
+    if not check.enabled():
+        return _row("self_check", name, "off", "Not switched on", None, SELF_CHECK_AFFECTS)
+    last = check.latest()
+    at = _epoch((last or {}).get("at"))
+    today = at is not None and datetime.fromtimestamp(at, ET).date() == datetime.fromtimestamp(now, ET).date()
+    if last is None or at is None:
+        return _row("self_check", name, "quiet", "Runs a minute after the open on market days", None, SELF_CHECK_AFFECTS)
+    if last.get("state") != "done":
+        if today and now - at <= RUNNING_SECONDS:
+            return _row("self_check", name, "unknown", "Running now", at, SELF_CHECK_AFFECTS)
+        return _row("self_check", name, "down" if today else "quiet", f"Did not finish · started {_clock(at, now)}", at,
+                    SELF_CHECK_AFFECTS)
+    results = last.get("results") or []
+    failed = [r for r in results if r.get("status") == "fail"]
+    off = [r for r in results if r.get("status") == "off"]
+    if failed:
+        said = f"{len(failed)} of {len(results)} failed {_clock(at, now)}: " + ", ".join(r["name"] for r in failed)
+    elif off:
+        said = f"{len(results) - len(off)} of {len(results)} OK {_clock(at, now)}, off: " + ", ".join(r["name"] for r in off)
+    else:
+        said = f"All {len(results)} OK {_clock(at, now)}"
+    if not today:
+        return _row("self_check", name, "quiet", f"Last run {said[0].lower()}{said[1:]} · next a minute after the open", at,
+                    SELF_CHECK_AFFECTS)
+    return _row("self_check", name, "down" if failed else "live", said, at, SELF_CHECK_AFFECTS)
+
+
 # --------------------------------------------------------------------------- the strip
 
 def overall(rows: list[dict]) -> str:
@@ -291,6 +328,7 @@ def build(db: Session, now: float, robinhood_facts, mode: str = "live") -> dict:
         one("gmail", "Fill emails", GMAIL_AFFECTS, lambda: gmail(db, now)),
         one("radar", "Radar", RADAR_AFFECTS, lambda: radar(now, phase, regular)),
         one("budget", "Copilot budget", BUDGET_AFFECTS, lambda: budget(db)),
+        one("self_check", "Self-check", SELF_CHECK_AFFECTS, lambda: self_check(now)),
     ]
     return {"as_of": today._iso(now), "now": int(now), "phase": phase, "overall": overall(rows), "sources": rows}
 
@@ -306,6 +344,8 @@ def fixture(now: float) -> dict:
         _row("gmail", "Fill emails", "live", f"Live · last email {_clock(now - 41 * 60, now)}", now - 41 * 60, GMAIL_AFFECTS),
         _row("radar", "Radar", "live", f"Recording · pass {_clock(now - 40, now)}", now - 40, RADAR_AFFECTS),
         _row("budget", "Copilot budget", "live", "$2.40 left of $4.00 today", None, BUDGET_AFFECTS),
+        _row("self_check", "Self-check", "down", f"1 of 6 failed {_clock(now - 52 * 60, now)}: replay", now - 52 * 60,
+             SELF_CHECK_AFFECTS),
     ]
     return {"as_of": datetime.fromtimestamp(now, UTC).isoformat(), "now": int(now), "phase": "regular",
             "overall": overall(rows), "sources": rows}

@@ -470,6 +470,23 @@ async def _maybe_start_paper_runner(app_: FastAPI):
     return asyncio.create_task(runner.loop())
 
 
+async def _maybe_start_self_check(app_: FastAPI):
+    """The desk's open self-check (app/engine/self_check.py): a minute after each regular open, the newest desk features
+    tried on live data and one Telegram line. On by default while the copilot runs on live evidence; SELF_CHECK_ENABLED=false
+    switches it off."""
+    if os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    from app.engine import self_check
+    if not self_check.enabled():
+        return None
+    from app.ai import copilot
+    found = copilot.settings()
+    if not found.enabled or found.evidence != "live":
+        return None
+    check = self_check.SelfCheck(engine, app=app_, runner=lambda: getattr(app_.state, "paper_runner", None))
+    return asyncio.create_task(check.loop())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Alembic owns the schema. The app used to call create_all() here, which
@@ -511,11 +528,14 @@ async def lifespan(_app: FastAPI):
     chatter = await _maybe_start_chatter(_app)
     robinhood_fills = await _maybe_start_robinhood_fills(_app)
     paper_runner = await _maybe_start_paper_runner(_app)
+    self_check = await _maybe_start_self_check(_app)
     from app.routers.copilot_desk import warm_at_start
     warm_at_start()  # the desk's market calendar, on its own thread
     try:
         yield
     finally:
+        if self_check is not None:
+            self_check.cancel()
         if paper_runner is not None:
             paper_runner.cancel()
         if robinhood_fills is not None:

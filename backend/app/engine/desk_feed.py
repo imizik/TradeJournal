@@ -71,7 +71,7 @@ SYMBOL = re.compile(r"[A-Z]{1,6}(\.[A-Z])?")
 PLAN_KINDS = {"entry", "invalidation", "time_stop", "nudge", "no_plan", "link"}
 NOTE_KINDS = {"companion_update", "companion_adopt"}
 SKIP_KINDS = {"prep", "evening_review", "week_review", "day_replay", "research", "radar_setup", "radar_event", "radar_digest",
-              "paper_review"}
+              "paper_review", "self_check"}
 HELD = {"merged": "Held back: merged into an earlier ping", "suppressed": "Held back: quiet window",
         "over_cap": "Held back: over the day's budget", "not_followed": "Held back: not followed"}
 RADAR_KIND = {"relative_to_spy": "vs SPY", "relative_to_sector": "vs sector", "group_move": "Group move",
