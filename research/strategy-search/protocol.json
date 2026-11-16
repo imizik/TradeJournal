@@ -1,0 +1,80 @@
+{
+  "protocol_id": "strategy-search-20261115-v1",
+  "registered": "2026-11-15",
+  "registered_before": "any result of these four rules on these ETFs was computed here. Already known: the noise-area intraday momentum rule passed on QQQ (#822, result #825; chosen settings lookback 60, VM 1.25, every 60, band_vwap; exam +4.40 bp a day at 1x on 2022-2026); the QQQ overnight hold passed (#818); the QQQ 5-minute opening range breakout was closed (#814); opening breakouts, gap reversals and dip buys on single stocks found nothing (#760/#762, #794, #803); a 2-10 day momentum pullback on leaders found nothing (#811). None of those tested these ETFs (other than QQQ) with these rules. The QQQ minute bars are not used here; QQQ appears only in the daily families (dip buy and trend switch), whose rules were never run on it.",
+  "question": "With settings chosen only on 2016-2021, does any of four strategy families make money after costs on 2022-2026, years its search never saw?",
+  "why_it_matters": "The owner asked to search settings freely to find more strategies that work. Searching on old years and examining one chosen setting a family on untouched years keeps that honest; four families get four exams, so each exam uses a 99% interval.",
+  "data": "Alpaca SIP bars (scripts.strategy_search_data): one-minute bars, split-adjusted, 09:30-15:59 New York, for SPY, IWM, DIA, XLK, XLF, XLE, XLV, XLI, XLY, XLP, XLU, XLB and SMH, 2016-2026; daily bars adjusted for splits and dividends for those 13 and QQQ, 2015-2026. Early closes (the 21 dates in the QQQ opening range breakout script) are not traded intraday.",
+  "years": {
+    "search": "2016-01-04 to 2021-12-31",
+    "exam": "2022-01-03 to 2026-11-13",
+    "exam_periods": {
+      "first": "2022-01-03 to 2023-12-31",
+      "second": "2024-01-01 to 2026-11-13"
+    }
+  },
+  "families": {
+    "etf_momentum": {
+      "rule": "the noise-area intraday momentum rule exactly as scripts.qqq_intraday_momentum_study (sigma from the previous LOOKBACK full sessions, gap-adjusted bands x VM, checks every EVERY minutes from 10:00, stops band_vwap / band / opposite, flat at the 15:59 close, decisions on the previous minute's close, fills at the check minute's open, $0.01 a share a side), on each of the 13 ETFs at 1x",
+      "book": "equal weight: each ETF a thirteenth of the book; a day an ETF has no trade or no data counts as 0 for that sleeve (the denominator is fixed)",
+      "grid": "the same 180 combinations: lookback 14, 30, 60, 90; vm 0.75, 1.0, 1.25, 1.5, 2.0; every 15, 30, 60; stop band_vwap, band, opposite",
+      "search_scoring": "from the first session at which every ETF has 90 previous full sessions",
+      "stress": "$0.02 a share a side"
+    },
+    "dip_buy": {
+      "rule": "each ETF decides at each daily close: flat and Wilder RSI(RSI) below BELOW and the close above its TREND-day simple average (TREND 0 = no trend filter) -> buy at that close; held and the close above its EXIT_SMA-day simple average, or held MAX_DAYS sessions -> sell at that close. Returns are close to close on adjusted daily bars",
+      "book": "equal weight over the 14 ETFs (QQQ included): each sleeve a fourteenth of the book, flat sleeves earn 0",
+      "grid": "180 combinations: rsi 2, 3; below 5, 10, 15, 20, 25; trend 0, 100, 200; exit_sma 3, 5, 10; max_days 5, 10",
+      "cost": "0.02% of price a side; stress 0.05%",
+      "exam_statistic": "exposure-matched: each sleeve's daily return minus its own ETF's daily return times the share of exam days that sleeve held it (days held through the session over all exam days), averaged over the 14 sleeves. Being invested in ETFs that rose earns nothing by itself; only the timing counts"
+    },
+    "trend_switch": {
+      "rule": "QQQ only, adjusted daily closes: flat and the close above SMA x (1 + BUFFER) -> long from that close; long and the close below SMA x (1 - BUFFER) -> cash from that close. CHECK daily, or weekly at each week's last session. Cash earns nothing",
+      "grid": "48 combinations: sma 20, 50, 100, 150, 200, 250; buffer 0, 0.01, 0.02, 0.03; check daily, weekly",
+      "cost": "0.02% a switch; stress 0.05%"
+    },
+    "gap": {
+      "rule": "each ETF, full sessions: the gap is today's 09:30 open over the previous session's last regular close, minus 1. When |gap| is at least GAP_ATR x the average (high - low) / close of the previous 14 full sessions, take a 1x position at the open of the ENTRY minute bar (09:31 or 10:00): fade = against the gap, follow = with it; out at the open of the EXIT minute bar (11:00, 12:00) or at the 15:59 close",
+      "book": "equal weight over the 13 ETFs: a day an ETF has no trade or no data counts as 0 (the denominator is fixed)",
+      "grid": "48 combinations: gap_atr 0.25, 0.5, 0.75, 1.0; direction fade, follow; entry 571 (09:31), 600 (10:00); exit 660 (11:00), 720 (12:00), 959 (the close)",
+      "cost": "$0.01 a share a side; stress $0.02"
+    }
+  },
+  "search": {
+    "choice": "for each family, the combination with the highest annualized Sharpe ratio (daily mean / standard deviation x sqrt 252) of its book on the search years (dip_buy: of its plain book returns); ties go to the setting earlier in the grid, setting by setting in the order listed. Leverage is not searched",
+    "combinations": "180 + 180 + 48 + 48 = 456 in all; each family's chosen combination alone goes to its exam"
+  },
+  "exam": {
+    "return_families": "etf_momentum and gap: mean daily book return in basis points over every full exam session; dip_buy: the mean daily exposure-matched excess (above) in basis points",
+    "trend_switch": "the switch's annualized Sharpe ratio minus that of holding QQQ over the same exam days",
+    "uncertainty": "2,000 bootstrap resamples of calendar months (seed 20261115), each month's days kept together; two-sided percentile interval at 99% (four families, one exam each)"
+  },
+  "decisions": {
+    "worth a paper test": "the interval's lower end is above 0, the statistic is above 0 in both exam periods, and it is above 0 with the stress cost",
+    "loses money": "the interval's upper end is below 0",
+    "no evidence either way": "anything else",
+    "what_each_allows": "Worth a paper test: that family's chosen rule as a paper book on the desk at 1x, before any money. Otherwise that family is closed: no new grid, settings, symbols or filters on any history"
+  },
+  "descriptive_only": [
+    "each family's search table, top ten, chosen combination and share of combinations with a positive search Sharpe",
+    "each family's exam by year, growth of $1 and maximum drawdown",
+    "etf_momentum: each ETF's exam result alone, the book without SPY, XLK and SMH (the ETFs that move most like QQQ), and the paper's own settings (14, 1.0, 30, band_vwap) on the exam",
+    "dip_buy: the plain book returns on the exam and by year, equal-weight buy-and-hold of the 14 ETFs over the exam, and each ETF's share of exam days held",
+    "trend_switch: both legs by year, the switch at 2x and 3x daily leverage beside holding QQQ at 2x and 3x (no financing or decay costs), and the share of days with a non-zero return",
+    "gap: the share of days traded"
+  ],
+  "limits": [
+    "intraday fills are minute-bar opens plus a stated cost, not quotes; daily fills are the adjusted close plus a stated cost, which assumes a closing order",
+    "leverage figures ignore margin interest, borrow and the daily-reset decay of leveraged funds",
+    "the trend switch's cash earns nothing, which understates it in years with high short rates",
+    "the ETF list was chosen for liquidity and breadth before any result; it includes funds whose sector mix changed over the years",
+    "the chosen setting is the best of its grid on the search years; the exam on untouched years is the check on that choice",
+    "etf_momentum is here because the same rule passed on QQQ over these exam years; SPY, XLK and SMH move much like QQQ intraday, so a pass partly repeats a known result. Its verdict is read together with the book without those three, which is reported beside it",
+    "minute bars are split-adjusted only: each ex-dividend open shows a gap down equal to the dividend (about 0.6-1% a quarter in XLU, XLE, XLP, XLF), so some gap trades and the momentum band's previous-close reference react to dividends rather than news",
+    "costs are cents a share on split-adjusted minute prices: before any split in these years the cost in basis points is overstated by the split ratio, which weighs on the search years more than the exam",
+    "intraday means leave out early closes (about three a year) rather than counting them as 0",
+    "the dip_buy exposure match uses each sleeve's share of days held over the whole exam, a constant; it does not match the timing of market moves day by day"
+  ],
+  "results": "Market data only: the aggregate results are committed beside this protocol after the single run; the data stays outside the repository.",
+  "one_run": "one historical run under this id: the four searches and the four exams together. A changed constant is a new protocol id, recorded beside this one"
+}
