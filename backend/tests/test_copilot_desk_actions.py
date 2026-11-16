@@ -67,6 +67,46 @@ def test_a_view_change_is_a_card_too_and_needs_no_price():
     assert copilot_actions.line(card(Desk(), action="show", symbol="NBIS", tab="chain")) == "Show NBIS · Chain"
 
 
+def test_a_show_moves_the_desk_to_any_place_on_its_one_list_and_the_ticker_is_optional_there():
+    rules = card(Desk(hidden=True), action="show", place="rules")  # no ticker: nothing to check but where the desk goes
+    assert rules == {"action": "show", "symbol": None, "timeframe": None, "place": "rules", "made_at": 1_792_857_000}
+    assert copilot_actions.line(rules) == "Show My rules"
+    chain = card(Desk(), action="show", symbol="nvda", place="chain")
+    assert chain["symbol"] == "NVDA" and copilot_actions.line(chain) == "Show NVDA · Chain"
+    assert "Not following" in refused(Desk(hidden=True), action="show", symbol="NBIS", place="replay")
+    # A place that takes the copilot's pane or the whole desk waits for his tap; the others move at once.
+    note = lambda **args: copilot_actions.act(Desk(), copilot_actions.validate(args), now=1)["note"]  # noqa: E731
+    assert "taps it" in note(action="show", place="now") and "at once" in note(action="show", place="rules")
+    for args, why in (({"action": "show", "place": "orders"}, "one of the desk's places"),
+                      ({"action": "show", "place": "send"}, "one of the desk's places"),
+                      ({"action": "show", "symbol": "NBIS", "place": "chain", "tab": "chain"}, "not both"),
+                      ({"action": "show"}, "US ticker"),  # a show without a place still names a ticker
+                      ({"action": "watch", "place": "rules"}, "unexpected arguments"),
+                      ({"action": "alert", "side": "below", "price": 98}, "US ticker")):
+        with pytest.raises(copilot_tools.ToolInputError, match=why):
+            copilot_tools.validate("desk_action", args)
+    # The schema the model sees offers exactly the list's places, and only a show takes one.
+    [tool] = [t for t in copilot_tools.TOOLS if t["name"] == "desk_action"]
+    assert tool["input_schema"]["properties"]["place"]["enum"] == list(copilot_tools.DESK_PLACES)
+    assert tool["input_schema"]["required"] == ["action"]
+    assert "place" in copilot_actions.KEYS["show"] and not any("place" in keys for a, keys in copilot_actions.KEYS.items() if a != "show")
+    # A saved place card reads back as it was made; a tampered place does not.
+    stored = {k: v for k, v in rules.items() if k != "action"} | {"action": "show"}
+    assert copilot_actions.saved(stored) == rules
+    with pytest.raises(copilot_tools.ToolInputError):
+        copilot_actions.saved({**stored, "place": "orders"})
+
+
+def test_the_backend_places_are_the_desks_one_list():
+    """frontend/lib/deskPlaces.ts DESK_PLACES names every place once (the ⌘K palette's places are built from it): the
+    copilot's allowed places are exactly its ids, in its order, with its names."""
+    import re
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[2] / "frontend/lib/deskPlaces.ts").read_text()
+    listed = re.findall(r'\{\s*id:\s*"([a-z]+)",\s*label:\s*"([^"]+)"', source)
+    assert dict(listed) == copilot_tools.DESK_PLACES and [i for i, _ in listed] == list(copilot_tools.DESK_PLACES)
+
+
 def test_an_alert_card_says_what_it_sets_and_keeps_the_price_it_was_made_at():
     made = card(Desk(), action="alert", symbol="NBIS", side="below", price=98)
     assert copilot_actions.line(made) == "Set alert: NBIS below 98.00"
@@ -153,6 +193,9 @@ def run(question, job="desk", evidence=None):
     ("Alert me if NBIS loses 98", "Set alert: NBIS below 98.00"),
     ("Show me NBIS on the 15 minute", "Show NBIS · 15m"),
     ("Open the chain for NBIS", "Show NBIS · Chain"),
+    ("Show me NVDA's chain", "Show NVDA · Chain"),
+    ("Open my rules", "Show My rules"),
+    ("Take me to replay for AAPL", "Show AAPL · Replay a past day"),
     ("Watch IREN", "Watch IREN"),
     ("Mark 102.50 as resistance on NBIS", "Draw 102.50 on NBIS · resistance"),
     ("Build the 100 call for Dec 18 on NBIS", "Open ticket: NBIS 100 call Dec 18"),
@@ -216,6 +259,9 @@ def test_the_fixture_reads_only_requests_that_open_the_message():
     today = date(2026, 11, 13)
     assert desk_requests("What should I watch on NBIS today?", "NBIS", today) is None
     assert desk_requests("Is my stop too tight? Move it to 96?", "NBIS", today) is None
+    assert desk_requests("Open my rules", "NBIS", today) == [{"action": "show", "place": "rules"}]  # not the desk's ticker
+    assert desk_requests("Go to the paper book", None, today) == [{"action": "show", "place": "paper"}]
+    assert desk_requests("What are my rules about averaging down?", "NBIS", today) is None
     assert desk_requests("Build the 100/110 call spread", "NBIS", today) == "Which NBIS contract: the strike, call or put, and the expiry?"
     assert desk_requests("Build the 100/110 call spread for Dec 18", "NBIS", today) == [{"action": "ticket", "symbol": "NBIS", "strike": 100.0,
         "short_strike": 110.0, "option_type": "call", "expiry": "2026-12-18"}]

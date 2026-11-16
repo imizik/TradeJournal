@@ -54,6 +54,7 @@ import { DeskAccounts, activeAccount, forAccount } from "@/components/copilot/De
 import DeskHealthDot from "@/components/copilot/DeskHealth";
 import { DeskUseRoot, Fold, FoldMore, FoldSuggestion, useCountOpen, useDeskUse } from "@/components/copilot/DeskUse";
 import { PIECE, countOpen, countTap } from "@/lib/deskUse";
+import { DESK_PLACES, PLACE, placeFromWords, type DeskPlaceId } from "@/lib/deskPlaces";
 import styles from "./CopilotLab.module.css";
 
 // The Grid's code loads the first time its tab opens.
@@ -77,13 +78,8 @@ const narrow = () => typeof window !== "undefined" && window.matchMedia("(max-wi
 type CentreTab = "chart" | "chain" | "ticket" | "check" | "grid";
 /** The centre's tabs: the selected ticker's tools in the order he works (see it, pick a contract, build the ticket),
  * then Check a call and the Grid of many tickers. ``key`` is the tab's desk key. */
-const CENTRE_TABS: readonly { id: CentreTab; label: string; key: string; hint: string }[] = [
-  { id: "chart", label: "Chart", key: "C", hint: "The selected ticker's chart" },
-  { id: "chain", label: "Chain", key: "O", hint: "The selected ticker's option chain" },
-  { id: "ticket", label: "Ticket", key: "T", hint: "A plan's ticket to copy. Nothing is sent." },
-  { id: "check", label: "Check a call", key: "L", hint: "Paste a call and check it" },
-  { id: "grid", label: "Grid", key: "G", hint: "Your positions and watched names, several charts at once" },
-];
+const CENTRE_TABS: readonly { id: CentreTab; label: string; key: string; hint: string }[] = (["chart", "chain", "ticket", "check", "grid"] as const)
+  .map(id => { const place = PLACE.get(id)!; return { id, label: place.label, key: place.key!, hint: place.hint }; });
 /** A phone's three views (CopilotLab.module.css): one shows at a time under the switch. */
 type DeskView = "book" | "ticker" | "feed";
 /** A phone's view changed: the page goes to where that view starts. */
@@ -380,7 +376,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const planTrade = useCallback(() => go(PLAN_HREF), [go]);
   const [refresh, setRefresh] = useState(0);
   // The copilot's desk action cards: a view card moves the centre (Undo puts it back); a tap that changed a list reads again.
-  useDeskActionHost({ picked, tab: centreTab, rows, go, setPicked, setPickedKey, setTab: setCentreTab, setRefresh, setSheet, showCentre });
+  // A show card's place moves the desk the way ⌘K does (``moveTo``, below), and hands back its Undo.
+  const moveRef = useRef<(place: DeskPlaceId, symbol?: string | null) => () => void>(() => () => undefined);
+  const moveCard = useCallback((place: DeskPlaceId, symbol?: string | null) => moveRef.current(place, symbol), []);
+  useDeskActionHost({ picked, tab: centreTab, rows, go, setPicked, setPickedKey, setTab: setCentreTab, setRefresh, setSheet, showCentre, moveTo: moveCard });
   // Mark plan done in the thread menu: only for a plan row (armed and not entered, or exited), never a held position's.
   const [planSymbol, setPlanSymbol] = useState<string | null>(null);
   // A decision or an alert still asking today: a conversation opens on it, at the top of the thread.
@@ -592,6 +591,47 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     setReplay(true);
     if (redoList) setTimeout(() => document.querySelector<HTMLElement>('[data-testid="redo-worst"]')?.scrollIntoView({ block: "center" }), 600);
   }, []);
+  // Every place on the desk (``lib/deskPlaces.ts``, the one list) and how its palette command opens it: the ticker's tools,
+  // the Feed, the copilot's message box, the thread list, Now, and the book side's places, each of which also has a button
+  // where it lives. One per place, or this does not compile.
+  const placeRun = useMemo<Record<DeskPlaceId, () => void>>(() => ({
+    chart: () => openCentre("chart"), chain: () => openCentre("chain"), ticket: () => openCentre("ticket"), check: () => openCentre("check"),
+    grid: () => openCentre("grid"),
+    feed: showFeed, copilot: focusCopilot, book: focusBook, threads: toggleThreads,
+    now: () => { goNow(true); showCopilot(); },
+    paper: () => reveal(["paper"], "desk-paper", false, "paper"),
+    rules: () => reveal([], "rules-toggle", true, "rules"),
+    goals: () => reveal([], "goals-set", true, "rules"),
+    watchlist: () => reveal(["watching"], "desk-watching"),
+    note: () => reveal([], ['[data-desk-book] li[data-selected] [data-testid="desk-note-button"]', '[data-desk-book] [data-testid="desk-note-button"]'], true),
+    health: () => desk.current?.querySelector<HTMLElement>('[data-testid="desk-health"]')?.click(),
+    replay: () => openReplay(), redo: () => openReplay(true), day: toggleDay,
+  }), [openCentre, showFeed, focusCopilot, focusBook, toggleThreads, goNow, showCopilot, reveal, openReplay, toggleDay]);
+  // The desk as a move found it, for the move's Undo: the views a place changes, and which lines and editors were open.
+  const shownNow = useRef({ centreTab, feedShown, phoneView, threadsShown, dayList, replay, sheet });
+  useEffect(() => { shownNow.current = { centreTab, feedShown, phoneView, threadsShown, dayList, replay, sheet }; });
+  // A move to a place from the copilot's show card or ⌘K's "Go to" (with the ticker it names): as its palette command,
+  // except that a place which toggles (the thread list, the Day checklist, Data health) only opens. It only moves the desk:
+  // an editor opens, nothing is saved, armed or sent. Returns its Undo: the views back as they were, and every line or
+  // editor it opened closed again.
+  const moveTo = useCallback((place: DeskPlaceId, symbol: string | null = null): (() => void) => {
+    const was = shownNow.current;
+    const open = new Set(Array.from(desk.current?.querySelectorAll('[aria-expanded="true"]') ?? []));
+    if (symbol) { setPicked(symbol); setPickedKey(null); }
+    if (place === "threads") setThreadsShown(true);
+    // A note on a named ticker: that ticker's own book row only, never another position's line.
+    else if (place === "note" && symbol) reveal([], ['[data-desk-book] li[data-selected] [data-testid="desk-note-button"]'], true);
+    else if (place === "day") { if (!dayShown) toggleDay(); }
+    else if (place === "health") { if (desk.current?.querySelector('[data-testid="desk-health"]')?.getAttribute("aria-expanded") !== "true") placeRun.health(); }
+    else placeRun[place]();
+    return () => {
+      const opened = Array.from(desk.current?.querySelectorAll<HTMLElement>('[aria-expanded="true"][data-testid]') ?? []).filter(el => !open.has(el));
+      for (const el of opened.reverse()) el.click(); // the editor inside a line first, then the line
+      setCentreTab(was.centreTab); setFeedShown(was.feedShown); setPhoneView(was.phoneView); setThreadsShown(was.threadsShown);
+      setDayList(was.dayList); setReplay(was.replay); setSheet(was.sheet);
+    };
+  }, [placeRun, dayShown, toggleDay, reveal]);
+  useEffect(() => { moveRef.current = moveTo; }, [moveTo]);
   const commands = useMemo<PaletteCommand[]>(() => [
     { id: "plan", name: "Plan a trade", hint: "A new plan; you name the symbol. Nothing is sent.", key: "N", run: planTrade },
     { id: "week", name: "Review my week", hint: "Asks the copilot now: planned vs unplanned, follow-through, exits", run: () => actions.ask(WEEK_REVIEW_CONTEXT) },
@@ -601,24 +641,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       { id: "prep", name: "Prep the day", hint: "Puts a prep question in the box, unsent", run: () => fill(PREP_PROMPT) }] : []),
     ...(dayPhase === "close" ? [{ id: "close", name: "Close the day", hint: "Each close question and fill to link, one at a time. Nothing is sent.", run: closeDay }] : []),
     // The Day button's checklist: its name follows the clock (``closeDay`` keeps the name "Close the day").
-    { id: "day", name: dayPhase === "pre" ? "Start the day" : dayPhase === "close" ? "Close-of-day checklist" : "Day checklist", key: "D",
-      hint: dayKind === "start" ? "Brief, plans to arm, goals, prep question. Nothing is sent." : "Your day, to review, paper next to real, rules, goals, tomorrow. Nothing is sent.", run: toggleDay },
-    // Every place on the desk, each with its key: the ticker's tools, the Feed, the copilot's message box, the thread list.
-    ...CENTRE_TABS.map(tab => ({ id: `go-${tab.id}`, name: tab.label, hint: tab.hint, key: tab.key, run: () => openCentre(tab.id) })),
-    { id: "go-feed", name: "Feed", hint: "Yours, ideas and the market today", key: "F", run: showFeed },
-    { id: "go-copilot", name: "Copilot", hint: "The conversation and its message box", key: "/", run: focusCopilot },
-    { id: "go-book", name: "Book", hint: "Your positions and what needs you", key: "B", run: focusBook },
-    { id: "go-threads", name: "Threads", hint: "The thread list and previous days", key: "[", run: toggleThreads },
-    { id: "go-now", name: "Now", hint: "Today's Main chat in the copilot", run: () => { goNow(true); showCopilot(); } },
-    // The book side's places: each also has a button where it lives.
-    { id: "go-paper", name: "Paper book", hint: "Paper positions, orders and score. Not real money.", key: "P", run: () => reveal(["paper"], "desk-paper", false, "paper") },
-    { id: "go-rules", name: "My rules", hint: "Write or change your trading rules", run: () => reveal([], "rules-toggle", true, "rules") },
-    { id: "go-goals", name: "This week's goals", hint: "Set or change one or two goals for the week", run: () => reveal([], "goals-set", true, "rules") },
-    { id: "go-watching", name: "Watchlist", hint: "Your watched names: add, import, plan", key: "W", run: () => reveal(["watching"], "desk-watching") },
-    { id: "go-note", name: "Note on this position", hint: "A one-line note on the selected position", run: () => reveal([], ['[data-desk-book] li[data-selected] [data-testid="desk-note-button"]', '[data-desk-book] [data-testid="desk-note-button"]'], true) },
-    { id: "go-health", name: "Data health", hint: "Is every source live: Robinhood, prices, fill emails, Radar", run: () => desk.current?.querySelector<HTMLElement>('[data-testid="desk-health"]')?.click() },
-    { id: "go-replay", name: "Replay a past day", hint: "Practice on a past day's bars. Not live, not real money.", key: "R", run: () => openReplay() },
-    { id: "go-redo", name: "Redo one of my trades", hint: "Re-trade a past real trade in replay, then compare", run: () => openReplay(true) },
+    { id: "day", name: dayPhase === "pre" ? "Start the day" : dayPhase === "close" ? "Close-of-day checklist" : PLACE.get("day")!.label, key: PLACE.get("day")!.key,
+      hint: dayKind === "start" ? "Brief, plans to arm, goals, prep question. Nothing is sent." : "Your day, to review, paper next to real, rules, goals, tomorrow. Nothing is sent.", run: placeRun.day },
+    // Every other place on the desk, each with its key where it has one.
+    ...DESK_PLACES.filter(p => p.id !== "day").map(p => ({ id: `go-${p.id}`, name: p.label, hint: p.hint, key: p.key, run: placeRun[p.id] })),
     { id: "desk-use", name: "How I use the desk", hint: "What you use most and least; fold away what you don't", run: openUse },
     // A piece he folded away is still one command away: it shows for now, where it lives.
     ...foldedPieces.map(id => ({ id: `fold-${id}`, name: PIECE.get(id)!.label, hint: "Folded · shows it for now", run: () => {
@@ -627,7 +653,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       if (area === "Left") showBook(); else if (area === "Centre") { setCentreTab("chart"); showCentre(); } else if (area === "Right") showFeed();
       requestAnimationFrame(() => document.querySelector(`[data-use="${id}"]`)?.scrollIntoView({ block: "nearest" }));
     } })),
-  ], [actions, dayPhase, dayKind, toggleDay, fill, planTrade, closeDay, openCentre, showFeed, focusCopilot, focusBook, toggleThreads, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre, goNow, reveal, openReplay]);
+  ], [actions, dayPhase, dayKind, placeRun, fill, planTrade, closeDay, showFeed, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre]);
 
   // J / K walk the conversations the thread list shows, subthreads included, in its order.
   const [walk, setWalk] = useState<string[]>([]);
@@ -757,6 +783,18 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const sparks = useSparks(on ? [...(centreSymbol ? [centreSymbol] : []), ...followed.flatMap(r => r.symbol ? [r.symbol] : [])] : [], on ? watched : []);
   // Earnings tags for the book and the Watching list: one read for both, kept for half an hour.
   const events = useDeskEvents(on && rowsRead, followed, watched);
+  // ⌘K's "Go to": a short phrase naming a place ("rules", "nvda chain") goes straight there. Its ticker must be one the
+  // desk already shows (the book's and the thread list's rows, the Watching list), never one he set to Not following.
+  const goTo = useCallback((query: string): PaletteCommand | null => {
+    const quiet = new Set(rows.filter(r => r.hidden && r.symbol).map(r => r.symbol!));
+    const known = new Set([...rows.flatMap(r => r.symbol ? [r.symbol] : []), ...(watching.data?.symbols ?? [])].filter(s => !quiet.has(s)));
+    const found = placeFromWords(query, known);
+    if (!found) return null;
+    const { place, symbol } = found;
+    // A place on its own is its palette command, brought to the top (and not listed twice).
+    if (!symbol) return commands.find(c => c.id === (place.id === "day" ? "day" : `go-${place.id}`)) ?? null;
+    return { id: `goto-${place.id}`, name: `Go to ${symbol ? `${symbol} · ` : ""}${place.label}`, hint: place.hint, key: place.key, run: () => { moveTo(place.id, symbol); } };
+  }, [rows, watching.data, moveTo, commands]);
   // A thread opened from anywhere but the book (the drawer, J / K, the palette, a link) takes the centre with it.
   const lastTalking = useRef(talking);
   useEffect(() => {
@@ -1147,7 +1185,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       {on && !replay && <button type="button" onClick={askCopilot} className={cn(styles.ask, "min-h-11 items-center gap-1.5 rounded-full border border-foreground/30 bg-card px-4 text-sm font-medium text-foreground shadow-lg hover:bg-secondary max-sm:size-12 max-sm:justify-center max-sm:px-0")}>
         <MessageCircle size={15} aria-hidden className="text-muted-foreground max-sm:size-5 max-sm:text-foreground" /><span className="max-sm:sr-only">Ask the copilot{picked && picked !== talking ? ` about ${picked}` : ""}</span>
       </button>}
-      {on && !replay && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} onConversation={actions.open} />}
+      {on && !replay && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} onConversation={actions.open} goTo={goTo} />}
       </DeskUseRoot>
     </div>
   );

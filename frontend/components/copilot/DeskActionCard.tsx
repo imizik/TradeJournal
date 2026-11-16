@@ -15,10 +15,11 @@ import { CHART_SETTINGS_SAVED, readChartSettings, useChartSettings } from "@/lib
 import { applyEdit, MAX_LEVELS } from "@/lib/drawings";
 import type { Proposal, ProposalOutcome } from "@/lib/copilot";
 import { freshQuote } from "@/lib/copilot";
-import { DESK_CHANGED_EVENT, DESK_GO_EVENT, DESK_POSITION_EVENT, DESK_VIEW_EVENT, Stale, actionLine, actionVerb, applyShow, arrived, heldFacts, revealCentre,
-  rowForLeg, runAction, showOnDesk, staleByAge, staleByPrice, ticketDone, ticketFromBook, undoFor, undoShow, type CentreTab, type DeskAction,
+import { DESK_CHANGED_EVENT, DESK_GO_EVENT, DESK_POSITION_EVENT, DESK_VIEW_EVENT, Stale, actionLine, actionVerb, appliesItself, applyShow, arrived, heldFacts, revealCentre,
+  rowForLeg, runAction, showOnDesk, shownWhere, staleByAge, staleByPrice, ticketDone, ticketFromBook, undoFor, undoShow, type CentreTab, type DeskAction,
   type DeskView, type Done, type PositionDetail } from "@/lib/deskAction";
 import type { DeskThread } from "@/lib/desk";
+import { isDeskPlace, type DeskPlaceId } from "@/lib/deskPlaces";
 import { peekDeskTicks } from "@/lib/deskTicks";
 import { openClosingTicket } from "@/components/copilot/DeskTicket";
 import { PaperButton } from "@/components/copilot/DeskPaper";
@@ -99,10 +100,10 @@ export default function DeskActionCard({ proposal, onOutcome }: { proposal: Desk
   // A view change applies itself once, when it arrived in this tab's stream; a reopened one waits for a tap.
   const applied = useRef(false);
   useEffect(() => {
-    if (card.action !== "show" || applied.current || saved || !arrived(id)) return;
+    if (card.action !== "show" || !appliesItself(card) || applied.current || saved || !arrived(id)) return;
     applied.current = true;
     // The desk moved (or said it is not on this page): the card says so. Once, when it arrived.
-    if (applyShow(id, card)) finish({ text: "Shown on the desk." }); // eslint-disable-line react-hooks/set-state-in-effect -- reports what the desk did
+    if (applyShow(id, card)) finish({ text: `Moved the desk: ${shownWhere(card)}` }); // eslint-disable-line react-hooks/set-state-in-effect -- reports what the desk did
     else setNoDesk(true);
   }, [card, id, saved, finish]);
 
@@ -112,7 +113,7 @@ export default function DeskActionCard({ proposal, onOutcome }: { proposal: Desk
     if (phase === "working" || phase === "drawing") return;
     setNote(null);
     if (card.action === "show") {
-      if (applyShow(id, card)) { setUndone(false); finish({ text: "Shown on the desk." }); }
+      if (applyShow(id, card)) { setUndone(false); finish({ text: `Moved the desk: ${shownWhere(card)}` }); }
       else setNoDesk(true);
       return;
     }
@@ -200,11 +201,13 @@ export default function DeskActionCard({ proposal, onOutcome }: { proposal: Desk
  * the Chart) and reports what it replaced for Undo; a tap that changed a list reads the desk again; a phone's "Show it"
  * (``reveal``) closes the copilot's sheet onto the centre.
  */
-export function useDeskActionHost({ picked, tab, rows, go, setPicked, setPickedKey, setTab, setRefresh, setSheet, showCentre }: {
+export function useDeskActionHost({ picked, tab, rows, go, setPicked, setPickedKey, setTab, setRefresh, setSheet, showCentre, moveTo }: {
   picked: string | null; tab: CentreTab; rows: readonly DeskThread[]; go(href: string): void; setPicked(symbol: string | null): void;
   setPickedKey(key: string | null): void; setTab(tab: CentreTab): void; setRefresh(next: (n: number) => number): void; setSheet(open: boolean): void;
   /** The desk's own "the selected ticker's tools come forward": a phone's ticker view, the centre below 1180 px. */
   showCentre(): void;
+  /** Moves the desk to a place as ⌘K's Go to does (it only moves the desk) and returns what puts it back. */
+  moveTo(place: DeskPlaceId, symbol?: string | null): () => void;
 }) {
   const now = useRef({ picked, tab, rows });
   useEffect(() => { now.current = { picked, tab, rows }; }, [picked, tab, rows]);
@@ -226,6 +229,9 @@ export function useDeskActionHost({ picked, tab, rows, go, setPicked, setPickedK
       const detail = (event as CustomEvent<DeskView & { was: DeskView }>).detail;
       if ("symbol" in detail && detail.symbol !== undefined) { detail.was.symbol = now.current.picked; setPicked(detail.symbol); setPickedKey(null); }
       if (detail.tab) { detail.was.tab = now.current.tab; setTab(detail.tab); }
+      // Only a place on the desk's one list moves it; Undo hands back what that move changed.
+      if (isDeskPlace(detail.place)) detail.was.undo = moveTo(detail.place, detail.symbol ?? null);
+      if (typeof detail.undo === "function") detail.undo();
       if (detail.reveal && window.matchMedia("(max-width: 1179px)").matches) { // the sheet layout (CopilotLab.module.css)
         setSheet(false);
         showCentre();
@@ -238,5 +244,5 @@ export function useDeskActionHost({ picked, tab, rows, go, setPicked, setPickedK
     window.addEventListener(DESK_VIEW_EVENT, onView);
     window.addEventListener(DESK_CHANGED_EVENT, onChanged);
     return () => { window.removeEventListener(DESK_VIEW_EVENT, onView); window.removeEventListener(DESK_CHANGED_EVENT, onChanged); };
-  }, [setPicked, setPickedKey, setTab, setRefresh, setSheet, showCentre]);
+  }, [setPicked, setPickedKey, setTab, setRefresh, setSheet, showCentre, moveTo]);
 }

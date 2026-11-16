@@ -103,7 +103,7 @@ test("a view change shows at once on the desk chart, with Undo", async ({ page }
   await desk(page, [SHOW]);
   const shown = actionCard(page, "show");
   await expect(shown).toContainText("Show NBIS · 15m");
-  await expect(shown).toContainText("Shown on the desk.");
+  await expect(shown).toContainText("Moved the desk: NBIS · 15m");
   await expect(page.getByTestId("desk-chart")).toContainText("NBIS");
   await expect(page.getByRole("group", { name: "Timeframe" }).getByRole("button", { name: "15m" })).toHaveAttribute("aria-pressed", "true");
   await shown.getByRole("button", { name: "Undo" }).click();
