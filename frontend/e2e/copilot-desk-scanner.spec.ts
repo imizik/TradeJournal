@@ -87,7 +87,7 @@ test("the Scanner filter lists today's candidates; a row opens its ticker on the
   await feed.getByRole("button", { name: "Scanner", exact: true }).click();
 
   await crwv.getByRole("button").first().click();
-  await expect(pane.getByRole("tab", { name: "Chart" })).toHaveAttribute("aria-selected", "true");
+  await expect(pane.getByTestId("desk-dock")).toBeVisible(); // the chart with its dock, not the Grid
   await expect(pane.getByTestId("desk-chart").getByText("CRWV", { exact: true }).first()).toBeVisible();
   await expect(pane.getByTestId("desk-chart-canvas")).toHaveAttribute("data-bars", "60");
   await expect(pane.getByTestId("desk-chart-guides")).toHaveText("Scan trigger 118.40 · Scan stop 120.15 · Scan target 115.90");

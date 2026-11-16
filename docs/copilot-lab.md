@@ -547,8 +547,10 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
 
 - **Where things live** (the layout pass of 2026-11-13; `frontend/e2e/copilot-desk-layout.spec.ts`). The order follows
   his day. What needs a decision keeps the top (the Needs-you strip) and his positions the left (the book, always
-  first in its column). The centre is the selected ticker's tools and nothing else: **Chart**, **Chain**, **Ticket**,
-  then **Check a call** and, set apart at the right, the **Grid**. The right side is the copilot, with the **Feed**
+  first in its column). The centre is the selected ticker's tools and nothing else: the **Chart** always on top, and
+  under it **the dock** (since 2026-11-16): **Position | Chain | Ticket | Notes | Check a call**, with a **Grid** button
+  at the dock's right that opens the Grid over the whole centre until **Back to chart**. Going from an idea to its chart,
+  its chain, a contract and the ticket never hides the price. The right side is the copilot, with the **Feed**
   (his own items, ideas, the market) behind the tab beside it (**Copilot | Feed**), so the chart stays on show while he
   reads the Feed: a Feed row's chart, Scanner row or unusual contract changes the centre in place and the Feed stays
   where it was, on the pick he left (Mine, Ideas with its Radar / Scanner / Unusual pick, Market, All; kept while he
@@ -728,9 +730,23 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   calendar's FOMC, CPI and jobs days, faint; no other chart does. The Chain tab marks **ER** on each expiry that lives
   through the next report (on or after its date), with one line naming the report; its read carries `earnings` and each
   expiry's `earnings` flag, from the same cache (`desk_events.next_report`).
-- **Centre.** A tab strip of the selected ticker's tools in the order he works: **Chart**, **Chain** (see
-  [Chain](#chain)), **Ticket** (see [Ticket](#ticket)), then **Check a call** (§ Check a call) and, at the right end,
-  **Grid** (below). The Feed is not a centre tab (since 2026-11-13): it sits beside the copilot. Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
+- **Centre.** The chart never leaves (since 2026-11-16): it sits on top of the centre, and the selected ticker's tools
+  dock under it, one tab at a time in the order he works: **Position** (the Position panel, § Where a held option
+  stands, with the tiles and Timeline below), **Chain** (see [Chain](#chain)), **Ticket** (see [Ticket](#ticket); a
+  roll's ticket too), **Notes** (every note on the selected position's trade, newest last, and a line to add one,
+  § Notes on a trade; a paper position's one note) and **Check a call** (§ Check a call). The dock opens on Position
+  when he holds the ticker (real or paper), else on the Chain (a ticker set to Not following stays on Position, so
+  nothing reads its chain unasked; so does a Chain he folded away); picking a book or Watching row puts it back on that
+  default. Put on ticket from a contract picked in the Chain, the Position panel's Trim / Close / Roll / Close at target and a copilot ticket card switch
+  the dock to Ticket without touching the chart. Selecting an unheld ticker so reads its chain at the Chain's own
+  cadence without a tap; the chart and the Chain share the desk's ticker and walls reads, so nothing is read twice. From 1024 px the chart keeps a share of the centre's height (62% to
+  start; the thin **splitter** on the dock's top edge drags between 40% and 80%, or the arrow keys on it, kept for this
+  browser) and only the dock's content scrolls; from 768 px the dock's content scrolls in its own box under the
+  chart; a phone runs the chart, then the dock's tabs and content, one after the other. **Grid** (below) is a button at
+  the dock's right, not a tab: it opens over the whole centre with **Back to chart** (or C). The keys keep their
+  meaning: C the chart (closing the Grid), O / T / L open Chain / Ticket / Check a call in the dock, G the Grid
+  (Position and Notes have no key). On a phone a Ticket opened from anywhere scrolls the dock into view. A dock tab folded away (§ How I use the desk) waits in the dock's More. The Feed is
+  not in the centre (since 2026-11-13): it sits beside the copilot. Chart: the selected ticker (the book's pick, else the copilot's, else the first followed
   position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's
   fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D, with studies (VWAP, EMAs, SMAs,
   volume), his Charts levels and drawings (with a pencil to draw), the symbol's alerts and a level menu to act from
@@ -744,9 +760,9 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   position selected the first candle starts inside the first screen (the selected book row above it drops its
   standing words, track and sparkline on that view; its P&L, tags, notes and Close / Roll buttons stay, and the full
   standing follows the chart).
-  The chart takes the room: 280–420 px tall on a phone, 420 px on a tablet, and the column's height under the header
-  (420–760 px) on a wide screen. A piece folded away on the desk (§ How I use the desk: chart studies, Tape, Replay)
-  waits in More as a folded entry: one tap shows it for now, **Keep showing** unfolds it. Then, under the chart, a held option's standing (§ Where a held option
+  The candles are 280–420 px tall on a phone, 420 px on a tablet, and on a wide screen the chart's share of the
+  centre over the dock (at least 200 px; about 330 px at 1440×900 under the sandbox's banner). A piece folded away on the desk (§ How I use the desk: chart studies, Tape, Replay)
+  waits in More as a folded entry: one tap shows it for now, **Keep showing** unfolds it. The dock's Position tab holds a held option's standing (§ Where a held option
   stands) and, for a held position, two tiles the book row does not carry: vs SPY today (the stock's change today less SPY's, from the sparks
   read) and Held (its P&L, distance to the stop and expiry are the row's, beside it); and **Timeline ▾** folded under it. The sparks read takes at most 12 symbols (the centre's first), plus up to 30 watched names (Watching, above), and
   answers a repeat within 30 seconds from memory, so several open desks cost one chart-feed read a minute. The chart is
@@ -776,8 +792,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   faded) after the previous session's last 30 minutes (grey), with today's RTH VWAP and the symbol's armed plan and alert
   levels within 4% as thin lines, and his Charts levels and drawings one pixel wide (no notes, no price tags; read
   from the shared chart settings, `GET /charts/settings`, when the Grid opens and when the browser tab shows again;
-  nothing is saved from a tile). No studies, zoom or crosshair: a click opens the name on the Chart tab in place, as its
-  book or Watching row would. One read for every tile when the names or timeframe change, then at most once a minute
+  nothing is saved from a tile). No studies, zoom or crosshair: a click opens the name on the chart in place (the Grid
+  closes), as its book or Watching row would. One read for every tile when the names or timeframe change, then at most once a minute
   while the Grid shows, the session is on and the browser tab is visible; between reads the ticker moves each tile's
   last candle and starts the next. Bars older than 150 s on a live day (their re-read failed or waited for the feed's
   budget) show greyed with their read time ("bars 10:50 AM") and the ticker does not extend them; a finished session's
@@ -892,8 +908,8 @@ for a closing price.
 
 **Phone (375 to 440 px).** One view at a time, picked on a switch that stays at the top of the screen (since
 2026-11-13; before, one long page): **Book** (the Needs-you strip, the book, Watching, the day's block, What's moving), the
-selected ticker (the button carries its symbol, "Market" with none: the centre's Chart, Chain, Ticket, Check a call and
-Grid, five tabs that fit the width) and **Feed** (with its grey count). It opens on the Book, so what needs a decision
+selected ticker (the button carries its symbol, "Market" with none: the chart first, then the dock's Position, Chain,
+Ticket, Notes and Check tabs and the Grid's icon, which fit the width) and **Feed** (with its grey count). It opens on the Book, so what needs a decision
 and the book's first rows are the first screen; a link that names a ticker (a ping's `?symbol=`) opens on that
 ticker's view, under the copilot's sheet. The strip shows on the Book; on the other two views the Book button
 carries an amber count of what needs him. A book or Watching row, a What's moving tile, a Feed row's chart, a closing
@@ -1998,7 +2014,7 @@ The desk counts quietly which of its pieces he uses, so after two weeks it can o
   so a book switched off is not "unused"; Watching, which shows plan levels, is foldable by hand but never suggested):
   "You haven't opened Grid or Tape in 2 weeks. Fold them?" with Fold all /
   Pick (the view) / Not now (14 days' snooze). Nothing folds without his tap.
-- **Folded is one tap away.** A section folds to a slim labelled stub; a centre tab, a chart tool (studies, Tape,
+- **Folded is one tap away.** A section folds to a slim labelled stub; a dock tab (or the Grid's button), a chart tool (studies, Tape,
   Replay) or Chatter moves into its row's More. One tap shows it for now (nothing saved); "Keep showing" unfolds it.
   A folded tab's key and ⌘K still open it, and ⌘K lists every other folded piece. Folding the Account line ends a
   narrowed book, so no account's positions are hidden unsaid. A folded piece stays mounted while
@@ -2560,7 +2576,7 @@ To switch either off again, delete its line (or set `CHATTER_NYT_ENABLED=false`)
 Isaac shares a trade call from his Discord group and gets one card back saying
 what the evidence shows (`backend/app/engine/call_check.py`). From the iPhone:
 long-press the Discord message, Share, Telegram, the TradeJournal bot; or paste
-it in the desk's **Check a call** tab (the centre tab strip).
+it in the desk's **Check a call** tab (the dock under the chart).
 
 - **The check.** One bounded copilot turn as the `check_call` job (§ Jobs),
   under the turn and daily budgets, recorded like every turn (`kind`

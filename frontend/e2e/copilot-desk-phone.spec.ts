@@ -113,17 +113,21 @@ for (const width of [375, 393, 440]) {
     const figure = await amd.getByText("+$12,345").evaluate(el => el.getBoundingClientRect().right);
     const eye = await amd.getByRole("button", { name: /^Hide AMD/ }).evaluate(el => el.getBoundingClientRect().left);
     expect(figure).toBeLessThanOrEqual(eye);
-    // The other two views, and the ticker's tabs (five: they fit the width without swiping).
+    // The other two views, and the ticker's dock tabs under its chart (five and the Grid's button: they fit the width
+    // without swiping).
     await page.getByTestId("desk-view-feed").click();
     await expect(page.getByTestId("desk-feed")).toBeVisible();
     expect(await sideways(page), `Feed at ${width} px`).toBeLessThanOrEqual(0);
     await page.getByTestId("desk-view-ticker").click();
     const strip = page.getByRole("tablist", { name: "Centre" });
     expect(await strip.evaluate(el => el.scrollWidth - el.clientWidth), `the tab strip at ${width} px`).toBeLessThanOrEqual(0);
-    for (const tab of ["Chain", "Check a call", "Ticket", "Grid"]) {
+    for (const tab of ["Position", "Chain", "Check a call", "Notes", "Ticket"]) {
       await page.getByRole("tab", { name: new RegExp(`^${tab}`) }).click();
       expect(await sideways(page), `${tab} at ${width} px`).toBeLessThanOrEqual(0);
     }
+    await page.locator("#desk-centre").getByRole("button", { name: "Grid", exact: true }).click();
+    expect(await sideways(page), `Grid at ${width} px`).toBeLessThanOrEqual(0);
+    await page.getByRole("button", { name: "Back to chart" }).click();
     await page.getByTestId("desk-view-book").click();
     // The round Ask button opens the copilot over the page; one tap on Desk closes it.
     const ask = page.getByRole("button", { name: /^Ask the copilot/ });

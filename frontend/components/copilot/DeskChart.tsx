@@ -113,8 +113,9 @@ const REPORT_ROOM = 10;
 /** Pixels from a mark within which the pointer shows what it was. */
 const HOVER_PX = 10;
 /** The chart's height: the candles take the room. A phone keeps the first candle on the first screen; a wide screen
- * fills the column's height under the header. */
-const CHART_HEIGHT = "h-[clamp(280px,calc(100svh_-_430px),420px)] sm:h-[420px] lg:h-[clamp(420px,calc(100dvh_-_270px),760px)]";
+ * takes the desk's share of the centre over its dock (``--desk-candles``, CopilotLab.module.css), else fills the
+ * column's height under the header. */
+const CHART_HEIGHT = "h-[clamp(280px,calc(100svh_-_430px),420px)] sm:h-[420px] lg:h-[var(--desk-candles,clamp(420px,calc(100dvh_-_270px),760px))]";
 const NEXT_TIMEFRAME: Partial<Record<DeskTimeframe, DeskTimeframe>> = { "2m": "15m", "15m": "1D" };
 const CANDLE_WORD: Record<DeskTimeframe, string> = { "2m": "2-minute", "15m": "15-minute", "1D": "daily" };
 const nyWeekday = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" });

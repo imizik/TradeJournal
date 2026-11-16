@@ -131,6 +131,27 @@
   background: hsl(var(--card));
 }
 
+/* Inside the centre: the chart on top, then the dock of the selected ticker's tools under it (its tab row, then the
+   tab's content). From 1024 px the chart keeps its share of the centre's height (``--desk-share``, the splitter's) and
+   only the dock's content scrolls; from 768 px the dock's content scrolls in its own box; a phone runs them one after
+   the other. The Grid takes the whole centre while open. */
+.chartPart {
+  padding: 12px 12px 6px;
+}
+
+.dock {
+  min-width: 0;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.dockPanel {
+  padding: 12px;
+}
+
+.splitter {
+  display: none;
+}
+
 .thread {
   grid-area: thread;
   container-type: inline-size;
@@ -232,6 +253,16 @@
     z-index: 30;
     margin: 0 12px 12px auto;
     float: right;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  /* The page scrolls here, so the dock's content scrolls in its own box under the chart. */
+  .dockPanel {
+    max-height: max(260px, calc(100dvh - 600px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
   }
 }
 
@@ -419,6 +450,11 @@
     scroll-margin-top: calc(52px + env(safe-area-inset-top));
   }
 
+  /* A Ticket opened on a phone scrolls the dock up to just under the switch. */
+  .dock {
+    scroll-margin-top: calc(52px + env(safe-area-inset-top));
+  }
+
   .views {
     display: flex;
     flex: 1 1 0;
@@ -526,9 +562,62 @@
     scrollbar-width: thin;
   }
 
+  /* The centre fills its row: the chart keeps its share of the height on top (``--desk-candles`` sizes its candles,
+     DeskChart.tsx), the dock takes the rest and only its content scrolls. If the chart's own lines grow (a drawing bar,
+     an alert list), the centre scrolls rather than squeeze the dock below its floor. */
   .centre {
-    align-self: start;
-    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    container-type: size;
+  }
+
+  .centreBody {
+    flex: 1 0 auto;
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    --desk-candles: max(200px, calc(var(--desk-share, 0.62) * 100cqh - 112px));
+  }
+
+  .chartPart {
+    flex: none;
+  }
+
+  .dock {
+    flex: 1 1 0;
+    min-height: 190px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .dockPanel {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+
+  /* The splitter: a thin grab line on the dock's top edge. */
+  .splitter {
+    display: block;
+    flex: none;
+    height: 7px;
+    margin: -4px 0 -3px;
+    position: relative;
+    z-index: 2;
+    cursor: row-resize;
+    touch-action: none;
+  }
+
+  .splitter:hover,
+  .splitter:focus-visible {
+    background: hsl(var(--primary) / 0.35);
+    outline: none;
+  }
+
+  .gridView {
+    flex: 1 0 auto;
   }
 }
 

@@ -97,7 +97,10 @@ const feedPane = (page: Page) => page.getByTestId("desk-feed-pane");
 
 test("the centre is the ticker's tools; the Feed sits beside the copilot, keeps the chart on show and keeps its place", async ({ page }) => {
   await open(page);
-  await expect(centre(page).getByRole("tab")).toHaveText(["Chart", "Chain", "Ticket", "Check a call", "Grid"]);
+  // The chart on top; the ticker's tools dock under it, and the Grid is a button beside them.
+  await expect(centre(page).getByTestId("desk-dock")).toBeVisible();
+  await expect(centre(page).getByRole("tab")).toHaveText(["Position", "Chain", "Ticket", "Notes", "Check a call"]);
+  await expect(centre(page).getByRole("button", { name: "Grid", exact: true })).toBeVisible();
   const side = page.getByRole("tablist", { name: "Side" }).getByRole("tab");
   await expect(side).toHaveText(["Copilot", "Feed1 new"]);
   await expect(side.nth(0)).toHaveAttribute("aria-selected", "true");
@@ -144,10 +147,17 @@ test("the centre is the ticker's tools; the Feed sits beside the copilot, keeps 
 test("every place has a key and a ⌘K command; keys typed in the message box are ignored", async ({ page }) => {
   await open(page);
   const tab = (name: string) => centre(page).getByRole("tab", { name, exact: true });
-  for (const [key, name] of [["o", "Chain"], ["t", "Ticket"], ["l", "Check a call"], ["g", "Grid"], ["c", "Chart"]] as const) {
+  for (const [key, name] of [["o", "Chain"], ["t", "Ticket"], ["l", "Check a call"]] as const) {
     await page.keyboard.press(key);
     await expect(tab(name)).toHaveAttribute("aria-selected", "true");
   }
+  // G opens the Grid over the centre; C brings the chart back, with the dock as he left it.
+  await page.keyboard.press("g");
+  await expect(page.getByTestId("desk-grid")).toBeVisible();
+  await page.keyboard.press("c");
+  await expect(page.getByTestId("desk-grid")).toHaveCount(0);
+  await expect(centre(page).getByTestId("desk-chart")).toBeVisible();
+  await expect(tab("Check a call")).toHaveAttribute("aria-selected", "true");
   // F shows the Feed, F again the copilot.
   await page.keyboard.press("f");
   await expect(feedPane(page)).toBeVisible();
@@ -218,7 +228,10 @@ test("a phone: one view at a time under the switch, the strip on the Book, the t
   await expect(views).toHaveText(["Book1 need you", "NVDA", "Feed"]);
   await expect(views.nth(1)).toHaveAttribute("aria-pressed", "true");
   await expect(centre(page).getByTestId("desk-chart").getByText("NVDA", { exact: true }).first()).toBeVisible();
-  await expect(centre(page).getByRole("tab")).toHaveText(["Chart", "Chain", "Ticket", "Check a call", "Grid"]);
+  // The chart on top; the ticker's tools dock under it, and the Grid is a button beside them.
+  await expect(centre(page).getByTestId("desk-dock")).toBeVisible();
+  await expect(centre(page).getByRole("tab")).toHaveText(["Position", "Chain", "Ticket", "Notes", "Check a call"]);
+  await expect(centre(page).getByRole("button", { name: "Grid", exact: true })).toBeVisible();
   await expect(centre(page).getByTestId("desk-chart-canvas")).toHaveAttribute("data-bars", "60");
   await expect.poll(async () => Number((await centre(page).getByTestId("desk-chart-canvas").getAttribute("data-edges"))?.split(",")[0])).toBeLessThan(40);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);

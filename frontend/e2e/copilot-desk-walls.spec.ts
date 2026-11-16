@@ -97,6 +97,9 @@ async function desk(page: Page) {
     }
     return route.fulfill({ json: { alerts: [], phone: true } });
   });
+  // NBIS is not held, so the dock under the chart would open on its Chain, which reads walls for its own line. Start the
+  // dock on Check a call instead: until a test opens the Chain, only the chart could read walls.
+  await page.addInitScript(() => window.sessionStorage.setItem("desk.centre.v1", "check"));
   await page.goto("/copilot-lab?symbol=NBIS");
   const pane = page.getByRole("region", { name: "Chart and tools" });
   await expect(pane.getByTestId("desk-chart-canvas")).toHaveAttribute("data-bars", "60");

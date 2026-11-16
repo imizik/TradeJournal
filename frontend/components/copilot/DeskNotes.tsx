@@ -9,7 +9,9 @@
 
 import { NotebookPen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { NOTE_MAX, NOTE_SAVED_EVENT, addDeskNote, getDeskNotes, type DeskNote, type DeskNotes, type NoteTarget } from "@/lib/deskNotes";
+import { NOTE_MAX, NOTE_SAVED_EVENT, addDeskNote, getDeskNotes, rowTrade, type DeskNote, type DeskNotes, type NoteTarget } from "@/lib/deskNotes";
+import type { DeskThread } from "@/lib/desk";
+import ModeMark from "@/components/copilot/ModeMark";
 import { cn } from "@/lib/utils";
 
 const ET = "America/New_York";
@@ -50,7 +52,12 @@ export function useDeskNotes(trades: string[], fills: string[]): DeskNotesState 
     setData(current => current.trades[saved.trade_id]?.some(n => n.id === saved.note.id) ? current
       : { ...current, trades: { ...current.trades, [saved.trade_id]: [...(current.trades[saved.trade_id] ?? []), saved.note] } });
   }, []);
-  const save = useCallback(async (target: NoteTarget, text: string) => { add(await addDeskNote(target, text)); }, [add]);
+  // Saved: shown here at once, and told to the rest of the desk (the dock's Notes tab); the listener below skips its own.
+  const save = useCallback(async (target: NoteTarget, text: string) => {
+    const saved = await addDeskNote(target, text);
+    add(saved);
+    window.dispatchEvent(new CustomEvent(NOTE_SAVED_EVENT, { detail: saved }));
+  }, [add]);
   // A note the copilot's card saved shows under its row at once, as the pen's own does.
   useEffect(() => {
     const onSaved = (event: Event) => { const saved = (event as CustomEvent<{ trade_id: string; note: DeskNote }>).detail; if (saved?.note) add(saved); };
@@ -76,7 +83,7 @@ export function NoteButton({ notes, id, label, className }: { notes: DeskNotesSt
 }
 
 /** One text line: Enter saves, Esc (or Enter on nothing) closes. The desk's keys never fire while typing here. */
-function NoteInput({ label, onSave, onClose }: { label: string; onSave(text: string): Promise<void>; onClose(): void }) {
+function NoteInput({ label, onSave, onClose, autoFocus = true }: { label: string; onSave(text: string): Promise<void>; onClose(): void; autoFocus?: boolean }) {
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
@@ -95,12 +102,71 @@ function NoteInput({ label, onSave, onClose }: { label: string; onSave(text: str
   };
   return (
     <span className="block">
-      <input autoFocus type="text" data-testid="desk-note-input" aria-label={`Note on ${label}`} value={text} maxLength={NOTE_MAX}
+      <input autoFocus={autoFocus} type="text" data-testid="desk-note-input" aria-label={`Note on ${label}`} value={text} maxLength={NOTE_MAX}
         disabled={saving} onChange={event => setText(event.target.value)} onKeyDown={event => void key(event)}
         placeholder="Why you're in, or why you left · Enter saves, Esc cancels"
         className="h-8 w-full rounded border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground/70 disabled:opacity-60" />
       {failed && <span role="alert" className="mt-0.5 block text-[11px] text-rose-300">{failed}</span>}
     </span>
+  );
+}
+
+/**
+ * The dock's Notes tab: every note on the selected position's trade (newest last, each with its time) and a line to add
+ * one, saved with the trade as the book's pen saves it (the book's lines show it at once); a paper position in the ticker
+ * shows its one note. Nothing when nothing is selected but a quiet line.
+ */
+export function PositionNotes({ row, paper = [], symbol }: {
+  row: DeskThread | null; symbol: string | null;
+  paper?: readonly { id: string; label: string; note: string | null }[];
+}) {
+  const trade = row?.book ? rowTrade(row) : null;
+  const [notes, setNotes] = useState<DeskNote[]>([]);
+  const [read, setRead] = useState(false);
+  const [adding, setAdding] = useState(0); // the text line's key: a save starts a fresh, empty one
+  useEffect(() => {
+    if (!trade) return;
+    const controller = new AbortController();
+    getDeskNotes([trade], [], controller.signal)
+      .then(data => { setNotes(data.trades[trade] ?? []); setRead(true); })
+      .catch(() => setRead(true));
+    const onSaved = (event: Event) => {
+      const saved = (event as CustomEvent<{ trade_id: string; note: DeskNote }>).detail;
+      if (saved?.trade_id === trade && saved.note) setNotes(current => current.some(n => n.id === saved.note.id) ? current : [...current, saved.note]);
+    };
+    window.addEventListener(NOTE_SAVED_EVENT, onSaved);
+    return () => { controller.abort(); window.removeEventListener(NOTE_SAVED_EVENT, onSaved); };
+  }, [trade]);
+  const label = row?.instrument && row.instrument !== row.symbol ? `${row.symbol} ${row.instrument}` : row?.title ?? symbol ?? "this position";
+  const save = async (text: string) => {
+    const saved = await addDeskNote({ trade_id: trade! }, text);
+    window.dispatchEvent(new CustomEvent(NOTE_SAVED_EVENT, { detail: saved })); // the book's lines and this list
+  };
+  const papered = paper.filter(p => p.note);
+  return (
+    <div data-testid="desk-position-notes" className="space-y-2 text-xs">
+      {trade ? <>
+        <p className="text-muted-foreground">Notes on {label}: why you&apos;re in, or why you leave. Saved with the trade.</p>
+        {notes.length > 0 ? (
+          <ul className="space-y-1">
+            {notes.map(note => (
+              <li key={note.id} data-testid="desk-note" className="flex min-w-0 gap-2">
+                <span className="shrink-0 tabular-nums text-muted-foreground/70">{noteTime(note.at)}</span>
+                <span className="min-w-0 whitespace-pre-wrap break-words text-foreground">{note.text}</span>
+              </li>
+            ))}
+          </ul>
+        ) : read && <p className="text-muted-foreground">No notes on this position yet.</p>}
+        <NoteInput key={adding} label={label} autoFocus={false} onSave={async text => { await save(text); }} onClose={() => setAdding(n => n + 1)} />
+      </> : !papered.length && (
+        <p className="text-muted-foreground">{symbol ? `No open position in ${symbol} to note.` : "Pick a position in your book to see its notes."}</p>
+      )}
+      {papered.map(p => (
+        <p key={p.id} data-testid="desk-paper-note" className="flex flex-wrap items-baseline gap-x-2 text-muted-foreground">
+          <ModeMark mode="paper" short className="self-center" /><span className="font-medium text-foreground">{p.label}</span><span>“{p.note}”</span>
+        </p>
+      ))}
+    </div>
   );
 }
 

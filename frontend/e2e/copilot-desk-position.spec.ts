@@ -239,7 +239,7 @@ test("Trim opens the close-now ticket with the count, Close with all of them; no
   await expect(ticket(page).getByLabel("Quantity in contracts")).toHaveValue("1");
   await expect(ticket(page).getByLabel("Limit price per share")).toHaveValue("4.10");
   await expect(ticket(page).getByTestId("close-now-proceeds")).toHaveText("about $410.00 at this limit"); // 4.10 × 100 × 1
-  await page.getByRole("tab", { name: "Chart" }).click();
+  await page.getByRole("tab", { name: "Position" }).click(); // the dock back on the panel; the chart above never left
   await panel(page).getByTestId("position-close").click();
   await expect(ticket(page)).toContainText("Close at the mark now");
   await expect(ticket(page).getByLabel("Quantity in contracts")).toHaveValue("2");

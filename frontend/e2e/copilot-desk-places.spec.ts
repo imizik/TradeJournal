@@ -112,7 +112,7 @@ test("\"nvda chain\" in ⌘K goes straight to NVDA's chain with no model call; a
   // The other order says the same.
   await jump(page, "chart aapl");
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("tab", { name: "Chart" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("desk-dock")).toBeVisible(); // the chart on top with its dock, not the Grid
   await expect(page.getByTestId("desk-chart")).toContainText("AAPL");
   expect(seen.chats).toBe(0);
   expect(seen.writes).toEqual([]);

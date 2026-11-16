@@ -122,7 +122,7 @@ async function chartOn(page: Page, symbol: string, phone: boolean) {
     await expect(ticker).toHaveText(symbol);
     await ticker.click();
   }
-  await expect(centre(page).getByRole("tab", { name: "Chart" })).toHaveAttribute("aria-selected", "true");
+  await expect(centre(page).getByTestId("desk-dock")).toBeVisible(); // the chart with its dock, not the Grid
   await expect(centre(page).getByTestId("desk-chart").getByText(symbol, { exact: true }).first()).toBeVisible();
 }
 
