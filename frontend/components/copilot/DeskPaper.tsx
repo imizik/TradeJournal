@@ -96,11 +96,11 @@ function limitWords(limit: number, spread: boolean, pays: boolean, closing: bool
  *
  * On an idea (Paper it on a copilot plan, a Radar setup or a scanner pick) ``source`` and ``ideaId`` record whose idea it
  * was, and the confirm opens prefilled from it; an idea without enough to place an order (``order`` null) shows the
- * button disabled with ``why``.
+ * button disabled with ``why``. ``strong``: the main action where it stands (a ticket in the desk's Paper mode).
  */
-export function PaperButton({ order, quantity = 1, note = null, stop = null, target = null, label = "Paper trade it", source = "mine", ideaId = null, why = null }: {
+export function PaperButton({ order, quantity = 1, note = null, stop = null, target = null, label = "Paper trade it", source = "mine", ideaId = null, why = null, strong = false }: {
   order: PaperOrder | null; quantity?: number | null; note?: string | null; stop?: number | null; target?: number | null; label?: string;
-  source?: PaperSource; ideaId?: string | null; why?: string | null;
+  source?: PaperSource; ideaId?: string | null; why?: string | null; strong?: boolean;
 }) {
   const multiplier = order?.instrument === "stock" ? 1 : 100;
   const [open, setOpen] = useState(false);
@@ -173,7 +173,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
       <button type="button" data-testid="paper-button" data-use="ticket.paper" data-source={source} disabled={!order} aria-describedby={!order && why ? `paper-why-${ideaId ?? source}` : undefined}
         onClick={() => { const n = quantity && quantity > 0 ? quantity : 1; setQty(String(n)); setType("market"); check(n); }}
         title={!order && why ? why : "Fill this on paper at the live quote, or place a paper limit: no money, nothing sent"}
-        className={cn(BUTTON, "border-amber-400/60 text-amber-200")}>{label}</button>
+        className={cn(BUTTON, strong ? "border-amber-400 bg-amber-400 font-semibold text-black hover:bg-amber-300" : "border-amber-400/60 text-amber-200")}>{label}</button>
     );
     if (order || !why) return button;
     return (

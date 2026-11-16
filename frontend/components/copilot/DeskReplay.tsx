@@ -14,6 +14,7 @@ import {
   type ReplayQuote, type ReplayScore, type ReplayTrade, type ReplayView, type Speed,
 } from "@/lib/paperReplay";
 import { cn } from "@/lib/utils";
+import { ModeSwitch, type ViewMode } from "./DeskMode";
 import ModeMark, { MODE_FRAME, modeDay } from "./ModeMark";
 
 /**
@@ -615,7 +616,11 @@ export function RedoCompareCard({ data }: { data: RedoCompare }) {
 
 type Loaded = { key: string; bars: ReplayBar[]; open_at: number; close_at: number };
 
-export default function DeskReplay({ symbol, redo = null, onLeave }: { symbol: string | null; redo?: string | null; onLeave(): void }) {
+export default function DeskReplay({ symbol, redo = null, onLeave }: {
+  symbol: string | null; redo?: string | null;
+  /** Back to the live desk; ``to``: the mode the header's switch picked (Real or Paper), else as it was. */
+  onLeave(to?: ViewMode): void;
+}) {
   const [home, setHome] = useState<ReplayHome | null>(null);
   const [homeError, setHomeError] = useState<string | null>(null);
   const [day, setDay] = useState<string | null>(null);
@@ -751,14 +756,14 @@ export default function DeskReplay({ symbol, redo = null, onLeave }: { symbol: s
   const pause = useCallback(() => setPlaying(false), []);
   const onView = useCallback((next: ReplayView) => apply(next), [apply]);
 
-  const leave = async () => {
+  const leave = async (to?: ViewMode) => {
     setPlaying(false);
     if (view && busy && !view.ended) {
       setLeaving(true);
       try { apply(await stepReplay(view.run.id, at, true)); } catch { /* the run keeps what is open; the scorecard says so */ }
       setLeaving(false);
     }
-    onLeave();
+    onLeave(to);
   };
   const another = () => { setView(null); setLog([]); setPlaying(false); setActive(null); setCompare(null); setRedoId(null); };
 
@@ -807,7 +812,9 @@ export default function DeskReplay({ symbol, redo = null, onLeave }: { symbol: s
             {comparing ? "Comparing…" : "End redo and compare"}
           </button>
         )}
-        <button type="button" data-testid="replay-leave" disabled={leaving} onClick={leave} className={cn(BUTTON, active && view && !compare ? "" : "ml-auto")}>
+        {/* The desk's mode switch on Replay: Real or Paper leaves the way Back to live does, in that mode. */}
+        <ModeSwitch mode="replay" onPick={next => { if (next !== "replay" && !leaving) void leave(next); }} className={active && view && !compare ? "" : "ml-auto"} />
+        <button type="button" data-testid="replay-leave" disabled={leaving} onClick={() => void leave()} className={BUTTON}>
           {leaving ? "Selling what is open…" : "Back to live"}
         </button>
       </div>

@@ -131,6 +131,41 @@
   background: hsl(var(--card));
 }
 
+/* The desk's Paper mode (DeskMode.tsx): the centre wears the dashed PAPER frame (ModeMark's amber), with its chip on
+   the frame's top-right corner from 768 px, laid over the centre's own grid area so it never takes the chart's room. */
+.centre[data-mode="paper"] {
+  border-style: dashed;
+  border-color: rgb(251 191 36 / 0.45);
+}
+
+.paperChip,
+.statusLine {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .paperChip {
+    display: block;
+    grid-area: centre;
+    align-self: start;
+    justify-self: end;
+    z-index: 3;
+    margin: -9px 16px 0 0;
+    padding: 0 4px;
+    background: hsl(var(--background));
+    pointer-events: none;
+  }
+
+  /* The status line along the desk's bottom: its own row under the cockpit, so it never covers what is above it. */
+  .statusLine {
+    display: block;
+    flex: none;
+    min-width: 0;
+    border-top: 1px solid hsl(var(--border));
+    background: hsl(var(--background));
+  }
+}
+
 /* Inside the centre: the chart on top, then the dock of the selected ticker's tools under it (its tab row, then the
    tab's content). From 1024 px the chart keeps its share of the centre's height (``--desk-share``, the splitter's) and
    only the dock's content scrolls; from 768 px the dock's content scrolls in its own box; a phone runs them one after

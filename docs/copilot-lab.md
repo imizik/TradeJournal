@@ -559,7 +559,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   answers, the palette, the thread list) brings the copilot forward. From 768 to 1179 px the Feed is a drawer on the
   right opened by the top bar's **Feed** button; a phone has it as a view, opened by the Feed chip in the top row (§ Phone). Every place has a key while not
   typing and a ⌘K command (§ Keys and the palette). Nothing was removed: each piece is at most two taps from the desk.
-- **Top bar.** Desk, the market phase with the New York clock of the session read ("Live · 11:48 ET", "Pre-market ·
+- **Top bar.** Desk, the **mode switch** (Real | Paper | Replay, § Real, paper and replay; a phone has it at the top
+  of Positions), the market phase with the New York clock of the session read ("Live · 11:48 ET", "Pre-market ·
   8:52 ET", "Closed 16:00"), SPY / QQQ / VIX's change, **Realized today** (the trades closed today, New York's day,
   Webull left out: the session read's `realized_today`; absent until it is not $0) and **Open** (every open position's unrealized P&L now,
   followed or not). Then the **Day button** (§ The day's checklist: "Start the day" before 9:30 on a weekday, "Close
@@ -583,6 +584,11 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   account line at all (on a phone the value block at the top of Positions takes its place, § Phone). Before it, **the day's value line**:
   total account value through the session (the tapped account's alone), change since the first reading, fills as dots,
   breaks as gaps; hover or tap for the high and low ([the feed § The value line](robinhood-read-feed.md#the-value-line)).
+  In Paper mode the account line opens on its REAL mark and the paper book's value follows it with its PAPER mark.
+- **Status line** (from 768 px; a phone has its tab bar there): one thin row along the desk's bottom, under the
+  cockpit and Replay alike, so it never covers them. The mode's mark and whose book ("Real · Roth IRA ••8267", "Paper ·
+  real book unchanged", "Replay · real and paper books unchanged"), how fresh prices are, then every source behind the
+  desk (§ Data health).
 - **Needs you** (`NeedsStrip`), **the Needs-you strip**. Only what needs a decision now, in amber; most of the day
   there is none and the strip is absent. Nothing in it is dismissed and there is no Seen: the strip shows the single
   top item with its own answers, and **+N more** opens every other item at once, each with its own answers. The rules
@@ -1535,7 +1541,8 @@ and Prep the day before 9:30 on a weekday, Close the day after 16:00; the Day bu
 day" before 9:30, "Close-of-day checklist" after 16:00, "Day checklist" otherwise); then every place on the desk with its key:
 Chart, Chain, Ticket, Check a call, Position, Notes, Grid, Feed, Copilot, Book, Threads; then Now, and the book side's places, each of
 which also has its own button where it lives: Paper book, My rules, This week's goals, Watchlist, Note on this position,
-Data health (the health list), Replay a past day and Redo one of my trades; How I use the desk last). A command
+Data health (the health list), Replay a past day and Redo one of my trades; Paper mode and Real mode, the mode
+switch's; How I use the desk last). A command
 that spends a model call says "Asks the copilot now" in its hint. A book-side place brings the phone's Positions view
 forward, shows a piece folded away (§ How I use the desk) for now, opens the line it lives in (Practice's paper line, My rules), scrolls to it and opens it when it is an editor (rules,
 goals, the note line). The places come from one list, `lib/deskPlaces.ts` (id, name, key, hint), which the copilot's
@@ -2058,6 +2065,15 @@ its state and last good time in plain words; a tap on a source says what it affe
 already in the app (Gmail's Reconnect; the Robinhood sign-in steps in docs/robinhood-read-feed.md). No new fix flow. It
 reads again a few seconds after the desk opens or comes back into view, once the desk's own first reads have landed.
 
+From 768 px the **status line** along the desk's bottom (`DeskStatusLine` in `DeskHealth.tsx`) shows the same rows: the
+mode's mark and whose book, how fresh prices are (the newest live price's time in the session, else what the Prices
+row says: "market closed", its last good time), then each source as a dot and its name. A source behind is in words
+and comes first: red when it leaves positions, fills or prices wrong (Robinhood, Prices, Fill emails: "Robinhood
+behind since 10:31"), amber for the rest ("Chatter behind since 9:58"). A tap opens the same list above it. The dot
+and the line share one read (`useDeskHealth`, the `reportLevel2` store pattern): the first to mount starts it, the last
+to go stops it, and the line asks for no price of its own (`useHeldTicks` reads the desk's live prices as they arrive).
+A phone has no status line; its dot stays its health view. Proof: `frontend/e2e/copilot-desk-modes.spec.ts`.
+
 | Source | Read from | Stale after | Outside its hours |
 |---|---|---|---|
 | Robinhood | the feed's kept snapshot (`snapshot(kick=False)`: never starts a read) and the order-history pass's last status | three missed refreshes (3 min in market hours, 45 min otherwise); a read under way is "unknown", not stale | read while a desk is open; the order history every 15 min |
@@ -2222,12 +2238,30 @@ never by colour alone (amber also means "needs you"):
   is sent"; "Your book" carries it beside its heading.
 - **PAPER**: a dashed amber chip, "Paper · not real money", on a dashed amber frame: the paper book, the QQQ overnight
   and momentum books, the paper confirm. On a ticket "Paper trade it" sits in its own PAPER half under a dashed
-  divider, below Copy all; in the Chain the Paper button is its own PAPER group under the real actions (Check it, Plan
+  divider, below Copy all (in Paper mode the half leads instead, below); in the Chain the Paper button is its own PAPER group under the real actions (Check it, Plan
   it, Put on ticket, Make it a spread).
 - **REPLAY**: a filled amber chip with the day ("Replay · Fri, Nov 13"): the replay ticket and the Replay practice card.
 
 Where paper and real sit side by side (the paper score line, Progress, the rules followed/broken line, the Friday
 review) each side carries its mark. Proof: `frontend/e2e/copilot-desk-rules.spec.ts`, `frontend/e2e/copilot-desk-chain.spec.ts`.
+
+**The mode switch** (since 2026-11-16; `DeskMode.tsx`): **Real | Paper | Replay** in the top bar, each segment in its
+mark's look when picked. It is a view only: nothing is sent, and no order, account or book behaves differently.
+
+- **Real**: the desk as it always was.
+- **Paper**: paper first without hiding real money. The centre (chart and dock) wears the dashed PAPER frame with a
+  "Paper · fills shown" chip on its top-right corner; a plan or spread ticket leads with its paper half (the order in
+  words, **Fill on paper** as the main button) and the real half follows under it, labelled REAL and unchanged; the
+  top bar shows the paper book's value and P&L since the run started beside the real accounts, each with its mark (a
+  tap opens the paper book). The real book on the left stays as it is.
+- **Replay**: Replay a past day, the same screen as **R**. The switch shows Replay whenever Replay is open, however it
+  opened (R, ⌘K, the copilot, the Practice block); Replay's own header carries the same switch, so its Real or Paper
+  comes back in one tap (as Back to live does, selling what is open at the replay clock first).
+
+Real or Paper is kept for this browser (`desk.mode.v1`), as the desk's other choices are; a reload never opens in
+Replay. ⌘K has **Paper mode** and **Real mode**; Replay is its Replay place. A phone has the switch at the top of
+Positions (its top row has no room), with the paper value under it in Paper mode. The status line along the desk's
+bottom starts with the mode (§ Data health). Proof: `frontend/e2e/copilot-desk-modes.spec.ts`.
 
 ### Paper
 

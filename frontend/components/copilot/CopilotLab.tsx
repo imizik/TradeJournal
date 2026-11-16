@@ -54,7 +54,9 @@ import { afterClose, answerSymbol, deskLinkIn, deskNeeds, liveOn, refreshRobinho
 import { cn } from "@/lib/utils";
 import { DeskAccounts, activeAccount, forAccount } from "@/components/copilot/DeskAccounts";
 import { ChainPicker, PhoneOrders, PhoneValue, usePhone } from "@/components/copilot/DeskPhone";
-import DeskHealthDot from "@/components/copilot/DeskHealth";
+import DeskHealthDot, { DeskStatusLine } from "@/components/copilot/DeskHealth";
+import { ModeSwitch, PaperValue, setDeskMode, useDeskMode } from "@/components/copilot/DeskMode";
+import ModeMark, { type Mode } from "@/components/copilot/ModeMark";
 import { DeskUseRoot, Fold, FoldMore, FoldSuggestion, useCountOpen, useDeskUse } from "@/components/copilot/DeskUse";
 import { PIECE, countOpen, countTap } from "@/lib/deskUse";
 import { DESK_PLACES, PLACE, placeFromWords, type DeskPlaceId } from "@/lib/deskPlaces";
@@ -209,6 +211,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // Replay (DeskReplay): paper trading on a past day. While it runs the live desk stays mounted but hidden, so leaving
   // puts it back exactly as it was, and none of its live pieces shows beside a replayed price.
   const [replay, setReplay] = useState(false);
+  // The desk's mode (DeskMode.tsx): Real or Paper as kept for this browser, Replay whenever a replay is open, however it
+  // opened. A view only: nothing is sent and no order or account behaves differently.
+  const viewMode = useDeskMode();
+  const mode: Mode = replay ? "replay" : viewMode;
   const [threadsShown, setThreadsShown] = useState(false);
   const toggleThreads = useCallback(() => setThreadsShown(shown => !shown), []);
   // The centre: the symbol the owner picked in the book (else the copilot's, else the first followed position), on Chart
@@ -676,6 +682,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     setReplay(true);
     if (redoList) setTimeout(() => document.querySelector<HTMLElement>('[data-testid="redo-worst"]')?.scrollIntoView({ block: "center" }), 600);
   }, []);
+  // The mode switch: Replay opens Replay (as R does); Real or Paper is kept for this browser. Replay's own switch leaves
+  // through its Back to live (``DeskReplay``), which sells what is open at the replay clock first.
+  const pickMode = useCallback((next: Mode) => { if (next === "replay") openReplay(); else setDeskMode(next); }, [openReplay]);
   // Every place on the desk (``lib/deskPlaces.ts``, the one list) and how its palette command opens it: the ticker's tools,
   // the Feed, the copilot's message box, the thread list, Now, and the book side's places, each of which also has a button
   // where it lives. One per place, or this does not compile.
@@ -731,6 +740,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       hint: dayKind === "start" ? "Brief, plans to arm, goals, prep question. Nothing is sent." : "Your day, to review, paper next to real, rules, goals, tomorrow. Nothing is sent.", run: placeRun.day },
     // Every other place on the desk, each with its key where it has one.
     ...DESK_PLACES.filter(p => p.id !== "day").map(p => ({ id: `go-${p.id}`, name: p.label, hint: p.hint, key: p.key, run: placeRun[p.id] })),
+    // The mode switch's Real and Paper (its Replay is the Replay place above). Nothing is sent.
+    { id: "mode-paper", name: "Paper mode", hint: "Paper first: tickets lead with Fill on paper, the paper value beside the real. Nothing is sent.", run: () => pickMode("paper") },
+    { id: "mode-real", name: "Real mode", hint: "The desk as your real accounts show it", run: () => pickMode("real") },
     { id: "desk-use", name: "How I use the desk", hint: "What you use most and least; fold away what you don't", run: openUse },
     // A piece he folded away is still one command away: it shows for now, where it lives.
     ...foldedPieces.map(id => ({ id: `fold-${id}`, name: PIECE.get(id)!.label, hint: "Folded · shows it for now", run: () => {
@@ -739,7 +751,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       if (area === "Left") showBook(); else if (area === "Centre") { setGrid(false); showCentre(); } else if (area === "Right") showFeed();
       requestAnimationFrame(() => document.querySelector(`[data-use="${id}"]`)?.scrollIntoView({ block: "nearest" }));
     } })),
-  ], [actions, dayPhase, dayKind, placeRun, fill, planTrade, closeDay, showFeed, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre]);
+  ], [actions, dayPhase, dayKind, placeRun, fill, planTrade, closeDay, showFeed, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre, pickMode]);
 
   // J / K walk the conversations the thread list shows, subthreads included, in its order.
   const [walk, setWalk] = useState<string[]>([]);
@@ -1053,8 +1065,17 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       </section>
     ) : <SinceYouLooked rows={rows} session={session.data} read={rowsRead} />;
 
+  // The status line's first words: the mode's mark and whose book. Real names the account line's account (label and
+  // masked number, never the full one); paper and replay say the real book is untouched.
+  const shownAccounts = rowsFresh && liveOn(live) ? (live?.accounts ?? []).filter(a => !account || a.masked === account) : [];
+  const realWho = !shownAccounts.length ? "from the journal" : shownAccounts.length <= 2 ? shownAccounts.map(a => `${a.label} ${a.masked}`).join(" + ")
+    : `${shownAccounts.length} accounts`;
+  const statusMark = mode === "real" ? <ModeMark mode="real" detail={realWho} />
+    : mode === "paper" ? <ModeMark mode="paper" detail="real book unchanged" /> : <ModeMark mode="replay" detail="real and paper books unchanged" />;
+  const openPaper = placeRun.paper;
+
   return (
-    <div ref={desk} className={styles.desk} data-on={on} data-sheet={sheet ? "open" : "closed"} data-threads={threadsShown ? "shown" : "hidden"}
+    <div ref={desk} className={styles.desk} data-on={on} data-mode={mode} data-sheet={sheet ? "open" : "closed"} data-threads={threadsShown ? "shown" : "hidden"}
       data-view={phoneView} data-feed={feedShown ? "shown" : "hidden"}>
       <DeskUseRoot use={use}>
       {/* The desk's head: the top bar and, at its right, the desk's buttons. On a phone the buttons' row comes first and
@@ -1123,20 +1144,30 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           </button>
         )}
         <h1 className={styles.title}><MessagesSquare size={17} aria-hidden />Desk</h1>
+        {/* Real, Paper or Replay: a view only (a phone has it at the top of Positions). */}
+        {on && <div className={cn("contents", styles.wideOnly)}><ModeSwitch mode={mode} onPick={pickMode} /></div>}
         {on && <DeskStatus data={session.data} />}
         {/* A phone has these in the value block at the top of Positions instead. */}
         {on && <div data-use="pnl" className={cn("contents", styles.wideOnly)}><DayPnl session={session.data} rows={rows} read={rowsFresh} /></div>}
-        {on && <div className={cn("contents", styles.wideOnly)}><Fold id="accounts" compact><DeskAccounts live={rowsFresh ? live : null} rows={rows} active={account} onPick={setAccount} /></Fold></div>}
+        {on && <div className={cn("contents", styles.wideOnly)}><Fold id="accounts" compact><DeskAccounts live={rowsFresh ? live : null} rows={rows} active={account} onPick={setAccount} mark={viewMode === "paper"} /></Fold></div>}
+        {/* Paper mode: the paper book's value beside the real accounts, each with its mark. */}
+        {on && viewMode === "paper" && <div className={cn("contents", styles.wideOnly)}><PaperValue book={paper.book} failed={paper.failed} onOpen={openPaper} className="sm:order-last" /></div>}
         {on && <ScalpShortlistNudge />}
       </header>
       </div>
-      {on && replay && <DeskReplay symbol={centreSymbol} redo={redo} onLeave={() => { setReplay(false); setRedo(null); }} />}
+      {on && replay && <DeskReplay symbol={centreSymbol} redo={redo} onLeave={to => { setReplay(false); setRedo(null); if (to) setDeskMode(to); }} />}
       <div id="desk-cockpit" className={styles.cockpit} style={replay ? { display: "none" } : undefined}>
         {/* A phone's Positions opens on what the account is worth and how the book is doing, in one block. */}
         {on && phone && (
           <div data-use="accounts" className={styles.value}>
+            {/* The mode switch sits at the top of Positions on a phone (its top row has no room), beside the total; Paper
+                adds the paper value under it. */}
             <PhoneValue live={rowsFresh ? live : null} rows={rows} booked={booked} active={account} onPick={setAccount} day={today}
-              realized={session.data?.realized_today ?? null} />
+              realized={session.data?.realized_today ?? null} aside={
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <ModeSwitch mode={mode} onPick={pickMode} />
+                  {viewMode === "paper" && <PaperValue book={paper.book} failed={paper.failed} onOpen={openPaper} />}
+                </div>} />
           </div>
         )}
         {/* A phone's Orders: Robinhood's working orders, then today's fills. Read only. */}
@@ -1187,7 +1218,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           </div>
         )}
         {on && (
-          <section id="desk-centre" aria-label="Chart and tools" className={styles.centre} data-grid={grid ? "open" : undefined}
+          <section id="desk-centre" aria-label="Chart and tools" className={styles.centre} data-grid={grid ? "open" : undefined} data-mode={viewMode}
             style={{ "--desk-share": share } as CSSProperties}>
             {/* The chart never leaves: it stays on top, and the selected ticker's tools dock under it (Position, Chain,
                 Ticket, Notes, Check a call). The Grid of many tickers takes the whole centre until Back to chart. The Feed
@@ -1255,6 +1286,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
             )}
           </section>
         )}
+        {/* Paper mode: the centre's corner chip, on its dashed frame (from 768 px). */}
+        {on && viewMode === "paper" && <span data-testid="desk-centre-paper" className={styles.paperChip}><ModeMark mode="paper" detail="fills shown" /></span>}
         {/* The right side: the copilot, and the Feed behind its tab (CopilotLab.module.css lays the two out by width). */}
         <div className={styles.side}>
         {on && (
@@ -1345,6 +1378,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         </section>
         </div>
       </div>
+      {/* The status line along the bottom, from 768 px (a phone has its tab bar there): the mode, whose book, how fresh
+          prices are and every source behind the desk; a tap opens the Data health list. */}
+      {on && !phone && <DeskStatusLine mark={statusMark} className={styles.statusLine} />}
       {/* A phone's tab bar is the desk's own: Positions, the ticker's Chart, Chain, Orders and Ask, then the app's More
           (Nav.tsx keeps its slot). Each counts as its view's piece (view.*). */}
       {/* Under the copilot's open sheet (which covers the bar) the desk's tabs wait hidden; More stays. */}
