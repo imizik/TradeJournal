@@ -451,7 +451,7 @@
   /* The ticker's view keeps a held position's own row above its chart (its P&L, its standing line and the Close
      buttons), and nothing else of the book's column; a ticker he does not hold shows none. */
   .desk[data-on="true"][data-view="ticker"] .book:not(:has(li[data-selected])),
-  .desk[data-on="true"][data-view="ticker"] .book > :not([data-desk-book]),
+  .desk[data-on="true"][data-view="ticker"] .book > :not([data-desk-book]):not([data-use="book"]),
   .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] > :not(ul),
   .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] > ul > li:not([data-selected]) {
     display: none;

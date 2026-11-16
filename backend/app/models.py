@@ -2139,6 +2139,25 @@ class TradingRuleRecord(SQLModel, table=True):
     data_json: str = Field(sa_column=Column(Text, nullable=False))
 
 
+class DeskUseDay(SQLModel, table=True):
+    """How much he used each piece of the copilot desk on one New York day, on one device size (``engine/desk_use.py``):
+    opens, taps and seconds on screen (15-second buckets), summed per day. Only piece ids from the desk's own catalog
+    (``frontend/lib/deskUse.ts``): no keystrokes, no message text, no tickers. Stays in this database; never touches
+    fills, trades, accounts or P&L."""
+
+    __tablename__ = "desk_use_day"
+    __table_args__ = (UniqueConstraint("day", "size", "piece", name="uq_desk_use_day_piece"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    day: date = Field(index=True)  # New York
+    size: str  # desk | phone
+    piece: str
+    opens: int = Field(default=0)
+    taps: int = Field(default=0)
+    seen_s: int = Field(default=0)
+    updated_at: datetime = Field(default_factory=utc_now_naive)  # UTC
+
+
 class MarketContextItem(SQLModel, table=True):
     """External market context for the pre-trade check (advisor step 9): each
     tracked symbol's next earnings date and a live VIX quote, from Tradier.

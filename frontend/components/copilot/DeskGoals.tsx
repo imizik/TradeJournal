@@ -102,7 +102,7 @@ export function GoalsLine({ goals }: { goals?: WeeklyGoals }) {
       className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">{word}</button>
   );
   return (
-    <div data-testid="goals" className="space-y-1 px-3 pt-1 text-[11px] tabular-nums">
+    <div data-testid="goals" data-use="paper.goals" className="space-y-1 px-3 pt-1 text-[11px] tabular-nums">
       {goals.goals.length === 0 ? <p>{edit("Set this week's goals")}</p> : (
         <p data-testid="goals-line" className="flex flex-wrap gap-x-1.5">
           <span className="text-amber-200">{goals.label}:</span>

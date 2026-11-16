@@ -34,7 +34,7 @@ export function TapeToggle({ open, onToggle }: { open: boolean; onToggle(next: b
   const { owner } = useAppAccess();
   if (!owner) return null;
   return (
-    <button type="button" aria-pressed={open} onClick={() => onToggle(!open)} data-testid="tape-toggle" title="Level 2 and time & sales"
+    <button type="button" aria-pressed={open} onClick={() => onToggle(!open)} data-testid="tape-toggle" data-use="chart.tape" title="Level 2 and time & sales"
       className={cn("min-h-11 rounded border px-2 text-xs sm:min-h-0 sm:py-0.5",
         open ? "border-foreground/60 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
       Tape

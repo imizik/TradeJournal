@@ -52,6 +52,8 @@ import { afterClose, answerSymbol, deskLinkIn, deskNeeds, refreshRobinhood, type
 import { cn } from "@/lib/utils";
 import { DeskAccounts, activeAccount, forAccount } from "@/components/copilot/DeskAccounts";
 import DeskHealthDot from "@/components/copilot/DeskHealth";
+import { DeskUseRoot, Fold, FoldMore, FoldSuggestion, useCountOpen, useDeskUse } from "@/components/copilot/DeskUse";
+import { PIECE, countOpen, countTap } from "@/lib/deskUse";
 import styles from "./CopilotLab.module.css";
 
 // The Grid's code loads the first time its tab opens.
@@ -275,6 +277,19 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const [opened, setOpened] = useState<Record<string, number>>({});
   useEffect(() => { setOpened(readOpened(nyDay())); }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
   const jumpKey = useJumpKey();
+  // How he uses the desk: quiet counts, and the pieces he folded away on this device size (DeskUse.tsx).
+  const use = useDeskUse(on);
+  // The account line folded away: a narrowed book would hide the other accounts with nothing on screen saying so.
+  if (pickedAccount !== null && use.hidden("accounts")) setAccount(null);
+  const centreOpened = useRef<CentreTab | null>(null);
+  useEffect(() => {
+    if (!on) return;
+    if (centreOpened.current !== null && centreOpened.current !== centreTab) countOpen(`tab.${centreTab}`);
+    centreOpened.current = centreTab;
+  }, [on, centreTab]);
+  useCountOpen("side.feed", on && feedOpen);
+  useCountOpen("threads", on && threadsShown);
+  useCountOpen("palette", on && palette);
   const desk = useRef<HTMLDivElement>(null);
   const [deciding, setDeciding] = useState(false);
   const sent = useRef(0);
@@ -338,6 +353,17 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     rest.delete("redo");
     window.history.replaceState(null, "", `/copilot-lab${rest.size ? `?${rest}` : ""}`);
   }, [params]);
+  // More → How I use the desk (``/copilot-lab?desk=use``): the view opens once and the address drops the word.
+  const openUse = use.openView;
+  const useReady = use.enabled;
+  useEffect(() => {
+    // Waits for the desk to be on (its status reads first), keeping the word in the address until then.
+    if (!useReady || params.get("desk") !== "use") return;
+    openUse();
+    const rest = new URLSearchParams(params.toString());
+    rest.delete("desk");
+    window.history.replaceState(null, "", `/copilot-lab${rest.size ? `?${rest}` : ""}`);
+  }, [params, openUse, useReady]);
   const shownLink = useRef(link);
   useEffect(() => { shownLink.current = link; }, [link]);
   useEffect(() => {
@@ -503,7 +529,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     if (was !== null) { setArming(false); setAnswering(false); }
   }, [thread?.id]);
   // A centre tab by its key or the palette: the tab, and on a phone the ticker's view with it.
-  const openCentre = useCallback((tab: CentreTab) => { setCentreTab(tab); showCentre(); }, [showCentre]);
+  const showNow = use.showNow;
+  const openCentre = useCallback((tab: CentreTab) => { showNow(`tab.${tab}`); setCentreTab(tab); showCentre(); }, [showCentre, showNow]);
   // The copilot's message box: the copilot comes forward, then the box takes the keys.
   const focusCopilot = useCallback(() => {
     showCopilot();
@@ -514,6 +541,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     showBook();
     requestAnimationFrame(() => desk.current?.querySelector<HTMLElement>("[data-desk-book] li button")?.focus());
   }, [showBook]);
+  // Folded pieces other than the centre's tabs (those have their own commands, which show a folded tab for now).
+  const foldedPieces = useMemo(() => [...PIECE.keys()].filter(id => !id.startsWith("tab.") && use.folded(id)), [use]);
   const commands = useMemo<PaletteCommand[]>(() => [
     { id: "plan", name: "Plan a trade", hint: "A new plan; you name the symbol. Nothing is sent.", key: "N", run: planTrade },
     { id: "week", name: "Review my week", hint: "One turn: planned vs unplanned, follow-through, exits", run: () => actions.ask(WEEK_REVIEW_CONTEXT) },
@@ -528,7 +557,15 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     { id: "go-copilot", name: "Copilot", hint: "The conversation and its message box", key: "/", run: focusCopilot },
     { id: "go-book", name: "Book", hint: "Your positions and what needs you", key: "B", run: focusBook },
     { id: "go-threads", name: "Threads", hint: "The thread list and previous days", key: "[", run: toggleThreads },
-  ], [actions, dayPhase, fill, planTrade, closeDay, openCentre, showFeed, focusCopilot, focusBook, toggleThreads, showCopilot]);
+    { id: "desk-use", name: "How I use the desk", hint: "What you use most and least; fold away what you don't", run: openUse },
+    // A piece he folded away is still one command away: it shows for now, where it lives.
+    ...foldedPieces.map(id => ({ id: `fold-${id}`, name: PIECE.get(id)!.label, hint: "Folded · shows it for now", run: () => {
+      showNow(id);
+      const area = PIECE.get(id)!.area;
+      if (area === "Left") showBook(); else if (area === "Centre") { setCentreTab("chart"); showCentre(); } else if (area === "Right") showFeed();
+      requestAnimationFrame(() => document.querySelector(`[data-use="${id}"]`)?.scrollIntoView({ block: "nearest" }));
+    } })),
+  ], [actions, dayPhase, fill, planTrade, closeDay, openCentre, showFeed, focusCopilot, focusBook, toggleThreads, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre]);
 
   // J / K walk the conversations the thread list shows, subthreads included, in its order.
   const [walk, setWalk] = useState<string[]>([]);
@@ -553,13 +590,14 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         return;
       }
       if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
-      if (key === "j" || key === "k") { event.preventDefault(); step(key === "j" ? 1 : -1); }
-      else if (event.key === "[") { event.preventDefault(); toggleThreads(); }
+      if (key === "j" || key === "k") { event.preventDefault(); countTap("keys"); step(key === "j" ? 1 : -1); }
+      else if (event.key === "[") { event.preventDefault(); countTap("keys"); toggleThreads(); }
       else if (key === "n" && !event.repeat) {
         // A new plan leaves this conversation: never over words not yet sent.
         const box = desk.current?.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message']");
         if (box?.value.trim()) return;
         event.preventDefault();
+        countTap("keys");
         planTrade();
       }
       // Escape closes the thread list's drawer, else the Feed's drawer (below 1180 px), else the copilot's sheet.
@@ -572,10 +610,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       // A place by its key: C chart, O chain (options), T ticket, L check a call, G grid, F feed, B book, / the message box.
       else if (!event.repeat) {
         const tab = CENTRE_TABS.find(t => t.key.toLowerCase() === key);
-        if (tab) { event.preventDefault(); openCentre(tab.id); }
-        else if (key === "f") { event.preventDefault(); if (feedKept.current) showCopilot(); else showFeed(); }
-        else if (key === "b") { event.preventDefault(); focusBook(); }
-        else if (event.key === "/") { event.preventDefault(); focusCopilot(); }
+        if (tab) { event.preventDefault(); countTap("keys"); openCentre(tab.id); }
+        else if (key === "f") { event.preventDefault(); countTap("keys"); if (feedKept.current) showCopilot(); else showFeed(); }
+        else if (key === "b") { event.preventDefault(); countTap("keys"); focusBook(); }
+        else if (event.key === "/") { event.preventDefault(); countTap("keys"); focusCopilot(); }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -793,6 +831,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   return (
     <div ref={desk} className={styles.desk} data-on={on} data-sheet={sheet ? "open" : "closed"} data-threads={threadsShown ? "shown" : "hidden"}
       data-view={phoneView} data-feed={feedShown ? "shown" : "hidden"}>
+      <DeskUseRoot use={use}>
       {/* The desk's head: the top bar and, at its right, the desk's buttons. On a phone the buttons' row comes first, stays at
           the top of the screen, and starts with the switch between the desk's three views (CopilotLab.module.css). */}
       <div className={styles.head} style={replay ? { display: "none" } : undefined}>
@@ -801,7 +840,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           {/* A phone's switch: one view at a time, the middle one named for the selected ticker. Wider screens show all at once. */}
           <nav id="desk-views" aria-label="Desk views" data-testid="desk-views" className={styles.views}>
             {([["book", "Book"], ["ticker", centreSymbol ?? "Market"], ["feed", "Feed"]] as const).map(([id, label]) => (
-              <button key={id} type="button" aria-pressed={phoneView === id} data-testid={`desk-view-${id}`}
+              <button key={id} type="button" aria-pressed={phoneView === id} data-testid={`desk-view-${id}`} data-use={`view.${id}`}
                 onClick={() => id === "book" ? showBook() : id === "ticker" ? showCentre() : showFeed()}
                 className={cn("min-h-11 min-w-0 flex-1 truncate rounded-md px-1 text-sm", phoneView === id ? "bg-secondary font-semibold text-foreground" : "text-muted-foreground")}>
                 {label}
@@ -812,7 +851,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           </nav>
           <div className={styles.barActions}>
             {/* Is every source behind the desk live: one dot, a list on a tap. */}
-            <DeskHealthDot />
+            <div data-use="health" className="contents"><DeskHealthDot /></div>
             {/* The desk's front door: today's Main chat in the copilot. */}
             <Link href="/copilot-lab" aria-current={onNow ? "page" : undefined} title="Back to today: Main chat in the copilot"
               onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setFeedShown(false); if (!onNow) goNow(true); }}
@@ -824,16 +863,16 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               Feed{feedNew.count > 0 && <span data-testid="feed-new-bar" className="tabular-nums">{feedNew.count}<span className="sr-only"> new</span></span>}
             </button>
             {/* No count here: what needs him is the strip's, counted once there. */}
-            <button type="button" onClick={toggleThreads} aria-pressed={threadsShown} aria-label="Threads" title="The thread list and previous days ( [ )"
+            <button type="button" onClick={toggleThreads} aria-pressed={threadsShown} aria-label="Threads" data-use="threads" title="The thread list and previous days ( [ )"
               className={cn("inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground sm:min-h-8", threadsShown && "bg-secondary")}>
               <PanelLeft size={15} aria-hidden /><span className="hidden sm:inline">Threads</span>
             </button>
-            <button type="button" onClick={() => setPalette(true)} aria-label="Jump to a thread or command" aria-haspopup="dialog"
+            <button type="button" onClick={() => setPalette(true)} aria-label="Jump to a thread or command" aria-haspopup="dialog" data-use="palette"
               className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md border bg-card px-2.5 text-xs text-muted-foreground hover:text-foreground sm:min-h-8">
               {/* A phone keeps the bar short: icons only, as the button's label already says. */}
               <Search size={14} aria-hidden /><span className="hidden sm:inline">Jump to…</span><kbd className={cn(KBD, "hidden md:inline")}>{jumpKey}</kbd>
             </button>
-            <button type="button" onClick={planTrade} title="A new plan; you name the symbol. Nothing is sent. ( N )"
+            <button type="button" onClick={planTrade} data-use="plan" title="A new plan; you name the symbol. Nothing is sent. ( N )"
               className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">
               <Plus size={14} aria-hidden /><span className="sr-only sm:not-sr-only">Plan a trade</span>
             </button>
@@ -850,8 +889,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         )}
         <h1 className={styles.title}><MessagesSquare size={17} aria-hidden />Desk</h1>
         {on && <DeskStatus data={session.data} />}
-        {on && <DayPnl session={session.data} rows={rows} read={rowsFresh} />}
-        {on && <DeskAccounts live={rowsFresh ? live : null} rows={rows} active={account} onPick={setAccount} />}
+        {on && <div data-use="pnl" className="contents"><DayPnl session={session.data} rows={rows} read={rowsFresh} /></div>}
+        {on && <Fold id="accounts" compact><DeskAccounts live={rowsFresh ? live : null} rows={rows} active={account} onPick={setAccount} /></Fold>}
         {on && <ScalpShortlistNudge />}
       </header>
       </div>
@@ -860,11 +899,11 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         {on && (
           <div className={styles.strip}>
             {/* A phone shows the strip on its Book view; on the other two the Book's button carries the amber count. */}
-            {needs.length > 0 && <div className={styles.needs}><NeedsStrip needs={needs} actions={needActions} /></div>}
+            {needs.length > 0 && <div className={styles.needs} data-use="needs"><NeedsStrip needs={needs} actions={needActions} /></div>}
             {unchecked && <p data-testid="needs-you-unchecked" className="px-1 pt-1 text-xs text-muted-foreground">Needs you could not check {unchecked} just now; it will read again in a minute.</p>}
             {/* What's moving: one thin row across the book and the centre, folded until opened; a tile selects its symbol in
                 place, as a watched name does. A phone puts it under the book. */}
-            <div className={styles.moving}><MovingStrip on={on} selected={centreSymbol} onSelect={selectWatched} /></div>
+            <div className={styles.moving}><Fold id="moving"><MovingStrip on={on} selected={centreSymbol} onSelect={selectWatched} /></Fold></div>
           </div>
         )}
         {on && (
@@ -884,23 +923,25 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         )}
         {on && (
           <div className={styles.book}>
-            <Book rows={booked.rows} sparks={sparks} earnings={events} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} updating={rowsRead && !rowsFresh} onSelect={select} onFollow={changeFollow}
-              live={booked.live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} />
+            <div data-use="book" className="contents"><Book rows={booked.rows} sparks={sparks} earnings={events} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} updating={rowsRead && !rowsFresh} onSelect={select} onFollow={changeFollow}
+              live={booked.live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} /></div>
+            {/* After 14 days of desk use: one quiet card offering to fold what he never opens. Never folds unasked. */}
+            <FoldSuggestion />
             {/* His own paper book: paper positions, Close and Trim, and the scorecard beside his real trades. Never real money. */}
-            <DeskPaper book={paper.book} failed={paper.failed} symbol={centreSymbol} top={<PaperReviewCard review={paper.book?.review} onAsk={actions.ask} />} />
+            <Fold id="paper"><DeskPaper book={paper.book} failed={paper.failed} symbol={centreSymbol} top={<PaperReviewCard review={paper.book?.review} onAsk={actions.ask} />} /></Fold>
             {/* The QQQ overnight paper book: the one rule that passed its registered test, recorded live. Hidden until switched on. */}
-            <DeskOvernight on={on} />
+            <Fold id="strategy.overnight"><DeskOvernight on={on} /></Fold>
             {/* The QQQ intraday momentum paper book: the rule that passed its registered exam, recorded live at 1x. Hidden until switched on. */}
-            <DeskMomentum on={on} />
+            <Fold id="strategy.momentum"><DeskMomentum on={on} /></Fold>
             {/* Replay practice: past days paper traded on the desk, scored apart from live paper. */}
-            <ReplayPractice />
+            <Fold id="replay.practice"><ReplayPractice /></Fold>
             {/* Before the open and after the close the day's block (the brief, the day report) comes straight after the
                 book; in the session it waits under Watching. */}
-            {dayPhase !== null && lower}
-            <Watching data={rowsRead ? watching.data : null} failed={watching.failed} sparks={sparks} earnings={events} held={held} selected={centreSymbol}
-              onSelect={selectWatched} onAsk={askWatched} onPlan={planWatched} onChange={watching.set} />
-            {dayPhase === null && lower}
-            <DayFacts session={session.data} />
+            {dayPhase !== null && <div data-use="dayblock" className="contents">{lower}</div>}
+            <Fold id="watching"><Watching data={rowsRead ? watching.data : null} failed={watching.failed} sparks={sparks} earnings={events} held={held} selected={centreSymbol}
+              onSelect={selectWatched} onAsk={askWatched} onPlan={planWatched} onChange={watching.set} /></Fold>
+            {dayPhase === null && <div data-use="dayblock" className="contents">{lower}</div>}
+            <div data-use="dayfacts" className="contents"><DayFacts session={session.data} /></div>
           </div>
         )}
         {on && (
@@ -908,21 +949,25 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
             {/* The selected ticker's tools in the order he works: Chart, Chain, Ticket; then Check a call and, set apart, the
                 Grid of many tickers. The Feed is not here: it sits beside the copilot, so the chart stays while he reads it. */}
             {/* The strip's bottom line is an inset shadow, so a tab's underline paints over it without spilling past the scroll box. */}
-            <div role="tablist" aria-label="Centre" className="flex gap-0.5 overflow-x-auto px-1.5 pt-1.5 shadow-[inset_0_-1px_0_hsl(var(--border))] [scrollbar-width:none] sm:gap-1 sm:px-2">
-              {CENTRE_TABS.map(({ id, label, key }) => (
-                <button key={id} type="button" role="tab" aria-selected={centreTab === id} onClick={() => setCentreTab(id)} title={`${label} ( ${key} )`}
+            {/* A tab he folded away waits in More at the strip's end (one tap shows it for now); its key and ⌘K still open it. */}
+            <div className="flex items-center pr-1.5 shadow-[inset_0_-1px_0_hsl(var(--border))]">
+            <div role="tablist" aria-label="Centre" className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto px-1.5 pt-1.5 [scrollbar-width:none] sm:gap-1 sm:px-2">
+              {CENTRE_TABS.filter(t => !use.hidden(`tab.${t.id}`) || centreTab === t.id).map(({ id, label, key }) => (
+                <button key={id} type="button" role="tab" aria-selected={centreTab === id} onClick={() => setCentreTab(id)} title={`${label} ( ${key} )`} data-use={`tab.${id}`}
                   className={cn("min-h-11 shrink-0 whitespace-nowrap border-b-2 px-2 text-sm sm:min-h-9 sm:px-2.5", id === "grid" && "ml-auto",
                     centreTab === id ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
                   {label}
                 </button>
               ))}
             </div>
+            <FoldMore ids={CENTRE_TABS.map(t => `tab.${t.id}`)} onOpen={id => openCentre(id.slice(4) as CentreTab)} />
+            </div>
             <div role="tabpanel" aria-label={CENTRE_TABS.find(t => t.id === centreTab)!.label} className="p-3">
               {centreTab === "check" ? <CheckACall seed={checkSeed} />
                 : centreTab === "grid" ? <DeskGrid held={gridHeld} watched={watched} hidden={gridHidden} sparks={sparks} earnings={events} selected={centreSymbol} onOpen={openFromGrid} />
                 : centreTab === "chain" ? <DeskChain symbol={centreSymbol} plans={tickets.plans} onCheck={chainCheck} onPlan={chainPlan} onTicket={chainTicket} unusual={unusual?.rows} focus={chainFocus} />
-                : centreTab === "ticket" && ticketRoll ? <DeskRoll key={`${ticketRoll.symbol}|${ticketRoll.expiry}|${ticketRoll.strike}|${ticketRoll.held}`} from={ticketRoll} onClose={() => setTicketRoll(null)}
-                  onPlaced={symbol => { setTicketRoll(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} />
+                : centreTab === "ticket" && ticketRoll ? <div data-use="ticket.roll" className="contents"><DeskRoll key={`${ticketRoll.symbol}|${ticketRoll.expiry}|${ticketRoll.strike}|${ticketRoll.held}`} from={ticketRoll} onClose={() => setTicketRoll(null)}
+                  onPlaced={symbol => { setTicketRoll(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} /></div>
                 : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} pick={ticketPick} close={ticketClose} onOpen={id => { setTicketFor(id); setTicketPick(null); setTicketClose(null); }} onClose={() => { setTicketFor(null); setTicketPick(null); setTicketClose(null); }}
                 onPlaced={symbol => { setTicketFor(null); setTicketClose(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
                 : <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events} onReplay={() => setReplay(true)}
@@ -934,11 +979,11 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         <div className={styles.side}>
         {on && (
           <div role="tablist" aria-label="Side" className={styles.sideTabs}>
-            <button type="button" role="tab" aria-selected={!feedShown} onClick={showCopilot} title="The copilot ( / )"
+            <button type="button" role="tab" aria-selected={!feedShown} onClick={showCopilot} data-use="side.copilot" title="The copilot ( / )"
               className={cn("min-h-9 shrink-0 whitespace-nowrap border-b-2 px-2.5 text-sm", !feedShown ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
               Copilot{talking && <span className="ml-1.5 text-xs text-muted-foreground">{talking}</span>}
             </button>
-            <button type="button" role="tab" aria-selected={feedShown} onClick={showFeed} title="Yours, ideas and the market today ( F )"
+            <button type="button" role="tab" aria-selected={feedShown} onClick={showFeed} data-use="side.feed" title="Yours, ideas and the market today ( F )"
               className={cn("min-h-9 shrink-0 whitespace-nowrap border-b-2 px-2.5 text-sm", feedShown ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
               Feed{feedNew.count > 0 && <span data-testid="feed-new" className="ml-1.5 text-xs tabular-nums text-muted-foreground">{feedNew.count}<span className="sr-only"> new</span></span>}
             </button>
@@ -1020,6 +1065,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         <MessageCircle size={15} aria-hidden className="text-muted-foreground max-sm:size-5 max-sm:text-foreground" /><span className="max-sm:sr-only">Ask the copilot{picked && picked !== talking ? ` about ${picked}` : ""}</span>
       </button>}
       {on && !replay && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} onConversation={actions.open} />}
+      </DeskUseRoot>
     </div>
   );
 }
