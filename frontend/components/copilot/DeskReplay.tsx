@@ -424,7 +424,7 @@ function Ticket({ view, at, symbol, options, onView, pause, preset = null }: {
           <input aria-label="Replay target" inputMode="decimal" placeholder="$" value={target} onChange={e => { setTarget(e.target.value.replace(/[^\d.]/g, "")); setPreview(null); }} className={cn(INPUT, "w-20")} />
         </label>
         <label className="flex min-h-11 items-center gap-1.5 text-xs text-muted-foreground sm:min-h-0">
-          <input type="checkbox" checked={auto} onChange={e => { setAuto(e.target.checked); setPreview(null); }} disabled={!stop.trim() && !target.trim()} />Close automatically at stop/target
+          <input type="checkbox" checked={auto} onChange={e => { setAuto(e.target.checked); setPreview(null); }} disabled={!stop.trim() && !target.trim()} className="accent-violet-400" />Close automatically at stop/target
         </label>
       </div>
       <input aria-label="Replay note" maxLength={280} placeholder="Why (optional, one line)" value={note} onChange={e => { setNote(e.target.value); setPreview(null); }} className={cn(INPUT, "w-full")} />
@@ -493,7 +493,7 @@ function Position({ p, view, at, onView, pause }: { p: PaperPosition; view: Repl
           {p.stop != null && <span>stop {px(p.stop)}{p.touched?.stop ? ` · touched ${replayTime(p.touched.stop)}` : ""}</span>}
           {p.target != null && <span>target {px(p.target)}{p.touched?.target ? ` · touched ${replayTime(p.touched.target)}` : ""}</span>}
           <label className="flex min-h-11 items-center gap-1.5 sm:min-h-0">
-            <input type="checkbox" checked={!!p.auto} onChange={e => toggle(e.target.checked)} aria-label={`Close ${p.symbol} automatically at stop/target`} />Close automatically
+            <input type="checkbox" checked={!!p.auto} onChange={e => toggle(e.target.checked)} aria-label={`Close ${p.symbol} automatically at stop/target`} className="accent-violet-400" />Close automatically
           </label>
           {p.exiting && <span className="text-amber-200">{p.instrument === "option" ? "selling at the contract's next traded minute" : <>selling at the next bar&apos;s open</>}</span>}
         </div>
