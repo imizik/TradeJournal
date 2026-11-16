@@ -36,6 +36,7 @@ export const PIECES: readonly Piece[] = [
   { id: "palette", label: "Jump to… (⌘K)", area: "Top", fold: null },
   { id: "keys", label: "Desk keys", area: "Top", fold: null },
   { id: "plan", label: "Plan a trade", area: "Top", fold: null },
+  { id: "day", label: "Day button (Start / Close the day)", area: "Top", fold: null },
   { id: "book", label: "Book: positions and working orders", area: "Left", fold: null, safety: true },
   { id: "paper", label: "Paper", area: "Left", fold: "stub" },
   { id: "paper.rules", label: "My rules", area: "Left", fold: null },

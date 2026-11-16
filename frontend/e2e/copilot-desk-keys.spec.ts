@@ -130,7 +130,7 @@ test("⌘K opens the palette: type to filter, Enter opens the thread, Escape and
   const options = box.getByRole("option");
   // The thread list's rows in list order, tickers first and Main's Radar hits after (pinned rows are the commands), then the commands.
   // The threads, the desk's commands, then every place on the desk with its key.
-  await expect(options).toHaveText([/^NBIS/, /^CRWV/, /^APLD/, /^MU/, /^Plan a trade/, /^Review my week/, /^What matters right now\?/,
+  await expect(options).toHaveText([/^NBIS/, /^CRWV/, /^APLD/, /^MU/, /^Plan a trade/, /^Review my week/, /^What matters right now\?/, /^Day checklist.*D$/,
     /^Chart.*C$/, /^Chain.*O$/, /^Ticket.*T$/, /^Check a call.*L$/, /^Grid.*G$/, /^Feed.*F$/, /^Copilot.*\/$/, /^Book.*B$/, /^Threads.*\[$/,
     /^Now/, /^Paper book.*P$/, /^My rules/, /^This week's goals/, /^Watchlist.*W$/, /^Note on this position/, /^Data health/,
     /^Replay a past day.*R$/, /^Redo one of my trades/, /^How I use the desk/]);
@@ -167,7 +167,7 @@ test("Plan a trade from the palette opens a new plan, unsent; after 16:00 Close 
   await expect(page.getByTestId("needs-you")).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type("close");
-  await expect(palette(page).getByRole("option")).toHaveText([/^Close the day/]);
+  await expect(palette(page).getByRole("option")).toHaveText([/^Close the day/, /^Close-of-day checklist/]); // the pass, then the Day button's checklist
   await page.keyboard.press("Enter");
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Close the day: /);
   await expect(page.getByRole("textbox", { name: "Message" })).toBeFocused();
@@ -538,7 +538,11 @@ test("before the open the book's lower block is the morning brief alone, cut sho
   await brief.getByRole("button", { name: "Read the whole brief ▾" }).click();
   await expect(brief.getByRole("listitem")).toHaveCount(4);
   await expect(brief).toContainText("Changes if: SMH loses its gap.");
-  await expect(page.getByRole("button", { name: "Arm today's plans" })).toHaveCount(0); // in Jump to (⌘K), not a second button
+  // Arm today's plans has no button of its own on the desk: the Day button opens the day's checklist, which holds it.
+  await expect(page.getByRole("button", { name: "Arm today's plans", exact: true })).toHaveCount(0);
+  await page.getByTestId("desk-day-button").click();
+  await expect(page.getByTestId("day-checklist").getByRole("button", { name: /Arm today's plans/ })).toBeVisible();
+  await page.getByTestId("desk-day-button").click();
   await expect(page.getByTestId("since-you-looked")).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("cockpit-before-open-1280.png") });
   await page.unroute("**/copilot/desk/session");
@@ -1029,4 +1033,137 @@ test("every place is in Jump to: Replay opens from the palette and from R, and t
   await page.getByRole("button", { name: "Jump to a thread or command" }).click();
   await page.keyboard.type("review my week");
   await expect(palette(page).getByRole("option", { name: /^Review my week/ })).toContainText("Asks the copilot now");
+});
+
+// The Day button (docs/copilot-lab.md § The desk, The day's checklist): one button in the top bar that follows the New
+// York clock and opens one checklist in the copilot column. Its paper book is stubbed with invented numbers.
+const stats = (pnl: number, trades: number, win: number | null) => ({ trades, pnl, win_rate: win, avg_win: null, avg_loss: null, largest_loss: null, curve: [] });
+const group = (trades: number, pnl: number, win: number | null) => ({ trades, pnl, win_rate: win });
+const SPLIT = { followed: group(4, 210, 75), broken: group(2, -140, 0), unclear: group(0, 0, null), unrecorded: 0, by_rule: [] };
+const GOALS = { goals: [{ kind: "max_loss", n: 300, book: "real" }], max: 2, monday: "2026-10-19", label: "This week", kinds: [],
+  progress: [{ kind: "max_loss", n: 300, book: "real", goal: "Max loss per trade $300", text: "max loss $220 (goal $300)", ok: true, stale: null }] };
+const PAPER = {
+  run: { id: "r1", number: 1, starting_cash: 10000, started_at: epoch("2026-10-12T15:00:00Z") },
+  account: { cash: 10120, collateral: 0, reserved: 0, buying_power: 10120, equity: 10120, pnl: 120, unpriced: 0, prices_at: null },
+  positions: [], closed: [], orders: [], earlier: [], market_open: false, review: null,
+  score: { paper: { ...stats(120, 6, 50), by_source: [], rules: SPLIT }, real: stats(-312, 3, 33.3), real_rules: null },
+  my_rules: [{ id: "r1", text: "Wait for the 15m close" }], goals: GOALS,
+};
+async function dayDesk(page: Page, options: Parameters<typeof lab>[1]) {
+  await page.route("**/copilot/desk/minute?*", (route) => route.fulfill({ status: 404, json: { detail: "Not in this test." } })); // each read alone
+  await page.route("**/copilot/paper", (route) => route.fulfill({ json: PAPER }));
+  return lab(page, options);
+}
+const dayButton = (page: Page) => page.getByTestId("desk-day-button");
+const dayList = (page: Page) => page.getByTestId("day-checklist");
+
+test("before the open the Day button is Start the day: one checklist, Arm opens from it, Prep fills the box, nothing is sent", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const plan = (fields: Record<string, unknown>) => ({ instrument: null, thesis: null, horizon: "swing", last: null, entry: null, invalidation: null,
+    time_stop: null, r: null, at: null, note: null, ...fields });
+  const threads = () => ({ ...DESK, day: { ...DESK.day, phase: "pre" }, plans: [
+    plan({ stage: "armed", symbol: "APLD", investigation_id: APLD }), plan({ stage: "armed", symbol: "CRWV", investigation_id: CRWV }),
+    plan({ stage: "in_position", symbol: "NBIS", investigation_id: NBIS })] });
+  const lines = ["**Wait** — **CPI at 8:30 sets the tone.**", "- APLD needs 31.00 on volume.", "- CRWV short only under 99.00."];
+  await page.route("**/day-journal/2026-10-23", (route) => route.fulfill({ json: { day: "2026-10-23", entries: [], trade_plans: {} } }));
+  const { chats } = await dayDesk(page, { time: new Date("2026-10-23T12:45:00Z"), threads, showThreads: false, // 8:45 New York, a Friday
+    session: { ...SESSION, now: epoch("2026-10-23T12:45:00Z"), phase: "pre", events: [], time_stops: [],
+      prep: { at: epoch("2026-10-23T12:30:00Z"), line: lines[0], lines, fallback: false, path: null } } });
+  // Amber while the day is not started yet.
+  await expect(dayButton(page)).toHaveText("Start the day", { useInnerText: true });
+  await expect(dayButton(page)).toHaveClass(/bg-primary/);
+  await page.screenshot({ path: test.info().outputPath("day-button-before-open-1440.png") });
+  await dayButton(page).click();
+  const list = dayList(page);
+  await expect(list).toHaveAttribute("data-kind", "start");
+  await expect(list.getByRole("listitem")).toHaveText([/^1Morning briefwritten 08:30 ET/, /^2Arm today's plans2 plans armed/,
+    /^3This week's goals1 of 1 on track/, /^4Prep the dayits question into the box, unsent/]);
+  expect(chats).toEqual([]); // opening it sends nothing
+  await expect(dayButton(page)).not.toHaveClass(/bg-primary/); // opened today: nothing left to nudge
+  // The brief opens in place, as the left column shows it; the goals line is the desk's own.
+  await list.getByRole("button", { name: /Morning brief/ }).click();
+  await expect(list.getByTestId("morning-brief")).toContainText("APLD needs 31.00 on volume.");
+  await expect(list.getByTestId("goals-line")).toContainText("max loss $220 (goal $300)");
+  await page.screenshot({ path: test.info().outputPath("day-checklist-start-1440.png") });
+  // Arm today's plans opens its own checklist; closing it comes back to the day's.
+  await list.getByRole("button", { name: /Arm today's plans/ }).click();
+  const arm = page.getByTestId("arm-checklist");
+  await expect(arm.getByTestId("arm-progress")).toHaveText("0 of 2 checked");
+  await expect(list).toHaveCount(0);
+  await arm.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(list).toBeVisible();
+  await list.getByRole("button", { name: /Prep the day/ }).click();
+  await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Prep the day: /);
+  // D closes and opens it; ⌘K has it as Start the day, and its old commands still work.
+  await page.getByRole("textbox", { name: "Message" }).blur();
+  await page.keyboard.press("d");
+  await expect(list).toHaveCount(0);
+  await page.keyboard.press("d");
+  await expect(list).toBeVisible();
+  await page.getByRole("button", { name: "Jump to a thread or command" }).click();
+  await expect(palette(page).getByRole("option", { name: /^Start the day/ })).toHaveText(/^Start the day.*D$/);
+  await page.keyboard.press("Escape");
+  await command(page, "Arm today's plans");
+  await expect(arm).toBeVisible();
+  expect(chats).toEqual([]);
+});
+
+test("after the close the Day button is Close the day · N to review: its checklist starts the close pass, nothing is sent", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const threads = () => ({ ...DESK, as_of: "2026-10-23T20:35:00Z", day: { phase: "post", need_you: 2, streak: null },
+    threads: DESK.threads.map(r => r.symbol === "NBIS" ? { ...r, close: { kind: "position", question: "Review: did you follow the plan?", reviewed: null } }
+      : r.symbol === "CRWV" ? { ...r, close: { kind: "plan", question: "Added or not, and why?", reviewed: null } } : r) });
+  await page.route("**/copilot/symbol/*", (route) => {
+    const symbol = route.request().url().split("/").pop()!;
+    return route.fulfill({ json: { symbol, as_of: "2026-10-23T20:35:00Z", positions: { state: "ok", rows: symbol === "NBIS" ? [{ symbol }] : [] },
+      plans: { state: "ok", rows: symbol === "NBIS" ? [] : [{ symbol, position: "waiting" }] }, new: { radar: { state: "off" }, thesis: { state: "ok", count: 0, rows: [] } },
+      quotes_at: null, quote_issue: null } });
+  });
+  await page.route("**/day-journal/2026-10-23", (route) => route.fulfill({ json: { day: "2026-10-23", entries: [], trade_plans: {} } }));
+  await page.route("**/today", (route) => route.fulfill({ json: { as_of: "2026-10-23T20:35:00Z", day: "2026-10-23", quotes_at: null, quote_issue: null,
+    act_now: { state: "ok", rows: [], open_positions: 0 }, plans: { state: "ok", rows: [], armed: 0 }, new: {}, held: { state: "ok", rows: [], count: 0 }, week: { state: "unavailable" } } }));
+  const { chats } = await dayDesk(page, { time: new Date("2026-10-23T20:35:00Z"), threads, showThreads: false, // 16:35 New York
+    session: { ...SESSION, now: epoch("2026-10-23T20:35:00Z"), phase: "post", time_stops: [] } });
+  await expect(dayButton(page)).toHaveText("Close the day · 2 to review", { useInnerText: true });
+  await expect(dayButton(page)).toHaveClass(/bg-primary/);
+  await page.screenshot({ path: test.info().outputPath("day-button-after-close-1440.png") });
+  await dayButton(page).click();
+  const list = dayList(page);
+  await expect(list).toHaveAttribute("data-kind", "close");
+  await expect(list.getByRole("listitem")).toHaveText([/^1Your daythe read at the top of Now/, /^2To review2 to review, one at a time/,
+    /^3Paper next to real/, /^4Rules followed vs broken/, /^5This week's goals1 of 1 on track/, /^6One thing for tomorrow/]);
+  await expect(list.getByTestId("day-paper-score")).toContainText("+$120.00");
+  await expect(list.getByTestId("day-paper-score")).toContainText("−$312.00");
+  await expect(list.getByTestId("rules-split")).toContainText("followed +$210.00");
+  await page.screenshot({ path: test.info().outputPath("day-checklist-close-1440.png") });
+  expect(chats).toEqual([]); // opening it sends nothing
+  // To review starts the close pass on the first unreviewed thread, as Close the day always has.
+  await list.getByRole("button", { name: /To review/ }).click();
+  await expect(list).toHaveCount(0);
+  await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Close of day" })).toContainText("Review: did you follow the plan?");
+  // One thing for tomorrow puts the close question in the box, unsent.
+  await dayButton(page).click();
+  await dayList(page).getByRole("button", { name: /One thing for tomorrow/ }).click();
+  await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Close the day: /);
+  expect(chats).toEqual([]);
+});
+
+test("on a phone the Day button is an icon and one word in the top row, its checklist opens in the sheet, and the session's is quiet", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await dayDesk(page, { time: new Date("2026-10-23T12:45:00Z"), showThreads: false, // 8:45 New York
+    session: { ...SESSION, now: epoch("2026-10-23T12:45:00Z"), phase: "pre", events: [], time_stops: [] } });
+  await expect(dayButton(page)).toHaveText("Start", { useInnerText: true });
+  // In the top row, beside Jump to, with room left for the three views' names.
+  const [day, jump] = [await dayButton(page).boundingBox(), await page.getByRole("button", { name: "Jump to a thread or command" }).boundingBox()];
+  expect(Math.abs(day!.y + day!.height / 2 - (jump!.y + jump!.height / 2))).toBeLessThan(2);
+  expect(await page.getByTestId("desk-view-book").evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true); // "Book" is not cut short
+  await dayButton(page).click();
+  await expect(dayList(page)).toBeVisible();
+  await expect(dayList(page).getByTestId("day-step-brief")).toContainText("not written yet");
+  await expect(page.getByRole("button", { name: "Back to the desk" })).toBeVisible(); // the copilot's sheet
+  await page.screenshot({ path: test.info().outputPath("day-checklist-start-375.png") });
+  await page.clock.fastForward(60 * 60_000); // 9:45: the session
+  await expect(dayButton(page)).toHaveText("Day", { useInnerText: true });
+  await expect(dayButton(page)).not.toHaveClass(/bg-primary/);
 });

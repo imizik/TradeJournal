@@ -560,7 +560,9 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
 - **Top bar.** Desk, the market phase with the New York clock of the session read ("Live · 11:48 ET", "Pre-market ·
   8:52 ET", "Closed 16:00"), SPY / QQQ / VIX's change, **Realized today** (the trades closed today, New York's day,
   Webull left out: the session read's `realized_today`; absent until it is not $0) and **Open** (every open position's unrealized P&L now,
-  followed or not). Then **Now** (back to today's Main chat; dropped on a phone while already there), **Threads** (the
+  followed or not). Then the **Day button** (§ The day's checklist: "Start the day" before 9:30 on a weekday, "Close
+  the day · N to review" after 16:00, a quiet "Day" in between; amber only while something is still to do; on a phone
+  an icon over one word), **Now** (back to today's Main chat; dropped on a phone while already there), **Threads** (the
   thread list's drawer; no count on the button, since the strip counts what needs him), Jump to… (⌘K) and Plan a trade (the same words as ⌘K).
   Then **the account line** while the Robinhood feed is live ([the feed](robinhood-read-feed.md)): one tappable group
   per account (Roth IRA, MCP; Individual only while it holds something), its label and number masked to the last four,
@@ -843,8 +845,9 @@ day kept today's replay; otherwise **Since you looked**: what changed since the
 owner last left the desk in this browser (`localStorage` `desk.looked.v2`, by position, saved when the page is hidden
 or left), four lines at most: the biggest open-P&L changes since then ("NBIS 11/14/26 105C −$235": the change, since
 the row has the P&L now; a move under $25 and 10% left out), positions opened or closed since, and the fills, pings
-and Radar events since (a ticker not followed counts in none). **Arm today's plans** is a ⌘K command; **Close the day**
-is ⌘K and, after the close, one quiet link under the day report ("Close the day · 2 to review →"), never the strip. No mode shows
+and Radar events since (a ticker not followed counts in none). **Arm today's plans** is a ⌘K command and a step of the
+Day button's checklist; **Close the day** is ⌘K, the Day button's checklist and, after the close, one quiet link under
+the day report ("Close the day · 2 to review →"), never the strip. No mode shows
 more than the session mode does.
 
 **Day report** (`DayReport.tsx`), after 16:00 New York on a weekday: one compact card of up to four single lines, each
@@ -1428,8 +1431,26 @@ the Check service's pre-trade check does not see it.
 **The top bar's day** (`DeskStatus` in `SessionTape.tsx`, `DayPnl` in `Cockpit.tsx`): **Live** (green dot) with the
 New York clock in the regular session, **Pre-market** with the clock, **Closed 16:00** (the calendar's close) after it,
 or **Market closed**; SPY, QQQ and VIX's change; Realized today and Open. The phase actions are ⌘K commands (Jump to… on
-a phone): **Arm today's plans** before 9:30 on a weekday, and **Close the day** after 16:00 (also one quiet link under
-the day report), which walks each thread's close question (see Close of day).
+a phone) and steps of the Day button's checklist (below): **Arm today's plans** and **Prep the day** before 9:30 on a
+weekday, and **Close the day** after 16:00 (also one quiet link under the day report), which walks each thread's close
+question (see Close of day).
+
+**The day's checklist** (since 2026-11-16; `DayChecklist.tsx`). The top bar's Day button (⌘K, **D**) follows the New
+York clock and opens one checklist in the copilot column, where Arm today's plans and the close pass open (below 1180 px
+it opens the copilot sheet). Before the open on a weekday it reads **Start the day**, amber until its list is opened
+that day in this browser (`localStorage` `desk.day.started.v1`); after 16:00 **Close the day · N to review**, N being
+the close pass's count (close questions and fills still to answer), amber while N is above 0; in the session and at
+weekends a quiet **Day** that opens Start the day's list. Each step is one line with its state and opens the piece that
+already does it; every piece also stays where it lives, so this is a second, shorter way to each:
+- *Start the day*: 1 the morning brief ("written 08:30 ET", opening `MorningBrief` in place, or "not written yet");
+  2 Arm today's plans ("2 plans armed", opening its checklist, whose Close comes back to the list); 3 this week's goals
+  (the goals line with its editor); 4 Prep the day (its question in the box, unsent).
+- *Close the day*: 1 your day (the day read at the top of Now: the list gives way to it); 2 to review ("2 to review",
+  starting the close pass); 3 paper next to real (the paper book's score line, with its marks); 4 rules followed vs
+  broken (the rules split line); 5 goals; 6 one thing for tomorrow (the close question in the box, unsent).
+Opening it reads nothing new (the session read, the thread list's plans and the paper book are already on the desk) and
+sends nothing to the model; only a step that already sends something would, and none does. Opening a thread or a link
+closes it, as it does Arm's checklist.
 
 **Arm today's plans** opens a checklist in the copilot column
 (`ArmChecklist.tsx`; below 1180 px it opens the copilot sheet): each armed plan
@@ -1469,7 +1490,8 @@ typed, every saved conversation whose title, symbol or conclusion holds the
 words, up to the newest 50 matches, from `GET /copilot/investigations?q=`, so a
 closed or old thread stays reachable) and Commands (Plan a trade, Review
 my week, What matters right now?, the day's phase commands: Arm today's plans
-and Prep the day before 9:30 on a weekday, Close the day after 16:00; then every place on the desk with its key:
+and Prep the day before 9:30 on a weekday, Close the day after 16:00; the Day button's checklist (**D**: "Start the
+day" before 9:30, "Close-of-day checklist" after 16:00, "Day checklist" otherwise); then every place on the desk with its key:
 Chart, Chain, Ticket, Check a call, Grid, Feed, Copilot, Book, Threads; then Now, and the book side's places, each of
 which also has its own button where it lives: Paper book, My rules, This week's goals, Watchlist, Note on this position,
 Data health (the health list), Replay a past day and Redo one of my trades; How I use the desk last). A command
@@ -1502,7 +1524,7 @@ prices are marked: the book shows **Updating…** with its P&L dimmed and the to
 a thread header's price block is dimmed until its read lands; "Since you entered" keeps its own as-of time. Only the
 very first load shows "Reading positions…". While not typing in a field: J / K open the next or previous
 conversation as the list shows it (those under Main, then each ticker's
-subthreads when shown, else its newest; folded ones are skipped), N opens Plan a trade (not while the message box holds unsent words), `[` opens or closes the thread list's drawer, a place's key opens it (**C** Chart, **O** Chain, **T** Ticket, **L** Check a call, **G** Grid, **F** the Feed and back to the copilot, **B** the Book, **P** the paper book, **W** the watchlist, **R** Replay, **/** the copilot's message box), and Escape closes the drawer, else the Feed's drawer, else the copilot's sheet. No desk key fires in an
+subthreads when shown, else its newest; folded ones are skipped), N opens Plan a trade (not while the message box holds unsent words), `[` opens or closes the thread list's drawer, a place's key opens it (**C** Chart, **O** Chain, **T** Ticket, **L** Check a call, **G** Grid, **F** the Feed and back to the copilot, **B** the Book, **P** the paper book, **W** the watchlist, **R** Replay, **D** the day's checklist, **/** the copilot's message box), and Escape closes the drawer, else the Feed's drawer, else the copilot's sheet. No desk key fires in an
 input, text area or editable field, ⌘K included, and no other browser shortcut
 is taken (**/** is Firefox's quick find outside a field; on the desk it goes to the message box). A one-line key hint sits at the foot of the thread list on a wide
 screen. Browser proof: `frontend/e2e/copilot-desk-keys.spec.ts` (palette,

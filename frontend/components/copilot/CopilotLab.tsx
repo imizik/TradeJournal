@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { ChartCandlestick, Menu, MessageCircle, MessagesSquare, PanelLeft, Plus, Search, X } from "lucide-react";
+import { CalendarCheck, ChartCandlestick, Menu, MessageCircle, MessagesSquare, Moon, PanelLeft, Plus, Search, Sunrise, X } from "lucide-react";
 import { openNavMenu, useFoldedNav } from "@/components/Nav";
 import CheckACall from "@/components/copilot/CheckACall";
 import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
@@ -29,6 +29,7 @@ import WatchDayLink from "@/components/replay/WatchDayLink";
 import { planContext } from "@/components/copilot/PlanATrade";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import ArmChecklist from "@/components/copilot/ArmChecklist";
+import DayChecklist from "@/components/copilot/DayChecklist";
 import DeskFeed, { feedQuestion, useDeskFeed, useFeedNew, type FeedItem } from "@/components/copilot/DeskFeed";
 import { useDeskUnusual } from "@/components/copilot/DeskUnusual";
 import { scannerGuides, useDeskScanner, type DeskScannerRow } from "@/components/copilot/DeskScanner";
@@ -61,6 +62,8 @@ const DeskGrid = dynamic(() => import("@/components/copilot/DeskGrid"), { ssr: f
 /** The close pass in progress (its New York day), kept for this tab: a thread with no conversation opens by its link. */
 const CLOSING_KEY = "desk.closing.v1";
 const CENTRE_KEY = "desk.centre.v1";
+/** The New York day Start the day's checklist was last opened in this browser: until then the Day button is amber before the open. */
+const STARTED_KEY = "desk.day.started.v1";
 /** "Plan a trade" with nothing known: the owner names the ticker. The thread list's own button makes the same link. */
 const PLAN_HREF = copilotLabHref("", planContext(), { kind: "copilot", ref: null });
 const PREP_PROMPT = "Prep the day: what is armed, what news or earnings touch my positions and watches, and what would change a plan before the open?";
@@ -294,6 +297,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const sent = useRef(0);
   const [answering, setAnswering] = useState(false); // the close pass's fills to link, in the conversation pane
   const [arming, setArming] = useState(false); // Arm today's plans' checklist, in the conversation pane
+  const [dayList, setDayList] = useState(false); // the Day button's checklist, in the conversation pane
   // The open thread is in the address (below). Now in place marks ``toNow``: the Main chat it opens replaces the bare
   // address, as a fresh load's does.
   const addressed = useRef<string | null>(null);
@@ -307,6 +311,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     showCopilot();
     setArming(false);
     setAnswering(false);
+    setDayList(false);
   }, [showCopilot]);
   // Now (the top bar's, the breadcrumb's, Back to the bare address): today's Main chat in place, its address replacing
   // the bare one as a fresh load's does.
@@ -322,6 +327,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     setFeedShown(false); // beside the Feed, Now brings the copilot's column forward
     setArming(false);
     setAnswering(false);
+    setDayList(false);
   }, []);
   const actions = useMemo<HomeActions>(() => ({
     open: id => { setCommand({ kind: "open", id, n: ++sent.current }); showCopilot(); if (narrow()) setThreadsShown(false); },
@@ -525,8 +531,31 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   useEffect(() => {
     const was = lastThread.current;
     lastThread.current = thread?.id ?? null;
-    if (was !== null) { setArming(false); setAnswering(false); }
+    if (was !== null) { setArming(false); setAnswering(false); setDayList(false); }
   }, [thread?.id]);
+  // The Day button (the top bar's, ⌘K's, D): Start the day before the open and through the session, Close the day after
+  // 16:00, one checklist in the conversation pane. Opening it reads nothing new and sends nothing (DayChecklist.tsx). It
+  // is amber only while something is still to do: before the open until its list was opened today, after the close while
+  // any close question or fill waits.
+  const dayKind = dayPhase === "close" ? "close" : "start";
+  const dayLeft = Math.max(0, tally.total - tally.done);
+  const [started, setStarted] = useState<string | null>(null);
+  useEffect(() => { try { setStarted(window.localStorage.getItem(STARTED_KEY)); } catch { /* amber until opened */ } }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+  const dayToDo = dayPhase === "pre" ? started !== nyDay() : dayPhase === "close" ? dayLeft > 0 : false;
+  const copilotShown = !arming && !answering && !feedShown && (sheet || !sheetLayout());
+  const toggleDay = useCallback(() => {
+    if (dayList && copilotShown) { setDayList(false); return; }
+    setDayList(true); setArming(false); setAnswering(false); showCopilot();
+    if (dayPhase === "pre") { const day = nyDay(); setStarted(day); try { window.localStorage.setItem(STARTED_KEY, day); } catch { /* this visit only */ } }
+  }, [dayList, copilotShown, dayPhase, showCopilot]);
+  useCountOpen("day", on && dayList);
+  // Your day: the day read sits at the top of Now; the checklist gives way to it.
+  const openDayRead = useCallback(() => {
+    setDayList(false);
+    goNow(true);
+    showCopilot();
+    requestAnimationFrame(() => requestAnimationFrame(() => desk.current?.querySelector('[data-testid="day-read"]')?.scrollIntoView({ block: "nearest" })));
+  }, [goNow, showCopilot]);
   // A centre tab by its key or the palette: the tab, and on a phone the ticker's view with it.
   const showNow = use.showNow;
   const openCentre = useCallback((tab: CentreTab) => { showNow(`tab.${tab}`); setCentreTab(tab); showCentre(); }, [showCentre, showNow]);
@@ -570,6 +599,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       { id: "arm", name: "Arm today's plans", hint: "Each armed plan: still good, change or drop. Nothing is sent.", run: () => { setArming(true); showCopilot(); } },
       { id: "prep", name: "Prep the day", hint: "Puts a prep question in the box, unsent", run: () => fill(PREP_PROMPT) }] : []),
     ...(dayPhase === "close" ? [{ id: "close", name: "Close the day", hint: "Each close question and fill to link, one at a time. Nothing is sent.", run: closeDay }] : []),
+    // The Day button's checklist: its name follows the clock (``closeDay`` keeps the name "Close the day").
+    { id: "day", name: dayPhase === "pre" ? "Start the day" : dayPhase === "close" ? "Close-of-day checklist" : "Day checklist", key: "D",
+      hint: dayKind === "start" ? "Brief, plans to arm, goals, prep question. Nothing is sent." : "Your day, to review, paper next to real, rules, goals, tomorrow. Nothing is sent.", run: toggleDay },
     // Every place on the desk, each with its key: the ticker's tools, the Feed, the copilot's message box, the thread list.
     ...CENTRE_TABS.map(tab => ({ id: `go-${tab.id}`, name: tab.label, hint: tab.hint, key: tab.key, run: () => openCentre(tab.id) })),
     { id: "go-feed", name: "Feed", hint: "Yours, ideas and the market today", key: "F", run: showFeed },
@@ -594,7 +626,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       if (area === "Left") showBook(); else if (area === "Centre") { setCentreTab("chart"); showCentre(); } else if (area === "Right") showFeed();
       requestAnimationFrame(() => document.querySelector(`[data-use="${id}"]`)?.scrollIntoView({ block: "nearest" }));
     } })),
-  ], [actions, dayPhase, fill, planTrade, closeDay, openCentre, showFeed, focusCopilot, focusBook, toggleThreads, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre, goNow, reveal, openReplay]);
+  ], [actions, dayPhase, dayKind, toggleDay, fill, planTrade, closeDay, openCentre, showFeed, focusCopilot, focusBook, toggleThreads, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre, goNow, reveal, openReplay]);
 
   // J / K walk the conversations the thread list shows, subthreads included, in its order.
   const [walk, setWalk] = useState<string[]>([]);
@@ -645,12 +677,13 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         else if (key === "p") { event.preventDefault(); countTap("keys"); reveal(["paper"], "desk-paper", false, "paper"); }
         else if (key === "w") { event.preventDefault(); countTap("keys"); reveal(["watching"], "desk-watching"); }
         else if (key === "r") { event.preventDefault(); countTap("keys"); openReplay(); }
+        else if (key === "d") { event.preventDefault(); countTap("keys"); toggleDay(); }
         else if (event.key === "/") { event.preventDefault(); countTap("keys"); focusCopilot(); }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [on, replay, step, planTrade, toggleThreads, openCentre, showFeed, focusBook, showCopilot, focusCopilot, reveal, openReplay]);
+  }, [on, replay, step, planTrade, toggleThreads, openCentre, showFeed, focusBook, showCopilot, focusCopilot, reveal, openReplay, toggleDay]);
 
   // The open symbol's row in the thread list (a position or a plan): its close question and horizon, as the list shows them.
   const deskRow = useCallback((symbol: string | null | undefined) =>
@@ -874,7 +907,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
             {([["book", "Book"], ["ticker", centreSymbol ?? "Market"], ["feed", "Feed"]] as const).map(([id, label]) => (
               <button key={id} type="button" aria-pressed={phoneView === id} data-testid={`desk-view-${id}`} data-use={`view.${id}`}
                 onClick={() => id === "book" ? showBook() : id === "ticker" ? showCentre() : showFeed()}
-                className={cn("min-h-11 min-w-0 flex-1 truncate rounded-md px-1 text-sm", phoneView === id ? "bg-secondary font-semibold text-foreground" : "text-muted-foreground")}>
+                className={cn("min-h-11 min-w-0 flex-1 truncate rounded-md px-0.5 text-sm", phoneView === id ? "bg-secondary font-semibold text-foreground" : "text-muted-foreground")}>
                 {label}
                 {id === "book" && phoneView !== "book" && needs.length > 0 && <span data-testid="desk-view-needs" className="ml-1.5 text-xs font-semibold tabular-nums text-primary">{needs.length}<span className="sr-only"> need you</span></span>}
                 {id === "feed" && feedNew.count > 0 && <span data-testid="feed-new-phone" className="ml-1.5 text-xs tabular-nums text-muted-foreground">{feedNew.count}<span className="sr-only"> new</span></span>}
@@ -884,6 +917,16 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           <div className={styles.barActions}>
             {/* Is every source behind the desk live: one dot, a list on a tap. */}
             <div data-use="health" className="contents"><DeskHealthDot /></div>
+            {/* The Day button: the day's routine as one checklist, by the New York clock. A phone keeps an icon and one word. */}
+            <button type="button" onClick={toggleDay} aria-pressed={dayList} data-testid="desk-day-button" data-use="day" data-phase={dayPhase ?? "session"}
+              title={dayPhase === "pre" ? "Start the day: brief, plans to arm, goals, prep ( D )" : dayPhase === "close" ? "Close the day: your day, to review, paper next to real, rules, goals ( D )" : "The day's checklist ( D )"}
+              className={cn("inline-flex min-h-11 min-w-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border px-2 text-xs sm:min-w-11 max-sm:flex-col max-sm:gap-0.5 max-sm:px-1 max-sm:text-[10px] max-sm:leading-none sm:min-h-8 sm:px-2.5",
+                dayToDo ? "border-primary bg-primary font-semibold text-primary-foreground hover:bg-primary/90" : cn("text-muted-foreground hover:text-foreground", dayList && "bg-secondary"))}>
+              {dayPhase === "pre" ? <Sunrise size={14} aria-hidden /> : dayPhase === "close" ? <Moon size={14} aria-hidden /> : <CalendarCheck size={14} aria-hidden />}
+              {dayPhase === "pre" ? <><span className="sm:hidden">Start</span><span className="max-sm:hidden">Start the day</span></>
+                : dayPhase === "close" ? <><span className="sm:hidden">Close{dayLeft ? ` · ${dayLeft}` : ""}</span><span className="max-sm:hidden">Close the day{dayLeft ? ` · ${dayLeft} to review` : ""}</span></>
+                : "Day"}
+            </button>
             {/* The desk's front door: today's Main chat in the copilot. */}
             <Link href="/copilot-lab" aria-current={onNow ? "page" : undefined} title="Back to today: Main chat in the copilot"
               onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setFeedShown(false); if (!onNow) goNow(true); }}
@@ -1056,12 +1099,17 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               ask={() => { setArming(false); fill(ARM_PROMPT); }}
               change={(plan, text) => { setArming(false); setCommand({ kind: "open", id: plan.investigationId!, text, n: ++sent.current }); showCopilot(); }} />
           )}
+          {on && !arming && !closeStep && dayList && (
+            <DayChecklist kind={dayKind} prep={session.data?.prep} plans={plans} book={paper.book} bookFailed={paper.failed} toReview={dayLeft} fill={fill}
+              onClose={() => setDayList(false)} onArm={() => { setArming(true); showCopilot(); }} onPrep={() => fill(PREP_PROMPT)}
+              onDayRead={openDayRead} onReview={() => { setDayList(false); closeDay(); }} onTomorrow={() => fill(CLOSE_PROMPT)} />
+          )}
           {on && !arming && closeStep && (
             <ClosePass key={closeStep.id} done={tally.done} total={tally.total}
               onSkip={() => pass(closeStep.id)} onEnd={() => { setAnswering(false); setClosing(false); }} body={
                 <FillLinkBar tradeId={closeStep.id} titles={fills.titles} onDone={(id, how) => { fills.answer(id, how); pass(id); }} />} />
           )}
-          {on && !arming && !closeStep && (!thread && link?.symbol && link.radar ? (
+          {on && !arming && !closeStep && !dayList && (!thread && link?.symbol && link.radar ? (
             <><RadarDecision key={link.radar} eventId={link.radar} symbol={link.symbol} fill={fill} /><ThreadHitRating key={`rate-${link.radar}`} eventId={link.radar} /></>
           ) : !thread && link?.symbol && !link.investigation ? (
             <div className="mb-4 space-y-3">

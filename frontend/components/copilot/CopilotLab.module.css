@@ -379,6 +379,12 @@
     background: hsl(var(--background));
   }
 
+  /* Tighter on a phone, so the Day button fits beside the others and the views keep their names. */
+  .topRow,
+  .barActions {
+    gap: 4px;
+  }
+
   .bar {
     gap: 4px 12px;
     padding: 6px 12px 8px;
