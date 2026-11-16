@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from sqlmodel import Session
 
-from app.engine import chatter, desk_health, desk_minute, desk_sparks, desk_ticks, robinhood_book, robinhood_fills
+from app.engine import chatter, desk_health, desk_minute, desk_sparks, desk_ticks, robinhood_book, robinhood_fills, self_check
 from app.models import DayJournalEntry
 from app.routers import copilot_desk
 from tests.test_copilot_desk import desk  # noqa: F401  (the desk app over the shared fixtures)
@@ -18,6 +18,12 @@ from tests.test_today import clock, marks  # noqa: F401  (fixtures)
 
 NOW = (T0 + timedelta(minutes=289)).replace(tzinfo=UTC).timestamp()  # 14:49 New York, Wednesday Oct 21 (the clock fixture's)
 OPEN = (T0 - timedelta(minutes=30)).replace(tzinfo=UTC).timestamp()  # 9:30
+
+
+@pytest.fixture(autouse=True)
+def no_kept_self_check(tmp_path, monkeypatch):
+    """The open self-check's kept runs in a folder of the test's own: none unless a test writes one."""
+    monkeypatch.setattr(self_check, "ROOT", tmp_path / "self_check")
 
 
 @pytest.fixture
@@ -50,7 +56,8 @@ def test_every_source_has_a_row_and_nothing_switched_on_is_never_green(desk, reg
     monkeypatch.setattr(desk_health, "gmail", lambda db, now: desk_health._row("gmail", "Fill emails", "off", "Real-time off", None, ""))
     body = read(desk)
     rows = by_id(body)
-    assert list(rows) == ["robinhood", "prices", "chatter", "tradingview", "gmail", "radar", "budget"]
+    assert list(rows) == ["robinhood", "prices", "chatter", "tradingview", "gmail", "radar", "budget", "self_check"]
+    assert rows["self_check"]["state"] == "quiet"  # no run yet: never green
     assert rows["robinhood"]["state"] == "off"
     assert rows["prices"]["state"] == "unknown"  # in the session with no price read yet: unknown, not live
     assert rows["prices"]["line"] == "Waiting for the first price read"

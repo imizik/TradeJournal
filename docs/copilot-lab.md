@@ -1893,11 +1893,38 @@ reads again a few seconds after the desk opens or comes back into view, once the
 | Fill emails | the Gmail health the nav already shows | its own heartbeat rules | — |
 | Radar | today's recorder passes (read-only) | 3 min | closed outside the regular session |
 | Copilot budget | today's API spend against `COPILOT_DAILY_BUDGET_USD` | amber under $0.50 left | resets at midnight New York |
+| Self-check | the newest kept open self-check (§ Open self-check) | amber when today's run had a failure | quiet before today's run, naming the last |
 
 `GET /copilot/desk/health` (`backend/app/engine/desk_health.py`, thresholds in its `STALE_AFTER` table) is owner-only,
 read-only and rides the desk's minute request (§ What an open desk asks): no poll of its own, no provider call, no
 Robinhood call (the desk router hands it the feed's state). A hidden ticker's alert never shows in it. The fixture desk
 (the UX sandbox) answers invented rows.
+
+### Open self-check
+
+A minute after each regular open (09:31 on a normal day), the server tries the desk's newest features on the first live
+data and sends the owner one Telegram line (`backend/app/engine/self_check.py`, started in `app/main.py` while the copilot
+runs on live evidence). Six checks, each on its own thread with a 15-second timeout, so one failing or hanging never
+holds the others or the API, and none writes into his books (no paper order, plan, rule record or goal):
+
+| Check | What passes |
+|---|---|
+| paper pricing | the paper book's own fill price (`paper_book.contract`, `_live_quotes`, `price`: pure, nothing written) for SPY shares and today's at-the-money SPY call, on quotes inside the fresh-quote rule (two quote reads) |
+| paper runner | the paper book's minute passed in the last 2 minutes; named off when it is not running |
+| replay | option replay's source (`replay_options.trades`) returns bars for the at-the-money SPY call that expired on the previous session (one timesales read) |
+| desk minute | the minute request's dispatcher (`desk_minute.read_all`) answers its investigations and health reads, routed inside the app (both read only the database and kept state: the thread list is left out because it reads quotes and can start a Robinhood read) |
+| deep links | a ping's tap (`phone.desk_link`) opens the desk route with only the parameters the desk reads |
+| health strip | § Data health reads every source; its amber rows ride the line ("Data: Robinhood down") |
+
+The line: "Self-check 09:31 ✅ all 6 OK" (sent silently), or "Self-check 09:31 ⚠️ 2 of 6 failed: paper pricing (no fresh
+SPY quote since 09:28:40), replay (…)" (it buzzes), with the data-health result under it. It goes under its own ping kind,
+`self_check`, with a budget of one a day of its own (§ Phone ping policy), never spending another kind's, and only on a
+day the market calendar confirms as a session (never a weekend or holiday; with no calendar answer it does not run). The
+day is claimed before the checks start, so a restart never runs it twice. Each run is kept in
+`backend/data/self_check/<day>.json` (the last 30 days) and the data-health strip shows the newest (amber all day when
+today's run had a failure or never finished). At most three Tradier
+reads a day, each through the chart feed's single-flight and budget; no Robinhood call (the health strip's existing
+reader of the feed's kept state only). `SELF_CHECK_ENABLED=false` switches it off; it is on by default.
 
 ### The desk read
 
@@ -3813,7 +3840,8 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   single pings that carry a [setup card](radar.md#setup-cards-off-by-default),
   ranked just above `radar_event`), `radar_event` 4 (Radar's other single
   pings), `radar_digest` 2, `thesis_watch` 2, `research` 1, `paper` 6 (his
-  [paper book](#paper)'s PAPER pings) and `paper_review` 1 (the Friday [paper review](#paper)), ranked last. Before 09:30
+  [paper book](#paper)'s PAPER pings), `paper_review` 1 (the Friday [paper review](#paper)) and `self_check` 1 (the
+  [open self-check](#open-self-check)'s line), ranked last. Before 09:30
   New York these kinds together also have `PING_PREOPEN_ALLOWANCE` (default 2)
   pings, so pre-open headlines cannot spend the day. While the
   [morning brief](#pre-market-prep) is on and not yet decided today, one of them

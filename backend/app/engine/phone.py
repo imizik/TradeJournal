@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 SendError = ntfy.NtfyError
 NO_WHY = frozenset({"prep", "week_review", "day_replay", "evening_review", "companion_adopt", "companion_update",
-                    "paper_review"})
+                    "paper_review", "self_check"})
 
 
 def with_why(kind: str, buttons: tuple[tuple[str, str], ...]) -> tuple[tuple[str, str], ...]:

@@ -35,6 +35,7 @@ class PaperRunner:
     def __init__(self, engine, *, clock=time.time, minutes=_minutes, send=None):
         self.engine, self.clock, self.minutes, self._send = engine, clock, minutes, send
         self.last_error: str | None = None
+        self.last_pass_at: float | None = None  # the newest completed pass (the open self-check asks)
 
     def run_once(self) -> list[dict]:
         now = self.clock()
@@ -42,6 +43,7 @@ class PaperRunner:
             told = paper_book.minute_pass(db, now, self.minutes)
             for item in told:
                 self.ping(db, item, now)
+        self.last_pass_at = now
         return told
 
     def ping(self, db: Session, item: dict, now: float) -> None:
