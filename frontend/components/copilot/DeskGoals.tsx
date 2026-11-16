@@ -108,7 +108,7 @@ export function GoalsLine({ goals }: { goals?: WeeklyGoals }) {
           <span className="text-amber-200">{goals.label}:</span>
           {goals.progress.length
             ? goals.progress.map((p, i) => <span key={`${p.kind}-${p.book}`}>{i > 0 && <span className="text-muted-foreground">· </span>}<Item p={p} /></span>)
-            : <span className="text-muted-foreground">{goals.goals.map(g => SHORT[g.kind].replace("N", String(g.n)) + (g.book === "paper" ? " (paper)" : "")).join(" · ")}</span>}
+            : <span className="text-muted-foreground">{goals.goals.map(g => SHORT[g.kind].replace(/\bN\b/, String(g.n)) + (g.book === "paper" ? " (paper)" : "")).join(" · ")}</span>}
           <span className="ml-1">{edit("Edit")}</span>
         </p>
       )}

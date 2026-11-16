@@ -23,6 +23,7 @@ never a ping.
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from datetime import UTC, date, datetime, time as wall_time, timedelta
 
@@ -91,7 +92,7 @@ def clean(db: Session, raw) -> list[dict]:
         spec = KINDS[kind]
         if book not in BOOKS:
             raise GoalsError("A goal is about your real trades or your paper book.")
-        if isinstance(n, bool) or not isinstance(n, (int, float)) or n != int(n) or not spec["min"] <= n <= spec["max"]:
+        if isinstance(n, bool) or not isinstance(n, (int, float)) or not math.isfinite(n) or n != int(n) or not spec["min"] <= n <= spec["max"]:
             raise GoalsError(f"\"{spec['words'].format(n='N')}\" needs a whole N from {spec['min']:,} to {spec['max']:,}.")
         if (kind, book) in seen:
             raise GoalsError("The same goal twice: keep one.")
@@ -263,6 +264,7 @@ def progress(db: Session, goals: list[dict], monday: date, now: float) -> list[d
                     found = _rules_line([trading_rules.outcome(p.get("rules")) for p in paper if _in_week(p["opened_at"], monday)],
                                         n, "paper ", "entered before your rules")
         except Exception:  # noqa: BLE001 -- unreadable: grey with why, never a zero
+            db.rollback()  # a failed read must not leave the session aborted for the paper read that follows
             found = {"text": f"{words(goal)}: could not be read just now", "ok": None}
             item["stale"] = "Could not be read just now."
         if item["stale"]:

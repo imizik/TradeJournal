@@ -113,9 +113,9 @@ test("a goal whose source is behind is grey with why and its time, never ticked"
 });
 
 test("on a weekend the line names next week's goals with nothing measured yet, and Clear removes them", async ({ page }) => {
-  const seen = await open(page, 1440, { ...NONE, label: "Next week", monday: "2026-11-16", goals: [{ kind: "rules_pct", n: 80, book: "paper" }], progress: [] });
+  const seen = await open(page, 1440, { ...NONE, label: "Next week", monday: "2026-11-16", goals: [{ kind: "rules_pct", n: 80, book: "paper" }, { kind: "max_trades_day", n: 5, book: "real" }], progress: [] });
   const goals = (await paperSection(page, 1440)).getByTestId("goals");
-  await expect(goals.getByTestId("goals-line")).toContainText("Next week:Follow all my rules on 80% of trades (paper)");
+  await expect(goals.getByTestId("goals-line")).toContainText("Next week:Follow all my rules on 80% of trades (paper) · No more than 5 trades a day");
   await goals.getByTestId("goals-set").click();
   await goals.getByTestId("goals-clear").click();
   expect(seen.saves.at(-1)).toEqual({ goals: [] });

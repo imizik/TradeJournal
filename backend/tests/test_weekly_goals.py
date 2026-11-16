@@ -48,7 +48,8 @@ def test_one_or_two_measurable_goals_carry_over_until_changed(db):  # noqa: F811
     assert weekly_goals.desk(db, NOW)["goals"] == saved  # set last week, still this week's
     for bad, why in [([{"kind": "max_loss", "n": 1}] * 3, "Keep it to 2"), ([{"kind": "vibes", "n": 1}], "one of"),
                      ([{"kind": "max_loss", "n": 0}], "whole N"), ([{"kind": "max_trades_day", "n": 2.5}], "whole N"),
-                     ([{"kind": "max_loss", "n": True}], "whole N"), ([{"kind": "max_loss", "n": 300, "book": "both"}], "real trades or"),
+                     ([{"kind": "max_loss", "n": True}], "whole N"), ([{"kind": "max_loss", "n": float("nan")}], "whole N"),
+                     ([{"kind": "max_loss", "n": float("inf")}], "whole N"), ([{"kind": "max_loss", "n": 300, "book": "both"}], "real trades or"),
                      ([{"kind": "max_loss", "n": 300}, {"kind": "max_loss", "n": 200}], "twice"),
                      ([{"kind": "rules_pct", "n": 80}], "Write your rules first")]:
         with pytest.raises(weekly_goals.GoalsError, match=why):
