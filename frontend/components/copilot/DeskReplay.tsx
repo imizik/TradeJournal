@@ -378,7 +378,7 @@ function Ticket({ view, at, symbol, options, onView, pause, preset = null }: {
   return (
     <section aria-label="Replay ticket" data-testid="replay-ticket" className={cn("space-y-2 rounded-md p-2.5", MODE_FRAME.replay)}>
       <div className="flex flex-wrap items-center gap-2">
-        <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground"><ModeMark mode="replay" detail={modeDay(view.run.day)} /> not real money</p>
+        <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground"><ModeMark mode="replay" detail={modeDay(view.run.day)} /> · not real money</p>
         <div role="radiogroup" aria-label="What to trade" className="ml-auto inline-flex rounded-md border text-xs">
           <button type="button" role="radio" aria-checked={!option} onClick={() => choose("stock")}
             className={cn("min-h-11 rounded-l-md px-3 sm:min-h-8", !option ? "bg-amber-400/15 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>{symbol} shares</button>

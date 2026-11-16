@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
  * the same everywhere and read by shape and word, never by colour alone (amber also means "needs you" on the desk):
  * - REAL: a solid light chip, with the account when known ("Real · Roth IRA ••8267"); its card has a solid left edge.
  * - PAPER: a dashed amber chip, "Paper · not real money" unless ``short``; its card has a dashed amber frame.
- * - REPLAY: a filled amber chip with the replayed day ("Replay · Fri Nov 13").
+ * - REPLAY: a filled amber chip with the replayed day ("Replay · Fri, Nov 13").
  * The word is written in sentence case and shown in capitals, so text reads "Paper +$40.50" to tests and screen readers.
  */
 
@@ -25,7 +25,7 @@ export const MODE_FRAME: Record<Mode, string> = {
   replay: "border border-dashed border-amber-400/40",
 };
 
-/** "Fri Nov 13" for a calendar date (read in UTC so the day never shifts). */
+/** "Fri, Nov 13" for a calendar date (read in UTC so the day never shifts). */
 export const modeDay = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
 
 export default function ModeMark({ mode, detail, short = false, className }: {

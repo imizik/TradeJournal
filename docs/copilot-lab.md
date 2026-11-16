@@ -2086,7 +2086,7 @@ never by colour alone (amber also means "needs you"):
   and momentum books, the paper confirm. On a ticket "Paper trade it" sits in its own PAPER half under a dashed
   divider, below Copy all; in the Chain the Paper button is its own PAPER group under the real actions (Check it, Plan
   it, Put on ticket, Make it a spread).
-- **REPLAY**: a filled amber chip with the day ("Replay · Fri Nov 13"): the replay ticket and the Replay practice card.
+- **REPLAY**: a filled amber chip with the day ("Replay · Fri, Nov 13"): the replay ticket and the Replay practice card.
 
 Where paper and real sit side by side (the paper score line, Progress, the rules followed/broken line, the Friday
 review) each side carries its mark. Proof: `frontend/e2e/copilot-desk-rules.spec.ts`, `frontend/e2e/copilot-desk-chain.spec.ts`.
