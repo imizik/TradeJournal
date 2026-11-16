@@ -10,6 +10,7 @@ import {
 } from "@/lib/paperBook";
 import { cn } from "@/lib/utils";
 import { GoalsLine } from "./DeskGoals";
+import ModeMark from "./ModeMark";
 import { RulesChecklist, RulesEditor, RulesSplitLine } from "./DeskRules";
 
 /**
@@ -193,7 +194,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
   const entry = order && form ? { side: "paper" as const, instrument: order.instrument, expiry: order.instrument === "stock" ? null : order.expiry, size, stop: stopN } : null;
   return (
     <div data-testid="paper-confirm" className="w-full space-y-2 rounded-md border border-dashed border-amber-400/50 p-2.5">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-200">Paper · not real money{source !== "mine" && <span data-testid="paper-idea" className="ml-1 font-normal normal-case tracking-normal text-muted-foreground">· {SOURCE_WORD[source]}&apos;s idea{order ? `: ${orderWords(order)}` : ""}</span>}</p>
+      <p className="flex flex-wrap items-center gap-x-1 text-[11px]"><ModeMark mode="paper" />{source !== "mine" && <span data-testid="paper-idea" className="text-muted-foreground">· {SOURCE_WORD[source]}&apos;s idea{order ? `: ${orderWords(order)}` : ""}</span>}</p>
       {busy && !form && <p className="text-xs text-muted-foreground">Reading a live quote…</p>}
       {form && !done && (
         <>
@@ -438,7 +439,7 @@ function Curve({ paper, real }: { paper: PaperStats["curve"]; real: PaperStats["
       </svg>
       <figcaption className="flex justify-between text-[11px] text-muted-foreground">
         <span>{days[0].slice(5).replace("-", "/")}</span>
-        <span><span className="text-amber-300">— paper</span> · <span>- - real</span> · closed P&amp;L by day</span>
+        <span><span className="text-amber-300">— </span><ModeMark mode="paper" short /> · <span>- - </span><ModeMark mode="real" /> · closed P&amp;L by day</span>
         <span>{days[days.length - 1].slice(5).replace("-", "/")}</span>
       </figcaption>
     </figure>
@@ -456,7 +457,7 @@ function Score({ paper, real, since }: { paper: PaperStats; real: PaperStats; si
   ];
   return (
     <table data-testid="paper-score" className="w-full text-xs tabular-nums">
-      <thead><tr className="text-muted-foreground"><th className="py-1 text-left font-normal">Since {day(since)}</th><th className="text-right font-medium text-amber-200">Paper</th><th className="text-right font-medium">Real</th></tr></thead>
+      <thead><tr className="text-muted-foreground"><th className="py-1 text-left font-normal">Since {day(since)}</th><th className="text-right font-medium"><ModeMark mode="paper" short /></th><th className="text-right font-medium"><ModeMark mode="real" /></th></tr></thead>
       <tbody>{rows.map(([name, cell]) => <tr key={name} className="border-t border-border/50"><td className="py-1 text-muted-foreground">{name}</td><td className="text-right">{cell(paper)}</td><td className="text-right">{cell(real)}</td></tr>)}</tbody>
     </table>
   );
@@ -477,8 +478,7 @@ export default function DeskPaper({ book, failed, symbol, top = null }: { book: 
   };
   const head = (
     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 px-3 pb-1.5 pt-2.5">
-      <h2 className={cn(LABEL, "text-amber-200")}>Paper</h2>
-      <span className="rounded border border-amber-400/50 px-1 text-[10px] uppercase tracking-wide text-amber-200">not real money</span>
+      <h2 className="self-center"><ModeMark mode="paper" /></h2>
       {book?.run && <span className="text-[11px] text-muted-foreground">run {book.run.number} · since {day(book.run.started_at)}</span>}
       {book && <button type="button" aria-expanded={editing} data-testid="rules-toggle" data-use="paper.rules" onClick={() => setEditing(e => !e)}
         title="Your own trading rules, checked at each entry" className="ml-auto text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
@@ -559,8 +559,8 @@ export default function DeskPaper({ book, failed, symbol, top = null }: { book: 
       ) : <p className="border-t border-border/60 px-3 py-1.5 text-xs text-muted-foreground">No paper positions. Paper on the Ticket or the Chain{symbol ? `, or ${symbol} shares here` : ""}.</p>}
       {symbol && <div className="flex flex-wrap gap-2 px-3 pt-1.5"><PaperButton key={symbol} order={{ instrument: "stock", symbol }} quantity={10} label={`Paper buy ${symbol} shares`} /></div>}
       <p data-testid="paper-score-line" className="flex flex-wrap gap-x-3 px-3 pt-1.5 text-xs tabular-nums">
-        <span><span className="text-amber-200">Paper </span><span className={toneOf(score.paper.pnl)}>{signed(score.paper.pnl)}</span>{score.paper.win_rate != null && <span className="text-muted-foreground"> · {score.paper.win_rate}% of {score.paper.trades}</span>}</span>
-        <span><span className="text-muted-foreground">Real </span>{score.real.trades === 0 ? <span className="text-muted-foreground">no closed trades</span> : <>
+        <span className="inline-flex items-center gap-1"><ModeMark mode="paper" short />{" "}<span className={toneOf(score.paper.pnl)}>{signed(score.paper.pnl)}</span>{score.paper.win_rate != null && <span className="text-muted-foreground"> · {score.paper.win_rate}% of {score.paper.trades}</span>}</span>
+        <span className="inline-flex items-center gap-1"><ModeMark mode="real" />{" "}{score.real.trades === 0 ? <span className="text-muted-foreground">no closed trades</span> : <>
           <span className={toneOf(score.real.pnl)}>{signed(score.real.pnl)}</span><span className="text-muted-foreground"> · {score.real.win_rate}% of {score.real.trades}</span></>}</span>
         <span className="text-muted-foreground">closed, since {day(book.run.started_at)}</span>
       </p>

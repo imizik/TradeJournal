@@ -155,6 +155,42 @@ test("the Ticket's Copy all keeps the real checklist with the plan and the accou
 });
 
 for (const width of [1440, 375]) {
+  test(`a real ticket opens on REAL and the account; Paper trade it sits apart in its own PAPER group at ${width}px`, async ({ page }) => {
+    await open(page, width, "/copilot-lab?ticket=inv-nbis");
+    const ticket = page.getByTestId("desk-ticket");
+    // The ticket's first line: REAL, the account, and that he places it himself.
+    await expect(ticket.locator("p").first()).toHaveAttribute("data-testid", "ticket-real");
+    const real = ticket.getByTestId("ticket-real");
+    await expect(real.getByTestId("mode-mark")).toHaveAttribute("data-mode", "real");
+    await expect(real.getByTestId("mode-mark")).toHaveText("Real · Roth ••8267");
+    await expect(real).toContainText("you place it in Robinhood · nothing is sent");
+    // The paper action is in its own group, under a divider, below Copy all; Copy all is not in it.
+    const paper = ticket.getByRole("group", { name: "Paper, not real money" });
+    await expect(paper.getByTestId("mode-mark")).toHaveText("Paper · not real money");
+    await expect(paper.getByTestId("paper-button")).toHaveText("Paper trade it");
+    await expect(ticket.getByTestId("paper-button")).toHaveCount(1);
+    await expect(paper.getByRole("button", { name: "Copy all for Robinhood" })).toHaveCount(0);
+    const copy = await ticket.getByRole("button", { name: "Copy all for Robinhood" }).boundingBox();
+    const half = await paper.boundingBox();
+    expect(half!.y).toBeGreaterThan(copy!.y + copy!.height);
+  });
+
+  test(`the book says REAL, the paper score line marks each side, and the row's P&L stays on screen at ${width}px`, async ({ page }) => {
+    await open(page, width);
+    const paper = await paperSection(page, width);
+    const book = page.getByTestId("desk-book");
+    await expect(book.getByRole("heading", { level: 2 })).toHaveText("Your book · 1 followed");
+    await expect(book.getByTestId("mode-mark")).toHaveAttribute("data-mode", "real");
+    const pnl = book.getByTestId("book-pnl").first();
+    await expect(pnl).toBeVisible();
+    const box = await pnl.boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    const line = paper.getByTestId("paper-score-line");
+    await expect(line.getByTestId("mode-mark")).toHaveText(["Paper", "Real"]);
+    await expect(line).toContainText("Real −$312.00 · 33.3% of 3");
+    await expect(paper.getByTestId("rules-split").getByTestId("mode-mark")).toHaveText(["Paper", "Real"]);
+  });
+
   test(`Paper › Rules edits the list and the score line splits followed versus broken, per rule on a tap, at ${width}px`, async ({ page }) => {
     const seen = await open(page, width);
     const paper = await paperSection(page, width);

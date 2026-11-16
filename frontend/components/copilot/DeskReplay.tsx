@@ -14,6 +14,7 @@ import {
   type ReplayQuote, type ReplayScore, type ReplayTrade, type ReplayView, type Speed,
 } from "@/lib/paperReplay";
 import { cn } from "@/lib/utils";
+import ModeMark, { MODE_FRAME, modeDay } from "./ModeMark";
 
 /**
  * Replay on the desk (docs/copilot-lab.md § Paper replay): pick a past trading day and a ticker, and the day plays
@@ -191,10 +192,12 @@ export function ReplayPractice() {
     return () => { controller.abort(); window.removeEventListener(REPLAY_EVENT, load); };
   }, []);
   if (!card || card.runs.length === 0) return null;
+  const days = [...new Set(card.runs.map(r => r.day))].sort();
   return (
-    <section aria-label="Replay practice" data-testid="replay-practice" className="space-y-1.5 rounded-md border border-dashed px-3 py-2">
-      <button type="button" aria-expanded={open} onClick={() => setOpen(o => !o)} className="flex min-h-11 w-full items-center gap-2 text-left sm:min-h-0">
+    <section aria-label="Replay practice" data-testid="replay-practice" className={cn("space-y-1.5 rounded-md px-3 py-2", MODE_FRAME.replay)}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen(o => !o)} className="flex min-h-11 w-full flex-wrap items-center gap-2 text-left sm:min-h-0">
         <span className={LABEL}>Replay practice</span>
+        <ModeMark mode="replay" detail={days.length === 1 ? modeDay(days[0]) : `${days.length} days, latest ${modeDay(days[days.length - 1])}`} />
         <span className="text-[11px] text-muted-foreground">past days · not live paper</span>
         <span className="ml-auto text-xs text-muted-foreground">{open ? "▴" : "▾"}</span>
       </button>
@@ -373,9 +376,9 @@ function Ticket({ view, at, symbol, options, onView, pause, preset = null }: {
   };
 
   return (
-    <section aria-label="Replay ticket" data-testid="replay-ticket" className="space-y-2 rounded-md border border-dashed border-amber-400/50 p-2.5">
+    <section aria-label="Replay ticket" data-testid="replay-ticket" className={cn("space-y-2 rounded-md p-2.5", MODE_FRAME.replay)}>
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-200">Paper · replay · not real money</p>
+        <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground"><ModeMark mode="replay" detail={modeDay(view.run.day)} /> not real money</p>
         <div role="radiogroup" aria-label="What to trade" className="ml-auto inline-flex rounded-md border text-xs">
           <button type="button" role="radio" aria-checked={!option} onClick={() => choose("stock")}
             className={cn("min-h-11 rounded-l-md px-3 sm:min-h-8", !option ? "bg-amber-400/15 text-amber-100" : "text-muted-foreground hover:bg-secondary")}>{symbol} shares</button>

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { PaperButton } from "@/components/copilot/DeskPaper";
 import { RealRules } from "@/components/copilot/DeskRules";
+import { MODE_FRAME, PaperHalf, RealTicketLine } from "@/components/copilot/ModeMark";
 import PlayCheck, { type PlayCheckData } from "@/components/copilot/PlayCheck";
 import SetupRecordLines, { premiumLine } from "@/components/copilot/SetupRecordLines";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
@@ -266,8 +267,10 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
   if (error) return <div data-testid="desk-ticket" className="space-y-3"><p role="alert" className="text-sm">{error}</p>{foot(false)}</div>;
   if (!ticket) return <p data-testid="desk-ticket" className="text-sm text-muted-foreground">Reading the ticket…</p>;
 
+  const chosen = ticket.accounts?.find(a => a.id === account) ?? ticket.accounts?.[0];
   const head = (
     <div className="space-y-1">
+      <RealTicketLine account={chosen ? `${chosen.label}${chosen.last4 ? ` ••${chosen.last4}` : ""}` : null} />
       <p className="text-sm"><span className="font-semibold">{ticket.symbol}</span>{ticket.thesis && <span className="text-muted-foreground"> · {ticket.thesis}</span>}</p>
       <p className="text-xs text-muted-foreground">
         A ticket for your saved plan{ticket.entry !== null && `: entry ${ticket.entry}`}{ticket.invalidation !== null && `, out at ${ticket.invalidation}`}{ticket.time_stop && `, ${ticket.time_stop}`}. It copies; it never sends.
@@ -275,9 +278,8 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
       </p>
     </div>
   );
-  if (ticket.state !== "ok") return <div data-testid="desk-ticket" className="space-y-3">{head}<p className="text-sm">{ticket.reason}</p>{foot(false)}</div>;
+  if (ticket.state !== "ok") return <div data-testid="desk-ticket" className={cn("space-y-3", MODE_FRAME.real)}>{head}<p className="text-sm">{ticket.reason}</p>{foot(false)}</div>;
 
-  const chosen = ticket.accounts.find(a => a.id === account) ?? ticket.accounts[0];
   const switcher = (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs text-muted-foreground">Account</span>
@@ -301,7 +303,7 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
   if (!ticket.contract) {
     const c = ticket.candidates;
     return (
-      <div data-testid="desk-ticket" className="space-y-3">
+      <div data-testid="desk-ticket" className={cn("space-y-3", MODE_FRAME.real)}>
         {head}
         {ticket.check && <PlayCheck check={ticket.check} investigationId={ticket.investigation_id} symbol={ticket.symbol} contracts={null} paid={null} />}
         <div className="rounded-lg border bg-card p-3">
@@ -345,7 +347,7 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
   const all = copyAllText({ symbol: ticket.symbol, type: k.type, expiry: k.expiry, strike: k.strike, limit: limitN !== null ? limitN.toFixed(2) : "", contracts: qtyN ? String(qtyN) : "" });
   const field = "w-24 rounded border bg-background px-2 py-1.5 text-base tabular-nums sm:text-sm";
   return (
-    <div data-testid="desk-ticket" className="space-y-3">
+    <div data-testid="desk-ticket" className={cn("space-y-3", MODE_FRAME.real)}>
       {head}
       {switcher}
       <div className="rounded-lg border bg-card px-3 py-1.5">
@@ -407,8 +409,10 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
           </div>
         )}
       </RealRules>
-      <PaperButton order={{ instrument: "option", symbol: ticket.symbol, option_type: k.type, expiry: k.expiry, strike: k.strike }} quantity={qtyN}
-        note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} />
+      <PaperHalf>
+        <PaperButton order={{ instrument: "option", symbol: ticket.symbol, option_type: k.type, expiry: k.expiry, strike: k.strike }} quantity={qtyN}
+          note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} />
+      </PaperHalf>
       {foot(true)}
     </div>
   );
@@ -451,7 +455,7 @@ function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, 
   const field = "w-24 rounded border bg-background px-2 py-1.5 text-base tabular-nums sm:text-sm";
   const per = (n: number | null) => n === null ? "—" : `${n.toFixed(2)} ${s.type}`;
   return (
-    <div data-testid="desk-ticket" data-spread={s.type} data-use="ticket.spread" className="space-y-3">
+    <div data-testid="desk-ticket" data-spread={s.type} data-use="ticket.spread" className={cn("space-y-3", MODE_FRAME.real)}>
       {head}
       {switcher}
       <div className="rounded-lg border bg-card px-3 py-1.5">
@@ -528,8 +532,10 @@ function SpreadView({ ticket, spread: s, head, switcher, foot, limit, setLimit, 
         <CopyButton text={all} label="Copy all for Robinhood" wide onCopy={onCopy} />
         <p className="text-xs text-muted-foreground">You place it yourself in Robinhood: open {ticket.symbol}, Trade, Trade options, pick both legs (Buy the ${s.long}, Sell the ${s.short}, {shortDate(s.expiry)}), then the limit as a {s.type} and the quantity. Nothing is sent from here.</p>
       </div>)}</RealRules>
-      <PaperButton order={{ instrument: "spread", symbol: ticket.symbol, option_type: s.kind, expiry: s.expiry, long_strike: s.long, short_strike: s.short }} quantity={qtyN}
-        note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} />
+      <PaperHalf>
+        <PaperButton order={{ instrument: "spread", symbol: ticket.symbol, option_type: s.kind, expiry: s.expiry, long_strike: s.long, short_strike: s.short }} quantity={qtyN}
+          note={ticket.thesis} stop={ticket.invalidation} target={ticket.target ?? null} />
+      </PaperHalf>
       {foot}
     </div>
   );
@@ -562,8 +568,9 @@ function CloseNowView({ ticket: t, onClose, onPlaced }: { ticket: CloseNowTicket
   const whole = t.contracts === t.held;
   const field = "w-24 rounded border bg-background px-2 py-1.5 text-base tabular-nums sm:text-sm";
   return (
-    <div data-testid="desk-ticket" data-closing="now" className="space-y-3">
+    <div data-testid="desk-ticket" data-closing="now" className={cn("space-y-3", MODE_FRAME.real)}>
       <div className="space-y-1">
+        <RealTicketLine account={t.account} />
         <p className="text-sm"><span className="font-semibold">{t.symbol}</span><span className="text-muted-foreground"> · {whole ? "Close" : "Trim"} at the mark now</span></p>
         <p className="text-xs text-muted-foreground">A closing {spread ? "spread" : "sell"} of {whole ? `all ${t.held}` : `${t.contracts} of the ${t.held}`} {unit}{t.held === 1 ? "" : "s"} you hold, priced at {spread ? "the spread's net" : "today's"} mark. It copies; it never sends.</p>
       </div>
@@ -621,8 +628,9 @@ function ClosingView({ ticket: t, onClose, onPlaced }: { ticket: ClosingTicket; 
   const signed = (n: number) => `${n < 0 ? "−" : "+"}${Math.abs(n).toFixed(2)}`;
   const field = "w-24 rounded border bg-background px-2 py-1.5 text-base tabular-nums sm:text-sm";
   return (
-    <div data-testid="desk-ticket" data-closing={t.at} className="space-y-3">
+    <div data-testid="desk-ticket" data-closing={t.at} className={cn("space-y-3", MODE_FRAME.real)}>
       <div className="space-y-1">
+        <RealTicketLine account={t.account} />
         <p className="text-sm"><span className="font-semibold">{t.symbol}</span><span className="text-muted-foreground"> · Close at {where}, {t.level.toFixed(2)}</span></p>
         <p className="text-xs text-muted-foreground">A closing sell of the {t.contracts} contract{t.contracts === 1 ? "" : "s"} you hold, priced for {t.symbol} at your plan&apos;s {t.at}. It copies; it never sends.</p>
       </div>
