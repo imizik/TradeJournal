@@ -234,7 +234,7 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
   const seededQty = useRef("");  // the count the plan's size gave, re-seeded on a re-read until he edits it
   // The server judges the quote's age once; an open ticket keeps judging it on this clock.
   const [nowS, setNowS] = useState(() => Date.now() / 1000);
-  // The desk's Paper mode: the ticket leads with its paper half, Fill on paper the main action; the real half follows.
+  // The desk's Paper mode: the ticket's main action is Buy on paper (``PaperMain``); Copy all for the real order follows.
   const paperFirst = useDeskMode() === "paper";
   useEffect(() => { const timer = setInterval(() => setNowS(Date.now() / 1000), 30_000); return () => clearInterval(timer); }, []);
 

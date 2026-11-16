@@ -2,10 +2,10 @@ import { cn } from "@/lib/utils";
 
 /**
  * The one mark that says whose money a ticket, book or figure is (docs/copilot-lab.md § Real, paper and replay), drawn
- * the same everywhere and read by shape and word, never by colour alone (amber also means "needs you" on the desk):
+ * the same everywhere and read by shape and word, never by colour alone; violet is paper and replay only (amber means "needs you"):
  * - REAL: a solid light chip, with the account when known ("Real · Roth IRA ••8267"); its card has a solid left edge.
- * - PAPER: a dashed amber chip, "Paper · not real money" unless ``short``; its card has a dashed amber frame.
- * - REPLAY: a filled amber chip with the replayed day ("Replay · Fri, Nov 13").
+ * - PAPER: a dashed violet chip, "Paper · not real money" unless ``short``; its card has a dashed violet frame.
+ * - REPLAY: a filled violet chip with the replayed day ("Replay · Fri, Nov 13").
  * The word is written in sentence case and shown in capitals, so text reads "Paper +$40.50" to tests and screen readers.
  */
 
@@ -15,15 +15,15 @@ const WORD: Record<Mode, string> = { real: "Real", paper: "Paper", replay: "Repl
 /** Each mode's chip: the mark's own look, and the picked segment of the desk's mode switch (`DeskMode.tsx`). */
 export const MODE_CHIP: Record<Mode, string> = {
   real: "border border-foreground/60 bg-foreground/10 text-foreground",
-  paper: "border border-dashed border-amber-400/70 text-amber-200",
-  replay: "border border-amber-400 bg-amber-400 text-black",
+  paper: "border border-dashed border-violet-400/70 text-violet-200",
+  replay: "border border-violet-400 bg-violet-400 text-black",
 };
 
-/** The frame of a card that holds one mode's money: REAL a solid left edge, PAPER and REPLAY a dashed amber border. */
+/** The frame of a card that holds one mode's money: REAL a solid left edge, PAPER and REPLAY a dashed violet border. */
 export const MODE_FRAME: Record<Mode, string> = {
   real: "border-l-2 border-l-foreground/60 pl-3",
-  paper: "border border-dashed border-amber-400/40",
-  replay: "border border-dashed border-amber-400/40",
+  paper: "border border-dashed border-violet-400/40",
+  replay: "border border-dashed border-violet-400/40",
 };
 
 /** "Fri, Nov 13" for a calendar date (read in UTC so the day never shifts). */
@@ -60,7 +60,7 @@ export function RealTicketLine({ account }: { account: string | null | undefined
  * desk's Paper mode the ticket's main action is paper instead, with no half: ``DeskTicket``'s ``PaperMain``.) */
 export function PaperHalf({ children }: { children: React.ReactNode }) {
   return (
-    <div role="group" aria-label="Paper, not real money" data-testid="ticket-paper" className="space-y-2 border-t border-dashed border-amber-400/40 pt-3">
+    <div role="group" aria-label="Paper, not real money" data-testid="ticket-paper" className="space-y-2 border-t border-dashed border-violet-400/40 pt-3">
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
         <ModeMark mode="paper" />
         <span>practise the same order with no money</span>

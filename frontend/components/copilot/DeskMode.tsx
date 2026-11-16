@@ -5,8 +5,8 @@
  * a view only: nothing is sent, and no order, account or book behaves differently.
  *
  * - Real: the desk as it always was.
- * - Paper: paper comes first without hiding real money. The centre wears the dashed PAPER frame, a ticket leads with its
- *   paper half ("Fill on paper"), the top bar shows the paper book's value beside the real accounts, each with its mark.
+ * - Paper: paper comes first without hiding real money. The centre wears the dashed PAPER frame, a ticket's main action
+ *   is Buy on paper, the top bar shows the paper book's value beside the real accounts, each with its mark.
  * - Replay: Replay a past day (``DeskReplay``), however it opened (R, ⌘K, the copilot, Practice). Its own header carries
  *   the same switch, so one tap comes back to Real or Paper.
  *
@@ -43,7 +43,7 @@ export function setDeskMode(next: ViewMode) {
 
 const MODES: readonly { id: Mode; word: string; hint: string }[] = [
   { id: "real", word: "Real", hint: "Real: your accounts, as the desk always shows them" },
-  { id: "paper", word: "Paper", hint: "Paper first: tickets lead with Fill on paper, the paper value beside the real. Nothing is sent; your real book stays." },
+  { id: "paper", word: "Paper", hint: "Paper first: a ticket's main button is Buy on paper, the paper value beside the real. Nothing is sent; your real book stays." },
   { id: "replay", word: "Replay", hint: "Replay a past day ( R ). Not live, not real money." },
 ];
 
@@ -79,7 +79,7 @@ export function PaperValue({ book, failed, onOpen, className }: { book: PaperBoo
   const pnl = value && book?.run ? Math.round((value.value - book.run.starting_cash) * 100) / 100 : null;
   return (
     <button type="button" onClick={onOpen} data-testid="desk-paper-value" title="Your paper book: positions, orders and score. Not real money. ( P )"
-      className={cn("inline-flex min-h-11 shrink-0 items-baseline gap-1.5 whitespace-nowrap rounded-md border border-dashed border-amber-400/50 px-2 py-1 text-xs hover:bg-secondary sm:min-h-0 sm:py-0.5", className)}>
+      className={cn("inline-flex min-h-11 shrink-0 items-baseline gap-1.5 whitespace-nowrap rounded-md border border-dashed border-violet-400/50 px-2 py-1 text-xs hover:bg-secondary sm:min-h-0 sm:py-0.5", className)}>
       <ModeMark mode="paper" short className="self-center" />
       {!book ? <span className="text-muted-foreground">{failed ? "could not be read" : "reading…"}</span>
         : !book.run ? <span className="text-muted-foreground">not started</span>

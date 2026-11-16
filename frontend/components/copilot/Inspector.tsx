@@ -22,7 +22,7 @@ const KIND: Record<DeskTimelineRow["kind"], { label: string; dot: string }> = {
   revisit: { label: "Revisit", dot: "bg-muted-foreground" },
   fill: { label: "Fill", dot: "bg-foreground" },
   thesis: { label: "Thesis watch", dot: "bg-foreground/60" },
-  ping: { label: "Ping", dot: "bg-violet-400" },
+  ping: { label: "Ping", dot: "bg-zinc-300" },
   decision: { label: "Decision", dot: "bg-emerald-400" },
 };
 const Quiet = ({ children }: { children: ReactNode }) => <p className="text-sm text-muted-foreground">{children}</p>;

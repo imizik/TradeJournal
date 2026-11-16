@@ -106,6 +106,8 @@ for (const width of [1440, 375]) {
     await expect(card.getByTestId("paper-order-levels")).toHaveText("Stop 96 (stock prices)");
     if (width < 768) expect((await card.boundingBox())!.width).toBeLessThanOrEqual(375);
     expect(orders).toEqual([]); // the card alone fills nothing
+    await expect(card.getByTestId("paper-order-fill")).toBeEnabled(); // once his rules are on the card
+    await card.screenshot({ path: test.info().outputPath(`paper-order-card-${width}.png`) });
     await card.getByTestId("paper-order-fill").click();
     await expect(card.getByTestId("paper-order-done")).toContainText("Paper: bought 2 × NBIS $100 Call 11/20/26 at 3.50 (the ask)");
     expect(orders).toHaveLength(1);

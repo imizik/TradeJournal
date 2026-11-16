@@ -126,7 +126,7 @@ export default function PaperOrderCard({ proposal, onOutcome }: { proposal: Pape
 
   return (
     <section aria-label="Paper order" data-testid="paper-order-card" data-action={d.action} data-phase={phase}
-      className="mt-2 space-y-1.5 rounded-md border border-dashed border-amber-400/50 p-2.5 text-xs">
+      className="mt-2 space-y-1.5 rounded-md border border-dashed border-violet-400/50 p-2.5 text-xs">
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <ModeMark mode="paper" short />
         <span data-testid="paper-order-line" className="min-w-0 flex-1 font-medium text-foreground">{draftLine(d)}</span>
@@ -153,7 +153,7 @@ export default function PaperOrderCard({ proposal, onOutcome }: { proposal: Pape
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" data-testid="paper-order-fill" disabled={!fresh || !rulesShown || phase === "working"} onClick={() => void fill()}
             title={fresh ? "Fills on paper at the live quote when you tap: no money, nothing sent" : "No live price: refresh it first"}
-            className={cn(BUTTON, "border-amber-400/70 text-amber-100")}>{phase === "working" ? "Working…" : VERB[d.action]}</button>
+            className={cn(BUTTON, "border-violet-400/70 text-violet-100")}>{phase === "working" ? "Working…" : VERB[d.action]}</button>
           {!fresh && <button type="button" data-testid="paper-order-refresh" disabled={phase === "working"} onClick={() => void refresh()} className={BUTTON}>Refresh price</button>}
           {open && <button type="button" data-testid="paper-order-edit" onClick={() => setEditing(true)} className={QUIET}>Edit</button>}
         </div>

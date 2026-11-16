@@ -153,7 +153,7 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
           className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted">Review with copilot</Link>}
         {copilotOn && trade.status !== "open" && <Link href={redoHref(trade.id)} data-testid="redo-in-replay"
           title="Paper trade this day again on the desk's Replay, without seeing what you did, then compare"
-          className="inline-flex items-center rounded-md border border-amber-400/60 px-2.5 py-1 text-xs text-foreground hover:bg-muted">Redo in replay</Link>}
+          className="inline-flex items-center rounded-md border border-violet-400/60 px-2.5 py-1 text-xs text-foreground hover:bg-muted">Redo in replay</Link>}
         {/* From a position alert the selected alert carries this as its primary action instead. */}
         {askHref && !alert && <Link href={askHref}
           className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted">Ask copilot about this position</Link>}
