@@ -2,8 +2,9 @@
 
 /**
  * Is everything behind the desk live? (docs/copilot-lab.md § Data health) One dot in the desk's top bar: green alone
- * when every running source is live ("All live" is its name and tooltip), amber naming what is stale or down, grey alone
- * when one cannot be told. A tap opens the list: each source, its state and last good time in plain words; a tap on a source says what
+ * when every running source is live ("All live" is its name and tooltip), red naming it when a source that moves money
+ * (``MONEY``: Robinhood, Prices, Fill emails) is stale, down or low, amber naming any other, grey alone when one cannot
+ * be told. A tap opens the list: each source, its state and last good time in plain words; a tap on a source says what
  * it affects and, where one already exists, the fix. From 768 px the status line along the desk's bottom
  * (``DeskStatusLine``) shows the same rows as a dot and a name each, and opens the same list.
  *
@@ -46,6 +47,8 @@ export function level2Row(state: Level2Health): HealthRow {
 // --------------------------------------------------------------------------- the server's rows, one read for the desk
 
 const BAD: HealthState[] = ["stale", "down", "low"];
+/** Sources whose being behind leaves positions, fills or prices wrong: red, on the dot and the status line. The rest are amber. */
+const MONEY = new Set(["robinhood", "prices", "gmail"]);
 const SETTLE_MS = 8_000; // after an open or a return to the page: the desk's own first reads have landed by then
 
 type HealthRead = { data: DeskHealth | null; failed: boolean };
@@ -122,13 +125,18 @@ const WORD: Record<HealthState, string> = {
   live: "live", closed: "closed", off: "off", quiet: "quiet", unknown: "unknown", stale: "behind", down: "down", low: "low",
 };
 
-/** The dot's summary from every row: amber naming the worst, grey when something cannot be told, else green. */
-export function summary(rows: HealthRow[] | null, failed: boolean): { tone: "ok" | "unknown" | "bad"; text: string } {
+/** The dot's summary from every row: red naming a money source behind first ("Robinhood down", "Robinhood + 1 behind";
+ * ``short``, its name alone, for a phone), amber naming any other ("Chatter behind", "2 sources behind"), grey when
+ * something cannot be told, else green. */
+export function summary(rows: HealthRow[] | null, failed: boolean): { tone: "ok" | "unknown" | "amber" | "red"; text: string; short?: string } {
   if (failed) return { tone: "unknown", text: "Health unknown" };
   if (!rows) return { tone: "unknown", text: "Checking…" };
   const bad = rows.filter(r => BAD.includes(r.state));
-  if (bad.length === 1) return { tone: "bad", text: `${bad[0].name} ${WORD[bad[0].state]}` };
-  if (bad.length > 1) return { tone: "bad", text: `${bad.length} sources behind` };
+  const money = bad.find(r => MONEY.has(r.id));
+  if (money) return { tone: "red", short: money.name,
+    text: bad.length === 1 ? `${money.name} ${WORD[money.state]}` : `${money.name} + ${bad.length - 1} behind` };
+  if (bad.length === 1) return { tone: "amber", text: `${bad[0].name} ${WORD[bad[0].state]}` };
+  if (bad.length > 1) return { tone: "amber", text: `${bad.length} sources behind` };
   const unknown = rows.filter(r => r.state === "unknown");
   if (unknown.length) return { tone: "unknown", text: unknown.length === 1 ? `${unknown[0].name} unknown` : `${unknown.length} unknown` };
   return { tone: "ok", text: rows.some(r => r.state === "live") ? "All live" : "All fine · market closed" };
@@ -172,17 +180,20 @@ function HealthList({ rows, failed, tape, up = false }: { rows: HealthRow[] | nu
 export default function DeskHealthDot() {
   const { rows, failed, said, tape } = useDeskHealth();
   const { open, setOpen, box } = useHealthOpen();
-  const dot = said.tone === "bad" ? "bg-amber-400" : said.tone === "ok" ? "bg-emerald-400" : "bg-muted-foreground/50";
+  const dot = said.tone === "red" ? "bg-rose-500" : said.tone === "amber" ? "bg-amber-400" : said.tone === "ok" ? "bg-emerald-400" : "bg-muted-foreground/50";
 
   return (
     <div ref={box} className="relative">
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="dialog" data-testid="desk-health"
         data-tone={said.tone} aria-label={`Data health: ${said.text}`} title={`${said.text} · is every source behind the desk live?`}
         className={cn("inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md px-2 text-xs sm:min-h-8",
-          said.tone === "bad" ? "text-amber-300" : "text-muted-foreground", open ? "bg-secondary" : "hover:bg-secondary")}>
+          said.tone === "red" ? "font-medium text-rose-300 max-sm:flex-col max-sm:gap-0.5 max-sm:px-1" : said.tone === "amber" ? "text-amber-300" : "text-muted-foreground",
+          open ? "bg-secondary" : "hover:bg-secondary")}>
         <span aria-hidden className={cn("h-2 w-2 shrink-0 rounded-full", dot)} />
         {/* Words only when something is behind: a dot that never changes width keeps the top bar from jumping. */}
-        {said.tone === "bad" && <span data-testid="desk-health-words" className="hidden whitespace-nowrap sm:inline">{said.text}</span>}
+        {(said.tone === "red" || said.tone === "amber") && <span data-testid="desk-health-words" className="hidden whitespace-nowrap sm:inline">{said.text}</span>}
+        {/* A phone has no status line: money behind names its source under the dot, as the Day button's word sits. */}
+        {said.short && <span aria-hidden data-testid="desk-health-short" className="whitespace-nowrap text-[10px] leading-none sm:hidden">{said.short}</span>}
       </button>
       {open && <HealthList rows={rows} failed={failed} tape={tape} />}
     </div>
@@ -241,8 +252,6 @@ function GmailReconnect() {
 // --------------------------------------------------------------------------- the status line
 
 const ET = "America/New_York";
-/** Sources whose being behind leaves positions, fills or prices wrong: red. The rest are amber. */
-const MONEY = new Set(["robinhood", "prices", "gmail"]);
 const clock = (at: number, seconds = false) => new Date(at * 1000).toLocaleTimeString("en-US",
   { timeZone: ET, hour: "numeric", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}), hourCycle: "h23" });
 

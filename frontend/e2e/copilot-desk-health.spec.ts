@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // The desk's data health (docs/copilot-lab.md § Data health): one dot in the top bar, green alone ("All live" as its name)
-// when every running source is live, amber naming what is behind, grey alone when it cannot tell. A tap lists each source with its last
+// when every running source is live, red naming a money source behind (Robinhood, Prices, Fill emails), amber naming any other, grey alone when it cannot tell. A tap lists each source with its last
 // good time; a tap on one says what it affects and the existing fix. It rides the minute's one request (no poll of its
 // own). Level 2 is the Tape's session: off with none. Every route is stubbed; every number is invented.
 const ON = {
@@ -93,15 +93,16 @@ test("all live: one quiet green dot; the list names every source, Level 2 off wi
   await expect(list).toHaveCount(0);
 });
 
-test("a source down: the dot turns amber and names it; a tap says what it affects and the existing fix", async ({ page }) => {
+test("a money source down: the dot turns red and names it; a tap says what it affects and the existing fix", async ({ page }) => {
   const sources = LIVE.map(r => r.id === "robinhood"
     ? row("robinhood", "Robinhood", "down", "Last read 9:41, signed out", { kind: "text", text: "Sign in again with the Robinhood sign-in helper." })
     : r.id === "gmail" ? row("gmail", "Fill emails", "down", "Gmail disconnected · last email 10:19", { kind: "gmail_reconnect" }) : r);
   await open(page, health(sources));
   const dot = page.getByTestId("desk-health");
-  await expect(dot).toHaveAttribute("data-tone", "bad");
-  await expect(dot).toHaveText("2 sources behind");
-  await expect(dot).toHaveAccessibleName("Data health: 2 sources behind");
+  // Both move money (positions, fills): red, the first named.
+  await expect(dot).toHaveAttribute("data-tone", "red");
+  await expect(dot.getByTestId("desk-health-words")).toHaveText("Robinhood + 1 behind");
+  await expect(dot).toHaveAccessibleName("Data health: Robinhood + 1 behind");
   await dot.click();
   const rh = page.getByTestId("health-robinhood");
   await expect(rh).toHaveAttribute("data-state", "down");

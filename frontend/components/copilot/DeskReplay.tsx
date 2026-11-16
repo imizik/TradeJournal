@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineStyle, createChart, createSeriesMarkers,
   type IChartApi, type IPriceLine, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type Time, type UTCTimestamp,
@@ -20,7 +20,8 @@ import ModeMark, { MODE_FRAME, modeDay } from "./ModeMark";
 /**
  * Replay on the desk (docs/copilot-lab.md § Paper replay): pick a past trading day and a ticker, and the day plays
  * forward from 9:30 ET a bar at a time (play, pause, 1×/5×/20×/60×, one bar), with the paper ticket priced from the
- * replayed bars. Only bars that ended by the replay clock are drawn; nothing else of the live desk shows while it runs,
+ * replayed bars. Only bars that ended by the replay clock are drawn; nothing else of the live desk shows while it runs
+ * but one REAL line under the header (``live``, ``ReplayLiveLine``: open positions, P&L, working orders, what needs him),
  * and leaving puts the live desk back exactly as it was (it stays mounted underneath). Shares, or one call or put that
  * traded that day priced from its own trade bars (on a day older than the contracts' minute history, options are off
  * with the reason). Replay trades are their own runs, scored apart from live paper and real trades.
@@ -616,10 +617,12 @@ export function RedoCompareCard({ data }: { data: RedoCompare }) {
 
 type Loaded = { key: string; bars: ReplayBar[]; open_at: number; close_at: number };
 
-export default function DeskReplay({ symbol, redo = null, onLeave }: {
+export default function DeskReplay({ symbol, redo = null, onLeave, live = null }: {
   symbol: string | null; redo?: string | null;
   /** Back to the live desk; ``to``: the mode the header's switch picked (Real or Paper), else as it was. */
   onLeave(to?: ViewMode): void;
+  /** The real book's live line (``ReplayLiveLine``), across the foot of the header: replay never hides real money. */
+  live?: ReactNode;
 }) {
   const [home, setHome] = useState<ReplayHome | null>(null);
   const [homeError, setHomeError] = useState<string | null>(null);
@@ -817,6 +820,7 @@ export default function DeskReplay({ symbol, redo = null, onLeave }: {
         <button type="button" data-testid="replay-leave" disabled={leaving} onClick={() => void leave()} className={BUTTON}>
           {leaving ? "Selling what is open…" : "Back to live"}
         </button>
+        {live}
       </div>
 
       {homeError && <p role="alert" className="text-xs text-amber-300">Replay is unavailable right now: {homeError}</p>}
