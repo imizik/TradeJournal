@@ -138,6 +138,10 @@ class Store:
         with closing(self._connect()) as db:
             return [dict(r) for r in db.execute("SELECT * FROM check_row ORDER BY day, minute")]
 
+    def checks_on(self, day: str) -> list[dict]:
+        with closing(self._connect()) as db:
+            return [dict(r) for r in db.execute("SELECT * FROM check_row WHERE day = ? ORDER BY minute", (day,))]
+
 
 # ------------------------------------------------------------------ rules (pure)
 
@@ -232,6 +236,56 @@ def summary(trades: list[dict], checks: list[dict], now: float, on: bool) -> dic
                    "up": sum(1 for b in days if b > 0),
                    "missed_checks": sum(1 for c in checks if c["status"] == "missed")},
     }
+
+
+def today_view(store: Store, now: float, on: bool) -> dict | None:
+    """Today's band and trades for the desk chart, from the store alone: None when the book is off or has no check
+    recorded today (New York date of ``now``), so a chart never shows an earlier day's lines as today's.
+
+    ``checks``: each recorded check with its New York time (``at``) and the band it decided on (none on a missed one).
+    ``ahead``: the band at the checks still to come today, from the same 60-session window the checks use and the
+    max/min(open, previous close) anchor that today's first done check implies (its band divided by 1 +/- VM x sigma).
+    ``trades``: today's entries and exits, with the closed ones' result in basis points of the day's open (as ``bp``).
+    ``until``: where the last recorded band stops: the close, or an overdue check not recorded yet."""
+    if not on:
+        return None
+    moment = datetime.fromtimestamp(now, ET)
+    day = moment.date()
+    iso = day.isoformat()
+    rows = store.checks_on(iso)
+    if not rows:
+        return None
+
+    def stamp(minute: int) -> float:
+        return datetime(day.year, day.month, day.day, minute // 60, minute % 60, tzinfo=ET).timestamp()
+
+    checks = [{"minute": c["minute"], "at": stamp(c["minute"]), "status": c["status"], "price": c["price"],
+               "upper": c["upper"], "lower": c["lower"], "vwap": c["vwap"]} for c in rows]
+    ahead: list[dict] = []
+    done = [c for c in rows if c["status"] == "done" and c["upper"] is not None and c["lower"] is not None]
+    if done:
+        history = store.history(iso)
+        first = done[0]
+        sig0 = sigma(history, first["minute"])
+        if sig0 is not None:
+            high, low = first["upper"] / (1 + VM * sig0), first["lower"] / (1 - VM * sig0)
+            last, minute_now = max(c["minute"] for c in rows), moment.hour * 60 + moment.minute
+            for m in CHECKS:
+                s = sigma(history, m) if m > last and m > minute_now else None
+                if s is not None:
+                    ahead.append({"minute": m, "at": stamp(m), "upper": high * (1 + VM * s), "lower": low * (1 - VM * s)})
+    trades = []
+    for t in store.trades():
+        if t["day"] != iso:
+            continue
+        b = bp(t)
+        trades.append({"side": t["side"], "entry_at": t["entry_at"], "entry": t["entry"], "exit_at": t["exit_at"],
+                       "exit": t["exit"], "how": t["how"], "bp": None if b is None else round(b, 2)})
+    # The band drawn so far ends at the close, or at a check whose time has passed but is not recorded yet (the book
+    # retries for a few minutes): never drawn on past a check as if it had held.
+    recorded, minute_now = {c["minute"] for c in rows}, moment.hour * 60 + moment.minute
+    overdue = [m for m in CHECKS if m <= minute_now and m not in recorded]
+    return {"day": iso, "checks": checks, "ahead": ahead, "trades": trades, "until": stamp(overdue[0] if overdue else FULL_CLOSE)}
 
 
 # ------------------------------------------------------------------ the recorder
@@ -381,10 +435,12 @@ class IntradayMomentumBook:
 
 
 def read(now: float | None = None) -> dict:
-    """The desk's view, from the store alone (no provider call); a missing file reads as an empty book."""
+    """The desk's view, from the store alone (no provider call); a missing file reads as an empty book. ``today`` is the
+    chart's band and marks (``today_view``)."""
     now = time.time() if now is None else now
     path = store_path()
     if not path.exists():
-        return summary([], [], now, enabled())
+        return {**summary([], [], now, enabled()), "today": None}
     store = Store(path, seed=None)
-    return summary(store.trades(), store.checks(), now, enabled())
+    on = enabled()
+    return {**summary(store.trades(), store.checks(), now, on), "today": today_view(store, now, on)}

@@ -2304,6 +2304,13 @@ on the minute request): long, short or flat now, finished days (a checked day wi
 the average in basis points and dollars on $10,000, missed checks, the last five days and the exam's +4.4 bp a day.
 Hidden while switched off and empty; a failed read says so instead of showing old rows.
 
+On the desk chart, QQQ on 2m and 15m only, the same read's `today` (`today_view`, from the book's own records) draws
+today's noise band as two thin orange lines stepping at each recorded check, the checks still ahead faint and dashed
+(today's 60-session window over the anchor today's first check implies), and the paper entries and exits as pale marks
+lettered M (`frontend/lib/deskMomentumBand.ts`). One chip, "Momentum band · paper", toggles it (on by default, one
+choice for both timeframes, kept in the browser) and shows the band at the crosshair. Nothing, chip included, when the
+book is off, has no check today, the read fails or its day is not the chart's latest day.
+
 ### Switching chatter on
 
 Both are off until set up; while off nothing is read and nothing is spent. Setting these on the server is Isaac's call.
