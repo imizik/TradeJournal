@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// His weekly goals on the desk (docs/copilot-lab.md § Weekly goals): with none set, the Paper section shows only a small
+// His weekly goals on the desk (docs/copilot-lab.md § Weekly goals): with none set, My rules shows only a small
 // "Set this week's goals" control; setting one or two takes a pick and a number; the line then shows the server's
 // progress with ✓/✗, a goal whose source is behind is grey with why and never ticked, and the Friday review card carries
 // a Goals row. Every route is stubbed with invented numbers, so nothing reaches the e2e backend.
@@ -70,14 +70,22 @@ async function open(page: Page, width: number, goals: object = NONE) {
 
 async function paperSection(page: Page, width: number) {
   if (width < 768) await page.getByTestId("desk-view-book").click();
+  await page.getByTestId("practice-line-paper").click(); // nothing open on paper: Practice's paper line waits closed
   return page.getByTestId("desk-paper");
+}
+
+/** The goals line lives in My rules (one line under the day's block, outside the paper frame), opened in place. */
+async function goalsSection(page: Page, width: number) {
+  if (width < 768) await page.getByTestId("desk-view-book").click();
+  const rules = page.getByTestId("rules-goals");
+  await rules.getByTestId("rules-goals-toggle").click();
+  return rules.getByTestId("goals");
 }
 
 for (const width of [1440, 375]) {
   test(`with no goals only the small control shows; setting two takes a pick and a number at ${width}px`, async ({ page }) => {
     const seen = await open(page, width);
-    const paper = await paperSection(page, width);
-    const goals = paper.getByTestId("goals");
+    const goals = await goalsSection(page, width);
     await expect(goals.getByTestId("goals-set")).toHaveText("Set this week's goals");
     await expect(goals.getByTestId("goals-line")).toHaveCount(0);
     await goals.getByTestId("goals-set").click();
@@ -95,17 +103,19 @@ for (const width of [1440, 375]) {
     await expect(line).toContainText("This week:");
     await expect(line.getByTestId("goal-progress").first()).toHaveText("max loss $220 (goal $300)✓");
     await expect(line.getByTestId("goal-progress").nth(1)).toHaveText("most trades in a day 6 (Tue; goal 5)✗");
+    const box = await goals.boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
     // The review card's row: last week's goal, measured over last week.
+    const paper = await paperSection(page, 1440);
     await expect(paper.getByTestId("paper-review-goals")).toHaveText("Goals:max loss $410 (goal $300)✗");
-    const box = await paper.boundingBox();
-    expect(box!.width).toBeLessThanOrEqual(width);
+    expect((await paper.boundingBox())!.width).toBeLessThanOrEqual(width);
   });
 }
 
 test("a goal whose source is behind is grey with why and its time, never ticked", async ({ page }) => {
   const stale = "Real trades as of Nov 12, 2:15 PM ET: new fills are not arriving.";
   await open(page, 1440, { ...NONE, goals: [{ kind: "max_loss", n: 300, book: "real" }], progress: [{ ...LOSS, ok: null, stale }] });
-  const goals = (await paperSection(page, 1440)).getByTestId("goals");
+  const goals = await goalsSection(page, 1440);
   const item = goals.getByTestId("goal-progress");
   await expect(item).toHaveAttribute("data-stale", "true");
   await expect(item).toHaveText("max loss $220 (goal $300)");  // no ✓
@@ -114,7 +124,7 @@ test("a goal whose source is behind is grey with why and its time, never ticked"
 
 test("on a weekend the line names next week's goals with nothing measured yet, and Clear removes them", async ({ page }) => {
   const seen = await open(page, 1440, { ...NONE, label: "Next week", monday: "2026-11-16", goals: [{ kind: "rules_pct", n: 80, book: "paper" }, { kind: "max_trades_day", n: 5, book: "real" }], progress: [] });
-  const goals = (await paperSection(page, 1440)).getByTestId("goals");
+  const goals = await goalsSection(page, 1440);
   await expect(goals.getByTestId("goals-line")).toContainText("Next week:Follow all my rules on 80% of trades (paper) · No more than 5 trades a day");
   await goals.getByTestId("goals-set").click();
   await goals.getByTestId("goals-clear").click();

@@ -245,8 +245,10 @@ const left = (expiry: string | null, day: string) => {
  * and those sit behind "N not followed" at the bottom. The selected row (and its standing line) carry ``data-selected``:
  * a phone's ticker view keeps just that row above the chart (CopilotLab.module.css).
  */
-export function Book({ rows, sparks, selected, selectedKey = null, day, read, updating = false, live = null, earnings = null, onRefreshLive, onSelect, onFollow, children }: {
+export function Book({ rows, sparks, selected, selectedKey = null, day, read, updating = false, live = null, earnings = null, risk = null, onRefreshLive, onSelect, onFollow, children }: {
   rows: DeskThread[]; sparks: DeskSparks | null; selected: string | null; selectedKey?: string | null; day: string; read: boolean;
+  /** The safety line under the heading (``ExposureLine``: what is at risk now). Never folded. */
+  risk?: ReactNode;
   /** Earnings tags (``useDeskEvents``), by symbol. */
   earnings?: DeskEvents | null;
   /** The rows are the desk's last read, kept for its remount, with the fresh read on the way: P&L dimmed, "Updating". */
@@ -286,6 +288,7 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
         <PricesAsOf at={staleSince(ticks, followed.map(r => r.book?.tick?.quote))} />
         {updating && <span role="status" data-testid="book-updating" className="text-[11px] text-muted-foreground">Updating…</span>}
       </div>
+      {risk}
       {isLive && <OrdersGroup orders={live?.orders} notes={notes} />}
       {followed.length ? (
         <ul>
@@ -420,19 +423,20 @@ function useExposureLine(asOf: string | undefined): string | null {
   return line;
 }
 
-/** One quiet line under the book's lower block: the open long options' premium at risk now against a usual day, and the
- * practice goal with this week's count. Nothing when neither reads. */
-export function DayFacts({ session }: { session: DeskSession | null }) {
-  const practice = usePracticeLine(true);
+/** The book's safety line, under its heading: the open long options' premium at risk now against a usual day ("At risk
+ * now: $6,400 in 3 options · usual day $2,100"). Never folded (``dayfacts``). Nothing when the read fails or no long
+ * option is open. */
+export function ExposureLine({ session }: { session: DeskSession | null }) {
   const exposure = useExposureLine(session?.as_of);
-  if (!practice && !exposure) return null;
-  return (
-    <p data-testid="session-facts" className="px-1 text-xs text-muted-foreground">
-      {exposure && <span data-testid="exposure-line">{exposure}</span>}
-      {exposure && practice && " · "}
-      {practice}
-    </p>
-  );
+  if (!exposure) return null;
+  return <p data-testid="exposure-line" data-use="dayfacts" className="px-3 pb-1.5 text-xs text-muted-foreground">{exposure}</p>;
+}
+
+/** One quiet line under the day's block: the practice goal with this week's count. Nothing until it reads. */
+export function DayFacts() {
+  const practice = usePracticeLine(true);
+  if (!practice) return null;
+  return <p data-testid="session-facts" className="px-1 text-xs text-muted-foreground">{practice}</p>;
 }
 
 // ------------------------------------------------------------------------------------------------ the centre

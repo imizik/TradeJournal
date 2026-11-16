@@ -14,7 +14,7 @@ import ModeMark, { MODE_FRAME } from "./ModeMark";
 
 type Night = { day: string; status: "open" | "closed" | "missed"; entry_at: number | null; entry: number | null;
   exit_day: string | null; exit_at: number | null; exit: number | null; bp: number | null; dollars: number | null; note: string | null };
-type Book = { enabled: boolean; state: "holding" | "flat"; symbol: string; stake: number;
+export type OvernightBook = { enabled: boolean; state: "holding" | "flat"; symbol: string; stake: number;
   backtest: { mean_bp: number; years: string };
   nights: Night[]; totals: { closed: number; missed: number; mean_bp: number | null; dollars: number | null; up: number } };
 
@@ -33,8 +33,9 @@ const late = (epoch: number | null) => {
 };
 const time = (epoch: number) => new Date(epoch * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
 
-export default function DeskOvernight({ on }: { on: boolean }) {
-  const [book, setBook] = useState<Book | null>(null);
+/** The overnight book: read on mount and on the desk's shared minute (joining its one request) while the desk is on. */
+export function useOvernightBook(on: boolean): { book: OvernightBook | null; failed: boolean } {
+  const [book, setBook] = useState<OvernightBook | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     if (!on) return;
@@ -47,12 +48,20 @@ export default function DeskOvernight({ on }: { on: boolean }) {
     const stop = everyDeskMinute(load);
     return () => { controller.abort(); stop(); };
   }, [on]);
-  if (!on || (!book && !failed)) return null;
-  if (book && !book.enabled && book.nights.length === 0) return null; // not switched on yet: nothing to show
+  return { book, failed };
+}
+
+/** Whether the overnight book has anything to show: nothing until it reads, nor before it is switched on with no record. */
+export const overnightShown = ({ book, failed }: { book: OvernightBook | null; failed: boolean }) =>
+  (!!book || failed) && !(book && !book.enabled && book.nights.length === 0);
+
+/** The overnight book's full section (the desk's Practice block opens it in place). */
+export default function DeskOvernight({ book, failed }: { book: OvernightBook | null; failed: boolean }) {
+  if (!overnightShown({ book, failed })) return null;
   const held = book?.nights.find(n => n.status === "open");
   const t = book?.totals;
   return (
-    <section data-testid="desk-overnight" aria-label="QQQ overnight paper book" className={cn("mt-3 rounded-md px-3 py-2", MODE_FRAME.paper)}>
+    <section data-testid="desk-overnight" aria-label="QQQ overnight paper book" className={cn("rounded-md px-3 py-2", MODE_FRAME.paper)}>
       <p className="flex flex-wrap items-center gap-2"><span className={LABEL}>QQQ overnight</span><ModeMark mode="paper" /></p>
       {failed || !book ? (
         <p data-testid="desk-overnight-failed" className="mt-1 text-xs text-muted-foreground">Could not read the overnight book; it reads again in a minute.</p>

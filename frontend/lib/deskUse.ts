@@ -45,7 +45,7 @@ export const PIECES: readonly Piece[] = [
   { id: "replay.practice", label: "Replay practice", area: "Left", fold: "stub" },
   { id: "watching", label: "Watching", area: "Left", fold: "stub", quiet: true },
   { id: "dayblock", label: "Since you looked · brief · day report", area: "Left", fold: null },
-  { id: "dayfacts", label: "Day facts (at risk now)", area: "Left", fold: null, safety: true },
+  { id: "dayfacts", label: "At risk now (under the book's heading)", area: "Left", fold: null, safety: true },
   { id: "tab.chart", label: "Chart tab", area: "Centre", fold: null },
   { id: "tab.chain", label: "Chain tab", area: "Centre", fold: "more" },
   { id: "tab.ticket", label: "Ticket tab", area: "Centre", fold: "more" },

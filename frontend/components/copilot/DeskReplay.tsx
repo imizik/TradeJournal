@@ -181,9 +181,8 @@ function TradeRows({ trades, days = true }: { trades: ReplayTrade[]; days?: bool
 
 /** Replay practice on the live desk, under the Paper section: every replay's closed trades, apart from live paper and
  *  real trades. Read on mount and after a replay changes; nothing shows until there is a replay. */
-export function ReplayPractice() {
+export function useReplayPractice(): ReplayScore | null {
   const [card, setCard] = useState<ReplayScore | null>(null);
-  const [open, setOpen] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
     const load = () => replayHome(false, controller.signal).then(setCard).catch(() => { /* the section stays hidden */ });
@@ -191,6 +190,12 @@ export function ReplayPractice() {
     window.addEventListener(REPLAY_EVENT, load);
     return () => { controller.abort(); window.removeEventListener(REPLAY_EVENT, load); };
   }, []);
+  return card;
+}
+
+/** The replay practice section, from ``useReplayPractice``'s read: nothing until there is a replay. */
+export function ReplayPractice({ card }: { card: ReplayScore | null }) {
+  const [open, setOpen] = useState(false);
   if (!card || card.runs.length === 0) return null;
   const days = [...new Set(card.runs.map(r => r.day))].sort();
   return (

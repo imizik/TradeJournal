@@ -6,7 +6,7 @@ import { saveGoals, type Goal, type GoalBook, type GoalKind, type GoalProgress, 
 import { cn } from "@/lib/utils";
 
 /**
- * His weekly goals on the desk (docs/copilot-lab.md § Weekly goals): one compact line in the Paper section ("This week:
+ * His weekly goals on the desk (docs/copilot-lab.md § Weekly goals): one compact line under My rules on the desk ("This week:
  * max loss $220 (goal $300) ✓ · …"), a small "Set this week's goals" control when none is set, and a row in the Friday
  * paper review card. Progress is the server's, computed from his trades; a goal whose source is behind is grey with
  * why and its time, never ticked. No pings.
@@ -93,7 +93,7 @@ function Editor({ goals, onDone }: { goals: WeeklyGoals; onDone(): void }) {
   );
 }
 
-/** The Paper section's goals line, or only the small control when none is set. */
+/** The goals line inside My rules (``RulesAndGoals``), or only the small control when none is set. */
 export function GoalsLine({ goals }: { goals?: WeeklyGoals }) {
   const [editing, setEditing] = useState(false);
   if (!goals) return null;

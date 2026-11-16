@@ -267,7 +267,7 @@ test("between 768 and 1180 px the Feed is a drawer from the top bar; Escape clos
   await expect(feedPane(page)).toBeHidden();
 });
 
-test("the day's block comes straight after the book outside the session, and under Watching in it", async ({ page }) => {
+test("in the session the day's block comes under Watching, which comes straight after the book", async ({ page }) => {
   const top = async (locator: ReturnType<Page["getByTestId"]>) => (await locator.boundingBox())!.y;
   const watching = () => page.getByRole("region", { name: "Watching" });
   await open(page);
@@ -276,10 +276,10 @@ test("the day's block comes straight after the book outside the session, and und
   expect(await top(watching())).toBeLessThan(await top(page.getByTestId("since-you-looked")));
 });
 
-test("after the close the day report comes before Watching", async ({ page }) => {
+test("after the close the day report takes the day's block, still under the book and Watching", async ({ page }) => {
   const top = async (locator: ReturnType<Page["getByTestId"]>) => (await locator.boundingBox())!.y;
   await open(page, { time: new Date("2026-11-13T21:30:00Z") }); // 16:30 New York
   await expect(page.getByTestId("day-report")).toBeVisible();
-  expect(await top(page.getByTestId("desk-book"))).toBeLessThan(await top(page.getByTestId("day-report")));
-  expect(await top(page.getByTestId("day-report"))).toBeLessThan(await top(page.getByRole("region", { name: "Watching" })));
+  expect(await top(page.getByTestId("desk-book"))).toBeLessThan(await top(page.getByRole("region", { name: "Watching" })));
+  expect(await top(page.getByRole("region", { name: "Watching" }))).toBeLessThan(await top(page.getByTestId("day-report")));
 });

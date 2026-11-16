@@ -112,7 +112,16 @@ async function open(page: Page, width: number, path = "/copilot-lab") {
 
 async function paperSection(page: Page, width: number) {
   if (width < 768) await page.getByTestId("desk-view-book").click();
+  await page.getByTestId("practice-line-paper").click(); // nothing open on paper: Practice's paper line waits closed
   return page.getByTestId("desk-paper");
+}
+
+/** My rules: one line under the day's block, outside the paper frame (rules cover real trades too), opened in place. */
+async function rulesSection(page: Page, width: number) {
+  if (width < 768) await page.getByTestId("desk-view-book").click();
+  const rules = page.getByTestId("rules-goals");
+  await rules.getByTestId("rules-goals-toggle").click();
+  return rules;
 }
 
 for (const width of [1440, 375]) {
@@ -188,20 +197,20 @@ for (const width of [1440, 375]) {
     const line = paper.getByTestId("paper-score-line");
     await expect(line.getByTestId("mode-mark")).toHaveText(["Paper", "Real"]);
     await expect(line).toContainText("Real −$312.00 · 33.3% of 3");
-    await expect(paper.getByTestId("rules-split").getByTestId("mode-mark")).toHaveText(["Paper", "Real"]);
+    await expect((await rulesSection(page, 1440)).getByTestId("rules-split").getByTestId("mode-mark")).toHaveText(["Paper", "Real"]);
   });
 
-  test(`Paper › Rules edits the list and the score line splits followed versus broken, per rule on a tap, at ${width}px`, async ({ page }) => {
+  test(`My rules edits the list and splits followed versus broken, per rule on a tap, at ${width}px`, async ({ page }) => {
     const seen = await open(page, width);
-    const paper = await paperSection(page, width);
-    const split = paper.getByTestId("rules-split");
+    const rules = await rulesSection(page, width);
+    const split = rules.getByTestId("rules-split");
     await expect(split).toContainText("Paper followed +$184.50 66.7%/3 · broken −$260.00 0%/2");
     await expect(split).toContainText("Real followed +$150.00 100%/1 · broken — · 1 copied, not matched to a fill, 1 still open");
     await split.getByRole("button").click();
     const table = split.getByTestId("rules-by-rule");
     await expect(table.getByTestId("rules-by-rule-row").filter({ hasText: "Stop before I enter" })).toContainText("followed +$184.50 66.7%/3broken −$260.00 0%/2");
-    await paper.getByTestId("rules-toggle").click();
-    const editor = paper.getByTestId("rules-editor");
+    await rules.getByTestId("rules-toggle").click();
+    const editor = rules.getByTestId("rules-editor");
     await expect(editor.getByTestId("rules-editor-row")).toHaveCount(4);
     await editor.getByRole("button", { name: "Add a rule" }).click();
     await editor.getByLabel("Rule 5", { exact: true }).fill("No new trades after two losers");

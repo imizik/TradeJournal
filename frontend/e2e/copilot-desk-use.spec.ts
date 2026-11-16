@@ -192,9 +192,9 @@ test("More's link opens How I use the desk once the desk is on, and drops the wo
   await expect(page).toHaveURL(/\/copilot-lab$/);
 });
 
-test("Day facts carries the at-risk line: never folded, even if a saved list names it", async ({ page }) => {
+test("the at-risk line (dayfacts) is never folded, even if a saved list names it", async ({ page }) => {
   await open(page, 1440, { ...FOURTEEN, pieces: { ...FOURTEEN.pieces, dayfacts: { opens: 0, taps: 0, seen_s: 9_000, last_used: null } },
     folds: { folded: ["dayfacts"], snoozed_until: null } });
   await expect(page.getByTestId("fold-stub-dayfacts")).toHaveCount(0);
-  await expect(page.getByTestId("fold-suggestion")).not.toContainText("Day facts");
+  await expect(page.getByTestId("fold-suggestion")).not.toContainText("At risk now");
 });

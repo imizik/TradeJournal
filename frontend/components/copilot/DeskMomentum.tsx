@@ -14,7 +14,7 @@ import ModeMark, { MODE_FRAME } from "./ModeMark";
 
 type Trade = { side: number; entry_at: number; entry: number; exit_at: number | null; exit: number | null; how: string | null };
 type Day = { day: string; bp: number; dollars: number; trades: Trade[] };
-type Book = { enabled: boolean; symbol: string; stake: number; now: number; backtest: { mean_bp: number; years: string };
+export type MomentumBook = { enabled: boolean; symbol: string; stake: number; now: number; backtest: { mean_bp: number; years: string };
   holding: { side: number; entry_at: number; entry: number } | null; days: Day[];
   totals: { days: number; days_traded: number; mean_bp: number | null; dollars: number | null; up: number; missed_checks: number } };
 
@@ -30,8 +30,9 @@ const nyDay = (epoch: number) => new Date(epoch * 1000).toLocaleDateString("en-C
 const sameDay = (a: number, b: number) => nyDay(a) === nyDay(b);
 const word = (side: number) => side > 0 ? "Long" : "Short";
 
-export default function DeskMomentum({ on }: { on: boolean }) {
-  const [book, setBook] = useState<Book | null>(null);
+/** The momentum book: read on mount and on the desk's shared minute (joining its one request) while the desk is on. */
+export function useMomentumBook(on: boolean): { book: MomentumBook | null; failed: boolean } {
+  const [book, setBook] = useState<MomentumBook | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     if (!on) return;
@@ -44,11 +45,19 @@ export default function DeskMomentum({ on }: { on: boolean }) {
     const stop = everyDeskMinute(load);
     return () => { controller.abort(); stop(); };
   }, [on]);
-  if (!on || (!book && !failed)) return null;
-  if (book && !book.enabled && book.days.length === 0 && !book.holding) return null; // not switched on yet
+  return { book, failed };
+}
+
+/** Whether the momentum book has anything to show: nothing until it reads, nor before it is switched on with no record. */
+export const momentumShown = ({ book, failed }: { book: MomentumBook | null; failed: boolean }) =>
+  (!!book || failed) && !(book && !book.enabled && book.days.length === 0 && !book.holding);
+
+/** The momentum book's full section (the desk's Practice block opens it in place). */
+export default function DeskMomentum({ book, failed }: { book: MomentumBook | null; failed: boolean }) {
+  if (!momentumShown({ book, failed })) return null;
   const t = book?.totals;
   return (
-    <section data-testid="desk-momentum" aria-label="QQQ intraday momentum paper book" className={cn("mt-3 rounded-md px-3 py-2", MODE_FRAME.paper)}>
+    <section data-testid="desk-momentum" aria-label="QQQ intraday momentum paper book" className={cn("rounded-md px-3 py-2", MODE_FRAME.paper)}>
       <p className="flex flex-wrap items-center gap-2"><span className={LABEL}>QQQ intraday momentum</span><ModeMark mode="paper" /></p>
       {failed || !book ? (
         <p data-testid="desk-momentum-failed" className="mt-1 text-xs text-muted-foreground">Could not read the momentum book; it reads again in a minute.</p>

@@ -9,9 +9,8 @@ import {
   type PaperBook, type PaperFill, type PaperOrder, type PaperPosition, type PaperSource, type PaperStats, type PaperWorkingOrder,
 } from "@/lib/paperBook";
 import { cn } from "@/lib/utils";
-import { GoalsLine } from "./DeskGoals";
 import ModeMark from "./ModeMark";
-import { RulesChecklist, RulesEditor, RulesSplitLine } from "./DeskRules";
+import { RulesChecklist } from "./DeskRules";
 
 /**
  * His own paper book on the desk (docs/copilot-lab.md § Paper): a Paper button wherever the desk builds an order (the
@@ -463,10 +462,10 @@ function Score({ paper, real, since }: { paper: PaperStats; real: PaperStats; si
   );
 }
 
-/** The Paper section under the book: one panel, folded to its account line and score line until Progress is opened. */
+/** The Paper section (the desk's Practice block opens it in place): one panel, folded to its account line and score line
+ *  until Progress is opened. His rules and goals are the desk's own line (``RulesAndGoals``): they cover real trades too. */
 export default function DeskPaper({ book, failed, symbol, top = null }: { book: PaperBook | null; failed: boolean; symbol: string | null; top?: React.ReactNode }) {
   const [progress, setProgress] = useState(false);
-  const [editing, setEditing] = useState(false);
   const [closing, setClosing] = useState<{ id: string; trim: boolean } | null>(null);
   const [cash, setCash] = useState("10000");
   const [resetting, setResetting] = useState(false);
@@ -480,15 +479,11 @@ export default function DeskPaper({ book, failed, symbol, top = null }: { book: 
     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 px-3 pb-1.5 pt-2.5">
       <h2 className="self-center"><ModeMark mode="paper" /></h2>
       {book?.run && <span className="text-[11px] text-muted-foreground">run {book.run.number} · since {day(book.run.started_at)}</span>}
-      {book && <button type="button" aria-expanded={editing} data-testid="rules-toggle" data-use="paper.rules" onClick={() => setEditing(e => !e)}
-        title="Your own trading rules, checked at each entry" className="ml-auto text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
-        Rules{book.my_rules?.length ? ` (${book.my_rules.length})` : ""}</button>}
-      {book?.run && <button type="button" aria-expanded={progress} data-testid="paper-progress-toggle" onClick={() => setProgress(p => !p)} className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">{progress ? "Hide progress" : "Progress"}</button>}
+      {book?.run && <button type="button" aria-expanded={progress} data-testid="paper-progress-toggle" onClick={() => setProgress(p => !p)} className="ml-auto text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">{progress ? "Hide progress" : "Progress"}</button>}
     </div>
   );
   const frame = (children: React.ReactNode) => (
-    <section aria-label="Paper book" data-testid="desk-paper" className="rounded-lg border border-dashed border-amber-400/40 bg-card">{head}
-      {editing && book && <RulesEditor rules={book.my_rules ?? []} onDone={() => setEditing(false)} />}{children}</section>
+    <section aria-label="Paper book" data-testid="desk-paper" className="rounded-lg border border-dashed border-amber-400/40 bg-card">{head}{children}</section>
   );
   if (!book) return frame(<p className="px-3 pb-2.5 text-xs text-muted-foreground">{failed ? "Your paper book could not be read; it reads again in a minute." : "Reading your paper book…"}</p>);
   const startForm = (reset: boolean) => (
@@ -508,7 +503,6 @@ export default function DeskPaper({ book, failed, symbol, top = null }: { book: 
           <p className="text-xs text-muted-foreground">Trade the way you would on Robinhood, with no money: Paper on the Ticket or the Chain fills at the live ask (the bid to sell), or places a day limit, and keeps score against your real trades.</p>
           {startForm(false)}
         </div>
-        <GoalsLine goals={book.goals} />
       </div>,
     );
   }
@@ -565,8 +559,6 @@ export default function DeskPaper({ book, failed, symbol, top = null }: { book: 
         <span className="text-muted-foreground">closed, since {day(book.run.started_at)}</span>
       </p>
       <BySource rows={score.paper.by_source} />
-      <RulesSplitLine paper={score.paper.rules} real={score.real_rules} />
-      <GoalsLine goals={book.goals} />
       {progress && (
         <div data-testid="paper-progress" className="space-y-3 px-3 pt-2">
           <Score paper={score.paper} real={score.real} since={book.run.started_at} />
