@@ -1,14 +1,12 @@
 "use client";
 
 /**
- * The Tape's open state and its chart-header button (docs/copilot-lab.md § The desk), apart from the panel itself
- * (``DeskTape``) so the desk loads the panel's code only when the Tape is opened.
+ * The Tape's open state (docs/copilot-lab.md § The desk; its switch is in the chart header's More, ``DeskChartHead``),
+ * apart from the panel itself (``DeskTape``) so the desk loads the panel's code only when the Tape is opened.
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { useAppAccess } from "@/components/AccessProvider";
 import { DESK_CHANGED_EVENT, DESK_TAPE_KEY } from "@/lib/deskAction";
-import { cn } from "@/lib/utils";
 
 const OPEN_KEY = DESK_TAPE_KEY;
 
@@ -27,17 +25,4 @@ export function useTapeOpen(): [boolean, (next: boolean) => void] {
     try { window.localStorage.setItem(OPEN_KEY, next ? "open" : "closed"); } catch { /* this view only */ }
   }, []);
   return [open, pick];
-}
-
-/** The chart header's Tape button; nothing for an assistant (the depth route is the owner's). */
-export function TapeToggle({ open, onToggle }: { open: boolean; onToggle(next: boolean): void }) {
-  const { owner } = useAppAccess();
-  if (!owner) return null;
-  return (
-    <button type="button" aria-pressed={open} onClick={() => onToggle(!open)} data-testid="tape-toggle" data-use="chart.tape" title="Level 2 and time & sales"
-      className={cn("min-h-11 rounded border px-2 text-xs sm:min-h-0 sm:py-0.5",
-        open ? "border-foreground/60 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
-      Tape
-    </button>
-  );
 }

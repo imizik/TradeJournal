@@ -258,17 +258,17 @@ test("with no row selected the chart follows the ticker the latest answer is abo
   const opened = await open(page, { main: investigation(MAIN, { message_count: 2, transcript: [{ role: "user", content: QUESTION }, { role: "assistant", content: IREN }] }) });
   const chart = page.getByTestId("desk-chart");
   // SMH comes first and twice in the answer, but the verdict is about IREN.
-  await expect(chart.locator("span").first()).toHaveText("IREN");
+  await expect(chart.getByTestId("desk-chart-symbol")).toHaveText("IREN");
   await expect.poll(() => opened.charts.at(-1)).toBe("symbol:IREN");
   await page.getByTestId("desk-book").getByRole("button", { name: /^ORCL / }).click();
-  await expect(chart.locator("span").first()).toHaveText("ORCL");
+  await expect(chart.getByTestId("desk-chart-symbol")).toHaveText("ORCL");
 });
 
 test("an answer with no clear subject leaves the chart on the market", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const opened = await open(page, { main: investigation(MAIN, { message_count: 2, transcript: [{ role: "user", content: "how did I do today?" },
     { role: "assistant", content: "Verdict: Unclear — Three entries, none with a plan saved before the fill.\n- The day was green for the market." }] }) });
-  await expect(page.getByTestId("desk-chart").locator("span").first()).toHaveText("QQQ");
+  await expect(page.getByTestId("desk-chart").getByTestId("desk-chart-symbol")).toHaveText("QQQ");
   await expect.poll(() => opened.charts.at(-1)).toBe("market");
 });
 

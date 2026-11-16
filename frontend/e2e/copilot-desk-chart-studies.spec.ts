@@ -1,4 +1,10 @@
-import { expect, test, type Page, type Request } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
+
+/** The study toggles live in the chart header's "Studies" menu: open it, unless it is open, to reach one. */
+async function studies(pane: Locator) {
+  if (!(await pane.getByTestId("desk-chart-studies").isVisible())) await pane.getByTestId("desk-studies-open").click();
+  return pane.getByTestId("desk-chart-studies");
+}
 
 // The cockpit chart's studies and level menu (docs/copilot-lab.md § The desk): the legend's toggles and their memory per
 // timeframe, the reading line, the symbol's alerts as lines and in the header's list with Remove, and the level menu's three actions. The
@@ -88,8 +94,12 @@ test("each study has a toggle that shows its value at the crosshair, and the cho
   const { pane, writes } = await desk(page);
   const canvas = pane.getByTestId("desk-chart-canvas");
   const legend = pane.getByTestId("desk-chart-studies");
+  const values = pane.getByTestId("desk-chart-values");
   // Intraday defaults: VWAP, EMA 9 and 21, volume and the reference lines, each with its value on the last candle; Walls
-  // (its own spec) starts off.
+  // (its own spec) starts off. The read-out in the chart's corner carries the values; the header counts the studies on.
+  await expect(values).toHaveText(/^VWAP \d+\.\d{2} · EMA 9 \d+\.\d{2} · EMA 21 \d+\.\d{2} · Vol 1\.6K · 1\.4×$/);
+  await expect(pane.getByTestId("desk-studies-open")).toHaveText("Studies · 6");
+  await studies(pane);
   await expect(legend.getByRole("button")).toHaveText([/^VWAP \d+\.\d{2}$/, /^EMA 9 \d+\.\d{2}$/, /^EMA 21 \d+\.\d{2}$/, /^Vol 1\.6K · 1\.4×$/, "Prev close · PM high/low", "News", "Walls"]);
   for (const button of await legend.getByRole("button").all()) {
     await expect(button).toHaveAttribute("aria-pressed", (await button.getAttribute("data-testid")) === "desk-study-walls" ? "false" : "true");
@@ -97,27 +107,35 @@ test("each study has a toggle that shows its value at the crosshair, and the cho
   await expect(canvas).toHaveAttribute("data-studies", "vwap,ema9,ema21");
   await expect(canvas).toHaveAttribute("data-volume", "on");
   await expect(canvas).toHaveAttribute("data-reference", "3");
-  // The reading line: price, change against the previous close, VWAP, volume against usual, and when.
+  // The reading: price and change in the header row; the change's basis, VWAP, volume against usual and when on the
+  // quiet line under it.
   const reading = pane.getByTestId("desk-reading");
-  await expect(reading).toContainText(/^\d+\.\d{2} · [+−]\d+\.\d{2}% vs prev close · [+−]\d+\.\d{2}% vs VWAP 94\.59 · vol 1\.4× usual · as of \d{1,2}:\d{2} [AP]M ET$/);
+  await expect(reading).toHaveText(/^\d+\.\d{2}[+−]\d+\.\d{2}%$/);
+  await expect(pane.getByTestId("desk-reading-facts")).toHaveText(/^as of \d{1,2}:\d{2} [AP]M ET · change vs prev close \d+\.\d{2} · [+−]\d+\.\d{2}% vs VWAP 94\.59 · vol 1\.4× usual$/);
   await pane.screenshot({ path: test.info().outputPath("desk-chart-studies-2m.png") });
+  await page.keyboard.press("Escape");
+  await expect(legend).toHaveCount(0);
 
   // The crosshair moves the values to the candle under the pointer.
   const box = (await canvas.boundingBox())!;
-  const before = await legend.getByTestId("desk-study-ema9").textContent();
+  const before = await values.textContent();
   await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.4);
-  await expect(legend.getByTestId("desk-study-ema9")).not.toHaveText(before!);
+  await expect(values).not.toHaveText(before!);
 
+  await studies(pane);
   await legend.getByTestId("desk-study-ema9").click();
   await legend.getByTestId("desk-study-volume").click();
   await expect(legend.getByTestId("desk-study-ema9")).toHaveAttribute("aria-pressed", "false");
   await expect(legend.getByTestId("desk-study-ema9")).toHaveText("EMA 9"); // off: no value
   await expect(canvas).toHaveAttribute("data-studies", "vwap,ema21");
   await expect(canvas).toHaveAttribute("data-volume", "off");
+  await expect(values).toHaveText(/^VWAP \d+\.\d{2} · EMA 21 \d+\.\d{2}$/); // what is off has no value on the chart either
+  await expect(pane.getByTestId("desk-studies-open")).toHaveText("Studies · 4");
 
   // The daily chart offers its own studies, all on but Walls, untouched by the 2m choices.
   await pane.getByRole("group", { name: "Timeframe" }).getByRole("button", { name: "1D" }).click();
   await expect(canvas).toHaveAttribute("data-timeframe", "1D");
+  await studies(pane);
   await expect(legend.getByRole("button")).toHaveText([/^EMA 21 /, /^SMA 50 /, "SMA 200 —", /^Vol .* · 1\.2× 30d$/, "Walls"]);
   await expect(canvas).toHaveAttribute("data-studies", "ema21,sma50"); // SMA 200 has no value yet: nothing drawn, no flat line
   await expect(canvas).toHaveAttribute("data-volume", "on");
@@ -127,6 +145,7 @@ test("each study has a toggle that shows its value at the crosshair, and the cho
   await pane.getByRole("group", { name: "Timeframe" }).getByRole("button", { name: "2m" }).click();
   await page.reload();
   await expect(canvas).toHaveAttribute("data-timeframe", "2m");
+  await studies(pane);
   await expect(legend.getByTestId("desk-study-ema9")).toHaveAttribute("aria-pressed", "false");
   await expect(legend.getByTestId("desk-study-volume")).toHaveAttribute("aria-pressed", "false");
   await expect(canvas).toHaveAttribute("data-studies", "vwap,ema21");
@@ -215,7 +234,7 @@ test("Plan from here opens the plan form prefilled with his choice of role and s
 test.describe("at 393 px with a finger", () => {
   test.use({ viewport: { width: 393, height: 852 }, hasTouch: true, isMobile: true });
 
-  test("a long-press opens the level menu with thumb-sized items, the legend scrolls sideways, and the page does not", async ({ page }) => {
+  test("a long-press opens the level menu with thumb-sized items, the page does not scroll sideways, and the studies wait in More", async ({ page }) => {
     const { pane, writes } = await desk(page);
     await page.getByRole("button", { name: "Back to the desk" }).click({ timeout: 2000 }).catch(() => { /* already on the desk */ });
     const canvas = pane.getByTestId("desk-chart-canvas");
@@ -232,7 +251,6 @@ test.describe("at 393 px with a finger", () => {
     const placed = (await menu.boundingBox())!;
     expect(placed.x).toBeGreaterThanOrEqual(0);
     expect(placed.x + placed.width).toBeLessThanOrEqual(393);
-    for (const button of await pane.getByTestId("desk-chart-studies").getByRole("button").all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await page.screenshot({ path: test.info().outputPath("desk-level-menu-393.png") });
     await menu.getByRole("menuitem", { name: "Alert when price crosses here" }).tap();
     await expect(pane.getByTestId("desk-chart-status")).toContainText("Alert set: NBIS crosses");
@@ -257,5 +275,11 @@ test.describe("at 393 px with a finger", () => {
     await expect(menu).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
     expect(writes()).toEqual(["POST /api/backend/charts/alerts"]);
+    // On a phone the studies wait in the header's More, each toggle thumb-sized.
+    await page.keyboard.press("Escape");
+    await pane.getByTestId("desk-chart-more").tap();
+    const toggles = await pane.getByTestId("desk-chart-studies").getByRole("button").all();
+    expect(toggles.length).toBe(7);
+    for (const button of toggles) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   });
 });

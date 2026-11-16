@@ -111,6 +111,7 @@ async function open(page: Page, width: number, run: Partial<typeof RUN> & { opti
     await back.click();
     await page.getByTestId("desk-view-ticker").click();
   }
+  await page.getByTestId("desk-chart-more").click(); // Replay is in the chart header's More
   await page.getByTestId("replay-open").click();
   return { steps, orders, picks };
 }

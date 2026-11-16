@@ -1,5 +1,11 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+/** The Tape's switch is in the chart header's More: open it, unless it is open, to reach the switch. */
+async function tapeSwitch(page: Page) {
+  if (!(await page.getByTestId("tape-toggle").isVisible())) await page.getByTestId("desk-chart-more").click();
+  return page.getByTestId("tape-toggle");
+}
+
 // The desk's Tape (docs/copilot-lab.md § The desk): the chart header's Tape button opens the selected ticker's Level 2
 // and time & sales from the same manual depth session Charts uses. Closed by default and remembered; opening starts the
 // stream, closing stops it; a print is green or red only when the ARCA book of the same moment says it was at the ask or
@@ -56,7 +62,7 @@ const streaming = (): Depth => ({ posts: [], answer: route => route.fulfill({ st
 test("Tape is closed by default, opens the ticker's book and prints, and stays open across a reload", async ({ page }) => {
   const depth = streaming();
   await desk(page, "NBIS", depth);
-  const toggle = page.getByTestId("tape-toggle");
+  const toggle = await tapeSwitch(page);
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByTestId("desk-tape")).toHaveCount(0);
   expect(depth.posts).toEqual([]); // nothing reaches the depth service while it is closed
@@ -87,14 +93,14 @@ test("Tape is closed by default, opens the ticker's book and prints, and stays o
   expect(depth.posts).toHaveLength(1);
 
   await page.reload();
-  await expect(page.getByTestId("tape-toggle")).toHaveAttribute("aria-pressed", "true");
+  await expect(await tapeSwitch(page)).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("desk-tape").getByTestId("tape-prints").locator("li")).toHaveCount(29);
 
-  await page.getByTestId("tape-toggle").click();
+  await (await tapeSwitch(page)).click();
   await expect(page.getByTestId("desk-tape")).toHaveCount(0);
   await page.reload();
   await expect(page.getByTestId("desk-chart")).toBeAttached();
-  await expect(page.getByTestId("tape-toggle")).toHaveAttribute("aria-pressed", "false");
+  await expect(await tapeSwitch(page)).toHaveAttribute("aria-pressed", "false");
 });
 
 test("closing the Tape stops a running stream", async ({ page }) => {
@@ -112,14 +118,14 @@ test("closing the Tape stops a running stream", async ({ page }) => {
     }) as typeof window.fetch;
   });
   await desk(page, "NBIS", streaming());
-  await page.getByTestId("tape-toggle").click();
+  await (await tapeSwitch(page)).click();
   await expect(page.getByTestId("tape-status")).toHaveText("Connecting NBIS…");
   // The desk's data health shows the session as Level 2 while it runs, and off once the Tape closes.
   await page.getByTestId("desk-health").click();
   await expect(page.getByTestId("health-level2")).toHaveAttribute("data-state", "live");
   await expect(page.getByTestId("health-level2")).toContainText("Live · NBIS");
   await page.keyboard.press("Escape");
-  await page.getByTestId("tape-toggle").click();
+  await (await tapeSwitch(page)).click();
   await expect(page.getByTestId("desk-tape")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (window as unknown as { tapeAborted: boolean }).tapeAborted)).toBe(true);
   await page.getByTestId("desk-health").click();
@@ -129,7 +135,7 @@ test("closing the Tape stops a running stream", async ({ page }) => {
 test("another session holding the bridge is named, not fought", async ({ page }) => {
   const depth: Depth = { posts: [], answer: route => route.fulfill({ status: 409, json: { detail: "Local lab unavailable" } }) };
   await desk(page, "NBIS", depth);
-  await page.getByTestId("tape-toggle").click();
+  await (await tapeSwitch(page)).click();
   const tape = page.getByTestId("desk-tape");
   await expect(tape.getByTestId("tape-status")).toHaveText(/Another Level 2 stream is running \(Charts, perhaps in another tab\)/);
   await page.waitForTimeout(3_000);
@@ -141,7 +147,7 @@ test("another session holding the bridge is named, not fought", async ({ page })
 test("an index starts nothing", async ({ page }) => {
   const depth = streaming();
   await desk(page, "SPX", depth);
-  await page.getByTestId("tape-toggle").click();
+  await (await tapeSwitch(page)).click();
   await expect(page.getByTestId("desk-tape")).toContainText("SPX is an index: the tape covers US stocks and ETFs only. Nothing was started.");
   await page.waitForTimeout(500);
   expect(depth.posts).toEqual([]);
@@ -150,7 +156,7 @@ test("an index starts nothing", async ({ page }) => {
 test("a phone shows the spread and a short tape, not the book", async ({ page }) => {
   await desk(page, "NBIS", streaming(), { width: 390, height: 844 });
   await page.getByRole("button", { name: "Back to the desk" }).click(); // the address opens the copilot over the desk
-  await page.getByTestId("tape-toggle").click();
+  await (await tapeSwitch(page)).click();
   const tape = page.getByTestId("desk-tape");
   await expect(tape.getByTestId("tape-spread")).toBeVisible();
   await expect(tape.getByTestId("tape-levels")).toBeHidden();
@@ -181,7 +187,7 @@ test("hiding the tab stops the stream and showing it starts again", async ({ pag
     }) as typeof window.fetch;
   });
   await desk(page, "NBIS", streaming());
-  await page.getByTestId("tape-toggle").click();
+  await (await tapeSwitch(page)).click();
   const record = () => page.evaluate(() => (window as unknown as { tapeRecord: { posts: number; aborted: number } }).tapeRecord);
   await expect.poll(record).toEqual({ posts: 1, aborted: 0 });
   await setHidden(page, true);
@@ -195,7 +201,7 @@ test("hiding the tab stops the stream and showing it starts again", async ({ pag
 test("hiding and showing the tab does not retry against another session holding the bridge", async ({ page }) => {
   const depth: Depth = { posts: [], answer: route => route.fulfill({ status: 409, json: { detail: "Local lab unavailable" } }) };
   await desk(page, "NBIS", depth);
-  await page.getByTestId("tape-toggle").click();
+  await (await tapeSwitch(page)).click();
   await expect(page.getByTestId("tape-status")).toHaveText(/Another Level 2 stream is running/);
   await setHidden(page, true);
   await setHidden(page, false);

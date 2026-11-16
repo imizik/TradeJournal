@@ -1,4 +1,10 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+/** The study toggles live in the chart header's "Studies" menu: open it, unless it is open, to reach one. */
+async function studies(pane: Locator) {
+  if (!(await pane.getByTestId("desk-chart-studies").isVisible())) await pane.getByTestId("desk-studies-open").click();
+  return pane.getByTestId("desk-chart-studies");
+}
 
 // The momentum paper book on the desk chart (lib/deskMomentumBand.ts): on QQQ's intraday candles, the book's noise band
 // today as two thin stepping lines (the hours ahead faint) and its paper entries and exits as pale M marks, behind one
@@ -77,6 +83,11 @@ test("on QQQ the band steps at each check with the hour ahead faint, the paper t
   const { pane } = await desk(page);
   const canvas = pane.getByTestId("desk-chart-canvas");
   const chip = pane.getByTestId("desk-study-momentum");
+  // The legend keys the M marks, and a chip in the chart's corner says paper fills are drawn.
+  await expect(pane.getByLabel("Legend")).toContainText("momentum paper book");
+  await expect(pane.getByTestId("desk-chart-paper")).toHaveText("PAPER fills shown");
+  await expect(pane.getByTestId("desk-chart-values")).toContainText("Momentum band · paper 93.55–95.05");
+  await studies(pane);
   await expect(chip).toHaveAttribute("aria-pressed", "true");
   await expect(chip).toHaveText("Momentum band · paper 93.55–95.05"); // the band in force now
   await expect(canvas).toHaveAttribute("data-momentum", "3");
@@ -94,16 +105,21 @@ test("on QQQ the band steps at each check with the hour ahead faint, the paper t
   await expect(canvas).toHaveAttribute("data-momentum", "off");
   await expect(canvas).toHaveAttribute("data-marks", "0");
   await expect(marks).not.toContainText("Momentum");
+  await expect(pane.getByLabel("Legend")).not.toContainText("momentum paper book");
+  await expect(pane.getByTestId("desk-chart-paper")).toHaveCount(0);
   await page.reload();
+  await studies(pane);
   await expect(pane.getByTestId("desk-study-momentum")).toHaveAttribute("aria-pressed", "false");
   await pane.getByRole("group", { name: "Timeframe" }).getByRole("button", { name: "15m" }).click();
   await expect(canvas).toHaveAttribute("data-timeframe", "15m");
+  await studies(pane);
   await expect(pane.getByTestId("desk-study-momentum")).toHaveAttribute("aria-pressed", "false");
 });
 
 test("nothing on another symbol", async ({ page }) => {
   const { pane } = await desk(page, "NBIS");
   await expect(pane.getByTestId("desk-chart-canvas")).toHaveAttribute("data-momentum", "none");
+  await studies(pane);
   await expect(pane.getByTestId("desk-study-walls")).toBeVisible();
   await expect(pane.getByTestId("desk-study-momentum")).toHaveCount(0);
 });
@@ -118,6 +134,7 @@ for (const state of ["off", "other-day", "missed", "fail"] as const) {
     await answered;
     const canvas = pane.getByTestId("desk-chart-canvas");
     await expect(canvas).toHaveAttribute("data-bars", "60");
+    await studies(pane);
     await expect(pane.getByTestId("desk-study-walls")).toBeVisible();
     await expect(canvas).toHaveAttribute("data-momentum", "none");
     await expect(pane.getByTestId("desk-study-momentum")).toHaveCount(0);

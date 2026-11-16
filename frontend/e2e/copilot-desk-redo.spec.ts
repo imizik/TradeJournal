@@ -144,6 +144,7 @@ for (const width of [1440, 375]) {
 test("Replay's day picker lists Redo my worst; an old day redoes on shares with the reason", async ({ page }) => {
   await stub(page, 1440);
   await page.goto("/copilot-lab?symbol=NBIS");
+  await page.getByTestId("desk-chart-more").click(); // Replay is in the chart header's More
   await page.getByTestId("replay-open").click();
   const worst = page.getByTestId("redo-worst-trade");
   await expect(worst).toHaveCount(2);

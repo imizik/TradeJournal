@@ -97,6 +97,7 @@ test("the centre opens on the open thread's chart beside the conversation, and i
   await expect(pane.getByRole("tab", { name: "Chart" })).toHaveAttribute("aria-selected", "true");
   await expect(pane.getByRole("tab")).toHaveText(["Chart", "Chain", "Ticket", "Check a call", "Grid"]); // the ticker's tools; the Feed sits beside the copilot
   await expect(pane.getByTestId("desk-chart")).toContainText("NBIS");
+  await pane.getByTestId("desk-chart-more").click(); // Open in Charts is in the chart header's More
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
   await expect(pane.getByRole("img", { name: /NBIS today: 2-minute candles/ })).toBeVisible();
   await page.waitForTimeout(200);
@@ -126,7 +127,7 @@ test("the chart draws the plan's lines, the fills, pings, Radar and the time sto
   await expect(canvas.locator("canvas").first()).toBeVisible(); // the library drew
   // The lines and the time stop are named above the chart; every mark, with its New York time, in the chart's own list.
   // The stop is 20 minutes ahead, so after about 23:40 New York it falls on the next day and carries that day's date.
-  await expect(pane.getByTestId("desk-chart-lines")).toHaveText(/^Entry 95.90Invalidation 92.30Time stop (?:[A-Z][a-z]{2} \d{1,2} )?\d{1,2}:\d{2} [AP]M0Reset$/); // then the bell (no alerts) and Reset
+  await expect(pane.getByTestId("desk-chart-lines")).toHaveText(/^Entry 95.90Invalidation 92.30Time stop (?:[A-Z][a-z]{2} \d{1,2} )?\d{1,2}:\d{2} [AP]M$/);
   const marks = pane.getByRole("list", { name: "On the chart" }).getByRole("listitem");
   await expect(marks).toHaveText(["Entry 95.90", "Invalidation 92.30",
     /^Fill · Bought 2 NBIS 11\/20\/26 100C · NBIS at 94.40 · .*\d{1,2}:\d{2} [AP]M ET$/,
@@ -138,6 +139,13 @@ test("the chart draws the plan's lines, the fills, pings, Radar and the time sto
   await expect(legend).toContainText("paper"); // his paper fills, pale and lettered P
   await expect(legend).toContainText("pings");
   await expect(legend).toContainText("Radar");
+  await expect(pane.getByTestId("desk-chart-paper")).toHaveText("PAPER fills shown"); // a chip in the chart's corner
+  // One header row: the ticker, the timeframes and the chart's tools sit on one line above the candles.
+  const head = (await pane.getByTestId("desk-chart-head").boundingBox())!;
+  expect(head.height).toBeLessThanOrEqual(40);
+  expect((await canvas.boundingBox())!.y - (head.y + head.height)).toBeLessThanOrEqual(40);
+  // The quiet line under it wraps on a computer: no part (the as-of, a distance) is pushed out of view.
+  expect(await pane.getByTestId("desk-chart-facts").evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
   await pane.screenshot({ path: test.info().outputPath("desk-chart-2m.png") });
 
   // Hovering the chart moves the readout to the candle under the pointer.
@@ -153,6 +161,7 @@ test("the chart draws the plan's lines, the fills, pings, Radar and the time sto
   await group.getByRole("button", { name: "1D" }).click();
   await expect(canvas).toHaveAttribute("data-timeframe", "1D");
   await expect(pane.getByRole("img", { name: /NBIS the last few months: daily candles/ })).toBeVisible();
+  await pane.getByTestId("desk-chart-more").click();
   await pane.getByRole("button", { name: "Reset" }).click();
   expect(timeframes).toEqual(["2m", "15m", "1D"]);
   expect(reads).toEqual(["GET chart", "GET news", "GET chart", "GET news", "GET chart"]); // reads only; 1D reads no headlines
@@ -169,9 +178,21 @@ test("the chart and the timeline each say what is unavailable or missing", async
     timeline: { state: "ok", symbol: "NBIS", rows: [], count: 0, unavailable: ["pings"], recent_days: 7 },
   });
   const empty = pane.getByTestId("desk-chart-empty");
-  await expect(empty).toContainText("No chart data");
-  await expect(empty).toContainText("No NBIS minute bars for today yet. 15m and 1D show earlier sessions.");
+  // In words, never a blank box; only a weekend is named as the market being closed.
+  const weekend = ["Sat", "Sun"].includes(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(Date.now()));
+  await expect(empty).toContainText(weekend ? "Market closed · no 2-minute candles to show" : "No 2-minute candles to show");
+  await expect(empty).toContainText("No NBIS minute bars for today yet.");
+  // Over the library's canvases (they stack at z-index 2): the middle of the box is the message, not a canvas.
+  expect(await empty.evaluate(node => {
+    const box = node.getBoundingClientRect();
+    return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+  })).toBe(true);
   await expect(pane.getByTestId("desk-chart-canvas")).toHaveAttribute("data-bars", "0");
+  // It offers the next timeframe.
+  await empty.getByRole("button", { name: "Show 15m: earlier sessions" }).click();
+  await expect(pane.getByRole("group", { name: "Timeframe" }).getByRole("button", { name: "15m" })).toHaveAttribute("aria-pressed", "true");
+  await expect(empty).toContainText("No 15-minute candles to show");
+  await expect(empty.getByRole("button", { name: "Show 1D: the last few months" })).toBeVisible();
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
   await expect(pane).toContainText("Nothing has touched this thread in the last 7 days.");
   await expect(pane).toContainText("Could not read: pings.");
@@ -208,8 +229,9 @@ test("a symbol opened with no saved conversation charts it by the symbol", async
   await page.goto("/copilot-lab?symbol=NBIS");
   const pane = page.getByRole("region", { name: "Chart and tools" });
   await expect(pane.getByRole("img", { name: /NBIS today: 2-minute candles/ })).toBeVisible();
-  await expect(pane.getByTestId("desk-chart-lines")).toHaveText("no plan lines saved0Reset"); // a symbol with no plan draws no lines and says so (then the bell, no alerts)
+  await expect(pane.getByTestId("desk-chart-lines")).toHaveText("no plan lines saved"); // a symbol with no plan draws no lines and says so
   await expect(pane.getByRole("list", { name: "On the chart" }).getByRole("listitem")).toHaveCount(4); // its fill, paper fill, ping and Radar marks
+  await pane.getByTestId("desk-chart-more").click(); // Open in Charts is in the chart header's More
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
   await expect(pane.getByRole("list", { name: "Timeline" }).getByRole("listitem")).toHaveText([/Bought 5 NBIS stock at 94.20.*the open position/]);
@@ -259,6 +281,7 @@ test("with no ticker the centre charts the market, and This week sits folded at 
   await page.goto("/copilot-lab?view=briefing");
   const centre = page.getByRole("region", { name: "Chart and tools" });
   await expect(centre.getByRole("img", { name: /QQQ today: 2-minute candles with your fills/ })).toBeVisible();
+  await centre.getByTestId("desk-chart-more").click(); // Open in Charts is in the chart header's More
   await expect(centre.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=QQQ");
   await expect(centre).toContainText("your fills");
   expect(reads).toEqual(["market"]);

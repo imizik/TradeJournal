@@ -717,15 +717,26 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   position; none is QQQ, the market) as an interactive chart with the plan's entry and invalidation lines, the owner's
   fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D, with studies (VWAP, EMAs, SMAs,
   volume), his Charts levels and drawings (with a pencil to draw), the symbol's alerts and a level menu to act from
-  the chart, a reading line under the symbol, **Tape** (below) and
-  **Open in Charts →** ("Charts" on a phone); then, under the chart, a held option's standing (§ Where a held option
+  the chart. Above the candles sits **one header row** (`components/copilot/DeskChartHead.tsx`, since 2026-11-16): the ticker, its last
+  price and today's change, the held contract (it gives way first when the column is narrow), the Stock / Contract
+  switch when it applies, the timeframes, then **Studies · N** (a menu of the study toggles), the bell (the symbol's
+  alerts, with the count), the pencil and **More** (**Replay a past day**, **Tape** (below), **Open in Charts →**,
+  **Reset**). Under it one quiet line that never wraps: the plan's lines, a Scanner row's guides, a time stop, a
+  report, the change's basis, the reading's facts and their as-of. On a phone the ticker and its price sit over the
+  controls, the studies and the pencil wait in More, and the quiet line moves under the chart, so with a held
+  position selected the first candle starts inside the first screen (the selected book row above it drops its
+  standing words, track and sparkline on that view; its P&L, tags, notes and Close / Roll buttons stay, and the full
+  standing follows the chart).
+  The chart takes the room: 280–420 px tall on a phone, 420 px on a tablet, and the column's height under the header
+  (420–760 px) on a wide screen. A piece folded away on the desk (§ How I use the desk: chart studies, Tape, Replay)
+  waits in More as a folded entry: one tap shows it for now, **Keep showing** unfolds it. Then, under the chart, a held option's standing (§ Where a held option
   stands) and, for a held position, two tiles the book row does not carry: vs SPY today (the stock's change today less SPY's, from the sparks
   read) and Held (its P&L, distance to the stop and expiry are the row's, beside it); and **Timeline ▾** folded under it. The sparks read takes at most 12 symbols (the centre's first), plus up to 30 watched names (Watching, above), and
   answers a repeat within 30 seconds from memory, so several open desks cost one chart-feed read a minute. The chart is
   its own small component on the library `/charts` uses (lightweight-charts), not the workspace's `PriceChart`: that
   chart is bound to the workspace's live feed, crosshair links, command bus and clock stores, so the desk draws from
   its own read instead of embedding it.
-- **Tape** (`components/copilot/DeskTape.tsx`, owner only): the chart header's **Tape** button opens the selected stock
+- **Tape** (`components/copilot/DeskTape.tsx`, owner only): **Tape** in the chart header's More opens the selected stock
   or ETF's Level 2 and time & sales above the chart, from the same manual moomoo session Charts' Level 2 uses
   (`useDepthSession`, `/api/level2-lab/session`; [Level 2 manual connection](level2-manual-connection.md#desk-tape)).
   Closed by default; open or closed is remembered on this device (`desk.tape.v1`). It streams only while open and the
@@ -971,7 +982,7 @@ The cockpit's panes in detail:
   investigation) and `GET /copilot/plans/positions` (the open position in its
   symbol, matched by the plan's invalidation; none for an armed plan not yet
   entered), once a minute; a thread with no plan shows only the header.
-- **Centre** (above): the chart (`components/copilot/DeskChart.tsx`) and its folded timeline
+- **Centre** (above): the chart (`components/copilot/DeskChart.tsx`, its header row `components/copilot/DeskChartHead.tsx`) and its folded timeline
   (`components/copilot/Inspector.tsx`), reads in
   `backend/app/engine/desk_context.py`. A ticker with no saved conversation (a position or plan from the book or the
   thread list, a `?symbol=` link, a Radar hit) reads them by the symbol at once, as `symbol:<SYMBOL>` on the same
@@ -1022,18 +1033,29 @@ The cockpit's panes in detail:
     minute's last trade and never a new request; without it no line is drawn and the reading line falls back to the
     book's change today with its own as-of. Studies are thin, faded and outside the price scale's fit, in the
     workspace's colours (EMA 21 takes its EMA 20's, the SMAs its EMA 50's and 200's); the plan's lines are two
-    pixels and stay the boldest thing after price. A **legend row** under the lines row has one toggle per study,
-    showing its value at the crosshair (else on the last candle); one line that scrolls sideways on a phone, so
-    values changing never move the chart. The choices are kept per timeframe in this browser
+    pixels and stay the boldest thing after price. The header's **Studies · N** menu (on a phone, in More) has one
+    toggle per study with its value; the values at the crosshair (else on the last candle) are also in the
+    **read-out** over the chart's top-left corner, under the headline dots: the candle's time and OHLC (pre-market or
+    after hours said), then each study shown with its value, and a **PAPER fills shown** chip whenever paper marks are
+    drawn. It never takes the pointer, so values changing never move the chart. The choices are kept per timeframe in this browser
     (`desk.chart.studies.v1`, localStorage), all on at first. `backend/tests/test_desk_chart_studies.py` holds the
     values against the workspace's for the same candles (VWAP exactly; EMA 9 and 21 within half a cent from the first
     15m candle shown; EMA 21 and SMA 50/200 against `indicators.py`'s pandas forms). One difference with Charts:
     the workspace's today panel starts its EMAs at today's first candle, so its EMAs for the first hour or so of
     today differ from the desk's warmed ones; its completed sessions agree.
-  - **The reading line** under the symbol: the newest price, its change against the previous close, its distance from
-    VWAP and from the plan's invalidation when there is one, and volume against usual for the time of day, with the
-    as-of (and VWAP's and RVol's own time when they are the regular session's and the price is after hours). A part
-    with nothing behind it is left out. The tiles below are unchanged (none repeats a figure the line shows).
+  - **The reading**: the newest price and its change in the header row beside the symbol; on the quiet line under
+    it, the change's basis (against the previous close, or the book's change today with its time when the read has
+    no previous close), its distance from VWAP and from the plan's invalidation when there is one, and volume against
+    usual for the time of day, with the as-of (and VWAP's and RVol's own time when they are the regular session's and
+    the price is after hours). A part with nothing behind it is left out. The tiles below are unchanged (none repeats
+    a figure the line shows).
+  - **The legend** under the chart keys every kind of mark drawn: your fills, **P** paper and **M** the momentum
+    paper book whenever they are drawn (any ticker), pings, Radar, TradingView.
+  - **An empty timeframe** says so in words over the chart ("No 2-minute candles yet today", "Market closed · no
+    2-minute candles today" on a weekend, "No 15-minute candles") with the read's reason, and offers the next
+    timeframe (**Show 15m: earlier sessions**, **Show 1D: the last few months**). It sits above the library's
+    canvases, which stack at z-index 2. No date for the last session is claimed: the desk's read does not know
+    holidays.
   - **Alerts and the level menu.** The symbol's other armed level alerts come with the read (`alerts`; the plan's own
     are its entry and invalidation lines) as thin dotted lines. The bell in the chart's header (with the count) opens
     their list (`DeskAlerts.tsx`, the same rows Charts' Alerts panel shows): **Move** arms one at a price he types
@@ -1086,7 +1108,7 @@ The cockpit's panes in detail:
     headline gets no marker; no reason is ever invented. Hover, focus or tap opens the headlines (newest first) with
     publisher, New York time, session and a link out, the move above them when there was one; a tap pins it, Esc or ×
     closes. **Ask** puts the headline (quoted, shortened to fit), its time and the move into the copilot's context line
-    on the symbol, unsent, as the level menu's Ask does. A **News** toggle in the legend row (default on, kept with the
+    on the symbol, unsent, as the level menu's Ask does. A **News** toggle in the Studies menu (default on, kept with the
     studies' choices) hides them and stops the read; none on 1D, the market chart, the Grid's tiles or a ticker he does
     not follow (and a headline naming one is left out, as in the Feed). Source: the Feed's own (Alpaca's news API,
     Benzinga's wire), one read per symbol covering seven days, kept 180 seconds and shared by both timeframes; candles
@@ -1776,7 +1798,7 @@ nearest expiry, or the Chain tab's shown one. There is no second model: it is `o
 call the Charts ladder makes, so it shares that chain cache, budget and pacing; the stock's price is the chart feed's
 shared quote. Never Robinhood, nothing written; a ticker set to Not following answers `none` without a read.
 
-- **Chart:** **Walls** in the studies row (off until turned on, then on for every timeframe, remembered in this browser) draws the four as thin
+- **Chart:** **Walls** in the Studies menu (off until turned on, then on for every timeframe, remembered in this browser) draws the four as thin
   labelled dashed lines in the ladder's colours and the expected move as a faint band. Hovering one says what it is in
   plain words and that the dealer side is assumed (long calls, short puts); a long-press, right-click or price-scale
   tap near one opens the level menu at its price (alert there, plan from it, ask about it).

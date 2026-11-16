@@ -8,7 +8,6 @@
  */
 
 import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import Link from "next/link";
 import dynamic from "next/dynamic";
 import { EyeOff } from "lucide-react";
 import { useKeptState } from "@/components/copilot/DeskMemory";
@@ -17,6 +16,7 @@ import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
 import { getExposure } from "@/lib/copilot";
 import { DESK_CHANGED_EVENT, DESK_TIMEFRAME_KEY } from "@/lib/deskAction";
 import { DeskChart, ReadingLine, type DeskChartActions, type DeskGuide } from "@/components/copilot/DeskChart";
+import { ChartHead, type ChartTools } from "@/components/copilot/DeskChartHead";
 import { DeskTimeline } from "@/components/copilot/Inspector";
 import { ChartViewToggle, ContractChart, heldContract, useContractView } from "@/components/copilot/DeskContract";
 import { EarningsTag, PositionEarnings } from "@/components/copilot/EarningsTag";
@@ -29,10 +29,10 @@ import { Flash, PricesAsOf } from "@/components/copilot/Ticks";
 import { OptionStanding, OptionStandingLine } from "@/components/copilot/OptionStanding";
 import { OrderLines, OrdersGroup } from "@/components/copilot/DeskOrders";
 import { NoteButton, NoteLines, useDeskNotes } from "@/components/copilot/DeskNotes";
-import { FoldMore, useFolds } from "@/components/copilot/DeskUse";
+import { useFolds } from "@/components/copilot/DeskUse";
 import { fillKey, rowTrade } from "@/lib/deskNotes";
 import ModeMark from "@/components/copilot/ModeMark";
-import { TapeToggle, useTapeOpen } from "@/components/copilot/TapeToggle";
+import { useTapeOpen } from "@/components/copilot/TapeToggle";
 import { cn } from "@/lib/utils";
 import { deskBeats, everyDeskMinute, onDeskBeat } from "@/lib/deskMinute";
 
@@ -448,9 +448,6 @@ function Tile({ label, children, className }: { label: string; children: ReactNo
 
 const SPAN: Record<DeskTimeframe, string> = { "2m": "today: 2-minute candles", "15m": "recent sessions: 15-minute candles", "1D": "the last few months: daily candles" };
 const TIMEFRAME_KEY = DESK_TIMEFRAME_KEY;
-const Key = ({ color, glyph, children }: { color: string; glyph: string; children: ReactNode }) => (
-  <span><span aria-hidden style={{ color }}>{glyph}</span> {children}</span>
-);
 
 /** The chart's timeframe, kept for the tab's session so it holds its place across positions and tab switches. */
 function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
@@ -475,7 +472,7 @@ function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
 /**
  * The centre's Chart: the selected symbol's interactive chart (``DeskChart``: candles with the plan's entry and invalidation
  * lines, the owner's fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D; the timeframe
- * holds across positions) with Open in Charts, then a held option's standing, then two tiles for a held position that
+ * holds across positions) under its one header row (``DeskChartHead``), then a held option's standing, then two tiles for a held position that
  * its book row does not carry (the stock against SPY today, time held: P&L, the distance to the stop and expiry are the
  * row's) and, folded, what touched the thread. No symbol: QQQ with the owner's fills and pings.
  */
@@ -507,44 +504,31 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
   const contract = useContractView(held);
   const onContract = contract.view === "contract" && held && contract.data;
   const [tape, setTape] = useTapeOpen();
-  const folds = useFolds(); // the chart's tools he folded away wait in its More (DeskUse.tsx)
+  const folds = useFolds(); // the chart's tools he folded away wait in its More (DeskChartHead.tsx)
+  const name = symbol ?? "QQQ";
+  const tapePanel = tape && !folds.hidden("chart.tape") ? <DeskTape symbol={name} option={!!row?.book?.option} /> : null;
+  // The one row above the chart: the ticker, its price and change, the held contract, the switch and the timeframes, then
+  // the chart's own tools (none on a held option's own chart).
+  const head = (tools: ChartTools | null) => (
+    <ChartHead symbol={name} reading={<ReadingLine part="head" symbol={name} data={reading} fallback={fallback} live={live} />}
+      held={row ? (row.instrument && row.instrument !== row.symbol ? row.instrument : row.title) : null}
+      view={contract.available ? <ChartViewToggle view={contract.view} onPick={contract.pick} /> : null}
+      timeframe={onContract ? null : timeframe} onTimeframe={pickTimeframe} tools={tools} onReplay={onReplay}
+      tape={tape} onTape={setTape} charts={charts} />
+  );
   return (
-    <div className="space-y-3" data-testid="desk-chart">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="text-base font-semibold text-foreground">{symbol ?? "QQQ"}</span>
-        <span className="min-w-0 truncate text-xs text-muted-foreground">{row ? (row.instrument && row.instrument !== row.symbol ? row.instrument : row.title) : symbol ? "today" : "market today"}</span>
-      </div>
-      <ReadingLine symbol={symbol ?? "QQQ"} data={reading} fallback={fallback} live={live} />
-      <div className="flex items-center gap-1">
-        {contract.available && <ChartViewToggle view={contract.view} onPick={contract.pick} />}
-        {!onContract && <div role="group" aria-label="Timeframe" className="flex gap-1">
-          {DESK_TIMEFRAMES.map(item => (
-            <button key={item} type="button" aria-pressed={timeframe === item} onClick={() => pickTimeframe(item)}
-              className={cn("min-h-11 min-w-11 rounded border px-2 text-xs tabular-nums sm:min-h-0 sm:min-w-0 sm:py-0.5",
-                timeframe === item ? "border-foreground/60 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
-              {item}
-            </button>
-          ))}
-        </div>}
-        <span className="ml-auto" />
-        {onReplay && !folds.hidden("chart.replay") && <button type="button" data-testid="replay-open" data-use="chart.replay" onClick={onReplay} title="Paper trade a past day, any time: the day replays bar by bar"
-          className="inline-flex min-h-11 items-center rounded px-1.5 text-xs text-amber-200/80 hover:text-amber-100 sm:min-h-0">Replay</button>}
-        {!folds.hidden("chart.tape") && <TapeToggle open={tape} onToggle={setTape} />}
-        <FoldMore ids={["chart.studies", "chart.tape", "chart.replay"]} onOpen={id => { if (id === "chart.tape") setTape(true); }} />
-        <Link href={charts} className="inline-flex min-h-11 items-center whitespace-nowrap text-xs text-muted-foreground hover:text-foreground sm:min-h-0"><span><span className="max-sm:sr-only">Open in </span>Charts<span className="max-sm:sr-only"> →</span></span></Link>
-      </div>
-      {tape && !folds.hidden("chart.tape") && <DeskTape symbol={symbol ?? "QQQ"} option={!!row?.book?.option} />}
-      {onContract ? <ContractChart held={held} data={contract.data!} /> : <>
-      <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0} onRead={setShown} actions={actions} live={live} guides={guides}
-        label={`${symbol ?? "QQQ"} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />
-      <p aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <Key color="#e9a23b" glyph="▲▼">your fills</Key>
-        {ref && shown?.marks.some(m => m.kind === "paper") && <Key color="#fef3c7" glyph="P">paper</Key>}
-        <Key color="#a78bfa" glyph="●">pings</Key>
-        {ref && <Key color="#60a5fa" glyph="■">Radar</Key>}
-        {ref && shown?.marks.some(m => m.kind === "tradingview") && <Key color="#f0abfc" glyph="●">TradingView</Key>}
-      </p>
+    <div className="space-y-2" data-testid="desk-chart">
+      {onContract && <>
+        {head(null)}
+        {tapePanel}
+        {/* The stock's reading, with its as-of and basis, beside the contract's own chart. */}
+        <p className="text-[11px] leading-4 tabular-nums text-muted-foreground"><ReadingLine part="facts" symbol={name} data={reading} fallback={fallback} live={live} /></p>
       </>}
+      {onContract ? <ContractChart held={held} data={contract.data!} /> : (
+        <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0} onRead={setShown} actions={actions} live={live} guides={guides}
+          head={head} under={tapePanel} reading={<ReadingLine part="facts" symbol={name} data={reading} fallback={fallback} live={live} />} onTimeframe={pickTimeframe}
+          label={`${name} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />
+      )}
       {/* The held option's standing sits under the chart: the chart comes first, and its book row already carries the
           short form (break-even, time value, decay) with the same Close buttons. */}
       {row?.book?.option && <OptionStanding row={row} rows={rows}
