@@ -894,8 +894,9 @@ Grid, five tabs that fit the width) and **Feed** (with its grey count). It opens
 and the book's first rows are the first screen; a link that names a ticker (a ping's `?symbol=`) opens on that
 ticker's view, under the copilot's sheet. The strip shows on the Book; on the other two views the Book button
 carries an amber count of what needs him. A book or Watching row, a What's moving tile, a Feed row's chart, a closing
-ticket and `?ticket=` go to the ticker's view, which keeps a held position's own book row above the centre (its P&L,
-its standing line and the Close buttons), so closing is still row, then Close at target. The Book starts at the page's
+ticket and `?ticket=` go to the ticker's view, which keeps a held position's own book row above the centre (its P&L and
+its standing line), with the Position panel and its buttons under the chart, so closing is row, then Close or Close
+at target. The Book starts at the page's
 top; the ticker and the Feed start right under the switch. The chart sets its default view again when it is first laid
 out (it had no width while another view showed). The top is three short rows: the switch with the desk's buttons
 (Threads, Jump to…, Plan a trade, as icons) in the row that stays put (the word "Desk" is the app's tab bar's, not
@@ -1615,13 +1616,37 @@ Proof: `frontend/e2e/option-standing.spec.ts` (calls, puts, 0DTE, missing Greeks
 `frontend/e2e/copilot-desk-option-standing.spec.ts` (the header on a held call and put, live movement, a spread leg),
 `backend/tests/test_copilot_desk.py` and `test_robinhood_book.py` (the terms on each kind of row).
 
+**The Position panel.** The standing sits inside one panel under the chart for the selected position
+(`frontend/components/copilot/DeskPosition.tsx`, its arithmetic in `frontend/lib/deskPosition.ts`), where every way
+of managing it has a button. It takes props only (the desk shell wires it), so it can move into a dock tab unchanged.
+It shows the REAL mark with the account, the contract and size, the P&L, the price now (an option's premium a share:
+the live tick, else the book's contract mark over 100) and the stock's change today, the plan's entry, stop and target,
+the standing (break-even, days left, …) and any working Robinhood order on it. Then one row of buttons:
+
+- **Stop / target**: two stock prices in place. Saving moves the plan's stop through its own invalidation alert, armed
+  again at the new price from a fresh quote (`POST /charts/alerts/{id}/rearm`, the route the copilot's `plan_stop`
+  card taps; the alert must still be at the stop the panel shows, a stale quote or a stop already past the price is
+  refused) and its target through `PUT /copilot/plans/{investigation_id}/target` (the plan capture's target price, a
+  line with no alert; on the winning side of the stop). A position with no saved plan shows **Plan it** (the plan flow)
+  instead. Nothing is sent to Robinhood.
+- **Trim** (a count, half by default) and **Close** (all): the Ticket's close-now view at the mark (`closeNowTicket`,
+  as the copilot's close and trim cards). A single long call or put the book reads as one leg only.
+- **Roll**: the roll ticket. **Note**: the book row's note line (saved with the trade; it shows under the row at once).
+- **Close at target / Close at stop**, when the plan has those levels: the closing tickets below.
+
+The book row keeps only its short standing line; the buttons are the panel's. A paper position in the same ticker has
+its own panel, marked PAPER (§ Paper). On a phone the panel sits under the chart on the ticker view. Proof:
+`frontend/e2e/copilot-desk-position.spec.ts` (the panel on a real option and on paper, Stop / target through the rearm
+route, Trim with its count, the book row without buttons, a phone; the arithmetic's signs and units),
+`backend/tests/test_plan_target.py`.
+
 ### The contract's own chart
 
 With a held single-leg call or put selected, the centre chart's header offers **Stock / Contract** (remembered per
 contract in the browser). Contract draws the option itself, as Robinhood's position screen does: its price for the
 latest session with trades, his fills as lines at their premium, and at the cursor the price and which it is, his P&L
 in dollars for his size (the book's own formula, `book.tick`) and the stock's price at that moment. The closing
-tickets stay in the position's standing under it.
+tickets stay in the Position panel under it.
 
 - **Where the price comes from.** `GET /copilot/desk/contract?symbol=&occ=` (`backend/app/engine/desk_contract.py`):
   one Tradier time-and-sales read of the OCC symbol (1-minute trades, the last five calendar days to today's 20:00)
@@ -1701,8 +1726,8 @@ that nothing in it places or sends anything.
   Straddles, strangles, condors, butterflies and calendars are still refused, and a plan's words naming a roll are not
   a plan ticket (a held position rolls from its own Roll, below).
 - **Roll** (`GET /copilot/roll`, `app/engine/desk_roll.py`, `frontend/components/copilot/DeskRoll.tsx`,
-  `frontend/lib/rollTicket.ts`). A held single long call or put in whole contracts shows **Roll** beside its closing
-  buttons (the standing under the chart and the book row), and a closing ticket offers **Roll it instead**. It opens
+  `frontend/lib/rollTicket.ts`). A held single long call or put in whole contracts shows **Roll** in its Position panel
+  under the chart, and a closing ticket offers **Roll it instead**. It opens
   the Ticket in roll mode: leg 1 is the contract held, **sell to close**, all of it by default (fewer if he types
   fewer; never more than held, and the rest is said to be kept); leg 2 he picks in the Chain shown under it, opened on
   the held expiry and side (**Roll to this**; the other side or the held contract itself says why not), **buy to open**,
@@ -1723,8 +1748,12 @@ that nothing in it places or sends anything.
   multi-leg positions get no Roll (their standing says Roll covers a single long call or put only).
   Proof: `backend/tests/test_desk_roll.py` (every money case, the quotes, the refusals, one feed pass, no send),
   `frontend/e2e/roll-ticket.spec.ts` (the same cases in the browser's math), `frontend/e2e/copilot-desk-roll.spec.ts`.
-- **Closing tickets: Close at target / Close at stop.** A held single long call or put with a plan shows these in the
-  position's standing under the chart (beside the What if…) and under its book row. Each opens the Ticket as a **sell to close** of the
+- **Close and Trim at the mark** (the Position panel's **Close** and **Trim**, and the copilot's close and trim cards):
+  the Ticket's close-now view (`closeNowTicket`), a sell to close of all or a count of the contracts held at the mark
+  now, priced from the book row's own worth (a contract's mark is its premium a share × 100; proceeds are that × the
+  count), quantity and limit editable, copy-only with no Send button.
+- **Closing tickets: Close at target / Close at stop.** A held single long call or put with a plan shows these in its
+  Position panel under the chart. Each opens the Ticket as a **sell to close** of the
   contracts held, filled in the browser from the book row (`frontend/lib/closingTicket.ts`): the account holding it
   (Robinhood's label and masked number, so a position the live feed does not show gets no closing ticket), the contract, the quantity held, and a limit
   estimated for the stock at that plan level, mark + delta x (level − stock), never below the contract's value at
@@ -2192,6 +2221,19 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   closes nothing: each level's first touch is recorded once and pinged. Bars are the desk chart's own cached minute read
   (`chart_feed.today_minutes`), one per watched stock per minute. Known limit: the session's last minute is not judged
   (its bar completes after the close), and an expired contract waiting to settle is not watched.
+- **Stop, target and note after entry** (`PATCH /copilot/paper/positions/{position_id}`, `paper_book.set_levels`;
+  the Position panel's **Stop / target** and **Note**): only the fields sent change, null clears one. The stop and
+  target are stock prices on the same sides as at entry, checked against the desk's newest kept price for the stock (no
+  quote read). Recorded as a `levels` event (the newest wins); the fold carries them, so a closed trade is graded against
+  the levels as they stood at its exit. A change never fills or closes anything by itself and leaves the switch as it
+  is: touches of the new levels count only from the change on (a touch or trigger is keyed to the change), and a
+  trigger found before the change no longer sells.
+- **The Position panel on paper.** Tapping a paper position's name in the Paper section shows its ticker on the desk;
+  under the chart each open paper position in that ticker has its own panel (`DeskPaperPosition` in
+  `frontend/components/copilot/DeskPosition.tsx`), marked PAPER: its P&L, the price now and the stock's change today,
+  entry (the stock's price at the fill), stop, target, break-even at expiry for a call or put (the strike plus the
+  premium paid a share, less it for a put), days left, whether Close automatically is on and any working paper order;
+  then **Stop / target**, **Trim**, **Close** (the Paper section's own close row) and **Note**. No Roll on paper.
 - **PAPER pings.** One Telegram message per paper event: a limit filled, an automatic exit, or a stop or target touched
   with the switch off (a touch noticed more than 10 minutes after its bar is recorded without one). Each title starts
   "PAPER ·" and each text "Paper, not real money." They go through the notification policy as kind `paper`, with a
@@ -2220,7 +2262,7 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   `score.paper.by_source`), and each paper position not from his own ticket carries a small source tag.
 - **Stored apart and append-only.** `paper_run` (one row per run) and `paper_event` (each fill: open, close or expire;
   a position is their fold; and the orders' and switches' own facts: `order`, its fill or one `cancel`/`lapse`, `auto`,
-  `touch`, `trigger`), additive migration `a7c3e9f1b5d2`, no new table. Nothing here writes fills, trades, accounts, real P&L,
+  `touch`, `trigger`, `levels`), additive migration `a7c3e9f1b5d2`, no new table. Nothing here writes fills, trades, accounts, real P&L,
   the shadow and scanner books, calls Robinhood or places an order anywhere. `GET /copilot/paper` is
   one of the desk's minute reads.
 - **The copilot reads it** (`get_paper_book`, `backend/app/ai/copilot_paper_book.py`; Isaac's yes on 2026-11-14): a

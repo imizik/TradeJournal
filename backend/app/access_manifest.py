@@ -97,6 +97,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/plans/positions',
     'GET /copilot/plans/{investigation_id}/red-team',
     'POST /copilot/plans/{investigation_id}/red-team',
+    'PUT /copilot/plans/{investigation_id}/target',  # move a confirmed plan's target: its plan capture's target price only; no alert, no quote, nothing sent
     'GET /copilot/symbol/{symbol}',
     'GET /copilot/desk/threads',
     'GET /copilot/desk/session',
@@ -134,6 +135,7 @@ DOMAIN_ROUTES = frozenset({
     'POST /copilot/paper/orders',  # a paper fill at one live quote read through the chart feed: paper tables only; never an order, never Robinhood
     'POST /copilot/paper/orders/cancel',  # cancel a working paper limit order: paper tables only
     'POST /copilot/paper/auto',  # a paper position's close-automatically switch: paper tables only
+    'PATCH /copilot/paper/positions/{position_id}',  # a paper position's stop, target or note after entry: paper tables and the desk's kept prices only; never a fill
     'POST /copilot/desk/use',  # the desk's quiet use counts (piece ids, opens, taps, seconds on screen): the desk-use table only; no text, no tickers
     'GET /copilot/desk/use',  # how he uses the desk: the desk-use table and his folds, read only
     'PUT /copilot/desk/folds',  # which desk pieces he folded away, per device size: the desk-folds settings row only

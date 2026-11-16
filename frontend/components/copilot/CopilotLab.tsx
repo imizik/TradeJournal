@@ -703,7 +703,11 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const centreSymbol = picked ?? talking ?? focus ?? (day && turnText ? null : followed[0]?.symbol ?? null);
   // Another ticker on the chart drops a Scanner row's lines for good.
   useEffect(() => { if (scanLines && scanLines.symbol !== centreSymbol) setScanLines(null); }, [scanLines, centreSymbol]); // eslint-disable-line react-hooks/set-state-in-effect -- follows the chart's ticker
-  const centreRow = centreSymbol ? followed.find(r => r.symbol === centreSymbol) ?? rows.find(r => r.symbol === centreSymbol && r.key.startsWith("trade:")) ?? null : null;
+  // The row tapped when two contracts share the ticker: the Position panel acts on that one.
+  const centreRow = centreSymbol ? followed.find(r => r.key === pickedKey && r.symbol === centreSymbol) ?? followed.find(r => r.symbol === centreSymbol)
+    ?? rows.find(r => r.symbol === centreSymbol && r.key.startsWith("trade:")) ?? null : null;
+  // His open paper positions in the centre's ticker: each gets its own Position panel under the chart, marked PAPER.
+  const centrePaper = useMemo(() => centreSymbol ? (paper.book?.positions ?? []).filter(p => p.symbol === centreSymbol) : [], [centreSymbol, paper.book]);
   // The chart reads by the conversation when it is about that ticker (its plan's lines), else by the position's plan.
   const centreThread = useMemo<DeskThreadRef | null>(() => {
     if (!centreSymbol) return null;
@@ -969,7 +973,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
             {/* His rules and goals: one neutral line, outside the paper frame, since they cover real trades too. */}
             <RulesAndGoals book={paper.book} />
             {/* Practice: his paper book, the QQQ overnight and momentum paper books and Replay, one line each. Never real money. */}
-            <Practice on={on} paper={paper} symbol={centreSymbol} review={<PaperReviewCard review={paper.book?.review} onAsk={actions.ask} />} onReplay={() => setReplay(true)} />
+            <Practice on={on} paper={paper} symbol={centreSymbol} review={<PaperReviewCard review={paper.book?.review} onAsk={actions.ask} />} onReplay={() => setReplay(true)}
+              onPick={selectWatched} />
           </div>
         )}
         {on && (
@@ -999,7 +1004,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 : centreTab === "ticket" ? <DeskTicket plans={tickets.plans} failed={tickets.failed} open={ticketFor} pick={ticketPick} close={ticketClose} onOpen={id => { setTicketFor(id); setTicketPick(null); setTicketClose(null); }} onClose={() => { setTicketFor(null); setTicketPick(null); setTicketClose(null); }}
                 onPlaced={symbol => { setTicketFor(null); setTicketClose(null); setPicked(symbol); setPickedKey(null); setCentreTab("chart"); }} onPlan={planTrade} />
                 : <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events} onReplay={() => setReplay(true)}
-                  guides={scanLines && scanLines.symbol === centreSymbol ? scanLines.lines : undefined} />}
+                  guides={scanLines && scanLines.symbol === centreSymbol ? scanLines.lines : undefined}
+                  paper={centrePaper} paperOrders={paper.book?.orders} onPlan={planWatched} />}
             </div>
           </section>
         )}

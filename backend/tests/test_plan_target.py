@@ -13,11 +13,11 @@ import sys
 
 import pytest
 from sqlalchemy import create_engine as sa_create_engine, inspect, text
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.ai import copilot_tools
 from app.engine import captures, copilot_investigations, copilot_plans, desk_context, telegram_replies
-from app.models import TradeCapture
+from app.models import LevelAlert, TradeCapture
 from app.routers import copilot_desk
 from tests import test_telegram
 from tests.test_browser_access import boundary, signin  # noqa: F401  (the shared access fixture)
@@ -122,6 +122,31 @@ def test_the_desk_chart_draws_the_target_line_beside_entry_and_invalidation(lab,
     target = body["levels"][2]
     assert target["id"] == f"target:{plan}"  # not an alert: nothing armed at it
     assert body["alerts"] == []
+
+
+def test_the_position_panel_moves_or_clears_the_target_on_the_winning_side_only(lab, engine, monkeypatch):  # noqa: F811
+    from app.access_manifest import DOMAIN_ROUTES
+    assert "PUT /copilot/plans/{investigation_id}/target" in DOMAIN_ROUTES
+    investigation(engine)
+    plan = capture(engine, "NBIS")
+    set_target(engine, plan, 99.5)
+    alert(engine, NBIS, "NBIS", "entry", 95.9)
+    alert(engine, NBIS, "NBIS", "invalidation", 92.3, minute=2)
+    moved = lab.put(f"/copilot/plans/{NBIS}/target", json={"target": 101.25})
+    assert moved.status_code == 200 and moved.json() == {"investigation_id": NBIS, "symbol": "NBIS", "target": 101.25}
+    with Session(engine) as db:
+        assert db.get(TradeCapture, plan).target_price == 101.25
+        before = [(a.price, a.state, a.generation) for a in db.exec(select(LevelAlert)).all()]
+    # A long plan's target sits above its stop; a bad price is refused and nothing changes.
+    refused = lab.put(f"/copilot/plans/{NBIS}/target", json={"target": 92.0})
+    assert refused.status_code == 409 and "above its stop 92.30" in refused.json()["detail"]
+    assert lab.put(f"/copilot/plans/{NBIS}/target", json={"target": -1}).status_code == 422
+    assert lab.put(f"/copilot/plans/{NBIS}/target", json={"target": None}).json()["target"] is None
+    with Session(engine) as db:
+        assert db.get(TradeCapture, plan).target_price is None
+        # No alert is armed, moved or added for a target: the stop moves through its own alert's rearm.
+        assert [(a.price, a.state, a.generation) for a in db.exec(select(LevelAlert)).all()] == before
+    assert lab.put("/copilot/plans/33333333-3333-4333-8333-333333333333/target", json={"target": 100}).status_code == 404
 
 
 # ------------------------------------------------------------------ Telegram's Confirm, the desk's twin

@@ -82,8 +82,8 @@ export class PaperRefused extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
-async function post<T>(path: string, body: object): Promise<T> {
-  const response = await fetch(apiUrl(path), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+async function post<T>(path: string, body: object, method: "POST" | "PATCH" = "POST"): Promise<T> {
+  const response = await fetch(apiUrl(path), { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const reply = await response.json().catch(() => null);
   if (!response.ok) throw new PaperRefused(typeof reply?.detail === "string" ? reply.detail : `Request failed (${response.status}).`, response.status);
   return reply as T;
@@ -137,6 +137,14 @@ export async function cancelPaperOrder(orderId: string) {
 export async function setPaperAuto(positionId: string, on: boolean) {
   await post<{ auto: boolean }>("/copilot/paper/auto", { position_id: positionId, on, order_key: orderKey() });
   changed();
+}
+/** Change an open paper position's stop, target (stock prices) or note after entry: only the fields named change, null
+ *  clears one. Never a fill or a close by itself: the position's close-automatically switch still decides. */
+export async function setPaperLevels(positionId: string, change: { stop?: number | null; target?: number | null; note?: string | null }) {
+  const saved = await post<{ stop: number | null; target: number | null; note: string | null }>(
+    `/copilot/paper/positions/${encodeURIComponent(positionId)}`, { ...change, order_key: orderKey() }, "PATCH");
+  changed();
+  return saved;
 }
 
 /** Whether a spread takes in a credit to open: a call spread buying the higher strike, a put spread buying the lower. */

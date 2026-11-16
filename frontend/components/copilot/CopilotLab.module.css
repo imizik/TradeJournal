@@ -448,8 +448,8 @@
     display: block;
   }
 
-  /* The ticker's view keeps a held position's own row above its chart (its P&L, its standing line and the Close
-     buttons), and nothing else of the book's column; a ticker he does not hold shows none. */
+  /* The ticker's view keeps a held position's own row above its chart (its P&L and its standing line; the Position
+     panel with its buttons sits under the chart), and nothing else of the book's column; a ticker he does not hold shows none. */
   .desk[data-on="true"][data-view="ticker"] .book:not(:has(li[data-selected])),
   .desk[data-on="true"][data-view="ticker"] .book > :not([data-desk-book]):not([data-use="book"]),
   .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] > :not(ul),
@@ -464,7 +464,7 @@
 
   /* A short row above the chart: the standing's words (break-even, time value, decay; the full standing follows the
      chart), the track and the sparkline wait, because the chart under it draws the plan's lines and the price. The
-     contract, its tags, the P&L (the percent beside the dollars), the notes and the Close / Roll buttons stay. */
+     contract, its tags, the P&L (the percent beside the dollars) and the notes stay. */
   .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] li[data-selected] [data-testid="book-standing"],
   .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] li[data-selected] > button > span:first-child > [role="img"],
   .desk[data-on="true"][data-view="ticker"] .book [data-desk-book] li[data-selected] > button > :not(:first-child):not([data-testid="book-pnl"]) {

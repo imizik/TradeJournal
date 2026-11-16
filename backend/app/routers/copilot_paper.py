@@ -12,6 +12,8 @@ it, the close or a cancel; ``preview`` answers what it would fill at (or hold) a
 refused outside the regular session, on a stale quote, or without the buying power.
 ``POST /copilot/paper/orders/cancel``: cancel a working paper limit order.
 ``POST /copilot/paper/auto``: turn a position's "Close automatically at stop/target" switch on or off.
+``PATCH /copilot/paper/positions/{position_id}``: change an open position's stop, target or note after entry (the desk's
+Position panel); never a fill or a close by itself.
 
 His own trading rules (``engine/trading_rules.py``): ``GET /copilot/rules`` his list and the automatic checks it may use;
 ``PUT /copilot/rules`` saves the list (up to 8). ``POST /copilot/rules/check``: the checklist for an entry he is about
@@ -139,6 +141,25 @@ def auto(body: AutoAsk, db: Session = Depends(get_session)):
     _settings()
     try:
         return paper_book.set_auto(db, body.model_dump(), time.time())
+    except paper_book.PaperError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+
+
+class LevelsAsk(BaseModel):
+    stop: float | None = None
+    target: float | None = None
+    note: str | None = Field(None, max_length=2000)
+    order_key: str | None = Field(None, max_length=64)
+
+
+@router.patch("/paper/positions/{position_id}")
+def levels(position_id: str, body: LevelsAsk, db: Session = Depends(get_session)):
+    """Change an open paper position's stop, target or note after entry: only the fields sent change (null clears one).
+    Never fills or closes anything; the position's close-automatically switch still decides what a touch does."""
+    _settings()
+    ask = {k: v for k, v in body.model_dump().items() if k in body.model_fields_set or k == "order_key"}
+    try:
+        return paper_book.set_levels(db, {**ask, "position_id": position_id[:40]}, time.time())
     except paper_book.PaperError as exc:
         raise HTTPException(exc.status, str(exc)) from None
 

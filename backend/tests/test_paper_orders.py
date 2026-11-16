@@ -266,6 +266,65 @@ def test_paper_entries_and_exits_are_chart_marks_at_the_stocks_price(db, market)
     assert paper_book.chart_marks(db, "AAPL", NOW - 600) == [] and paper_book.chart_marks(db, "NBIS", NOW + 600) == []
 
 
+def test_moving_the_stop_after_entry_never_closes_by_itself_and_counts_touches_from_the_change(db, market):  # noqa: F811
+    paper_book.start_run(db, None, False, NOW)
+    market.quotes = {CALL: q(CALL, 3.30, 3.40), "NBIS": q("NBIS", 98.0, 98.1, last=98.05)}
+    pid = paper_book.open_order(db, {"symbol": "NBIS", "instrument": "option", "option_type": "call", "expiry": "2026-11-20",
+                                     "strike": 100, "quantity": 2, "stop": 95, "target": 105, "order_key": key()}, NOW)["filled"]["position_id"]
+    paper_book.set_auto(db, {"position_id": pid, "on": True, "order_key": key()}, NOW + 10)
+    # The stop touched at 95 (the 10:01 bar) while the switch is on: a trigger waits for a fresh bid.
+    bars = [bar(NOW + 60, 94.5, 96)]
+    market.quotes = {}
+    assert passes(db, NOW + 151, bars) == []
+    assert paper_book.view(db, NOW + 152)["positions"][0]["exiting"] is True
+    # He moves the stop to 93 (and the target, and a note) before it sells: the old trigger no longer acts, nothing fills,
+    # the switch stays on, and a bar from before the change past 93 does not count.
+    market.marks = {"NBIS": {"last": 95.2, "at": NOW + 160}}
+    assert paper_book.set_levels(db, {"position_id": pid, "stop": 93, "target": 104, "note": "  gave it room  ", "order_key": key()},
+                                 NOW + 170) == {"stop": 93.0, "target": 104.0, "note": "gave it room"}
+    early = bars + [bar(NOW + 120, 92.5, 95)]  # the 10:02 bar, before the 10:02:50 change
+    market.quotes = {CALL: q(CALL, 2.0, 2.1, now=NOW + 211), "NBIS": q("NBIS", 95, 95.1, last=95.0, now=NOW + 211)}
+    assert passes(db, NOW + 211, early) == []
+    [held] = paper_book.view(db, NOW + 212)["positions"]
+    assert (held["remaining"], held["stop"], held["target"], held["note"], held["auto"], held["exiting"]) == (2, 93.0, 104.0, "gave it room", True, False)
+    assert db.exec(select(PaperEvent).where(PaperEvent.kind == "close")).all() == []
+    # A later bar past the new stop is the switch's to act on: the exit is graded against the stop as it stood then.
+    later = early + [bar(NOW + 240, 92.8, 94)]
+    market.quotes = {CALL: q(CALL, 1.5, 1.6, now=NOW + 331), "NBIS": q("NBIS", 92.9, 93.0, last=92.95, now=NOW + 331)}
+    [told] = passes(db, NOW + 331, later)
+    assert told["title"] == "PAPER · NBIS auto exit at the stop" and "touched your stop 93.00" in told["body"]
+    assert told["filled"]["cash"] == 300.0 and told["filled"]["pnl"] == -380.0  # (1.50 − 3.40) × 100 × 2
+    [closed] = paper_book.view(db, NOW + 400)["closed"]
+    assert closed["verdict"]["text"].startswith("Auto exit at the stop: the stock touched 93")
+
+
+def test_a_level_change_is_checked_against_the_stock_and_the_switch_off_tells_the_new_level_once(db, market):  # noqa: F811
+    paper_book.start_run(db, None, False, NOW)
+    market.quotes = {CALL: q(CALL, 3.30, 3.40), "NBIS": q("NBIS", 98.0, 98.1, last=98.05)}
+    pid = paper_book.open_order(db, {"symbol": "NBIS", "instrument": "option", "option_type": "call", "expiry": "2026-11-20",
+                                     "strike": 100, "quantity": 1, "stop": 95, "order_key": key()}, NOW)["filled"]["position_id"]
+    reads = len(market.reads)
+    market.marks = {"NBIS": {"last": 97.0, "at": NOW + 50}}
+    for bad, why in (({"stop": 97.5}, "stop is a stock price below 97"), ({"target": 96}, "target is a stock price above 97"),
+                     ({"stop": 0}, "positive"), ({"target": 94}, "above 97")):
+        with pytest.raises(paper_book.PaperError, match=why):
+            paper_book.set_levels(db, {"position_id": pid, "order_key": key(), **bad}, NOW + 60)
+    with pytest.raises(paper_book.PaperError, match="not open"):
+        paper_book.set_levels(db, {"position_id": key(), "stop": 90, "order_key": key()}, NOW + 60)
+    assert len(market.reads) == reads  # the desk's kept price, never a quote read
+    # Only the field sent changes; null clears it.
+    assert paper_book.set_levels(db, {"position_id": pid, "target": 103, "order_key": key()}, NOW + 60) == {"stop": 95.0, "target": 103.0, "note": None}
+    assert paper_book.set_levels(db, {"position_id": pid, "stop": None, "order_key": key()}, NOW + 61)["stop"] is None
+    assert paper_book.set_levels(db, {"position_id": pid, "stop": 94, "order_key": key()}, NOW + 62)["stop"] == 94.0
+    # The switch off: the new stop's first touch after the change is told once; nothing is closed.
+    bars = [bar(NOW + 120, 93.5, 96)]
+    [told] = passes(db, NOW + 211, bars)
+    assert told["title"] == "PAPER · NBIS touched your stop" and "stop 94.00" in told["body"] and "Nothing was closed" in told["body"]
+    assert passes(db, NOW + 271, bars) == []
+    [held] = paper_book.view(db, NOW + 272)["positions"]
+    assert held["remaining"] == 1 and held["touched"] == {"stop": NOW + 180}
+
+
 def test_the_new_routes_are_owner_only_and_work(db, market, monkeypatch):  # noqa: F811
     for route in ("POST /copilot/paper/orders/cancel", "POST /copilot/paper/auto"):
         assert route in DOMAIN_ROUTES
@@ -290,6 +349,12 @@ def test_the_new_routes_are_owner_only_and_work(db, market, monkeypatch):  # noq
         on = client.post("/copilot/paper/auto", json={"position_id": filled["position_id"], "on": True, "order_key": key()})
         assert on.status_code == 200 and on.json() == {"auto": True}
         assert client.get("/copilot/paper").json()["positions"][0]["auto"] is True
+        moved = client.patch(f"/copilot/paper/positions/{filled['position_id']}", json={"stop": 96, "order_key": key()})
+        assert moved.status_code == 200 and moved.json() == {"stop": 96.0, "target": None, "note": None}
+        assert client.patch(f"/copilot/paper/positions/{filled['position_id']}", json={"target": "x", "order_key": key()}).status_code == 422
+        assert client.patch(f"/copilot/paper/positions/{key()}", json={"stop": 96, "order_key": key()}).status_code == 409
+        assert client.get("/copilot/paper").json()["positions"][0]["stop"] == 96.0
+    assert "PATCH /copilot/paper/positions/{position_id}" in DOMAIN_ROUTES
 
 
 

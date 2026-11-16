@@ -6,9 +6,11 @@ desk's Context pane for the open thread (``GET /copilot/desk/{investigation_id}/
 fills and phone pings sent, from the Briefing session timeline's own readers (``copilot_desk``). An id of ``symbol:`` and a
 symbol is a thread named by its symbol alone (a position or plan with no saved conversation), on all three.
 
-Owner-only like every ``/copilot`` route; refuses while the lab is off. Read-only, except the one write here: asking
+Owner-only like every ``/copilot`` route; refuses while the lab is off. Read-only, except two writes here: asking
 Jo to argue against a confirmed plan (``POST /copilot/plans/{investigation_id}/red-team``, ``engine/jo_research.py``),
-which only records a pending request for Jo's next research run; no model call, no ping.
+which only records a pending request for Jo's next research run; no model call, no ping; and moving a confirmed plan's
+target (``PUT /copilot/plans/{investigation_id}/target``, the desk's Position panel), its plan capture's price only.
+The plan's stop moves through its invalidation alert's own rearm (``POST /charts/alerts/{id}/rearm``).
 """
 
 from datetime import datetime
@@ -53,6 +55,35 @@ def ask_red_team(investigation_id: str, body: RedTeamBody, response: Response, d
         raise HTTPException(404 if exc.code == "not_found" else 409, str(exc)) from None
     response.status_code = 201 if created else 200
     return found
+
+
+class TargetBody(BaseModel):
+    target: float | None = Field(default=None, gt=0, lt=1_000_000)
+
+
+@router.put("/plans/{investigation_id}/target")
+def set_target(investigation_id: str, body: TargetBody, db: Session = Depends(get_session)):
+    """Move (or with null clear) the confirmed plan's profit target: the underlying's price saved on its plan capture, the
+    one the desk chart draws and the closing ticket reads (``desk_context.plan``). A line only: no alert is armed at it, and
+    nothing is sent anywhere. 404 without a plan; 409 when the plan has no saved plan card to keep it, or the target is
+    not on the winning side of the plan's invalidation (above it for a long, below for a short)."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    found = desk_context.plan(db, investigation_id) if re.fullmatch(r"[A-Za-z0-9-]{1,64}", investigation_id) else None
+    if found is None:
+        raise HTTPException(404, "No saved plan in this thread.")
+    capture = found["capture"]
+    if capture is None:
+        raise HTTPException(409, "This plan has no saved plan card to keep a target on.")
+    target = None if body.target is None else round(body.target, 4)
+    stop = found["invalidation"].price if found["invalidation"] is not None else None
+    long = found["direction"] != "short"
+    if target is not None and stop is not None and (target <= stop if long else target >= stop):
+        raise HTTPException(409, f"A {'long' if long else 'short'} plan's target is {'above' if long else 'below'} its stop {stop:,.2f}.")
+    capture.target_price = target
+    db.add(capture)
+    db.commit()
+    return {"investigation_id": investigation_id, "symbol": found["symbol"], "target": target}
 
 
 @router.get("/plans/{investigation_id}/red-team")
