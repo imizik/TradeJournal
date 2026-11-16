@@ -113,6 +113,26 @@ test("the Feed: four groups, Ideas opens on Radar, and the tab counts only his o
   await expect(sources).toHaveText(["News", "Radar", "News"]);
 });
 
+test("the Feed remembers its group in this browser: a reload opens on the last one picked", async ({ page }) => {
+  await open(page);
+  await page.getByRole("tab", { name: "Feed" }).click();
+  const feed = page.getByTestId("desk-feed");
+  const show = feed.getByRole("group", { name: "Show" });
+  await show.getByRole("button", { name: "Market" }).click();
+  await expect(feed.getByTestId("feed-item")).toHaveText([/Yields climb before the Fed minutes/]);
+  expect(await page.evaluate(() => window.localStorage.getItem("desk.feed.group.v1"))).toBe("market");
+  await page.reload();
+  await page.getByRole("tab", { name: "Feed" }).click();
+  await expect(show.getByRole("button", { name: "Market" })).toHaveAttribute("aria-pressed", "true");
+  await expect(show.getByRole("button", { name: "Mine" })).toHaveAttribute("aria-pressed", "false");
+  await expect(feed.getByTestId("feed-item")).toHaveText([/Yields climb before the Fed minutes/]);
+  // A stored value that is not a group is ignored: Mine, as before.
+  await page.evaluate(() => window.localStorage.setItem("desk.feed.group.v1", "chatter"));
+  await page.reload();
+  await page.getByRole("tab", { name: "Feed" }).click();
+  await expect(show.getByRole("button", { name: "Mine" })).toHaveAttribute("aria-pressed", "true");
+});
+
 test("a phone: the book comes before What's moving, and the centre waits behind the switch", async ({ page }) => {
   await open(page, 390);
   const top = async (id: string) => (await page.getByTestId(id).boundingBox())!.y;

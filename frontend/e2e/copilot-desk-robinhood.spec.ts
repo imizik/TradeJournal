@@ -71,7 +71,10 @@ for (const width of [1440, 375]) {
     await expect(chips).toContainText("MCP••7884$0");
     const shelf = page.getByTestId("desk-book");
     await expect(shelf.getByRole("heading", { level: 2 })).toHaveText("Your book · 4 followed");
-    await expect(shelf.getByTestId("book-live")).toHaveText(/^live from Robinhood · as of \d/);
+    await expect(shelf.getByTestId("book-live")).toHaveText(/^live from Robinhood · as of \d.*Read again$/);
+    // It reads as a button: a bordered "Read again" beside the time.
+    await expect(shelf.getByTestId("book-live").getByTestId("book-live-again")).toHaveText("Read again");
+    await expect(shelf.getByTestId("book-live").getByTestId("book-live-again")).toHaveCSS("border-top-style", "solid");
     // Options first; the stock with no plan waits behind one line.
     await expect(shelf.getByRole("button", { name: /^(NBIS|CRWV|APLD) / })).toHaveCount(3);
     await expect(shelf.getByRole("button", { name: /^RKLB/ })).toHaveCount(0);

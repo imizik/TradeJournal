@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
@@ -46,6 +46,8 @@ const ACTION = "inline-flex min-h-11 items-center gap-1 rounded-md border px-2.5
  * carry a small second row (Radar, Scanner, Unusual options; News & calendar, Chatter) when there is more than one. */
 const GROUPS = [["mine", "Mine"], ["ideas", "Ideas"], ["market", "Market"], ["all", "All"]] as const;
 type Group = (typeof GROUPS)[number][0];
+/** The group he picked last, kept in this browser so a reload opens the Feed where he left it. */
+const GROUP_KEY = "desk.feed.group.v1";
 type Idea = "radar" | "scanner" | "unusual";
 type MarketPick = "news" | "chatter";
 /** What the list shows: a group, or one of its second row's picks. */
@@ -168,12 +170,20 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, onChart, 
   /** A ping's card (the desk's ?feed=): the Feed opens on Ideas › its kind with that card picked and in view. */
   focus?: FeedLink | null;
 }) {
-  // The picks hold while he stays on the desk (a link that reopens it included), so the Feed is where he left it.
-  const [group, setGroup] = useKeptState<Group>("desk.feed.group", "mine");
+  // The picks hold while he stays on the desk (a link that reopens it included), so the Feed is where he left it; the
+  // group he picks is also kept in this browser (``GROUP_KEY``), so a reload opens on it. A ping's link is not his pick.
+  const [group, keepGroup] = useKeptState<Group>("desk.feed.group", "mine");
+  const setGroup = useCallback((next: Group) => {
+    keepGroup(next);
+    try { window.localStorage.setItem(GROUP_KEY, next); } catch { /* this visit only */ }
+  }, [keepGroup]);
+  useEffect(() => {
+    try { const saved = window.localStorage.getItem(GROUP_KEY); if (GROUPS.some(([id]) => id === saved)) keepGroup(saved as Group); } catch { /* Mine */ }
+  }, [keepGroup]); // read after hydration; a ping's link below still wins
   const [ideaPick, setIdea] = useKeptState<Idea>("desk.feed.idea", "radar");
   const [marketPick, setMarket] = useKeptState<MarketPick>("desk.feed.market", "news");
   const [symbol, setSymbol] = useState<string | null>(null);
-  useEffect(() => { if (focus) { setGroup("ideas"); setIdea(focus.kind); } }, [focus, setGroup, setIdea]); // once per link: the desk remounts for each
+  useEffect(() => { if (focus) { keepGroup("ideas"); setIdea(focus.kind); } }, [focus, keepGroup, setIdea]); // once per link: the desk remounts for each
   const chatter = data?.chatter ?? null;
   const chatterOn = (chatter?.items.length ?? 0) > 0;
   const scannerOn = !!scanner && scanner.state !== "off";

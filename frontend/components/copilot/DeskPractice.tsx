@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useDeskTicks } from "@/lib/deskTicks";
-import { paperPnl, paperSymbols, type PaperBook } from "@/lib/paperBook";
+import { paperPnl, paperSymbols, type PaperBook, type PaperStats } from "@/lib/paperBook";
 import { cn } from "@/lib/utils";
 import DeskMomentum, { momentumShown, useMomentumBook } from "./DeskMomentum";
 import DeskOvernight, { overnightShown, useOvernightBook } from "./DeskOvernight";
@@ -46,6 +46,44 @@ const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${usd(n)}`;
 const bp = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(1)} bp`;
 const tone = (n: number | null | undefined) => n == null || n === 0 ? "text-muted-foreground" : n > 0 ? "text-emerald-300" : "text-rose-300";
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+// ------------------------------------------------------------------------------------------------ how I'm doing
+
+/** "How I'm doing · this week": his closed REAL and PAPER trades since Monday, side by side (trades, P&L, win rate), in
+ *  one neutral block outside the paper frame. From the paper read's ``score.week``; nothing until it lands. Replay keeps
+ *  its own score in its REPLAY line. Folds like the column's other pieces (``scorecard``). */
+export function HowImDoing({ book }: { book: PaperBook | null }) {
+  const week = book?.score?.week;
+  if (!week) return null;
+  const sides: [Mode, PaperStats][] = [["real", week.real], ["paper", week.paper]];
+  const rows: [string, (s: PaperStats) => ReactNode][] = [
+    ["Trades", s => s.trades],
+    ["P&L", s => s.trades === 0 ? "—" : <span className={tone(s.pnl)}>{signed(s.pnl)}</span>],
+    ["Win rate", s => s.win_rate == null ? "—" : `${s.win_rate}%`],
+  ];
+  return (
+    <section aria-label="How I'm doing this week" data-testid="desk-scorecard" className="rounded-lg border bg-card px-3 pb-2 pt-2"
+      title={`Closed trades since Monday ${week.monday.slice(5).replace("-", "/")} (New York): real beside paper`}>
+      <h2 className={LABEL}>How I&apos;m doing<span className="font-normal normal-case tracking-normal"> · this week</span></h2>
+      <table className="mt-1 w-full text-xs tabular-nums">
+        <thead>
+          <tr>
+            <th className="w-1/3 text-left font-normal"><span className="sr-only">Closed this week</span></th>
+            {sides.map(([mode]) => <th key={mode} scope="col" className="py-0.5 text-right font-normal"><ModeMark mode={mode} short /></th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([name, cell]) => (
+            <tr key={name} className="border-t border-border/50">
+              <th scope="row" className="py-0.5 text-left font-normal text-muted-foreground">{name}</th>
+              {sides.map(([mode, s]) => <td key={mode} data-testid={`scorecard-${mode}`} className="text-right text-foreground/90">{cell(s)}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
 
 // ------------------------------------------------------------------------------------------------ rules and goals
 

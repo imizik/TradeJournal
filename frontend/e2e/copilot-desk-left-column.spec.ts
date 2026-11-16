@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // The desk's left column (docs/copilot-lab.md § The desk), money and safety first: the book with "At risk now" under its
-// heading, Watching, the day's block, one neutral My rules line, then Practice (paper, the two QQQ paper books, Replay)
+// heading, Watching, the day's block, How I'm doing this week (REAL beside PAPER), one neutral My rules line, then Practice (paper, the two QQQ paper books, Replay)
 // with one line each that opens its full section in place. The paper line is open by itself while a paper position or
 // working paper order exists. Every route is stubbed with invented numbers, so nothing reaches the e2e backend.
 const ON = {
@@ -29,7 +29,8 @@ const BOOK = {
   run: { id: "r1", number: 1, starting_cash: 10000, started_at: epoch("2026-11-10T15:00:00Z") },
   account: { cash: 9320, collateral: 0, reserved: 0, buying_power: 9320, equity: 10040, pnl: 40, unpriced: 0, prices_at: null },
   positions: [], closed: [], orders: [],
-  score: { paper: { ...stats(62.5, 6, 50), open_pnl: null, by_source: [], rules: SPLIT }, real: stats(-312, 3, 33.3), real_rules: null },
+  score: { paper: { ...stats(62.5, 6, 50), open_pnl: null, by_source: [], rules: SPLIT }, real: stats(-312, 3, 33.3), real_rules: null,
+    week: { monday: "2026-11-09", real: stats(-145.5, 2, 50), paper: stats(0, 0, null) } },
   my_rules: [{ id: "r_stop000001", text: "Stop before I enter", check: { kind: "stop_set" } }, { id: "r_aplus00001", text: "Only A+ setups", check: null }],
   earlier: [], market_open: true, review: null,
   goals: { goals: [LOSS, DAYS], kinds: KINDS, max: 2, monday: "2026-11-09", label: "This week", progress: [LOSS, DAYS] },
@@ -62,14 +63,17 @@ const READS: Record<string, unknown> = {
   "/copilot/paper": BOOK,
 };
 
-async function open(page: Page, width: number, book: object = BOOK) {
+async function open(page: Page, width: number, book: object = BOOK, folded: string[] | null = null) {
   const reads: Record<string, unknown> = { ...READS, "/copilot/paper": book };
+  // His folds on this device size (DeskUse.tsx): a folded piece is a slim stub.
+  if (folded) reads["/copilot/desk/use"] = { size: width < 768 ? "phone" : "desk", today: "2026-11-13", window_days: 14, window_start: "2026-10-31",
+    first_day: "2026-10-30", days_with_use: 3, pieces: {}, folds: { folded, snoozed_until: null } };
   await page.setViewportSize({ width, height: 900 });
   await page.clock.install({ time: NOW });
   await page.route("**/api/backend/**", route => route.fulfill({ status: 404, json: { detail: "Not in this test." } }));
   await page.route("**/copilot/status", route => route.fulfill({ json: ON }));
   await page.route("**/copilot/chat", route => route.abort());
-  const found = (url: string) => Object.keys(READS).find(p => new URL(url).pathname.endsWith(p));
+  const found = (url: string) => Object.keys(reads).find(p => new URL(url).pathname.endsWith(p));
   await page.route(url => !!found(url.toString()), route => route.fulfill({ json: reads[found(route.request().url())!] }));
   await page.route("**/copilot/desk/minute?*", route => route.fulfill({ json: { reads: new URL(route.request().url()).searchParams.getAll("read").map(target => {
     const body = reads[target.split("?")[0]];
@@ -89,7 +93,7 @@ for (const width of [1440, 375]) {
     await expect(book.getByTestId("exposure-line")).toHaveText("At risk now: $680 in 1 option · usual day $2,100");
     await expect(page.getByTestId("since-you-looked")).toBeVisible();
     await expect(page.getByTestId("practice-line-replay")).toBeVisible();
-    const order = ["desk-book", "desk-watching", "since-you-looked", "rules-goals", "desk-practice"];
+    const order = ["desk-book", "desk-watching", "since-you-looked", "desk-scorecard", "rules-goals", "desk-practice"];
     for (let i = 1; i < order.length; i++) expect(await top(page, order[i - 1])).toBeLessThan(await top(page, order[i]));
     // Practice: one line each, with its mark and figure, in this order.
     const practice = page.getByTestId("desk-practice");
@@ -106,6 +110,41 @@ for (const width of [1440, 375]) {
     expect((await page.evaluate(() => document.documentElement.scrollWidth))).toBeLessThanOrEqual(width);
   });
 }
+
+for (const width of [1440, 375]) {
+  test(`How I'm doing this week: REAL beside PAPER, outside the paper frame, at ${width}px`, async ({ page }) => {
+    await open(page, width);
+    const card = page.getByTestId("desk-scorecard");
+    await expect(card.getByRole("heading")).toHaveText("How I'm doing · this week");
+    // Two labelled columns, REAL then PAPER, each with trades, P&L and win rate; a side with no closed trade shows dashes.
+    await expect(card.getByRole("columnheader").getByTestId("mode-mark")).toHaveText(["Real", "Paper"]);
+    await expect(card.getByRole("rowheader")).toHaveText(["Trades", "P&L", "Win rate"]);
+    await expect(card.getByTestId("scorecard-real")).toHaveText(["2", "−$145.50", "50%"]);
+    await expect(card.getByTestId("scorecard-paper")).toHaveText(["0", "—", "—"]);
+    // Not inside any paper frame or the Practice block; Replay keeps its own score in Practice.
+    for (const frame of ["desk-paper", "desk-practice"]) await expect(card.locator(`xpath=ancestor::*[@data-testid='${frame}']`)).toHaveCount(0);
+    await expect(card).not.toContainText("Replay");
+    await expect(page.getByTestId("practice-line-replay")).toContainText("Replay4 trades+$132.00");
+    const box = (await card.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+    await card.screenshot({ path: test.info().outputPath(`desk-scorecard-${width}.png`) });
+  });
+}
+
+test("How I'm doing folds like the column's other pieces: a slim stub, one tap shows it", async ({ page }) => {
+  await open(page, 1440, BOOK, ["scorecard"]);
+  const stub = page.getByTestId("fold-stub-scorecard");
+  await expect(stub).toContainText("How I'm doing · folded");
+  await expect(page.getByTestId("desk-scorecard")).toBeHidden();
+  await stub.click();
+  await expect(page.getByTestId("desk-scorecard")).toBeVisible();
+});
+
+test("an older paper read without this week's score shows no scorecard", async ({ page }) => {
+  await open(page, 1440, { ...BOOK, score: { ...BOOK.score, week: undefined } });
+  await expect(page.getByTestId("rules-goals")).toBeVisible();
+  await expect(page.getByTestId("desk-scorecard")).toHaveCount(0);
+});
 
 test("a Practice line opens its full section in place and stays open for this tab; Replay a day opens Replay", async ({ page }) => {
   await open(page, 1440);

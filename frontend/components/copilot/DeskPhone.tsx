@@ -136,8 +136,10 @@ export function PhoneValue({ live, rows, booked, active, onPick, day, realized, 
           <span key={oneWord} className="contents"><span aria-hidden>·</span><span className={cn("tabular-nums", risk ? "text-rose-300" : "text-foreground")}>{n} {n === 1 ? oneWord : many}</span></span>
         ))}
       </p>
+      {open && isLive && <p data-testid="value-accounts-hint" className="mt-2 text-[11px] text-muted-foreground">
+        {active ? "Tap the account again to show every position" : "Tap an account to show only its positions in the book"}</p>}
       {open && isLive && (
-        <ul aria-label="Accounts" data-testid="value-accounts" className="mt-2 border-t">
+        <ul aria-label="Accounts" data-testid="value-accounts" className="mt-1 border-t">
           {live!.accounts!.map(a => {
             const t = tickedAccount(a, rows, ticks);
             const on = active === a.masked;

@@ -126,6 +126,9 @@ test("the chart draws the plan's lines, the fills, pings, Radar and the time sto
   await expect(pane.getByRole("img", { name: /NBIS today: 2-minute candles with .*pings and Radar hits/ })).toBeVisible();
   await expect(canvas).toHaveAttribute("data-bars", "60");
   await expect(canvas).toHaveAttribute("data-marks", "4");
+  // Real and paper are told apart by shape, not colour alone: his real fill a solid arrow, the paper fill a square (lettered P).
+  const shapes = (await canvas.getAttribute("data-mark-shapes"))!.split(",");
+  expect(shapes.sort()).toEqual(["fill:arrowUp", "paper:square", "ping:circle", "radar:square"]);
   await expect(canvas.locator("canvas").first()).toBeVisible(); // the library drew
   // The lines and the time stop are named above the chart; every mark, with its New York time, in the chart's own list.
   // The stop is 20 minutes ahead, so after about 23:40 New York it falls on the next day and carries that day's date.
@@ -138,7 +141,8 @@ test("the chart draws the plan's lines, the fills, pings, Radar and the time sto
   await expect(pane.getByTestId("desk-chart-readout")).toContainText(/ET · O \d+\.\d{2} H .* C /);
   const legend = pane.getByLabel("Legend");
   await expect(legend).toContainText("your fills");
-  await expect(legend).toContainText("paper"); // his paper fills, pale and lettered P
+  await expect(legend).toContainText("■P paper"); // his paper fills, pale squares lettered P
+  await expect(legend).toContainText("▲▼ your fills");
   await expect(legend).toContainText("pings");
   await expect(legend).toContainText("Radar");
   await expect(pane.getByTestId("desk-chart-paper")).toHaveText("PAPER fills shown"); // a chip in the chart's corner

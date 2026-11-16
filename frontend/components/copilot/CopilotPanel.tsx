@@ -307,9 +307,10 @@ function Metrics({ metrics }: { metrics: TurnMetrics }) {
   );
 }
 
-/** The lab's backing and evidence as two chips, or (``quiet``, the desk) one small line: the model, and only what is
- * unusual (simulated data or model, a replay, spend past half the budget, no key). The page's own description says
- * what the lab may and may not do. */
+/** The lab's backing and evidence as two chips, or (``quiet``, the desk) one small line. On the desk the engineering
+ * detail (the model's name, the backend and model pickers, the follow-up model) folds behind a small "Model ▸" toggle,
+ * and only what is unusual stays in view: a simulated model or market data, a replay, spend past half the budget, no key.
+ * The page's own description says what the lab may and may not do. */
 const BACKEND_LABEL: Record<Backend, string> = { anthropic: "Claude API (credits)" };
 
 // "claude-haiku-5-5" -> "Haiku 5.5"; anything else as sent.
@@ -320,6 +321,7 @@ const followupLabel = (id: string) => {
 
 function StatusLine({ status, error, model, onModel, backend, onBackend, quiet = false }: { status: CopilotStatus | null; error: string | null; quiet?: boolean;
   model: string | null; onModel: (model: string | null) => void; backend: Backend | null; onBackend: (backend: Backend | null) => void }) {
+  const [shown, setShown] = useState(false); // the desk's "Model ▸": closed until he opens it
   if (error) return <p role="alert" className="rounded border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-sm text-rose-300">{error}</p>;
   if (!status) return <p className="text-sm text-muted-foreground">Checking Copilot Lab…</p>;
   if (!status.enabled) return <p className="rounded border px-3 py-2 text-sm text-muted-foreground">{status.reason}</p>;
@@ -329,53 +331,74 @@ function StatusLine({ status, error, model, onModel, backend, onBackend, quiet =
   const chip = (tone: string) => quiet ? undefined : cn("rounded px-1.5 py-0.5", tone);
   const pick = quiet ? "min-h-11 rounded border-0 bg-transparent text-[11px] text-muted-foreground hover:text-foreground sm:min-h-0"
     : "min-h-11 rounded border bg-background px-1.5 text-xs text-foreground sm:min-h-0";
+  const pickers = (status.models?.length ?? 0) > 1;
+  // What answers: the model's name (the desk names it once, in its picker when there is one). A simulated model is a
+  // warning and always shows.
+  const named = !simulated && !(quiet && pickers) && (
+    <span key="named" className={chip("bg-emerald-500/10 text-emerald-300")}>{`Claude API · ${model ?? status.model}`}</span>
+  );
+  const backendPick = !simulated && (status.backends?.length ?? 0) > 1 && (
+    <label key="backend" className="inline-flex items-center gap-1">
+      <span className="sr-only">Backend</span>
+      <select aria-label="Backend" value={effective} onChange={e => onBackend(e.target.value === status.backend ? null : e.target.value as Backend)}
+        className={pick}>
+        {status.backends!.map(b => <option key={b} value={b}>{BACKEND_LABEL[b]}{b === status.backend ? " (default)" : ""}</option>)}
+      </select>
+    </label>
+  );
+  // The desk shows the day's spend once it passes half the budget.
+  const spend = !simulated && effective === "anthropic" && status.spend_today_usd != null && status.daily_budget_usd != null && (!quiet || status.spend_today_usd >= status.daily_budget_usd / 2) && (
+    <span key="spend" className={status.spend_today_usd >= status.daily_budget_usd ? cn(chip("bg-rose-500/10"), "text-rose-300") : chip("bg-muted")}>
+      API today ${status.spend_today_usd.toFixed(2)} of ${status.daily_budget_usd.toFixed(2)}
+    </span>
+  );
+  const modelPick = !simulated && pickers && (
+    <label key="model" className="inline-flex items-center gap-1">
+      <span className="sr-only">Model</span>
+      <select aria-label="Model" value={model ?? status.model} onChange={e => onModel(e.target.value === status.model ? null : e.target.value)}
+        className={pick}>
+        {status.models!.map(m => <option key={m} value={m}>{m}{m === status.model ? " (default)" : ""}</option>)}
+      </select>
+    </label>
+  );
+  // Follow-ups on carried evidence run on their own model unless one is picked above.
+  const followups = !simulated && effective === "anthropic" && status.followup_model && !model && (
+    <span key="followups" data-testid="copilot-followup-model">follow-ups on {followupLabel(status.followup_model)}</span>
+  );
+  const evidence = status.evidence === "replay" ? (
+    <span key="evidence" className={status.replay && "error" in status.replay ? cn(chip("bg-rose-500/10"), "text-rose-300") : chip("bg-violet-500/10 text-violet-300")}>
+      {!status.replay ? "Replay" : "error" in status.replay ? `Replay unavailable: ${status.replay.error}`
+        : `Replay · clock frozen at ${new Date(status.replay.at).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET · recorded Radar data`}
+    </span>
+  ) : quiet && status.evidence !== "fixture" ? null : (
+    <span key="evidence" className={chip(status.evidence === "fixture" ? "bg-amber-500/10 text-amber-300" : "bg-secondary text-foreground")}>
+      {status.evidence === "fixture" ? "Simulated market data" : "Read-only TradeJournal data"}
+    </span>
+  );
+  const noKey = status.backend === "anthropic" && !status.key_configured && <span key="key" className="text-rose-300">API key not set</span>;
+  const fake = simulated && (
+    <span key="fake" className={chip("bg-amber-500/10 text-amber-300")}>Simulated model — no API calls</span>
+  );
+  if (!quiet) {
+    return (
+      <p data-testid="copilot-status" className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        {fake}{named}{backendPick}{spend}{modelPick}{followups}{evidence}{noKey}
+      </p>
+    );
+  }
+  // The desk: warnings in view; the routine detail behind "Model ▸" (nothing to open for a simulated model).
+  const detail = [named, backendPick, modelPick, followups].filter(Boolean);
   return (
-    <p data-testid="copilot-status" className={quiet
-      ? "flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground [&>*+*]:before:mr-1.5 [&>*+*]:before:content-['·']"
-      : "flex flex-wrap items-center gap-2 text-xs text-muted-foreground"}>
-      {/* The desk's line names the model once: in its picker when there is one. */}
-      {!(quiet && !simulated && (status.models?.length ?? 0) > 1) && <span className={chip(simulated ? "bg-amber-500/10 text-amber-300" : "bg-emerald-500/10 text-emerald-300")}>
-        {simulated ? "Simulated model — no API calls" : `Claude API · ${model ?? status.model}`}
-      </span>}
-      {!simulated && (status.backends?.length ?? 0) > 1 && (
-        <label className="inline-flex items-center gap-1">
-          <span className="sr-only">Backend</span>
-          <select aria-label="Backend" value={effective} onChange={e => onBackend(e.target.value === status.backend ? null : e.target.value as Backend)}
-            className={pick}>
-            {status.backends!.map(b => <option key={b} value={b}>{BACKEND_LABEL[b]}{b === status.backend ? " (default)" : ""}</option>)}
-          </select>
-        </label>
+    <p data-testid="copilot-status" data-open={shown || undefined}
+      className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground [&>*+*]:before:mr-1.5 [&>*+*]:before:content-['·']">
+      {detail.length > 0 && (
+        <button type="button" data-testid="copilot-model-toggle" aria-expanded={shown} onClick={() => setShown(open => !open)}
+          title={shown ? "Hide the model and its settings" : "Show the model, the backend and follow-ups"}
+          className="inline-flex min-h-11 items-center gap-0.5 rounded hover:text-foreground sm:min-h-0">
+          Model<span aria-hidden>{shown ? "▾" : "▸"}</span>
+        </button>
       )}
-      {/* The desk shows the day's spend once it passes half the budget. */}
-      {!simulated && effective === "anthropic" && status.spend_today_usd != null && status.daily_budget_usd != null && (!quiet || status.spend_today_usd >= status.daily_budget_usd / 2) && (
-        <span className={status.spend_today_usd >= status.daily_budget_usd ? cn(chip("bg-rose-500/10"), "text-rose-300") : chip("bg-muted")}>
-          API today ${status.spend_today_usd.toFixed(2)} of ${status.daily_budget_usd.toFixed(2)}
-        </span>
-      )}
-      {!simulated && (status.models?.length ?? 0) > 1 && (
-        <label className="inline-flex items-center gap-1">
-          <span className="sr-only">Model</span>
-          <select aria-label="Model" value={model ?? status.model} onChange={e => onModel(e.target.value === status.model ? null : e.target.value)}
-            className={pick}>
-            {status.models!.map(m => <option key={m} value={m}>{m}{m === status.model ? " (default)" : ""}</option>)}
-          </select>
-        </label>
-      )}
-      {/* Follow-ups on carried evidence run on their own model unless one is picked above. */}
-      {!simulated && effective === "anthropic" && status.followup_model && !model && (
-        <span data-testid="copilot-followup-model">follow-ups on {followupLabel(status.followup_model)}</span>
-      )}
-      {status.evidence === "replay" ? (
-        <span className={status.replay && "error" in status.replay ? cn(chip("bg-rose-500/10"), "text-rose-300") : chip("bg-violet-500/10 text-violet-300")}>
-          {!status.replay ? "Replay" : "error" in status.replay ? `Replay unavailable: ${status.replay.error}`
-            : `Replay · clock frozen at ${new Date(status.replay.at).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET · recorded Radar data`}
-        </span>
-      ) : quiet && status.evidence !== "fixture" ? null : (
-        <span className={chip(status.evidence === "fixture" ? "bg-amber-500/10 text-amber-300" : "bg-secondary text-foreground")}>
-          {status.evidence === "fixture" ? "Simulated market data" : "Read-only TradeJournal data"}
-        </span>
-      )}
-      {status.backend === "anthropic" && !status.key_configured && <span className="text-rose-300">API key not set</span>}
+      {fake}{shown && detail}{spend}{evidence}{noKey}
     </p>
   );
 }

@@ -13,7 +13,7 @@ import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/componen
 import DeskChain, { type ChainPick } from "@/components/copilot/DeskChain";
 import { usePaperBook } from "@/components/copilot/DeskPaper";
 import { PositionNotes } from "@/components/copilot/DeskNotes";
-import { Practice, RulesAndGoals, openDeskPlace, type DeskPlace } from "@/components/copilot/DeskPractice";
+import { HowImDoing, Practice, RulesAndGoals, openDeskPlace, type DeskPlace } from "@/components/copilot/DeskPractice";
 import DeskReplay from "@/components/copilot/DeskReplay";
 import PaperReviewCard from "@/components/copilot/PaperReview";
 import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
@@ -1203,6 +1203,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 (never folded). Then Watching, the day's block, his rules and goals, and Practice (paper and replay). */}
             <div data-use="book" className="contents"><Book rows={booked.rows} sparks={sparks} earnings={events} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} updating={rowsRead && !rowsFresh} onSelect={select} onFollow={changeFollow}
               risk={<ExposureLine session={session.data} />}
+              filter={account ? { label: live?.accounts?.find(a => a.masked === account)?.label ?? account, onShowAll: () => setAccount(null) } : null}
               live={booked.live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} /></div>
             {/* After 14 days of desk use: one quiet card offering to fold what he never opens. Never folds unasked. */}
             <FoldSuggestion />
@@ -1210,6 +1211,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               onSelect={selectWatched} onAsk={askWatched} onPlan={planWatched} onChange={watching.set} /></Fold>
             {/* The day's block (the brief, Since you looked, the day report) and the practice goal under it. */}
             <div data-use="dayblock" className="contents">{lower}<DayFacts /></div>
+            {/* How I'm doing this week: real beside paper, outside the paper frame (replay keeps its own score in Practice). */}
+            <Fold id="scorecard"><HowImDoing book={paper.book} /></Fold>
             {/* His rules and goals: one neutral line, outside the paper frame, since they cover real trades too. */}
             <RulesAndGoals book={paper.book} />
             {/* Practice: his paper book, the QQQ overnight and momentum paper books and Replay, one line each. Never real money. */}
