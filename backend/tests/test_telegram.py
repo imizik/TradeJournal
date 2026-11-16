@@ -1018,10 +1018,11 @@ def test_a_proposed_plan_is_saved_as_the_desk_saves_it_and_sent_after_the_answer
                          "Entry: crosses 100", "Invalidation: 5m close beyond 95", "Time stop: out by 15:30"]
     assert lines[5] in ("Horizon: Day trade", "Horizon: Swing") and lines[6] == telegram_replies.PLAN_FOOTER
     assert card["reply_parameters"]["message_id"] == 61
-    (confirm,), (edit,) = card["reply_markup"]["inline_keyboard"]
+    (confirm, paper), (edit,) = card["reply_markup"]["inline_keyboard"]
     assert confirm["text"] == "Confirm" and confirm["callback_data"].startswith("pl:") and confirm["callback_data"].endswith(":confirm")
     assert len(confirm["callback_data"].encode()) <= telegram.CALLBACK_MAX
     key = confirm["callback_data"].split(":")[1]
+    assert paper == {"text": "📝 Paper it", "callback_data": f"pp:p:{key}"}  # its contract names one call
     with Session(db_engine) as db:
         thread_id, saved = telegram_replies.find_plan(db, key)
         main = db.exec(select(CopilotInvestigation).where(CopilotInvestigation.main_day.is_not(None))).one()

@@ -34,6 +34,9 @@ A button's callback data is ``<verb>:<id>[:<answer>]``, at most 64 bytes:
 - ``cc:<check id as 32 hex>:pass``: Pass under a checked call's card (``engine/call_check.py``), recorded on its row
   once; the keyboard then shows "✓ Passed" (Plan it, a link, goes). ``cc:q``: Check as a call under the answer to an
   ambiguous message: the message it answered (Telegram sends it with the tap) is checked as a call;
+- ``pp:r:<Radar setup id as 32 hex>``, ``pp:p:<card client id>``: Paper it on a Radar setup ping or a plan card
+  (``engine/telegram_paper.py``): one paper market order through the paper book's own path, one per ping (its order
+  key is the ping's), answered in the chat with the fill or the refusal, and any rule or goal it breaks;
 - ``ask:<kind>``: the Why? ``phone.send`` adds to every other factual ping (Radar, thesis watch, research, plan and
   level pings, interrupts): the same bounded turn, asked about the ping's own text, as a typed reply to it is. A
   ping too old for Telegram to show its text again says so instead.
@@ -75,7 +78,7 @@ Helped and Didn't (``hd:``) under it.
 A ``trade_plan`` card the turn proposes (at most ``PLAN_CARDS``) is saved on the answer as the desk saves one (the
 proposal event without its type, its id made unique in the conversation, and a client id; on Main chat ``append_main``
 gives it its own plan thread), then sent after the answer as its own message: the card's lines, Confirm
-(``pl:<client id>:confirm``) and Edit (the thread on the desk). The callback carries the card's client id, 32 hex
+(``pl:<client id>:confirm``) and Edit (the thread on the desk), and Paper it (``pp:p:``) when its contract names one call or put. The callback carries the card's client id, 32 hex
 characters, because the proposal id is only unique within its conversation and the conversation's id beside it does
 not fit 64 bytes; a tap finds the card by that id in the saved conversations (``find_plan``). Other cards are named at
 the end of the answer, to confirm on the desk. A card message that fails to send is logged; the answer is already sent
@@ -226,6 +229,11 @@ class Replies:
             reply, chosen = await asyncio.to_thread(radar_setup_plan.plan, self.engine, rest)
             if chosen == radar_setup_plan.PLANNED and self.alerts_changed is not None:
                 self.alerts_changed()
+        elif verb == "pp":
+            from app.engine import telegram_paper
+            line, chosen = await asyncio.to_thread(telegram_paper.tap, self.engine, rest)
+            await asyncio.to_thread(self._reply, message, line)  # the fill or the refusal, in the chat
+            reply = "Papered: the fill is in the chat." if chosen else "Not placed: why is in the chat."
         elif verb == "hd":
             reply, chosen = await asyncio.to_thread(self._rate, rest)
         elif verb == "pu":
@@ -674,17 +682,20 @@ class Replies:
     def _send_plans(self, message: dict) -> None:
         """Each plan card the turn saved, as its own message after the answer: the card's lines, Confirm and Edit (its
         thread on the desk). A card that cannot be read or sent is logged; it stays on the desk to confirm there."""
+        from app.engine import telegram_paper
         keys, self._plans = self._plans, []
         for key in keys:
             try:
                 with Session(self.engine) as db:
                     found = find_plan(db, key)
+                    paper = telegram_paper.plan_button(db, found[1], key) if found is not None else None
                 if found is None:
                     log.warning("Telegram plan card %s not found on the desk", key)
                     continue
                 thread_id, card = found
                 from app.engine.position_companion import desk_path
-                markup = telegram.keyboard(desk_path(thread_id), (("Confirm", f"pl:{key}:confirm"),), open_label="Edit")
+                markup = telegram.keyboard(desk_path(thread_id), (("Confirm", f"pl:{key}:confirm"), *((paper,) if paper else ())),
+                                           open_label="Edit")
                 self.call("sendMessage", json={
                     "chat_id": telegram.chat_id(), "text": plan_text(card), "reply_markup": markup,
                     "reply_parameters": {"message_id": message.get("message_id"), "allow_sending_without_reply": True},
@@ -749,7 +760,7 @@ class Replies:
                 if first is None:
                     first = len(edited)
                     edited.append([])
-                kept += [b for b in row if not answer(b) and str(b.get("callback_data", "")).startswith(("why:", "ask:", "rp:", DONE))]
+                kept += [b for b in row if not answer(b) and str(b.get("callback_data", "")).startswith(("why:", "ask:", "rp:", "pp:", "pl:", DONE))]
             if first is not None:
                 edited[first] = [{"text": f"✓ {chosen}", "callback_data": done}, *kept]
         if edited == rows:

@@ -2029,6 +2029,17 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   idea it was, `source` `mine` (his own ticket, the default), `copilot`, `radar` or `scanner`, and the idea's id
   (`idea_id`), as fields in the event data (no migration); a position recorded before sources counts as his own. Radar's
   and the scanner's rows name the contract for it (`contract`, from `paper_book.idea_contract`).
+- **Paper it from the phone** (`backend/app/engine/telegram_paper.py`). A Radar setup ping whose card names a contract
+  and a copilot plan card the bot sends whose contract words name one call or put (or a long share plan) carry
+  "📝 Paper it" beside Plan it or Confirm, while Copilot Lab is on and the ticker is followed. Telegram has no confirm
+  screen, so the tap places the idea as the desk's Paper it would prefill it (1 contract; a share plan 10 shares; the
+  same stop, target, note, `source` and `idea_id`) as a paper market order through `paper_book.open_order`: the same
+  regular-session, fresh-ask and buying-power rules. One order per ping: its order key is the ping's (`tg-r-<setup>`,
+  `tg-p-<card>`), so a second tap answers with the fill already recorded and reads no quote. The bot replies in the chat
+  with one line ("PAPER · bought 1 NVDA 11/20 150C at 3.45 (ask, 10:42 ET) · … · not real money") or the refusal with
+  its reason, and a second line naming any rule the entry breaks and any paper-book weekly goal it breaks (trades
+  today, most it can lose, the week's rules-followed share). Neither blocks the order. Tick-box rules are kept as not
+  answered, reason "Not answered (phone)."
 - **Fills on a live quote only** (`POST /copilot/paper/orders`, `backend/app/engine/paper_book.py`): in the regular
   session, each leg bought at its ask and each sold at its bid, and only when both sides of every leg's quote were
   updated in the last two minutes (`setup_scanner._fresh`, the shadow book's rule, against the scanner's
