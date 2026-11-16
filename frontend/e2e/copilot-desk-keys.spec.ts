@@ -131,7 +131,9 @@ test("⌘K opens the palette: type to filter, Enter opens the thread, Escape and
   // The thread list's rows in list order, tickers first and Main's Radar hits after (pinned rows are the commands), then the commands.
   // The threads, the desk's commands, then every place on the desk with its key.
   await expect(options).toHaveText([/^NBIS/, /^CRWV/, /^APLD/, /^MU/, /^Plan a trade/, /^Review my week/, /^What matters right now\?/,
-    /^Chart.*C$/, /^Chain.*O$/, /^Ticket.*T$/, /^Check a call.*L$/, /^Grid.*G$/, /^Feed.*F$/, /^Copilot.*\/$/, /^Book.*B$/, /^Threads.*\[$/, /^How I use the desk/]);
+    /^Chart.*C$/, /^Chain.*O$/, /^Ticket.*T$/, /^Check a call.*L$/, /^Grid.*G$/, /^Feed.*F$/, /^Copilot.*\/$/, /^Book.*B$/, /^Threads.*\[$/,
+    /^Now/, /^Paper book.*P$/, /^My rules/, /^This week's goals/, /^Watchlist.*W$/, /^Note on this position/, /^Data health/,
+    /^Replay a past day.*R$/, /^Redo one of my trades/, /^How I use the desk/]);
   await expect(options.first()).toContainText("1.0% from invalidation 92.30");
   await expect(options.first()).toContainText("+$180.00");
   await page.keyboard.type("crw");
@@ -1000,4 +1002,26 @@ test("Chatter that is on but has nothing yet: no filter, and nothing about it ou
   await expect(feed.getByRole("button", { name: "Chatter" })).toHaveCount(0);
   await expect(feed.getByTestId("feed-chatter-note")).toHaveCount(0);
   await expect(feed).not.toContainText(/chatter|wallstreetbets/i);
+});
+
+test("every place is in Jump to: Replay opens from the palette and from R, and the book side's places are listed", async ({ page }) => {
+  await lab(page, { showThreads: false });
+  await command(page, "Replay a past day");
+  await expect(page.getByTestId("desk-replay")).toBeVisible();
+  await page.getByTestId("replay-leave").click();
+  await expect(page.getByTestId("desk-replay")).toHaveCount(0);
+  await page.keyboard.press("r");
+  await expect(page.getByTestId("desk-replay")).toBeVisible();
+  await page.getByTestId("replay-leave").click();
+  for (const [typed, name] of [["rules", "My rules"], ["goals", "This week's goals"], ["redo", "Redo one of my trades"], ["paper", "Paper book"],
+    ["watch", "Watchlist"], ["note", "Note on this position"], ["health", "Data health"]]) {
+    await page.getByRole("button", { name: "Jump to a thread or command" }).click();
+    await page.keyboard.type(typed);
+    await expect(palette(page).getByRole("option", { name: new RegExp(`^${name}`) })).toBeVisible();
+    await page.keyboard.press("Escape");
+  }
+  // A command that spends a model call says so before the tap.
+  await page.getByRole("button", { name: "Jump to a thread or command" }).click();
+  await page.keyboard.type("review my week");
+  await expect(palette(page).getByRole("option", { name: /^Review my week/ })).toContainText("Asks the copilot now");
 });
