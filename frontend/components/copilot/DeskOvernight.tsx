@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { cn } from "@/lib/utils";
 import ModeMark, { MODE_FRAME } from "./ModeMark";
+import PaperCoverage, { type Coverage } from "./PaperCoverage";
 
 /**
  * The QQQ overnight paper book (backend app/engine/overnight_book.py): the one rule that passed its registered test
@@ -16,6 +17,7 @@ type Night = { day: string; status: "open" | "closed" | "missed"; entry_at: numb
   exit_day: string | null; exit_at: number | null; exit: number | null; bp: number | null; dollars: number | null; note: string | null };
 export type OvernightBook = { enabled: boolean; state: "holding" | "flat"; symbol: string; stake: number;
   backtest: { mean_bp: number; years: string };
+  coverage?: Coverage | null;
   nights: Night[]; totals: { closed: number; missed: number; mean_bp: number | null; dollars: number | null; up: number } };
 
 const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
@@ -79,6 +81,7 @@ export default function DeskOvernight({ book, failed }: { book: OvernightBook | 
               {t.missed > 0 && <> · {t.missed} missed</>}
             </p>
           )}
+          <PaperCoverage coverage={book.coverage} unit="entry window" />
           <p className="mt-0.5 text-[11px] text-muted-foreground">Backtest {book.backtest.years}: {bp(book.backtest.mean_bp)} a night after costs.</p>
           {book.nights.filter(n => n.status !== "open").length > 0 && (
             <ul className="mt-1 space-y-0.5 text-xs tabular-nums">

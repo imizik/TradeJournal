@@ -63,8 +63,8 @@ const READS: Record<string, unknown> = {
   "/copilot/paper": BOOK,
 };
 
-async function open(page: Page, width: number, book: object = BOOK, folded: string[] | null = null) {
-  const reads: Record<string, unknown> = { ...READS, "/copilot/paper": book };
+async function open(page: Page, width: number, book: object = BOOK, folded: string[] | null = null, overrides: Record<string, unknown> = {}) {
+  const reads: Record<string, unknown> = { ...READS, "/copilot/paper": book, ...overrides };
   // His folds on this device size (DeskUse.tsx): a folded piece is a slim stub.
   if (folded) reads["/copilot/desk/use"] = { size: width < 768 ? "phone" : "desk", today: "2026-11-13", window_days: 14, window_start: "2026-10-31",
     first_day: "2026-10-30", days_with_use: 3, pieces: {}, folds: { folded, snoozed_until: null } };
@@ -111,6 +111,31 @@ for (const width of [1440, 375]) {
     await expect(page.getByTestId("rules-goals").locator("xpath=ancestor::*[@data-testid='desk-paper']")).toHaveCount(0);
     for (const id of ["desk-paper", "desk-overnight", "desk-momentum", "replay-practice"]) await expect(page.getByTestId(id)).toHaveCount(0);
     expect((await page.evaluate(() => document.documentElement.scrollWidth))).toBeLessThanOrEqual(width);
+  });
+}
+
+for (const width of [1440, 390]) {
+  test(`QQQ receipt gaps are visible before opening Practice details at ${width}px`, async ({ page }, testInfo) => {
+    await open(page, width, BOOK, null, {
+      "/copilot/desk/overnight": { ...OVERNIGHT, state: "flat", nights: [], totals: { ...OVERNIGHT.totals, closed: 0 },
+        coverage: { missing: 1, latest_missing_day: "2026-11-12", unknown_days: 0 } },
+      "/copilot/desk/momentum": { ...MOMENTUM, days: [], totals: { ...MOMENTUM.totals, days: 0 },
+        coverage: { missing: 6, latest_missing_day: "2026-11-12", unknown_days: 1 } },
+    });
+    const practice = page.getByTestId("desk-practice");
+    const overnight = practice.getByTestId("practice-line-overnight");
+    const momentum = practice.getByTestId("practice-line-momentum");
+    await expect(overnight).toContainText("1 unrecorded window");
+    await expect(momentum).toContainText("6 unrecorded checks");
+    await expect(momentum).toContainText("calendar incomplete");
+    await overnight.click();
+    await momentum.click();
+    await expect(practice.getByTestId("desk-overnight")).toContainText("1 entry window without a receipt in the last 14 days. Latest Nov 12.");
+    await expect(practice.getByTestId("desk-momentum")).toContainText("6 checks without a receipt in the last 14 days. Latest Nov 12.");
+    await expect(practice.getByTestId("desk-momentum")).toContainText("Calendar coverage unavailable for 1 day.");
+    const box = (await practice.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+    await practice.screenshot({ path: testInfo.outputPath(`qqq-paper-coverage-${width}.png`) });
   });
 }
 

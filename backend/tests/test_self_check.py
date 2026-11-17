@@ -48,7 +48,7 @@ def live(monkeypatch):
     """Fresh SPY and 590 call quotes at 09:31:05, yesterday's contract trades, and a counter of every read."""
     state = SimpleNamespace(quotes={"SPY": q("SPY", 590.30, 590.32, AT - 2, last=590.37),
                                     "SPY261116C00590000": q("SPY261116C00590000", 1.10, 1.14, AT - 3)},
-                            asked=[], trades={("SPY261113C00590000", date(2026, 11, 13)): [{"time": OPEN, "close": 1.0}] * 5})
+                            asked=[], trades={("SPY261116C00590000", date(2026, 11, 13)): [{"time": OPEN, "close": 1.0}] * 5})
     monkeypatch.setattr(paper_book, "_live_quotes", lambda symbols: state.asked.append(list(symbols)) or
                         {s: state.quotes[s] for s in symbols if s in state.quotes})
     monkeypatch.setattr(paper_replay, "days", lambda now, count=1: [{"date": "2026-11-13"}])
@@ -121,8 +121,9 @@ def test_the_paper_runner_passed_in_the_last_two_minutes():
         self_check.check_paper_runner(AT, None)
 
 
-def test_replay_reads_yesterdays_atm_contract_through_option_replays_source(live, monkeypatch):
-    assert self_check.check_replay(AT, {"spy": 590.37}) == "5 bars for SPY261113C00590000"
+def test_replay_reads_previous_session_from_the_contract_still_listed_today(live, monkeypatch):
+    assert self_check.check_replay(AT, {"spy": 590.37}) == "5 bars for SPY261116C00590000"
+    assert live.asked == [("timesales", "SPY261116C00590000", date(2026, 11, 13))]
 
     def refused(occ, day):
         raise replay_options.OptionsOff("The contract's trades could not be read: HTTP 500", 503)

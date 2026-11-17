@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { cn } from "@/lib/utils";
 import ModeMark, { MODE_FRAME } from "./ModeMark";
+import PaperCoverage, { type Coverage } from "./PaperCoverage";
 
 /**
  * The QQQ intraday momentum paper book (backend app/engine/intraday_momentum_book.py): the rule and settings that passed
@@ -16,6 +17,7 @@ type Trade = { side: number; entry_at: number; entry: number; exit_at: number | 
 type Day = { day: string; bp: number; dollars: number; trades: Trade[] };
 export type MomentumBook = { enabled: boolean; symbol: string; stake: number; now: number; backtest: { mean_bp: number; years: string };
   holding: { side: number; entry_at: number; entry: number } | null; days: Day[];
+  coverage?: Coverage | null;
   totals: { days: number; days_traded: number; mean_bp: number | null; dollars: number | null; up: number; missed_checks: number } };
 
 const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
@@ -72,9 +74,10 @@ export default function DeskMomentum({ book, failed }: { book: MomentumBook | nu
             <p data-testid="desk-momentum-totals" className="mt-1 text-xs text-muted-foreground tabular-nums">
               {t.days} {t.days === 1 ? "day" : "days"} ({t.days_traded} traded) · avg <span className={tone(t.mean_bp)}>{bp(t.mean_bp ?? 0)}</span>
               {" "}· <span className={tone(t.dollars)}>{usd(t.dollars ?? 0)}</span> on ${book.stake.toLocaleString("en-US")} · {t.up} up
-              {t.missed_checks > 0 && <> · {t.missed_checks} checks missed</>}
             </p>
           )}
+          {!!t?.missed_checks && <p className="mt-1 text-xs text-muted-foreground">{t.missed_checks} {t.missed_checks === 1 ? "check" : "checks"} marked missed by the recorder.</p>}
+          <PaperCoverage coverage={book.coverage} unit="check" />
           <p className="mt-0.5 text-[11px] text-muted-foreground">Exam {book.backtest.years}: {bp(book.backtest.mean_bp)} a day at 1x; most days are flat or small losses.</p>
           {book.days.length > 0 && (
             <ul className="mt-1 space-y-0.5 text-xs tabular-nums">

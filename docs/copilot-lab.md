@@ -2180,7 +2180,7 @@ holds the others or the API, and none writes into his books (no paper order, pla
 |---|---|
 | paper pricing | the paper book's own fill price (`paper_book.contract`, `_live_quotes`, `price`: pure, nothing written) for SPY shares and today's at-the-money SPY call, on quotes inside the fresh-quote rule (two quote reads) |
 | paper runner | the paper book's minute passed in the last 2 minutes; named off when it is not running |
-| replay | option replay's source (`replay_options.trades`) returns bars for the at-the-money SPY call that expired on the previous session (one timesales read) |
+| replay | option replay's source (`replay_options.trades`) reads the previous session's bars for today's at-the-money SPY call while it is still listed (one timesales read) |
 | desk minute | the minute request's dispatcher (`desk_minute.read_all`) answers its investigations and health reads, routed inside the app (both read only the database and kept state: the thread list is left out because it reads quotes and can start a Robinhood read) |
 | deep links | a ping's tap (`phone.desk_link`) opens the desk route with only the parameters the desk reads |
 | health strip | § Data health reads every source; its amber rows ride the line ("Data: Robinhood down") |
@@ -2716,6 +2716,11 @@ The desk shows it as a line in Practice under the overnight one (`frontend/compo
 on the minute request): long, short or flat now, finished days (a checked day with no trade counts as 0, as in the exam),
 the average in basis points and dollars on $10,000, missed checks, the last five days and the exam's +4.4 bp a day.
 Hidden while switched off and empty; a failed read says so instead of showing old rows.
+
+Both QQQ books show unrecorded windows on the folded Practice line, with the latest missing date in the expanded section.
+The coverage check uses the last 14 calendar days, starting at the first saved live receipt, and the existing cached
+market calendar. It counts elapsed windows on confirmed full sessions, reports unavailable calendar coverage in the
+expanded section, and leaves paper returns and fills alone.
 
 On the desk chart, QQQ on 2m and 15m only, the same read's `today` (`today_view`, from the book's own records) draws
 today's noise band as two thin violet lines stepping at each recorded check, the checks still ahead faint and dashed

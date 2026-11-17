@@ -8,8 +8,8 @@ the API, and none writes anything into his books (no paper order, plan, rule rec
    pure) for SPY shares and the at-the-money SPY call expiring today, on a fresh quote. Two quote reads.
 2. ``paper runner`` — the paper book's minute (``paper_runner``) passed in the last ``RUNNER_FRESH`` seconds; ``off``
    when it is not running.
-3. ``replay`` — the option replay's source (``replay_options.trades``) returns bars for the at-the-money SPY call that
-   expired on the previous session. One timesales read (none when it is already kept).
+3. ``replay`` — the option replay's source (``replay_options.trades``) returns previous-session bars for today's
+   at-the-money SPY call while it is still listed. One timesales read (none when it is already kept).
 4. ``desk minute`` — the desk minute request's dispatcher (``desk_minute.read_all``) answers two of its reads that read
    only the database and kept state (``MINUTE_READS``), routed inside the app: no network, no provider call.
 5. ``deep links`` — a ping's tap (``phone.desk_link``) opens the desk route with only the parameters the desk reads.
@@ -190,7 +190,7 @@ def check_paper_runner(now: float, runner) -> str:
 
 
 def check_replay(now: float, facts: dict) -> str:
-    """The at-the-money SPY call that expired on the previous session: its minute trades, as option replay reads them."""
+    """Read the prior session's trades for today's at-the-money SPY call, which is still listed at the open."""
     from app.engine import paper_replay, replay_options
     from app.engine.occ import occ_symbol
     found = paper_replay.days(now, 1)
@@ -202,8 +202,9 @@ def check_replay(now: float, facts: dict) -> str:
     price = facts.get("spy")
     if not price:
         raise CheckFailed(f"no {SYMBOL} price to pick a contract")
-    spec = _atm_call(price, day)
-    occ = occ_symbol(SYMBOL, day, "call", spec["strike"])
+    expiry = datetime.fromtimestamp(now, ET).date()
+    spec = _atm_call(price, expiry)
+    occ = occ_symbol(SYMBOL, expiry, "call", spec["strike"])
     try:
         bars = replay_options.trades(occ, day)
     except replay_options.OptionsOff as exc:

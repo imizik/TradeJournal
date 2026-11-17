@@ -250,6 +250,8 @@ export function Practice({ on, paper, symbol, review, onReplay, onPick }: {
             {overnight.failed || !night ? <span>· could not be read</span> : <>
               <span>· {held ? "holding" : "flat"}</span>
               {nights && nights.closed > 0 && <span title={`average over ${plural(nights.closed, "night")}`}>· <span className={tone(nights.mean_bp)}>{bp(nights.mean_bp ?? 0)}</span> avg</span>}
+              {!isOpen("overnight") && !!night.coverage?.missing && <span>· {plural(night.coverage.missing, "unrecorded window")}</span>}
+              {!isOpen("overnight") && !!night.coverage?.unknown_days && <span>· calendar incomplete</span>}
             </>}
           </Line>
         )}
@@ -261,6 +263,8 @@ export function Practice({ on, paper, symbol, review, onReplay, onPick }: {
             {momentum.failed || !day ? <span>· could not be read</span> : <>
               <span>· {day.holding ? (day.holding.side > 0 ? "long" : "short") : "flat"}</span>
               {days && days.days > 0 && <span title={`average over ${plural(days.days, "day")}`}>· <span className={tone(days.mean_bp)}>{bp(days.mean_bp ?? 0)}</span> avg</span>}
+              {!isOpen("momentum") && !!day.coverage?.missing && <span>· {plural(day.coverage.missing, "unrecorded check")}</span>}
+              {!isOpen("momentum") && !!day.coverage?.unknown_days && <span>· calendar incomplete</span>}
             </>}
           </Line>
         )}
