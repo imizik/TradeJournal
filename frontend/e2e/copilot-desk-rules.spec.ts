@@ -212,7 +212,7 @@ for (const width of [1440, 375]) {
     await open(page, width);
     const paper = await paperSection(page, width);
     const book = page.getByTestId("desk-book");
-    await expect(book.getByRole("heading", { level: 2 })).toHaveText("Your book · 1 followed");
+    await expect(book.getByRole("heading", { level: 2 })).toHaveText("Your book · 1");
     await expect(book.getByTestId("mode-mark")).toHaveAttribute("data-mode", "real");
     const pnl = book.getByTestId("book-pnl").first();
     await expect(pnl).toBeVisible();

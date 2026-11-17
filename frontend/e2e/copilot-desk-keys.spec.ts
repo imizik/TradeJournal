@@ -133,7 +133,7 @@ test("⌘K opens the palette: type to filter, Enter opens the thread, Escape and
   await expect(options).toHaveText([/^NBIS/, /^CRWV/, /^APLD/, /^MU/, /^Plan a trade/, /^Review my week/, /^What matters right now\?/, /^Day checklist.*D$/,
     /^Chart.*C$/, /^Chain.*O$/, /^Ticket.*T$/, /^Check a call.*L$/, /^Position/, /^Notes/, /^Grid.*G$/, /^Feed.*F$/, /^Copilot.*\/$/, /^Book.*B$/, /^Threads.*\[$/,
     /^Now/, /^Paper book.*P$/, /^My rules/, /^This week's goals/, /^Watchlist.*W$/, /^Note on this position/, /^Data health/,
-    /^Replay a past day.*R$/, /^Redo one of my trades/, /^Paper mode/, /^Real mode/, /^How I use the desk/]);
+    /^Replay a past day.*R$/, /^Redo one of my trades/, /^Paper mode/, /^Real mode/, /^How I use the desk/, /^Today: Live 11:00 ET/]);
   await expect(options.first()).toContainText("1.0% from invalidation 92.30");
   await expect(options.first()).toContainText("+$180.00");
   await page.keyboard.type("crw");
@@ -159,7 +159,7 @@ test("⌘K opens the palette: type to filter, Enter opens the thread, Escape and
 test("Plan a trade from the palette opens a new plan, unsent; after 16:00 Close the day fills the box", async ({ page }) => {
   const { chats } = await lab(page, { time: new Date("2026-10-23T21:00:00Z"), // 17:00 New York
     session: { ...SESSION, now: epoch("2026-10-23T21:00:00Z"), phase: "post", time_stops: [] } });
-  await expect(page.getByTestId("desk-status")).toContainText("Closed 16:00");
+  await expect(page.getByTestId("day-report")).toBeVisible(); // after the close
   // Nothing left to review: Close the day is one quiet link under the day report (no count) and never the strip; the
   // palette's puts the question in the box.
   await page.keyboard.press("Escape");
@@ -167,7 +167,7 @@ test("Plan a trade from the palette opens a new plan, unsent; after 16:00 Close 
   await expect(page.getByTestId("needs-you")).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type("close");
-  await expect(palette(page).getByRole("option")).toHaveText([/^Close the day/, /^Close-of-day checklist/, /^Ask the copilot/]); // the pass, then the Day button's checklist
+  await expect(palette(page).getByRole("option")).toHaveText([/^Close the day/, /^Close-of-day checklist/, /^Today: Closed 16:00/, /^Ask the copilot/]); // the pass, the Day button's checklist, the market's line
   await page.keyboard.press("Enter");
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Close the day: /);
   await expect(page.getByRole("textbox", { name: "Message" })).toBeFocused();
@@ -316,10 +316,15 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
   test(`the cockpit opens on the day: top bar, one item in the strip, the book, the chart and the copilot, at ${width} px`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     const { chats } = await lab(page, { showThreads: false });
-    // The top bar: live with the New York clock, the indices, realized today and the open positions' P&L.
-    await expect(page.getByTestId("desk-status")).toContainText("Live · 11:00 ET");
-    await expect(page.getByTestId("desk-indices")).toHaveText("SPY +0.42%QQQ −0.31%");
-    await expect(page.getByTestId("desk-pnl")).toHaveText("Realized today −$120Open +$180");
+    // The top bar is one row (the calm pass): live with the New York clock, the indices, the open positions' P&L and
+    // realized today are ⌘K's Today command.
+    await expect(page.getByTestId("desk-status")).toHaveCount(0);
+    await page.getByRole("button", { name: "Jump to a thread or command" }).click();
+    await palette(page).getByRole("combobox").fill("today");
+    const today = palette(page).getByRole("option", { name: /^Today/ });
+    await expect(today).toContainText("Today: Live 11:00 ET · SPY +0.42% QQQ −0.31%");
+    await expect(today).toContainText("Open +$180 · Realized today −$120");
+    await page.keyboard.press("Escape");
     // The strip: only what needs a decision now. The option expiring today is one; a stop 1% away and a plan near its
     // entry are not (the book row and the thread list carry those). Nothing to dismiss, no rating asks.
     const strip = page.getByTestId("needs-you");
@@ -334,7 +339,7 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
     await expect(nbis).toContainText("1.0% to stop");
     await expect(nbis).toContainText("expires today");
     await expect(nbis.getByTestId("book-state")).toHaveText("Near stop");
-    await expect(nbis.getByRole("img", { name: "NBIS today" })).toBeVisible();
+    await expect(nbis.getByRole("img", { name: "NBIS today" })).toHaveCount(0); // no sparkline: the chart has the day
     // The tiles carry only what the row does not: the stock against SPY and time held.
     const tiles = page.getByTestId("desk-tiles");
     await expect(tiles).toHaveText("vs SPY today+1.2 ptsHeldtoday");
@@ -368,7 +373,9 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
       await page.getByRole("button", { name: /^Ask the copilot/ }).click();
     }
     await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible();
-    await expect(conversation(page).getByRole("group", { name: "Suggestions" }).getByRole("button").first()).toHaveText("Why is it moving?");
+    // One row under the answer; the suggestion chips are an empty conversation's only.
+    await expect(conversation(page).getByRole("group", { name: "Rate this answer" }).getByRole("button")).toHaveCount(2);
+    await expect(conversation(page).getByRole("group", { name: "Suggestions" })).toHaveCount(0);
     expect(chats).toEqual([]);
   });
 }
@@ -495,7 +502,7 @@ test("selecting positions in the book switches the copilot in place: the book ne
   await expect(book.getByRole("button", { name: /^TSLA / })).toHaveAttribute("aria-pressed", "true");
 });
 
-test("Now in the top bar opens today's Main chat in place from a position", async ({ page }) => {
+test("Now (⌘K since the calm pass) opens today's Main chat in place from a position", async ({ page }) => {
   const MAIN = "66666666-6666-4666-8666-666666666666";
   const main = { ...saved(MAIN, "", "Main answer: the day so far."), symbol: null, title: "Main chat", main_day: "2026-10-23" };
   await page.route("**/copilot/main-chat", (route) => route.fulfill({ json: main }));
@@ -505,14 +512,15 @@ test("Now in the top bar opens today's Main chat in place from a position", asyn
   // The book's first read has landed before the watch starts (its "Reading positions…" is not a reload).
   await expect(page.getByTestId("desk-book").getByRole("button", { name: /^AMD / })).toBeVisible();
   const watched = await watchDesk(page);
-  await page.getByRole("link", { name: "Now" }).click();
+  await expect(page.getByRole("link", { name: "Now" })).toHaveCount(0); // not on the bar
+  await command(page, "Now");
   await expect(page).toHaveURL(`/copilot-lab?thread=${MAIN}`);
   await expect(conversation(page)).toContainText("Main answer: the day so far.");
   await expect(page.getByTestId("desk-breadcrumb")).toHaveCount(0);
   expect(await watched()).toMatchObject({ emptied: 0, remounted: false });
   // Already on Main chat, Now adds no step.
   const steps = await page.evaluate(() => history.length);
-  await page.getByRole("link", { name: "Now" }).click();
+  await command(page, "Now");
   expect(await page.evaluate(() => history.length)).toBe(steps);
   await expect(page).toHaveURL(`/copilot-lab?thread=${MAIN}`);
   // A position picked in place, then the app menu's Desk (a plain link to the bare address): back on Main chat.
@@ -531,7 +539,8 @@ test("before the open the book's lower block is the morning brief alone, cut sho
   const before = { ...SESSION, now: epoch("2026-10-23T12:45:00Z"), phase: "pre", events: [],
     prep: { at: epoch("2026-10-23T12:30:00Z"), line: lines[0], lines, fallback: false, path: null } };
   await lab(page, { time: new Date("2026-10-23T12:45:00Z"), session: before, showThreads: false }); // 8:45 New York
-  await expect(page.getByTestId("desk-status")).toContainText("Pre-market · 8:45 ET");
+  // The market's line is the status line's hover (and ⌘K's Today) since the calm pass.
+  await expect(page.getByTestId("desk-status-line")).toHaveAttribute("title", /^Pre-market 8:45 ET · SPY \+0\.42% QQQ −0\.31%\n/);
   const brief = page.getByTestId("morning-brief");
   await expect(brief.getByRole("listitem")).toHaveCount(3);
   await expect(brief).not.toContainText("Changes if");
@@ -548,7 +557,7 @@ test("before the open the book's lower block is the morning brief alone, cut sho
   await page.unroute("**/copilot/desk/session");
   await page.route("**/copilot/desk/session", (route) => route.fulfill({ json: { ...SESSION, phase: "closed", open: null, close: null, events: [], time_stops: [] } }));
   await page.reload();
-  await expect(page.getByTestId("desk-status")).toContainText("Market closed");
+  await expect(page.getByTestId("desk-status-line")).toHaveAttribute("title", /^Market closed · SPY/);
 });
 
 test("the palette's phase commands follow the clock while the owner stays on the desk", async ({ page }) => {
@@ -1071,9 +1080,11 @@ test("before the open the Day button is Start the day: one checklist, Arm opens 
   const { chats } = await dayDesk(page, { time: new Date("2026-10-23T12:45:00Z"), threads, showThreads: false, // 8:45 New York, a Friday
     session: { ...SESSION, now: epoch("2026-10-23T12:45:00Z"), phase: "pre", events: [], time_stops: [],
       prep: { at: epoch("2026-10-23T12:30:00Z"), line: lines[0], lines, fallback: false, path: null } } });
-  // Amber while the day is not started yet.
+  // Not started yet, but the Needs-you strip is asking (NBIS expires today): one amber thing at a time, so the Day
+  // button stays plain with its words (the calm pass; with the strip empty it is amber, as the test below shows).
   await expect(dayButton(page)).toHaveText("Start the day", { useInnerText: true });
-  await expect(dayButton(page)).toHaveClass(/bg-primary/);
+  await expect(page.getByTestId("needs-you")).toBeVisible();
+  await expect(dayButton(page)).not.toHaveClass(/bg-primary/);
   await page.screenshot({ path: test.info().outputPath("day-button-before-open-1440.png") });
   await dayButton(page).click();
   const list = dayList(page);

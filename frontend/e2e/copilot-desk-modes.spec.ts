@@ -98,8 +98,8 @@ test("the switch's three states: Real as it was, Paper framed with its value bes
   await expect(page.getByTestId("desk-paper-value")).toContainText("$10,234.50");
   await expect(page.getByTestId("desk-paper-value")).toContainText("+$234.50");
   await expect(page.getByTestId("desk-paper-value").getByTestId("mode-mark")).toHaveAttribute("data-mode", "paper");
-  await expect(page.getByTestId("desk-accounts")).toBeVisible();
-  await expect(page.locator("header").getByTestId("mode-mark").first()).toHaveAttribute("data-mode", "real");
+  await expect(page.getByTestId("desk-accounts")).toBeVisible(); // under the book's heading, with its REAL mark
+  await expect(page.getByTestId("desk-book").getByTestId("mode-mark").first()).toHaveAttribute("data-mode", "real");
   await expect(page.getByTestId("desk-book")).toBeVisible();
   await expect(status.getByTestId("mode-mark")).toHaveText("Paper · real book unchanged");
 
@@ -156,8 +156,8 @@ test("the status line names a source behind in words, red where it moves positio
   await expect(status.getByTestId("status-robinhood")).toHaveAttribute("data-tone", "red");
   await expect(status.getByTestId("status-chatter")).toHaveText("Chatter behind since 10:58");
   await expect(status.getByTestId("status-chatter")).toHaveAttribute("data-tone", "amber");
-  await expect(status.getByTestId("status-radar")).toContainText("Radar");
-  // The top bar's dot stays, from the same one read: red, naming the money source first.
+  await expect(status.getByTestId("status-radar")).toHaveCount(0); // live: said only in the list (the calm pass)
+  // The top bar's dot shows while a money source is behind, from the same one read: red, naming it first.
   await expect(page.getByTestId("desk-health")).toHaveAccessibleName("Data health: Robinhood + 1 behind");
   await expect(page.getByTestId("desk-health")).toHaveAttribute("data-tone", "red");
   // Its own row under the cockpit: nothing of the desk sits behind it.
@@ -397,9 +397,14 @@ for (const width of [1440, 375]) {
   test(`the health dot stays amber when only Chatter is behind at ${width}px`, async ({ page }) => {
     await open(page, { width, sources: SOURCES.map(r => r.id === "chatter" ? row("chatter", "Chatter", "stale", "Last read 10:54") : r) });
     const dot = page.getByTestId("desk-health");
+    if (width >= 768) {
+      // Health said once (the calm pass): amber is the status line's words; the bar's dot is for money behind only.
+      await expect(page.getByTestId("desk-status-line").getByTestId("status-chatter")).toHaveAttribute("data-tone", "amber");
+      await expect(dot).toHaveCount(0);
+      return;
+    }
     await expect(dot).toHaveAttribute("data-tone", "amber");
     await expect(dot).toHaveAccessibleName("Data health: Chatter behind");
     await expect(dot.getByTestId("desk-health-short")).toHaveCount(0);
-    if (width >= 768) await expect(dot.getByTestId("desk-health-words")).toHaveText("Chatter behind");
   });
 }

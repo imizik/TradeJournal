@@ -148,9 +148,14 @@ test("an answer leads with its verdict and headline, keeps Changes if plain, and
   await expect.poll(() => seen.puts.filter((p) => "rating" in p)).toEqual([{ rating: "helped" }, { rating: "didnt" }, { rating: null }]);
   expect(seen.posts[0]).toMatchObject({ transcript: [{}, { metrics: { total_ms: 2, rounds: 2, model: "fake-scripted", turn_id: "0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f" } }] });
 
-  // Saved, the thread's next steps are offered instead.
+  // Saved, the thread's next steps are offered instead: in its ⋯ menu, not as chips under the answer (the calm pass).
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
-  await expect(chips.getByRole("button")).toHaveText(["Why is it moving?", "What changed since I looked?", "What does my plan say?", "More", "Look at my chart"]);
+  await expect(chips).toHaveCount(0);
+  await page.getByRole("button", { name: "Thread actions" }).click();
+  await expect(page.getByRole("group", { name: "Next steps" }).getByRole("button"))
+    .toHaveText(["Why is it moving?", "What changed since I looked?", "What does my plan say?", "More", "Look at my chart"]);
+  await page.getByRole("button", { name: "Thread actions" }).click();
+  await expect(page.getByRole("group", { name: "Next steps" })).toHaveCount(0);
   // The new thread is named by its ticker, its purpose and the owner's own first words, not the answer's headline.
   expect(seen.posts[0].title).toBe("NBIS · question: is NBIS still a hold");
   await page.screenshot({ path: test.info().outputPath("answer-format-1440.png") });
@@ -178,11 +183,15 @@ test("the thread menu keeps a lesson and closes the thread; a plan card offers S
   const seen = await lab(page, `/copilot-lab?investigation=${INV}`, saved);
   await expect(conversation(page).getByTestId("copilot-verdict")).toHaveText("Draft");
   await expect(page.getByRole("region", { name: "Proposed trade plan" })).toBeVisible();
+  // Mid-conversation the next steps wait in the thread's ⋯ menu (the calm pass: chips only on an empty conversation).
   const chips = page.getByRole("group", { name: "Suggestions" });
-  await expect(chips.getByRole("button")).toHaveText(["Why is it moving?", "What changed since I looked?", "What does my plan say?", "Size it", "More"]);
+  await expect(chips).toHaveCount(0);
+  await page.getByRole("button", { name: "Thread actions" }).click();
+  const steps = page.getByRole("group", { name: "Next steps" });
+  await expect(steps.getByRole("button")).toHaveText(["Why is it moving?", "What changed since I looked?", "What does my plan say?", "Size it", "More"]);
   await expect(page.getByLabel("Message")).toHaveValue(/^What changed\?/); // the deep link's question, unsent
 
-  await chips.getByRole("button", { name: "Size it" }).click();
+  await steps.getByRole("button", { name: "Size it" }).click();
   await expect(page.getByLabel("Message")).toHaveValue(/^Size it: with this plan's entry and invalidation, .* to \$$/);
   await expect(page.getByLabel("Message")).toBeFocused();
   expect(seen.chats).toEqual([]);

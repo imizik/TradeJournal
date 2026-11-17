@@ -79,8 +79,9 @@ test("quiet top: What's moving starts folded and remembers being opened; no acco
   const toggle = page.getByTestId("desk-moving-toggle");
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByTestId("desk-moving-row")).toHaveCount(0);
-  // The top bar: the open positions' P&L, nothing for a day with no trade closed, and no account line with the feed off.
-  await expect(page.getByTestId("desk-pnl")).toHaveText("Open −$120");
+  // The book heading's hover: the open positions' P&L, nothing for a day with no trade closed; no account line with
+  // the feed off (the calm pass took the day's money off the top bar).
+  await expect(page.getByTestId("desk-book").getByRole("heading", { level: 2 })).toHaveAttribute("title", "Open −$120 · 1 followed");
   await expect(page.getByTestId("desk-accounts")).toHaveCount(0);
   await toggle.click();
   await expect(page.getByTestId("desk-moving-group")).toHaveText("SPY▲+0.4%");

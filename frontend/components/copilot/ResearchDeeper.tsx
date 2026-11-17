@@ -36,8 +36,10 @@ export function JobMateriality({ job }: { job: ResearchJob }) {
 
 /** "Research deeper" for one saved investigation: queue a background research job from it and follow its status.
  * Renders nothing unless the research queue is enabled. */
-export default function ResearchDeeper({ investigationId, symbol, topic, onFinished, onOpenResult, onDiscuss }: {
+export default function ResearchDeeper({ investigationId, symbol, topic, link = false, onFinished, onOpenResult, onDiscuss }: {
   investigationId: string; symbol: string; topic: string;
+  /** The desk: a quiet text link beside an answer's rating, not a bordered button. */
+  link?: boolean;
   onFinished(): void; onOpenResult(id: string): void; onDiscuss(id: string): void;
 }) {
   const [enabled, setEnabled] = useState(false);
@@ -95,10 +97,11 @@ export default function ResearchDeeper({ investigationId, symbol, topic, onFinis
 
   if (!enabled) return null;
   return (
-    <section aria-label="Research deeper" className="space-y-2 text-xs">
+    <section aria-label="Research deeper" className={cn("space-y-2 text-xs", link && "min-w-0 [&:has(form,ul)]:basis-full")}>
       {!form && !waiting && (
         <button type="button" onClick={() => setForm({ symbol, question: topic })}
-          className="min-h-11 rounded border px-2 py-1 text-muted-foreground hover:text-foreground sm:min-h-0">Research deeper</button>
+          className={link ? "min-h-11 px-1 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline sm:min-h-7"
+            : "min-h-11 rounded border px-2 py-1 text-muted-foreground hover:text-foreground sm:min-h-0"}>Research deeper</button>
       )}
       {form && (
         <form onSubmit={event => { event.preventDefault(); void submit(); }} className="space-y-2 rounded border bg-card/40 p-2">

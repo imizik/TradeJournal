@@ -12,7 +12,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Info, MoreHorizontal } from "lucide-react";
 import { useAppAccess } from "@/components/AccessProvider";
 import { useFolds } from "@/components/copilot/DeskUse";
 import { PIECE } from "@/lib/deskUse";
@@ -35,15 +35,20 @@ export type ChartTools = {
   ready: boolean;
   /** A phone: the studies and the pencil wait in More. */
   narrow: boolean;
+  /** The chart's facts (plan lines, earnings, the reading's as-of, VWAP and volume), its key and the library's
+   * attribution: the header's ⓘ, so the default view is the candles. */
+  info: ReactNode;
 };
 
 const BUTTON = "inline-flex min-h-11 items-center gap-1 whitespace-nowrap rounded border px-1.5 text-xs sm:min-h-0 sm:py-0.5";
 export const headButton = (open: boolean) => cn(BUTTON, open ? "border-foreground/60 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground");
 
 /** A header button that opens a small menu under it; a tap outside or Escape closes it. */
-export function ChartMenu({ label, title, testId, use, open, onOpen, align = "right", wide = false, chevron = true, children }: {
+export function ChartMenu({ label, title, testId, use, open, onOpen, align = "right", wide = false, chevron = true, keep = false, children }: {
   label: ReactNode; title: string; testId: string; use?: string; open: boolean; onOpen(open: boolean): void;
-  align?: "left" | "right"; wide?: boolean; chevron?: boolean; children: ReactNode;
+  align?: "left" | "right"; wide?: boolean; chevron?: boolean;
+  /** Kept in the page while closed, hidden (the ⓘ's facts: their reads stay as they were, only out of view). */
+  keep?: boolean; children: ReactNode;
 }) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -59,8 +64,8 @@ export function ChartMenu({ label, title, testId, use, open, onOpen, align = "ri
       <button type="button" aria-expanded={open} aria-haspopup="true" data-testid={testId} title={title} onClick={() => onOpen(!open)} className={headButton(open)}>
         {label}{chevron && <ChevronDown size={12} aria-hidden />}
       </button>
-      {open && (
-        <div className={cn("absolute top-full z-[60] mt-1 max-h-[70svh] overflow-y-auto rounded-md border bg-popover p-1 text-xs shadow-lg", align === "right" ? "right-0" : "left-0",
+      {(open || keep) && (
+        <div hidden={!open} className={cn("absolute top-full z-[60] mt-1 max-h-[70svh] overflow-y-auto rounded-md border bg-popover p-1 text-xs shadow-lg", align === "right" ? "right-0" : "left-0",
           wide ? "w-[min(20rem,calc(100vw-2rem))]" : "min-w-52")}>
           {children}
         </div>
@@ -91,30 +96,37 @@ function FoldItem({ id, onOpen, children }: { id: string; onOpen(): void; childr
  * The header row. ``reading`` is the price and today's change; ``held`` the held contract; ``view`` the Stock / Contract
  * switch; ``tools`` null while a held option's own chart is shown (no studies, alerts or drawing there).
  */
-export function ChartHead({ symbol, reading, held, view, timeframe, onTimeframe, tools, onReplay, tape, onTape, charts }: {
+export function ChartHead({ symbol, reading, held, view, timeframe, onTimeframe, tools, info = null, onReplay, tape, onTape, charts }: {
   symbol: string; reading: ReactNode; held: string | null; view: ReactNode; timeframe: DeskTimeframe | null; onTimeframe(next: DeskTimeframe): void;
   tools: ChartTools | null; onReplay?(): void; tape: boolean; onTape(next: boolean): void; charts: string;
+  /** The ⓘ's facts when there are no chart tools (a held option's own chart). */
+  info?: ReactNode;
 }) {
   const folds = useFolds();
   const { owner } = useAppAccess();
   const [more, setMore] = useState(false);
   const [studies, setStudies] = useState(false);
+  const [facts, setFacts] = useState(false);
   const narrow = tools?.narrow ?? false;
   const studiesShown = !folds.hidden("chart.studies");
   const close = () => setMore(false);
+  const infoBody = tools?.info ?? info;
   return (
     // One row on a computer (the held contract gives way first); on a phone the ticker and its price sit over the controls.
-    <div data-testid="desk-chart-head" className="flex flex-wrap items-center gap-x-1.5 gap-y-1 sm:flex-nowrap">
-      <span className="flex min-w-0 items-baseline gap-x-2 max-sm:w-full">
-        <span data-testid="desk-chart-symbol" className="text-base font-semibold leading-5 text-foreground">{symbol}</span>
-        {reading}
-        {held && <span data-testid="desk-chart-held" className="min-w-0 truncate text-xs text-muted-foreground max-sm:hidden">{held}</span>}
+    <div data-testid="desk-chart-head" className="flex flex-wrap items-center gap-x-1 gap-y-1 sm:flex-nowrap">
+      {/* The ticker and its price never shrink; the held contract truncates, and nothing here ever paints over the
+          timeframes (it overlapped them on 2026-11-16: "−7.56% today" under "2m"). */}
+      <span data-testid="desk-chart-title" className="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden max-sm:w-full">
+        <span data-testid="desk-chart-symbol" className="shrink-0 text-base font-semibold leading-5 text-foreground">{symbol}</span>
+        <span className="shrink-0">{reading}</span>
+        {/* The held contract is the book row's and the Position panel's: the header names it only on a very wide screen. */}
+        {held && <span data-testid="desk-chart-held" className="min-w-0 truncate text-xs text-muted-foreground max-2xl:hidden">{held}</span>}
       </span>
       {view}
       {timeframe && <div role="group" aria-label="Timeframe" className="flex shrink-0 gap-0.5">
         {DESK_TIMEFRAMES.map(item => (
           <button key={item} type="button" aria-pressed={timeframe === item} onClick={() => onTimeframe(item)}
-            className={cn("min-h-11 min-w-11 rounded border px-2 text-xs tabular-nums sm:min-h-0 sm:min-w-0 sm:py-0.5",
+            className={cn("min-h-11 min-w-11 rounded border px-2 text-xs tabular-nums sm:min-h-0 sm:min-w-0 sm:px-1.5 sm:py-0.5",
               timeframe === item ? "border-foreground/60 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
             {item}
           </button>
@@ -129,7 +141,8 @@ export function ChartHead({ symbol, reading, held, view, timeframe, onTimeframe,
         )}
         {tools?.alerts}
         {tools && !narrow && tools.draw}
-        <ChartMenu label="More" title="Replay, Tape, Open in Charts, Reset" testId="desk-chart-more" open={more} onOpen={setMore}>
+        <ChartMenu label={<><MoreHorizontal size={14} aria-hidden /><span className="sr-only">More</span></>} title="More: Replay, Tape, Open in Charts, Reset"
+          testId="desk-chart-more" open={more} onOpen={setMore} chevron={false}>
           <div role="group" aria-label="More chart tools" className="flex flex-col">
             {tools && narrow && (
               <FoldItem id="chart.studies" onOpen={() => undefined}>
@@ -165,6 +178,12 @@ export function ChartHead({ symbol, reading, held, view, timeframe, onTimeframe,
             {tools && <button type="button" onClick={() => { close(); tools.reset(); }} disabled={!tools.ready} className={cn(ITEM, "disabled:opacity-40")}>Reset</button>}
           </div>
         </ChartMenu>
+        {infoBody && (
+          <ChartMenu label={<Info size={13} aria-label="Chart facts" />} title="Chart facts: plan lines, earnings, as of, VWAP and volume; the key"
+            testId="desk-chart-info" open={facts} onOpen={setFacts} wide chevron={false} keep>
+            <div data-testid="desk-chart-info-panel" className="space-y-1.5 px-1.5 py-1">{infoBody}</div>
+          </ChartMenu>
+        )}
       </span>
     </div>
   );

@@ -37,33 +37,14 @@ export function useDeskSession(on: boolean): { data: DeskSession | null; error: 
   return { data, error };
 }
 
-/** The top bar's live line: Live, Pre-market, Closed 16:00 or Market closed with the New York clock of the session read
- * (re-read each minute), then SPY / QQQ / VIX's change. Nothing until the phase is known. */
-export function DeskStatus({ data }: { data: DeskSession | null }) {
+/** The market's line in words, for ⌘K's "Today" and the status line's hover: "Closed 16:00 · SPY −1.92% QQQ −2.67% VIX
+ * +18.70%", "Live 10:31 ET · SPY +0.42%". Null until the phase is known. */
+export function marketWords(data: DeskSession | null): string | null {
   if (!data?.phase) return null;
-  const word = data.phase === "regular" ? "Live" : data.phase === "pre" ? "Pre-market"
+  const word = data.phase === "regular" ? `Live ${hhmm(data.now)} ET` : data.phase === "pre" ? `Pre-market ${hhmm(data.now)} ET`
     : data.close !== null && data.now >= data.close ? `Closed ${hhmm(data.close)}` : "Market closed";
-  const closed = data.phase !== "regular" && data.phase !== "pre";
-  return (
-    // A phone keeps the clock and the three indices on one line (tighter, "Pre" for Pre-market), so its positions start higher.
-    <div data-testid="desk-status" className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs max-md:gap-x-2.5">
-      <span className="flex items-center gap-1.5 whitespace-nowrap text-muted-foreground">
-        <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", data.phase === "regular" ? "bg-emerald-400 ring-[3px] ring-emerald-400/15" : "bg-muted-foreground")} />
-        {data.phase === "pre" ? <span>Pre<span className="max-md:hidden">-market</span></span> : word}{!closed && <> · <span data-testid="desk-clock" className="tabular-nums">{hhmm(data.now)} ET</span></>}
-      </span>
-      {data.indices.length > 0 && (
-        <span data-testid="desk-indices" className="flex gap-3 whitespace-nowrap max-md:gap-2">
-          {data.indices.map(row => (
-            <span key={row.symbol}>
-              <span className="text-muted-foreground">{row.symbol}</span>{" "}
-              {row.change_pct === null ? <span className="text-muted-foreground">—</span>
-                : <span className={cn("tabular-nums", row.change_pct >= 0 ? "text-emerald-300" : "text-rose-300")}>{pct(row.change_pct)}</span>}
-            </span>
-          ))}
-        </span>
-      )}
-    </div>
-  );
+  const indices = data.indices.map(row => `${row.symbol} ${row.change_pct === null ? "—" : pct(row.change_pct)}`).join(" ");
+  return [word, indices].filter(Boolean).join(" · ");
 }
 
 const ROW = "flex min-h-11 w-full min-w-0 flex-col justify-center gap-0.5 rounded-md px-2.5 py-1.5 text-left hover:bg-secondary sm:min-h-10";

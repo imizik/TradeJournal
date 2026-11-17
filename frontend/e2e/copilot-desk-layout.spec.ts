@@ -139,7 +139,8 @@ test("the centre is the ticker's tools; the Feed sits beside the copilot, keeps 
   // Now, from the Feed: today's Main chat comes forward too.
   await side.nth(1).click();
   await expect(feedPane(page)).toBeVisible();
-  await page.getByRole("link", { name: "Now", exact: true }).click();
+  await page.getByRole("button", { name: "Jump to a thread or command" }).click(); // Now is ⌘K's since the calm pass
+  await page.getByRole("dialog", { name: "Jump to" }).getByRole("option", { name: /^Now/ }).click();
   await expect(conversation(page)).toBeVisible();
   await expect(feedPane(page)).toBeHidden();
 });

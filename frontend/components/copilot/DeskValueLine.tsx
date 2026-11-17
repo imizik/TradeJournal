@@ -86,7 +86,8 @@ export function DeskValueLine({ line, active }: { line: DeskDayLine | null | und
         <span className="tabular-nums text-[11px] text-muted-foreground max-sm:hidden">since {clock(first.at)}</span>
         {series.quiet_since != null && <span data-testid="value-quiet" className="tabular-nums text-[11px] text-muted-foreground">· last {clock(series.quiet_since)}</span>}
       </button>
-      <div role="tooltip" data-testid="value-detail" className={cn("absolute left-0 top-full z-50 mt-1 w-60 rounded-md border bg-card p-2 text-xs shadow-md",
+      {/* Never takes the pointer: under the book's heading it opens over the account chips, which stay tappable. */}
+      <div role="tooltip" data-testid="value-detail" className={cn("pointer-events-none absolute left-0 top-full z-50 mt-1 w-60 rounded-md border bg-card p-2 text-xs shadow-md",
         open ? "block" : "hidden group-hover/value:block")}>
         <p className="font-medium">{who} today</p>
         <p className="tabular-nums">{usd(last.value)} <span className="text-muted-foreground">at {clock(last.at)}</span></p>

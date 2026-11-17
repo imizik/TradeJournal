@@ -98,14 +98,16 @@ test("a price no longer live is greyed with its time, then hands back to the min
   feed.mark = 1.1;
   await page.clock.runFor(5_000);
   await expect(pnl(page)).toHaveText("−$110−50%");
-  await expect(page.getByTestId("desk-pnl-open")).toHaveText("−$110");
+  // The day's Open total follows the live price too (the book heading's hover since the calm pass).
+  const heading = page.getByTestId("desk-book").getByRole("heading", { level: 2 });
+  await expect(heading).toHaveAttribute("title", /^Open −\$110 · /);
   feed.state = "fail";
   const before = feed.asked.length;
   await page.clock.runFor(25_000);
   // The last good price stays, greyed, with the time it was read: never a zero, never a number that looks live.
   await expect(pnl(page)).toHaveText("−$110−50%");
   await expect.poll(() => pnl(page).evaluate(node => node.className)).toMatch(/opacity-50/);
-  await expect.poll(() => page.getByTestId("desk-pnl-open").evaluate(node => node.className)).toMatch(/opacity-50/);
+  await expect(heading).toHaveAttribute("title", /^Open −\$110 \(prices behind\) · /);
   await expect(page.getByTestId("desk-book").getByTestId("prices-as-of")).toHaveText(/^prices 11:00:\d\d AM$/);
   await expect(page.getByTestId("desk-watching").getByTestId("prices-as-of")).toHaveText(/^prices 11:00:\d\d AM$/);
   // 25 s of failures: 5, 10 then 20 s apart, not one every 5 s.
@@ -119,7 +121,7 @@ test("a price no longer live is greyed with its time, then hands back to the min
   feed.mark = 1.2;
   await page.clock.runFor(60_000);
   await expect(pnl(page)).toHaveText("−$100−46%");
-  await expect(page.getByTestId("desk-pnl-open")).toHaveText("−$100");
+  await expect(heading).toHaveAttribute("title", /^Open −\$100 · /);
 });
 
 test("outside the session nothing polls", async ({ page }) => {

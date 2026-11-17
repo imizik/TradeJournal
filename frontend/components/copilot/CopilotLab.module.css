@@ -41,7 +41,7 @@
   letter-spacing: -0.01em;
 }
 
-/* The head: the top bar (clock, indices, the day's money) with the desk's buttons at its right. The buttons come first
+/* The head: the top bar, one row (Menu, Desk, the mode switch) with the desk's buttons at its right. The buttons come first
    in the page (a phone puts their row on top), so here they are ordered after the bar. */
 .head {
   display: flex;
@@ -411,8 +411,8 @@
   }
 }
 
-/* A phone: the desk runs edge to edge inside the page's 8 px padding. The top bar keeps its buttons on the title's row,
-   then the clock and indices, then the day's P&L and the Accounts button, so the strip and the book come first. */
+/* A phone: the desk runs edge to edge inside the page's 8 px padding. The top bar is its one row of buttons, so the
+   value block, the strip and the book come first. */
 @media (max-width: 767px) {
   .desk {
     margin-inline: -8px;
@@ -420,8 +420,8 @@
     border-radius: 0;
   }
 
-  /* The first row is the Feed chip and the desk's buttons; it stays at the top of the screen. The bar under it is the
-     clock and indices (the day's money and the accounts are the value block's). The views are the desk's tab bar's, at
+  /* The first row is the Feed chip and the desk's buttons; it stays at the top of the screen. No second row (the day's
+     money and the accounts are the value block's; the market's line is ⌘K's). The views are the desk's tab bar's, at
      the bottom (Nav.tsx keeps its slot). */
   .head {
     display: contents;
@@ -458,10 +458,15 @@
     padding-inline: 4px;
   }
 
+  /* The calm pass: no second row on a phone either. The bar's title stays for a screen reader; the 9:40 scalp-picks
+     link, the only other piece a phone shows here, sits under the top row in its window. */
   .bar {
-    gap: 4px 12px;
-    padding: 6px 12px 8px;
-    border-bottom: 1px solid hsl(var(--border));
+    display: contents;
+  }
+
+  .bar > a {
+    margin: 6px 12px 0;
+    align-self: flex-start;
   }
 
   .title {
@@ -478,7 +483,7 @@
     display: none;
   }
 
-  /* The top bar keeps the clock and SPY / QQQ / VIX; the day's money and the accounts are the value block's. */
+  /* The day's money and the accounts are the value block's. */
   .desk .wideOnly {
     display: none;
   }

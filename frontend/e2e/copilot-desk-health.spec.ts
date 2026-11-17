@@ -76,8 +76,22 @@ async function open(page: Page, first: unknown, { width = 1440, height = 900, st
   return { seen, answer };
 }
 
-test("all live: one quiet green dot; the list names every source, Level 2 off with no Tape session", async ({ page }) => {
+// Since the calm pass health is said once: from 768 px the status line says it and the top bar's dot shows only while a
+// money source is behind; a phone (no status line) keeps the dot whatever it says, so the dot's quiet tones are a phone's.
+const PHONE = { width: 390, height: 844 };
+
+test("all live, laptop: no dot in the bar; the status line says All live once and opens every source", async ({ page }) => {
   await open(page, health(LIVE));
+  await expect(page.getByTestId("desk-health")).toHaveCount(0);
+  const line = page.getByTestId("desk-status-line");
+  await expect(line.getByTestId("status-fine")).toHaveText("All live");
+  await expect(line.getByTestId("status-chatter")).toHaveCount(0); // fine sources wait in the list
+  await line.click();
+  await expect(page.getByTestId("desk-health-list").getByRole("listitem")).toHaveCount(8);
+});
+
+test("all live: one quiet green dot; the list names every source, Level 2 off with no Tape session", async ({ page }) => {
+  await open(page, health(LIVE), PHONE);
   const dot = page.getByTestId("desk-health");
   await expect(dot).toHaveAttribute("data-tone", "ok");
   await expect(dot).toHaveAccessibleName("Data health: All live");
@@ -121,20 +135,20 @@ test("a money source down: the dot turns red and names it; a tap says what it af
 
 test("unknown is never green: a source that cannot be told and a failed read both show grey", async ({ page }) => {
   const sources = LIVE.map(r => r.id === "prices" ? row("prices", "Prices", "unknown", "No price read yet") : r);
-  await open(page, health(sources));
+  await open(page, health(sources), PHONE);
   await expect(page.getByTestId("desk-health")).toHaveAttribute("data-tone", "unknown");
   await expect(page.getByTestId("desk-health")).toHaveAccessibleName("Data health: Prices unknown");
   await expect(page.getByTestId("desk-health")).toHaveText("");
 });
 
 test("a failed health read says unknown, not all live", async ({ page }) => {
-  await open(page, { detail: "boom" }, { status: 500 });
+  await open(page, { detail: "boom" }, { status: 500, ...PHONE });
   await expect(page.getByTestId("desk-health")).toHaveAttribute("data-tone", "unknown");
   await expect(page.getByTestId("desk-health")).toHaveAccessibleName("Data health: Health unknown");
 });
 
 test("a failed read after a good one: grey, and the old rows are not shown as live", async ({ page }) => {
-  const { answer } = await open(page, health(LIVE));
+  const { answer } = await open(page, health(LIVE), PHONE);
   await expect(page.getByTestId("desk-health")).toHaveAccessibleName("Data health: All live");
   answer.status = 500;
   answer.body = { detail: "boom" };
@@ -149,13 +163,15 @@ test("a failed read after a good one: grey, and the old rows are not shown as li
 
 test("it rides the minute's one request: a change shows on the next beat with no read of its own", async ({ page }) => {
   const { seen, answer } = await open(page, health(LIVE));
-  await expect(page.getByTestId("desk-health")).toHaveAccessibleName("Data health: All live");
+  const line = page.getByTestId("desk-status-line");
+  await expect(line.getByTestId("status-fine")).toHaveText("All live");
   await page.clock.runFor(10_000); // the one settle read a few seconds after opening (cold load, not the idle rate)
   await expect.poll(() => seen.filter(p => p === "/copilot/desk/health").length).toBe(2);
   const before = seen.filter(p => p === "/copilot/desk/health").length;
   answer.body = health(LIVE.map(r => r.id === "radar" ? row("radar", "Radar", "stale", "Last pass 10:52") : r));
   await page.clock.runFor(61_000);
-  await expect(page.getByTestId("desk-health")).toHaveText("Radar behind");
+  await expect(line.getByTestId("status-radar")).toHaveText("Radar behind since 10:58"); // amber: in words on the line, no dot in the bar
+  await expect(page.getByTestId("desk-health")).toHaveCount(0);
   expect(seen.filter(p => p === "/copilot/desk/health").length).toBe(before); // asked inside /copilot/desk/minute only
   expect(seen).toContain("/copilot/desk/minute");
 });

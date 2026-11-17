@@ -66,15 +66,17 @@ for (const width of [1440, 375]) {
   test(`live from Robinhood at ${width}px: chips, account tags, new and missing rows, stocks folded, refresh`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     const reads = await open(page, desk(LIVE));
-    const chips = page.getByTestId("desk-accounts");
-    await expect(chips).toContainText("Roth IRA••8267$9,860");
-    await expect(chips).toContainText("MCP••7884$0");
     const shelf = page.getByTestId("desk-book");
-    await expect(shelf.getByRole("heading", { level: 2 })).toHaveText("Your book · 4 followed");
-    await expect(shelf.getByTestId("book-live")).toHaveText(/^live from Robinhood · as of \d.*Read again$/);
-    // It reads as a button: a bordered "Read again" beside the time.
-    await expect(shelf.getByTestId("book-live").getByTestId("book-live-again")).toHaveText("Read again");
-    await expect(shelf.getByTestId("book-live").getByTestId("book-live-again")).toHaveCSS("border-top-style", "solid");
+    // The account line sits under the book's heading (a phone has the value block instead).
+    if (width >= 768) {
+      const chips = shelf.getByTestId("desk-accounts");
+      await expect(chips).toContainText("Roth IRA••8267$9,860");
+      await expect(chips).toContainText("MCP••7884$0");
+    }
+    await expect(shelf.getByRole("heading", { level: 2 })).toHaveText("Your book · 4");
+    // Live says nothing in words (the calm pass): one small ↻ that reads again, its as-of on hover.
+    await expect(shelf.getByTestId("book-live")).toHaveAccessibleName("Read Robinhood again");
+    await expect(shelf.getByTestId("book-live")).toHaveAttribute("title", /^Live from Robinhood · as of \d.* · read again$/);
     // Options first; the stock with no plan waits behind one line.
     await expect(shelf.getByRole("button", { name: /^(NBIS|CRWV|APLD) / })).toHaveCount(3);
     await expect(shelf.getByRole("button", { name: /^RKLB/ })).toHaveCount(0);
@@ -104,17 +106,17 @@ test("not live: no account figures, no tags, the journal's book as before, one q
     const { account: _a, live: _l, quantity: _q, mark: _m, ...rest } = (r as unknown as { book: Record<string, unknown> }).book; // eslint-disable-line @typescript-eslint/no-unused-vars
     return { ...r, book: rest };
   });
-  for (const [robinhood, words] of [[{ state: "stale", as_of: AS_OF }, /^Robinhood stale · from the journal · as of/],
-    [{ state: "expired" }, /^Robinhood sign-in expired · from the journal$/], [{ state: "signed_out" }, /^Robinhood signed out/]] as const) {
+  for (const [robinhood, words] of [[{ state: "stale", as_of: AS_OF }, /^Robinhood stale · as of \d/],
+    [{ state: "expired" }, /^Robinhood sign-in expired$/], [{ state: "signed_out" }, /^Robinhood signed out$/]] as const) {
     await page.unrouteAll();
     await open(page, desk(robinhood, journal));
-    // No money on the account line: its age when stale, else one grey word.
-    await expect(page.getByTestId("desk-accounts")).toHaveText(robinhood.state === "stale" ? /^Accounts as of \d/ : "Accounts unavailable");
+    // No account line and no money: the book's one line says why, once.
+    await expect(page.getByTestId("desk-accounts")).toHaveCount(0);
     await expect(page.getByTestId("book-account")).toHaveCount(0);
     await expect(page.getByTestId("book-live")).toHaveText(words);
   }
   await page.unrouteAll();
   await open(page, desk({ state: "off" }, journal));
   await expect(page.getByTestId("book-live")).toHaveCount(0); // off: exactly today's book
-  await expect(page.getByTestId("desk-book").getByRole("heading", { level: 2 })).toHaveText("Your book · 2 followed");
+  await expect(page.getByTestId("desk-book").getByRole("heading", { level: 2 })).toHaveText("Your book · 2");
 });

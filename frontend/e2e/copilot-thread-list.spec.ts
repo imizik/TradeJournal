@@ -228,14 +228,16 @@ test("Radar hits sit in the Feed, not the ticker list: each hit opening its even
   await expect(tickers(page).getByRole("button", { name: /^MU/ })).toHaveCount(0);
 });
 
-test("a quiet day: nothing open says so, and Plan a trade is one tap away in the desk bar, not repeated under the list", async ({ page }) => {
+test("a quiet day: nothing open says so, and Plan a trade is one key away (N, ⌘K), not repeated under the list", async ({ page }) => {
   await lab(page, QUIET);
   const threads = list(page);
   await expect(threads.getByTestId("desk-day")).toHaveText("Nothing needs you");
   await expect(tickers(page)).toContainText("Nothing open. Plan a trade to start a ticker.");
   await expect(threads.getByRole("link", { name: "Plan a trade" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Plan a trade" })).toBeVisible();
   await expect(page.getByTestId("desk-book")).toContainText("No open positions.");
+  // Off the desk bar since the calm pass: ⌘K's first command (N without the palette).
+  await page.getByRole("button", { name: "Jump to a thread or command" }).click();
+  await expect(page.getByRole("dialog", { name: "Jump to" }).getByRole("option", { name: /^Plan a trade/ })).toBeVisible();
 });
 
 test("an unavailable source says so, and the list never claims nothing is open without positions", async ({ page }) => {
@@ -520,19 +522,19 @@ for (const width of [1440, 375]) {
     // The book: SLS is not among the positions and not in the strip; it waits behind "1 not followed".
     await page.getByRole("button", { name: "Close the thread list" }).click(); // the drawer sits over the book
     const book = page.getByTestId("desk-book");
-    await expect(book.getByRole("heading", { level: 2 })).toHaveText("Your book · 1 followed");
+    await expect(book.getByRole("heading", { level: 2 })).toHaveText("Your book · 1");
     await expect(book.getByRole("button", { name: /^SLS/ })).toHaveCount(0);
     await expect(page.getByTestId("needs-you").getByText(/SLS/)).toHaveCount(0); // the strip may be absent
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     await expect(book.getByTestId("not-followed")).toContainText("1 not followed · quiet on your phone too");
     await book.getByRole("button", { name: /1 not followed/ }).click();
     await book.getByRole("button", { name: "Show again" }).click();
-    await expect(book.getByRole("heading", { level: 2 })).toHaveText("Your book · 2 followed");
+    await expect(book.getByRole("heading", { level: 2 })).toHaveText("Your book · 2");
     expect(entries.map(e => [e.kind, e.symbol, e.text])).toEqual([["follow", "SLS", "Following"]]);
 
     // Hide it again from its row: one tap, saved for every device.
     await book.getByRole("button", { name: "Hide SLS: not following" }).click();
-    await expect(book.getByRole("heading", { level: 2 })).toHaveText("Your book · 1 followed");
+    await expect(book.getByRole("heading", { level: 2 })).toHaveText("Your book · 1");
     expect(entries.map(e => e.text)).toEqual(["Following", "Not following"]);
   });
 }

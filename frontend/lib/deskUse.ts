@@ -29,8 +29,8 @@ export type Piece = { id: string; label: string; area: string; fold: FoldMode;
 /** Every piece the desk counts, by area. Folding one never changes what the app reads or pings. */
 export const PIECES: readonly Piece[] = [
   { id: "needs", label: "Needs you", area: "Top", fold: null, safety: true },
-  { id: "health", label: "Health dot", area: "Top", fold: null, safety: true },
-  { id: "pnl", label: "Day P&L", area: "Top", fold: null },
+  { id: "health", label: "Data health (status line, dot)", area: "Top", fold: null, safety: true },
+  { id: "pnl", label: "Day P&L (book heading hover)", area: "Top", fold: null },
   { id: "accounts", label: "Account line", area: "Top", fold: "stub" },
   { id: "moving", label: "What's moving", area: "Top", fold: "stub" },
   { id: "threads", label: "Thread list", area: "Top", fold: null },

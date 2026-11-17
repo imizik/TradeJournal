@@ -218,17 +218,19 @@ for (const saved of ["marked interrupted", "an older empty reply"] as const) {
 // ------------------------------------------------------------------------------------------------ 3. the book's tag
 
 for (const width of [1440, 375]) {
-  test(`at ${width}px a book row's tag never runs under its sparkline or its P&L`, async ({ page }) => {
+  // The calm pass took the sparkline off the row (the chart has the day): the tag still never runs under the P&L.
+  test(`at ${width}px a book row's tag never runs under its P&L`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await open(page, { path: "/copilot-lab", threads: [orcl("new"), AAPL] });
     const rows = page.getByTestId("desk-book").locator("li");
     await expect(rows).toHaveCount(2);
     for (const symbol of ["ORCL", "AAPL"]) {
-      const item = rows.filter({ has: page.getByRole("img", { name: `${symbol} today` }) });
+      const item = rows.filter({ has: page.getByRole("button", { name: new RegExp(`^${symbol} `) }) });
+      await expect(item.getByRole("img", { name: `${symbol} today` })).toHaveCount(0);
       const tag = await item.getByTestId("book-state").boundingBox();
-      const spark = await item.getByRole("img", { name: `${symbol} today` }).boundingBox();
-      expect(tag && spark, symbol).toBeTruthy();
-      expect(tag!.x + tag!.width, `${symbol}'s tag ends before its sparkline`).toBeLessThanOrEqual(spark!.x);
+      const pnl = await item.getByTestId("book-pnl").boundingBox();
+      expect(tag && pnl, symbol).toBeTruthy();
+      expect(tag!.x + tag!.width, `${symbol}'s tag ends before its P&L`).toBeLessThanOrEqual(pnl!.x);
     }
   });
 }
