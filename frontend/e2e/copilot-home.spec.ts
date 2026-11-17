@@ -191,7 +191,7 @@ test("daily Main reopens across devices in the copilot, keeps drafts in their ta
     await mobile.screenshot({ path: test.info().outputPath("daily-main-phone.png") });
   } finally { await phone.close(); }
   // The cockpit and today's conversation are one screen: the book and the centre, the copilot on Main chat beside them.
-  await expect(page.getByRole("link", { name: "Now", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: "Main chat · Fri, Oct 23" })).toBeVisible();
   await expect(page.getByTestId("desk-book")).toBeVisible();
   await expect(page.getByLabel("Message")).toHaveValue("Follow up after lunch");
   await page.getByText("Previous days", { exact: true }).click();
@@ -204,10 +204,11 @@ test("daily Main reopens across devices in the copilot, keeps drafts in their ta
   await page.getByText("Previous days", { exact: true }).click();
   await page.getByRole("button", { name: "Main chat · Thu, Oct 22" }).click();
   await expect(page.getByRole("heading", { name: "Main chat · Thu, Oct 22" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Now", exact: true })).not.toHaveAttribute("aria-current", "page");
-  await page.getByRole("link", { name: "Now", exact: true }).click();
+  // Now (⌘K's since the calm pass) goes back to today's Main chat.
+  await page.getByRole("button", { name: "Jump to a thread or command" }).click();
+  await page.getByRole("dialog", { name: "Jump to" }).getByRole("combobox").fill("now");
+  await page.getByRole("dialog", { name: "Jump to" }).getByRole("option", { name: /^Now/ }).click();
   await expect(page.getByRole("heading", { name: "Main chat · Fri, Oct 23" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Now", exact: true })).toHaveAttribute("aria-current", "page");
   expect(sends).toBe(0);
   await page.screenshot({ path: test.info().outputPath("daily-main-desktop.png") });
 });
@@ -287,11 +288,11 @@ test("before the open the book's lower block is the morning brief, cut short wit
   await page.screenshot({ path: test.info().outputPath("main-chat-brief-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(card).toBeInViewport();
-  // On Now the top row drops its Now button and keeps the view switch, search and New plan on one line.
+  // The top row has no Now button (⌘K's since the calm pass) and keeps the view switch and search on one line.
   await expect(page.getByRole("link", { name: "Now", exact: true })).toBeHidden();
   const middle = async (box: Promise<{ y: number; height: number } | null>) => { const b = await box; return b ? b.y + b.height / 2 : NaN; };
   const desk = await middle(page.getByTestId("desk-views").boundingBox());
-  for (const button of [page.getByRole("button", { name: "Jump to a thread or command" }), page.getByRole("button", { name: "Plan a trade" })])
+  for (const button of [page.getByRole("button", { name: "Jump to a thread or command" })])
     expect(Math.abs(await middle(button.boundingBox()) - desk)).toBeLessThan(12);
   await page.screenshot({ path: test.info().outputPath("main-chat-brief-phone.png") });
   await page.setViewportSize({ width: 1280, height: 720 });
