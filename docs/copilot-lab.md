@@ -562,15 +562,31 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   answers, the palette, the thread list) brings the copilot forward. From 768 to 1179 px the Feed is a drawer on the
   right opened by the top bar's **Feed** button; a phone has it as a view, opened by the Feed chip in the top row (§ Phone). Every place has a key while not
   typing and a ⌘K command (§ Keys and the palette). Nothing was removed: each piece is at most two taps from the desk.
-- **Top bar.** Desk, the **mode switch** (Real | Paper | Replay, § Real, paper and replay; a phone has it at the top
-  of Positions), the market phase with the New York clock of the session read ("Live · 11:48 ET", "Pre-market ·
-  8:52 ET", "Closed 16:00"), SPY / QQQ / VIX's change, **Realized today** (the trades closed today, New York's day,
-  Webull left out: the session read's `realized_today`; absent until it is not $0) and **Open** (every open position's unrealized P&L now,
-  followed or not). Then the **Day button** (§ The day's checklist: "Start the day" before 9:30 on a weekday, "Close
-  the day · N to review" after 16:00, a quiet "Day" in between; amber only while something is still to do; on a phone
-  an icon over one word), **Now** (back to today's Main chat; dropped on a phone while already there), **Threads** (the
-  thread list's drawer; no count on the button, since the strip counts what needs him), Jump to or ask… (⌘K) and Plan a trade (the same words as ⌘K).
-  Then **the account line** while the Robinhood feed is live ([the feed](robinhood-read-feed.md)): one tappable group
+- **The calm pass (2026-11-16).** After the close the owner found the desk "still sooooo much going on": every fact
+  showed in two or three places. The rule since: every fact is shown once, in one place; anything secondary is a hover,
+  a tap, the chart's ⓘ or ⌘K; nothing became copilot-only and nothing left the app; safety stays in view (positions,
+  working orders, the Needs-you strip, a red money-source warning). What moved: the market's line (clock, SPY / QQQ /
+  VIX) is ⌘K's **Today** command and the status line's hover; Realized today and Open are the book heading's hover (and
+  the Today command's hint); the account line sits under the book's heading, only while Robinhood is live; Now and Plan
+  a trade are ⌘K's (N for a plan; the chart, the Chain and the Feed keep their own Plan buttons); health is the status
+  line's (the bar shows a dot only while a money source is behind); the book's sparklines went (the chart has the day);
+  the chart's facts lines, its key and the library's attribution are the header's ⓘ; the corner read-out shows while
+  the pointer is on the chart; an answer has one row under it; suggestion chips show only on an empty conversation
+  (then the thread's ⋯ menu has them as Next steps).
+  On the busy after-close desk the first screen went from 78 controls and 79 pieces of text to 60 and 46 at 1440 px,
+  29 and 21 to 17 and 14 at 375 px (`frontend/e2e/copilot-desk-calm.spec.ts` counts them).
+- **Top bar.** One row: Menu, Desk, the **mode switch** (Real | Paper | Replay, § Real, paper and replay; a phone has it at the top
+  of Positions), in Paper mode the paper book's value, then at the right the health dot only while a money source is
+  behind (§ Data health; a phone keeps its dot), the **Day button** (§ The day's checklist: "Start the day" before 9:30 on a weekday, "Close
+  the day · N to review" after 16:00, a quiet "Day" in between; amber only while something is still to do and the
+  Needs-you strip is not asking, so one amber thing asks at a time; on a phone
+  an icon over one word), **Threads** (the
+  thread list's drawer; no count on the button, since the strip counts what needs him) and Jump to or ask… (⌘K). The
+  market's line ("Closed 16:00 · SPY −1.92% QQQ −2.67% VIX +18.70%", "Live 11:48 ET · …") is ⌘K's **Today** command,
+  whose hint is the day's money (**Open**, every open position's unrealized P&L at the book's last read, and
+  **Realized today**, the trades closed today, New York's day, Webull left out: the session read's `realized_today`;
+  absent until it is not $0), and the status line's hover. Today's Main chat is ⌘K's **Now** (and the breadcrumb's).
+  Under the book's heading, **the account line** while the Robinhood feed is live ([the feed](robinhood-read-feed.md)): one tappable group
   per account (Roth IRA, MCP; Individual only while it holds something), its label and number masked to the last four,
   total value, today's change in dollars and percent, options value, cash, buying power and **open** (its positions'
   unrealized P&L). Today's change is not a figure Robinhood's portfolio read gives: it is each open position's move
@@ -585,16 +601,15 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   book (and its Orders group) to that account's rows, and the book says so under its heading: "Showing Roth IRA only ·
   **Show all**" (Show all clears it), and to a journal row carrying one of its orders; a journal row
   Robinhood does not show belongs to no account and waits until the filter is cleared. Tapping it again shows every
-  row; the line going unavailable clears it too. Not live (signed out, expired, unavailable): one grey **Accounts
-  unavailable**, or **Accounts as of 10:04 AM** when the read is stale, and no money; with the feed switched off, no
+  row; the line going unavailable clears it too. Not live (signed out, expired, unavailable, stale): no account line
+  and no money (the book's heading says "Robinhood stale · as of 4:30 PM"); with the feed switched off, no
   account line at all (on a phone the value block at the top of Positions takes its place, § Phone). Before it, **the day's value line**:
   total account value through the session (the tapped account's alone), change since the first reading, fills as dots,
   breaks as gaps; hover or tap for the high and low ([the feed § The value line](robinhood-read-feed.md#the-value-line)).
-  In Paper mode the account line opens on its REAL mark and the paper book's value follows it with its PAPER mark.
 - **Status line** (from 768 px; a phone has its tab bar there): one thin row along the desk's bottom, under the
   cockpit and Replay alike, so it never covers them. The mode's mark and whose book ("Real · Roth IRA ••8267", "Paper ·
-  real book unchanged", "Replay · real and paper books unchanged"), how fresh prices are, then every source behind the
-  desk (§ Data health).
+  real book unchanged", "Replay · real and paper books unchanged"), then only what is not fine, in words (§ Data
+  health); with nothing wrong, "All live" or after the close "Market closed · all fine". A tap opens every source.
 - **Needs you** (`NeedsStrip`), **the Needs-you strip**. Only what needs a decision now, in amber; most of the day
   there is none and the strip is absent. Nothing in it is dismissed and there is no Seen: the strip shows the single
   top item with its own answers, and **+N more** opens every other item at once, each with its own answers. The rules
@@ -650,7 +665,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   than atop the centre: it takes the same height from the chart either way, but here it is about twice as wide and,
   on a phone, first on the screen.
 - **Left: the book** (`Book`). One dense row per open position the owner follows: ticker, contract, unrealized P&L in
-  dollars and percent, a sparkline of the underlying today, the bar placing it between the plan's invalidation (left)
+  dollars and percent (no sparkline since the calm pass: the chart has the day), the bar placing it between the plan's invalidation (left)
   and entry (the tick) (nothing without both: no bar, no plan), the distance to the stop ("4.3% to stop"), days to
   expiry on every row and at most one tag (this year's expiry drops the year: "11/14 105C"). **The book's tag** says
   what is true now, and only when it tells him something. The backend's state, first match wins
@@ -660,13 +675,17 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   Giving back, else **Expires today** for an option on its last day (in place of its days left), else On plan; a
   position with no plan shows no tag (its missing bar and the day report's "Open without a plan" line say so). A
   position under its entry is never Giving back, however recently the alert fired. While the Robinhood feed is live,
-  "in profit" is Robinhood's P&L. The row's facts wrap onto a second line rather than run under the sparkline or
-  the P&L, at any width. These come from each position row's `book` (`copilot_desk._book`). Selecting a row shows it in the centre at once and, where the copilot sits beside it, opens
+  "in profit" is Robinhood's P&L. The row's facts wrap onto a second line rather than run under the P&L, at any
+  width. Its pen (a note) and eye (Not following) show on the row's hover or keyboard focus with a mouse; a touch
+  screen always shows them. These come from each position row's `book` (`copilot_desk._book`). Selecting a row shows it in the centre at once and, where the copilot sits beside it, opens
   its conversation (its own, else the ticker's newest open one, else its link; a position whose link leaves the desk
   opens the symbol's desk view). The desk never reloads for it: a symbol's desk view opens in place (see *The address*
   below), so the book, the top bar, the strip and the centre keep their data. Each row's eye sets its ticker to **Not following**; those sit behind "N not followed
-  ▾" at the bottom, each with Show again. **At risk now** (see Exposure) sits under the book's heading, a safety line
-  that never folds.
+  ▾" at the bottom, each with Show again. **The heading** is one line: "Your book · 8 · at risk $1,969" with its
+  REAL mark. The at-risk figure (see Exposure) never folds; its full line ("At risk now: $1,969 in 5 options · usual
+  day $1,068") is its hover, and Open and Realized today are the heading's hover (Open adds "(prices behind)" while a
+  price in it is no longer live, as that row is greyed). "Robinhood stale · as of 4:30 PM"
+  (red, as the status line says it) shows under it only while Robinhood is behind; live, a small ↻ reads it again.
 
   **The left column, top to bottom** (since 2026-11-16, money and safety first): the book (real positions and working
   orders, At risk now under its heading); **Watching**; the time of day's block (below: the morning brief, Since you
@@ -724,10 +743,15 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   thread; a position only Robinhood shows (the fill email has not arrived) is a `robinhood:` row tagged **New · not in
   the journal yet** with no plan; a journal position Robinhood does not show stays as the journal has it, tagged **Not
   on Robinhood** (only when every account's positions read). Options come first; stocks with no plan wait behind
-  "N stock positions ▾". A quiet line beside the heading says **live from Robinhood · as of HH:MM** with a bordered
-  **↻ Read again** after it, so it reads as the button it is (tap: read again, `POST /copilot/desk/robinhood/refresh`,
-  no input) or, signed out, expired or stale, says so; then the book is exactly
-  the journal's. Off, nothing changes and no line shows. Not followed tickers stay hidden. Display only: nothing is
+  "N stock positions ▾". Live, a small **↻** at the heading's end reads Robinhood again (its hover: "Live from
+  Robinhood · as of HH:MM · read again"; `POST /copilot/desk/robinhood/refresh`, no input); signed out, expired,
+  unavailable or stale, one line under the heading says so ("Robinhood stale · as of 4:30 PM"); then the book is
+  exactly the journal's. The line and the status line come from one state: Robinhood is behind when the book's read
+  or the health read says so (`DeskHealth.tsx` `reportBookLive`; a read whose join with the journal failed counts as
+  unavailable). When the book's read was live but the health read says behind (a newer read, or only the
+  order-history pass), the line says the status line's own words ("Robinhood behind since 16:30") and the ↻ stays. On 2026-11-16 they disagreed: the book's read
+  started Robinhood's refresh and said stale, the health read eight seconds later saw the refresh done and said live,
+  and the book kept "stale" until its next minute. Off, nothing changes and no line shows. Not followed tickers stay hidden. Display only: nothing is
   written to the journal. The copilot sees the same snapshot's numbers (§ Owner context), never a Robinhood tool.
   With the order-history pass on (`ROBINHOOD_FILLS_ENABLED` `shadow` or `true`), working orders and today's fills show
   on their book rows (`book.orders`) or, with no followed row, in a small **Orders** group (`robinhood.orders`); see
@@ -770,12 +794,17 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   fills, today's pings and Radar hits and a time stop still ahead, on 2m, 15m or 1D, with studies (VWAP, EMAs, SMAs,
   volume), his Charts levels and drawings (with a pencil to draw), the symbol's alerts and a level menu to act from
   the chart. Above the candles sits **one header row** (`components/copilot/DeskChartHead.tsx`, since 2026-11-16): the ticker, its last
-  price and today's change, the held contract (it gives way first when the column is narrow), the Stock / Contract
+  price and today's change (the figure alone; its basis is its hover), the held contract (from 1536 px only: the book
+  row and the Position panel name it), the Stock / Contract
   switch when it applies, the timeframes, then **Studies · N** (a menu of the study toggles), the bell (the symbol's
-  alerts, with the count), the pencil and **More** (**Replay a past day**, **Tape** (below), **Open in Charts →**,
-  **Reset**). Under it one quiet line that never wraps: the plan's lines, a Scanner row's guides, a time stop, a
-  report, the change's basis, the reading's facts and their as-of. On a phone the ticker and its price sit over the
-  controls, the studies and the pencil wait in More, and the quiet line moves under the chart, so with a held
+  alerts, with the count), the pencil, **⋯** (More: **Replay a past day**, **Tape** (below), **Open in Charts →**,
+  **Reset**) and **ⓘ**. The ticker and its price never shrink and never paint over the timeframes (they did on
+  2026-11-16); `copilot-desk-calm.spec.ts` checks it at 1440 and 1280 px. The **ⓘ** holds what used to be the quiet
+  lines under the header: the plan's lines (or "no plan lines saved"), a Scanner row's guides, a time stop, the next
+  report, the change's basis, the reading's facts and their as-of; then the chart's key (unless it is in view) and the
+  library's attribution (TradingView's link and notice, which the licence asks for on the page; the logo over the
+  candles is off). The default view is the candles. On a phone the ticker and its price sit over the
+  controls and the studies and the pencil wait in More, so with a held
   position selected the first candle starts inside the first screen (the selected book row above it drops its
   standing words, track and sparkline on that view; its P&L, tags, notes and Close / Roll buttons stay, and the full
   standing follows the chart).
@@ -1115,23 +1144,27 @@ The cockpit's panes in detail:
     book's change today with its own as-of. Studies are thin, faded and outside the price scale's fit, in the
     workspace's colours (EMA 21 takes its EMA 20's, the SMAs its EMA 50's and 200's); the plan's lines are two
     pixels and stay the boldest thing after price. The header's **Studies · N** menu (on a phone, in More) has one
-    toggle per study with its value; the values at the crosshair (else on the last candle) are also in the
+    toggle per study with its value; while the pointer is on the chart (the crosshair) the values there are also in the
     **read-out** over the chart's top-left corner, under the headline dots: the candle's time and OHLC (pre-market or
-    after hours said), then each study shown with its value, and a **PAPER fills shown** chip whenever paper marks are
+    after hours said), then each study shown with its value (without the pointer it is gone: the header has the price).
+    A **PAPER fills shown** chip sits there whenever paper marks are
     drawn. It never takes the pointer, so values changing never move the chart. The choices are kept per timeframe in this browser
     (`desk.chart.studies.v1`, localStorage), all on at first. `backend/tests/test_desk_chart_studies.py` holds the
     values against the workspace's for the same candles (VWAP exactly; EMA 9 and 21 within half a cent from the first
     15m candle shown; EMA 21 and SMA 50/200 against `indicators.py`'s pandas forms). One difference with Charts:
     the workspace's today panel starts its EMAs at today's first candle, so its EMAs for the first hour or so of
     today differ from the desk's warmed ones; its completed sessions agree.
-  - **The reading**: the newest price and its change in the header row beside the symbol; on the quiet line under
-    it, the change's basis (against the previous close, or the book's change today with its time when the read has
+  - **The reading**: the newest price and its change in the header row beside the symbol; in the header's ⓘ,
+    the change's basis (against the previous close, or the book's change today with its time when the read has
     no previous close), its distance from VWAP and from the plan's invalidation when there is one, and volume against
     usual for the time of day, with the as-of (and VWAP's and RVol's own time when they are the regular session's and
     the price is after hours). A part with nothing behind it is left out. The tiles below are unchanged (none repeats
     a figure the line shows).
-  - **The legend** under the chart keys every kind of mark drawn: your fills, **P** paper and **M** the momentum
-    paper book whenever they are drawn (any ticker), pings, Radar, TradingView.
+  - **The legend** keys every kind of mark drawn: your fills, **P** paper and **M** the momentum
+    paper book whenever they are drawn (any ticker), pings, Radar, TradingView. It sits under the chart only while
+    paper or momentum marks are drawn or the desk is in Paper mode; otherwise it is the ⓘ's **Key**.
+  - **Earnings and macro chips** on the date axis open their card on hover, a tap, or keyboard focus; a chip that keeps
+    the focus after a click (or gets it back when the window does) does not reopen it, and a tap elsewhere closes it.
   - **An empty timeframe** says so in words over the chart ("No 2-minute candles yet today", "Market closed · no
     2-minute candles today" on a weekend, "No 15-minute candles") with the read's reason, and offers the next
     timeframe (**Show 15m: earlier sessions**, **Show 1D: the last few months**). It sits above the library's
@@ -1491,9 +1524,10 @@ Read-only, no model call; a failed read leaves the lines out (`setup`
 unavailable). This is the app's half of the October 29, 2026 opening review;
 the Check service's pre-trade check does not see it.
 
-**The top bar's day** (`DeskStatus` in `SessionTape.tsx`, `DayPnl` in `Cockpit.tsx`): **Live** (green dot) with the
-New York clock in the regular session, **Pre-market** with the clock, **Closed 16:00** (the calendar's close) after it,
-or **Market closed**; SPY, QQQ and VIX's change; Realized today and Open. The phase actions are ⌘K commands (Jump to or ask… on
+**The day in words** (`marketWords` in `SessionTape.tsx`, `dayMoneyWords` in `Cockpit.tsx`; off the top bar since the
+calm pass): **Live** with the New York clock in the regular session, **Pre-market** with the clock, **Closed 16:00**
+(the calendar's close) after it, or **Market closed**; SPY, QQQ and VIX's change. ⌘K's **Today** command says it with
+Open and Realized today as its hint; the status line's hover says it too. The phase actions are ⌘K commands (Jump to or ask… on
 a phone) and steps of the Day button's checklist (below): **Arm today's plans** and **Prep the day** before 9:30 on a
 weekday, and **Close the day** after 16:00 (also one quiet link under the day report), which walks each thread's close
 question (see Close of day).
@@ -1616,8 +1650,8 @@ width; it opens the labelled menu (every page, sync, the plan streak), whose
 **Keep the sidebar open** shows the full sidebar instead, remembered in this
 browser with the same key as Charts' expanded rail (its Collapse folds it
 back). A phone keeps its tab bar. Every icon in the Charts rail names itself
-on hover or focus (`NavHint`), the sync dot included. Plan a trade is outlined, not the bar's loudest button; with N and
-the Jump entry it is the one way to Plan a trade from the desk. The read-only note sits under the message box.
+on hover or focus (`NavHint`), the sync dot included. Plan a trade is not on the bar since the calm pass: N and ⌘K
+start one, and the chart's level menu, the Chain, the Feed and the Position panel keep their own Plan buttons. The read-only note sits under the message box.
 
 **The desk is home.** While the lab is on, the desk takes the Today screen's
 place: it is first in the menu and the phone's first tab ("Desk",
@@ -2089,7 +2123,9 @@ The copilot does not see folds or counts (no tool change).
 
 ### Data health
 
-One dot at the left of the desk's buttons says whether every source behind the desk is live, so a quiet desk on a bad
+Health is said once (since the calm pass): from 768 px the status line along the bottom says it, and the dot at the
+left of the desk's buttons shows only while a money source is behind (red, named); a phone has no status line, so its
+dot always shows, as below. One dot says whether every source behind the desk is live, so a quiet desk on a bad
 morning can be told from a dead feed. A green dot alone when every running source is live ("All live" is its name and
 tooltip); red naming it when a source that leaves positions, fills or prices wrong is stale, down or low (the `MONEY`
 set: Robinhood, Prices, Fill emails; "Robinhood down", or "Robinhood + 1 behind" when others are behind too, the money
@@ -2103,11 +2139,15 @@ as the dot shows them; a tap on a source says what it affects and, where one exi
 already in the app (Gmail's Reconnect; the Robinhood sign-in steps in docs/robinhood-read-feed.md). No new fix flow. It
 reads again a few seconds after the desk opens or comes back into view, once the desk's own first reads have landed.
 
-From 768 px the **status line** along the desk's bottom (`DeskStatusLine` in `DeskHealth.tsx`) shows the same rows: the
-mode's mark and whose book, how fresh prices are (the newest live price's time in the session, else what the Prices
-row says: "market closed", its last good time), then each source as a dot and its name. A source behind is in words
-and comes first: red when it leaves positions, fills or prices wrong (Robinhood, Prices, Fill emails: "Robinhood
-behind since 10:31"), amber for the rest ("Chatter behind since 9:58"). A tap opens the same list above it. The dot
+From 768 px the **status line** along the desk's bottom (`DeskStatusLine` in `DeskHealth.tsx`) shows the mode's mark
+and whose book, then only what is not fine, in words: a source behind, money first, red when it leaves positions,
+fills or prices wrong (Robinhood, Prices, Fill emails: "Robinhood behind since 10:31"), amber for the rest ("Self-check
+down since 09:31"); a source that cannot be told, grey ("Robinhood unknown"); prices that stopped ticking in the
+session ("Prices 10:31:05", amber). With nothing wrong it says so once: "All live", or "Market closed · all fine" when
+the Prices row is closed. Its hover is the market's line; a tap opens the same list above it, every source.
+**Robinhood is one state** for the book and for health: the book reports its own read's Robinhood state
+(`reportBookLive`), and the Robinhood row is behind when either read says so ("The book says stale · as of 16:30"),
+so the book's "Robinhood stale" line and the status line never disagree. The dot
 and the line share one read (`useDeskHealth`, the `reportLevel2` store pattern): the first to mount starts it, the last
 to go stops it, and the line asks for no price of its own (`useHeldTicks` reads the desk's live prices as they arrive).
 A phone has no status line; its dot stays its health view. Proof: `frontend/e2e/copilot-desk-modes.spec.ts`.
@@ -4853,7 +4893,10 @@ stale save from another window is refused (409). The browser remembers only
 which investigation was open. No follow-up, plan, decision, memory or
 monitoring is created or linked: a saved card is only a card.
 
-Under each finished answer the desk shows two quiet buttons, Helped and Didn't.
+Under each finished answer the desk shows one row: Helped and Didn't as two small icons (named on hover and for a
+screen reader) and, under the last answer, **Research deeper** as a text link. The desk's suggestion chips show only
+on an empty conversation; after the first answer the same steps (Why is it moving?, What changed since I looked?, What
+does my plan say?, Size it, More) are the thread's ⋯ menu's **Next steps**, beside Close with a lesson.
 A tap chooses, the other switches, the chosen one clears. The saved message
 carries the optional `rating` (`helped` or `didnt`) and `metrics`: that turn's
 `first_text_ms`, `total_ms`, `rounds`, `model`, `backend`, tool names and error

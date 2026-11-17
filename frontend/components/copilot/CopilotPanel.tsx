@@ -8,7 +8,7 @@ import {
 } from "@/lib/copilot";
 import Link from "next/link";
 import { chartDraftThread, draftKey, readDraft, rememberChartDraft, storeDraft, type CopilotDraft } from "@/lib/copilotDraft";
-import { Eye, ImagePlus, Loader2, MoreHorizontal, Plus, Reply, X } from "lucide-react";
+import { Eye, ImagePlus, Loader2, MoreHorizontal, Plus, Reply, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import MarkPlanDone from "@/components/copilot/MarkPlanDone";
 import { useAppAccess } from "@/components/AccessProvider";
 import ExitLessons from "@/components/copilot/ExitLessons";
@@ -201,15 +201,26 @@ function Answer({ text, onPushBack }: { text: string; onPushBack?: (line: string
 /** What the answer read, folded into one line. The line still says what was unavailable, stale, partial, simulated or a
  * replay; opening it lists each source and the turn's model, timings and cost. */
 /** One-tap verdict under a finished answer: tap to choose, tap the other to switch, tap the chosen one to clear. */
-function RateAnswer({ rating, onRate, ask }: { rating?: Rating; onRate: (next: Rating | null) => void; ask?: boolean }) {
-  const button = (value: Rating, label: string) => (
+function RateAnswer({ rating, onRate, ask, small = false, children }: { rating?: Rating; onRate: (next: Rating | null) => void; ask?: boolean;
+  /** The desk: two small icon buttons (their names stay for a screen reader and on hover) and ``children`` beside them. */
+  small?: boolean; children?: ReactNode }) {
+  const button = (value: Rating, label: string) => small ? (
+    <button type="button" aria-pressed={rating === value} aria-label={label} title={label === "Helped" ? "Helped" : "Didn't help"} onClick={() => onRate(rating === value ? null : value)}
+      className={cn("inline-flex min-h-11 min-w-11 items-center justify-center rounded sm:min-h-7 sm:min-w-7",
+        rating === value ? "bg-secondary text-foreground" : "text-muted-foreground/70 hover:bg-secondary hover:text-foreground")}>
+      {value === "helped" ? <ThumbsUp size={13} aria-hidden /> : <ThumbsDown size={13} aria-hidden />}
+    </button>
+  ) : (
     <button type="button" aria-pressed={rating === value} onClick={() => onRate(rating === value ? null : value)}
       className={`min-h-11 rounded border px-2 py-0.5 text-xs sm:min-h-0 sm:px-3 sm:py-1 sm:text-sm ${rating === value ? "border-foreground/40 bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>
   );
   return (
-    <div role="group" aria-label="Rate this answer" className="mt-1 flex items-center gap-1.5">
-      {ask && rating === undefined && <span aria-hidden className="mr-1 text-xs text-muted-foreground">Did this help?</span>}
-      {button("helped", "Helped")}{button("didnt", "Didn't")}
+    <div className={cn("mt-1 flex flex-wrap items-center", small ? "gap-x-1 gap-y-1" : "gap-1.5")}>
+      <div role="group" aria-label="Rate this answer" className={cn("flex items-center", small ? "gap-0.5" : "gap-1.5")}>
+        {!small && ask && rating === undefined && <span aria-hidden className="mr-1 text-xs text-muted-foreground">Did this help?</span>}
+        {button("helped", "Helped")}{button("didnt", "Didn't")}
+      </div>
+      {children}
     </div>
   );
 }
@@ -1298,8 +1309,12 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       {saveState.state === "saving" ? "Saving…" : saveState.state === "saved" ? "Saved" : saveState.message}
     </span>
   );
-  const research = current && <ResearchDeeper key={`research-${current.id}`} investigationId={current.id} symbol={symbol} topic={topic}
+  const research = current && <ResearchDeeper key={`research-${current.id}`} investigationId={current.id} symbol={symbol} topic={topic} link={!!desk}
     onFinished={refreshRecent} onOpenResult={id => void resume(id)} onDiscuss={id => void discuss(id)} />;
+  // The desk's answer row: the last answer that shows its rating carries Research deeper.
+  const rated = (m: (typeof messages)[number], i: number) => m.role === "assistant" && !!m.content && !m.plan_context && (!current?.main_day || i < current.message_count)
+    && !(busy && i === messages.length - 1);
+  const lastRated = messages.reduce((last, m, i) => rated(m, i) ? i : last, -1);
   const messageBox = (
     <textarea ref={box} value={draft} onChange={e => { edits.current++; typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={small ? 1 : 3} wrap={small ? "off" : undefined} disabled={!enabled || openingMain || current?.main_at_capacity}
       onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft); } }}
@@ -1334,6 +1349,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const moreReady = !busy && lastMessage?.role === "assistant" && !!lastMessage.content.trim();
   // The cockpit's three asks lead, each one turn in this conversation about its symbol (or across everything).
   const about = symbol || null;
+  // As chips only on an empty conversation (the calm pass); once there is an answer they wait in the thread's ⋯ menu
+  // (Next steps), where Close with a lesson already lives.
   const offered: (Suggestion | false | null | undefined | "")[] = !desk || !enabled ? [] : [
     { label: "Why is it moving?", title: "One copilot turn: what is moving the price today, from read-only evidence",
       run: () => void send(about ? `Why is ${about} moving today?` : "Why is the market moving today?") },
@@ -1351,7 +1368,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       run: () => { setMenu(true); window.setTimeout(() => lesson.current?.focus(), 0); } },
   ];
   // The three asks, then at most two of the thread's own next steps (the thread menu keeps Close with a lesson).
-  const suggestions = offered.filter((item): item is Suggestion => !!item).slice(0, 5);
+  const steps = offered.filter((item): item is Suggestion => !!item).slice(0, 5);
+  const suggestions = messages.length > 0 ? [] : steps;
+  const nextSteps = messages.length > 0 ? steps.filter(item => item.label !== "Close with a lesson") : [];
   const handoffPending = busy || attaching?.state === "busy" || saveState?.state === "saving" || (!current && messages.length > 0);
   return (
     <div className={panel ? "space-y-2 p-2 text-sm" : "space-y-3"} ref={root} data-testid={panel ? "copilot-panel" : undefined}>
@@ -1413,6 +1432,14 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
                     </div>
                     {desk?.planDone && (
                       <MarkPlanDone investigationId={current.id} symbol={desk.planDone.symbol} onDone={() => { setMenu(false); desk.planDone?.done(); }} />
+                    )}
+                    {nextSteps.length > 0 && (
+                      <div role="group" aria-label="Next steps" className="flex flex-wrap gap-1.5 border-t pt-2">
+                        {nextSteps.map(item => (
+                          <button key={item.label} type="button" disabled={busy} title={item.title} onClick={() => { setMenu(false); item.run(); }}
+                            className="min-h-11 rounded-full border px-2.5 text-muted-foreground hover:text-foreground disabled:opacity-40 sm:min-h-7">{item.label}</button>
+                        ))}
+                      </div>
                     )}
                   </div>
                 )}
@@ -1574,7 +1601,10 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
                 onOutcome={outcome => recordOutcome(proposal.id, outcome)} />
             ))}
             <Sources tools={message.tools ?? []} metrics={message.metrics} />
-            {message.content && !message.plan_context && (!current?.main_day || i < current.message_count) && !(busy && i === messages.length - 1) && <RateAnswer ask={i === messages.length - 1} rating={message.rating} onRate={next => rateAnswer(i, next)} />}
+            {/* On the desk, one row under an answer: the rating as two small icons and, under the last one, Research deeper. */}
+            {message.content && !message.plan_context && (!current?.main_day || i < current.message_count) && !(busy && i === messages.length - 1) && <RateAnswer ask={i === messages.length - 1} rating={message.rating} onRate={next => rateAnswer(i, next)} small={!!desk}>
+              {desk && i === lastRated && research}
+            </RateAnswer>}
           </div>
         ))}
         <div ref={end} />
@@ -1602,7 +1632,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           {attaching?.state === "error" && <span role="alert" className="text-xs text-rose-300">{attaching.message}</span>}
         </div>
       )}
-      {desk && research}
+      {/* No answer to sit under yet (a job queued from an earlier one still shows its status here). */}
+      {desk && lastRated < 0 && research}
       {look && (
         <button type="button" onClick={() => void lookAtChart()} data-testid="copilot-look"
           disabled={!enabled || busy || attaching?.state === "busy" || (!!pageSymbol && symbol !== pageSymbol)}

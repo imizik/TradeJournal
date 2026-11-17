@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { ArrowLeft, Briefcase, CalendarCheck, ChartCandlestick, LayoutGrid, ListChecks, Menu, MessageCircle, MessagesSquare, Moon, PanelLeft, Plus, Search, Sunrise, TableProperties, X } from "lucide-react";
+import { ArrowLeft, Briefcase, CalendarCheck, ChartCandlestick, LayoutGrid, ListChecks, Menu, MessageCircle, MessagesSquare, Moon, PanelLeft, Search, Sunrise, TableProperties, X } from "lucide-react";
 import { openNavMenu, useDeskTabSlot, useFoldedNav } from "@/components/Nav";
 import CheckACall from "@/components/copilot/CheckACall";
 import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
@@ -36,8 +36,8 @@ import DayChecklist from "@/components/copilot/DayChecklist";
 import DeskFeed, { feedQuestion, useDeskFeed, useFeedNew, type FeedItem } from "@/components/copilot/DeskFeed";
 import { useDeskUnusual } from "@/components/copilot/DeskUnusual";
 import { scannerGuides, useDeskScanner, type DeskScannerRow } from "@/components/copilot/DeskScanner";
-import { DeskStatus, useDeskSession } from "@/components/copilot/SessionTape";
-import { Book, CentreChart, DayFacts, DayPnl, ExposureLine, NeedsStrip, SinceYouLooked, positionRows, useSparks } from "@/components/copilot/Cockpit";
+import { marketWords, useDeskSession } from "@/components/copilot/SessionTape";
+import { Book, CentreChart, DayFacts, NeedsStrip, RiskWord, SinceYouLooked, dayMoneyWords, positionRows, useSparks } from "@/components/copilot/Cockpit";
 import type { DeskChartActions, DeskGuide } from "@/components/copilot/DeskChart";
 import MorningBrief from "@/components/copilot/MorningBrief";
 import Watching, { useWatching } from "@/components/copilot/Watching";
@@ -53,9 +53,10 @@ import { WHAT_MATTERS_PROMPT, copilotLabHref, mainChatLabel, type FeedLink, type
 import { useKept } from "@/components/copilot/DeskMemory";
 import { afterClose, answerSymbol, deskLinkIn, deskNeeds, liveOn, refreshRobinhood, type DeskLive, deskSymbolThread, nyDay, readOpened, saveFollow, saveHorizon, saveOpened, threadInUrl, toReview, type DeskCommand, type DeskPlan, type DeskThreads, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
+import type { DeskTicks } from "@/lib/deskTicks";
 import { DeskAccounts, activeAccount, forAccount } from "@/components/copilot/DeskAccounts";
 import { ChainPicker, PhoneOrders, PhoneValue, usePhone } from "@/components/copilot/DeskPhone";
-import DeskHealthDot, { DeskStatusLine } from "@/components/copilot/DeskHealth";
+import DeskHealthDot, { DeskStatusLine, reportBookLive } from "@/components/copilot/DeskHealth";
 import { ModeSwitch, PaperValue, setDeskMode, useDeskMode } from "@/components/copilot/DeskMode";
 import ModeMark, { type Mode } from "@/components/copilot/ModeMark";
 import { DeskUseRoot, Fold, FoldMore, FoldSuggestion, useCountOpen, useDeskUse } from "@/components/copilot/DeskUse";
@@ -76,6 +77,11 @@ const PLAN_HREF = copilotLabHref("", planContext(), { kind: "copilot", ref: null
 const PREP_PROMPT = "Prep the day: what is armed, what news or earnings touch my positions and watches, and what would change a plan before the open?";
 const ARM_PROMPT = "Arm today's plans: for each plan I mean to trade today, check its entry, invalidation and time stop against the pre-market, and propose any alert or time stop still missing for me to confirm.";
 const CLOSE_PROMPT = "Close the day: for each position and plan today, did I follow the plan, and what is the one thing to repeat or change tomorrow?";
+
+/** What opens the Data health list: the top bar's dot when it shows (a money source behind, or a phone), else the status line. */
+const HEALTH_OPENER = '[data-testid="desk-health"], [data-testid="desk-status-line"]';
+/** ⌘K's "Today" says the book's open P&L at its last read (the book's own rows carry the live prices). */
+const NO_TICKS: DeskTicks = { rows: {}, open: false, checked: 0 };
 
 /** Below 1180 px the copilot is a sheet (CopilotLab.module.css); below 768 px the thread list covers the screen. */
 const sheetLayout = () => typeof window !== "undefined" && window.matchMedia("(max-width: 1179px)").matches;
@@ -146,8 +152,8 @@ function typing(target: EventTarget | null) {
 }
 
 /**
- * The Copilot desk, a cockpit (docs/copilot-lab.md § The desk): the top bar (market phase and clock, SPY / QQQ / VIX,
- * the day's P&L), the Needs-you strip (the one most urgent item), then three columns: the book of followed positions
+ * The Copilot desk, a cockpit (docs/copilot-lab.md § The desk): the top bar (one row since the calm pass: the mode
+ * switch and the desk's buttons; the market's line and the day's money are ⌘K's "Today" and hovers), the Needs-you strip (the one most urgent item), then three columns: the book of followed positions
  * with the time of day's block under it (the morning brief, Since you looked, or the day report), the centre (the
  * selected symbol's Chart and tools), and the side: the copilot (today's Main chat or the open thread, its decision,
  * close pass or checklist on top) with the Feed of what the app knows today behind its tab. Selecting a position drives
@@ -209,6 +215,14 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     setRows(next); setLive(feed ?? null); setRowsRead(true); setRowsFresh(true); keepRows({ rows: next, live: feed ?? null });
     if (read) { setPlans(read.plans); setSections(read.sections); if (read.sections?.positions !== "unavailable") setPositionsAt(read.asOf); }
   }, [keepRows]);
+  // The book's Robinhood state is the health read's too (DeskHealth.tsx): the status line and the book say the same.
+  // What the book shows: a read whose join with the journal failed ("ok", not joined) shows as unavailable.
+  const liveState = rowsFresh && live ? (live.state === "ok" && !liveOn(live) ? "unavailable" : live.state) : null;
+  const liveAsOf = rowsFresh ? live?.as_of ?? null : null;
+  useEffect(() => {
+    reportBookLive(on && liveState ? { state: liveState, as_of: liveAsOf } : null);
+    return () => reportBookLive(null);
+  }, [on, liveState, liveAsOf]);
   const [saved, setSaved] = useState<InvestigationSummary[]>([]);
   const [palette, setPalette] = useState(false);
   // Replay (DeskReplay): paper trading on a past day. While it runs the live desk stays mounted but hidden, so leaving
@@ -453,8 +467,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     if (next && JSON.stringify(next) !== JSON.stringify(shownLink.current)) followLink(next); // the address moved
     else if (!params.size && !toNow.current) goNow(false);
   }, [params, followLink, goNow]);
-  // Plan a trade (the desk bar's New plan, N and ⌘K): a new conversation with "Plan a trade: " in the box, unsent.
-  const planTrade = useCallback(() => go(PLAN_HREF), [go]);
+  // Plan a trade (N, ⌘K and the Ticket's empty state): a new conversation with "Plan a trade: " in the box, unsent. Off
+  // the bar since the calm pass, so its use is counted here (the "plan" piece) rather than by a tap on a bar button.
+  const planTrade = useCallback(() => { countTap("plan"); go(PLAN_HREF); }, [go]);
   const [refresh, setRefresh] = useState(0);
   // The copilot's desk action cards: a view card moves the centre (Undo puts it back); a tap that changed a list reads again.
   // A card names the chart, a dock tab or the Grid. "Chart" (and an Undo back to it) closes the Grid and puts a Chain,
@@ -704,7 +719,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     goals: () => reveal([], "goals-set", true, "rules"),
     watchlist: () => reveal(["watching"], "desk-watching"),
     note: () => reveal([], ['[data-desk-book] li[data-selected] [data-testid="desk-note-button"]', '[data-desk-book] [data-testid="desk-note-button"]'], true),
-    health: () => desk.current?.querySelector<HTMLElement>('[data-testid="desk-health"]')?.click(),
+    // The top bar's dot while a money source is behind (and on a phone), else the status line: both open the same list.
+    health: () => desk.current?.querySelector<HTMLElement>(HEALTH_OPENER)?.click(),
     replay: () => openReplay(), redo: () => openReplay(true), day: toggleDay,
   }), [openCentre, showFeed, focusCopilot, focusBook, toggleThreads, goNow, showCopilot, reveal, openReplay, toggleDay]);
   // The desk as a move found it, for the move's Undo: the views a place changes, and which lines and editors were open.
@@ -722,7 +738,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     // A note on a named ticker: that ticker's own book row only, never another position's line.
     else if (place === "note" && symbol) reveal([], ['[data-desk-book] li[data-selected] [data-testid="desk-note-button"]'], true);
     else if (place === "day") { if (!dayShown) toggleDay(); }
-    else if (place === "health") { if (desk.current?.querySelector('[data-testid="desk-health"]')?.getAttribute("aria-expanded") !== "true") placeRun.health(); }
+    else if (place === "health") { if (desk.current?.querySelector(HEALTH_OPENER)?.getAttribute("aria-expanded") !== "true") placeRun.health(); }
     else placeRun[place]();
     return () => {
       const opened = Array.from(desk.current?.querySelectorAll<HTMLElement>('[aria-expanded="true"][data-testid]') ?? []).filter(el => !open.has(el));
@@ -732,6 +748,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     };
   }, [placeRun, dayShown, toggleDay, reveal]);
   useEffect(() => { moveRef.current = moveTo; }, [moveTo]);
+  const marketLine = marketWords(session.data);
+  const moneyLine = dayMoneyWords(rows, NO_TICKS, session.data?.realized_today, rowsFresh);
+  const todayWords = useMemo(() => ({ market: marketLine, money: moneyLine }), [marketLine, moneyLine]);
   const commands = useMemo<PaletteCommand[]>(() => [
     { id: "plan", name: "Plan a trade", hint: "A new plan; you name the symbol. Nothing is sent.", key: "N", run: planTrade },
     { id: "week", name: "Review my week", hint: "Asks the copilot now: planned vs unplanned, follow-through, exits", run: () => actions.ask(WEEK_REVIEW_CONTEXT) },
@@ -749,6 +768,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     { id: "mode-paper", name: "Paper mode", hint: "Paper first: tickets lead with Fill on paper, the paper value beside the real. Nothing is sent.", run: () => pickMode("paper") },
     { id: "mode-real", name: "Real mode", hint: "The desk as your real accounts show it", run: () => pickMode("real") },
     { id: "desk-use", name: "How I use the desk", hint: "What you use most and least; fold away what you don't", run: openUse },
+    // The market's line and the day's money, off the top bar since the calm pass: one fact command (it moves
+    // nothing), after the ones that act, so a typed word such as "close" still leads with Close the day.
+    ...(todayWords.market || todayWords.money ? [{ id: "today", name: `Today${todayWords.market ? `: ${todayWords.market}` : ""}`,
+      hint: todayWords.money ?? "SPY, QQQ and VIX today", run: () => undefined }] : []),
     // A piece he folded away is still one command away: it shows for now, where it lives.
     ...foldedPieces.map(id => ({ id: `fold-${id}`, name: PIECE.get(id)!.label, hint: "Folded · shows it for now", run: () => {
       showNow(id);
@@ -756,7 +779,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       if (area === "Left") showBook(); else if (area === "Centre") { setGrid(false); showCentre(); } else if (area === "Right") showFeed();
       requestAnimationFrame(() => document.querySelector(`[data-use="${id}"]`)?.scrollIntoView({ block: "nearest" }));
     } })),
-  ], [actions, dayPhase, dayKind, placeRun, fill, planTrade, closeDay, showFeed, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre, pickMode]);
+  ], [actions, dayPhase, dayKind, placeRun, fill, planTrade, closeDay, showFeed, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre, pickMode, todayWords]);
 
   // J / K walk the conversations the thread list shows, subthreads included, in its order.
   const [walk, setWalk] = useState<string[]>([]);
@@ -1040,6 +1063,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const unchecked = !on ? null : rowsFailed || sections?.positions === "unavailable" ? "positions"
     : sections?.plans === "unavailable" ? "plans" : session.error ? "today's alerts"
     : session.data?.sections?.alerts_to_answer === "unavailable" ? "today's alerts" : null;
+  // One amber thing at a time: while the strip asks something, the Day button is plain (it keeps its count in words).
+  const dayAmber = dayToDo && needs.length === 0;
   const openNeed = (row: DeskThread) => { setPicked(row.symbol); openRow(row); showCopilot(); };
   // The same words as the copilot's own "Why is it moving?" about that ticker, sent in today's conversation.
   const askWhy = (need: DeskNeed) => actions.ask(`Why is ${need.symbol} moving today?`);
@@ -1101,23 +1126,23 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
             </button>
           </div>
           <div className={styles.barActions}>
-            {/* Is every source behind the desk live: one dot, a list on a tap. */}
-            <div data-use="health" className="contents"><DeskHealthDot /></div>
-            {/* The Day button: the day's routine as one checklist, by the New York clock. A phone keeps an icon and one word. */}
+            {/* Data health, said once: from 768 px the status line along the bottom has it, so the bar shows the dot only
+                while a money source is behind (red); a phone (no status line) keeps the dot as it was. */}
+            <div data-use="health" className="contents"><DeskHealthDot onlyRed={!phone} /></div>
+            {/* The Day button: the day's routine as one checklist, by the New York clock. A phone keeps an icon and one word.
+                One amber thing at a time: while the Needs-you strip asks something, it stays plain (its count in words). */}
             <button type="button" onClick={toggleDay} aria-pressed={dayShown} data-testid="desk-day-button" data-use="day" data-phase={dayPhase ?? "session"}
+              data-amber={dayAmber || undefined}
               title={dayPhase === "pre" ? "Start the day: brief, plans to arm, goals, prep ( D )" : dayPhase === "close" ? "Close the day: your day, to review, paper next to real, rules, goals ( D )" : "The day's checklist ( D )"}
               className={cn("inline-flex min-h-11 min-w-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border px-2 text-xs sm:min-w-11 max-sm:flex-col max-sm:gap-0.5 max-sm:px-1 max-sm:text-[10px] max-sm:leading-none sm:min-h-8 sm:px-2.5",
-                dayToDo ? "border-primary bg-primary font-semibold text-primary-foreground hover:bg-primary/90" : cn("text-muted-foreground hover:text-foreground", dayShown && "bg-secondary"))}>
+                dayAmber ? "border-primary bg-primary font-semibold text-primary-foreground hover:bg-primary/90" : cn("text-muted-foreground hover:text-foreground", dayShown && "bg-secondary"))}>
               {dayPhase === "pre" ? <Sunrise size={14} aria-hidden /> : dayPhase === "close" ? <Moon size={14} aria-hidden /> : <CalendarCheck size={14} aria-hidden />}
               {dayPhase === "pre" ? <><span className="sm:hidden">Start</span><span className="max-sm:hidden">Start the day</span></>
                 : dayPhase === "close" ? <><span className="sm:hidden">Close{dayLeft ? ` · ${dayLeft}` : ""}</span><span className="max-sm:hidden">Close the day{dayLeft ? ` · ${dayLeft} to review` : ""}</span></>
                 : "Day"}
             </button>
-            {/* The desk's front door: today's Main chat in the copilot. */}
-            <Link href="/copilot-lab" aria-current={onNow ? "page" : undefined} title="Back to today: Main chat in the copilot"
-              onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setFeedShown(false); if (!onNow) goNow(true); }}
-              className={cn("inline-flex min-h-11 items-center whitespace-nowrap rounded-md border px-2.5 text-xs sm:min-h-8",
-                onNow ? "bg-secondary font-medium text-foreground max-md:hidden" : "text-muted-foreground hover:text-foreground")}>Now</Link>
+            {/* Now (today's Main chat) and Plan a trade are not on the bar: ⌘K has both (Plan a trade with N), the
+                breadcrumb's Now goes back to today, and Plan a trade sits on the chart, the Chain and the Feed. */}
             {/* Between 768 and 1180 px the Feed is a drawer on the right: this opens it (wider, it is the tab beside the copilot; a phone has its view). */}
             <button type="button" onClick={() => feedShown ? setFeedShown(false) : showFeed()} aria-pressed={feedShown} title="Yours, ideas and the market today ( F )"
               className={cn(styles.feedButton, "min-h-11 items-center gap-1.5 rounded-md border px-2.5 text-xs text-muted-foreground hover:text-foreground sm:min-h-8", feedShown && "bg-secondary")}>
@@ -1133,10 +1158,6 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               {/* A phone keeps the bar short: icons only, as the button's label already says. */}
               <Search size={14} aria-hidden /><span className="hidden sm:inline">Jump to or ask…</span><kbd className={cn(KBD, "hidden md:inline")}>{jumpKey}</kbd>
             </button>
-            <button type="button" onClick={planTrade} data-use="plan" title="A new plan; you name the symbol. Nothing is sent. ( N )"
-              className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">
-              <Plus size={14} aria-hidden /><span className="sr-only sm:not-sr-only">Plan a trade</span>
-            </button>
           </div>
         </div>
       )}
@@ -1151,10 +1172,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         <h1 className={styles.title}><MessagesSquare size={17} aria-hidden />Desk</h1>
         {/* Real, Paper or Replay: a view only (a phone has it at the top of Positions). */}
         {on && <div className={cn("contents", styles.wideOnly)}><ModeSwitch mode={mode} onPick={pickMode} /></div>}
-        {on && <DeskStatus data={session.data} />}
-        {/* A phone has these in the value block at the top of Positions instead. */}
-        {on && <div data-use="pnl" className={cn("contents", styles.wideOnly)}><DayPnl session={session.data} rows={rows} read={rowsFresh} /></div>}
-        {on && <div className={cn("contents", styles.wideOnly)}><Fold id="accounts" compact><DeskAccounts live={rowsFresh ? live : null} rows={rows} active={account} onPick={setAccount} mark={viewMode === "paper"} /></Fold></div>}
+        {/* One row (the calm pass): the market's line (the clock, SPY / QQQ / VIX) and the day's money are not here. The
+            money is the book's (its heading's hover has Open and Realized today, a live account line sits under it); the
+            market's line is ⌘K's "Today" and the status line's hover. */}
         {/* Paper mode: the paper book's value beside the real accounts, each with its mark. */}
         {on && viewMode === "paper" && <div className={cn("contents", styles.wideOnly)}><PaperValue book={paper.book} failed={paper.failed} onOpen={openPaper} className="sm:order-last" /></div>}
         {on && <ScalpShortlistNudge />}
@@ -1211,7 +1231,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
             {/* Money and safety first: his real positions and working orders, with what is at risk now under the heading
                 (never folded). Then Watching, the day's block, his rules and goals, and Practice (paper and replay). */}
             <div data-use="book" className="contents"><Book rows={booked.rows} sparks={sparks} earnings={events} selected={centreSymbol} selectedKey={pickedKey} day={today} read={rowsRead} updating={rowsRead && !rowsFresh} onSelect={select} onFollow={changeFollow}
-              risk={<ExposureLine session={session.data} />}
+              risk={<RiskWord session={session.data} />} realized={session.data?.realized_today ?? null}
+              // The live account line (a phone has it in its value block): each account's figures, a tap narrows the book.
+              accounts={!phone && <div className={cn("min-w-0 px-3 pb-1.5", styles.wideOnly)}><Fold id="accounts" compact><DeskAccounts live={rowsFresh && liveOn(live) ? live : null} rows={rows} active={account} onPick={setAccount} stacked /></Fold></div>}
               filter={account ? { label: live?.accounts?.find(a => a.masked === account)?.label ?? account, onShowAll: () => setAccount(null) } : null}
               live={booked.live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} /></div>
             {/* After 14 days of desk use: one quiet card offering to fold what he never opens. Never folds unasked. */}
@@ -1392,7 +1414,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       </div>
       {/* The status line along the bottom, from 768 px (a phone has its tab bar there): the mode, whose book, how fresh
           prices are and every source behind the desk; a tap opens the Data health list. */}
-      {on && !phone && <DeskStatusLine mark={statusMark} className={styles.statusLine} />}
+      {on && !phone && <div data-use="health" className="contents"><DeskStatusLine mark={statusMark} market={marketWords(session.data)} className={styles.statusLine} /></div>}
       {/* A phone's tab bar is the desk's own: Positions, the ticker's Chart, Chain, Orders and Ask, then the app's More
           (Nav.tsx keeps its slot). Each counts as its view's piece (view.*). */}
       {/* Under the copilot's open sheet (which covers the bar) the desk's tabs wait hidden; More stays. */}

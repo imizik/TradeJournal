@@ -131,7 +131,9 @@ test("the session line shows what is at risk now, and fits a phone", async ({ pa
   await labOn(page);
   await page.route("**/copilot/exposure", (route) => route.fulfill({ json: EXPOSURE }));
   await page.goto("/copilot-lab?view=briefing");
-  await expect(page.getByTestId("exposure-line")).toHaveText("At risk now: $6,400 in 3 options · usual day $2,100");
+  // In the book's heading since the calm pass: the figure, its full line on hover.
+  await expect(page.getByTestId("exposure-line")).toHaveText("· at risk $6,400");
+  await expect(page.getByTestId("exposure-line")).toHaveAttribute("title", "At risk now: $6,400 in 3 options · usual day $2,100");
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/copilot-lab?view=briefing");
   await expect(page.getByTestId("exposure-line")).toBeVisible();

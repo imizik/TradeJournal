@@ -63,10 +63,12 @@ export function tickedAccount(account: DeskLiveAccount, rows: DeskThread[], tick
   };
 }
 
-export function DeskAccounts({ live, rows, active, onPick, mark = false }: {
+export function DeskAccounts({ live, rows, active, onPick, mark = false, stacked = false }: {
   live: DeskLive | null; rows: DeskThread[]; active: string | null; onPick(masked: string | null): void;
   /** The desk's Paper mode: the line opens on its REAL mark, beside the paper book's value. */
   mark?: boolean;
+  /** Under the book's heading (the calm pass): the value line on its own row, the chips under it, scrolling sideways. */
+  stacked?: boolean;
 }) {
   const ticks = useDeskTicks(positionRows(rows).map(r => r.book?.account ? r.book.tick?.quote : null));
   // Off: no account line at all (the book is the journal's, as it always was). Loading: the first read is on its way
@@ -74,7 +76,8 @@ export function DeskAccounts({ live, rows, active, onPick, mark = false }: {
   if (!live || live.state === "off") return null;
   // The day's value line sits first (outside the swiping row, so its detail is not clipped); it follows the account tap.
   const line = <>{mark && <ModeMark mode="real" className="self-center" />}<DeskValueLine line={live.day_line} active={active} /></>;
-  const wrap = "flex min-w-0 max-w-full items-center gap-1.5 max-sm:basis-full sm:order-last";
+  const wrap = stacked ? "flex w-full min-w-0 flex-col items-stretch gap-1 [&>*]:min-w-0 [&>*]:max-w-full"
+    : "flex min-w-0 max-w-full items-center gap-1.5 max-sm:basis-full sm:order-last";
   if (live.state === "loading") return live.day_line?.series.all ? <div className={wrap}>{line}</div> : null;
   if (!liveOn(live) || !live.accounts?.length) {
     const age = live.state === "stale" && live.as_of
@@ -82,9 +85,8 @@ export function DeskAccounts({ live, rows, active, onPick, mark = false }: {
       : "Accounts unavailable";
     return <div className={wrap}>{line}<span data-testid="desk-accounts" className="min-w-0 truncate whitespace-nowrap text-xs text-muted-foreground">{age}</span></div>;
   }
-  return (
-    <div className={wrap}>
-      {line}
+  const chips = (
+    <>
       {/* The chips filter the book: a funnel and, on a wide screen, the words (a screen reader always has them). */}
       <span data-testid="desk-accounts-hint" title="Tap an account to show only its positions in the book; tap it again to show all"
         className="inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
@@ -121,6 +123,12 @@ export function DeskAccounts({ live, rows, active, onPick, mark = false }: {
           );
         })}
       </div>
+    </>
+  );
+  return (
+    <div className={wrap}>
+      {line}
+      {stacked ? <div className="flex min-w-0 items-center gap-1.5">{chips}</div> : chips}
     </div>
   );
 }

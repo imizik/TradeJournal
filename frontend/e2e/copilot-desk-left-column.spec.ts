@@ -59,7 +59,7 @@ const READS: Record<string, unknown> = {
   "/copilot/paper/replay": REPLAY,
   "/copilot/investigations": { investigations: [] },
   "/copilot/tickets": { plans: [] },
-  "/copilot/exposure": { line: "At risk now: $680 in 1 option · usual day $2,100" },
+  "/copilot/exposure": { state: "ok", at_risk_usd: 680, positions: 1, usual_day_usd: 2100, sample_days: 60, as_of: "2026-11-13T16:00:00Z", line: "At risk now: $680 in 1 option · usual day $2,100" },
   "/copilot/paper": BOOK,
 };
 
@@ -90,7 +90,10 @@ for (const width of [1440, 375]) {
   test(`money and safety first: the book with what is at risk, Watching, the day's block, My rules, then Practice, at ${width}px`, async ({ page }) => {
     await open(page, width);
     const book = page.getByTestId("desk-book");
-    await expect(book.getByTestId("exposure-line")).toHaveText("At risk now: $680 in 1 option · usual day $2,100");
+    // What is at risk, in the book's heading line; the full line (in how many options, against a usual day) on hover.
+    await expect(book.getByTestId("exposure-line")).toHaveText("· at risk $680");
+    await expect(book.getByTestId("exposure-line")).toBeVisible();
+    await expect(book.getByTestId("exposure-line")).toHaveAttribute("title", "At risk now: $680 in 1 option · usual day $2,100");
     await expect(page.getByTestId("since-you-looked")).toBeVisible();
     await expect(page.getByTestId("practice-line-replay")).toBeVisible();
     const order = ["desk-book", "desk-watching", "since-you-looked", "desk-scorecard", "rules-goals", "desk-practice"];

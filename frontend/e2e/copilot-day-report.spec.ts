@@ -100,8 +100,8 @@ for (const width of [1440, 375]) {
       /^Calls checked, last 30 days, since you checked: 14 · 5 up, 7 down, 2 not measured · Today: 4 \(1 up, 1 down, 2 not measured\)/,
       /^Open without a plan · AAPL/, // the one place the desk names it: the book shows no tag and the strip never asks
     ]);
-    // Realized P&L is the top bar's: not repeated in the card.
-    await expect(page.getByTestId("desk-pnl")).toContainText("Realized today +$245");
+    // Realized P&L is the book heading's (its hover since the calm pass): not repeated in the card.
+    await expect(page.getByTestId("desk-book").getByRole("heading", { level: 2 })).toHaveAttribute("title", /Realized today \+\$245/);
     await expect(card).not.toContainText(/realized|\$245/i);
     await expect(card.getByTestId("pings-alert").first()).toBeHidden(); // collapsed by default
     await expect(page.getByTestId("pings-recap")).toHaveCount(0); // the pings are folded in, never shown twice

@@ -34,7 +34,7 @@ when the desk's thread read asks (an open desk, or the evening review's one read
 with its own as-of and, when that is due, starts the refresh on a background thread; the first read after a start,
 with no snapshot yet, shows the journal's rows and "reading Robinhood…". The calls inside a refresh go one after
 another: the read-only client keeps one session and one call count, not built for calls in parallel, and it is not
-changed here. Only the **live from Robinhood · as of** line's tap waits on a read
+changed here. Only the book heading's **↻** (its hover: "Live from Robinhood · as of HH:MM") waits on a read
 (no more than once every 15 seconds). If a read fails the last snapshot stays; after three missed
 refreshes it is **stale** and the book shows the journal again.
 
@@ -160,7 +160,8 @@ These steps are yours to run. Nobody else needs to see the sign-in.
    ROBINHOOD_ACCOUNTS=Roth IRA,MCP
    ```
 
-   Within a minute the desk shows the account line and **live from Robinhood · as of HH:MM**.
+   Within a minute the desk shows the account line under the book's heading, and the heading's **↻** says
+   "Live from Robinhood · as of HH:MM" on hover.
 
 Every five days or so, or whenever the desk says **sign-in expired**, repeat steps 1 and 2. No restart is needed: the
 app picks up the new file.

@@ -169,9 +169,9 @@ test("the desk's tab bar: Positions, Chart, Chain, Orders and Ask, each thumb-si
     const box = (await b.boundingBox())!;
     expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
   }
-  // The top row keeps the health dot, Day, ⌘K and Plan a trade, with the Feed chip; no view switch.
+  // The top row keeps the health dot, Day and ⌘K, with the Feed chip; no view switch. Plan a trade is ⌘K's (the calm pass).
   await expect(page.getByRole("navigation", { name: "Desk views" })).toHaveCount(0);
-  for (const name of [/^Day|^Start|^Close/, /Jump to a thread or command/, /Plan a trade/]) await expect(page.getByRole("button", { name }).first()).toBeVisible();
+  for (const name of [/^Day|^Start|^Close/, /Jump to a thread or command/]) await expect(page.getByRole("button", { name }).first()).toBeVisible();
   await expect(page.getByTestId("desk-view-feed")).toHaveText("Feed");
   await expect(page.getByTestId("desk-view-book")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("desk-value")).toBeVisible();
@@ -255,7 +255,7 @@ test("only the desk swaps the bar: other pages keep theirs, and the laptop keeps
   await expect(bar.getByRole("link", { name: "Charts" })).toBeVisible();
   await expect(bar.getByRole("link", { name: "Plan a trade" })).toBeVisible();
   await expect(bar.getByTestId("desk-view-book")).toHaveCount(0);
-  // The laptop: no value block, no tab bar; the account line stays in the top bar.
+  // The laptop: no value block, no tab bar; the account line sits under the book's heading.
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/copilot-lab");
   await expect(page.getByTestId("desk-book")).toBeVisible();

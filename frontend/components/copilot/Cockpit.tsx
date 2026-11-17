@@ -13,7 +13,8 @@ import { EyeOff, RefreshCw } from "lucide-react";
 import { useKeptState } from "@/components/copilot/DeskMemory";
 import { NotFollowed } from "@/components/copilot/SessionTape";
 import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
-import { getExposure } from "@/lib/copilot";
+import { getExposure, type Exposure } from "@/lib/copilot";
+import { behindWords, useRobinhoodBehind } from "@/components/copilot/DeskHealth";
 import { DESK_CHANGED_EVENT, DESK_TIMEFRAME_KEY } from "@/lib/deskAction";
 import { DeskChart, ReadingLine, type DeskChartActions, type DeskGuide } from "@/components/copilot/DeskChart";
 import { ChartHead, type ChartTools } from "@/components/copilot/DeskChartHead";
@@ -51,25 +52,18 @@ const clockOf = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString
  * of positions the journal does not have yet. */
 export const positionRows = (rows: DeskThread[]) => rows.filter(r => r.key.startsWith("trade:") || r.key.startsWith("robinhood:"));
 
-// ------------------------------------------------------------------------------------------------ top bar
+// ------------------------------------------------------------------------------------------------ the book's heading
 
-/** "Realized today +$120 · Open +$355": the trades closed today (the session read) and every open position's
- * unrealized P&L now (the thread list's read, followed or not: it is the account's money). Nothing until read. */
-export function DayPnl({ session, rows, read }: { session: DeskSession | null; rows: DeskThread[]; read: boolean }) {
-  const ticks = useDeskTicks(positionRows(rows).map(r => r.book?.tick?.quote));
+/** "Open −$726 · Realized today +$539": every open position's unrealized P&L now (live prices folded in) and the trades
+ * closed today. The calm pass took it off the top bar: it is the book heading's hover (and ⌘K's "Today"). Null until read. */
+export function dayMoneyWords(rows: DeskThread[], ticks: ReturnType<typeof useDeskTicks>, realizedToday: number | null | undefined, read: boolean): string | null {
   const ticked = positionRows(rows).map(r => tickedBook(r.book, ticks));
   const open = ticked.flatMap(p => p.usd != null ? [p.usd] : []);
-  const stale = ticked.some(p => p.stale); // a price in it is no longer live: greyed, as its book row is
-  const total = open.reduce((a, b) => a + b, 0);
-  // Nothing closed today (exactly $0) says nothing: the figure shows once a trade closes.
-  const realized = session?.realized_today ? session.realized_today : null;
-  if (realized === null && !(read && open.length)) return null;
-  return (
-    <span data-testid="desk-pnl" className="flex items-baseline gap-3 whitespace-nowrap text-xs">
-      {realized !== null && <span><span className="text-muted-foreground">Realized today </span><span className={cn("tabular-nums", tone(realized))}>{money(realized)}</span></span>}
-      {read && open.length > 0 && <span><span className="text-muted-foreground">Open </span><span data-testid="desk-pnl-open" className={cn("tabular-nums", tone(total), stale && "opacity-50")}>{money(total)}</span></span>}
-    </span>
-  );
+  const behind = ticked.some(p => p.stale) ? " (prices behind)" : ""; // a price in it is no longer live, as its row is greyed
+  // Nothing closed today (exactly $0) says nothing.
+  const realized = realizedToday ? realizedToday : null;
+  const parts = [read && open.length ? `Open ${money(open.reduce((a, b) => a + b, 0))}${behind}` : null, realized !== null ? `Realized today ${money(realized)}` : null];
+  return parts.filter(Boolean).join(" · ") || null;
 }
 
 export const LIVE_WORDS: Record<DeskLive["state"], string> = {
@@ -78,25 +72,40 @@ export const LIVE_WORDS: Record<DeskLive["state"], string> = {
   ok: "live from Robinhood",
 };
 
-/** One quiet line beside the book's heading: where its numbers come from, and as of when (nothing while the feed is off:
- * the book is the journal's, as it always was). Live, it is a button that reads Robinhood again, and looks it: "live from
- * Robinhood · as of 10:42 AM" then a bordered "↻ Read again". */
+/** Where the book's numbers come from, said only when it matters (nothing while the feed is off: the book is the
+ * journal's, as it always was). Behind: one quiet line, "Robinhood stale · as of 4:30 PM", the same state the status
+ * line shows (``useRobinhoodBehind``: either read saying behind is behind). Live: only a small ↻ that reads Robinhood
+ * again, its as-of on hover. */
 function LiveLine({ live, onRefresh }: { live: DeskLive | null; onRefresh?(): void }) {
+  const behind = useRobinhoodBehind();
   if (!live || live.state === "off") return null;
   const on = liveOn(live);
-  const words = live.state === "ok" && !on ? LIVE_WORDS.unavailable : LIVE_WORDS[live.state] ?? LIVE_WORDS.unavailable;
-  const at = live.as_of ? ` · as of ${clockOf(live.as_of)}` : "";
-  const text = `${words}${on || live.state === "stale" ? at : ""}`;
-  return on && onRefresh ? (
-    <button type="button" data-testid="book-live" onClick={onRefresh} title="Read Robinhood again"
-      className="group ml-auto inline-flex min-h-11 items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground sm:min-h-0">
-      {/* A phone keeps the heading on one line: "live · as of 10:04 AM" (the words stay for a screen reader). */}
-      <span>{words === LIVE_WORDS.ok ? <>live<span className="max-sm:sr-only"> from Robinhood</span>{at}</> : text}</span>
-      <span data-testid="book-live-again" className="inline-flex items-center gap-0.5 rounded border px-1.5 py-px text-foreground/80 group-hover:bg-secondary group-hover:text-foreground">
-        <RefreshCw size={10} aria-hidden />Read again
-      </span>
+  const at = (seconds: number | null | undefined) => seconds ? ` · as of ${clockOf(seconds)}` : "";
+  const again = (testId: string) => on && onRefresh ? (
+    <button type="button" data-testid={testId} onClick={onRefresh} aria-label="Read Robinhood again"
+      title={`Live from Robinhood${at(live.as_of)} · read again`}
+      className="ml-auto inline-flex min-h-11 min-w-11 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-6 sm:min-w-6">
+      <RefreshCw size={12} aria-hidden />
     </button>
-  ) : <span data-testid="book-live" className="ml-auto text-[11px] text-muted-foreground">{text}</span>;
+  ) : null;
+  if (on && !behind) return again("book-live");
+  // The book's read was live but the health read says Robinhood is behind (a newer read, or only its orders pass): its
+  // own words, as the status line says them, with the ↻ kept.
+  if (on && behind) return (
+    <>
+      {again("book-live-again")}
+      <span data-testid="book-live" data-state={behind.state} title={`${behind.line} · ${behind.affects}`}
+        className="basis-full text-[11px] text-rose-300/90 max-md:hidden">{behindWords(behind)}</span>
+    </>
+  );
+  if (live.state === "loading") return <span data-testid="book-live" className="ml-auto text-[11px] text-muted-foreground">{LIVE_WORDS.loading}</span>;
+  // Not live: the book's own word ("ok" here is a read whose join with the journal failed: unavailable).
+  const word = ({ stale: "stale", unavailable: "unavailable", signed_out: "signed out", expired: "sign-in expired" } as Record<string, string>)[live.state] ?? "unavailable";
+  return (
+    <span data-testid="book-live" data-state={live.state === "ok" ? "unavailable" : live.state} title="From the journal until Robinhood reads again"
+      // A phone's value block, right above the book, already says it.
+      className="basis-full text-[11px] text-rose-300/90 max-md:hidden">Robinhood {word}{word === "stale" || word === "unavailable" ? at(live.as_of) : ""}</span>
+  );
 }
 
 // ------------------------------------------------------------------------------------------------ the strip
@@ -268,18 +277,22 @@ const left = (expiry: string | null, day: string) => {
 };
 
 /**
- * The book: one dense row per followed open position (ticker, contract, unrealized P&L in dollars and percent, today's
- * sparkline of the underlying, where it sits between invalidation and entry, days to expiry and one state tag).
+ * The book: one dense row per followed open position (ticker, contract, unrealized P&L in dollars and percent, where it
+ * sits between invalidation and entry, days to expiry and one state tag; no sparkline since the calm pass: the chart has it).
  * Selecting a row (``onSelect``) drives the centre and the copilot; its eye stops following the ticker (``onFollow``),
  * and those sit behind "N not followed" at the bottom. The selected row (and its standing line) carry ``data-selected``:
  * a phone's ticker view keeps just that row above the chart (CopilotLab.module.css).
  */
-export function Book({ rows, sparks, selected, selectedKey = null, day, read, updating = false, live = null, earnings = null, risk = null, filter = null, onRefreshLive, onSelect, onFollow, children }: {
+export function Book({ rows, sparks, selected, selectedKey = null, day, read, updating = false, live = null, earnings = null, risk = null, filter = null, accounts = null, realized = null, onRefreshLive, onSelect, onFollow, children }: {
   rows: DeskThread[]; sparks: DeskSparks | null; selected: string | null; selectedKey?: string | null; day: string; read: boolean;
   /** The book narrowed to one account (an account chip): "Showing Roth IRA only · Show all" under the heading. */
   filter?: { label: string; onShowAll(): void } | null;
-  /** The safety line under the heading (``ExposureLine``: what is at risk now). Never folded. */
+  /** The safety figure in the heading (``RiskWord``: what is at risk now, its full line on hover). Never folded. */
   risk?: ReactNode;
+  /** The live account line (``DeskAccounts``), under the heading: only while Robinhood is live. */
+  accounts?: ReactNode;
+  /** Trades closed today (the session read), for the heading's hover beside the open P&L. */
+  realized?: number | null;
   /** Earnings tags (``useDeskEvents``), by symbol. */
   earnings?: DeskEvents | null;
   /** The rows are the desk's last read, kept for its remount, with the fresh read on the way: P&L dimmed, "Updating". */
@@ -308,17 +321,23 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
     setFailed(null);
     onFollow(symbol, following).catch(() => setFailed(`${symbol}: not saved. Try again.`));
   };
+  const allTicks = useDeskTicks(held.map(r => r.book?.tick?.quote));
+  const moneyWords = dayMoneyWords(held, allTicks, realized, read);
   return (
     <section aria-label="Your book" data-testid="desk-book" data-desk-book className="rounded-lg border bg-card">
-      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 px-3 pb-1.5 pt-2.5 max-sm:items-center max-sm:py-0">
-        <h2 className={cn(LABEL, "shrink-0")}>
-          Your book{shown.length > 0 && <> · <span className="tabular-nums">{shown.length}</span> followed</>}
+      {/* One line: "Your book · 8 · at risk $1,969" and its REAL mark; the open P&L and today's realized on hover; where
+          the numbers come from only when Robinhood is behind. */}
+      <div data-testid="book-head" className="flex min-w-0 flex-wrap items-baseline gap-x-2 px-3 pb-1.5 pt-2.5 max-sm:items-center max-sm:py-0">
+        <h2 data-use="pnl" className={cn(LABEL, "shrink-0")} title={moneyWords ? `${moneyWords} · ${shown.length} followed` : undefined}>
+          Your book{shown.length > 0 && <> · <span className="tabular-nums" data-testid="book-count">{shown.length}</span></>}
         </h2>
+        {risk}
         <ModeMark mode="real" />
         <LiveLine live={live} onRefresh={onRefreshLive} />
         <PricesAsOf at={staleSince(ticks, followed.map(r => r.book?.tick?.quote))} />
         {updating && <span role="status" data-testid="book-updating" className="text-[11px] text-muted-foreground">Updating…</span>}
       </div>
+      {accounts}
       {filter && (
         <p data-testid="book-filter" className="flex flex-wrap items-center gap-x-1.5 px-3 pb-1 text-xs text-muted-foreground">
           <span>Showing <span className="font-medium text-foreground">{filter.label}</span> only</span>
@@ -327,13 +346,11 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
             className="inline-flex min-h-11 items-center text-foreground underline underline-offset-2 hover:text-foreground sm:min-h-0">Show all</button>
         </p>
       )}
-      {risk}
       {isLive && <OrdersGroup orders={live?.orders} notes={notes} />}
       {followed.length ? (
         <ul>
           {followed.map(row => {
             const book = row.book;
-            const spark = row.symbol ? sparks?.rows[row.symbol] : undefined;
             const state = bookTag(row, day);
             // "11/14 105C": this year's expiries drop the year, so the contract fits beside its line and figures.
             const full = row.instrument && row.instrument !== row.symbol ? row.instrument : row.title;
@@ -341,14 +358,11 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
             const count = book?.quantity != null ? ` ×${book.quantity.toLocaleString("en-US", { maximumFractionDigits: 4 })}` : "";
             const on = row.key === marked;
             const pnl = tickedBook(book, ticks);
-            const under = tickFor(ticks, row.symbol);
             const now = rowNow(book, ticks);
-            // The line's newest point follows the live price, so the row moves between the minute reads.
-            const points = spark?.points.length && under && !under.stale ? [...spark.points.slice(0, -1), under.last] : spark?.points;
             return (<Fragment key={row.key}>
-              <li data-selected={on || undefined} className={cn("flex items-stretch border-t", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")}>
+              <li data-selected={on || undefined} className={cn("group/row flex items-stretch border-t", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")}>
                 <button type="button" onClick={() => onSelect(row)} aria-pressed={on} aria-label={`${row.symbol} ${full}`}
-                  className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_48px_minmax(60px,auto)] items-center gap-2 py-2 pl-3 text-left hover:bg-secondary">
+                  className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(60px,auto)] items-center gap-2 py-2 pl-3 text-left hover:bg-secondary">
                   <span className="min-w-0 overflow-hidden">
                     <span className="flex items-baseline gap-1.5">
                       <span className="text-sm font-semibold text-foreground">{row.symbol}</span>
@@ -372,14 +386,14 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                     </span>
                     {isLive && <OrderLines orders={book?.orders} />}
                   </span>
-                  <Spark points={points} label={`${row.symbol} today`} />
                   <span data-testid="book-pnl" className={cn("whitespace-nowrap text-right text-sm tabular-nums", tone(pnl.usd), (updating || pnl.stale) && "opacity-50")}>
                     <Flash value={pnl.usd}>{pnl.usd != null ? money(pnl.usd) : row.value?.text ?? "—"}</Flash>
                     {pnl.pct != null && <span className="block text-[11px]">{signedPct(pnl.pct)}</span>}
                   </span>
                 </button>
-                {/* The pen and the eye: side by side on a phone, stacked in one column beside the narrow book. */}
-                <span className="flex shrink-0 sm:flex-col-reverse">
+                {/* The pen and the eye: side by side on a phone, stacked in one column beside the narrow book. With a mouse
+                    they show on the row's hover or focus (the space stays, so nothing moves); a touch screen always has them. */}
+                <span data-testid="book-row-tools" className="flex shrink-0 sm:flex-col-reverse [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:group-focus-within/row:opacity-100">
                   {rowTrade(row) && <NoteButton notes={notes} id={row.key} label="this position" className="sm:flex-1" />}
                   {row.symbol && (
                     <button type="button" onClick={() => follow(row.symbol!, false)} aria-label={`Hide ${row.symbol}: not following`}
@@ -451,30 +465,35 @@ export function SinceYouLooked({ rows, session, read }: { rows: DeskThread[]; se
   );
 }
 
-/** "At risk now: $6,400 in 3 options · usual day $2,100", read once the session is known, then each minute; null when the
- * read fails or no long option is open. */
-function useExposureLine(asOf: string | undefined): string | null {
-  const [line, setLine] = useState<string | null>(null);
+/** The exposure read ("At risk now: $6,400 in 3 options · usual day $2,100" and its figure), once the session is known,
+ * then each minute; null when the read fails or no long option is open. */
+function useExposure(asOf: string | undefined): Exposure | null {
+  const [exposure, setExposure] = useState<Exposure | null>(null);
   const beat = useSyncExternalStore(onDeskBeat, deskBeats, () => 0); // the desk's shared minute, inside its one request
   const known = !!asOf;
   useEffect(() => {
     if (!known) return;
     const controller = new AbortController();
-    getExposure(controller.signal).then(now => setLine(now.line)).catch(() => {
-      if (!controller.signal.aborted) setLine(null); /* the line is extra */
+    getExposure(controller.signal).then(now => setExposure(now.line ? now : null)).catch(() => {
+      if (!controller.signal.aborted) setExposure(null); /* the figure is extra */
     });
     return () => controller.abort();
   }, [known, beat]);
-  return line;
+  return exposure;
 }
 
-/** The book's safety line, under its heading: the open long options' premium at risk now against a usual day ("At risk
- * now: $6,400 in 3 options · usual day $2,100"). Never folded (``dayfacts``). Nothing when the read fails or no long
- * option is open. */
-export function ExposureLine({ session }: { session: DeskSession | null }) {
-  const exposure = useExposureLine(session?.as_of);
-  if (!exposure) return null;
-  return <p data-testid="exposure-line" data-use="dayfacts" className="px-3 pb-1.5 text-xs text-muted-foreground">{exposure}</p>;
+/** The book's safety figure, in its heading: "· at risk $6,400", the full line on hover (in how many options, against a
+ * usual day). Never folded (``dayfacts``). Nothing when the read fails or no long option is open. */
+export function RiskWord({ session }: { session: DeskSession | null }) {
+  const exposure = useExposure(session?.as_of);
+  if (!exposure?.line) return null;
+  const figure = exposure.at_risk_usd != null ? `$${Math.round(exposure.at_risk_usd).toLocaleString("en-US")}` : null;
+  return (
+    <span data-testid="exposure-line" data-use="dayfacts" title={exposure.line} aria-label={exposure.line}
+      className={cn(LABEL, "shrink-0 normal-case tracking-normal")}>
+      {figure ? <>· at risk <span className="tabular-nums text-foreground/90">{figure}</span></> : exposure.line}
+    </span>
+  );
 }
 
 /** One quiet line under the day's block: the practice goal with this week's count. Nothing until it reads. */
@@ -585,11 +604,11 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
   const tapePanel =tape && !folds.hidden("chart.tape") ? <DeskTape symbol={name} option={!!row?.book?.option} /> : null;
   // The one row above the chart: the ticker, its price and change, the held contract, the switch and the timeframes, then
   // the chart's own tools (none on a held option's own chart).
-  const head = (tools: ChartTools | null) => (
+  const head = (tools: ChartTools | null, info: ReactNode = null) => (
     <ChartHead symbol={name} reading={<ReadingLine part="head" symbol={name} data={reading} fallback={fallback} live={live} />}
       held={row ? (row.instrument && row.instrument !== row.symbol ? row.instrument : row.title) : null}
       view={contract.available ? <ChartViewToggle view={contract.view} onPick={contract.pick} /> : null}
-      timeframe={onContract ? null : timeframe} onTimeframe={pickTimeframe} tools={tools} onReplay={onReplay}
+      timeframe={onContract ? null : timeframe} onTimeframe={pickTimeframe} tools={tools} info={info} onReplay={onReplay}
       tape={tape} onTape={setTape} charts={charts} />
   );
   // The Position content: under the chart, or the dock's Position tab.
@@ -624,10 +643,9 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
       {/* The chart part: it stays on top while the dock under it changes. Its time on screen counts as the Chart's. */}
       <div className={cn("space-y-2", chartClassName)} data-use="tab.chart">
       {onContract && <>
-        {head(null)}
+        {/* The stock's reading, with its as-of and basis, behind the header's ⓘ beside the contract's own chart. */}
+        {head(null, <p className="text-[11px] leading-4 tabular-nums text-muted-foreground"><ReadingLine part="facts" symbol={name} data={reading} fallback={fallback} live={live} /></p>)}
         {tapePanel}
-        {/* The stock's reading, with its as-of and basis, beside the contract's own chart. */}
-        <p className="text-[11px] leading-4 tabular-nums text-muted-foreground"><ReadingLine part="facts" symbol={name} data={reading} fallback={fallback} live={live} /></p>
       </>}
       {onContract ? <ContractChart held={held} data={contract.data!} /> : (
         <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0} onRead={setShown} actions={actions} live={live} guides={guides}

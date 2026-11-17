@@ -25,6 +25,7 @@ import { drawableWalls, useDeskWalls, type DeskWalls } from "@/lib/deskWalls";
 import { everyDeskMinute } from "@/lib/deskMinute";
 import { bandAt, bandMarks, bandSteps, useMomentumToday, type BandStep } from "@/lib/deskMomentumBand";
 import type { ChartTools } from "@/components/copilot/DeskChartHead";
+import { useDeskMode } from "@/components/copilot/DeskMode";
 import { getDeskChart, signedPct, type DeskChartAlert, type DeskChartData, type DeskChartNews, type DeskChartMark, type DeskStudySeries, type DeskTimeframe } from "@/lib/desk";
 
 /*
@@ -642,7 +643,8 @@ export function ReadingLine({ symbol, data, fallback = null, live = null, part }
   // The change: its figure in the header, its basis first on the facts line.
   const parts: { key: string; text: string; tone?: number; title?: string; head?: string }[] = [];
   if (change !== null) parts.push({ key: "change", head: signedPct(change, 2), text: `change vs prev close ${price(reading.prev_close!)}`, tone: change, title: `vs the previous close, ${price(reading.prev_close!)}` });
-  else if (fallback) parts.push({ key: "change", head: `${signedPct(fallback.pct, 2)} today`, text: `change today from the book, ${nyWhen(fallback.at)}`, tone: fallback.pct, title: `The book's change today, as of ${nyWhen(fallback.at)}` });
+  // The header keeps the figure alone (its basis is the hover's and the ⓘ's), so the row fits beside the timeframes.
+  else if (fallback) parts.push({ key: "change", head: signedPct(fallback.pct, 2), text: `change today from the book, ${nyWhen(fallback.at)}`, tone: fallback.pct, title: `The book's change today, as of ${nyWhen(fallback.at)}` });
   if (reading.vwap) {
     const away = (last / reading.vwap - 1) * 100;
     parts.push({ key: "vwap", text: `${signedPct(away, 2)} vs VWAP ${price(reading.vwap)}` });
@@ -731,6 +733,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   const [read, setRead] = useState<Read | null>(null);
   const [tick, setTick] = useState(0);
   const [hover, setHover] = useState<Hover | null>(null);
+  const deskMode = useDeskMode(); // Paper mode keeps the chart's key in view
   const [chartApi, setChartApi] = useState<IChartApi | null>(null);  // for the event chips over the chart
   const [choices, setChoices] = useState<Choices>({});
   const [menu, setMenu] = useState<Menu | null>(null);
@@ -765,7 +768,8 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     if (!element) return;
     const chart = createChart(element, {
       autoSize: true,
-      layout: { background: { type: ColorType.Solid, color: "#0e0e10" }, textColor: "#8d8d96", fontSize: 10, panes: { separatorColor: "#27272a", separatorHoverColor: "#3a3a40" } },
+      // No logo over the candles: the header's ⓘ links TradingView and the library's notice on this page, as its licence asks.
+      layout: { background: { type: ColorType.Solid, color: "#0e0e10" }, textColor: "#8d8d96", fontSize: 10, attributionLogo: false, panes: { separatorColor: "#27272a", separatorHoverColor: "#3a3a40" } },
       grid: { vertLines: { color: "#1b1b1e" }, horzLines: { color: "#1b1b1e" } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: "#77777f", labelBackgroundColor: "#3a3a40" }, horzLine: { color: "#77777f", labelBackgroundColor: "#3a3a40" } },
       rightPriceScale: { borderColor: "#27272a", scaleMargins: { top: 0.1, bottom: 0.08 }, entireTextOnly: true },
@@ -1198,7 +1202,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
     alerts: data ? <AlertsButton count={alerts.length} open={alertsOpen} onToggle={() => setAlertsOpen(open => !open)} /> : null,
     draw: <PencilButton on={drawOn} disabled={!data || !draw.usable} count={draw.shapes.length} onToggle={() => drawOn ? stopDrawing() : setDrawOn(true)} />,
     drawing: { on: drawOn, disabled: !data || !draw.usable, toggle: () => drawOn ? stopDrawing() : setDrawOn(true) },
-    reset, ready: !!data, narrow,
+    reset, ready: !!data, narrow, info: null,
   };
   // The read-out over the chart's top-left corner: the candle under the pointer (else the last), each study's value there.
   const values = data ? offered.filter(study => study !== "levels" && study !== "news" && isOn(choices, timeframe, study) && value(study)) : [];
@@ -1206,12 +1210,11 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   const momentumDrawn = allMarks.some(mark => mark.kind === "momentum");
   const kinds = new Set(allMarks.map(mark => mark.kind));
   const nextTimeframe = NEXT_TIMEFRAME[timeframe];
-  // One quiet line: the plan's lines, the guides, a time stop, a report, then the reading's as-of and facts. Above the
-  // chart on a computer, where it wraps rather than hide a part; under it on a phone, one line that scrolls sideways.
+  // The chart's facts: the plan's lines (or "no plan lines saved"), the guides, a time stop, a report, then the reading's
+  // as-of and facts. Since the calm pass they live behind the header's ⓘ, so the default view is the candles.
   const facts = (
-    <div data-testid="desk-chart-facts" className={cn("flex items-center gap-x-3 text-[11px] leading-4 tabular-nums text-muted-foreground",
-      narrow ? "h-4 overflow-x-auto whitespace-nowrap [scrollbar-width:none]" : "min-h-4 flex-wrap")}>
-        <span data-testid="desk-chart-lines" className={cn("flex items-center gap-x-3 empty:hidden", narrow ? "shrink-0" : "min-w-0 flex-wrap")}>
+    <div data-testid="desk-chart-facts" className="flex flex-col gap-y-1 text-[11px] leading-4 tabular-nums text-muted-foreground">
+        <span data-testid="desk-chart-lines" className="flex min-w-0 flex-wrap items-center gap-x-3 empty:hidden">
           {data?.levels.map(level => (
             <span key={level.role} style={{ color: COLOR[level.role] }}>{level.label}{offScale.has(level.role) ? " (off the chart)" : ""}</span>
           ))}
@@ -1220,16 +1223,38 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           {data?.time_stop && <span style={{ color: COLOR.stop }}>Time stop {stopWhen(data.time_stop.at)}</span>}
           {data && earningsHeader(data.events, data.as_of) && <span data-testid="desk-chart-earnings" className="text-sky-200">{earningsHeader(data.events, data.as_of)}</span>}
         </span>
-        {/* A phone scrolls the line sideways; a computer wraps it, so no part is out of view. */}
-        <span className={narrow ? "shrink-0" : "min-w-0"}>{reading}</span>
+        <span className="min-w-0">{reading}</span>
       </div>
+  );
+  // Every kind of mark drawn has its key. Under the chart only while it says something a glance needs: paper or the
+  // momentum book's marks drawn, or the desk in Paper mode; otherwise it waits in the ⓘ.
+  const legend = (
+    <p aria-label="Legend" data-testid="desk-chart-legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <Key color={COLOR.fill} glyph="▲▼">your fills</Key>
+      {paperDrawn && <Key color={COLOR.paper} glyph="■P">paper</Key>}
+      {momentumDrawn && <Key color={COLOR.momentum} glyph="■M">momentum paper book</Key>}
+      <Key color={COLOR.ping} glyph="●">pings</Key>
+      {(id !== "market" || kinds.has("radar")) && <Key color={COLOR.radar} glyph="■">Radar</Key>}
+      {kinds.has("tradingview") && <Key color={COLOR.tradingview} glyph="●">TradingView</Key>}
+    </p>
+  );
+  const legendShown = paperDrawn || momentumDrawn || deskMode === "paper";
+  tools.info = (
+    <>
+      {facts}
+      {!legendShown && <div className="border-t pt-1.5"><p className="pb-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Key</p>{legend}</div>}
+      {/* The library's licence asks for its notice and a link to TradingView on the page; this replaces the chart's logo. */}
+      <p data-testid="desk-chart-attribution" className="border-t pt-1.5 text-[11px] text-muted-foreground">
+        Charts: <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer" className="underline-offset-2 hover:text-foreground hover:underline">TradingView Lightweight Charts™</a>{" "}
+        <a href="/lightweight-charts-NOTICE.txt" className="underline-offset-2 hover:text-foreground hover:underline">notice</a>
+      </p>
+    </>
   );
 
   return (
     <div className="space-y-1.5">
       {head?.(tools)}
       {under}
-      {!narrow && facts}
       {editing && <DrawBar narrow={narrow} tool={tool} selected={selected} canUndo={draw.canUndo} undoName={draw.undoName} second={second}
         onTool={(next) => { setTool(current => current === next ? null : next); setSelected(null); draw.setError(""); }}
         onDelete={() => { if (selected) deleteLine(selected); }} onUndo={() => { setStatus(null); draw.undo(); }} />}
@@ -1271,16 +1296,17 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
         {!unavailable && !switching && <ChartEventMarks chart={chartApi} data={data} />}
         {!unavailable && !switching && data && <ChartNewsMarks chart={chartApi} news={news} symbol={data.symbol} timeframe={data.timeframe}
           onAsk={actions ? (text) => actions.ask(data.symbol, text) : undefined} />}
-        {/* The read-out in the chart's top-left corner, under the headline dots: the candle, the studies' values there, and
-            a chip whenever paper fills are drawn. Never takes the pointer. */}
+        {/* The read-out in the chart's top-left corner, under the headline dots: the candle under the crosshair and the
+            studies' values there, only while the pointer is on the chart (the price is the header's otherwise); and a chip
+            whenever paper fills are drawn. Never takes the pointer. */}
         {!unavailable && !switching && readout && (
           <div data-testid="desk-chart-overlay" className="pointer-events-none absolute left-1.5 top-6 z-[3] max-w-[calc(100%-4.5rem)] text-[11px] leading-4 tabular-nums [text-shadow:0_0_3px_#0e0e10,0_0_2px_#0e0e10]">
-            <p className="truncate text-muted-foreground" data-testid="desk-chart-readout">
+            <p className={cn("truncate text-muted-foreground", !hover?.bar && "invisible")} data-testid="desk-chart-readout">
               {nyWhen(readout.time, daily)} · O {price(readout.open)} H {price(readout.high)} L {price(readout.low)} C <span className="text-foreground">{price(readout.close)}</span>
               {readout.extended && <> · {readout.time < (data?.bars.find(b => !b.extended)?.time ?? Infinity) ? "pre-market" : "after hours"}</>}
             </p>
             {values.length > 0 && (
-              <p data-testid="desk-chart-values" className="truncate">
+              <p data-testid="desk-chart-values" className={cn("truncate", !hover?.bar && "invisible")}>
                 {values.map((study, i) => <span key={study} style={{ color: STUDY[study].color }}>{i ? " · " : ""}{STUDY[study].name} <span className="text-foreground/80">{value(study)}</span></span>)}
               </p>
             )}
@@ -1357,16 +1383,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
           </div>
         )}
       </div>
-      {narrow && facts}
-      {/* Every kind of mark drawn has its key: the paper P and the momentum book's M on any ticker, whenever drawn. */}
-      <p aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <Key color={COLOR.fill} glyph="▲▼">your fills</Key>
-        {paperDrawn && <Key color={COLOR.paper} glyph="■P">paper</Key>}
-        {momentumDrawn && <Key color={COLOR.momentum} glyph="■M">momentum paper book</Key>}
-        <Key color={COLOR.ping} glyph="●">pings</Key>
-        {(id !== "market" || kinds.has("radar")) && <Key color={COLOR.radar} glyph="■">Radar</Key>}
-        {kinds.has("tradingview") && <Key color={COLOR.tradingview} glyph="●">TradingView</Key>}
-      </p>
+      {legendShown && legend}
       {data && (
         <ul aria-label="On the chart" className="sr-only" data-testid="desk-chart-marks">
           {data.levels.map(level => <li key={level.role}>{level.label}</li>)}

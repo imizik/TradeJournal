@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * Is everything behind the desk live? (docs/copilot-lab.md § Data health) One dot in the desk's top bar: green alone
+ * Is everything behind the desk live? (docs/copilot-lab.md § Data health) Said once: from 768 px the status line says
+ * it and the top bar's dot shows only while a money source is behind; a phone keeps the dot. The dot: green alone
  * when every running source is live ("All live" is its name and tooltip), red naming it when a source that moves money
  * (``MONEY``: Robinhood, Prices, Fill emails) is stale, down or low, amber naming any other, grey alone when one cannot
  * be told. A tap opens the list: each source, its state and last good time in plain words; a tap on a source says what
@@ -106,13 +107,50 @@ function subscribeHealth(listener: () => void) {
   };
 }
 
+// --------------------------------------------------------------------------- the book's own Robinhood read
+
+/** What the book's last read said of Robinhood (the thread list's ``robinhood``): its state and as-of. The two reads
+ * land at different moments (the book's read starts Robinhood's refresh; the health read a few seconds later can see
+ * it done), so on 2026-11-16 the status line's Robinhood was green beside a book that said "Robinhood stale". One rule
+ * now: Robinhood is behind when either read says so, and the book's line and the status line both say it. */
+export type BookLive = { state: string; as_of?: number | null } | null;
+let bookLive: BookLive = null;
+const bookListeners = new Set<() => void>();
+export function reportBookLive(next: BookLive) {
+  if (next?.state === bookLive?.state && (next?.as_of ?? null) === (bookLive?.as_of ?? null)) return;
+  bookLive = next;
+  for (const listener of bookListeners) listener();
+}
+const subscribeBook = (listener: () => void) => { bookListeners.add(listener); return () => { bookListeners.delete(listener); }; };
+const BOOK_BEHIND: Record<string, { state: HealthState; word: string }> = {
+  stale: { state: "stale", word: "stale" }, unavailable: { state: "down", word: "unavailable" },
+  signed_out: { state: "down", word: "signed out" }, expired: { state: "down", word: "sign-in expired" },
+};
+/** The health read's Robinhood row, behind as well when the book's read says it is. */
+export function agreeRobinhood(row: HealthRow, book: BookLive): HealthRow {
+  const behind = book ? BOOK_BEHIND[book.state] : undefined;
+  if (!behind || BAD.includes(row.state)) return row;
+  const at = book?.as_of ?? null;
+  return { ...row, state: behind.state, last_at: at, line: `The book says ${behind.word}${at ? ` · as of ${clock(at)}` : ""}` };
+}
+
 /** Every source behind the desk (Level 2, the Tape's own, after prices) and the summary, from the one shared read.
  * After a failed read the last rows are not given at all: an old "Live" is not known to be live now. */
 export function useDeskHealth(): { rows: HealthRow[] | null; failed: boolean; said: ReturnType<typeof summary>; tape: Level2Health } {
   const read = useSyncExternalStore(subscribeHealth, () => health, () => NOT_READ);
   const tape = useSyncExternalStore(subscribeLevel2, () => level2, () => OFF);
-  const rows = read.data && !read.failed ? read.data.sources.flatMap(r => r.id === "prices" ? [r, level2Row(tape)] : [r]) : null;
+  const book = useSyncExternalStore(subscribeBook, () => bookLive, () => null);
+  const rows = read.data && !read.failed ? read.data.sources.flatMap(r => r.id === "prices" ? [r, level2Row(tape)]
+    : r.id === "robinhood" ? [agreeRobinhood(r, book)] : [r]) : null;
   return { rows, failed: read.failed, said: summary(rows, read.failed), tape };
+}
+
+/** Robinhood's row when it is behind (the health read's, or the book's own word), else null: the book's line says the
+ * same thing as the status line. */
+export function useRobinhoodBehind(): HealthRow | null {
+  const { rows } = useDeskHealth();
+  const row = rows?.find(r => r.id === "robinhood");
+  return row && BAD.includes(row.state) ? row : null;
 }
 
 // --------------------------------------------------------------------------- the dot
@@ -139,7 +177,7 @@ export function summary(rows: HealthRow[] | null, failed: boolean): { tone: "ok"
   if (bad.length > 1) return { tone: "amber", text: `${bad.length} sources behind` };
   const unknown = rows.filter(r => r.state === "unknown");
   if (unknown.length) return { tone: "unknown", text: unknown.length === 1 ? `${unknown[0].name} unknown` : `${unknown.length} unknown` };
-  return { tone: "ok", text: rows.some(r => r.state === "live") ? "All live" : "All fine · market closed" };
+  return { tone: "ok", text: rows.some(r => r.state === "live") ? "All live" : "Market closed · all fine" };
 }
 
 /** Open and closed by its button; a tap away closes it, and Escape closes this list only, not the desk's drawer or sheet
@@ -177,10 +215,12 @@ function HealthList({ rows, failed, tape, up = false }: { rows: HealthRow[] | nu
   );
 }
 
-export default function DeskHealthDot() {
+/** ``onlyRed``: from 768 px the status line says health, so the top bar's dot shows only while a money source is behind. */
+export default function DeskHealthDot({ onlyRed = false }: { onlyRed?: boolean }) {
   const { rows, failed, said, tape } = useDeskHealth();
   const { open, setOpen, box } = useHealthOpen();
   const dot = said.tone === "red" ? "bg-rose-500" : said.tone === "amber" ? "bg-amber-400" : said.tone === "ok" ? "bg-emerald-400" : "bg-muted-foreground/50";
+  if (onlyRed && said.tone !== "red") return null;
 
   return (
     <div ref={box} className="relative">
@@ -276,39 +316,55 @@ function pricesWords(ticks: DeskTicks, row: HealthRow | undefined): { text: stri
 
 /**
  * The status line along the desk's bottom, from 768 px (a phone has its tab bar there, and the top bar's dot): the mode's
- * mark with whose book (``mark``), how fresh prices are, then each source as a dot and its name. A source behind is in
- * words, red when it leaves positions, fills or prices wrong ("Robinhood behind since 10:31"), amber for the rest. A tap
- * opens the Data health list. It shares the dot's read and the desk's live prices: it asks for nothing of its own.
+ * mark with whose book (``mark``), then only what is not fine, in words: a source behind, red when it leaves positions,
+ * fills or prices wrong ("Robinhood behind since 10:31"), amber for the rest; one that cannot be told, grey; prices that
+ * stopped ticking in the session. When nothing is wrong it says so once: "All live", or after the close "Market closed ·
+ * all fine". A tap opens the Data health list (every source); ``market`` (the clock and SPY / QQQ / VIX) is its hover.
+ * It shares the dot's read and the desk's live prices: it asks for nothing of its own.
  */
-export function DeskStatusLine({ mark, className }: { mark: ReactNode; className?: string }) {
+export function DeskStatusLine({ mark, market = null, className }: { mark: ReactNode; market?: string | null; className?: string }) {
   const { rows, failed, said, tape } = useDeskHealth();
   const { open, setOpen, box } = useHealthOpen();
   const ticks = useHeldTicks();
-  const prices = pricesWords(ticks, rows?.find(r => r.id === "prices"));
-  // Behind first, so a narrow line never cuts one off.
-  const shown = rows ? [...rows.filter(r => BAD.includes(r.state)), ...rows.filter(r => !BAD.includes(r.state))] : [];
+  const pricesRow = rows?.find(r => r.id === "prices");
+  const prices = pricesWords(ticks, pricesRow);
+  // Not fine: behind first (money before the rest), then any that cannot be told.
+  const bad = rows ? rows.filter(r => BAD.includes(r.state)).sort((a, b) => Number(MONEY.has(b.id)) - Number(MONEY.has(a.id))) : [];
+  const unknown = rows ? rows.filter(r => r.state === "unknown") : [];
+  const late = prices?.late && !bad.some(r => r.id === "prices") ? prices : null;
+  const fine = !!rows && !bad.length && !unknown.length && !late;
   return (
     <div ref={box} className={cn("relative", className)}>
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="dialog" data-testid="desk-status-line" data-tone={said.tone}
-        title="Data health: what feeds the desk"
+        title={`${market ? `${market}\n` : ""}Data health: what feeds the desk`}
         className={cn("flex h-7 w-full min-w-0 items-center gap-3 overflow-hidden whitespace-nowrap px-3.5 text-left text-[11px] text-muted-foreground hover:bg-secondary/60",
           open && "bg-secondary/60")}>
         {mark}
-        {prices && <span data-testid="status-prices" className={cn("shrink-0 tabular-nums", prices.late && "text-amber-300")}>{prices.text}</span>}
         <span aria-hidden className="h-3 w-px shrink-0 bg-border" />
         {failed ? <span className="shrink-0">Health unknown · the next minute asks again</span>
           : !rows ? <span className="shrink-0">Checking sources…</span>
-          : shown.map(row => {
-            const bad = BAD.includes(row.state);
-            const red = bad && MONEY.has(row.id);
-            return (
-              <span key={row.id} data-testid={`status-${row.id}`} data-state={row.state} data-tone={red ? "red" : bad ? "amber" : undefined}
-                className={cn("inline-flex shrink-0 items-center gap-1", red ? "font-medium text-rose-300" : bad && "text-amber-300")}>
-                <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", red ? "bg-rose-500" : DOT[row.state])} />
-                {bad ? behindWords(row) : <>{row.name}<span className="sr-only"> {WORD[row.state]}</span></>}
+          : fine ? <span data-testid="status-fine" className="inline-flex shrink-0 items-center gap-1">
+              <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+              {pricesRow?.state === "closed" ? "Market closed · all fine" : "All live"}
+            </span>
+          : <>
+            {bad.map(row => {
+              const red = MONEY.has(row.id);
+              return (
+                <span key={row.id} data-testid={`status-${row.id}`} data-state={row.state} data-tone={red ? "red" : "amber"}
+                  className={cn("inline-flex shrink-0 items-center gap-1", red ? "font-medium text-rose-300" : "text-amber-300")}>
+                  <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", red ? "bg-rose-500" : DOT[row.state])} />
+                  {behindWords(row)}
+                </span>
+              );
+            })}
+            {late && <span data-testid="status-prices" className="shrink-0 tabular-nums text-amber-300">{late.text}</span>}
+            {unknown.map(row => (
+              <span key={row.id} data-testid={`status-${row.id}`} data-state={row.state} className="inline-flex shrink-0 items-center gap-1">
+                <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/50" />{row.name} unknown
               </span>
-            );
-          })}
+            ))}
+          </>}
       </button>
       {open && <HealthList rows={rows} failed={failed} tape={tape} up />}
     </div>

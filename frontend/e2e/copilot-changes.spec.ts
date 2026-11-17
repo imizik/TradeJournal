@@ -54,7 +54,9 @@ test("a reopened investigation's What changed since I looked? runs one turn with
   const chats = await lab(page);
   await page.getByRole("navigation", { name: "Thread list" }).getByRole("button", { name: /^NBIS, / }).click();
   await expect(page.getByText("Not yet: it lags CRWV.")).toBeVisible();
-  const button = page.getByRole("button", { name: "What changed since I looked?" });
+  // A conversation with answers keeps its next steps in the thread's ⋯ menu (chips are an empty conversation's only).
+  await page.getByRole("button", { name: "Thread actions" }).click();
+  const button = page.getByRole("group", { name: "Next steps" }).getByRole("button", { name: "What changed since I looked?" });
   await expect(button).toBeVisible();
   expect(chats).toEqual([]); // opening costs nothing
   await button.click();

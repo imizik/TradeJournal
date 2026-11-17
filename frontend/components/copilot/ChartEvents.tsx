@@ -107,6 +107,13 @@ export function ChartEventMarks({ chart, data }: { chart: IChartApi | null; data
     bump();
     return () => { scale.unsubscribeVisibleLogicalRangeChange(bump); scale.unsubscribeSizeChange(bump); };
   }, [chart, items]);
+  // A card tapped open closes on a tap anywhere else.
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: PointerEvent) => { if (!(event.target as Element | null)?.closest?.('[data-testid="desk-chart-event"]')) setOpen(null); };
+    document.addEventListener("pointerdown", away);
+    return () => document.removeEventListener("pointerdown", away);
+  }, [open]);
   const placed = useMemo<Placed[]>(() => {
     void version;
     if (!chart || !data) return [];
@@ -124,12 +131,15 @@ export function ChartEventMarks({ chart, data }: { chart: IChartApi | null; data
   const pinned = [placed.find(p => p.pinned && p.kind === "earnings"), placed.find(p => p.pinned && p.kind === "macro")].filter((p): p is Placed => !!p);
   const onAxis = placed.filter(p => p.x !== null && !p.pinned);
   const tip = placed.find(p => p.key === open);
+  // Open only while hovered, tapped open or reached by the keyboard: a chip that keeps the focus after a click (or gets
+  // it back when the window does) never reopens its card over the candles unasked.
+  const keyboard = (el: HTMLElement) => { try { return el.matches(":focus-visible"); } catch { return false; } };
   const chip = (p: Placed, style: CSSProperties, arrow = false) => (
     <button key={p.key} type="button" data-testid="desk-chart-event" data-kind={p.kind} data-date={p.date} data-pinned={arrow ? "true" : "false"}
       aria-label={p.lines.join(" ")} aria-expanded={open === p.key}
       onClick={() => setOpen(o => o === p.key ? null : p.key)}
       onMouseEnter={() => setOpen(p.key)} onMouseLeave={() => setOpen(o => o === p.key ? null : o)}
-      onFocus={() => setOpen(p.key)} onBlur={() => setOpen(o => o === p.key ? null : o)}
+      onFocus={event => { if (keyboard(event.currentTarget)) setOpen(p.key); }} onBlur={() => setOpen(o => o === p.key ? null : o)}
       className={cn("pointer-events-auto absolute z-10 rounded border px-1 text-[10px] leading-4 tabular-nums",
         p.kind === "earnings" && "border-sky-300/60 bg-background/90 text-sky-200",
         p.kind === "last" && "border-sky-300/25 bg-background/80 text-sky-200/60",
