@@ -226,11 +226,16 @@ class OvernightBook:
 
 def read(now: float | None = None) -> dict:
     """The desk's view, from the store alone (no provider call). Off: an empty book that says so."""
+    from app.engine import qqq_paper_coverage
+
     now = time.time() if now is None else now
     on = enabled()
     path = store_path()
     if not path.exists():
-        return summary([], now, on, "flat")
+        return {**summary([], now, on, "flat"), "coverage": None}
     store = Store(path)
     nights = store.nights()
-    return summary(nights, now, on, "holding" if any(n["status"] == "open" for n in nights) else "flat")
+    state = "holding" if any(n["status"] == "open" for n in nights) else "flat"
+    receipts = {(n["day"], ENTRY_MINUTE) for n in nights}
+    coverage = qqq_paper_coverage.report(now, receipts, ((ENTRY_MINUTE, FULL_CLOSE),)) if on else None
+    return {**summary(nights, now, on, state), "coverage": coverage}

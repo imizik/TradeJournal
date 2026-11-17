@@ -437,10 +437,16 @@ class IntradayMomentumBook:
 def read(now: float | None = None) -> dict:
     """The desk's view, from the store alone (no provider call); a missing file reads as an empty book. ``today`` is the
     chart's band and marks (``today_view``)."""
+    from app.engine import qqq_paper_coverage
+
     now = time.time() if now is None else now
     path = store_path()
-    if not path.exists():
-        return {**summary([], [], now, enabled()), "today": None}
-    store = Store(path, seed=None)
     on = enabled()
-    return {**summary(store.trades(), store.checks(), now, on), "today": today_view(store, now, on)}
+    if not path.exists():
+        return {**summary([], [], now, on), "today": None, "coverage": None}
+    store = Store(path, seed=None)
+    checks = store.checks()
+    receipts = {(check["day"], check["minute"]) for check in checks}
+    windows = tuple((minute, minute + LATE_MINUTES) for minute in CHECKS)
+    coverage = qqq_paper_coverage.report(now, receipts, windows) if on else None
+    return {**summary(store.trades(), checks, now, on), "today": today_view(store, now, on), "coverage": coverage}
