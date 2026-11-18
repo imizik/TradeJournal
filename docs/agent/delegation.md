@@ -27,6 +27,9 @@ when substantive work remains.
 Before starting a worker, use the cheapest one whose output a check can verify.
 The owner chose (2026-11-17) to let Google-plan Hydrogen work in this repo on
 the same footing as Codex; briefs still never paste secrets or real data.
+Both builder and reader always run with the Antigravity sandbox on and no
+approval bypass: the builder edits only its own throwaway worktree with shell
+commands refused, and the reader runs in plan mode.
 
 - **Hydrogen builder** (Google plan, its own throwaway worktree): it runs its
   own lint/typecheck/test loop, then the owner reads the full patch, reruns the
