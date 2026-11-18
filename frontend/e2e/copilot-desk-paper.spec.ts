@@ -54,6 +54,14 @@ const HELD = { key: "trade:33333333-3333-4333-8333-333333333333", group: "watch"
   radar_event_id: null, path: null, changed_at: null,
   book: { usd: 220, pct: 35.5, expiry: "2026-11-20", days_held: 1, track: null, state: "on_plan", planned: true, quantity: 2, mark: 420, live: "matched" } };
 
+// The account's value over the day (invented): a gap where a price was missing, then a minute on an old price (grey).
+const SERIES = { range: "1D", run: { id: "r1", started_at: BOOK.run.started_at }, starting_cash: 10000, base: { value: 10000.5, at: at("2026-11-12T20:59:00Z") },
+  points: [{ at: at("2026-11-13T14:31:00Z"), equity: 10020, prices_at: at("2026-11-13T14:30:58Z"), stale: false },
+    { at: at("2026-11-13T15:00:00Z"), equity: 10050, prices_at: at("2026-11-13T14:59:58Z"), stale: false },
+    { at: at("2026-11-13T15:30:00Z"), equity: null, prices_at: null, stale: false },
+    { at: at("2026-11-13T15:40:00Z"), equity: 10090, prices_at: at("2026-11-13T15:39:00Z"), stale: false },
+    { at: at("2026-11-13T15:50:00Z"), equity: 10100, prices_at: at("2026-11-13T15:40:00Z"), stale: true }] };
+
 const STOCK_PREVIEW = { label: "NBIS shares", quantity: 10, per_share: -98.1, cash: -981, quoted_at: at("2026-11-13T15:59:58Z"), stock: 98.05,
   legs: { NBIS: { action: "buy", bid: 98.0, ask: 98.1, price: 98.1 } }, buying_power: 8985.5, need_each: 98.1 };
 const REFUSALS = {
@@ -73,6 +81,10 @@ async function open(page: Page, width: number, held = false, preview: "ok" | key
   await page.route("**/copilot/desk/ticks?*", route => route.fulfill({ json: { state: "ok", as_of: NOW.toISOString(),
     rows: { [OCC]: { last: 4.0, change_pct: null, prev_close: null, at: NOW.getTime() / 1000 } }, poll_seconds: 5 } }));
   await page.route(url => url.pathname.endsWith("/copilot/paper"), route => { reads += 1; return route.fulfill({ json: BOOK }); });
+  await page.route("**/copilot/paper/equity?*", route => {
+    const range = new URL(route.request().url()).searchParams.get("range");
+    return route.fulfill({ json: range === "ALL" ? { ...SERIES, range: "ALL", base: { value: 10000, at: BOOK.run.started_at } } : SERIES });
+  });
   await page.route("**/copilot/paper/orders", route => {
     const body = route.request().postDataJSON();
     if (!body.preview) posts.push(route.request());
@@ -106,10 +118,21 @@ for (const width of [1440, 375]) {
     await expect(paper.getByTestId("paper-account")).toContainText("Buying power $8,985.50");
     await expect(paper.getByTestId("paper-account")).toContainText("Held for orders $375.00");
     // The live tick (4.00) moves the P&L: 4.00 × 100 × 2 − 680 = +$120.00, +17.6%.
-    await expect(paper.getByTestId("paper-pnl")).toHaveText("+$120.00+17.6%");
-    // The account's value at the same live prices: $9,360.50 cash + 4.00 × 100 × 2 = $10,160.50, +$160.50 on $10,000.
-    await expect(paper.getByTestId("paper-value")).toHaveText("Value $10,160.50");
-    await paper.getByTestId("paper-close-button").click();
+    await expect(paper.getByTestId("paper-pnl")).toHaveText("+$120.00 (+17.6%)");
+    // Opened 10:10 New York today: today's change is all of it.
+    await expect(paper.getByTestId("paper-position-today")).toContainText("+$120.00");
+    // The account's value at the same live prices: $9,360.50 cash + 4.00 × 100 × 2 = $10,160.50, +$160.00 on yesterday's
+    // last recorded $10,000.50.
+    await expect(paper.getByTestId("paper-value")).toHaveText("$10,160.50");
+    await expect(paper.getByTestId("paper-change")).toHaveText("+$160.00 (+1.60%) Today");
+    // The line: a gap at the missing price, grey on the old one, never a zero.
+    const graph = paper.getByTestId("paper-graph");
+    await expect(graph.locator("polyline")).toHaveCount(2);
+    await expect(graph.locator("polyline[data-grey]")).toHaveCount(1);
+    await paper.getByTestId("paper-range-ALL").click();
+    await expect(paper.getByTestId("paper-change")).toHaveText("+$160.50 (+1.61%) All time");
+    await paper.getByTestId("paper-position-card").click(); // the order sheet, selling all of it
+    await expect(paper.getByTestId("paper-order-sheet-title")).toHaveText("Sell NBIS $100 Call 11/20/26");
     await expect(paper.getByTestId("paper-close")).toContainText("Sell 2 × NBIS $100 Call 11/20/26 at 3.90 (the bid");
     await expect(paper.getByTestId("paper-close")).toContainText("takes in $780.00");
     expect(posts).toHaveLength(0); // the quote alone fills nothing

@@ -1,10 +1,12 @@
 "use client";
 
 /**
- * Robinhood-style position card for one paper position on the upcoming phone "Paper home" view.
- * Self-contained and not wired in yet; a later change connects it to the phone paper home.
+ * One open paper position on the Paper home (``DeskPaper``), Robinhood-style: what it is worth now, how many at what
+ * average, today's change and the total return. Tapping it opens the order sheet. A price that is not live is grey with
+ * its time; no price at all says so, never a zero.
  */
 
+import type { ReactNode } from "react";
 import { useDeskTicks } from "@/lib/deskTicks";
 import { paperPnl, paperSymbols, type PaperPosition } from "@/lib/paperBook";
 import { cn } from "@/lib/utils";
@@ -14,6 +16,10 @@ export type PaperPositionCardProps = {
   position: PaperPosition;
   /** Today's dollar change for this position, supplied by the caller (omitted when null or undefined). */
   todayChange?: number | null;
+  /** A small tag after the label (whose idea it was). */
+  tag?: ReactNode;
+  /** Whether its order sheet is open (for the button's aria-expanded). */
+  expanded?: boolean;
   onOpen?(): void;
   className?: string;
 };
@@ -47,6 +53,8 @@ const avgPrice = (perShare: number) => {
   })}`;
 };
 
+const asOf = (epoch: number) => `${new Date(epoch * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })} ET`;
+
 const toneOf = (n: number | null | undefined) => {
   if (n == null || Math.abs(n) < 0.005) return "text-muted-foreground";
   return n > 0 ? "text-emerald-300" : "text-rose-300";
@@ -62,6 +70,8 @@ function unitWord(instrument: PaperPosition["instrument"], count: number): strin
 export default function PaperPositionCard({
   position,
   todayChange = null,
+  tag = null,
+  expanded,
   onOpen,
   className,
 }: PaperPositionCardProps) {
@@ -97,6 +107,7 @@ export default function PaperPositionCard({
         <span className="flex min-w-0 items-center gap-1.5">
           <ModeMark mode="paper" short />
           <span className="truncate text-sm font-semibold text-foreground">{position.label}</span>
+          {tag}
         </span>
         <span
           data-testid="paper-position-value"
@@ -105,7 +116,7 @@ export default function PaperPositionCard({
             currentValue != null && hasLiveMark ? "text-foreground" : "text-muted-foreground",
           )}
         >
-          {currentValue != null ? valueUsd(currentValue) : "no live quote"}
+          {currentValue != null ? valueUsd(currentValue) : "—"}
         </span>
       </span>
 
@@ -127,7 +138,7 @@ export default function PaperPositionCard({
       <span className="flex items-baseline justify-between gap-2 text-xs">
         <span className="text-[11px] text-muted-foreground">Total return</span>
         <span
-          data-testid="paper-position-return"
+          data-testid="paper-pnl"
           className={cn(
             "shrink-0",
             pnl && hasLiveMark ? toneOf(pnl.pnl) : "text-muted-foreground",
@@ -137,10 +148,10 @@ export default function PaperPositionCard({
             <>
               {signedUsd(pnl.pnl)}
               {pnl.pct != null && ` (${signedPct(pnl.pct)})`}
-              {!hasLiveMark && <span className="ml-1 text-[11px]">· no live quote</span>}
+              {!hasLiveMark && <span className="ml-1 text-[11px]">as of {asOf(pnl.at)}</span>}
             </>
-          ) : (
-            "no live quote"
+          ) : position.awaiting_close ? "Expired: settles on the close once it is read" : (
+            "no price yet"
           )}
         </span>
       </span>
@@ -149,7 +160,7 @@ export default function PaperPositionCard({
 
   if (onOpen) {
     return (
-      <button type="button" data-testid="paper-position-card" onClick={onOpen} className={cardClass}>
+      <button type="button" data-testid="paper-position-card" aria-expanded={expanded} onClick={onOpen} className={cardClass}>
         {body}
       </button>
     );

@@ -82,6 +82,13 @@ export type PaperBook = {
   /** His weekly goals and this week's progress (backend engine/weekly_goals.py). */
   goals?: WeeklyGoals;
 };
+/** The paper account's value over time (backend ``engine/paper_equity.py``, ``GET /copilot/paper/equity``): one point a
+ *  minute in the regular session. ``equity`` null: a held leg had no price (a gap, never a zero); ``stale``: its prices
+ *  were older than the challenge's two minutes (drawn grey). ``base`` is what the range's change is measured from. */
+export type EquityRange = "1D" | "1W" | "1M" | "ALL";
+export type EquityPoint = { at: number; equity: number | null; prices_at: number | null; stale: boolean };
+export type EquitySeries = { range: EquityRange; run: { id: string; started_at: number } | null; starting_cash: number | null;
+  points: EquityPoint[]; base: { value: number; at: number } | null };
 /** The copilot's weekly paper review: ``day`` the Friday it was written, ``monday`` its week. */
 export type PaperReview = { day: string; monday: string; at: number; text: string; goals?: GoalProgress[] };
 

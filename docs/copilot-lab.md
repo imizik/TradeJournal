@@ -2600,6 +2600,28 @@ Proof: `backend/tests/test_paper_book.py`, `backend/tests/test_paper_orders.py`,
 `frontend/e2e/copilot-desk-paper-review.spec.ts`, `backend/tests/test_trading_rules.py`, `frontend/e2e/copilot-desk-rules.spec.ts`,
 `backend/tests/test_weekly_goals.py`, `frontend/e2e/copilot-desk-goals.spec.ts`.
 
+### Paper home
+
+The owner's ask on 2026-11-17: paper trading that feels like Robinhood. Opening Paper (`DeskPaper`) shows:
+
+- **The account's value, big, with its graph** (`PortfolioGraph`): the desk's live `paperValue`, the change over the
+  picked range (1D / 1W / 1M / All) and the account's value over time from `GET /copilot/paper/equity`
+  (`backend/app/engine/paper_equity.py`). The paper runner's minute records one point a minute in the regular session
+  (`paper_equity` table, insert-only): cash plus every open position at the prices it judged with (a challenge run: the
+  prices its limits were judged with), the same sum as `paperValue`. A minute with a missing price is a gap and one on a
+  price older than two minutes is grey; never a zero. No market-data call of its own. 1D's change is from the last point
+  before the day; a range the run began inside is from the starting cash. During a $10,000 challenge the challenge's
+  status line sits under the change. Cash and buying power follow on one small line.
+- **One card per open position** (`PaperPositionCard`): its value now, how many at what average, today's change (all of
+  it when opened that day; shares from the previous close; an older option's is left out, never guessed) and the total
+  return. Tapping a card opens the order sheet (`PaperOrderSheet`, a bottom sheet on a phone): Sell all or Trim, Show on
+  chart, Market or Limit, and the review.
+- **Swipe up to submit** (`SwipeToSubmit`): on a touch screen the sheet's and the Paper button's Fill and Place limit
+  are a swipe up; with a mouse or reduced motion, a plain button. A fill buzzes briefly where the browser vibrates
+  (`fillBuzz`; iPhone Safari does not).
+
+Proof: `backend/tests/test_paper_equity.py`, `frontend/e2e/copilot-desk-paper.spec.ts`.
+
 ### Paper challenge
 
 The owner's choice on 2026-11-17: paper trading with real stakes (`backend/app/engine/paper_challenge.py`). **Start
