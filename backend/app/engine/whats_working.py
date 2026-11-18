@@ -7,7 +7,8 @@ at entry; option type with entry time; and, for paper only, whose idea it was an
 reports, per bucket, trades, wins, losses, total and average dollars and win rate.
 
 The money is the journal's own: a real trade is a FIFO ``trade`` row as the journal reconstructs it, and its dollars are
-its ``realized_pnl`` (premium ×100, fees and signs already applied), summed exactly as ``/stats`` sums them (closed or
+its ``realized_pnl`` (premium ×100, fees and signs already applied), summed exactly as ``/stats`` sums them (floats
+added, then rounded to cents) (closed or
 expired rows with a P&L; a win is above zero and every other priced trade a loss, as ``/stats`` counts them). Webull is
 left out (dormant by the owner's choice), as the paper scorecard's real side leaves it out. A paper trade is a fully
 closed paper position, its dollars ``realized`` from the fold. Journal times are New York wall clocks; paper times are
@@ -19,7 +20,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from typing import Iterable
 
 from sqlmodel import Session, col, select
@@ -35,12 +36,8 @@ HOLDS = ("Same day", "Overnight", "Multi-day")
 DTES = ("0–1 days", "2–7 days", "8–30 days", "Over 30 days")
 KINDS = ("Calls", "Puts", "Shares", "Call spreads", "Put spreads")
 SOURCES = {"mine": "My ideas", "copilot": "Copilot's ideas", "radar": "Radar's ideas", "scanner": "Scanner's ideas"}
-RULES = {"followed": "Rules followed", "broken": "Rules broken"}
+RULES = {"followed": "Rules followed", "broken": "Rules broken", "unclear": "Rules unclear"}
 DIMENSIONS = ("kind", "entry_time", "hold", "dte", "kind_time", "source", "rules")
-
-
-def _cents(value: Decimal) -> float:
-    return float(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 def entry_time(moment: datetime) -> str:
@@ -142,11 +139,13 @@ def paper_rows(db: Session) -> list[dict]:
 # --------------------------------------------------------------------------- the buckets
 
 def bucket(label: str, pnls: list[Decimal]) -> dict:
+    """Summed as ``/stats`` sums ``total_pnl`` (floats added, then ``round(..., 2)``), so a bucket of every trade is the
+    same figure to the cent, half-cent values included."""
     wins = sum(1 for v in pnls if v > 0)
-    total = sum(pnls, Decimal(0))
+    total = sum((float(v) for v in pnls), start=0.0)
     n = len(pnls)
-    return {"label": label, "trades": n, "wins": wins, "losses": n - wins, "pnl": _cents(total),
-            "avg_pnl": _cents(total / n) if n else None, "win_rate": round(wins / n * 100, 1) if n else None,
+    return {"label": label, "trades": n, "wins": wins, "losses": n - wins, "pnl": round(total, 2),
+            "avg_pnl": round(total / n, 2) if n else None, "win_rate": round(wins / n * 100, 1) if n else None,
             "judged": n >= MIN_TRADES}
 
 
@@ -155,19 +154,25 @@ def _order(dimension: str) -> tuple[str, ...]:
             "rules": tuple(RULES.values())}.get(dimension, ())
 
 
+def _label(row: dict, dimension: str) -> str | None:
+    value = row["labels"][dimension]
+    if dimension == "rules":
+        return RULES.get(value) if value else None
+    if dimension == "source":
+        return SOURCES.get(value, value)
+    return value
+
+
 def side(rows: Iterable[dict], *, paper: bool, unpriced: int = 0) -> dict:
     """One side's totals, buckets per dimension, the facts that were missing, and its top 3 making and losing buckets."""
     rows = list(rows)
     groups: dict[str, dict[str, list[Decimal]]] = {d: defaultdict(list) for d in DIMENSIONS}
     missing = {"pnl": unpriced, "hold": 0, "dte": 0, "rules": 0}
     for r in rows:
-        for d, value in r["labels"].items():
+        for d in r["labels"]:
             if d in ("source", "rules") and not paper:
                 continue
-            if d == "rules":
-                value = RULES.get(value) if value else None
-            elif d == "source":
-                value = SOURCES.get(value, value)
+            value = _label(r, d)
             if value is None:
                 missing[d] += 1
                 continue
@@ -184,10 +189,24 @@ def side(rows: Iterable[dict], *, paper: bool, unpriced: int = 0) -> dict:
     if not paper:
         missing.pop("rules")
     judged = [b | {"dimension": d} for d, bs in dims.items() for b in bs if b["judged"]]
-    # Ties go to the narrower bucket (option type with entry time first), then by name.
+    # Ties go to the narrower bucket (option type with entry time first), then by name; a bucket holding exactly the
+    # trades of one already listed ("Puts" when every put was entered before 10:00) is not listed twice.
     rank = {d: i for i, d in enumerate(("kind_time", "kind", "entry_time", "hold", "dte", "source", "rules"))}
-    making = sorted((b for b in judged if b["pnl"] > 0), key=lambda b: (-b["pnl"], rank[b["dimension"]], b["label"]))[:TOP]
-    losing = sorted((b for b in judged if b["pnl"] < 0), key=lambda b: (b["pnl"], rank[b["dimension"]], b["label"]))[:TOP]
+    sets = {(d, b["label"]): frozenset(i for i, r in enumerate(rows) if _label(r, d) == b["label"]) for d, bs in dims.items() for b in bs}
+
+    def top(found: list[dict]) -> list[dict]:
+        out, seen = [], set()
+        for b in found:
+            members = sets[(b["dimension"], b["label"])]
+            if members in seen:
+                continue
+            seen.add(members)
+            out.append(b)
+            if len(out) == TOP:
+                break
+        return out
+    making = top(sorted((b for b in judged if b["pnl"] > 0), key=lambda b: (-b["pnl"], rank[b["dimension"]], b["label"])))
+    losing = top(sorted((b for b in judged if b["pnl"] < 0), key=lambda b: (b["pnl"], rank[b["dimension"]], b["label"])))
     return {**bucket("All", [r["pnl"] for r in rows]), "missing": missing, "dimensions": dims,
             "making": making, "losing": losing}
 

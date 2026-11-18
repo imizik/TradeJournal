@@ -2135,7 +2135,7 @@ Where his money comes from and where it leaks, from his closed real trades and h
 - **Buckets.** Call / put / shares (paper also call and put spreads); entry time in New York (before 10:00,
   10:00–10:30, 10:30–12:00, 12:00–14:00, after 14:00); hold (same day, overnight = closed the next weekday, multi-day);
   days to expiry at entry (0–1, 2–7, 8–30, over 30); option type with entry time ("Puts before 10:00"); paper only,
-  whose idea it was (mine, copilot, Radar, scanner) and rules followed or broken. Each reports trades, wins, losses,
+  whose idea it was (mine, copilot, Radar, scanner) and rules followed, broken or unclear. Each reports trades, wins, losses,
   total and average dollars and win rate, over the last 30 days (by close time) and all time.
 - **Money.** A real trade's dollars are its FIFO `realized_pnl`, summed as `/stats` sums them (closed or expired; a
   win is above zero, every other priced trade a loss); Webull is left out, as in the paper scorecard. Under 5 trades a

@@ -133,13 +133,19 @@ def test_real_buckets_sum_exactly_and_match_stats(db):
     assert "n/a" not in dtes and sum(b["trades"] for b in dtes.values()) == 13  # shares have no expiry bucket
     assert by(recent, "kind_time")["Puts before 10:00"]["pnl"] == -300.0
     assert "source" not in recent["dimensions"] and "rules" not in recent["dimensions"]  # paper only
+    # Half-cent P&L rounds as /stats rounds it, to the cent.
+    real(db, opened=datetime(2026, 11, 17, 11, 0), closed=datetime(2026, 11, 17, 12, 0), pnl=0.005, expiry=date(2026, 11, 20))
+    real(db, opened=datetime(2026, 11, 17, 11, 0), closed=datetime(2026, 11, 17, 12, 0), pnl=2.67, expiry=date(2026, 11, 20))
+    db.commit()
+    assert ww.report(db, NOW)["windows"]["all"]["real"]["pnl"] == asyncio.run(get_stats(account="roth_ira", type=None, session=db))["total_pnl"]
 
 
 def test_top_three_are_only_judged_buckets_and_ties_go_to_the_narrower(db):
     seed_real(db)
     recent = ww.report(db, NOW)["windows"]["recent"]["real"]
     assert all(b["judged"] and b["trades"] >= ww.MIN_TRADES for b in recent["making"] + recent["losing"])
-    assert [b["label"] for b in recent["losing"]] == ["Puts before 10:00", "Puts", "Overnight"]
+    # The six puts are also all of "Puts", "Overnight" and "2–7 days" but for the 10:30 scratch call: listed once.
+    assert [b["label"] for b in recent["losing"]] == ["Puts before 10:00", "2–7 days", "Before 10:00"]
     assert recent["making"][0]["pnl"] == 600.0 and recent["making"][0]["label"] == "Calls"
     assert "Shares" not in [b["label"] for b in recent["making"]]  # +12.34 on one trade: too few to judge
 
@@ -207,6 +213,7 @@ def test_paper_buckets_whose_idea_and_rules(db):
     rules = by(side, "rules")
     assert rules["Rules followed"]["trades"] == 4 and rules["Rules broken"]["pnl"] == -30.0
     assert side["missing"]["rules"] == 1  # the shares had no rules check: missing, not "followed"
+    assert "Rules unclear" not in rules  # none came back unknown here; one that does gets its own bucket
     assert by(side, "hold")["Overnight"]["pnl"] == 210.25
     # The same closed positions and P&L as the paper book's own scorecard split.
     folded = [p for run in db.exec(select(PaperRun)).all()
@@ -268,3 +275,10 @@ def test_whats_working_stays_in_this_database():
     for path in ("app/engine/whats_working.py", "app/routers/whats_working.py"):
         text = (root / path).read_text()
         assert "robinhood" not in text.lower().replace("no robinhood", "") and "tradier" not in text.lower()
+
+
+def test_the_review_stands_when_the_leak_line_cannot_be_read(monkeypatch):
+    def broken(db, now):
+        raise RuntimeError("journal unreadable")
+    monkeypatch.setattr(ww, "leak_line", broken)
+    assert paper_review._leak_line(NOW) is None
