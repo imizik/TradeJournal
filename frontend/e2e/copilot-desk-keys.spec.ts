@@ -133,7 +133,7 @@ test("⌘K opens the palette: type to filter, Enter opens the thread, Escape and
   await expect(options).toHaveText([/^NBIS/, /^CRWV/, /^APLD/, /^MU/, /^Plan a trade/, /^Review my week/, /^What matters right now\?/, /^Day checklist.*D$/,
     /^Chart.*C$/, /^Chain.*O$/, /^Ticket.*T$/, /^Check a call.*L$/, /^Position/, /^Notes/, /^Grid.*G$/, /^Feed.*F$/, /^Copilot.*\/$/, /^Book.*B$/, /^Threads.*\[$/,
     /^Now/, /^Paper book.*P$/, /^My rules/, /^This week's goals/, /^Watchlist.*W$/, /^Note on this position/, /^Data health/,
-    /^Replay a past day.*R$/, /^Redo one of my trades/, /^Paper mode/, /^Real mode/, /^How I use the desk/, /^Today: Live 11:00 ET/]);
+    /^Replay a past day.*R$/, /^Redo one of my trades/, /^Paper mode/, /^Real mode/, /^How I use the desk/, /^Data sync/, /^Scanner history/, /^Radar log/, /^Today: Live 11:00 ET/]);
   await expect(options.first()).toContainText("1.0% from invalidation 92.30");
   await expect(options.first()).toContainText("+$180.00");
   await page.keyboard.type("crw");
