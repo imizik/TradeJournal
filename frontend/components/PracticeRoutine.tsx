@@ -29,12 +29,12 @@ const objText = (value: unknown) => JSON.stringify(value, null, 2);
 const clock = (value?: string | null) => value ? `${new Date(value).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })} ET` : "unavailable";
 const dayLabel = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
 
-export default function PracticeRoutine({ day }: { day?: string | null }) {
+export default function PracticeRoutine({ day, initialRunId }: { day?: string | null; initialRunId?: string }) {
   const { grants } = useAppAccess();
-  return (grants.decision_write || grants.market_decision_write) ? <SampleDecisionRoutine day={day} /> : <ReadPracticeRoutine day={day} />;
+  return (grants.decision_write || grants.market_decision_write) ? <SampleDecisionRoutine day={day} /> : <ReadPracticeRoutine day={day} initialRunId={initialRunId} />;
 }
 
-function ReadPracticeRoutine({ day }: { day?: string | null }) {
+function ReadPracticeRoutine({ day, initialRunId }: { day?: string | null; initialRunId?: string }) {
   const { owner } = useAppAccess();
   const selectedDay = day ?? localDay();
   const [runs, setRuns] = useState<Run[]>([]);
@@ -86,7 +86,7 @@ function ReadPracticeRoutine({ day }: { day?: string | null }) {
     const version = ++readVersion.current;
     const intended = selectedRun.current;
     if (linkedEntry.current === undefined) {
-      const id = new URLSearchParams(window.location.search).get("practice_run");
+      const id = initialRunId ?? new URLSearchParams(window.location.search).get("practice_run");
       linkedEntry.current = id ? { id, session: selectedDay } : null;
     }
     const linkedRunId = linkedEntry.current?.id;

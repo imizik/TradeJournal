@@ -107,7 +107,7 @@ test("⌘K: Data sync opens the Sync Center; Scanner history and Radar log are o
   await expect(page).toHaveURL(/\/radar\?log=1$/);
 });
 
-test("while the desk is home the menu drops Radar and Scanner; Signals stays", async ({ page }) => {
+test("while the desk is home the menu drops Radar, Scanner and Daily Practice; Signals and Advisor review stay", async ({ page }) => {
   await open(page);
   await page.getByRole("button", { name: /open menu|menu/i }).first().click();
   const market = page.getByRole("button", { name: "Market", exact: true });
@@ -115,6 +115,10 @@ test("while the desk is home the menu drops Radar and Scanner; Signals stays", a
   await expect(page.getByRole("link", { name: "Signals", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Radar", exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Scanner", exact: true })).toHaveCount(0);
+  const practice = page.getByRole("button", { name: "Practice", exact: true });
+  if ((await practice.getAttribute("aria-expanded")) !== "true") await practice.click();
+  await expect(page.getByRole("link", { name: "Advisor review", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Daily Practice", exact: true })).toHaveCount(0);
 });
 
 // The Dashboard's closed P&L, performance and latest closes: a desk drawer from More → Journal and ⌘K, invented numbers.
@@ -169,4 +173,86 @@ test("Journal summary over the Sync Center: Escape closes the top one first and 
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("desk-journal")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Data Sync Center" })).toBeVisible(); // the one underneath stays
+});
+
+const DECISION_ID = "11111111-1111-4111-8111-111111111111";
+const DECISION = {
+  id: DECISION_ID, operation_id: "op-1", opportunity_id: "SPY:2026-11-13", actor: "human", decision: "wait", symbol: "SPY",
+  received_at: "2026-11-13T14:35:00Z", input_cutoff: "2026-11-13T14:35:00Z", policy_version: "p0-v1", policy_hash: "h1",
+  evidence: { packet: {} }, evidence_sha256: "e1", plan: {}, rationale: "Wait for opening drive confirmation.",
+  wait_condition: "Break above opening high", wait_expiry: "2026-11-13T18:00:00Z", record_sha256: "r1", status: "practice_draft_unarmed",
+};
+const SCALP = {
+  day: "2026-11-13", today: "2026-11-13", now: "2026-11-13T09:45:00-05:00", sessions: ["2026-11-13"],
+  live: { day: "2026-11-13", captured_at: "2026-11-13T09:40:05-05:00", feed: "sip", eligible: 120,
+    picks: [{ symbol: "ANET", direction: "up", relative_volume: 2.5, sector_lead_pct: 1.2 }], movers: [] },
+  recap: null, decisions: [],
+};
+const SCENARIO = {
+  id: "replay-1", title: "Trim or hold a fast winner", symbol: "XYZ", instrument: "call option",
+  description: "Two frozen moments from a synthetic call.", checkpoint_count: 2, repeat_status: "new", latest_attempt_id: null,
+  option_contract: { right: "call", strike: 100, expiry: "2026-11-20", dte_at_entry: 5 },
+};
+
+test("Practice fold & ⌘K reach Daily practice, Saved decisions, 9:40 scalp shortlist and Decision replay lab", async ({ page }) => {
+  await open(page);
+  await page.route(url => url.pathname.endsWith("/practice/runs"), route => route.fulfill({ json: { runs: [] } }));
+  await page.route(url => url.pathname.endsWith("/decisions"), route => route.fulfill({ json: { decisions: [DECISION] } }));
+  await page.route(url => url.pathname.endsWith("/scalp-shortlist"), route => route.fulfill({ json: SCALP }));
+  await page.route(url => url.pathname.endsWith("/practice/replay/scenarios"), route => route.fulfill({ json: { scenarios: [SCENARIO] } }));
+
+  // Nothing from /practice mounts on the desk's first screen while lines wait closed.
+  for (const id of ["practice-routine", "practice-decisions", "scalp-shortlist", "personal-replay"]) {
+    await expect(page.getByTestId(id)).toHaveCount(0);
+  }
+
+  const jump = async (name: string) => {
+    await page.keyboard.press("ControlOrMeta+k");
+    const box = page.getByRole("dialog", { name: "Jump to" });
+    await box.getByRole("combobox").fill(name);
+    await box.getByRole("option", { name: new RegExp(`^${name}`) }).click();
+  };
+
+  await jump("Daily practice");
+  await expect(page.getByTestId("practice-routine")).toBeVisible();
+  await jump("Saved decisions");
+  await expect(page.getByTestId("practice-decisions")).toContainText("SPY · WAIT");
+  await jump("9:40 scalp shortlist");
+  await expect(page.getByTestId("scalp-shortlist")).toContainText("ANET");
+  await jump("Decision replay lab");
+  await expect(page.getByTestId("personal-replay")).toContainText("Trim or hold a fast winner");
+
+  // Closing one collapses it cleanly inside the fold.
+  await page.getByTestId("practice-line-decision-replay").click();
+  await expect(page.getByTestId("personal-replay")).toHaveCount(0);
+});
+
+test("desk ?decision= deep-link opens Saved decisions and focuses that card; 9:40 scalp nudge opens its fold", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.clock.install({ time: new Date("2026-11-13T14:45:00Z") }); // 9:45 ET during 9:40 scalp window
+  await page.route("**/api/backend/**", route => route.fulfill({ status: 404, json: { detail: "Not in this test." } }));
+  await page.route("**/copilot/status", route => route.fulfill({ json: ON }));
+  for (const [path, body] of Object.entries(READS)) await page.route(url => url.pathname.endsWith(path), route => route.fulfill({ json: body }));
+  await page.route("**/copilot/desk/minute?*", route => {
+    const reads = new URL(route.request().url()).searchParams.getAll("read").map(target => {
+      const body = READS[target.split("?")[0]];
+      return body ? { status: 200, body } : { status: 404, body: { detail: "Not in this test." } };
+    });
+    return route.fulfill({ json: { reads } });
+  });
+  await page.route(url => url.pathname.endsWith("/decisions"), route => route.fulfill({ json: { decisions: [DECISION] } }));
+  await page.route(url => url.pathname.endsWith("/scalp-shortlist"), route => route.fulfill({ json: SCALP }));
+
+  await page.goto(`/copilot-lab?decision=${DECISION_ID}`);
+  await expect(page.getByTestId("desk-book")).toBeVisible();
+  const card = page.locator(`details[data-decision-id="${DECISION_ID}"]`);
+  await expect(card).toHaveAttribute("open", "");
+  await expect(card).toContainText("Break above opening high");
+
+  const nudge = page.getByRole("link", { name: "9:40 scalp picks" });
+  await expect(nudge).toBeVisible();
+  await expect(nudge).toHaveAttribute("href", "#scalp-shortlist");
+  await nudge.click();
+  await expect(page.getByTestId("practice-line-scalp")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("scalp-shortlist")).toContainText("ANET");
 });
