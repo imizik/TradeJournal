@@ -1,7 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAppAccess } from "@/components/AccessProvider";
+import { copilotStatus } from "@/lib/copilot";
 import {
   MEASURE_LABELS, RATINGS, RULE_TAGS, STATUS_TEXT, coverageLine, getEvent, getFeed, getSetups, headlineMeta, measureText, newsLine, nyTime, rateEvent,
   recordVisit, radarEventChartHref, radarEventId, radarRating, radarSession, type OutsideCheckpoint, type RadarDetail, type RadarFeed, type RadarFeedEvent, type RadarNews, type RadarRating,
@@ -221,7 +224,16 @@ function EventCard({ event, fresh, open, linked, onToggle, onRated, setup }: {
   );
 }
 
-export default function RadarFeedView() {
+export type RadarFeedInitial = {
+  event?: string | null;
+  rate?: string | null;
+  session?: string | null;
+  groups?: string | null;
+};
+
+export default function RadarFeedView({ initial, embedded = false }: { initial?: RadarFeedInitial; embedded?: boolean } = {}) {
+  const router = useRouter();
+  const { owner } = useAppAccess();
   const [feed, setFeed] = useState<RadarFeed | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -231,21 +243,41 @@ export default function RadarFeedView() {
   const [linked, setLinked] = useState<string | null>(null); // the event a phone alert's tap asked for
   const [unseenOnly, setUnseenOnly] = useState(true);
   const [setups, setSetups] = useState<Setups | null>(null);
+  const ratedOnce = useRef<string | null>(null);
   useEffect(() => {
     let live = true;
     (async () => {
       const params = new URLSearchParams(window.location.search);
-      const event = radarEventId(params.get("event"));
-      const rate = radarRating(params.get("rate"));
-      let day = params.get("session");
+      if (!embedded && window.location.pathname === "/radar" && params.size > 0 && owner) {
+        const status = await copilotStatus().catch(() => null);
+        if (!live) return;
+        if (status?.enabled) {
+          const target = new URLSearchParams({ desk: "radar" });
+          for (const key of ["event", "rate", "session", "groups"]) {
+            const value = params.get(key);
+            if (value) target.set(key, value);
+          }
+          router.replace(`/copilot-lab?${target.toString()}`);
+          return;
+        }
+      }
+      const event = radarEventId(embedded ? (initial?.event ?? null) : params.get("event"));
+      const rate = radarRating(embedded ? (initial?.rate ?? null) : params.get("rate"));
+      let day = embedded ? (initial?.session ?? null) : params.get("session");
       if (event) {
         if (rate) {
           // A phone alert's Useful / Not useful action: the tap is the rating, saved once through the usual feedback
           // route before the event shows. It is dropped from the address first, so a reload (or a second effect run
           // in React strict mode) cannot repeat it.
-          const url = new URL(window.location.href); url.searchParams.delete("rate");
-          window.history.replaceState(window.history.state, "", url);
-          try { await rateEvent(event, rate); } catch { if (live) setNotice("That rating was not saved. You can rate the event below."); }
+          if (!embedded) {
+            const url = new URL(window.location.href); url.searchParams.delete("rate");
+            window.history.replaceState(window.history.state, "", url);
+          }
+          const key = `${event}:${rate}`;
+          if (ratedOnce.current !== key) {
+            ratedOnce.current = key;
+            try { await rateEvent(event, rate); } catch { if (live) setNotice("That rating was not saved. You can rate the event below."); }
+          }
         }
         if (!day) { try { day = (await getEvent(event)).event.session_date; } catch { /* the feed's default session, then */ } }
       }
@@ -254,7 +286,7 @@ export default function RadarFeedView() {
       setSession(radarSession(day)); setSessionReady(true);
     })();
     return () => { live = false; };
-  }, []);
+  }, [embedded, initial?.event, initial?.rate, initial?.session, owner, router]);
   // The last visit as it was when this page opened; opening the page records a new one.
   const baseline = useRef<string | null>(null);
   const visited = useRef(false);
@@ -324,8 +356,10 @@ export default function RadarFeedView() {
     <div className="flex items-center gap-2 text-xs text-muted-foreground">
       <label htmlFor="radar-session">Session</label>
       <select id="radar-session" value={feed.session} onChange={(e) => { setOpen(null); setSession(e.target.value);
-        const url = new URL(window.location.href); url.searchParams.set("session", e.target.value);
-        window.history.replaceState(window.history.state, "", url); }}
+        if (!embedded) {
+          const url = new URL(window.location.href); url.searchParams.set("session", e.target.value);
+          window.history.replaceState(window.history.state, "", url);
+        } }}
         className="h-9 rounded-md border bg-background px-2 text-xs text-foreground">
         {Array.from(new Set([feed.session, ...(feed.sessions ?? [])])).sort().reverse().map((d) => <option key={d} value={d}>{d}</option>)}
       </select>
@@ -382,7 +416,7 @@ export default function RadarFeedView() {
       {shownSetups && <RadarSetups data={shownSetups} today={today} onPlanned={planned} />}
       {!warn && status}
       {feed.outside_list && <OutsideList checkpoints={feed.outside_list} />}
-      {feed.state !== "off" && <RadarMovers session={session ?? feed.session ?? undefined} />}
+      {feed.state !== "off" && <RadarMovers session={session ?? feed.session ?? undefined} initialGroups={initial?.groups} syncUrl={!embedded} />}
     </div>
   );
 }

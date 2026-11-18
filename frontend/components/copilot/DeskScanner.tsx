@@ -8,6 +8,7 @@ import type { DeskGuide } from "@/components/copilot/DeskChart";
 import { cn } from "@/lib/utils";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { PaperButton } from "@/components/copilot/DeskPaper";
+import { openScannerHistory } from "@/components/copilot/DeskLogs";
 import { contractOrder } from "@/lib/paperBook";
 
 /**
@@ -100,7 +101,7 @@ export function ScannerList({ reply, onOpen, onPlan, focused = null }: {
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">Setup scanner · today</span>
         {when && <span data-testid="scanner-when" className={cn(reply.simulated && "text-amber-300", stale && "text-muted-foreground")}>{when}</span>}
-        <Link href="/scanner?history=1" className="ml-auto hover:text-foreground">Scanner page →</Link>
+        <Link href="/scanner?history=1" onClick={(e) => { e.preventDefault(); openScannerHistory(); }} className="ml-auto hover:text-foreground">Scanner page →</Link>
       </p>
       {status && !reply.simulated && <p data-testid="scanner-freshness" className={cn("px-1 text-xs", status.warn ? "text-primary" : "text-muted-foreground")}>{status.text}</p>}
       {reply.state !== "ok" || !reply.rows.length ? (

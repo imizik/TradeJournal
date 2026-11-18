@@ -28,10 +28,13 @@ export function monitoringText(m: ScannerMonitoring): { text: string; warn: bool
   }
 }
 
-export default function ScannerFreshness({ updatedAt, monitoring, live }: { updatedAt: string; monitoring: ScannerMonitoring; live: boolean }) {
+export default function ScannerFreshness({ updatedAt, monitoring, live, onRefresh }: { updatedAt: string; monitoring: ScannerMonitoring; live: boolean; onRefresh?: () => void }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const refresh = () => startTransition(() => router.refresh());
+  const refresh = () => {
+    if (onRefresh) onRefresh();
+    else startTransition(() => router.refresh());
+  };
 
   useEffect(() => {
     if (!live) return;
@@ -40,7 +43,7 @@ export default function ScannerFreshness({ updatedAt, monitoring, live }: { upda
     document.addEventListener("visibilitychange", tick);
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", tick); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live]);
+  }, [live, onRefresh]);
 
   const status = monitoringText(monitoring);
   return (
