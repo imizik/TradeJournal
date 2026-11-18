@@ -86,7 +86,9 @@ test("⌘K: Data sync opens the Sync Center; Scanner history and Radar log are o
   await expect(palette.getByRole("option").first()).toContainText("Data sync");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Data Sync Center" })).toBeVisible();
-  await page.getByRole("button", { name: "Close Sync Center" }).click();
+  await expect(page.getByRole("button", { name: "Close Sync Center" })).toBeFocused();
+  await page.keyboard.press("Escape"); // closes the drawer, not a desk panel under it
+  await expect(page.getByRole("heading", { name: "Data Sync Center" })).toHaveCount(0);
 
   await page.keyboard.press("ControlOrMeta+k");
   await palette.getByRole("combobox").fill("scanner history");

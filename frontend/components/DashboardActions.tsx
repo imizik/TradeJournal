@@ -235,6 +235,14 @@ export function DeskSyncCenter() {
     window.addEventListener(SYNC_OPEN_EVENT, show);
     return () => window.removeEventListener(SYNC_OPEN_EVENT, show);
   }, []);
+  // Over the desk: focus moves into the drawer, and Escape closes it before any desk key sees it.
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => document.querySelector<HTMLElement>('[aria-label="Close Sync Center"]')?.focus());
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") { event.stopImmediatePropagation(); event.preventDefault(); setOpen(false); } };
+    window.addEventListener("keydown", key, true);
+    return () => { cancelAnimationFrame(frame); window.removeEventListener("keydown", key, true); };
+  }, [open]);
   // Only while open, so the desk carries no hidden drawer.
   return open ? <SyncCenterDrawer initialJob={null} open onClose={() => setOpen(false)} onSummaryChange={() => undefined} onSyncQueued={() => undefined} /> : null;
 }
