@@ -153,7 +153,7 @@ test("dashboard Radar preview reads a bounded dated feed without changing visits
   await expect(context).toContainText("before the move");
   await expect(context).toContainText("after the move");
   await expect(context.locator("time")).toHaveAttribute("datetime", "2026-10-20T15:15:00Z");
-  await expect(context.getByRole("link", { name: "Inspect saved evidence in Radar" })).toHaveAttribute("href", "/radar");
+  await expect(context.getByRole("link", { name: "Inspect saved evidence in Radar" })).toHaveAttribute("href", "/radar?log=1");
   await preview.screenshot({ path: test.info().outputPath("dashboard-radar-recorded-desktop.png") });
   view = { ...view, state: "stale" };
   await preview.getByRole("button", { name: "Refresh Radar" }).click();

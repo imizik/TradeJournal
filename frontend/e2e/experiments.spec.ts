@@ -38,7 +38,7 @@ for (const [size, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844
     await page.getByTestId("experiment-radar").click();
     await expect(page.getByRole("figure")).toHaveCount(1);
     await expect(detail).toContainText("not certified sessions");
-    await expect(detail.getByRole("link", { name: "Rate Radar events" })).toHaveAttribute("href", "/radar");
+    await expect(detail.getByRole("link", { name: "Rate Radar events" })).toHaveAttribute("href", "/radar?log=1");
     await page.getByRole("button", { name: "Refresh evidence" }).click();
     await expect(page.getByTestId("experiment-radar")).toHaveAttribute("aria-expanded", "true");
     await expect(detail).toContainText(radar.rule_version);

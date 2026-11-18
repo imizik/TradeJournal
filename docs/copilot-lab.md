@@ -1592,7 +1592,10 @@ day" before 9:30, "Close-of-day checklist" after 16:00, "Day checklist" otherwis
 Chart, Chain, Ticket, Check a call, Position, Notes, Grid, Feed, Copilot, Book, Threads; then Now, and the book side's places, each of
 which also has its own button where it lives: Paper book, My rules, This week's goals, Watchlist, Note on this position,
 Data health (the health list), Replay a past day and Redo one of my trades; Paper mode and Real mode, the mode
-switch's; How I use the desk last). A command
+switch's; How I use the desk; then three pieces of the old pages: **Data sync** (the Dashboard's Data Sync Center,
+unchanged, also under the Data health list's "Data sync" line), **Scanner history** (`/scanner?history=1`: past days,
+shadow decisions and the scorecards) and **Radar log** (`/radar?log=1`: every event's evidence, Outside your list, the
+Shadow book)). A command
 that spends a model call says "Asks the copilot now" in its hint. A book-side place brings the phone's Positions view
 forward, shows a piece folded away (§ How I use the desk) for now, opens the line it lives in (Practice's paper line, My rules), scrolls to it and opens it when it is an editor (rules,
 goals, the note line). The places come from one list, `lib/deskPlaces.ts` (id, name, key, hint), which the copilot's
@@ -2138,6 +2141,17 @@ lists each source with its state and last good time in plain words, a money sour
 as the dot shows them; a tap on a source says what it affects and, where one exists, the fix
 already in the app (Gmail's Reconnect; the Robinhood sign-in steps in docs/robinhood-read-feed.md). No new fix flow. It
 reads again a few seconds after the desk opens or comes back into view, once the desk's own first reads have landed.
+Under the sources a **Data sync** line opens the Dashboard's Data Sync Center (`DeskSyncCenter` in
+`DashboardActions.tsx`, the same drawer and the same actions): run the pipeline or one job, job history, Connect Gmail,
+and Rebuild All / Resync All behind their own confirmations (Resync All deletes imported fills and still asks for the
+database's name where the backend requires it). The drawer mounts only while open.
+
+**Retired pages (2026-11-17).** While the desk is home, the bare `/scanner` opens the desk with the Feed on Ideas ›
+Scanner (`?symbol=` puts that chart in the centre; while the scanner is off the page still shows, since the desk then has
+no Scanner tab) and the bare `/radar` opens it on Ideas › Radar; the menu no longer lists either. Any other parameter
+keeps the page, for what the desk has no home for yet: `/scanner?day=` (a past day) and `?history=1` (the desk's
+"Scanner page →" link and ⌘K), and `/radar?event=` (a ping's rating link and the event's evidence), `?session=`,
+`?groups=` and `?log=1` (⌘K, the Shadow book and evidence links). With the lab off both pages show as before. `/dashboard`, `/charts`, `/daily` and `/practice` are not retired yet.
 
 From 768 px the **status line** along the desk's bottom (`DeskStatusLine` in `DeskHealth.tsx`) shows the mode's mark
 and whose book, then only what is not fine, in words: a source behind, money first, red when it leaves positions,
