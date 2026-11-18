@@ -6,13 +6,17 @@ took or broke his own stop or target, and one thing to try next week, tied to a 
 the week's facts alone (``facts``, ``pack``), with no tool, as the close-of-day read is (``engine/day_read.py``, whose
 turn runner, figure check and hidden-ticker check it reuses): every dollar figure in the review must be one the facts
 hold, and a review naming a ticker he does not follow is not shown. It never invents a trade: the facts list every one.
+Below the model's text, one line per QQQ strategy book (``engine/strategy_books.py``: the week's result, the running
+total and live against the backtest) is written here from the books' own rows, never by the model, and never suggests a
+rule change.
 
 When and what it costs:
 
 - once a week, on the week's last trading day (Friday; the day before a Friday holiday, per the market calendar) at or
   after ``AT`` (16:45 New York), from the level alert monitor's loop beside the other close-of-day senders, on its own
   thread; nothing runs while the copilot lab is off;
-- skipped, with no call, in a week with no closed paper trade;
+- skipped, with no call, in a week with no closed paper trade (when a QQQ strategy book has records, the review is
+  just their lines, still with no call);
 - one turn: one round, no tools, the day read's cap and output limit (``day_read.small``), a ``copilot_turn`` row
   (``kind="paper_review"``) on the shared ``COPILOT_DAILY_BUDGET_USD``, refused unless ``day_read.HEADROOM`` reads' worth
   of its cap still fits under the day's budget; a ``paper_review`` row already written today means the automatic review
@@ -267,8 +271,14 @@ async def write(now: float) -> dict:
     except Exception:  # noqa: BLE001 - no review without its facts
         log.warning("paper review facts unreadable", exc_info=True)
         return {"state": "error", "message": "The paper book or the journal could not be read."}
+    books = await asyncio.to_thread(_strategy_lines, now, found["hidden"])
     if not due(found):
-        return {"state": "skipped", "message": "No closed paper trades this week, so no review was written."}
+        if not books:
+            return {"state": "skipped", "message": "No closed paper trades this week, so no review was written."}
+        # No paper trade to review: the strategy books' lines alone, written here with no model call.
+        entry = _entry(found, now, "No closed paper trades of yours this week.", 0.0, "", books)
+        await asyncio.to_thread(_save, found["day"], entry)
+        return entry
     before = await asyncio.to_thread(_today_count)
     if before is None or before["count"] + before["refused"] > 0:
         return {"state": "done", "message": "This week's review already ran (or its count could not be read)."}
@@ -293,11 +303,28 @@ async def write(now: float) -> dict:
     if named:
         log.warning("paper review named %d ticker(s) he does not follow", len(named))
         return {"state": "error", "cost_usd": result["cost_usd"], "message": "The review named a ticker you do not follow, so it is not shown."}
-    entry = {"state": "ok", "text": result["text"], "cost_usd": result["cost_usd"], "at": now, "day": found["day"],
-             "monday": found["monday"], "facts": facts_text,
-             "ping": {"state": "pending", "attempts": 0, "next_at": None, "error": None}}
+    entry = _entry(found, now, result["text"], result["cost_usd"], facts_text, books)
     await asyncio.to_thread(_save, found["day"], entry)
     return entry
+
+
+def _strategy_lines(now: float, hidden: set[str]) -> list[str]:
+    """One line per QQQ strategy book (``engine/strategy_books.py``), written here from the books' rows, never by the
+    model: none when no book has ever recorded on this server or QQQ is not followed; an unreadable book says so."""
+    from app.engine import strategy_books
+    try:
+        lines = strategy_books.week_lines(now, hidden)
+    except Exception:  # noqa: BLE001 - the review stands without them
+        log.warning("strategy books unreadable for the paper review", exc_info=True)
+        return ["Strategy books: could not be read this week."]
+    return [] if all("no records on this server" in ln for ln in lines) else lines
+
+
+def _entry(found: dict, now: float, text: str, cost: float, facts_text: str, books: list[str]) -> dict:
+    if books:
+        text = text + "\n\nStrategy books (fixed rules, no money; judged after months):\n" + "\n".join(f"- {ln}" for ln in books)
+    return {"state": "ok", "text": text, "cost_usd": cost, "at": now, "day": found["day"], "monday": found["monday"],
+            "facts": facts_text, "ping": {"state": "pending", "attempts": 0, "next_at": None, "error": None}}
 
 
 def ping_title(entry: dict) -> str:

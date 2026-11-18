@@ -197,10 +197,16 @@ TOOLS: list[dict] = [
                        "positions with P&L and the time of the price behind it, working orders if any, the latest closed "
                        "paper trades with his note and how each ended against his stop and target, and the scorecard of "
                        "paper against his real closed trades over the same dates. Read it when he asks about paper "
-                       "trading, how he is doing on paper, or whether a paper call was right. Read only.",
+                       "trading, how he is doing on paper, or whether a paper call was right. With book \"strategies\" "
+                       "instead: the two QQQ strategy paper books (overnight and intraday momentum; fixed research rules, "
+                       "no money): results so far in bp and $, win rate, the backtest's number with how many results it "
+                       "takes to judge, the last trade and missed days; only when he asks about those books. Read only.",
         "input_schema": {"type": "object", "additionalProperties": False,
                          "properties": {"symbol": {"type": "string", "description": "Optional: list only this ticker's paper "
-                                                                                     "trades (the score stays the whole run)"}}},
+                                                                                     "trades (the score stays the whole run)"},
+                                        "book": {"type": "string", "enum": ["mine", "strategies"],
+                                                 "description": "Optional: mine (default, his paper book) or strategies "
+                                                                "(the QQQ strategy books)"}}},
     },
     {
         "name": "get_level_history",
@@ -710,6 +716,13 @@ def validate(name: str, args: Any) -> dict:
     if name == "get_positions":
         return {}
     if name == "get_paper_book":
+        book = args.get("book", "mine")
+        if book not in ("mine", "strategies"):
+            raise ToolInputError("book must be mine or strategies")
+        if book == "strategies":
+            if args.get("symbol") is not None:
+                raise ToolInputError("the strategy books take no symbol")
+            return {"book": "strategies"}
         return {"symbol": _symbol(args["symbol"])} if args.get("symbol") is not None else {}
     if name == "get_call_facts":
         from app.engine import call_check
@@ -1167,7 +1180,10 @@ class LiveEvidence:
         from app.ai import copilot_review
         return copilot_review.week_review(week_start)
 
-    def get_paper_book(self, symbol: str | None = None) -> dict:
+    def get_paper_book(self, symbol: str | None = None, book: str | None = None) -> dict:
+        if book == "strategies":
+            from app.engine import strategy_books
+            return strategy_books.live()
         from app.ai import copilot_paper_book
         return copilot_paper_book.live_paper_book(symbol)
 
@@ -1249,8 +1265,13 @@ PROVENANCE = {
 }
 
 
+STRATEGY_BOOKS_SOURCE = "QQQ strategy paper books (their own recorded rows) · backtest numbers from the research notes"
+
+
 def provenance(name: str, data: dict, evidence_label: str) -> dict:
     source, kind = PROVENANCE[name]
+    if name == "get_paper_book" and data.get("book") == "strategies":
+        source = STRATEGY_BOOKS_SOURCE
     as_of = data.get("generated_at") or data.get("as_of") or data.get("fetched_at") or data.get("quotes_fetched_at")
     if evidence_label == "fixture":
         source, kind = f"SIMULATED fixture (shaped like {source})", "simulated"
