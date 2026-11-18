@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { api, type Account, type Stats, type Trade } from "@/lib/api";
@@ -27,18 +28,20 @@ export default function DeskJournal() {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<Loaded | null>(null);
   const [error, setError] = useState(false);
+  const params = useSearchParams();
   useEffect(() => {
     const show = () => setOpen(true);
     window.addEventListener(JOURNAL_OPEN_EVENT, show);
-    // More → Journal summary arrives as ``?desk=journal``: it opens once and the address drops the word.
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("desk") === "journal") {
-      setOpen(true);
-      url.searchParams.delete("desk");
-      window.history.replaceState(null, "", `${url.pathname}${url.search}`);
-    }
     return () => window.removeEventListener(JOURNAL_OPEN_EVENT, show);
   }, []);
+  // More → Journal summary arrives as ``?desk=journal``: it opens once and the address drops the word.
+  useEffect(() => {
+    if (params.get("desk") !== "journal") return;
+    setOpen(true);
+    const rest = new URLSearchParams(params.toString());
+    rest.delete("desk");
+    window.history.replaceState(null, "", `/copilot-lab${rest.size ? `?${rest}` : ""}`);
+  }, [params]);
   useEffect(() => {
     if (!open) return;
     let live = true;

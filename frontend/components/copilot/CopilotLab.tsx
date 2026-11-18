@@ -772,7 +772,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     { id: "desk-use", name: "How I use the desk", hint: "What you use most and least; fold away what you don't", run: openUse },
     // The old pages' pieces the desk has no home for yet (the pages themselves now open the desk).
     { id: "sync", name: "Data sync", hint: "Run a sync or one job, job history, Gmail. Rebuild and Resync All ask first.", run: openSyncCenter },
-    { id: "journal", name: "Journal summary", hint: "Closed P&L today, this week and all time, performance and the latest closes", run: openJournal },
+    { id: "journal", name: "Journal summary", hint: "Today's, this week's and all-time P&L, performance and the latest trades", run: openJournal },
     { id: "scanner-history", name: "Scanner history", hint: "Past days, scorecards, shadow decisions and the scanner's tickers", run: () => go("/scanner?history=1") },
     { id: "radar-log", name: "Radar log", hint: "Every Radar event with its evidence, Outside your list and the Shadow book", run: () => go("/radar?log=1") },
     // The market's line and the day's money, off the top bar since the calm pass: one fact command (it moves
