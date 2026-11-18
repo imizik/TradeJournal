@@ -25,24 +25,24 @@ def key():
     return uuid4().hex
 
 
-def buy_calls(db, qty=2, now=NOW):
+def buy_calls(db, qty=2, now=NOW):  # noqa: F811
     return paper_book.open_order(db, {"symbol": "NBIS", "instrument": "option", "option_type": "call", "expiry": "2026-11-20",
                                       "strike": 100, "quantity": qty, "order_key": key()}, now)["filled"]
 
 
-def buy_shares(db, qty=100, now=NOW):
+def buy_shares(db, qty=100, now=NOW):  # noqa: F811
     return paper_book.open_order(db, {"symbol": "NBIS", "instrument": "stock", "quantity": qty, "order_key": key()}, now)["filled"]
 
 
-def quotes(market, now=NOW):
+def quotes(market, now=NOW):  # noqa: F811
     market.quotes = {CALL: q(CALL, 3.30, 3.40, now=now), "NBIS": q("NBIS", 98.0, 98.1, last=98.05, now=now)}
 
 
-def kinds(db):
+def kinds(db):  # noqa: F811
     return [e.kind for e in db.exec(select(PaperEvent).order_by(PaperEvent.recorded_at)).all()]
 
 
-def test_a_challenge_starts_at_ten_thousand_with_its_rules(db, market):
+def test_a_challenge_starts_at_ten_thousand_with_its_rules(db, market):  # noqa: F811
     paper_book.start_run(db, 2500, False, NOW, challenge=True)  # the challenge is always $10,000
     shown = paper_book.view(db, NOW + 1)
     assert shown["run"]["starting_cash"] == 10000
@@ -56,7 +56,7 @@ def test_a_challenge_starts_at_ten_thousand_with_its_rules(db, market):
     assert paper_book.view(db, NOW + 3)["challenge"] is None
 
 
-def test_open_pnl_exactly_at_the_limit_locks_opens_but_one_cent_short_does_not(db, market, unlock):
+def test_open_pnl_exactly_at_the_limit_locks_opens_but_one_cent_short_does_not(db, market, unlock):  # noqa: F811
     paper_book.start_run(db, None, False, NOW, challenge=True)
     quotes(market)
     held = buy_calls(db)  # 2 × 3.40 = $680 out; flat before it, so the day starts at $10,000
@@ -84,7 +84,7 @@ def test_open_pnl_exactly_at_the_limit_locks_opens_but_one_cent_short_does_not(d
     assert kinds(db).count("lock") == 1  # one lock for the day, however often it is read
 
 
-def test_realized_loss_and_open_loss_add_up_to_the_breach_and_cancel_working_opens(db, market, unlock, monkeypatch):
+def test_realized_loss_and_open_loss_add_up_to_the_breach_and_cancel_working_opens(db, market, unlock, monkeypatch):  # noqa: F811
     monkeypatch.setattr(paper_book, "_window", lambda now: ("regular", (int(NOW - 1800), int(NOW + 21600))))
     paper_book.start_run(db, None, False, NOW, challenge=True)
     quotes(market)
@@ -118,7 +118,7 @@ def test_realized_loss_and_open_loss_add_up_to_the_breach_and_cancel_working_ope
         assert "daily loss limit" in str(refused.value)
 
 
-def test_the_lock_lifts_at_midnight_new_york_of_the_next_trading_day(db, market, unlock):
+def test_the_lock_lifts_at_midnight_new_york_of_the_next_trading_day(db, market, unlock):  # noqa: F811
     paper_book.start_run(db, None, False, NOW, challenge=True)
     quotes(market)
     held = buy_calls(db)
@@ -146,7 +146,7 @@ def test_unlock_skips_the_weekend_by_the_market_calendar(monkeypatch):
     assert paper_challenge.unlock_at(date(2026, 11, 16)) == MONDAY + 86400
 
 
-def test_an_eight_percent_drawdown_fails_the_run_with_a_seven_day_cooldown(db, market, unlock):
+def test_an_eight_percent_drawdown_fails_the_run_with_a_seven_day_cooldown(db, market, unlock):  # noqa: F811
     paper_book.start_run(db, None, False, NOW, challenge=True)
     quotes(market)
     buy_shares(db)  # 100 × 98.10: cash $190
@@ -174,7 +174,7 @@ def test_an_eight_percent_drawdown_fails_the_run_with_a_seven_day_cooldown(db, m
     assert kinds(db).count("fail") == 1
 
 
-def test_the_target_passes_the_run_and_a_new_one_starts_at_once(db, market, unlock):
+def test_the_target_passes_the_run_and_a_new_one_starts_at_once(db, market, unlock):  # noqa: F811
     paper_book.start_run(db, None, False, NOW, challenge=True)
     quotes(market)
     buy_shares(db)
@@ -188,7 +188,7 @@ def test_the_target_passes_the_run_and_a_new_one_starts_at_once(db, market, unlo
     assert paper_book.view(db, NOW + 90)["earlier"][0]["challenge"]["result"] == "passed"
 
 
-def test_stale_prices_are_never_judged_or_read_as_zero(db, market, unlock):
+def test_stale_prices_are_never_judged_or_read_as_zero(db, market, unlock):  # noqa: F811
     paper_book.start_run(db, None, False, NOW, challenge=True)
     quotes(market)
     buy_calls(db)
@@ -200,7 +200,7 @@ def test_stale_prices_are_never_judged_or_read_as_zero(db, market, unlock):
     assert c["equity"] is None and c["today_pnl"] is None and c["to_floor"] is None and c["lock"] is None
 
 
-def test_the_minute_reads_one_quote_when_the_desks_prices_are_stale(db, market, unlock):
+def test_the_minute_reads_one_quote_when_the_desks_prices_are_stale(db, market, unlock):  # noqa: F811
     paper_book.start_run(db, None, False, NOW, challenge=True)
     quotes(market)
     buy_calls(db)
@@ -210,7 +210,7 @@ def test_the_minute_reads_one_quote_when_the_desks_prices_are_stale(db, market, 
     assert market.reads == [[CALL]] and found and found[0]["source"].startswith("lock:")
 
 
-def test_a_reset_over_a_running_challenge_is_kept_as_abandoned(db, market):
+def test_a_reset_over_a_running_challenge_is_kept_as_abandoned(db, market):  # noqa: F811
     paper_book.start_run(db, None, False, NOW, challenge=True)
     quotes(market)
     held = buy_calls(db)
@@ -221,7 +221,7 @@ def test_a_reset_over_a_running_challenge_is_kept_as_abandoned(db, market):
     assert old["challenge"] == {"result": "abandoned", "at": NOW + 120, "pct": -0.8}
 
 
-def test_the_route_starts_a_challenge(db, market, monkeypatch):
+def test_the_route_starts_a_challenge(db, market, monkeypatch):  # noqa: F811
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -235,7 +235,7 @@ def test_the_route_starts_a_challenge(db, market, monkeypatch):
     assert shown["challenge"]["rules"]["daily_pct"] == 3.0 and shown["run"]["starting_cash"] == 10000
 
 
-def test_a_no_bid_option_is_valued_at_its_midpoint_never_an_old_trade(db, market, unlock):
+def test_a_no_bid_option_is_valued_at_its_midpoint_never_an_old_trade(db, market, unlock):  # noqa: F811
     """The minute's own quote read prices a held option as the desk does: bid 0 / ask 0.10 is 0.05, not a stale last."""
     paper_book.start_run(db, None, False, NOW, challenge=True)
     quotes(market)
@@ -248,7 +248,7 @@ def test_a_no_bid_option_is_valued_at_its_midpoint_never_an_old_trade(db, market
     assert c["lock"] is not None and c["lock"]["equity"] == 9330.0  # 9,320 + 0.05 × 200, not 9,320 + 680
 
 
-def test_with_no_two_sided_quote_an_old_last_trade_is_stale_and_never_judged(db, market, unlock):
+def test_with_no_two_sided_quote_an_old_last_trade_is_stale_and_never_judged(db, market, unlock):  # noqa: F811
     paper_book.start_run(db, None, False, NOW, challenge=True)
     quotes(market, NOW + 400)
     buy_calls(db, now=NOW + 400)
