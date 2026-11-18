@@ -82,6 +82,17 @@ not the implementation worker. Profiles live in `.codex/agents/` and
 profiles or substitutions; do not silently downgrade. No cross-provider CLI,
 paid API review or waiting for GitHub comments.
 
+Pilot exception, until three Claude Code tier 1 PRs are recorded: the tier 1
+general reviewer may be local headless Codex (GPT-6.2 Sol, medium, Standard
+speed) on the signed-in ChatGPT plan, run read-only with no purchased credits
+or API key, given the same brief and [contract](#reviewer-contract). The owner
+calls it explicitly at the review checkpoint; there are no hooks, GitHub gate or
+watchdog. A verdict counts only if it names the requested head SHA. Anything
+else (usage limit, unavailable, timeout, unusable output) falls back to native
+Sonnet in the same round. Valid findings from an interrupted run are that
+round's findings. The PR record names the provider and any fallback reason.
+Tier 0 and tier 2 are unchanged.
+
 ## Owner sequence
 
 1. Finish the smallest complete change and its focused checks. For tier 2, retain

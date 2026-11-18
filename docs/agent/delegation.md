@@ -22,6 +22,21 @@ recommendation, then continues unblocked work. No fixed-format packet is needed.
 The owner handles small follow-up fixes directly and resumes the worker only
 when substantive work remains.
 
+## Cheaper hands
+
+Before starting a worker, use the cheapest one that can be checked:
+- **Small checkable edit** (a test, copy, a rename): a Google-plan builder in a
+  throwaway worktree of tracked files. Its own lint/test loop runs first; the
+  owner reads the full patch and reruns the check before a normal PR.
+- **Read-only survey:** a Google-plan reader, pointed only at a clean worktree,
+  never the main checkout (it holds `.env` and real data).
+- **Bounded UI work:** a Sonnet worker. Opus is for design, integration and
+  consequential work.
+
+Never hand to Google or a cheap worker: money/FIFO/fills, Robinhood access,
+auth, deployment, migrations, copilot tool lists, or real data. Delegation does
+not lower the review tier; worker PRs get the review their tier needs, once.
+
 ## Review tiers
 
 [pr-review.md](pr-review.md) is the only review policy. Ordinary changes need no
