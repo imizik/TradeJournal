@@ -99,3 +99,28 @@ test("On a phone Research is a full-width, full-height sheet", async ({ page }) 
   expect(box!.width).toBeGreaterThanOrEqual(view.width - 1);
   expect(box!.height).toBeGreaterThanOrEqual(view.height - 1);
 });
+
+test("On the default QQQ chart ⌘K lists Research QQQ too", async ({ page }) => {
+  await open(page, 1440, "");
+  await page.keyboard.press("Control+k");
+  await page.getByRole("combobox").fill("research");
+  await expect(page.getByRole("option", { name: /Research QQQ/ })).toBeVisible();
+});
+
+test("The sheet keeps keys and focus: desk keys do nothing behind it, Tab stays inside, close returns focus, and its tab never changes Charts'", async ({ page }) => {
+  await open(page);
+  await page.route("**/api/backend/charts/symbol/**", route => route.fulfill({ status: 503, json: { detail: "No research in this test." } }));
+  await page.evaluate(() => localStorage.setItem("tradejournal.charts.symbol-info.tab.v1", "News"));
+  await page.getByTestId("desk-chart-more").click();
+  await page.getByTestId("desk-research-open").click();
+  const drawer = page.getByRole("dialog", { name: "NBIS research" });
+  await drawer.getByRole("tab", { name: "Short" }).click();
+  await page.keyboard.press("r"); // Replay's key: the desk behind the sheet stays put
+  await expect(page.getByTestId("replay-open")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /Replay/ })).toHaveCount(0);
+  for (let i = 0; i < 25; i++) await page.keyboard.press("Tab");
+  expect(await page.evaluate(() => !!document.activeElement?.closest('[data-testid="desk-research"]'))).toBe(true);
+  expect(await page.evaluate(() => localStorage.getItem("tradejournal.charts.symbol-info.tab.v1"))).toBe("News");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("desk-chart-more")).toBeFocused();
+});

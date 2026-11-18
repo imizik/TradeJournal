@@ -811,6 +811,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         setPalette(true);
         return;
       }
+      // The Research sheet covers the desk: its keys are the sheet's, not the desk's.
+      if (document.querySelector('[data-testid="desk-research"]')) return;
       if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
       if (key === "j" || key === "k") { event.preventDefault(); countTap("keys"); step(key === "j" ? 1 : -1); }
       else if (event.key === "[") { event.preventDefault(); countTap("keys"); toggleThreads(); }
@@ -1459,7 +1461,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       {on && !replay && <button type="button" onClick={askCopilot} className={cn(styles.ask, "min-h-11 items-center gap-1.5 rounded-full border border-foreground/30 bg-card px-4 text-sm font-medium text-foreground shadow-lg hover:bg-secondary max-sm:size-12 max-sm:justify-center max-sm:px-0")}>
         <MessageCircle size={15} aria-hidden className="text-muted-foreground max-sm:size-5 max-sm:text-foreground" /><span className="max-sm:sr-only">Ask the copilot{picked && picked !== talking ? ` about ${picked}` : ""}</span>
       </button>}
-      {on && !replay && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} research={centreSymbol} onThread={pick} onConversation={actions.open} goTo={goTo} onAsk={askHere} />}
+      {on && !replay && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} research={centreSymbol ?? "QQQ"} onThread={pick} onConversation={actions.open} goTo={goTo} onAsk={askHere} />}
       </DeskUseRoot>
     </div>
   );

@@ -22,7 +22,9 @@ import type { ChartPosition } from "@/lib/chartJournal";
 
 const TABS = ["Overview", "News", "Events", "Forecast", "Financials", "Short", "You"] as const;
 type Tab = typeof TABS[number];
-const TAB_KEY = "tradejournal.charts.symbol-info.tab.v1";
+const CHARTS_TAB_KEY = "tradejournal.charts.symbol-info.tab.v1";
+/** The desk drawer keeps its own tab, so choosing one there never changes where Charts opens. */
+const DESK_TAB_KEY = "tradejournal.desk.research.tab.v1";
 /** The tabs built so far: one request each, for the open tab only. The Forecast tab needs the price. Forecast reads again each minute while open and visible. News is read through `useSymbolNews`, shared with the chart's news markers (T3.5). */
 const BUILT = {
   Overview: { load: fetchSymbolOverview, name: "overview", title: "Overview" },
@@ -43,6 +45,7 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
   const { owner, grants } = useAppAccess();
   const journal = owner || !!grants.journal_read;
   const id = useId();
+  const TAB_KEY = embedded ? DESK_TAB_KEY : CHARTS_TAB_KEY;
   const priceOf = useRef(price);
   useEffect(() => { priceOf.current = price; });
   const [view, setView] = useState<{ ready: boolean; expanded: boolean; tab: Tab }>({ ready: false, expanded: false, tab: "You" });
@@ -57,7 +60,7 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
     try { const saved = localStorage.getItem(TAB_KEY); if (TABS.includes(saved as Tab)) tab = saved as Tab; } catch { /* device storage is optional */ }
     const expanded = embedded || window.matchMedia("(min-width: 1024px)").matches;
     queueMicrotask(() => setView((current) => focused.current ? { ...current, ready: true } : { ready: true, expanded, tab }));
-  }, [embedded]);
+  }, [embedded, TAB_KEY]);
   const contextN = owner && contextFocus?.symbol === symbol ? contextFocus.n : 0;
   useEffect(() => {
     if (!contextN) return;
@@ -177,7 +180,7 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
       <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view.tab}`} className="p-2">
         {radarGroup && view.tab === "Overview" && peers}
         {owner && view.tab === "Overview" && <AskCopilot symbol={symbol} className="mb-2 inline-flex min-h-11 items-center rounded border border-border px-3 text-xs text-foreground hover:bg-secondary lg:min-h-0 lg:py-1" />}
-        {owner && view.tab === "Overview" && <div id={`${id}-holding`}><HoldingContext key={symbol} symbol={symbol} positions={positions} onPeers={onPeers ?? (() => document.getElementById(`${id}-peers`)?.scrollIntoView({ block: "start" }))} /></div>}
+        {owner && !embedded && view.tab === "Overview" && <div id={`${id}-holding`}><HoldingContext key={symbol} symbol={symbol} positions={positions} onPeers={onPeers ?? (() => document.getElementById(`${id}-peers`)?.scrollIntoView({ block: "start" }))} /></div>}
         {view.tab === "You" && !journal ? <p className="text-xs text-muted-foreground">Your journal is not shared with this assistant.</p> : !built(view.tab) ? <p className="text-xs text-muted-foreground">{view.tab} is coming soon.</p>
           : shown?.data ? (view.tab === "Overview" ? <SymbolInfoOverview data={shown.data as SymbolOverview} quote={quote} quoteFetchedAt={quoteFetchedAt ?? null}
               peers={peersResult?.symbol === symbol ? peersResult.data?.valuation : null}
