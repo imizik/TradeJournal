@@ -284,6 +284,9 @@ def start_run(db: Session, starting_cash, reset: bool, now: float, challenge: bo
     cooldown = paper_challenge.cooldown_until(db, now)
     if cooldown is not None:
         raise PaperError(f"Your last paper challenge failed; a new run can start {paper_challenge._until_words(cooldown)}.", 409)
+    locked = paper_challenge.reset_refusal(db, now)
+    if locked:
+        raise PaperError(locked, 409)
     run = PaperRun(starting_cash=round(float(cash), 2), started_at=_utc(now))
     db.add(run)
     if challenge:
@@ -1017,7 +1020,8 @@ def minute_pass(db: Session, now: float, minutes_for) -> list[dict]:
     _tidy(db, run, now)
     phase, regular = _window(now)
     if phase != "regular" or regular is None or not _market_open(now):
-        return []
+        from app.engine import paper_challenge
+        return paper_challenge.pings(db, run, now)  # a lock the desk's read recorded at the close is still told
     out = _watch(db, run, _events(db, run), now, minutes_for, regular[0])
     from app.engine import paper_challenge
     out += paper_challenge.minute(db, run, now)  # before the limits: a lock this minute opens nothing

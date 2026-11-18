@@ -106,8 +106,16 @@ def test_realized_loss_and_open_loss_add_up_to_the_breach_and_cancel_working_ope
     shown = paper_book.view(db, NOW + 190)
     assert shown["challenge"]["lock"] is not None and shown["orders"] == []
     assert shown["account"]["reserved"] == 0.0
-    # Pinged within the paper budget once per lock: the same key, which the notification policy sends once.
-    assert [p["source"] for p in paper_challenge.minute(db, paper_book.current_run(db), NOW + 240)] == [ping["source"]]
+    # Told once: after the runner puts it to the notification policy (the paper budget), no later minute asks again.
+    from app.engine import notification_policy
+    notification_policy.decide(db, sender="paper", source_id=ping["source"], kind="paper", title=ping["title"],
+                               body=ping["body"], now=NOW + 181)
+    assert paper_challenge.minute(db, paper_book.current_run(db), NOW + 240) == []
+    # A reset never lifts the lock, whatever run is asked for.
+    for challenge in (True, False):
+        with pytest.raises(paper_book.PaperError) as refused:
+            paper_book.start_run(db, 5000, True, NOW + 300, challenge=challenge)
+        assert "daily loss limit" in str(refused.value)
 
 
 def test_the_lock_lifts_at_midnight_new_york_of_the_next_trading_day(db, market, unlock):
@@ -225,3 +233,27 @@ def test_the_route_starts_a_challenge(db, market, monkeypatch):
     monkeypatch.setattr(copilot_paper.copilot, "settings", lambda: SimpleNamespace(enabled=True))
     shown = TestClient(app).post("/copilot/paper/runs", json={"challenge": True}).json()
     assert shown["challenge"]["rules"]["daily_pct"] == 3.0 and shown["run"]["starting_cash"] == 10000
+
+
+def test_a_no_bid_option_is_valued_at_its_midpoint_never_an_old_trade(db, market, unlock):
+    """The minute's own quote read prices a held option as the desk does: bid 0 / ask 0.10 is 0.05, not a stale last."""
+    paper_book.start_run(db, None, False, NOW, challenge=True)
+    quotes(market)
+    buy_calls(db)  # 2 × 3.40: cash 9,320
+    no_bid = q(CALL, 0.0, 0.10, last=3.40, now=NOW + 300)
+    no_bid.trade_date = int((NOW - 3 * 86400) * 1000)
+    market.quotes = {CALL: no_bid}
+    paper_challenge.minute(db, paper_book.current_run(db), NOW + 300)
+    c = paper_book.view(db, NOW + 301)["challenge"]
+    assert c["lock"] is not None and c["lock"]["equity"] == 9330.0  # 9,320 + 0.05 × 200, not 9,320 + 680
+
+
+def test_with_no_two_sided_quote_an_old_last_trade_is_stale_and_never_judged(db, market, unlock):
+    paper_book.start_run(db, None, False, NOW, challenge=True)
+    quotes(market, NOW + 400)
+    buy_calls(db, now=NOW + 400)
+    gone = q(CALL, None, None, last=1.00, now=NOW + 500)
+    gone.trade_date = int((NOW - 3 * 86400) * 1000)
+    market.quotes = {CALL: gone}
+    assert paper_challenge.minute(db, paper_book.current_run(db), NOW + 500) == []
+    assert paper_book.view(db, NOW + 501)["challenge"]["lock"] is None

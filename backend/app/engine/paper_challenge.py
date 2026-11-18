@@ -235,9 +235,22 @@ def refusal(db: Session, run: PaperRun, now: float) -> str | None:
         return f"This challenge passed on {_day_words(result['at'])}. Closes still work; start a new run to trade again."
     lock = _active_lock(facts, now)
     if lock is not None:
-        return (f"Daily loss limit hit: today's paper P&L {pb.usd(lock['pnl'])} vs the -{pb.usd(lock['limit'])} limit. "
+        return (f"Daily loss limit hit: today's paper P&L {pb.usd(lock['pnl'])} vs the −{pb.usd(lock['limit'])} limit. "
                 f"Paper opens unlock {_until_words(lock['until'])}; closes still work.")
     return None
+
+
+def reset_refusal(db: Session, now: float) -> str | None:
+    """Why a new run cannot replace the current one now: a reset never lifts a daily lock (the 7-day cooldown after a
+    fail is ``cooldown_until``'s)."""
+    run = pb.current_run(db)
+    if run is None:
+        return None
+    facts = state(pb._events(db, run))
+    lock = None if facts is None or facts["result"] is not None else _active_lock(facts, now)
+    if lock is None:
+        return None
+    return f"Today's daily loss limit locked this challenge: a new run can start {_until_words(lock['until'])}, when the lock lifts."
 
 
 def guard(db: Session, now: float, record: bool = True) -> None:
@@ -254,13 +267,23 @@ def guard(db: Session, now: float, record: bool = True) -> None:
 
 
 def _quote_marks(symbols: list[str]) -> dict:
-    """The legs' prices from one quote read (the mid of a two-sided quote, else the last), shaped as the desk's rows."""
+    """The legs' prices from one quote read, by the desk's own rule (``desk_ticks._row``): an option at its bid/ask
+    midpoint (a no-bid option too), shares at the last trade. A price is stamped with the time it comes from: the
+    quote's sides for a midpoint, the trade's time for a last trade (an old trade stays stale)."""
+    from app.engine.desk_ticks import _OCC
+    from app.engine.quotes import _calc_mid
     out = {}
     for name, quote in pb._live_quotes(symbols).items():
         bid, ask = quote.bid, quote.ask
-        two_sided = isinstance(bid, (int, float)) and isinstance(ask, (int, float)) and bid > 0 and ask >= bid
-        price = (bid + ask) / 2 if two_sided else quote.last
-        stamps = [t / 1000 for t in (quote.bid_date, quote.ask_date) if isinstance(t, (int, float))]
+        price, stamps = None, []
+        if _OCC.match(name):
+            if bid is not None and ask is not None and ask >= bid >= 0:
+                price = _calc_mid(bid, ask)
+                stamps = [t / 1000 for t in (quote.bid_date, quote.ask_date) if isinstance(t, (int, float))]
+        if price is None:
+            price = quote.last
+            trade = getattr(quote, "trade_date", None)
+            stamps = [trade / 1000] if isinstance(trade, (int, float)) else []
         if isinstance(price, (int, float)) and price > 0 and stamps:
             out[name] = {"last": round(float(price), 4), "at": min(stamps)}
     return out
@@ -268,8 +291,7 @@ def _quote_marks(symbols: list[str]) -> dict:
 
 def minute(db: Session, run: PaperRun, now: float) -> list[dict]:
     """The paper runner's minute in the regular session: judge the run, reading the held legs' quotes once when the
-    desk's prices are stale, and return a PAPER ping for a lock or a fail recorded in the last ``PING_SECONDS`` (the
-    notification policy sends each once)."""
+    desk's prices are stale, and return the pings still owed (``pings``)."""
     events = pb._events(db, run)
     facts = state(events)
     if facts is None:
@@ -284,16 +306,31 @@ def minute(db: Session, run: PaperRun, now: float) -> list[dict]:
             except pb.PaperError:
                 pass
         evaluate(db, run, now, marks=marks)
-        facts = state(pb._events(db, run))
+    return pings(db, run, now)
+
+
+def _judged(db: Session, source: str) -> bool:
+    """Whether the paper runner already put this ping to the notification policy (which answers "send" again for a
+    source it sent, so the runner must not ask twice)."""
+    from app.models import PhonePing
+    return db.exec(select(PhonePing).where(PhonePing.sender == "paper", PhonePing.source_id == source)).first() is not None
+
+
+def pings(db: Session, run: PaperRun, now: float) -> list[dict]:
+    """A PAPER ping for a lock or a fail recorded in the last ``PING_SECONDS`` and not yet put to the notification
+    policy: each once, whichever read recorded it (the runner's minute, the desk's read or an order's guard)."""
+    facts = state(pb._events(db, run))
+    if facts is None:
+        return []
     out = []
     lock = facts["locks"].get(pb._ny_day(now).isoformat())
-    if lock is not None and now - lock["at"] <= PING_SECONDS:
+    if lock is not None and now - lock["at"] <= PING_SECONDS and not _judged(db, lock["key"]):
         out.append({"source": lock["key"], "symbol": None, "title": "PAPER · Daily loss limit hit, opens locked",
                     "body": (f"Paper, not real money. Today's paper P&L {pb.usd(lock['pnl'])} reached the "
-                             f"-{pb.usd(lock['limit'])} daily limit. New paper opens are locked until "
+                             f"−{pb.usd(lock['limit'])} daily limit. New paper opens are locked until "
                              f"{_until_words(lock['until'])}; closes still work.")})
     result = facts["result"]
-    if result is not None and result["kind"] == "fail" and now - result["at"] <= PING_SECONDS:
+    if result is not None and result["kind"] == "fail" and now - result["at"] <= PING_SECONDS and not _judged(db, result["key"]):
         out.append({"source": result["key"], "symbol": None, "title": "PAPER · Challenge failed",
                     "body": (f"Paper, not real money. {result['reason']} The run is over; a new one can start "
                              f"{_until_words(result['at'] + COOLDOWN_DAYS * 86400)}.")})

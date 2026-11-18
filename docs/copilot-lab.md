@@ -2585,8 +2585,10 @@ equity.
   minutes old (a flat account always). A stale price is never read as zero; the desk line goes grey with its time.
 - **Daily lock.** At or past the limit (exactly at it counts), every paper open is refused (button, ticket, limit,
   copilot card, Telegram Paper it) until midnight New York of the next trading day; working opening limits are canceled;
-  closes stay allowed. One PAPER ping says so, in the paper ping budget.
-- **Fail.** At or past the drawdown the run fails: no more opens on it and no new run of any kind for 7 days.
+  closes stay allowed, and a reset cannot start a new run until it lifts. One PAPER ping says so, in the paper ping
+  budget.
+- **Fail.** At or past the drawdown the run fails: no more opens on it and no new paper-book run for 7 days (Paper
+  replay's practice days are separate and stay open).
 - **Pass.** At or past the target without a fail the run passes: a milestone; a new run can start at once.
 - **Record.** Each run keeps its result on the Progress scorecard ("Run 3 · failed Nov 21 · −8.1%"); a reset over a
   running challenge is kept as abandoned. Everything is append-only `paper_event` rows (no migration).
