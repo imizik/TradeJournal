@@ -87,6 +87,12 @@ test("⌘K: Data sync opens the Sync Center; Scanner history and Radar log are o
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Data Sync Center" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Close Sync Center" })).toBeFocused();
+  // ⌘K over the drawer: Escape closes the palette first, then the drawer.
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(palette).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(palette).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Data Sync Center" })).toBeVisible();
   await page.keyboard.press("Escape"); // closes the drawer, not a desk panel under it
   await expect(page.getByRole("heading", { name: "Data Sync Center" })).toHaveCount(0);
 

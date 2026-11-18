@@ -239,7 +239,8 @@ export function DeskSyncCenter() {
   useEffect(() => {
     if (!open) return;
     const frame = requestAnimationFrame(() => document.querySelector<HTMLElement>('[aria-label="Close Sync Center"]')?.focus());
-    const key = (event: KeyboardEvent) => { if (event.key === "Escape") { event.stopImmediatePropagation(); event.preventDefault(); setOpen(false); } };
+    // A native dialog opened above it (⌘K's palette) keeps its own Escape.
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape" && !document.querySelector("dialog[open]")) { event.stopImmediatePropagation(); event.preventDefault(); setOpen(false); } };
     window.addEventListener("keydown", key, true);
     return () => { cancelAnimationFrame(frame); window.removeEventListener("keydown", key, true); };
   }, [open]);
