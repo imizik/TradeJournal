@@ -88,7 +88,11 @@ export type PaperBook = {
 export type EquityRange = "1D" | "1W" | "1M" | "ALL";
 export type EquityPoint = { at: number; equity: number | null; prices_at: number | null; stale: boolean };
 export type EquitySeries = { range: EquityRange; run: { id: string; started_at: number } | null; starting_cash: number | null;
-  points: EquityPoint[]; base: { value: number; at: number } | null };
+  points: EquityPoint[];
+  /** Always a point on live prices; ``exact`` false when it is not the range's natural start (label it with its time). */
+  base: { value: number; at: number; exact: boolean } | null;
+  /** 1D only: the New York day shown (the newest with points) and whether it is today. */
+  day?: string; today?: boolean };
 /** The copilot's weekly paper review: ``day`` the Friday it was written, ``monday`` its week. */
 export type PaperReview = { day: string; monday: string; at: number; text: string; goals?: GoalProgress[] };
 

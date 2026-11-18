@@ -23,6 +23,9 @@ const PAD_Y = 8;
 
 const usd = (n: number) => `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${usd(n)}`;
+const dayTime = (epoch: number) => `${new Date(epoch * 1000).toLocaleDateString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric" }).replace(",", "")} ${at(epoch)}`;
+/** "2026-11-17" as "Tue Nov 17". */
+const dayWord = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).replace(",", "");
 const at = (epoch: number) => `${new Date(epoch * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })} ET`;
 
 /** The series for ``range``: read on mount and on a range change, on the desk's shared minute and after each paper fill. */
@@ -78,6 +81,10 @@ export default function PortfolioGraph({ value, unpriced = 0, series, failed = f
   const change = value && base ? Math.round((value.value - base.value) * 100) / 100 : null;
   const pct = change != null && base && base.value ? Math.round(change * 10000 / Math.abs(base.value)) / 100 : null;
   const grey = !value || value.stale;
+  // What the change is measured over: the range, the session shown when 1D is not today, or the base's own time when
+  // the range's natural start had no live prices.
+  const over = base?.exact === false ? `since ${dayTime(base.at)}`
+    : range === "1D" && series?.today === false && series.day ? dayWord(series.day) : RANGE_WORD[range];
   const tone = grey || change == null || change === 0 ? "text-muted-foreground" : change > 0 ? "text-emerald-300" : "text-rose-300";
 
   const points: EquityPoint[] = [...(series?.points ?? [])];
@@ -110,13 +117,13 @@ export default function PortfolioGraph({ value, unpriced = 0, series, failed = f
       </p>
       <p data-testid="paper-change" className={cn("mt-0.5 flex flex-wrap items-baseline gap-x-1.5 text-xs tabular-nums", tone)}>
         <span>{change != null ? `${signed(change)}${pct != null ? ` (${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct).toFixed(2)}%)` : ""}` : "—"}</span>
-        <span className="text-muted-foreground">{RANGE_WORD[range]}</span>
+        <span data-testid="paper-change-over" className="text-muted-foreground">{over}</span>
         {value?.stale && value.at != null && <span className="text-[11px] text-muted-foreground">as of {at(value.at)}</span>}
       </p>
       {status}
       {hasLine ? (
         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" data-testid="paper-graph"
-          aria-label={`Paper account value, ${RANGE_WORD[range].toLowerCase()}${change != null ? `: ${signed(change)}` : ""}`} className="mt-2 h-[120px] w-full">
+          aria-label={`Paper account value, ${over.toLowerCase()}${change != null ? `: ${signed(change)}` : ""}`} className="mt-2 h-[120px] w-full">
           {baseY != null && <line x1={0} x2={W} y1={baseY} y2={baseY} stroke="currentColor" strokeOpacity={0.3} strokeWidth={1} strokeDasharray="2 4"
             vectorEffect="non-scaling-stroke" className="text-muted-foreground" />}
           {lines.map((s, i) => (

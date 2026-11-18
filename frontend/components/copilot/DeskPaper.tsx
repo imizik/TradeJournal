@@ -368,7 +368,7 @@ export function CloseRow({ position, trim, quantity, onDone, onFilled, fixedKey,
   if (!sheet) return inner;
   const legs = preview ? Object.values(preview.legs) : [];
   const review: PaperOrderReview = {
-    title: sheet.title, side: "sell", orderType: type, quantity: qtyN, unit: position.multiplier === 1 ? "shares" : "contracts",
+    title: sheet.title, side: position.credit ? "buy" : "sell", orderType: type, quantity: qtyN, unit: position.multiplier === 1 ? "shares" : "contracts",
     price: type === "limit" ? (limitValid ? limitN : null) : legs.length === 1 ? legs[0].price : preview ? Math.abs(preview.per_share) : null,
     quotedAt: preview?.quoted_at ?? null, estimated: type === "market" ? share : null, buyingPowerAfter: null,
   };
@@ -595,11 +595,12 @@ export function PaperScoreLine({ score, since, testId = "paper-score-line", clas
 
 const nyDay = (epoch: number) => new Date(epoch * 1000).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 
-/** A position's change today: all of its P&L when it was opened on the day of its price; shares from the previous close
- *  (the desk's tick); otherwise null (an option's previous close is not read, so it is left out rather than guessed). */
+/** A position's change today, at live prices only: all of its P&L when it was opened today; shares from the previous
+ *  close (the desk's tick); otherwise null (an option's previous close is not read, so it is left out rather than guessed). */
 function todayChange(p: PaperPosition, ticks: DeskTicks): number | null {
   const pnl = paperPnl(p, ticks);
   if (!pnl) return null;
+  if (!pnl.live) return null; // before the open (or with no live tick) the last session's numbers are not today's
   if (nyDay(p.opened_at) === nyDay(pnl.at)) return pnl.pnl;
   if (p.instrument !== "stock") return null;
   const tick = tickFor(ticks, p.symbol);
@@ -700,7 +701,7 @@ export default function DeskPaper({ book, failed, symbol, top = null, onPick }: 
                     <div className="max-h-[90dvh] w-full overflow-y-auto sm:max-h-none">
                       {free > 0 ? (
                         <CloseRow key={`${p.id}|${closing.trim}`} position={p} trim={closing.trim} onDone={() => setClosing(null)}
-                          sheet={{ title: `${closing.trim ? "Trim" : "Sell"} ${p.label}`, top: (
+                          sheet={{ title: `${closing.trim ? "Trim" : p.instrument === "spread" ? "Close" : "Sell"} ${p.label}`, top: (
                             <div className="mb-2 flex flex-wrap items-center gap-2">
                               <div role="radiogroup" aria-label="Sell all or trim" className="inline-flex rounded-md border text-xs">
                                 {([false, true] as const).map(t => (

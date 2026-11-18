@@ -55,7 +55,7 @@ const HELD = { key: "trade:33333333-3333-4333-8333-333333333333", group: "watch"
   book: { usd: 220, pct: 35.5, expiry: "2026-11-20", days_held: 1, track: null, state: "on_plan", planned: true, quantity: 2, mark: 420, live: "matched" } };
 
 // The account's value over the day (invented): a gap where a price was missing, then a minute on an old price (grey).
-const SERIES = { range: "1D", run: { id: "r1", started_at: BOOK.run.started_at }, starting_cash: 10000, base: { value: 10000.5, at: at("2026-11-12T20:59:00Z") },
+const SERIES = { range: "1D", run: { id: "r1", started_at: BOOK.run.started_at }, starting_cash: 10000, base: { value: 10000.5, at: at("2026-11-12T20:59:00Z"), exact: true }, day: "2026-11-13", today: true,
   points: [{ at: at("2026-11-13T14:31:00Z"), equity: 10020, prices_at: at("2026-11-13T14:30:58Z"), stale: false },
     { at: at("2026-11-13T15:00:00Z"), equity: 10050, prices_at: at("2026-11-13T14:59:58Z"), stale: false },
     { at: at("2026-11-13T15:30:00Z"), equity: null, prices_at: null, stale: false },
@@ -83,7 +83,8 @@ async function open(page: Page, width: number, held = false, preview: "ok" | key
   await page.route(url => url.pathname.endsWith("/copilot/paper"), route => { reads += 1; return route.fulfill({ json: BOOK }); });
   await page.route("**/copilot/paper/equity?*", route => {
     const range = new URL(route.request().url()).searchParams.get("range");
-    return route.fulfill({ json: range === "ALL" ? { ...SERIES, range: "ALL", base: { value: 10000, at: BOOK.run.started_at } } : SERIES });
+    if (range === "1W") return route.fulfill({ json: { ...SERIES, range: "1W", day: undefined, today: undefined, base: { ...SERIES.base, exact: false } } });
+    return route.fulfill({ json: range === "ALL" ? { ...SERIES, range: "ALL", base: { value: 10000, at: BOOK.run.started_at, exact: true } } : SERIES });
   });
   await page.route("**/copilot/paper/orders", route => {
     const body = route.request().postDataJSON();
@@ -131,6 +132,8 @@ for (const width of [1440, 375]) {
     await expect(graph.locator("polyline[data-grey]")).toHaveCount(1);
     await paper.getByTestId("paper-range-ALL").click();
     await expect(paper.getByTestId("paper-change")).toHaveText("+$160.50 (+1.61%)All time");
+    await paper.getByTestId("paper-range-1W").click(); // the week's natural start had no live prices: labelled with the base's time
+    await expect(paper.getByTestId("paper-change-over")).toHaveText("since Thu Nov 12 3:59 PM ET");
     await paper.getByTestId("paper-position-card").click(); // the order sheet, selling all of it
     await expect(paper.getByTestId("paper-order-sheet-title")).toHaveText("Sell NBIS $100 Call 11/20/26");
     await expect(paper.getByTestId("paper-close")).toContainText("Sell 2 × NBIS $100 Call 11/20/26 at 3.90 (the bid");

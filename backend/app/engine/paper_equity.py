@@ -11,8 +11,9 @@ graph (1D / 1W / 1M / All).
   challenge's status line agree; any other run uses the desk's kept prices. No market-data call of its own.
 - **Ranges.** ``1D`` the newest session day with points (a weekend shows Friday), against the last point before it;
   ``1W`` and ``1M`` the last 7 and 30 days, ``ALL`` the run. Each is thinned to the last point per bucket. ``base`` is
-  what the change is measured from: the last point before the range, else the starting cash when the run began inside
-  it, else the range's first point.
+  what the change is measured from, always a point on live prices: the last one before the range, else the starting
+  cash when the run began inside it, else the range's first; when it is not the last point before the range (that one
+  was missing or stale) it is marked not ``exact`` and the change is labelled with its time.
 
 Insert-only ``paper_equity`` rows, one per run and minute; never touches fills, trades, accounts or Robinhood.
 """
@@ -28,6 +29,7 @@ from app.models import PaperEquity, PaperRun
 
 RANGES = {"1D": 60, "1W": 10 * 60, "1M": 60 * 60, "ALL": None}  # bucket seconds (ALL: sized to the run)
 ALL_POINTS = 300  # about this many points across a long run
+BASE_LOOKBACK = 2000  # points looked back for the newest one on live prices (about five sessions)
 
 
 def _naive(stamp: float) -> datetime:
@@ -73,17 +75,25 @@ def _thin(points: list[dict], bucket: int) -> list[dict]:
     return list(out.values())
 
 
+def _fresh(row: PaperEquity) -> bool:
+    return row.equity is not None and not _point(row)["stale"]
+
+
 def series(db: Session, span: str, now: float) -> dict:
-    """The current run's points for ``span`` (``RANGES``), oldest first, with ``base`` (``{value, at}`` or None)."""
+    """The current run's points for ``span`` (``RANGES``), oldest first, with ``base``: ``{value, at, exact}`` or None.
+    The base is always a point on live prices (never a missing or stale one); ``exact`` is false when it is not the
+    range's natural start (the last point before the range was missing or stale, or there was none), so the change is
+    labelled with the base's time instead. ``day`` (1D): the New York day shown, and ``today`` whether it is today."""
     if span not in RANGES:
         raise pb.PaperError(f"Range must be one of {', '.join(RANGES)}.", 422)
     run = pb.current_run(db)
     if run is None:
         return {"range": span, "run": None, "points": [], "base": None, "starting_cash": None}
     started = pb._epoch(run.started_at)
-    rows = list(db.exec(select(PaperEquity).where(PaperEquity.run_id == run.id).order_by(col(PaperEquity.at))).all())
+    mine = select(PaperEquity).where(PaperEquity.run_id == run.id)
+    newest = db.exec(mine.order_by(col(PaperEquity.at).desc())).first()
+    day = pb._ny_day(pb._epoch(newest.at)) if newest else pb._ny_day(now)
     if span == "1D":
-        day = pb._ny_day(pb._epoch(rows[-1].at)) if rows else pb._ny_day(now)
         start = datetime.combine(day, time(0), ET).timestamp()
     elif span == "1W":
         start = now - 7 * 86400
@@ -91,18 +101,22 @@ def series(db: Session, span: str, now: float) -> dict:
         start = now - 30 * 86400
     else:
         start = started
-    inside = [_point(r) for r in rows if pb._epoch(r.at) >= start]
-    before = [r for r in rows if pb._epoch(r.at) < start and r.equity is not None]
-    if before:
-        base = {"value": before[-1].equity, "at": pb._epoch(before[-1].at)}
+    rows = list(db.exec(mine.where(PaperEquity.at >= _naive(start)).order_by(col(PaperEquity.at))).all())
+    inside = [_point(r) for r in rows]
+    earlier = list(db.exec(mine.where(PaperEquity.at < _naive(start)).order_by(col(PaperEquity.at).desc()).limit(BASE_LOOKBACK)).all())
+    fresh = next((r for r in earlier if _fresh(r)), None)
+    if fresh is not None:
+        base = {"value": fresh.equity, "at": pb._epoch(fresh.at), "exact": fresh is earlier[0]}
     elif started >= start or span == "ALL":
-        base = {"value": run.starting_cash, "at": started}
+        base = {"value": run.starting_cash, "at": started, "exact": True}
     else:
-        first = next((p for p in inside if p["equity"] is not None), None)
-        base = None if first is None else {"value": first["equity"], "at": first["at"]}
+        first = next((r for r in rows if _fresh(r)), None)
+        base = None if first is None else {"value": first.equity, "at": pb._epoch(first.at), "exact": False}
     bucket = RANGES[span]
     if bucket is None:
         bucket = max(3600, int((now - started) / ALL_POINTS) // 3600 * 3600)
-    return {"range": span, "run": {"id": str(run.id), "started_at": started}, "starting_cash": run.starting_cash,
-            "points": _thin(inside, bucket), "base": base}
-
+    out = {"range": span, "run": {"id": str(run.id), "started_at": started}, "starting_cash": run.starting_cash,
+           "points": _thin(inside, bucket), "base": base}
+    if span == "1D":
+        out.update(day=day.isoformat(), today=day == pb._ny_day(now))
+    return out

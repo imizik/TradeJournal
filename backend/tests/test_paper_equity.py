@@ -86,9 +86,10 @@ def test_ranges_their_base_and_thinning(db, market):  # noqa: F811
     now = start + 2 * DAY + 600
     day = paper_equity.series(db, "1D", now)
     assert len(day["points"]) == 10 and day["points"][0]["at"] == start + 2 * DAY
-    assert day["base"] == {"value": 9320 + (4.40 + 0.09) * 200, "at": start + DAY + 540}  # yesterday's last point
+    assert day["base"] == {"value": 9320 + (4.40 + 0.09) * 200, "at": start + DAY + 540, "exact": True}  # yesterday's last point
+    assert day["day"] == "2026-11-15" and day["today"] is True
     everything = paper_equity.series(db, "ALL", now)
-    assert everything["base"] == {"value": 10000, "at": NOW} and everything["starting_cash"] == 10000
+    assert everything["base"] == {"value": 10000, "at": NOW, "exact": True} and everything["starting_cash"] == 10000
     assert len(everything["points"]) <= 3 * 10 and everything["points"][-1]["at"] == start + 2 * DAY + 540
     week = paper_equity.series(db, "1W", now)
     assert week["base"]["value"] == 10000  # the run began inside the week
@@ -125,3 +126,25 @@ def test_the_route_reads_the_series(db, market, monkeypatch):  # noqa: F811
     shown = client.get("/copilot/paper/equity", params={"range": "ALL"}).json()
     assert shown["points"][0]["equity"] == 10080 and shown["base"]["value"] == 10000
     assert client.get("/copilot/paper/equity", params={"range": "5Y"}).status_code == 422
+
+
+def test_the_base_is_never_a_stale_or_missing_point_and_says_so(db, market):  # noqa: F811
+    """No desk open after 10:00 on day one: its later points are stale (old prices). Day two's change is measured from
+    the last point on live prices and marked not exact, so it is labelled with its time, never as a clean "Today"."""
+    run = opened(db, market)
+    start = NOW + 60
+    market.marks = {CALL: {"last": 3.40, "at": start}}
+    paper_equity.record(db, run, start)  # live: 10,000
+    for m in range(1, 5):
+        paper_equity.record(db, run, start + m * 60)  # the same price, older each minute: stale from the third
+    market.marks = {}
+    paper_equity.record(db, run, start + 300)  # no price at all: null
+    one = paper_equity.series(db, "1D", start + 400)["points"]
+    assert [(p["equity"] is None, p["stale"]) for p in one] == [(False, False)] * 3 + [(False, True)] * 2 + [(True, False)]
+    market.marks = {CALL: {"last": 4.50, "at": start + DAY}}
+    paper_equity.record(db, run, start + DAY)
+    day = paper_equity.series(db, "1D", start + DAY + 30)
+    # The last point before the day is a gap and the two before it are stale: the base is the 10:03 point, not exact.
+    assert day["base"] == {"value": 10000.0, "at": start + 120, "exact": False} and day["today"] is True
+    later = paper_equity.series(db, "1D", start + 2 * DAY)  # the next morning, before any point: yesterday, not "today"
+    assert later["day"] == day["day"] and later["today"] is False
