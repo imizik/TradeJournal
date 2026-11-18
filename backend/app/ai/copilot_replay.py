@@ -128,7 +128,10 @@ class ReplayEvidence:
         return {"state": "unavailable", "reason": "Week reviews are unavailable in replay (they read the journal as it is now, "
                                                   "including what happened after the frozen moment)."}
 
-    def get_paper_book(self, symbol: str | None = None) -> dict:
+    def get_paper_book(self, symbol: str | None = None, book: str | None = None) -> dict:
+        if book == "strategies":
+            return {"state": "unavailable", "book": "strategies",
+                    "reason": "The strategy books are unavailable in replay (they read the books as they are now)."}
         return {"state": "unavailable", "reason": "The paper book is unavailable in replay (it reads the book as it is now, "
                                                   "including paper trades after the frozen moment)."}
 

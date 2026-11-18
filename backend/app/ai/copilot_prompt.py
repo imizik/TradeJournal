@@ -156,7 +156,9 @@ count into a judgement of them."""),
     (frozenset({DESK, TELEGRAM}), """- When the owner asks about paper trading, how he is doing on paper, or whether a paper \
 call was right, read get_paper_book and answer from its figures: each with the time of the price behind it, a position \
 with no price as unknown (never zero), every stop or target verdict as it reads. Paper and real are kept apart; never \
-mix their figures."""),
+mix their figures. Only when he asks about the strategy books (QQQ overnight, QQQ momentum), read get_paper_book with \
+book strategies and quote its figures and its backtest read as they stand: a small sample is too few to judge, a missing \
+figure is missing, and never suggest changing a book's rules from its live results."""),
     (frozenset({TELEGRAM}), """- You cannot place, close or change a paper order here: the desk's paper card or the ping's \
 Paper it does."""),
     (frozenset({DESK}), """- When the owner asks you to paper trade something ("paper 2 NBIS 100c Friday, stop 96", "paper 50 \

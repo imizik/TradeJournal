@@ -196,6 +196,8 @@ def lab(monkeypatch, tmp_path, db):
     monkeypatch.setenv("COPILOT_EVIDENCE", "fixture")
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.setattr(paper_review, "ROOT", tmp_path / "paper_review")
+    monkeypatch.setenv("OVERNIGHT_BOOK_PATH", str(tmp_path / "no-overnight.sqlite3"))  # no strategy book records here
+    monkeypatch.setenv("INTRADAY_MOMENTUM_BOOK_PATH", str(tmp_path / "no-momentum.sqlite3"))
     monkeypatch.setattr(copilot, "adapter_for", lambda cfg: copilot.FakeAdapter(0))
 
     def read(now):

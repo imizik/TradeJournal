@@ -593,6 +593,11 @@ class FakeAdapter:
                 yield "text", piece
             yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
             return
+        if isinstance(last["content"], str) and allow_tools and "strategy book" in lower:
+            yield "progress", "Reading the strategy books."
+            yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_paper_book",
+                                   "input": {"book": "strategies"}}], "tool_use", _zero_usage(), self.model)
+            return
         if isinstance(last["content"], str) and allow_tools and "paper" in lower:
             yield "progress", "Reading your paper book."
             yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_paper_book", "input": {}}],
@@ -722,6 +727,24 @@ class FakeAdapter:
         return scripted("Unclear", "Your paper book as it stands; the scripted model does not judge it.",
                         "**Paper book**\n" + "\n".join(lines), "more paper trades close.",
                         against="a handful of closed paper trades is not a sample.")
+
+    @staticmethod
+    def _strategies(data: dict) -> str:
+        """A scripted read of the strategy books: each book's figures and its backtest line, copied from the tool."""
+        if data.get("state") != "ok":
+            return scripted("Unclear", "No strategy books to read.", f"{data.get('reason') or 'Nothing came back'}.")
+        lines = []
+        for b in data.get("books") or []:
+            if not b.get("count"):
+                lines.append(f"- {b['book']}: {b.get('reason') or 'no finished results yet'} {b['vs_backtest']['read']}")
+                continue
+            lines.append(f"- {b['book']}: {b['count']} {b['unit']}s from {b['from']} to {b['to']}, total {b['total_bp']:+.2f} bp "
+                         f"({b['total_usd']:+,.2f} $), average {b['mean_bp']:+.2f} bp ({b['mean_usd']:+,.2f} $) a {b['unit']}, "
+                         f"win rate {b['win_rate_pct']:g}%. {b['vs_backtest']['read']}"
+                         + (f" Missed: {b['missed'][0]['day']} ({b['missed'][0]['reason']})." if b.get("missed") else ""))
+        return scripted("Unclear", "Too early to judge either book; the figures as they stand.",
+                        "**Strategy books**\n" + "\n".join(lines), "months more of results.",
+                        against="a few weeks of nights or days is not a sample.")
 
     @staticmethod
     def _proof(data: dict) -> str:
@@ -1099,6 +1122,8 @@ class FakeAdapter:
                             "nothing is remembered until you do.")
         if "get_radar_today" in results:
             return FakeAdapter._radar(results["get_radar_today"])
+        if (results.get("get_paper_book") or {}).get("book") == "strategies":
+            return FakeAdapter._strategies(results["get_paper_book"])
         if "get_paper_book" in results:
             return FakeAdapter._paper(results["get_paper_book"])
         if "get_proof" in results:
@@ -1329,6 +1354,9 @@ def _summary(name: str, data: dict) -> str:
     if name == "get_paper_book":
         if data.get("state") != "ok":
             return (data.get("reason") or "unavailable")[:160]
+        if data.get("book") == "strategies":
+            return " · ".join(f"{b['book']}: {b['count']} {b['unit']}s" + (f", avg {b['mean_bp']:+.2f} bp" if b.get("count") else "")
+                              for b in data.get("books") or [])[:160]
         paper = (data.get("score") or {}).get("paper") or {}
         return (f"{len(data.get('open') or [])} open · {paper.get('trades', 0)} closed on paper · "
                 f"paper P&L {paper.get('pnl', 0):+,.2f}")[:160]

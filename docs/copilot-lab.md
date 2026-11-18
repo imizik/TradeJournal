@@ -418,8 +418,9 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   - In replay both say `unavailable`: fundamentals are as they are now, and
     the proof is hindsight by construction. The fixture serves a simulated
     NBIS profile and proof card. Tests: `backend/tests/test_copilot_profile.py`.
-  - `get_paper_book(symbol?)` reads his paper book, read only (§ Paper). Book
-    context, never offered to research jobs. Tests: `backend/tests/test_copilot_paper.py`.
+  - `get_paper_book(symbol?, book?)` reads his paper book, or with `book: "strategies"`
+    the QQQ strategy books, read only (§ Paper). Book context, never offered to
+    research jobs. Tests: `backend/tests/test_copilot_paper.py`, `backend/tests/test_strategy_books.py`.
   - `draft_paper_order(action, symbol, …)` drafts a paper order card he fills with
     one tap; it never fills (§ Paper, "Tell the copilot"). Desk turns only.
     Tests: `backend/tests/test_copilot_paper_draft.py`.
@@ -2537,6 +2538,13 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   grey with why. On a weekend the line names next week's goals with nothing measured. The Friday review card's Goals
   row (`review.goals`) is the goals in force when that week ended, measured over it. Counts and dollars only, never a
   ticker; no ping, no quote, never Robinhood.
+- **The strategy books** (`backend/app/engine/strategy_books.py`): `get_paper_book` with `book: "strategies"` reads
+  the QQQ overnight and QQQ intraday momentum paper books from their own files (no provider call): finished nights or
+  days, total and average in bp and in $ at each book's stake, win rate, the backtest's number per night or day with
+  roughly the fewest live results before an average like it could be told from zero (a smaller sample reads "too few
+  to judge"), the last trade, missed days
+  with their reason and records missing from the last two weeks. A book with no file reads "no records", never zero;
+  nothing suggests a rule change. Offered only when he asks about those books.
 - **How am I doing?** A chip at the top of the Paper section (`components/copilot/PaperReview.tsx`) sends that question
   to the copilot, which reads `get_paper_book` and answers from its figures.
 - **The weekly paper review** (`backend/app/engine/paper_review.py`, job `paper_review`): after Friday's close (16:45
@@ -2545,7 +2553,10 @@ is separate from the copilot's shadow book and the scanner's paper trades, and f
   check and hidden-ticker check) compares the week's paper trades with his real ones from the week's facts: each paper
   trade closed this week with its note, stop, target and how it ended, the paper positions still open, the week's paper
   and real scorecards and his real trades closed this week. Four to six lines: Week, Worked, Stops and targets, Next
-  week. Skipped with no call in a week with no closed paper trade; a review quoting a figure the facts do not hold, or
+  week. Below it, one line per QQQ strategy book (the week's result, the running total, live against the backtest with
+  the "too few to judge" read; `strategy_books.week_lines`), written from the books' rows, never by the model.
+  Skipped with no call in a week with no closed paper trade, unless a strategy book has records: then the review is
+  just those lines, still with no call; a review quoting a figure the facts do not hold, or
   naming a ticker he does not follow, is not shown. One turn a week on the shared daily budget (`kind="paper_review"`).
   Kept in `backend/data/paper_review/<friday>.json` (eight weeks) and carried by `GET /copilot/paper` as `review`, shown
   at the top of the Paper section with its date until the next one. One Telegram (else ntfy) ping, `PAPER REVIEW · week

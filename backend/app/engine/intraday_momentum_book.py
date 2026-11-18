@@ -205,9 +205,10 @@ def bp(t: dict) -> float | None:
     return t["side"] * (t["exit"] - t["entry"]) / t["day_open"] * 10_000
 
 
-def summary(trades: list[dict], checks: list[dict], now: float, on: bool) -> dict:
-    """Only finished days count: a day is finished once its last check (15:00) is recorded or the day has passed, and
-    it has no open position. A checked day with no trade is a 0 day, as in the study."""
+def day_results(trades: list[dict], checks: list[dict], now: float) -> dict[str, float]:
+    """Each finished day's result in basis points of its open (unrounded): a day is finished once its last check (15:00)
+    is recorded or the day has passed, and it has no open position. A checked day with no trade is a 0 day, as in the
+    study."""
     today = datetime.fromtimestamp(now, ET).date().isoformat()
     open_days = {t["day"] for t in trades if t["status"] == "open"}
     last_checked = {c["day"] for c in checks if c["minute"] == CHECKS[-1]}
@@ -220,6 +221,12 @@ def summary(trades: list[dict], checks: list[dict], now: float, on: bool) -> dic
     for d in sorted({c["day"] for c in checks if c["status"] == "done"}):
         if finished(d):
             by_day.setdefault(d, 0.0)
+    return by_day
+
+
+def summary(trades: list[dict], checks: list[dict], now: float, on: bool) -> dict:
+    """The desk's view: finished days only (``day_results``)."""
+    by_day = day_results(trades, checks, now)
     days = [by_day[d] for d in sorted(by_day)]
     held = next((t for t in reversed(trades) if t["status"] == "open"), None)
     rows = [{"day": d, "bp": round(by_day[d], 2), "dollars": round(STAKE * by_day[d] / 10_000, 2),

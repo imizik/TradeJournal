@@ -222,7 +222,10 @@ class FixtureEvidence:
     def get_owner_context(self, symbol: str) -> dict:
         return self.owner_context(symbol)
 
-    def get_paper_book(self, symbol: str | None = None) -> dict:
+    def get_paper_book(self, symbol: str | None = None, book: str | None = None) -> dict:
+        if book == "strategies":
+            from app.engine import strategy_books
+            return strategy_books.fixture()
         from app.ai import copilot_paper_book
         return copilot_paper_book.fixture_paper_book(symbol)
 
