@@ -124,13 +124,13 @@ for (const width of [1440, 375]) {
     // The account's value at the same live prices: $9,360.50 cash + 4.00 × 100 × 2 = $10,160.50, +$160.00 on yesterday's
     // last recorded $10,000.50.
     await expect(paper.getByTestId("paper-value")).toHaveText("$10,160.50");
-    await expect(paper.getByTestId("paper-change")).toHaveText("+$160.00 (+1.60%) Today");
+    await expect(paper.getByTestId("paper-change")).toHaveText("+$160.00 (+1.60%)Today");
     // The line: a gap at the missing price, grey on the old one, never a zero.
     const graph = paper.getByTestId("paper-graph");
     await expect(graph.locator("polyline")).toHaveCount(2);
     await expect(graph.locator("polyline[data-grey]")).toHaveCount(1);
     await paper.getByTestId("paper-range-ALL").click();
-    await expect(paper.getByTestId("paper-change")).toHaveText("+$160.50 (+1.61%) All time");
+    await expect(paper.getByTestId("paper-change")).toHaveText("+$160.50 (+1.61%)All time");
     await paper.getByTestId("paper-position-card").click(); // the order sheet, selling all of it
     await expect(paper.getByTestId("paper-order-sheet-title")).toHaveText("Sell NBIS $100 Call 11/20/26");
     await expect(paper.getByTestId("paper-close")).toContainText("Sell 2 × NBIS $100 Call 11/20/26 at 3.90 (the bid");

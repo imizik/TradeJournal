@@ -76,7 +76,7 @@ export default function PortfolioGraph({ value, unpriced = 0, series, failed = f
 }) {
   const base = series?.base ?? null;
   const change = value && base ? Math.round((value.value - base.value) * 100) / 100 : null;
-  const pct = change != null && base && base.value ? Math.round(change / Math.abs(base.value) * 10000) / 100 : null;
+  const pct = change != null && base && base.value ? Math.round(change * 10000 / Math.abs(base.value)) / 100 : null;
   const grey = !value || value.stale;
   const tone = grey || change == null || change === 0 ? "text-muted-foreground" : change > 0 ? "text-emerald-300" : "text-rose-300";
 
