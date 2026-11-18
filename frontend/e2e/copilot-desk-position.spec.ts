@@ -258,7 +258,8 @@ test("a paper position: its own panel marked PAPER, the stop and target saved af
   await page.route("**/copilot/paper/orders", route => route.fulfill({ json: { preview: { label: PAPER_POSITION.label, quantity: 2, per_share: 3.7, cash: 740,
     quoted_at: epoch("2026-11-13T15:59:58Z"), legs: { [NBIS_CALL]: { action: "sell", bid: 3.7, ask: 3.8, price: 3.7 } }, stock: 98.2, pnl: 60, all: true, held: 0 } } }));
   await open(page);
-  // The paper line opens with a position open; its label shows NBIS on the desk with the paper panel under the chart.
+  // The paper line opens with a position open; its card's sheet shows NBIS on the desk with the paper panel under the chart.
+  await page.getByTestId("paper-position-card").click();
   await page.getByTestId("paper-position-show").click();
   const p = page.getByTestId("desk-chart").getByTestId("desk-paper-position");
   await expect(p.getByTestId("mode-mark")).toHaveText("Paper · not real money");

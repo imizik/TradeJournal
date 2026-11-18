@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Swipe-up confirmation control for the upcoming phone Paper home (not wired in yet).
+ * Swipe-up confirmation for a paper order (the Paper button's and CloseRow's Fill and Place limit).
  *
  * On touch devices (coarse pointer) with motion enabled, renders a vertical violet paper track
  * where dragging the thumb past 80% submits once; otherwise the thumb springs back. On desktop
@@ -31,6 +31,7 @@ export type SwipeToSubmitProps = {
   disabled?: boolean;
   busy?: boolean;
   className?: string;
+  testId?: string;
 };
 
 function getSwipeSnapshot(): boolean {
@@ -71,6 +72,7 @@ export default function SwipeToSubmit({
   disabled = false,
   busy = false,
   className,
+  testId,
 }: SwipeToSubmitProps) {
   const swipeEnabled = useSyncExternalStore(subscribePointer, getSwipeSnapshot, getServerSnapshot);
   const [pending, setPending] = useState(false);
@@ -179,6 +181,7 @@ export default function SwipeToSubmit({
     return (
       <button
         type="button"
+        data-testid={testId}
         disabled={blocked}
         onClick={() => void triggerSubmit()}
         className={cn(
@@ -217,6 +220,7 @@ export default function SwipeToSubmit({
       <div
         ref={thumbRef}
         role="button"
+        data-testid={testId}
         tabIndex={blocked ? -1 : 0}
         aria-label={isBusy ? "Sending…" : label}
         aria-disabled={blocked || undefined}

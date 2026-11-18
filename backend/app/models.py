@@ -2122,6 +2122,24 @@ class PaperEvent(SQLModel, table=True):
     data_json: str = Field(sa_column=Column(Text, nullable=False))
 
 
+class PaperEquity(SQLModel, table=True):
+    """The paper account's value once a minute in the regular session (``engine/paper_equity.py``): cash plus every open
+    position at the prices the paper runner judged with, for the Paper home's portfolio graph. ``equity`` is None when a
+    held leg had no price (never a zero); ``prices_at`` is the oldest of those prices' times. Insert-only, one row per
+    run and minute (the recorder checks the minute; the constraint stops an exact twin); never touches fills, trades, accounts or P&L."""
+
+    __tablename__ = "paper_equity"
+    __table_args__ = (UniqueConstraint("run_id", "at", name="uq_paper_equity_minute"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    run_id: uuid.UUID = Field(foreign_key="paper_run.id", index=True)
+    at: datetime  # UTC: when the minute's point was taken
+    equity: float | None = None
+    cash: float
+    prices_at: datetime | None = None  # UTC
+    open_positions: int = 0
+
+
 class TradingRuleRecord(SQLModel, table=True):
     """His own trading rules and the checklists of real orders he copied (``engine/trading_rules.py``). Insert-only:
     ``kind`` ``rules`` is one saved list (the newest is the list); ``ticket`` is one real order's checklist, kept when he

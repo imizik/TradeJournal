@@ -28,6 +28,7 @@ budget) only when a held position's price is stale. Never Robinhood.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import date, datetime, time, timedelta
 
@@ -36,6 +37,8 @@ from sqlmodel import Session, col, select
 from app.engine import paper_book as pb
 from app.engine.chart_math import ET
 from app.models import PaperEvent, PaperRun
+
+log = logging.getLogger(__name__)
 
 CHALLENGE_CASH = pb.DEFAULT_CASH
 TARGET_PCT, DAILY_PCT, MAX_DD_PCT = 10.0, 3.0, 8.0
@@ -306,6 +309,12 @@ def minute(db: Session, run: PaperRun, now: float) -> list[dict]:
             except pb.PaperError:
                 pass
         evaluate(db, run, now, marks=marks)
+        from app.engine import paper_equity
+        try:
+            paper_equity.record(db, run, now, marks)  # the graph's point at the prices the limits were judged with
+        except Exception:  # noqa: BLE001 -- the graph's point never stops the minute's pings
+            db.rollback()
+            log.exception("paper equity point not recorded")
     return pings(db, run, now)
 
 

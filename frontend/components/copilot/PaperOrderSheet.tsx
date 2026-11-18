@@ -5,8 +5,9 @@ import { cn } from "@/lib/utils";
 import ModeMark from "./ModeMark";
 
 /**
- * Robinhood-style "Review order" bottom sheet for paper orders (presentational only).
- * Lays groundwork for the phone Paper home; not wired in yet.
+ * Robinhood-style "Review order" sheet for a paper order: the Paper home opens it from a position card (``CloseRow``'s
+ * sheet). Presentational: the order's controls and swipe come in as children. A row with nothing to say (no buying power
+ * after for a close) is left out.
  */
 
 export type PaperOrderReview = {
@@ -159,7 +160,7 @@ export default function PaperOrderSheet({
           </dd>
         </div>
 
-        <div className="flex items-baseline justify-between gap-4 py-2">
+        {review.buyingPowerAfter != null && <div className="flex items-baseline justify-between gap-4 py-2">
           <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             Buying power after
           </dt>
@@ -177,7 +178,7 @@ export default function PaperOrderSheet({
               ? `${formatUsd(buyingPowerAfter)}${shortBuyingPower ? " (not enough)" : ""}`
               : "—"}
           </dd>
-        </div>
+        </div>}
       </dl>
 
       {warnings.length > 0 && (

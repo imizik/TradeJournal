@@ -1025,6 +1025,12 @@ def minute_pass(db: Session, now: float, minutes_for) -> list[dict]:
     out = _watch(db, run, _events(db, run), now, minutes_for, regular[0])
     from app.engine import paper_challenge
     out += paper_challenge.minute(db, run, now)  # before the limits: a lock this minute opens nothing
+    from app.engine import paper_equity
+    try:
+        paper_equity.record(db, run, now)  # the minute's account value (a challenge's minute already took it, at its prices)
+    except Exception:  # noqa: BLE001 -- the graph's point never stops the minute's limits and exits
+        db.rollback()
+        log.exception("paper equity point not recorded")
     return out + _execute(db, now)
 
 

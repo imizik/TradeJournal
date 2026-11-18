@@ -2,15 +2,20 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
-import { useDeskTicks } from "@/lib/deskTicks";
+import { tickFor, useDeskTicks, type DeskTicks } from "@/lib/deskTicks";
 import {
   PAPER_EVENT, PAPER_SOURCES, PaperRefused, SOURCE_WORD, cancelPaperOrder, orderWords, fillClose, fillOpen, isCredit, orderKey, paperPnl, paperSymbols, paperValue, placeLimitClose,
   placeLimitOpen, previewClose, previewOpen, setPaperAuto, startPaper,
-  type ChallengeRecord, type PaperBook, type PaperChallenge, type PaperFill, type PaperOrder, type PaperPosition, type PaperSource, type PaperStats, type PaperWorkingOrder,
+  type ChallengeRecord, type EquityRange, type PaperBook, type PaperChallenge, type PaperFill, type PaperOrder, type PaperPosition, type PaperSource, type PaperStats, type PaperWorkingOrder,
 } from "@/lib/paperBook";
+import { fillBuzz } from "@/lib/fillBuzz";
 import { cn } from "@/lib/utils";
 import ModeMark from "./ModeMark";
 import { RulesChecklist } from "./DeskRules";
+import PaperOrderSheet, { type PaperOrderReview } from "./PaperOrderSheet";
+import PaperPositionCard from "./PaperPositionCard";
+import PortfolioGraph, { usePaperEquity } from "./PortfolioGraph";
+import SwipeToSubmit from "./SwipeToSubmit";
 
 /**
  * His own paper book on the desk (docs/copilot-lab.md § Paper): a Paper button wherever the desk builds an order (the
@@ -157,22 +162,24 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
     setBusy(true); setError(null);
     try {
       const filled = await fillOpen(order, qtyN, levels(), key);
+      if (filled) fillBuzz("fill");
       const text = filled ? `Paper: ${fillLine(filled, true, multiplier)}.` : "Already filled on paper.";
       setDone(text); onFilled?.(text);
       setPreview(null);
-    } catch (e) { refuse(e); } finally { setBusy(false); }
+    } catch (e) { fillBuzz("reject"); refuse(e); } finally { setBusy(false); }
   };
   const place = async () => {
     if (!order || !valid || !limitValid) return;
     setBusy(true); setError(null);
     try {
       const placed = await placeLimitOpen(order, qtyN, limitN, levels(), key);
+      if (placed.filled) fillBuzz("fill");
       const text = placed.filled ? `Paper limit filled: ${fillLine(placed.filled, true, multiplier)}.`
         : placed.working ? `Paper limit working: ${spread ? "open" : "buy"} ${qtyN.toLocaleString("en-US")} at ${price(limitN)}${spread ? (credit ? " credit or more" : " debit or less") : " or better"}, until ${at(placed.working.expires_at)} or until you cancel it below.`
         : "Already placed on paper.";
       setDone(text); onFilled?.(text);
       setPreview(null); setClosedNow(false);
-    } catch (e) { refuse(e); } finally { setBusy(false); }
+    } catch (e) { fillBuzz("reject"); refuse(e); } finally { setBusy(false); }
   };
   const start = async () => {
     setBusy(true);
@@ -236,8 +243,8 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
           )}
           <div className="flex flex-wrap items-center gap-2">
             {type === "market"
-              ? <button type="button" data-testid="paper-fill" disabled={busy || !valid || !preview} onClick={fill} className={cn(BUTTON, "border-violet-400/70 text-violet-100")}>Fill on paper</button>
-              : <button type="button" data-testid="paper-place-limit" disabled={busy || !valid || !limitValid} onClick={place} className={cn(BUTTON, "border-violet-400/70 text-violet-100")}>Place limit on paper</button>}
+              ? <SwipeToSubmit testId="paper-fill" label="Fill on paper" onSubmit={fill} disabled={!valid || !preview} busy={busy} />
+              : <SwipeToSubmit testId="paper-place-limit" label="Place limit on paper" onSubmit={place} disabled={!valid || !limitValid} busy={busy} />}
             <button type="button" onClick={close} className={QUIET}>Cancel</button>
             <button type="button" data-testid="paper-more" aria-expanded={more} onClick={() => setMore(m => !m)}
               className={cn(QUIET, "ml-auto")}>{more ? "Less" : "More"}: stop, target, note, your rules{!more && broken > 0 && <span className="ml-1 text-amber-300">· breaks {broken}</span>}</button>
@@ -277,8 +284,11 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
 
 /** Close or trim an open paper position: a live quote first, then Fill on paper at the bid (the ask to buy a leg back),
  *  or a sell limit that waits for its price until the close. What a working sell limit holds cannot be sold twice. */
-export function CloseRow({ position, trim, quantity, onDone, onFilled, fixedKey }: {
+export function CloseRow({ position, trim, quantity, onDone, onFilled, fixedKey, sheet }: {
   position: Pick<PaperPosition, "id" | "remaining" | "held" | "multiplier" | "instrument" | "credit">; trim: boolean;
+  /** Shown as the Paper home's order sheet (``PaperOrderSheet``): its title, and what sits above the order (Sell all or
+   *  Trim, Show on chart). Cancel is the sheet's own. */
+  sheet?: { title: string; top?: React.ReactNode };
   /** The count to start from (a copilot card's Edit); half, rounded down, for a trim otherwise. */
   quantity?: number; onDone(): void;
   /** Told what a fill or a placed limit did. ``fixedKey``: the order key to use (a copilot card's), not a new one. */
@@ -309,22 +319,24 @@ export function CloseRow({ position, trim, quantity, onDone, onFilled, fixedKey 
     setBusy(true); setError(null);
     try {
       const filled = await fillClose(position.id, qtyN, key);
+      if (filled) fillBuzz("fill");
       const text = filled ? `Paper: ${fillLine(filled, false, position.multiplier)}; ${filled.pnl! >= 0 ? "made" : "lost"} ${usd(filled.pnl!)}.` : "Already filled on paper.";
       setDone(text); onFilled?.(text);
-    } catch (e) { setError(e instanceof Error ? e.message : "Not filled."); } finally { setBusy(false); }
+    } catch (e) { fillBuzz("reject"); setError(e instanceof Error ? e.message : "Not filled."); } finally { setBusy(false); }
   };
   const place = async () => {
     setBusy(true); setError(null);
     try {
       const placed = await placeLimitClose(position.id, qtyN, limitN, key);
+      if (placed.filled) fillBuzz("fill");
       const text = placed.filled ? `Paper limit filled: ${fillLine(placed.filled, false, position.multiplier)}; ${placed.filled.pnl! >= 0 ? "made" : "lost"} ${usd(placed.filled.pnl!)}.`
         : placed.working ? `Paper limit working: ${spread ? "close" : "sell"} ${qtyN} at ${price(limitN)}, until ${at(placed.working.expires_at)} or until you cancel it.` : "Already placed on paper.";
       setDone(text); onFilled?.(text);
-    } catch (e) { setError(e instanceof Error ? e.message : "Not placed."); } finally { setBusy(false); }
+    } catch (e) { fillBuzz("reject"); setError(e instanceof Error ? e.message : "Not placed."); } finally { setBusy(false); }
   };
   const share = preview && valid ? Math.round(preview.per_share * position.multiplier * qtyN * 100) / 100 : null;
-  return (
-    <div data-testid="paper-close" className="space-y-1.5 border-t border-dashed border-violet-400/30 px-3 py-2">
+  const inner = (
+    <div data-testid="paper-close" className={cn("space-y-1.5", !sheet && "border-t border-dashed border-violet-400/30 px-3 py-2")}>
       {busy && !preview && !error && <p className="text-xs text-muted-foreground">Reading a live quote…</p>}
       {preview && !done && (
         <>
@@ -343,16 +355,24 @@ export function CloseRow({ position, trim, quantity, onDone, onFilled, fixedKey 
               <input aria-label="Paper quantity to trim" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/[^\d]/g, ""))} className={cn(INPUT, "w-16")} />
             </label>}
             {type === "market"
-              ? <button type="button" data-testid="paper-close-fill" disabled={busy || !valid} onClick={fill} className={cn(BUTTON, "border-violet-400/70 text-violet-100")}>Fill on paper</button>
-              : <button type="button" data-testid="paper-close-place" disabled={busy || !valid || !limitValid} onClick={place} className={cn(BUTTON, "border-violet-400/70 text-violet-100")}>Place limit on paper</button>}
-            <button type="button" onClick={onDone} className={QUIET}>Cancel</button>
+              ? <SwipeToSubmit testId="paper-close-fill" label="Fill on paper" onSubmit={fill} disabled={!valid} busy={busy} />
+              : <SwipeToSubmit testId="paper-close-place" label="Place limit on paper" onSubmit={place} disabled={!valid || !limitValid} busy={busy} />}
+            {!sheet && <button type="button" onClick={onDone} className={QUIET}>Cancel</button>}
           </div>
         </>
       )}
-      {error && <div className="flex flex-wrap items-center gap-2"><p role="alert" className="text-xs text-amber-300">{error}</p><button type="button" onClick={onDone} className={QUIET}>Close</button></div>}
+      {error && <div className="flex flex-wrap items-center gap-2"><p role="alert" className="text-xs text-amber-300">{error}</p>{!sheet && <button type="button" onClick={onDone} className={QUIET}>Close</button>}</div>}
       {done && <div className="flex flex-wrap items-center gap-2"><p role="status" className="text-xs text-emerald-300">{done}</p><button type="button" onClick={onDone} className={QUIET}>Done</button></div>}
     </div>
   );
+  if (!sheet) return inner;
+  const legs = preview ? Object.values(preview.legs) : [];
+  const review: PaperOrderReview = {
+    title: sheet.title, side: position.credit ? "buy" : "sell", orderType: type, quantity: qtyN, unit: position.multiplier === 1 ? "shares" : "contracts",
+    price: type === "limit" ? (limitValid ? limitN : null) : legs.length === 1 ? legs[0].price : preview ? Math.abs(preview.per_share) : null,
+    quotedAt: preview?.quoted_at ?? null, estimated: type === "market" ? share : null, buyingPowerAfter: null,
+  };
+  return <PaperOrderSheet review={review} onCancel={onDone}>{sheet.top}{inner}</PaperOrderSheet>;
 }
 
 /** Working paper limits, each with its last check and Cancel. */
@@ -573,6 +593,20 @@ export function PaperScoreLine({ score, since, testId = "paper-score-line", clas
   );
 }
 
+const nyDay = (epoch: number) => new Date(epoch * 1000).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+
+/** A position's change today, at live prices only: all of its P&L when it was opened today; shares from the previous
+ *  close (the desk's tick); otherwise null (an option's previous close is not read, so it is left out rather than guessed). */
+function todayChange(p: PaperPosition, ticks: DeskTicks): number | null {
+  const pnl = paperPnl(p, ticks);
+  if (!pnl) return null;
+  if (!pnl.live) return null; // before the open (or with no live tick) the last session's numbers are not today's
+  if (nyDay(p.opened_at) === nyDay(pnl.at)) return pnl.pnl;
+  if (p.instrument !== "stock") return null;
+  const tick = tickFor(ticks, p.symbol);
+  return tick?.prev_close != null && pnl.live ? Math.round((tick.last - tick.prev_close) * p.remaining * 100) / 100 : null;
+}
+
 /** The Paper section (the desk's Practice block opens it in place): one panel, folded to its account line and score line
  *  until Progress is opened. His rules and goals are the desk's own line (``RulesAndGoals``): they cover real trades too. */
 export default function DeskPaper({ book, failed, symbol, top = null, onPick }: {
@@ -582,6 +616,8 @@ export default function DeskPaper({ book, failed, symbol, top = null, onPick }: 
 }) {
   const [progress, setProgress] = useState(false);
   const [closing, setClosing] = useState<{ id: string; trim: boolean } | null>(null);
+  const [range, setRange] = useState<EquityRange>("1D");
+  const equity = usePaperEquity(range, !!book?.run);
   const [cash, setCash] = useState("10000");
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -632,48 +668,57 @@ export default function DeskPaper({ book, failed, symbol, top = null, onPick }: 
   }
   const acct = book.account!, score = book.score!;
   const value = paperValue(book, ticks);
-  const pnlNow = value ? Math.round((value.value - book.run.starting_cash) * 100) / 100 : null;
   const positions = book.positions ?? [];
   const closed = book.closed ?? [];
   return frame(
     <div className="pb-2">
       {top}
-      {book.challenge && <ChallengeLine c={book.challenge} live={value} />}
-      <p data-testid="paper-account" className="flex flex-wrap gap-x-3 gap-y-0.5 px-3 pb-1.5 text-xs tabular-nums">
-        <span data-testid="paper-value"><span className="text-muted-foreground">Value </span>{value ? <span className={cn(value.stale && "text-muted-foreground")}>{usd(value.value)}</span>
-          : <span className="text-muted-foreground">needs a live price for {acct.unpriced} open</span>}</span>
-        {value && pnlNow != null && <span className={value.stale ? "text-muted-foreground" : toneOf(pnlNow)}>{signed(pnlNow)}{value.stale && value.at && <span className="ml-1 text-[11px]">as of {at(value.at)}</span>}</span>}
+      <div data-testid="paper-account">
+        <PortfolioGraph value={value} unpriced={acct.unpriced} series={equity.series} failed={equity.failed} range={range} onRange={setRange}
+          status={book.challenge && <div className="-mx-3 mt-1"><ChallengeLine c={book.challenge} live={value} /></div>} />
+        <p className="flex flex-wrap gap-x-3 gap-y-0.5 px-3 pb-1.5 text-xs tabular-nums">
         <span><span className="text-muted-foreground">Cash </span>{acct.cash < 0 ? "−" : ""}{usd(acct.cash)}</span>
         <span><span className="text-muted-foreground">Buying power </span>{usd(acct.buying_power)}</span>
         {acct.collateral > 0 && <span><span className="text-muted-foreground">Held for spreads </span>{usd(acct.collateral)}</span>}
         {(acct.reserved ?? 0) > 0 && <span><span className="text-muted-foreground">Held for orders </span>{usd(acct.reserved!)}</span>}
-      </p>
+        </p>
+      </div>
       <WorkingOrders orders={book.orders ?? []} />
       {positions.length > 0 ? (
-        <ul aria-label="Paper positions">
+        <ul aria-label="Paper positions" className="space-y-1.5 border-t border-border/60 px-3 pt-2">
           {positions.map(p => {
-            const pnl = paperPnl(p, ticks);
+            const free = p.remaining - (p.held ?? 0);
+            const open = closing?.id === p.id;
             return (
-              <li key={p.id} data-testid="paper-position" className="border-t border-border/60">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5">
-                  <span className="min-w-0 flex-1 text-sm sm:truncate">
-                    {onPick ? <button type="button" data-testid="paper-position-show" onClick={() => onPick(p.symbol)} title={`Show ${p.symbol} on the desk, with this position's panel under the chart`}
-                      className="font-semibold underline-offset-2 hover:underline">{p.label}</button> : <span className="font-semibold">{p.label}</span>}
-                    {" "}<span className="text-xs text-muted-foreground">×{p.remaining.toLocaleString("en-US")}</span><SourceTag source={p.source} /></span>
-                  {pnl ? (
-                    <span data-testid="paper-pnl" className={cn("text-sm tabular-nums", pnl.stale ? "text-muted-foreground" : toneOf(pnl.pnl))} title={pnl.stale ? `Price from ${at(pnl.at)}, not live` : undefined}>
-                      {signed(pnl.pnl)}{pnl.pct != null && <span className="ml-1 text-xs">{pnl.pct > 0 ? "+" : pnl.pct < 0 ? "−" : ""}{Math.abs(pnl.pct)}%</span>}
-                      {pnl.stale && <span className="ml-1 text-[11px]">as of {at(pnl.at)}</span>}
-                    </span>
-                  ) : <span data-testid="paper-pnl" className="text-xs text-muted-foreground">{p.awaiting_close ? "Expired: settles on the close once it is read" : "No price yet"}</span>}
-                  <span className="flex gap-1">
-                    {p.remaining - (p.held ?? 0) > 1 && <button type="button" onClick={() => setClosing({ id: p.id, trim: true })} className={cn(BUTTON, "px-2")}>Trim</button>}
-                    <button type="button" data-testid="paper-close-button" disabled={p.remaining - (p.held ?? 0) <= 0} title={p.held ? `${p.held} held for a working sell limit` : undefined}
-                      onClick={() => setClosing({ id: p.id, trim: false })} className={cn(BUTTON, "px-2")}>Close</button>
-                  </span>
-                </div>
+              <li key={p.id} data-testid="paper-position">
+                <PaperPositionCard position={p} todayChange={todayChange(p, ticks)} tag={<SourceTag source={p.source} />} expanded={open}
+                  onOpen={() => setClosing(open ? null : { id: p.id, trim: false })} />
                 <Levels p={p} />
-                {closing?.id === p.id && <CloseRow key={`${p.id}|${closing.trim}`} position={p} trim={closing.trim} onDone={() => setClosing(null)} />}
+                {open && (
+                  // The order sheet: a bottom sheet over the page on a phone, in place under the card on a laptop.
+                  <div data-testid="paper-sheet" className="fixed inset-0 z-50 flex items-end bg-black/60 sm:static sm:z-auto sm:mt-1.5 sm:block sm:bg-transparent"
+                    onClick={e => { if (e.target === e.currentTarget) setClosing(null); }}>
+                    <div className="max-h-[90dvh] w-full overflow-y-auto sm:max-h-none">
+                      {free > 0 ? (
+                        <CloseRow key={`${p.id}|${closing.trim}`} position={p} trim={closing.trim} onDone={() => setClosing(null)}
+                          sheet={{ title: `${closing.trim ? "Trim" : p.instrument === "spread" ? "Close" : "Sell"} ${p.label}`, top: (
+                            <div className="mb-2 flex flex-wrap items-center gap-2">
+                              <div role="radiogroup" aria-label="Sell all or trim" className="inline-flex rounded-md border text-xs">
+                                {([false, true] as const).map(t => (
+                                  <button key={String(t)} type="button" role="radio" aria-checked={closing.trim === t} disabled={t && free <= 1}
+                                    data-testid={t ? "paper-trim-button" : "paper-close-button"} onClick={() => setClosing({ id: p.id, trim: t })}
+                                    className={cn("min-h-11 px-3 first:rounded-l-md last:rounded-r-md disabled:opacity-45 sm:min-h-8",
+                                      closing.trim === t ? "bg-violet-400/15 text-violet-100" : "text-muted-foreground hover:bg-secondary")}>{t ? "Trim" : `Sell all ${free}`}</button>
+                                ))}
+                              </div>
+                              {onPick && <button type="button" data-testid="paper-position-show" onClick={() => { setClosing(null); onPick(p.symbol); }}
+                                title={`Show ${p.symbol} on the desk, with this position's panel under the chart`} className={QUIET}>Show on chart</button>}
+                            </div>
+                          ) }} />
+                      ) : <p className="rounded-lg border border-dashed border-violet-400/40 bg-card px-3 py-2 text-xs text-muted-foreground">All {p.remaining} held for a working sell limit; cancel it to sell another way.</p>}
+                    </div>
+                  </div>
+                )}
               </li>
             );
           })}

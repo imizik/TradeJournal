@@ -1,226 +1,152 @@
 "use client";
 
 /**
- * Robinhood-style paper portfolio graph for the phone Paper home: latest equity, signed $/% change over the picked
- * range, inline SVG line with dashed baseline, and 1D / 1W / 1M / All range selector. Self-contained and not wired in yet.
+ * The Paper home's header (docs/copilot-lab.md § Paper home): the paper account's value big at the top, its change over
+ * the picked range, the challenge's status line when a challenge is running, and the account's value over time (1D / 1W /
+ * 1M / All) from ``GET /copilot/paper/equity``.
+ *
+ * The big number is the desk's live ``paperValue`` (the same prices as each position card); the line is the recorded
+ * minutes plus that live value as its last point. A minute whose prices were missing is a gap and one whose prices were
+ * old is drawn grey; a stale live value is grey with its time. Never a zero for "no price".
  */
 
-import { useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
+import { PAPER_EVENT, type EquityPoint, type EquityRange, type EquitySeries } from "@/lib/paperBook";
 import { cn } from "@/lib/utils";
 
-export type PortfolioPoint = { t: number; equity: number };
-type Range = "1D" | "1W" | "1M" | "All";
-
-const RANGES: readonly Range[] = ["1D", "1W", "1M", "All"];
-const DAY_SECONDS = 86_400;
-const SVG_WIDTH = 320;
-const SVG_HEIGHT = 120;
+const RANGES: readonly EquityRange[] = ["1D", "1W", "1M", "ALL"];
+const RANGE_WORD: Record<EquityRange, string> = { "1D": "Today", "1W": "Past week", "1M": "Past month", ALL: "All time" };
+const W = 320;
+const H = 120;
 const PAD_Y = 8;
 
-const NY_DAY = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "America/New_York",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
+const usd = (n: number) => `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${usd(n)}`;
+const dayTime = (epoch: number) => `${new Date(epoch * 1000).toLocaleDateString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric" }).replace(",", "")} ${at(epoch)}`;
+/** "2026-11-17" as "Tue Nov 17". */
+const dayWord = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).replace(",", "");
+const at = (epoch: number) => `${new Date(epoch * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })} ET`;
 
-const nyDay = (epochSeconds: number) => NY_DAY.format(new Date(epochSeconds * 1000));
-
-const formatTimeET = (epochSeconds: number) =>
-  `${new Date(epochSeconds * 1000).toLocaleTimeString("en-US", {
-    timeZone: "America/New_York",
-    hour: "numeric",
-    minute: "2-digit",
-  })} ET`;
-
-const usd = (n: number) =>
-  `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-const formatEquity = (n: number) => `${Math.round(n * 100) < 0 ? "−" : ""}${usd(n)}`;
-
-function formatChange(delta: number, baseline: number): { text: string; up: boolean } {
-  const rounded = Math.round(delta * 100) / 100;
-  const zero = rounded === 0;
-  const up = rounded >= 0;
-  const sign = zero ? "+" : rounded > 0 ? "+" : "−";
-  const pct = baseline !== 0 ? (delta / Math.abs(baseline)) * 100 : null;
-  const pctRounded = pct != null ? Math.round(pct * 100) / 100 : null;
-  const pctText =
-    pctRounded != null
-      ? ` (${pctRounded === 0 ? "+" : pctRounded > 0 ? "+" : "−"}${Math.abs(pctRounded).toFixed(2)}%)`
-      : "";
-  return { text: `${sign}${usd(rounded)}${pctText}`, up };
+/** The series for ``range``: read on mount and on a range change, on the desk's shared minute and after each paper fill. */
+export function usePaperEquity(range: EquityRange, on: boolean): { series: EquitySeries | null; failed: boolean } {
+  const [series, setSeries] = useState<EquitySeries | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!on) return;
+    const controller = new AbortController();
+    const load = () => deskGet(`/copilot/paper/equity?range=${range}`, controller.signal)
+      .then(async r => { const body = await r.json().catch(() => null); if (!r.ok || !body) throw new Error(String(r.status)); setSeries(body); setFailed(false); })
+      .catch(() => { if (!controller.signal.aborted) setFailed(true); });
+    load();
+    const stop = everyDeskMinute(load);
+    window.addEventListener(PAPER_EVENT, load);
+    return () => { controller.abort(); stop(); window.removeEventListener(PAPER_EVENT, load); };
+  }, [range, on]);
+  return { series: series?.range === range ? series : null, failed };
 }
 
-function filterRange(sorted: PortfolioPoint[], range: Range): PortfolioPoint[] {
-  if (sorted.length === 0 || range === "All") return sorted;
-  const latestT = sorted[sorted.length - 1].t;
-  if (range === "1D") {
-    const day = nyDay(latestT);
-    return sorted.filter(p => nyDay(p.t) === day);
+type Segment = { points: string; grey: boolean };
+
+/** The line as polylines: split at a missing price, and grey wherever either end of a step is stale. */
+function segments(points: EquityPoint[], x: (t: number) => number, y: (v: number) => number): Segment[] {
+  const out: { xy: string[]; grey: boolean }[] = [];
+  const xy = (p: EquityPoint) => `${x(p.at).toFixed(1)},${y(p.equity!).toFixed(1)}`;
+  let prev: EquityPoint | null = null;
+  let current: { xy: string[]; grey: boolean } | null = null;
+  for (const p of points) {
+    if (p.equity == null) { prev = null; current = null; continue; }
+    if (prev) {
+      const grey = prev.stale || p.stale;
+      if (!current || current.grey !== grey) { current = { xy: [xy(prev)], grey }; out.push(current); }
+      current.xy.push(xy(p));
+    }
+    prev = p;
   }
-  const cutoff = latestT - (range === "1W" ? 7 : 30) * DAY_SECONDS;
-  return sorted.filter(p => p.t >= cutoff);
+  return out.map(s => ({ points: s.xy.join(" "), grey: s.grey }));
 }
 
-export default function PortfolioGraph({
-  points,
-  start,
-  asOf,
-  stale = false,
-  label = "Paper",
-  className,
-}: {
-  points: { t: number; equity: number }[];
-  start: number;
-  asOf: number | null;
-  stale?: boolean;
-  label?: string;
+export default function PortfolioGraph({ value, unpriced = 0, series, failed = false, range, onRange, status = null, className }: {
+  /** The desk's live account value (``paperValue``), or null when a position has no price at all. */
+  value: { value: number; at: number | null; stale: boolean } | null;
+  /** How many open positions have no price (when ``value`` is null). */
+  unpriced?: number;
+  series: EquitySeries | null; failed?: boolean;
+  range: EquityRange; onRange(range: EquityRange): void;
+  /** The challenge's status line, under the change. */
+  status?: ReactNode;
   className?: string;
 }) {
-  const [range, setRange] = useState<Range>("1D");
+  const base = series?.base ?? null;
+  const change = value && base ? Math.round((value.value - base.value) * 100) / 100 : null;
+  const pct = change != null && base && base.value ? Math.round(change * 10000 / Math.abs(base.value)) / 100 : null;
+  const grey = !value || value.stale;
+  // What the change is measured over: the range, the session shown when 1D is not today, or the base's own time when
+  // the range's natural start had no live prices.
+  const over = base?.exact === false ? `since ${dayTime(base.at)}`
+    : range === "1D" && series?.today === false && series.day ? dayWord(series.day) : RANGE_WORD[range];
+  const tone = grey || change == null || change === 0 ? "text-muted-foreground" : change > 0 ? "text-emerald-300" : "text-rose-300";
 
-  const sorted = [...points].sort((a, b) => a.t - b.t);
-  const filtered = filterRange(sorted, range);
-  const latestPoint = sorted.length > 0 ? sorted[sorted.length - 1] : null;
-  const latestEquity = latestPoint ? latestPoint.equity : start;
+  const points: EquityPoint[] = [...(series?.points ?? [])];
+  // A run that began inside the range starts the line at its starting cash; the live value is the line's last point.
+  if (base && series?.run && base.at === series.run.started_at && (points.length === 0 || base.at < points[0].at))
+    points.unshift({ at: base.at, equity: base.value, prices_at: null, stale: false });
+  // The live value at its prices' time (a flat account's: the newest point's), never before the newest point.
+  const liveAt = value ? Math.max(value.at ?? 0, points.at(-1)?.at ?? 0) : 0;
+  if (value && liveAt > 0) points.push({ at: liveAt, equity: value.value, prices_at: value.at, stale: value.stale });
+  const drawn = points.filter(p => p.equity != null);
+  const hasLine = drawn.length >= 2;
 
-  const hasChart = filtered.length >= 2;
-  const baseline =
-    range === "All"
-      ? start
-      : hasChart
-        ? filtered[0].equity
-        : null;
-
-  const change =
-    baseline != null && latestPoint != null
-      ? formatChange(latestEquity - baseline, baseline)
-      : null;
-
-  const tone = stale
-    ? "text-muted-foreground"
-    : change
-      ? change.up
-        ? "text-emerald-300"
-        : "text-rose-300"
-      : "text-muted-foreground";
-
-  let polylinePoints = "";
-  let baselineY = SVG_HEIGHT / 2;
-  if (hasChart && baseline != null) {
-    const tMin = filtered[0].t;
-    const tMax = filtered[filtered.length - 1].t;
-    const tSpan = tMax - tMin;
-    const values = [...filtered.map(p => p.equity), baseline];
-    const yMin = Math.min(...values);
-    const yMax = Math.max(...values);
-    const ySpan = yMax - yMin;
-
-    const xOf = (t: number, i: number) =>
-      tSpan > 0
-        ? ((t - tMin) / tSpan) * SVG_WIDTH
-        : (i / (filtered.length - 1)) * SVG_WIDTH;
-    const yOf = (v: number) =>
-      ySpan > 0
-        ? PAD_Y + ((yMax - v) / ySpan) * (SVG_HEIGHT - 2 * PAD_Y)
-        : SVG_HEIGHT / 2;
-
-    polylinePoints = filtered
-      .map((p, i) => `${xOf(p.t, i).toFixed(1)},${yOf(p.equity).toFixed(1)}`)
-      .join(" ");
-    baselineY = yOf(baseline);
+  let lines: Segment[] = [];
+  let baseY: number | null = null;
+  if (hasLine) {
+    const t0 = points[0].at, t1 = points[points.length - 1].at;
+    const values = [...drawn.map(p => p.equity!), ...(base ? [base.value] : [])];
+    const lo = Math.min(...values), hi = Math.max(...values);
+    const x = (t: number) => t1 > t0 ? (t - t0) / (t1 - t0) * W : 0;
+    const y = (v: number) => hi > lo ? PAD_Y + (hi - v) / (hi - lo) * (H - 2 * PAD_Y) : H / 2;
+    lines = segments(points, x, y);
+    baseY = base ? y(base.value) : null;
   }
-
-  const lineTone = change?.up !== false ? "text-emerald-300" : "text-rose-300";
-  const ariaSummary = change
-    ? `${label} portfolio over ${range}: ${formatEquity(latestEquity)}, ${change.text}${stale && asOf != null ? `, as of ${formatTimeET(asOf)}` : ""}`
-    : `${label} portfolio over ${range}: ${formatEquity(latestEquity)}`;
+  const lineTone = change != null && change < 0 ? "text-rose-300" : "text-emerald-300";
 
   return (
-    <section
-      aria-label={`${label} portfolio graph`}
-      className={cn("rounded-lg border border-dashed border-violet-400/40 bg-card p-3", className)}
-    >
-      <div className="flex items-center gap-2">
-        <span className="inline-flex shrink-0 items-center rounded border border-dashed border-violet-400/70 px-1 text-[10px] font-semibold uppercase leading-4 tracking-wide text-violet-200">
-          {label}
-        </span>
-      </div>
-
-      <p
-        className={cn(
-          "mt-1 text-[28px] font-semibold leading-8 tabular-nums tracking-tight",
-          stale ? "text-muted-foreground" : "text-foreground",
-        )}
-      >
-        {formatEquity(latestEquity)}
+    <div data-testid="paper-home-header" className={cn("px-3 pb-2", className)}>
+      <p data-testid="paper-value" className={cn("text-[28px] font-semibold leading-8 tabular-nums tracking-tight", grey ? "text-muted-foreground" : "text-foreground")}>
+        {value ? usd(value.value) : <span className="text-base font-normal">Needs a live price for {unpriced} open</span>}
       </p>
-
-      <p className={cn("mt-0.5 flex flex-wrap items-baseline gap-x-1.5 text-xs tabular-nums", tone)}>
-        <span>{change ? change.text : "—"}</span>
-        <span className="text-[11px] text-muted-foreground">{range}</span>
-        {stale && asOf != null && (
-          <span className="text-[11px] text-muted-foreground">as of {formatTimeET(asOf)}</span>
-        )}
+      <p data-testid="paper-change" className={cn("mt-0.5 flex flex-wrap items-baseline gap-x-1.5 text-xs tabular-nums", tone)}>
+        <span>{change != null ? `${signed(change)}${pct != null ? ` (${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct).toFixed(2)}%)` : ""}` : "—"}</span>
+        <span data-testid="paper-change-over" className="text-muted-foreground">{over}</span>
+        {value?.stale && value.at != null && <span className="text-[11px] text-muted-foreground">as of {at(value.at)}</span>}
       </p>
-
-      {hasChart ? (
-        <svg
-          viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
-          preserveAspectRatio="none"
-          role="img"
-          aria-label={ariaSummary}
-          className="mt-2 h-[120px] w-full"
-        >
-          <line
-            x1={0}
-            x2={SVG_WIDTH}
-            y1={baselineY}
-            y2={baselineY}
-            stroke="currentColor"
-            strokeOpacity={0.25}
-            strokeWidth={1}
-            strokeDasharray="3 3"
-            vectorEffect="non-scaling-stroke"
-            className="text-muted-foreground"
-          />
-          <polyline
-            points={polylinePoints}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.75}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            vectorEffect="non-scaling-stroke"
-            className={lineTone}
-          />
+      {status}
+      {hasLine ? (
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" data-testid="paper-graph"
+          aria-label={`Paper account value, ${over.toLowerCase()}${change != null ? `: ${signed(change)}` : ""}`} className="mt-2 h-[120px] w-full">
+          {baseY != null && <line x1={0} x2={W} y1={baseY} y2={baseY} stroke="currentColor" strokeOpacity={0.3} strokeWidth={1} strokeDasharray="2 4"
+            vectorEffect="non-scaling-stroke" className="text-muted-foreground" />}
+          {lines.map((s, i) => (
+            <polyline key={i} points={s.points} fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke" data-grey={s.grey || undefined} className={s.grey ? "text-muted-foreground/60" : lineTone} />
+          ))}
         </svg>
       ) : (
-        <div className="mt-2 flex h-[120px] items-center justify-center">
-          <p className="text-xs text-muted-foreground">No paper history yet</p>
+        <div className="mt-2 flex h-[120px] items-center justify-center rounded-md border border-dashed border-border/60">
+          <p className="px-3 text-center text-xs text-muted-foreground">
+            {failed ? "The history could not be read; it reads again in a minute." : !series ? "Reading the history…" : "The line fills in a minute at a time while the market is open."}
+          </p>
         </div>
       )}
-
-      <div role="radiogroup" aria-label="Portfolio range" className="mt-2 inline-flex rounded-md border text-xs">
+      <div role="radiogroup" aria-label="Paper graph range" className="mt-2 flex text-xs">
         {RANGES.map(r => (
-          <button
-            key={r}
-            type="button"
-            role="radio"
-            aria-checked={range === r}
-            onClick={() => setRange(r)}
-            className={cn(
-              "min-h-11 px-3 font-medium first:rounded-l-md last:rounded-r-md sm:min-h-8",
-              range === r
-                ? "bg-violet-400/15 text-violet-100"
-                : "text-muted-foreground hover:bg-secondary hover:text-foreground",
-            )}
-          >
-            {r}
+          <button key={r} type="button" role="radio" aria-checked={range === r} data-testid={`paper-range-${r}`} onClick={() => onRange(r)}
+            className={cn("min-h-11 flex-1 rounded-md px-3 font-medium sm:min-h-8 sm:flex-none",
+              range === r ? "bg-violet-400/15 text-violet-100" : "text-muted-foreground hover:bg-secondary hover:text-foreground")}>
+            {r === "ALL" ? "All" : r}
           </button>
         ))}
       </div>
-    </section>
+    </div>
   );
 }
