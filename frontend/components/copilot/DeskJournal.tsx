@@ -46,6 +46,7 @@ export default function DeskJournal() {
     if (!open) return;
     let live = true;
     setError(false);
+    setData(null); // never a past reading shown as current
     Promise.all([api.trades(), api.accounts(), api.stats()])
       .then(([trades, accounts, stats]) => { if (live) setData({ trades, accounts, stats }); })
       .catch(() => { if (live) setError(true); });
@@ -60,7 +61,11 @@ export default function DeskJournal() {
     const key = (event: KeyboardEvent) => {
       if (document.querySelector("dialog[open]")) return;
       if (event.key === "Escape") { event.stopImmediatePropagation(); event.preventDefault(); setOpen(false); return; }
-      if (event.key !== "Tab") return;
+      if (event.key !== "Tab") {
+        // The desk behind (``[`` opens its threads, and so on) hears nothing while this is open; ⌘K still opens.
+        if (!event.metaKey && !event.ctrlKey) event.stopImmediatePropagation();
+        return;
+      }
       const box = document.querySelector<HTMLElement>('[data-testid="desk-journal"]');
       const items = box ? Array.from(box.querySelectorAll<HTMLElement>("a[href], button, summary, input, [tabindex]:not([tabindex='-1'])")).filter(el => !el.hasAttribute("disabled")) : [];
       if (!items.length) return;
@@ -70,7 +75,7 @@ export default function DeskJournal() {
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     };
     window.addEventListener("keydown", key, true);
-    return () => { cancelAnimationFrame(frame); window.removeEventListener("keydown", key, true); if (before?.isConnected) before.focus(); };
+    return () => { cancelAnimationFrame(frame); window.removeEventListener("keydown", key, true); const back = before?.isConnected ? before : document.querySelector<HTMLElement>('button[aria-label="Open menu"]'); back?.focus(); };
   }, [open]);
   if (!open) return null;
 
