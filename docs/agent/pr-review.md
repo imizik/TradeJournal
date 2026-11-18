@@ -82,7 +82,7 @@ not the implementation worker. Profiles live in `.codex/agents/` and
 profiles or substitutions; do not silently downgrade. No cross-provider CLI,
 paid API review or waiting for GitHub comments.
 
-Pilot exception, until three PR records name Codex as the tier 1 provider
+Pilot exception, until three Claude Code PR records name Codex as the tier 1 provider
 (afterwards Sonnet resumes until the user decides): the tier 1
 general reviewer may be local headless Codex (GPT-6.2 Sol, medium, Standard
 speed) on the signed-in ChatGPT plan, run read-only with no purchased credits
