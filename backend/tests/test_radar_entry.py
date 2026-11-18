@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from datetime import datetime, date
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -11,12 +11,14 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.database import get_session
+from app.engine.chart_journal import stamp
 from app.engine.radar_comparison import (
     compare_entry,
     empty_comparison,
     iso,
     accepted_group_versions,
 )
+from app.engine.radar_entry import resolve_entry
 from app.engine.radar_store import RadarStore, load_universe
 from app.models import Account, Fill, Trade, TradeFill
 from app.routers import radar
@@ -331,3 +333,260 @@ def test_api_calendar_unavailable_and_rebuilt_entry_mismatch(api, store, monkeyp
     db.add(t)
     db.commit()
     assert "verified" in client.get(url(t)).json()["reason"]
+
+
+ROTH = UUID("00000000-0000-4000-8000-000000000001")
+RESOLVE_NOW = stamp(datetime(2026, 10, 20, 10, 30, 0))
+
+
+@pytest.fixture
+def db():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(
+            Account(
+                id=ROTH,
+                name="Roth",
+                type="roth_ira",
+                last4="8267",
+                broker="robinhood",
+            )
+        )
+        session.commit()
+        yield session
+    engine.dispose()
+
+
+def _seed_entry_trade(
+    db: Session,
+    *,
+    ticker: str = "NVDA",
+    instrument_type: str = "option",
+    status: str = "open",
+    opened_at: datetime = datetime(2026, 10, 20, 10, 15, 30),
+    closed_at: datetime | None = None,
+    fills: list[tuple[datetime, str, str]] | None = None,
+) -> tuple[Trade, list[Fill]]:
+    """Seed a Trade plus optional (executed_at, role, raw_email_id) Fill/TradeFill rows."""
+    t = Trade(
+        account_id=ROTH,
+        ticker=ticker,
+        instrument_type=instrument_type,
+        contracts=1,
+        option_type="call" if instrument_type == "option" else None,
+        strike=100 if instrument_type == "option" else None,
+        expiration=date(2026, 11, 21) if instrument_type == "option" else None,
+        avg_entry_premium=200,
+        total_premium_paid=200,
+        opened_at=opened_at,
+        closed_at=closed_at,
+        status=status,
+    )
+    db.add(t)
+    db.flush()
+    created_fills: list[Fill] = []
+    if fills is None:
+        fills = [(opened_at, "entry", f"{ticker}-in-{uuid4().hex[:6]}")]
+    for executed_at, role, raw_email_id in fills:
+        f = Fill(
+            account_id=ROTH,
+            ticker=ticker,
+            instrument_type=instrument_type,
+            side="buy_to_open" if role == "entry" else "sell_to_close",
+            contracts=1,
+            price=200,
+            executed_at=executed_at,
+            raw_email_id=raw_email_id,
+            option_type="call" if instrument_type == "option" else None,
+            strike=100 if instrument_type == "option" else None,
+            expiration=date(2026, 11, 21) if instrument_type == "option" else None,
+        )
+        db.add(f)
+        db.flush()
+        db.add(TradeFill(trade_id=t.id, fill_id=f.id, role=role))
+        created_fills.append(f)
+    db.commit()
+    return t, created_fills
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"status": "closed", "closed_at": datetime(2026, 10, 20, 10, 20, 0)},
+        {"instrument_type": "stock"},
+    ],
+)
+def test_resolve_entry_refuses_closed_or_stock_trade(db, kwargs):
+    t, _ = _seed_entry_trade(db, **kwargs)
+    result = {"window_minutes": 15}
+    assert resolve_entry(db, t, result, RESOLVE_NOW) is False
+    assert (
+        result["reason"] == "Since-entry context requires a recorded open option trade."
+    )
+    assert result["window_minutes"] is None
+    assert "entry" not in result
+
+
+def test_resolve_entry_refuses_trade_with_no_entry_fill(db):
+    t, _ = _seed_entry_trade(db, fills=[])
+    result = {"window_minutes": 15}
+    assert resolve_entry(db, t, result, RESOLVE_NOW) is False
+    assert (
+        result["reason"]
+        == "The first recorded entry could not be verified from this trade's fills."
+    )
+    assert result["window_minutes"] is None
+
+
+def test_resolve_entry_refuses_when_entry_fill_time_differs_from_opened_at(db):
+    opened_at = datetime(2026, 10, 20, 10, 15, 30)
+    t, _ = _seed_entry_trade(
+        db,
+        opened_at=opened_at,
+        fills=[(datetime(2026, 10, 20, 10, 16, 0), "entry", "msg-mismatch")],
+    )
+    result = {"window_minutes": 15}
+    assert resolve_entry(db, t, result, RESOLVE_NOW) is False
+    assert (
+        result["reason"]
+        == "The first recorded entry could not be verified from this trade's fills."
+    )
+    assert result["window_minutes"] is None
+
+
+def test_resolve_entry_picks_earliest_entry_fill_by_executed_at(db):
+    first_at = datetime(2026, 10, 20, 10, 15, 30)
+    later_at = datetime(2026, 10, 20, 10, 22, 0)
+    t, _ = _seed_entry_trade(
+        db,
+        opened_at=first_at,
+        fills=[
+            (later_at, "entry", "msg-add"),
+            (first_at, "entry", "msg-first"),
+        ],
+    )
+    result = {"window_minutes": 15}
+    assert resolve_entry(db, t, result, RESOLVE_NOW, source_key="msg-first") is True
+    assert result["entry"]["recorded_at"] == iso(stamp(first_at))
+    assert result["window_minutes"] is None
+
+
+def test_resolve_entry_checks_source_key_and_falls_back_to_fill_id(db):
+    opened_at = datetime(2026, 10, 20, 10, 15, 30)
+    t_with_email, _ = _seed_entry_trade(
+        db,
+        opened_at=opened_at,
+        fills=[(opened_at, "entry", "gmail-123")],
+    )
+    ok_result = {}
+    assert (
+        resolve_entry(db, t_with_email, ok_result, RESOLVE_NOW, source_key="gmail-123")
+        is True
+    )
+
+    bad_result = {"window_minutes": 15}
+    assert (
+        resolve_entry(db, t_with_email, bad_result, RESOLVE_NOW, source_key="other-key")
+        is False
+    )
+    assert (
+        bad_result["reason"]
+        == "The recorded position identity no longer matches this alert."
+    )
+    assert bad_result["window_minutes"] is None
+
+    # Fill.raw_email_id is non-nullable str in models.py; empty string exercises the str(fill.id) fallback.
+    t_no_email, [fill_no_email] = _seed_entry_trade(
+        db,
+        opened_at=opened_at,
+        fills=[(opened_at, "entry", "")],
+    )
+    fallback_ok = {}
+    assert (
+        resolve_entry(
+            db, t_no_email, fallback_ok, RESOLVE_NOW, source_key=str(fill_no_email.id)
+        )
+        is True
+    )
+    fallback_bad = {}
+    assert (
+        resolve_entry(db, t_no_email, fallback_bad, RESOLVE_NOW, source_key="wrong")
+        is False
+    )
+    assert (
+        fallback_bad["reason"]
+        == "The recorded position identity no longer matches this alert."
+    )
+
+
+def test_resolve_entry_refuses_earlier_new_york_day_while_populating_entry(db):
+    opened_at = datetime(2026, 10, 19, 15, 45, 30)
+    t, _ = _seed_entry_trade(db, opened_at=opened_at)
+    result = {"window_minutes": 15}
+    assert resolve_entry(db, t, result, RESOLVE_NOW) is False
+    assert (
+        result["reason"]
+        == "Only entries from today's regular session are supported; overnight positions are unavailable."
+    )
+    assert result["window_minutes"] is None
+    recorded = stamp(opened_at)
+    boundary = stamp(datetime(2026, 10, 19, 15, 46, 0))
+    assert result["entry"] == {
+        "trade_id": str(t.id),
+        "recorded_at": iso(recorded),
+        "not_before": iso(boundary),
+        "deadline": iso(boundary + 90),
+        "baseline_at": None,
+        "baseline_delay_seconds": None,
+    }
+
+
+def test_resolve_entry_succeeds_at_10_15_30_et(db):
+    opened_at = datetime(2026, 10, 20, 10, 15, 30)
+    t, _ = _seed_entry_trade(db, opened_at=opened_at)
+    result = {"window_minutes": 15}
+    assert resolve_entry(db, t, result, RESOLVE_NOW) is True
+    assert result["window_minutes"] is None
+    assert "reason" not in result
+    not_before = stamp(datetime(2026, 10, 20, 10, 16, 0))
+    assert result["entry"] == {
+        "trade_id": str(t.id),
+        "recorded_at": iso(stamp(opened_at)),
+        "not_before": iso(not_before),
+        "deadline": iso(not_before + 90),
+        "baseline_at": None,
+        "baseline_delay_seconds": None,
+    }
+
+
+def test_resolve_entry_refuses_future_entry_on_same_day(db):
+    opened_at = datetime(2026, 10, 20, 10, 35, 0)
+    t, _ = _seed_entry_trade(db, opened_at=opened_at)
+    result = {"window_minutes": 15}
+    assert resolve_entry(db, t, result, RESOLVE_NOW) is False
+    assert (
+        result["reason"] == "Recorded entry is in the future; context is unavailable."
+    )
+    assert result["window_minutes"] is None
+    assert result["entry"]["trade_id"] == str(t.id)
+
+
+def test_resolve_entry_ignores_an_exit_fill_at_the_opening_time(db):
+    opened_at = datetime(2026, 10, 20, 10, 15, 30)
+    t, _ = _seed_entry_trade(db, opened_at=opened_at, fills=[(opened_at, "exit", "msg-exit")])
+    result = {}
+    assert resolve_entry(db, t, result, RESOLVE_NOW) is False
+    assert result["reason"] == "The first recorded entry could not be verified from this trade's fills."
+
+
+def test_resolve_entry_uses_the_new_york_day_not_the_utc_day(db):
+    # 20:30 ET is already the next day in UTC; it is still today's entry in New York.
+    opened_at = datetime(2026, 10, 20, 20, 30, 0)
+    t, _ = _seed_entry_trade(db, opened_at=opened_at)
+    result = {}
+    assert resolve_entry(db, t, result, stamp(datetime(2026, 10, 20, 21, 0, 0))) is True
