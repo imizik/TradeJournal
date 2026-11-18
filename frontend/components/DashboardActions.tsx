@@ -219,6 +219,26 @@ export default function DashboardActions() {
   );
 }
 
+const SYNC_OPEN_EVENT = "desk-sync-open";
+/** Opens the desk's Sync Center (Data health's "Data sync", ⌘K's "Data sync"). */
+export const openSyncCenter = () => window.dispatchEvent(new Event(SYNC_OPEN_EVENT));
+
+/**
+ * The same Data Sync Center drawer the Dashboard opens, mounted once on the desk and opened by ``openSyncCenter``. Every
+ * action and confirmation is the drawer's own: Rebuild All and Resync All still ask first, and Resync All still asks
+ * for the database's name where the backend requires it.
+ */
+export function DeskSyncCenter() {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const show = () => setOpen(true);
+    window.addEventListener(SYNC_OPEN_EVENT, show);
+    return () => window.removeEventListener(SYNC_OPEN_EVENT, show);
+  }, []);
+  // Only while open, so the desk carries no hidden drawer.
+  return open ? <SyncCenterDrawer initialJob={null} open onClose={() => setOpen(false)} onSummaryChange={() => undefined} onSyncQueued={() => undefined} /> : null;
+}
+
 function SyncCenterDrawer({
   initialJob, open,
   onClose,

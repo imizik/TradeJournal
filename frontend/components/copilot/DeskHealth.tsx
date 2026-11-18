@@ -16,6 +16,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { api } from "@/lib/api";
+import { openSyncCenter } from "@/components/DashboardActions";
 import { getHealth, type DeskHealth, type HealthRow, type HealthState } from "@/lib/desk";
 import { everyDeskMinute } from "@/lib/deskMinute";
 import { STALE_SECONDS, useHeldTicks, type DeskTicks } from "@/lib/deskTicks";
@@ -198,7 +199,7 @@ function useHealthOpen() {
 }
 
 /** The list of every source, under the dot or (``up``) above the status line. */
-function HealthList({ rows, failed, tape, up = false }: { rows: HealthRow[] | null; failed: boolean; tape: Level2Health; up?: boolean }) {
+function HealthList({ rows, failed, tape, up = false, onClose }: { rows: HealthRow[] | null; failed: boolean; tape: Level2Health; up?: boolean; onClose(): void }) {
   const [picked, setPicked] = useState<string | null>(null);
   return (
     <div role="dialog" aria-label="Data health" data-testid="desk-health-list"
@@ -211,6 +212,11 @@ function HealthList({ rows, failed, tape, up = false }: { rows: HealthRow[] | nu
         {/* Without the server's rows the Tape's own still shows. */}
         {(rows ?? [level2Row(tape)]).map(row => <Source key={row.id} row={row} open={picked === row.id} onPick={() => setPicked(picked === row.id ? null : row.id)} />)}
       </ul>
+      {/* The Dashboard's Data Sync Center, unchanged: run sync or one job, job history, Rebuild / Resync All (each asks first). */}
+      <button type="button" onClick={() => { onClose(); openSyncCenter(); }} data-testid="desk-health-sync"
+        className="mt-1 flex min-h-9 w-full items-center rounded border-t px-2 py-1 text-left text-muted-foreground hover:bg-secondary hover:text-foreground">
+        Data sync · run a sync or one job, see history
+      </button>
     </div>
   );
 }
@@ -235,7 +241,7 @@ export default function DeskHealthDot({ onlyRed = false }: { onlyRed?: boolean }
         {/* A phone has no status line: money behind names its source under the dot, as the Day button's word sits. */}
         {said.short && <span aria-hidden data-testid="desk-health-short" className="whitespace-nowrap text-[10px] leading-none sm:hidden">{said.short}</span>}
       </button>
-      {open && <HealthList rows={rows} failed={failed} tape={tape} />}
+      {open && <HealthList rows={rows} failed={failed} tape={tape} onClose={() => setOpen(false)} />}
     </div>
   );
 }
@@ -366,7 +372,7 @@ export function DeskStatusLine({ mark, market = null, className }: { mark: React
             ))}
           </>}
       </button>
-      {open && <HealthList rows={rows} failed={failed} tape={tape} up />}
+      {open && <HealthList rows={rows} failed={failed} tape={tape} up onClose={() => setOpen(false)} />}
     </div>
   );
 }

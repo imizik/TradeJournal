@@ -57,6 +57,7 @@ import type { DeskTicks } from "@/lib/deskTicks";
 import { DeskAccounts, activeAccount, forAccount } from "@/components/copilot/DeskAccounts";
 import { ChainPicker, PhoneOrders, PhoneValue, usePhone } from "@/components/copilot/DeskPhone";
 import DeskHealthDot, { DeskStatusLine, reportBookLive } from "@/components/copilot/DeskHealth";
+import { DeskSyncCenter, openSyncCenter } from "@/components/DashboardActions";
 import { ModeSwitch, PaperValue, setDeskMode, useDeskMode } from "@/components/copilot/DeskMode";
 import ModeMark, { type Mode } from "@/components/copilot/ModeMark";
 import { DeskUseRoot, Fold, FoldMore, FoldSuggestion, useCountOpen, useDeskUse } from "@/components/copilot/DeskUse";
@@ -768,6 +769,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     { id: "mode-paper", name: "Paper mode", hint: "Paper first: tickets lead with Fill on paper, the paper value beside the real. Nothing is sent.", run: () => pickMode("paper") },
     { id: "mode-real", name: "Real mode", hint: "The desk as your real accounts show it", run: () => pickMode("real") },
     { id: "desk-use", name: "How I use the desk", hint: "What you use most and least; fold away what you don't", run: openUse },
+    // The old pages' pieces the desk has no home for yet (the pages themselves now open the desk).
+    { id: "sync", name: "Data sync", hint: "Run a sync or one job, job history, Gmail. Rebuild and Resync All ask first.", run: openSyncCenter },
+    { id: "scanner-history", name: "Scanner history", hint: "Past days, scorecards, shadow decisions and the scanner's tickers", run: () => go("/scanner?history=1") },
+    { id: "radar-log", name: "Radar log", hint: "Every Radar event with its evidence, Outside your list and the Shadow book", run: () => go("/radar?log=1") },
     // The market's line and the day's money, off the top bar since the calm pass: one fact command (it moves
     // nothing), after the ones that act, so a typed word such as "close" still leads with Close the day.
     ...(todayWords.market || todayWords.money ? [{ id: "today", name: `Today${todayWords.market ? `: ${todayWords.market}` : ""}`,
@@ -779,7 +784,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       if (area === "Left") showBook(); else if (area === "Centre") { setGrid(false); showCentre(); } else if (area === "Right") showFeed();
       requestAnimationFrame(() => document.querySelector(`[data-use="${id}"]`)?.scrollIntoView({ block: "nearest" }));
     } })),
-  ], [actions, dayPhase, dayKind, placeRun, fill, planTrade, closeDay, showFeed, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre, pickMode, todayWords]);
+  ], [actions, dayPhase, dayKind, placeRun, fill, planTrade, closeDay, showFeed, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre, pickMode, todayWords, go]);
 
   // J / K walk the conversations the thread list shows, subthreads included, in its order.
   const [walk, setWalk] = useState<string[]>([]);
@@ -1415,6 +1420,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       {/* The status line along the bottom, from 768 px (a phone has its tab bar there): the mode, whose book, how fresh
           prices are and every source behind the desk; a tap opens the Data health list. */}
       {on && !phone && <div data-use="health" className="contents"><DeskStatusLine mark={statusMark} market={marketWords(session.data)} className={styles.statusLine} /></div>}
+      {/* The Data Sync Center (Data health's "Data sync" and ⌘K's): hidden until opened. */}
+      {on && <DeskSyncCenter />}
       {/* A phone's tab bar is the desk's own: Positions, the ticker's Chart, Chain, Orders and Ask, then the app's More
           (Nav.tsx keeps its slot). Each counts as its view's piece (view.*). */}
       {/* Under the copilot's open sheet (which covers the bar) the desk's tabs wait hidden; More stays. */}

@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { requireAccess } from "@/lib/accessServer";
 import ScannerFreshness from "@/components/ScannerFreshness";
 import ScannerTickers from "@/components/ScannerTickers";
 import { api } from "@/lib/serverApi";
@@ -309,8 +311,14 @@ function shadowResult(c: ScannerCandidateRow) {
   return <span className="text-xs text-muted-foreground">—</span>;
 }
 
-export default async function ScannerPage({ searchParams }: { searchParams: Promise<{ day?: string }> }) {
-  const { day } = await searchParams;
+/** While the desk is home, the bare address opens the desk with the Feed on Ideas › Scanner (a ticker's chart in the
+ * centre when one is named). A past day (``?day=``) and ⌘K's Scanner history (``?history=1``) still show this page. */
+export default async function ScannerPage({ searchParams }: { searchParams: Promise<{ day?: string; history?: string; symbol?: string }> }) {
+  const { day, history, symbol } = await searchParams;
+  if (!day && !history && (await requireAccess()).owner && await api.copilotOn()) {
+    const ticker = typeof symbol === "string" && /^[A-Za-z][A-Za-z0-9.]{0,9}$/.test(symbol) ? `&symbol=${symbol.toUpperCase()}` : "";
+    redirect(`/copilot-lab?feed=scanner${ticker}`);
+  }
   const data = await api.scannerDay(day);
   const now = new Date();
   const live = data.date === nyDate(now);

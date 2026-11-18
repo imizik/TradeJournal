@@ -192,9 +192,12 @@ function withDesk<T extends { href: string }>(items: T[], copilot: boolean): T[]
   if (!copilot) return items;
   return items.filter(item => item.href !== "/").map(item => (item.href === "/today" ? { ...item, ...DESK } : item));
 }
-/** The folded groups; while the desk is home the Dashboard heads Journal. */
+/** Pages retired while the desk is home: their addresses open the desk's Feed (Radar, Scanner), so the menu drops them. */
+const RETIRED = new Set(["/radar", "/scanner"]);
+/** The folded groups; while the desk is home the Dashboard heads Journal and the retired pages leave. */
 function navGroups(copilot: boolean) {
-  return copilot ? GROUPS.map(group => group.name === "Journal" ? { ...group, items: [DASHBOARD, DESK_USE, ...group.items] } : group) : GROUPS;
+  if (!copilot) return GROUPS;
+  return GROUPS.map(group => ({ ...group, items: [...(group.name === "Journal" ? [DASHBOARD, DESK_USE] : []), ...group.items.filter(item => !RETIRED.has(item.href))] }));
 }
 
 /** Which pages this viewer may open: the owner sees all; an assistant sees the practice pages and, with journal access, the journal. */
