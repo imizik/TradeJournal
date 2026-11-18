@@ -431,6 +431,9 @@ test("the open thread is in the address: Back returns to the one before, a reloa
   await page.keyboard.press("j"); // NBIS's newest
   await expect(here.getByText("Answer 2")).toBeVisible();
   await expect(page).toHaveURL(`/copilot-lab?thread=${ID(2)}`);
+  // J / K walk the list as it is drawn, and the list opens NBIS's subthreads a render after the thread opens: a J before that has
+  // only the open thread to walk to. Wait for both subthreads to be listed, as a person looking at the list would.
+  await expect(list(page).getByRole("list", { name: "NBIS threads" }).getByRole("link")).toHaveCount(2);
   await page.keyboard.press("j"); // its subthreads are now shown, so the older one is next
   await expect(here.getByText("Answer 1")).toBeVisible();
   await expect(page).toHaveURL(`/copilot-lab?thread=${ID(1)}`);
