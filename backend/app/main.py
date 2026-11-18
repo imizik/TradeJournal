@@ -679,6 +679,8 @@ from app.routers import copilot_paper as copilot_paper_router  # owner-only: his
 app.include_router(copilot_paper_router.router, prefix="/copilot", tags=["copilot lab"])
 from app.routers import copilot_desk_use as copilot_desk_use_router  # owner-only: how he uses the desk; this database only
 app.include_router(copilot_desk_use_router.router, prefix="/copilot", tags=["copilot lab"])
+from app.routers import whats_working as whats_working_router  # owner-only: What's working; this database only, read only
+app.include_router(whats_working_router.router, prefix="/copilot", tags=["copilot lab"])
 from app.routers import today as today_router  # owner-only Today screen; composes existing readers, read-only
 app.include_router(today_router.router, prefix="/today", tags=["today"])
 from app.routers import replay as replay_router  # owner-only Watch your day clips; read-only

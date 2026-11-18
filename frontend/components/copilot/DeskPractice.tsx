@@ -14,6 +14,7 @@ import { GoalsLine } from "./DeskGoals";
 import { RulesEditor, RulesSplitLine } from "./DeskRules";
 import { Fold } from "./DeskUse";
 import ModeMark, { type Mode } from "./ModeMark";
+import WhatsWorking from "./WhatsWorking";
 import PersonalReplay from "@/components/PersonalReplay";
 import PracticeDecisions from "@/components/PracticeDecisions";
 import PracticeRoutine from "@/components/PracticeRoutine";
@@ -57,7 +58,8 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** "How I'm doing · this week": his closed REAL and PAPER trades since Monday, side by side (trades, P&L, win rate), in
  *  one neutral block outside the paper frame. From the paper read's ``score.week``; nothing until it lands. Replay keeps
- *  its own score in its REPLAY line. Folds like the column's other pieces (``scorecard``). */
+ *  its own score in its REPLAY line. Folds like the column's other pieces (``scorecard``). Its foot opens What's working
+ *  in place (``WhatsWorking``). */
 export function HowImDoing({ book }: { book: PaperBook | null }) {
   const week = book?.score?.week;
   if (!week) return null;
@@ -87,6 +89,8 @@ export function HowImDoing({ book }: { book: PaperBook | null }) {
           ))}
         </tbody>
       </table>
+      {/* Where the money comes from and where it leaks, real beside paper: opens in place (and from ⌘K). */}
+      <WhatsWorking />
     </section>
   );
 }

@@ -2126,6 +2126,31 @@ The desk counts quietly which of its pieces he uses, so after two weeks it can o
 
 The copilot does not see folds or counts (no tool change).
 
+### What's working
+
+Where his money comes from and where it leaks, from his closed real trades and his closed paper trades, kept apart
+(`backend/app/engine/whats_working.py`, `frontend/components/copilot/WhatsWorking.tsx`). Read only: the journal's
+`trade` rows and the paper book's events folded by `paper_book.fold`; no quote, no Robinhood.
+
+- **Buckets.** Call / put / shares (paper also call and put spreads); entry time in New York (before 10:00,
+  10:00–10:30, 10:30–12:00, 12:00–14:00, after 14:00); hold (same day, overnight = closed the next weekday, multi-day);
+  days to expiry at entry (0–1, 2–7, 8–30, over 30); option type with entry time ("Puts before 10:00"); paper only,
+  whose idea it was (mine, copilot, Radar, scanner) and rules followed or broken. Each reports trades, wins, losses,
+  total and average dollars and win rate, over the last 30 days (by close time) and all time.
+- **Money.** A real trade's dollars are its FIFO `realized_pnl`, summed as `/stats` sums them (closed or expired; a
+  win is above zero, every other priced trade a loss); Webull is left out, as in the paper scorecard. Under 5 trades a
+  bucket is too few to judge and never in a top 3. A missing fact (no P&L, close time, expiry or rules check) is
+  counted as missing, never as zero.
+- **Where it shows.** "What's working ▸" at the foot of How I'm doing (and ⌘K's "What's working") opens the top 3
+  buckets making money and the top 3 losing it, REAL beside PAPER, each with its sample
+  (`GET /copilot/desk/whats-working`). The real option ticket's "Your record" row adds the paper record for its option
+  type entered at this time ("Paper · puts before 10:00: 2W 7L, -$1,140", `GET /copilot/desk/whats-working/record`):
+  informational, it never blocks.
+- **The Friday paper review** ends with one line written from these buckets, never by the model: the single biggest
+  leak in the last 30 days of real trades with 5+ trades, as one change to try on paper next week ("Try: no puts before
+  10:00 next week, on paper."). It suggests only; it changes no rule and tunes no strategy book, and it rides the
+  review's one ping.
+
 ### Data health
 
 Health is said once (since the calm pass): from 768 px the status line along the bottom says it, and the dot at the
