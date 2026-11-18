@@ -10,8 +10,22 @@ The private `/charts` page is a stock/ETF chart workspace backed by Tradier for
 today and Alpaca historical SIP for completed intraday sessions.
 It uses TradingView's Apache-licensed Lightweight Charts, not the restricted
 Advanced Charts library. No TradingView subscription or paid data upgrade is
-required by this feature. The Tradier account still needs production market-data
+required by this feature. The live Tradier feed requires production market-data
 access. Keys remain on the private backend.
+
+## Temporary Alpaca equity fallback
+
+When Tradier cannot serve a stock or ETF workspace and Alpaca credentials
+are configured, Charts can poll consolidated Alpaca SIP candles and delayed
+snapshots. The chart labels the roughly 15-minute delay and disables the live
+trade stream while using this feed. Today's intraday request ends at least
+16 minutes ago. Daily and weekly views use completed split-adjusted Alpaca
+sessions from 2016 onward, with older pages selected from the same provider.
+Completed intraday scrollback keeps the existing raw SIP cache. Chart session
+hours use the existing calendar or its disclosed clock fallback. The Alpaca
+fallback does not supply options layers, automatic levels, or relative volume.
+VIX and US10Y continue to use their dedicated index adapter. This fallback
+applies to the chart display only.
 
 ## Macro layout: VIX and 10-year yield
 
@@ -1027,7 +1041,7 @@ the left edge, exactly like intraday pages.
   There is deliberately no disk copy: the provider rewrites adjusted history
   after every split. A new date, or a new split set, reads once more. Paging
   ten years costs no further Tradier calls. Daily bars are never built from
-  minutes, Alpaca or Tradier's weekly interval.
+  minutes or Tradier's weekly interval. The temporary Alpaca fallback uses Alpaca daily bars for those intervals.
 - **Pages are slices.** Indicators are computed over the whole series
   (`chart_bars`, about 9 ms for 1D and 14 ms for 1W over SPY's 7,972 bars,
   measured 2026-10-01) and a page is `chart_math.daily_page`'s slice of the result,

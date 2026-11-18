@@ -828,3 +828,54 @@ def test_first_prices_match_full_candles_without_duplicate_minute_download(provi
     assert first["fetched_at"]["intraday"] == full["fetched_at"]["intraday"]
     assert first["adjustment"] == full["adjustment"]
     assert sum("timesales" in url for url, _ in calls) == 1
+
+
+def test_workspace_uses_delayed_sip_and_pages_same_daily_feed_when_tradier_denies_access(route_client, monkeypatch):
+    from app.engine import chart_fallback
+    from app.engine.chart_splits import UNAVAILABLE
+
+    today = datetime.now(ET).date()
+    previous = today - timedelta(days=1)
+    calls = []
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.combine(today, wall_time(11), ET).astimezone(tz)
+
+    def denied(*args, **kwargs):
+        raise ChartFeedError("Tradier refused access.", "access_denied")
+
+    def read(path, params, ttl):
+        calls.append((path, params))
+        if path.endswith("/snapshots"):
+            assert params == {"symbols": "QQQ,SPY", "feed": "delayed_sip"}
+            return {"SPY": {"latestTrade": {"t": f"{today}T10:44:00-05:00", "p": 101}}}, 10, None
+        if params["timeframe"] == "1Min":
+            assert datetime.fromisoformat(params["end"]).time() == wall_time(10, 44)
+            stamp = datetime.combine(today, wall_time(10, 43), ET)
+            assert params["adjustment"] == "raw"
+        else:
+            assert params["adjustment"] == "split"
+            stamp = datetime.combine(previous, wall_time(), ET)
+        assert params["feed"] == "sip"
+        return {"symbol": "SPY", "bars": [{"t": stamp.isoformat(), "o": 100, "h": 102, "l": 99, "c": 101, "v": 9}]}, 10, None
+
+    monkeypatch.setattr(charts.alpaca, "alpaca_configured", lambda: True)
+    monkeypatch.setattr(charts.chart_feed, "workspace", denied)
+    monkeypatch.setattr(charts.chart_feed.splits, "get", lambda symbol: UNAVAILABLE)
+    monkeypatch.setattr(charts.chart_calendar, "hours", lambda day: HALF_HOURS)
+    monkeypatch.setattr(chart_fallback, "datetime", Clock)
+    monkeypatch.setattr(chart_fallback.feed, "read", read)
+    result = route_client.get("/charts/workspace?symbol=SPY&intervals=5m,1D,1W&watchlist=QQQ")
+    assert result.status_code == 200
+    data = result.json()
+    assert data["provider"] == "Alpaca SIP" and data["delayed"]
+    assert not data["issues"]
+    assert all(panel["bars"][0]["source"] == "alpaca_sip" for panel in data["panels"].values())
+    assert data["quotes"][0]["last"] == 101 and data["quotes"][0]["source"] == "Alpaca SIP"
+    assert len(calls) == 3
+    before = int(datetime.combine(today, wall_time(), ET).timestamp())
+    page = route_client.get(f"/charts/history?symbol=SPY&interval=1D&session=extended&before={before}&provider=alpaca_sip")
+    assert page.status_code == 200
+    assert page.json()["bars"] == data["panels"]["1D"]["bars"]

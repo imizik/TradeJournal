@@ -24,7 +24,7 @@ from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_feed import ChartFeedError, chart_feed
 from app.engine.chart_history import HistoryError, chart_history
 from app.engine.chart_indices import is_index
-from app.engine import tradier
+from app.engine import alpaca, chart_fallback, tradier
 from app.engine.chart_math import ET, INTERVALS, market_day
 from app.engine import symbol_info_tradier
 from app.engine import chart_journal, access, owner_lock
@@ -109,6 +109,7 @@ def history(
     before: int = Query(..., gt=0),
     limit: int = Query(1200, ge=1, le=1200),
     continuation: str | None = Query(None, max_length=64),
+    provider: str | None = Query(None, pattern="^alpaca_sip$"),
     db: Session = Depends(get_session),
 ):
     with request_timing(timing, response):
@@ -122,9 +123,10 @@ def history(
                 raise HTTPException(422 if exc.code == "invalid_request" else 503, {"code": exc.code, "message": str(exc)}) from None
             return {**data, "markers": [], "fills_truncated": False}
         if interval in ("1D", "1W"):
-            # Daily and weekly bars are Tradier's regular session; `session` and `continuation` do not apply.
+            # Both daily providers use regular-session bars; `session` and `continuation` do not apply.
             try:
-                data = chart_feed.daily.page(symbol, interval, before, limit)
+                read_page = chart_fallback.page if provider == chart_fallback.SOURCE else chart_feed.daily.page
+                data = read_page(symbol, interval, before, limit)
             except ChartFeedError as exc:
                 retry = int(time.time() + (60 if exc.code == "rate_limited" else 15))
                 raise HTTPException(503, {"code": exc.code, "message": str(exc), "retry_at": retry}) from None
@@ -182,6 +184,28 @@ async def stream(request: Request, symbol: str = Query("", max_length=15), symbo
     })
 
 
+def _workspace_prices(symbol, frames, watchlist, session, *, quotes=True, **kwargs):
+    """Try the normal workspace first. Preserve useful primary data if fallback also fails."""
+    primary = None
+    error = None
+    try:
+        primary = chart_feed.workspace(symbol, frames, watchlist, session, calendar=chart_calendar, quotes=quotes, **kwargs)
+    except ChartFeedError as exc:
+        error = exc
+    if not is_index(symbol) and alpaca.alpaca_configured() and (primary is None or primary.get("issues")):
+        try:
+            fallback = chart_fallback.workspace(symbol, frames, watchlist, session, calendar=chart_calendar, quotes=quotes)
+            if primary is None or all(not panel["bars"] or fallback["panels"][frame]["bars"]
+                                      for frame, panel in primary["panels"].items()):
+                return fallback
+        except ChartFeedError:
+            if primary is None:
+                raise
+    if error is not None:
+        raise error
+    return primary
+
+
 @router.get("/workspace")
 @_encoded
 def workspace(
@@ -230,7 +254,7 @@ def workspace(
             # First useful candles do not wait for other symbols, daily levels,
             # options, RVol or journal reads. Same price basis and calendar.
             try:
-                data = chart_feed.workspace(symbol, frames, [], session, calendar=chart_calendar, quotes=False, auto=False)
+                data = _workspace_prices(symbol, frames, [], session, quotes=False, auto=False)
             except ChartFeedError as exc:
                 raise HTTPException(503, {"code": exc.code, "message": str(exc)}) from None
             return {**data, "context_pending": True, "extras": {}, "fills": [], "fills_truncated": False,
@@ -252,17 +276,20 @@ def workspace(
                                              options_data.get("strikes", []), options_data.get("expirations", []))
 
         try:
-            data = chart_feed.workspace(symbol, frames, symbols, session, calendar=chart_calendar, stored_session=chart_history.stored,
-                                        volume_profile=chart_history.volume_profile, **levels_for(None))
+            data = _workspace_prices(symbol, frames, symbols, session, stored_session=chart_history.stored,
+                                     volume_profile=chart_history.volume_profile, **levels_for(None))
         except ChartFeedError as exc:
             raise HTTPException(503, {"code": exc.code, "message": str(exc)}) from None
         add_open_interest_changes(data.get("auto_levels"), symbol)
         data["extras"] = {}
         for name, wanted in held.items():
             try:
-                other = chart_feed.workspace(name, wanted, [], session, calendar=chart_calendar, quotes=False, stored_session=chart_history.stored,
-                                             volume_profile=chart_history.volume_profile, **levels_for("nearest"))
-                data["extras"][name] = {**{key: other[key] for key in ("panels", "fetched_at", "intraday_as_of", "issues", "adjustment")},
+                if data.get("provider") == chart_fallback.PROVIDER and not is_index(name):
+                    other = chart_fallback.workspace(name, wanted, [], session, calendar=chart_calendar, quotes=False)
+                else:
+                    other = chart_feed.workspace(name, wanted, [], session, calendar=chart_calendar, quotes=False, stored_session=chart_history.stored,
+                                                 volume_profile=chart_history.volume_profile, **levels_for("nearest"))
+                data["extras"][name] = {**{key: other[key] for key in ("panels", "fetched_at", "intraday_as_of", "issues", "adjustment", "provider", "delayed") if key in other},
                                          "auto_levels": other.get("auto_levels"), "rvol": other.get("rvol"), "instrument": other.get("instrument"), "history_note": other.get("history_note"), "market": other.get("market")}
                 add_open_interest_changes(data["extras"][name].get("auto_levels"), name)
             except ChartFeedError as exc:
