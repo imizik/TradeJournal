@@ -1812,7 +1812,7 @@ that nothing in it places or sends anything.
   Confirm, a Radar setup's Plan it, a checked call's plan), still armed and not yet entered (no fill linked to it and no
   open trade in the symbol opened since the plan, linked or not). Anything else (no capture,
   an open position, a feed item, a chat message) gets 404 or 409. It opens from the Ticket tab's list of those plans,
-  newest first, and **Open its ticket** on a confirmed plan card and on the plan thread's header (the book's rows carry
+  newest first, and **Open its ticket** on a confirmed plan card (Confirm opens that ticket by itself for option plans; the button is the way back) and on the plan thread's header (the book's rows carry
   no ticket icon: a held row is not a new order). With none, the tab says so and offers **Plan a trade**.
 - **Contract:** the capture's own strike and expiry, else the plan's "Contract: …" words when they state one strike,
   one type and one date plainly ("NBIS 11/14 105C", "Nov 14 '26 105C"; a year only as "'26" or four digits, so

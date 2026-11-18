@@ -341,6 +341,11 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
     report({ ...results, [part]: await run(part) });
   }
 
+  function openItsTicket() {
+    if (!investigationId || side === "buy_stock" || side === "short_stock") return;
+    openTicket(investigationId, carried ? { expiry: carried.expiry, strike: carried.strike, ...(carried.short != null ? { short: carried.short, kind: carried.side } : {}) } : undefined);
+  }
+
   /** The plan first: its alerts are armed only once it is saved, so a failed save leaves nothing armed without a plan. */
   async function savePlanThenAlerts() {
     const all = { ...results, plan: await run("plan") };
@@ -350,6 +355,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
     // Charts labels the levels this plan was drawn from, and shows its alerts.
     const detail: PlanConfirmed = { symbol: plan.symbol, side: plan.direction, entry: entryLevel.price, invalidation: stopLevel.price, target: targetPrice, drawn };
     window.dispatchEvent(new CustomEvent(PLAN_CONFIRMED, { detail }));
+    openItsTicket();
   }
 
   async function confirm() {
@@ -529,7 +535,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
       <PaperIt plan={plan} contract={contract} stop={stop} target={target} thesis={thesis} ideaId={plan.client_id ?? plan.id} />
       {investigationId && results.plan.state === "done" && side !== "buy_stock" && side !== "short_stock" && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <button type="button" onClick={() => openTicket(investigationId, carried ? { expiry: carried.expiry, strike: carried.strike, ...(carried.short != null ? { short: carried.short, kind: carried.side } : {}) } : undefined)}
+          <button type="button" onClick={openItsTicket}
             className="inline-flex min-h-11 items-center rounded-md border px-3 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-8">Open its ticket</button>
           {carried && <span data-testid="plan-ticket-pick" className="text-xs text-muted-foreground">with {carried.short != null
             ? spreadLabel(carried.symbol, carried.side, carried.strike, carried.short, carried.expiry) : contractLabel(carried)}, the contract you started from</span>}

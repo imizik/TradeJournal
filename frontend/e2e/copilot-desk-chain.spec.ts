@@ -202,7 +202,7 @@ async function planning(page: Page, contract: string) {
   return sends;
 }
 
-/** Send the plan line in the box, Confirm the copilot's card, then Open its ticket. */
+/** Send the plan line in the box and Confirm the copilot's card: its ticket opens by itself once the plan is saved. */
 async function sendConfirmOpen(page: Page) {
   await page.getByRole("button", { name: "Send" }).click();
   const card = page.getByRole("region", { name: "Proposed trade plan" });
@@ -233,8 +233,9 @@ for (const kind of ["one contract", "a spread"] as const) {
     expect(sends).toHaveLength(1);
     await expect(card.getByTestId("plan-ticket-pick")).toHaveText(spread ? "with NBIS $100/$105 Call Debit Spread 11/13/26, the contract you started from"
       : "with NBIS $100 Call 11/13/26, the contract you started from");
-    await card.getByRole("button", { name: "Open its ticket" }).click();
+    // Confirm opened it: no second tap, and "Open its ticket" stays as the way back.
     await expect(pane.getByRole("tab", { name: "Ticket" })).toHaveAttribute("aria-selected", "true");
+    await expect(card.getByRole("button", { name: "Open its ticket" })).toBeVisible();
     // The contract he picked on the chain, with no second pick: the ticket is read on it straight away.
     expect(tickets).toEqual([spread ? `${NEW}?expiration=2026-11-13&strike=100&short_strike=105&option_type=call` : `${NEW}?expiration=2026-11-13&strike=100`]);
     const open = pane.getByTestId("desk-ticket");
@@ -253,9 +254,21 @@ test("a plan the copilot moved to another expiry keeps its own words: its ticket
   await pane.getByTestId("chain-actions").getByRole("button", { name: "Put on ticket" }).click();
   const card = await sendConfirmOpen(page);
   await expect(card.getByTestId("plan-ticket-pick")).toHaveCount(0);
-  await card.getByRole("button", { name: "Open its ticket" }).click();
   await expect(pane.getByTestId("desk-ticket")).toBeVisible();
   expect(tickets).toEqual([NEW]); // the plan's own words decide
+});
+
+test("a plan that fails to save opens no ticket", async ({ page }) => {
+  const { pane, tickets } = await lab(page, [], { ...TICKET, investigation_id: NEW });
+  await planning(page, "NBIS 100C");
+  await page.route("**/charts/captures", route => route.fulfill({ status: 500, json: { detail: "no" } }));
+  await page.getByRole("button", { name: "Send" }).click();
+  const card = page.getByRole("region", { name: "Proposed trade plan" });
+  await card.getByRole("button", { name: "Confirm" }).click();
+  await expect(card.getByRole("button", { name: "Retry pre-trade plan" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Open its ticket" })).toHaveCount(0);
+  await expect(pane.getByTestId("desk-ticket")).toHaveCount(0);
+  expect(tickets).toEqual([]);
 });
 
 test("a checked call's Plan it carries its contract to the confirmed plan's ticket too", async ({ page }) => {
@@ -273,8 +286,7 @@ test("a checked call's Plan it carries its contract to the confirmed plan's tick
   await pane.getByTestId("call-check-run").click();
   await pane.getByTestId("call-check-plan").click();
   await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue(/Plan a trade: NBIS 105 call 11\/13, from a Discord call I checked/);
-  const card = await sendConfirmOpen(page);
-  await card.getByRole("button", { name: "Open its ticket" }).click();
+  await sendConfirmOpen(page);
   await expect(pane.getByTestId("desk-ticket")).toContainText("NBIS $105 Call 11/13/26");
   expect(tickets).toEqual([`${NEW}?expiration=2026-11-13&strike=105`]);
 });
