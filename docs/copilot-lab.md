@@ -2146,11 +2146,12 @@ Under the sources a **Data sync** line opens the Dashboard's Data Sync Center (`
 and Rebuild All / Resync All behind their own confirmations (Resync All deletes imported fills and still asks for the
 database's name where the backend requires it). The drawer mounts only while open.
 
-**Retired pages (2026-11-17).** While the desk is home, `/scanner` opens the desk with the Feed on Ideas › Scanner
-(`?symbol=` puts that chart in the centre) and `/radar` opens it on Ideas › Radar; the menu no longer lists either. The
-pages themselves stay for what the desk has no home for yet: `/scanner?day=` (a past day) and `?history=1`, and
-`/radar?event=` (a ping's rating link and the event's evidence), `?session=` and `?log=1`. With the lab off both pages
-show as before. `/dashboard`, `/charts`, `/daily` and `/practice` are not retired yet.
+**Retired pages (2026-11-17).** While the desk is home, the bare `/scanner` opens the desk with the Feed on Ideas ›
+Scanner (`?symbol=` puts that chart in the centre; while the scanner is off the page still shows, since the desk then has
+no Scanner tab) and the bare `/radar` opens it on Ideas › Radar; the menu no longer lists either. Any other parameter
+keeps the page, for what the desk has no home for yet: `/scanner?day=` (a past day) and `?history=1` (the desk's
+"Scanner page →" link and ⌘K), and `/radar?event=` (a ping's rating link and the event's evidence), `?session=`,
+`?groups=` and `?log=1` (⌘K, the Shadow book and evidence links). With the lab off both pages show as before. `/dashboard`, `/charts`, `/daily` and `/practice` are not retired yet.
 
 From 768 px the **status line** along the desk's bottom (`DeskStatusLine` in `DeskHealth.tsx`) shows the mode's mark
 and whose book, then only what is not fine, in words: a source behind, money first, red when it leaves positions,

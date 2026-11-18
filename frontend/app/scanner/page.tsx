@@ -311,15 +311,17 @@ function shadowResult(c: ScannerCandidateRow) {
   return <span className="text-xs text-muted-foreground">—</span>;
 }
 
-/** While the desk is home, the bare address opens the desk with the Feed on Ideas › Scanner (a ticker's chart in the
- * centre when one is named). A past day (``?day=``) and ⌘K's Scanner history (``?history=1``) still show this page. */
-export default async function ScannerPage({ searchParams }: { searchParams: Promise<{ day?: string; history?: string; symbol?: string }> }) {
-  const { day, history, symbol } = await searchParams;
-  if (!day && !history && (await requireAccess()).owner && await api.copilotOn()) {
-    const ticker = typeof symbol === "string" && /^[A-Za-z][A-Za-z0-9.]{0,9}$/.test(symbol) ? `&symbol=${symbol.toUpperCase()}` : "";
-    redirect(`/copilot-lab?feed=scanner${ticker}`);
-  }
+/** While the desk is home and the scanner is on, the bare address opens the desk with the Feed on Ideas › Scanner (a
+ * ticker's chart in the centre when ``?symbol=`` names one). Any other parameter (a past day, ⌘K's ``?history=1``) still
+ * shows this page, and so does the bare address while the scanner is off: the desk has no Scanner tab then. */
+export default async function ScannerPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const params = await searchParams;
+  const day = typeof params.day === "string" ? params.day : undefined;
   const data = await api.scannerDay(day);
+  if (data.enabled && Object.keys(params).every(key => key === "symbol") && (await requireAccess()).owner && await api.copilotOn()) {
+    const symbol = typeof params.symbol === "string" ? params.symbol.trim().toUpperCase() : "";
+    redirect(`/copilot-lab?feed=scanner${/^[A-Z][A-Z0-9.\-]{0,9}$/.test(symbol) ? `&symbol=${encodeURIComponent(symbol)}` : ""}`);
+  }
   const now = new Date();
   const live = data.date === nyDate(now);
   const t = data.totals;

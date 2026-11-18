@@ -21,10 +21,10 @@ type Entry = {
 const linkClass = "inline-flex min-h-11 items-center text-sm text-primary hover:underline";
 const names: Record<Path, [string, string, string, string]> = {
   alerts: ["Position alerts", "Did a reminder prompt a useful review?", "/proof", "Open alert feedback"],
-  radar: ["Radar", "Did it find something worth investigating?", "/radar", "Rate Radar events"],
+  radar: ["Radar", "Did it find something worth investigating?", "/radar?log=1", "Rate Radar events"],
   copilot: ["Copilot answers", "Are the answers useful at an acceptable cost?", "/copilot-lab", "Open the Copilot desk"],
   plans: ["Plan before entry", "Do trades with a plan differ from those without one?", "/proof", "Open planning proof"],
-  shadow: ["Copilot Shadow book", "Does the paper trader produce testable decisions?", "/radar", "Open the Shadow book"],
+  shadow: ["Copilot Shadow book", "Does the paper trader produce testable decisions?", "/radar?log=1", "Open the Shadow book"],
 };
 
 function entry(id: Path, error: boolean): Entry {

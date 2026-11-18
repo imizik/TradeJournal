@@ -50,7 +50,7 @@ export default function RadarPreview() {
                   </div>)}</div>
                 : <p className="py-2 text-muted-foreground">{newsLine(event.news, event.session_date)}</p>}
               {event.news?.checked_at && <p className="text-muted-foreground">News checked <time dateTime={event.news.checked_at}>{new Date(event.news.checked_at).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET</time></p>}
-              <Link href="/radar" className={dashboardLink}>Inspect saved evidence in Radar →</Link>
+              <Link href="/radar?log=1" className={dashboardLink}>Inspect saved evidence in Radar →</Link>
             </details>
             <p className="text-xs text-muted-foreground">Detected <time dateTime={event.first_seen_at}>{nyTime(event.first_seen_at)} ET</time>
               {event.latest_status && ` · ${STATUS_TEXT[event.latest_status]}`} · saved evidence in Radar</p>

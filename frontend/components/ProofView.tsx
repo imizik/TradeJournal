@@ -166,7 +166,7 @@ function RadarSetupsCard({ body, error }: { body: RadarProof | null; error: bool
 }
 
 function RadarVerdictCard({ body, error }: { body: RadarProof | null; error: boolean }) {
-  return <DashboardCard title="Does Radar find what you'd miss, early enough?" action={<Link href="/radar" className={dashboardLink}>Open Radar →</Link>}>
+  return <DashboardCard title="Does Radar find what you'd miss, early enough?" action={<Link href="/radar?log=1" className={dashboardLink}>Open Radar →</Link>}>
     {!body ? <Status error={error} what="Radar proof" />
       : !body.verdict ? <div data-testid="proof-radar-verdict">
         <VerdictHead tone={VERDICT.not_enough_data.tone} label={VERDICT.not_enough_data.label} reason={body.reason ?? "Radar is off."} />

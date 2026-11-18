@@ -65,6 +65,8 @@ test("the Scanner filter lists today's candidates; a row opens its ticker on the
   await feed.getByRole("button", { name: "Scanner", exact: true }).click();
   const list = feed.getByTestId("feed-scanner");
   await expect(list.getByTestId("scanner-freshness")).toContainText("Current — last judged");
+  // The full page is the history view: the bare /scanner opens this desk view now.
+  await expect(list.getByRole("link", { name: "Scanner page →" })).toHaveAttribute("href", "/scanner?history=1");
   const rows = list.getByTestId("scanner-row");
   await expect(rows).toHaveCount(2);
   const crwv = rows.nth(0);

@@ -6,12 +6,11 @@ import { api } from "@/lib/serverApi";
 
 export const dynamic = "force-dynamic";
 
-/** While the desk is home, the bare address opens the desk with the Feed on Ideas › Radar. An event (``?event=``, a
- * ping's rating link included) and ⌘K's Radar log (``?log=1``) still show this page, as does a session he picked there (``?session=``). */
-export default async function RadarPage({ searchParams }: { searchParams: Promise<{ event?: string; log?: string; session?: string }> }) {
+/** While the desk is home, the bare address opens the desk with the Feed on Ideas › Radar. Any parameter keeps this page:
+ * an event (``?event=``, a ping's rating link included), a session or groups view he picked here, ⌘K's Radar log (``?log=1``). */
+export default async function RadarPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   if (!(await requireAccess()).owner) notFound();
-  const { event, log, session } = await searchParams;
-  if (!event && !log && !session && await api.copilotOn()) redirect("/copilot-lab?feed=radar");
+  if (!Object.keys(await searchParams).length && await api.copilotOn()) redirect("/copilot-lab?feed=radar");
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <div>
