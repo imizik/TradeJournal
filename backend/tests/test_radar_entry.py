@@ -574,3 +574,19 @@ def test_resolve_entry_refuses_future_entry_on_same_day(db):
     )
     assert result["window_minutes"] is None
     assert result["entry"]["trade_id"] == str(t.id)
+
+
+def test_resolve_entry_ignores_an_exit_fill_at_the_opening_time(db):
+    opened_at = datetime(2026, 10, 20, 10, 15, 30)
+    t, _ = _seed_entry_trade(db, opened_at=opened_at, fills=[(opened_at, "exit", "msg-exit")])
+    result = {}
+    assert resolve_entry(db, t, result, RESOLVE_NOW) is False
+    assert result["reason"] == "The first recorded entry could not be verified from this trade's fills."
+
+
+def test_resolve_entry_uses_the_new_york_day_not_the_utc_day(db):
+    # 20:30 ET is already the next day in UTC; it is still today's entry in New York.
+    opened_at = datetime(2026, 10, 20, 20, 30, 0)
+    t, _ = _seed_entry_trade(db, opened_at=opened_at)
+    result = {}
+    assert resolve_entry(db, t, result, stamp(datetime(2026, 10, 20, 21, 0, 0))) is True
