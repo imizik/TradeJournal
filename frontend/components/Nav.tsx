@@ -185,7 +185,8 @@ function SyncTrigger({ open, running, onToggle, compact = false }: { open: boole
 /** While the Copilot Lab is on, the desk is home (`/` lands there): it takes Today's place, first in the menu and on the
  * phone's tab bar (Today forwards there), and the Dashboard leaves the bar for More → Journal at `/dashboard`. */
 const DESK = { href: "/copilot-lab", label: "Desk", icon: MessagesSquare };
-const DASHBOARD: NavItem = { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard };
+/** The Dashboard's closed P&L, performance and latest closes, as a desk drawer (``DeskJournal``); the Dashboard itself leaves the menu. */
+const JOURNAL_SUMMARY: NavItem = { href: "/copilot-lab?desk=journal", label: "Journal summary", icon: LayoutDashboard };
 /** "How I use the desk" (the desk's own view of what he uses and folds): opens over the desk. */
 const DESK_USE: NavItem = { href: "/copilot-lab?desk=use", label: "How I use the desk", icon: SlidersHorizontal };
 function withDesk<T extends { href: string }>(items: T[], copilot: boolean): T[] {
@@ -194,10 +195,10 @@ function withDesk<T extends { href: string }>(items: T[], copilot: boolean): T[]
 }
 /** Pages retired while the desk is home: their addresses open the desk's Feed (Radar, Scanner), so the menu drops them. */
 const RETIRED = new Set(["/radar", "/scanner"]);
-/** The folded groups; while the desk is home the Dashboard heads Journal and the retired pages leave. */
+/** The folded groups; while the desk is home the Journal summary heads Journal and the retired pages leave. */
 function navGroups(copilot: boolean) {
   if (!copilot) return GROUPS;
-  return GROUPS.map(group => ({ ...group, items: [...(group.name === "Journal" ? [DASHBOARD, DESK_USE] : []), ...group.items.filter(item => !RETIRED.has(item.href))] }));
+  return GROUPS.map(group => ({ ...group, items: [...(group.name === "Journal" ? [JOURNAL_SUMMARY, DESK_USE] : []), ...group.items.filter(item => !RETIRED.has(item.href))] }));
 }
 
 /** Which pages this viewer may open: the owner sees all; an assistant sees the practice pages and, with journal access, the journal. */

@@ -58,6 +58,7 @@ import { DeskAccounts, activeAccount, forAccount } from "@/components/copilot/De
 import { ChainPicker, PhoneOrders, PhoneValue, usePhone } from "@/components/copilot/DeskPhone";
 import DeskHealthDot, { DeskStatusLine, reportBookLive } from "@/components/copilot/DeskHealth";
 import { DeskSyncCenter, openSyncCenter } from "@/components/DashboardActions";
+import DeskJournal, { openJournal } from "@/components/copilot/DeskJournal";
 import { ModeSwitch, PaperValue, setDeskMode, useDeskMode } from "@/components/copilot/DeskMode";
 import ModeMark, { type Mode } from "@/components/copilot/ModeMark";
 import { DeskUseRoot, Fold, FoldMore, FoldSuggestion, useCountOpen, useDeskUse } from "@/components/copilot/DeskUse";
@@ -771,6 +772,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     { id: "desk-use", name: "How I use the desk", hint: "What you use most and least; fold away what you don't", run: openUse },
     // The old pages' pieces the desk has no home for yet (the pages themselves now open the desk).
     { id: "sync", name: "Data sync", hint: "Run a sync or one job, job history, Gmail. Rebuild and Resync All ask first.", run: openSyncCenter },
+    { id: "journal", name: "Journal summary", hint: "Closed P&L today, this week and all time, performance and the latest closes", run: openJournal },
     { id: "scanner-history", name: "Scanner history", hint: "Past days, scorecards, shadow decisions and the scanner's tickers", run: () => go("/scanner?history=1") },
     { id: "radar-log", name: "Radar log", hint: "Every Radar event with its evidence, Outside your list and the Shadow book", run: () => go("/radar?log=1") },
     // The market's line and the day's money, off the top bar since the calm pass: one fact command (it moves
@@ -1422,6 +1424,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       {on && !phone && <div data-use="health" className="contents"><DeskStatusLine mark={statusMark} market={marketWords(session.data)} className={styles.statusLine} /></div>}
       {/* The Data Sync Center (Data health's "Data sync" and ⌘K's): hidden until opened. */}
       {on && <DeskSyncCenter />}
+      {on && <DeskJournal />}
       {/* A phone's tab bar is the desk's own: Positions, the ticker's Chart, Chain, Orders and Ask, then the app's More
           (Nav.tsx keeps its slot). Each counts as its view's piece (view.*). */}
       {/* Under the copilot's open sheet (which covers the bar) the desk's tabs wait hidden; More stays. */}

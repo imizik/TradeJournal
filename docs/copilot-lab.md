@@ -1593,7 +1593,7 @@ day" before 9:30, "Close-of-day checklist" after 16:00, "Day checklist" otherwis
 Chart, Chain, Ticket, Check a call, Position, Notes, Grid, Feed, Copilot, Book, Threads; then Now, and the book side's places, each of
 which also has its own button where it lives: Paper book, My rules, This week's goals, Watchlist, Note on this position,
 Data health (the health list), Replay a past day and Redo one of my trades; Paper mode and Real mode, the mode
-switch's; How I use the desk; then three pieces of the old pages: **Data sync** (the Dashboard's Data Sync Center,
+switch's; How I use the desk; then four pieces of the old pages: **Journal summary** (the Dashboard's closed P&L today / this week / all time, performance chart and five latest closes, a drawer from ⌘K and More → Journal, `DeskJournal`; the Dashboard's other pieces were already on the desk), **Data sync** (the Dashboard's Data Sync Center,
 unchanged, also under the Data health list's "Data sync" line), **Scanner history** (`/scanner?history=1`: past days,
 shadow decisions and the scorecards) and **Radar log** (`/radar?log=1`: every event's evidence, Outside your list, the
 Shadow book)). A command
@@ -5755,3 +5755,8 @@ quotes, bars and earnings).
    `https://api.anthropic.com` regardless.
 3. Keep synthetic runs (`fixture` evidence) and live-evidence runs separate
    when comparing against Jo. Record latency and cost from the metrics line.
+
+
+### Dashboard retired into the desk
+
+While the desk is home, bare `/dashboard` opens the desk (owner, copilot on) and More → Journal lists **Journal summary** instead of Dashboard. Any parameter keeps the page (`?sync=open`, a filter, a saved decision link); the page code stays. Plans live in the thread list's Plans view and the book, Exit habits in This week and Proof, the morning briefing in the brief and `/morning`, Data freshness in Data health.
