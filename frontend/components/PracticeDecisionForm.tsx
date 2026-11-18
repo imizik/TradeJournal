@@ -2,9 +2,9 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { api, type DecisionContext } from "@/lib/api";
+import { api, type DecisionContext, type DecisionRecord } from "@/lib/api";
 
-export default function PracticeDecisionForm() {
+export default function PracticeDecisionForm({ onSaved }: { onSaved?: (record: DecisionRecord) => void } = {}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [symbol, setSymbol] = useState("");
@@ -78,6 +78,7 @@ export default function PracticeDecisionForm() {
       setContext(null);
       setPlanText("");
       operationId.current = "";
+      onSaved?.(record);
       startTransition(() => router.refresh());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save the decision. The choice was not recorded.");

@@ -53,7 +53,7 @@ function OpeningChart({ pick }: { pick: Pick }) {
   </figure>;
 }
 
-export default function ScalpShortlistPanel({ history = false }: { history?: boolean }) {
+export default function ScalpShortlistPanel({ history = false, embedded = false }: { history?: boolean; embedded?: boolean }) {
   const [study, setStudy] = useState<Study | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
@@ -128,7 +128,7 @@ export default function ScalpShortlistPanel({ history = false }: { history?: boo
   return <section className={`min-w-0 rounded-lg border bg-card ${canDecide ? "border-primary/30" : ""}`} aria-label="9:40 scalp shortlist" data-testid="scalp-shortlist">
     <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5">
       <div><h2 className="text-[13.5px] font-semibold tracking-tight">9:40 scalp shortlist</h2><p className="mt-0.5 text-xs text-muted-foreground">20-session paper study{sessionIndex >= 0 ? ` · Morning ${sessionIndex + 1} of 20` : ""}</p></div>
-      {history && <Link href="/dashboard" className="inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Dashboard →</Link>}
+      {history && !embedded && <Link href="/dashboard" className="inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Dashboard →</Link>}
     </div>
     <div className="space-y-3 p-4">
       {error && <p role="alert" className="text-sm text-amber-300">{error}</p>}
@@ -181,7 +181,7 @@ export default function ScalpShortlistPanel({ history = false }: { history?: boo
 }
 
 /** A compact doorway in the full-screen Desk, whose morning remains thread-first. */
-export function ScalpShortlistNudge() {
+export function ScalpShortlistNudge({ onOpen }: { onOpen?: () => void } = {}) {
   const [todaySession, setTodaySession] = useState(false);
   useEffect(() => {
     let active = true;
@@ -195,5 +195,6 @@ export function ScalpShortlistNudge() {
     return () => { active = false; window.clearInterval(timer); };
   }, []);
   if (!todaySession) return null;
-  return <Link href="/practice#scalp-shortlist" className="inline-flex min-h-11 items-center rounded-md border border-primary/40 px-2.5 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-8">9:40 scalp picks</Link>;
+  return <Link href={onOpen ? "#scalp-shortlist" : "/practice#scalp-shortlist"} onClick={onOpen ? (event) => { event.preventDefault(); onOpen(); } : undefined}
+    className="inline-flex min-h-11 items-center rounded-md border border-primary/40 px-2.5 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-8">9:40 scalp picks</Link>;
 }

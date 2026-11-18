@@ -1,15 +1,21 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { requireAccess } from "@/lib/accessServer";
 import { api } from "@/lib/serverApi";
 import PracticeRoutine from "@/components/PracticeRoutine";
 import PracticeDecisions from "@/components/PracticeDecisions";
 import ScalpShortlistPanel from "@/components/ScalpShortlistPanel";
 
+export const dynamic = "force-dynamic";
+
 type PracticeParams = { decision?: string; practice_run?: string };
 
+/** While the desk is home, the bare address opens the desk (where Practice lives). Parameterized links such as
+ * ``?decision=`` or ``?practice_run=`` keep this page working as well. */
 export default async function PracticePage({ searchParams }: { searchParams: Promise<PracticeParams> }) {
   if (!(await requireAccess()).owner) notFound();
-  const { decision } = await searchParams;
+  const params = await searchParams;
+  if (!Object.keys(params).length && await api.copilotOn()) redirect("/copilot-lab");
+  const { decision } = params;
   const { decisions } = await api.decisions();
   // Alert links can name records outside the recent-decision window.
   if (decision && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(decision)
