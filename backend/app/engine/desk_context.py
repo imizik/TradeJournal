@@ -281,13 +281,13 @@ def fifteen_bars(symbol: str) -> list[dict]:
     """Regular-session 15-minute bars: today's from the chart feed (each with its RVol, C2.4, when the stored baseline is
     ready), and up to ``SESSIONS_15M - 1`` completed sessions before it from the chart history (from disk, or fetched
     once and stored), split-adjusted like a chart page."""
+    from app.engine import chart_fallback
     from app.engine.chart_adjust import adjust_minutes
     from app.engine.chart_calendar import chart_calendar
-    from app.engine.chart_feed import chart_feed
     from app.engine.chart_history import HistoryError, chart_history
     from app.engine.chart_splits import UNAVAILABLE
-    data = chart_feed.workspace(symbol, ["15m"], [], "regular", calendar=chart_calendar, quotes=False,
-                                volume_profile=chart_history.volume_profile)
+    data = chart_fallback.workspace_or_fallback(symbol, ["15m"], [], "regular", calendar=chart_calendar, quotes=False,
+                                                volume_profile=chart_history.volume_profile)
     today = list(((data.get("panels") or {}).get("15m") or {}).get("bars") or [])
     info = chart_history.splits.get(symbol) if chart_history.splits else UNAVAILABLE
     earlier: list[list[dict]] = []
@@ -310,9 +310,9 @@ def fifteen_bars(symbol: str) -> list[dict]:
 
 def daily_bars(symbol: str) -> list[dict]:
     """Daily bars from the chart feed (whole history once per New York date, kept in memory)."""
+    from app.engine import chart_fallback
     from app.engine.chart_calendar import chart_calendar
-    from app.engine.chart_feed import chart_feed
-    data = chart_feed.workspace(symbol, ["1D"], [], "regular", calendar=chart_calendar, quotes=False)
+    data = chart_fallback.workspace_or_fallback(symbol, ["1D"], [], "regular", calendar=chart_calendar, quotes=False)
     return list(((data.get("panels") or {}).get("1D") or {}).get("bars") or [])
 
 
@@ -413,11 +413,16 @@ def _two_minute(minutes: list[dict]) -> list[dict]:
         extended = bool(bar.get("extended"))
         last = out[-1] if out else None
         if last is None or last["time"] != slot:
-            out.append({"time": slot, "open": bar["open"], "high": bar["high"], "low": bar["low"], "close": bar["close"],
-                        "volume": bar.get("volume") or 0, "extended": extended})
+            candle = {"time": slot, "open": bar["open"], "high": bar["high"], "low": bar["low"], "close": bar["close"],
+                      "volume": bar.get("volume") or 0, "extended": extended}
+            if "source" in bar:
+                candle["source"] = bar["source"]
+            out.append(candle)
             continue
         last.update(high=max(last["high"], bar["high"]), low=min(last["low"], bar["low"]), close=bar["close"],
                     volume=last["volume"] + (bar.get("volume") or 0), extended=last["extended"] and extended)
+        if bar.get("source") == "alpaca_sip":
+            last["source"] = "alpaca_sip"
     return out
 
 
@@ -450,12 +455,13 @@ def _live(now: float) -> bool:
 
 def today_minutes(symbol: str) -> list[dict]:
     """Today's minute bars (extended hours) with each regular-session minute's RTH VWAP and RVol (C2.4): the chart feed's
-    cached read, the same provider request as ``ping_images.today_bars``; the RVol baseline is read from disk only."""
+    cached read (the same Tradier request as ``ping_images.today_bars``, but this one falls back to the delayed Alpaca
+    SIP backup when Tradier fails); the RVol baseline is read from disk only."""
+    from app.engine import chart_fallback
     from app.engine.chart_calendar import chart_calendar
-    from app.engine.chart_feed import chart_feed
     from app.engine.chart_history import chart_history
-    data = chart_feed.workspace(symbol, ["1m"], [], "extended", calendar=chart_calendar, quotes=False,
-                                volume_profile=chart_history.volume_profile)
+    data = chart_fallback.workspace_or_fallback(symbol, ["1m"], [], "extended", calendar=chart_calendar, quotes=False,
+                                                volume_profile=chart_history.volume_profile)
     return list(((data.get("panels") or {}).get("1m") or {}).get("bars") or [])
 
 
@@ -625,7 +631,12 @@ def _desk_read(symbol: str, timeframe: str, now: float) -> dict | None:
             high, low = max(m["high"] for m in pre), min(m["low"] for m in pre)
             reference += [{"key": "pm_high", "price": round(float(high), 4), "label": f"PM high {_price(high)}"},
                           {"key": "pm_low", "price": round(float(low), 4), "label": f"PM low {_price(low)}"}]
-    return {"bars": [_plain(b) for b in shown], "studies": studies, "reading": reading, "reference": reference}
+    return {"bars": [_plain(b) for b in shown], "studies": studies, "reading": reading, "reference": reference,
+            # Only today's candles can be the delayed fallback (stored earlier sessions carry the SIP source too); on 1D the
+            # fallback's daily series ends yesterday, so a SIP last candle means the backup is showing and today is missing.
+            "delayed": (bool(shown) and shown[-1].get("source") == "alpaca_sip") if timeframe == "1D" else
+                       any(b.get("source") == "alpaca_sip" and datetime.fromtimestamp(b["time"], ET).date() == today
+                           for b in shown)}
 
 
 def _alerts(db: Session, symbol: str, plan_ids: set[str]) -> list[dict]:

@@ -107,6 +107,7 @@ def compact_chart(symbol: str, timeframe: str, data: dict) -> dict:
         "market": {"date": data["market"].get("date"), "status": data["market"].get("status"),
                    "description": str(data["market"].get("description") or "")[:80] or None} if isinstance(data.get("market"), dict) else None,
         "delayed": bool(data.get("delayed")),
+        **({"provider": data.get("provider")} if data.get("delayed") else {}),
         "bars": {"count_total": len(bars), "shown": len(shown),
                  "fields": "t (New York, MM-DD HH:MM, the bar's start), o, h, l, c, v, rvol (relative volume, null when unknown), "
                            "x (extended hours)",
@@ -130,12 +131,13 @@ def compact_chart(symbol: str, timeframe: str, data: dict) -> dict:
 
 
 def chart_context(symbol: str, timeframe: str) -> dict:
+    from app.engine import chart_fallback
     from app.engine.chart_calendar import chart_calendar
-    from app.engine.chart_feed import ChartFeedError, chart_feed
+    from app.engine.chart_feed import ChartFeedError
     from app.engine.chart_history import HistoryError, chart_history
     try:
-        data = chart_feed.workspace(symbol, [timeframe], [], "extended", calendar=chart_calendar,
-                                    stored_session=chart_history.stored, volume_profile=chart_history.volume_profile)
+        data = chart_fallback.workspace_or_fallback(symbol, [timeframe], [], "extended", calendar=chart_calendar,
+                                                    stored_session=chart_history.stored, volume_profile=chart_history.volume_profile)
     except ChartFeedError as exc:
         return {"symbol": symbol, "timeframe": timeframe, "state": "unavailable", "reason": str(exc)[:200], "as_of": _now()}
     panel = (data.get("panels") or {}).get(timeframe)

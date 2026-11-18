@@ -569,6 +569,8 @@ export async function getDeskPicture(id: string, signal?: AbortSignal, timeframe
 /** ``momentum``: added in the browser (the QQQ momentum paper book, ``lib/deskMomentumBand.ts``), never in the chart read. */
 export type DeskChartMark = { kind: "fill" | "paper" | "ping" | "radar" | "tradingview" | "momentum"; at: number; price: number | null; side: "buy" | "sell" | null; text: string };
 export type DeskChartData = {
+  /** Today's candles came from the delayed Alpaca SIP backup (about 15 minutes old) because the regular feed failed. */
+  delayed?: boolean;
   symbol: string; timeframe: DeskTimeframe; step: number; as_of: number; live: boolean;
   state: "ok" | "unavailable"; reason: string | null;
   bars: { time: number; open: number; high: number; low: number; close: number; volume: number; extended: boolean }[];

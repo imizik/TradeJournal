@@ -116,9 +116,9 @@ def today_context(daily: list[dict], today: date) -> dict:
 
 
 def _daily_bars(symbol: str) -> list[dict]:
+    from app.engine import chart_fallback
     from app.engine.chart_calendar import chart_calendar
-    from app.engine.chart_feed import chart_feed
-    data = chart_feed.workspace(symbol, ["1D"], [], "extended", calendar=chart_calendar, quotes=False)
+    data = chart_fallback.workspace_or_fallback(symbol, ["1D"], [], "extended", calendar=chart_calendar, quotes=False)
     return list(((data.get("panels") or {}).get("1D") or {}).get("bars") or [])
 
 

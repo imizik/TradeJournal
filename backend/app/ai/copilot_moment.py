@@ -239,7 +239,7 @@ def live_chart(symbol: str, at: datetime, timeframe: str, now: datetime | None =
     """The chart at ``at`` from the Charts page's own feeds: today's Tradier minutes, a stored SIP session for an
     earlier day (fetched once and stored when it is not), the daily history, and the automatic levels recomputed
     as of the candle's start."""
-    from app.engine import chart_levels, chart_rvol
+    from app.engine import chart_fallback, chart_levels, chart_rvol
     from app.engine.chart_adjust import adjust_minutes, factor_before
     from app.engine.chart_calendar import chart_calendar
     from app.engine.chart_feed import ChartFeedError, _rows, chart_feed
@@ -250,7 +250,7 @@ def live_chart(symbol: str, at: datetime, timeframe: str, now: datetime | None =
     day, today = at.astimezone(ET).date(), now.date()
     head = {"symbol": symbol, "timeframe": timeframe, "at": at.astimezone(ET).isoformat(timespec="minutes"), "as_of": copilot_book._now()}
     try:
-        data = chart_feed.workspace(symbol, ["1D"], [], "extended", calendar=chart_calendar, quotes=False)
+        data = chart_fallback.workspace_or_fallback(symbol, ["1D"], [], "extended", calendar=chart_calendar, quotes=False)
     except ChartFeedError as exc:
         return {**head, "state": "unavailable", "reason": str(exc)[:200]}
     daily = (data.get("panels") or {}).get("1D", {}).get("bars") or []
