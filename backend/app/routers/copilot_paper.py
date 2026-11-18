@@ -4,6 +4,9 @@
 scorecard beside his real closed trades over the same dates, and ``review``: the newest Friday paper review
 (``engine/paper_review.py``), shown until the next one. One of the desk's minute reads; it settles an expired option at
 its close and otherwise only reads.
+``GET /copilot/paper/equity?range=1D|1W|1M|ALL``: the paper account's value over time for the Paper home's graph
+(``engine/paper_equity.py``): one point a minute in the regular session, a missing price as null and an old one as
+``stale``, never a zero; reads ``paper_equity`` rows only.
 ``POST /copilot/paper/runs``: start the paper account (``starting_cash``, default $10,000), or with ``reset`` a new run;
 every older run keeps its history. ``challenge`` starts the paper challenge (``engine/paper_challenge.py``): $10,000, a
 +10% target, a daily loss limit that locks paper opens, and a max drawdown that fails the run (no new run for 7 days).
@@ -38,7 +41,7 @@ from sqlmodel import Session
 
 from app.ai import copilot
 from app.database import get_session
-from app.engine import paper_book, paper_replay, paper_review, replay_redo, trading_rules, weekly_goals
+from app.engine import paper_book, paper_equity, paper_replay, paper_review, replay_redo, trading_rules, weekly_goals
 
 router = APIRouter()
 
@@ -91,6 +94,12 @@ def paper(db: Session = Depends(get_session)):
     if review is not None:
         review = {**review, "goals": weekly_goals.for_review(db, review["monday"], now)}
     return {**paper_book.view(db, now), "review": review, "goals": weekly_goals.desk(db, now)}
+
+
+@router.get("/paper/equity")
+def paper_equity_series(span: Literal["1D", "1W", "1M", "ALL"] = Query("1D", alias="range"), db: Session = Depends(get_session)):
+    _settings()
+    return paper_equity.series(db, span, time.time())
 
 
 @router.post("/paper/runs")

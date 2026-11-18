@@ -306,6 +306,8 @@ def minute(db: Session, run: PaperRun, now: float) -> list[dict]:
             except pb.PaperError:
                 pass
         evaluate(db, run, now, marks=marks)
+        from app.engine import paper_equity
+        paper_equity.record(db, run, now, marks)  # the graph's point at the prices the limits were judged with
     return pings(db, run, now)
 
 

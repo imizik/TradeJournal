@@ -1025,6 +1025,8 @@ def minute_pass(db: Session, now: float, minutes_for) -> list[dict]:
     out = _watch(db, run, _events(db, run), now, minutes_for, regular[0])
     from app.engine import paper_challenge
     out += paper_challenge.minute(db, run, now)  # before the limits: a lock this minute opens nothing
+    from app.engine import paper_equity
+    paper_equity.record(db, run, now)  # the minute's account value (a challenge's minute already took it, at its prices)
     return out + _execute(db, now)
 
 
