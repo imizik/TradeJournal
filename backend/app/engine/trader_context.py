@@ -695,16 +695,6 @@ def thesis_line(thesis: dict | None) -> str | None:
     return f"{text} (the companion's guess)" if thesis.get("text_is_guess") else text
 
 
-def since_text(record: dict, *, most: int = 400) -> str:
-    """The since-entry lines as one sentence for a prompt: ``Since you entered (as of …): …``."""
-    since = record.get("since_entry") or {}
-    lines = since.get("lines") or []
-    if not lines:
-        return "Since you entered: unavailable."
-    text = f"Since you entered (as of {since.get('as_of', '?')[11:16]} ET): " + "; ".join(line["text"] for line in lines)
-    return text if len(text) <= most else text[: most - 1] + "…"
-
-
 def phone_line(db: Session, trade, now: float, snapshot_json: str | None = None, *, underlying: float | None = None) -> str:
     """'Since you entered: …' for a phone body. Database and the alert's frozen Radar snapshot only: no provider read,
     so it never delays a send. The thesis's own words, the invalidation and where the frozen underlying price sits

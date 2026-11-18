@@ -594,12 +594,6 @@ def _pays(spec: dict, closing: bool) -> bool:
     return spec["credit"] if closing else not spec["credit"]
 
 
-def _side_words(spec: dict, closing: bool) -> str:
-    if spec["instrument"] == "spread":
-        return "Close" if closing else "Open"
-    return "Sell" if closing else "Buy"
-
-
 def place_limit(db: Session, body: dict, now: float, preview: bool = False) -> dict:
     """Place a day limit order (``action`` open, or close for an open position): it works until a fresh quote crosses
     the limit, the day's close or his cancel. Placed from 4:00 AM New York until the close on a trading day; checked at
