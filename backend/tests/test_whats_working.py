@@ -186,7 +186,9 @@ def seed_paper(db):
     followed; a radar put spread at 11:00 -> -$30.00 with rules broken; shares at 14:30 -> +$4.50, no rules recorded;
     one put still open (not counted)."""
     first, second = PaperRun(starting_cash=10_000, started_at=datetime(2026, 11, 1)), PaperRun(starting_cash=10_000, started_at=datetime(2026, 11, 10))
-    db.add(first); db.add(second); db.commit()
+    db.add(first)
+    db.add(second)
+    db.commit()
     passed, failed = [{"status": "pass"}], [{"status": "fail"}]
     _paper(db, first.id, opened=ny(5, 9, 45), closed=ny(5, 11), cash_in=-340.0, cash_out=200.0, rules=passed)
     _paper(db, first.id, opened=ny(6, 9, 59), closed=ny(6, 10, 30), cash_in=-195.5, cash_out=100.0, rules=passed)

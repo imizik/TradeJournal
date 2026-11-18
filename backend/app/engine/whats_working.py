@@ -19,7 +19,7 @@ that is missing (no P&L, no close time, no expiry, no rules check) stays missing
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Iterable
 

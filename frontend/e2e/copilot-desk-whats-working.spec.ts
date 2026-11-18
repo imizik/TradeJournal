@@ -17,7 +17,6 @@ const RULES = [
   { id: "r_wait000001", text: "Wait out the first 15 minutes", check: { kind: "no_open_minutes", n: 15 } },
   { id: "r_aplus00001", text: "Only A+ setups", check: null },
 ];
-const result = (rule: (typeof RULES)[number], status: string, reason: string) => ({ id: rule.id, text: rule.text, kind: rule.check?.kind ?? "tick", n: null, status, reason });
 const stats = (pnl: number, trades: number, win: number | null) => ({ trades, pnl, win_rate: win, avg_win: null, avg_loss: null, largest_loss: null, curve: [] });
 const g = (pnl: number, trades: number, win: number | null) => ({ trades, pnl, win_rate: win });
 const SPLIT = {
@@ -42,16 +41,6 @@ const TICKET = {
   contract: { strike: 100, expiry: "2026-11-20", type: "call", label: "NBIS $100 Call 11/20/26", source: "plan", multiplier: 100 },
   candidates: null, quote: { state: "ok", as_of: NOW.getTime() / 1000 - 30, bid: 3.3, ask: 3.4, mid: 3.35, spread: 0.1, spread_pct: 3, multiplier: 100 },
   underlying: { state: "ok", last: 98.05, as_of: NOW.getTime() / 1000 - 30 }, expected_move_pct: null, limit: 3.35, contracts: 2, spread: null, check: null,
-};
-const THREADS = {
-  as_of: "2026-11-13T16:00:00Z", quotes_at: null, quote_issue: null, day: { phase: "regular", need_you: 0, streak: null },
-  sections: { positions: "ok" }, plans: [], robinhood: { state: "off" }, threads: [
-    // A real position on NBIS, so the desk's selected ticker is NBIS and the Paper section offers paper shares of it.
-    { key: "trade:33333333-3333-4333-8333-333333333333", group: "watch", symbol: "NBIS", title: "NBIS 11/20/26 100C", instrument: "11/20/26 100C",
-      value: { text: "+$220.00", tone: "gain" }, status: { text: "On plan", tone: "muted" }, meter: null, investigation_id: null,
-      trade_id: "33333333-3333-4333-8333-333333333333", radar_event_id: null, path: null, changed_at: null,
-      book: { usd: 220, pct: 35.5, expiry: "2026-11-20", days_held: 1, track: null, state: "on_plan", planned: true, quantity: 2, mark: 420, live: "matched" } },
-  ],
 };
 const b = (label: string, pnl: number, trades: number, wins: number, dimension = "kind") =>
   ({ label, pnl, trades, wins, losses: trades - wins, avg_pnl: pnl / trades, win_rate: Math.round(wins / trades * 1000) / 10, judged: trades >= 5, dimension });

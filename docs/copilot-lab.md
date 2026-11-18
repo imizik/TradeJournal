@@ -2137,7 +2137,8 @@ Where his money comes from and where it leaks, from his closed real trades and h
   days to expiry at entry (0–1, 2–7, 8–30, over 30); option type with entry time ("Puts before 10:00"); paper only,
   whose idea it was (mine, copilot, Radar, scanner) and rules followed, broken or unclear. Each reports trades, wins, losses,
   total and average dollars and win rate, over the last 30 days (by close time) and all time.
-- **Money.** A real trade's dollars are its FIFO `realized_pnl`, summed as `/stats` sums them (closed or expired; a
+- **Money.** A real trade's dollars are its FIFO `realized_pnl`, summed as `/stats` sums them (a half-cent total can
+  differ by a cent when rows come back in another order; closed or expired; a
   win is above zero, every other priced trade a loss); Webull is left out, as in the paper scorecard. Under 5 trades a
   bucket is too few to judge and never in a top 3. A missing fact (no P&L, close time, expiry or rules check) is
   counted as missing, never as zero.
