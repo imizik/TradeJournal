@@ -49,6 +49,17 @@ export type PaperWorkingOrder = {
   source?: PaperSource;
   check: { at: number; quoted_at: number | null; natural: number | null; issue: string | null } | null;
 };
+/** The paper challenge on the current run (backend engine/paper_challenge.py): equity at the backend's last fresh read,
+ *  today's start, the limits, and a lock (opens refused until ``until``) or the run's result. */
+export type PaperChallenge = {
+  rules: { target_pct: number; daily_pct: number; max_dd_pct: number };
+  starting_cash: number; target_equity: number; equity: number | null; prices_at: number | null; fresh: boolean; open_positions: number;
+  start_of_day: number | null; today_pnl: number | null; daily_limit: number | null; peak: number; floor: number;
+  to_target: number | null; to_floor: number | null;
+  lock: null | { day: string; pnl: number; limit: number; until: number; equity: number; start_of_day: number };
+  result: null | { kind: "pass" | "fail"; at: number; equity: number; pct: number; reason: string; next_run_at: number | null };
+};
+export type ChallengeRecord = { result: "passed" | "failed" | "abandoned" | "running"; at: number | null; pct: number | null };
 export type PaperBook = {
   run: null | { id: string; number: number; starting_cash: number; started_at: number };
   default_cash?: number;
@@ -59,7 +70,12 @@ export type PaperBook = {
     week?: { monday: string; paper: PaperStats; real: PaperStats } };
   /** His own trading rules now. */
   my_rules?: Rule[];
-  earlier: { number: number; started_at: number; ended_at: number; starting_cash: number; realized: number; trades: number; left_open: number }[];
+  earlier: { number: number; started_at: number; ended_at: number; starting_cash: number; realized: number; trades: number; left_open: number;
+    challenge?: ChallengeRecord | null }[];
+  /** The paper challenge on this run, or null when it is a plain run. */
+  challenge?: PaperChallenge | null;
+  /** After a failed challenge: no new run of any kind until then. */
+  cooldown_until?: number | null;
   market_open: boolean;
   /** The newest Friday paper review (backend engine/paper_review.py), shown until the next one. */
   review?: PaperReview | null;
@@ -123,8 +139,8 @@ const changed = () => window.dispatchEvent(new Event(PAPER_EVENT));
 /** One key per confirm: a retry of the same Fill on paper reuses it, so the server records one fill. */
 export const orderKey = () => (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");
 
-export async function startPaper(startingCash: number, reset = false): Promise<PaperBook> {
-  const book = await post<PaperBook>("/copilot/paper/runs", { starting_cash: startingCash, reset });
+export async function startPaper(startingCash: number, reset = false, challenge = false): Promise<PaperBook> {
+  const book = await post<PaperBook>("/copilot/paper/runs", { starting_cash: startingCash, reset, challenge });
   changed();
   return book;
 }

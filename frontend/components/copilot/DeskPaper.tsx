@@ -6,7 +6,7 @@ import { useDeskTicks } from "@/lib/deskTicks";
 import {
   PAPER_EVENT, PAPER_SOURCES, PaperRefused, SOURCE_WORD, cancelPaperOrder, orderWords, fillClose, fillOpen, isCredit, orderKey, paperPnl, paperSymbols, paperValue, placeLimitClose,
   placeLimitOpen, previewClose, previewOpen, setPaperAuto, startPaper,
-  type PaperBook, type PaperFill, type PaperOrder, type PaperPosition, type PaperSource, type PaperStats, type PaperWorkingOrder,
+  type ChallengeRecord, type PaperBook, type PaperChallenge, type PaperFill, type PaperOrder, type PaperPosition, type PaperSource, type PaperStats, type PaperWorkingOrder,
 } from "@/lib/paperBook";
 import { cn } from "@/lib/utils";
 import ModeMark from "./ModeMark";
@@ -176,7 +176,7 @@ export function PaperButton({ order, quantity = 1, note = null, stop = null, tar
   };
   const start = async () => {
     setBusy(true);
-    try { await startPaper(10_000); await check(); } catch (e) { refuse(e); } finally { setBusy(false); }
+    try { await startPaper(10_000, false, true); await check(); } catch (e) { refuse(e); } finally { setBusy(false); }
   };
   const close = () => { setOpen(false); setPreview(null); setError(null); setClosedNow(false); setDone(null); onClose?.(); };
   const opened = useRef(false);
@@ -496,6 +496,70 @@ function Score({ paper, real, since }: { paper: PaperStats; real: PaperStats; si
 
 /** Paper next to real: closed P&L and win rate for each, with their marks, since the run started. The Paper section's
  *  line, and the desk's Close the day checklist shows the same line (``testId`` apart). */
+const pct = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(1)}%`;
+const dayTime = (epoch: number) => `${new Date(epoch * 1000).toLocaleDateString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric" })} ${at(epoch)}`;
+
+/** "Run 3 · failed Nov 21 · −8.1%": a challenge run's permanent record. */
+export function runRecord(number: number, record: ChallengeRecord) {
+  const when = record.at != null ? ` ${day(record.at)}` : "";
+  return `Run ${number} · ${record.result}${when}${record.pct != null ? ` · ${pct(record.pct)}` : ""}`;
+}
+
+/** The paper challenge in one line of the Paper section: today's P&L against the daily limit, the distance to the target
+ *  and to the max drawdown, from the desk's live prices when they are live, else the backend's last read (grey, with its
+ *  time; never a zero). A lock, a fail or a pass replaces the line with what happened and what it means. */
+export function ChallengeLine({ c, live }: { c: PaperChallenge; live: { value: number; at: number | null; stale: boolean } | null }) {
+  if (c.result?.kind === "fail") {
+    return (
+      <p role="status" data-testid="paper-challenge" data-state="failed" className="mx-3 mb-1.5 rounded-md border border-rose-400/50 bg-rose-500/10 px-2 py-1.5 text-xs text-rose-200">
+        <span className="font-semibold">Challenge failed {day(c.result.at)}</span> · {pct(c.result.pct)} · {c.result.reason} No new paper opens; closes still work.
+        {c.result.next_run_at != null && <> A new run can start {dayTime(c.result.next_run_at)}.</>}
+      </p>
+    );
+  }
+  if (c.result?.kind === "pass") {
+    return (
+      <p role="status" data-testid="paper-challenge" data-state="passed" className="mx-3 mb-1.5 rounded-md border border-emerald-400/50 bg-emerald-500/10 px-2 py-1.5 text-xs text-emerald-200">
+        <span className="font-semibold">Challenge passed {day(c.result.at)} · {pct(c.result.pct)}</span> · {c.result.reason} Closes still work; start a new run to go again.
+      </p>
+    );
+  }
+  if (c.lock) {
+    return (
+      <p role="status" data-testid="paper-challenge" data-state="locked" className="mx-3 mb-1.5 rounded-md border border-amber-400/60 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">
+        <span className="font-semibold">Locked: daily loss limit hit</span> · today <span className="whitespace-nowrap">{signed(c.lock.pnl)}</span> of the <span className="whitespace-nowrap">−{usd(c.lock.limit)}</span> limit. New paper opens unlock {dayTime(c.lock.until)}; closes still work.
+      </p>
+    );
+  }
+  // Live equity from the desk's ticks when every price is live; otherwise the backend's last read, shown grey with its time.
+  const fromTicks = live && !live.stale;
+  const equity = fromTicks ? live!.value : c.equity;
+  const stale = !fromTicks && !(c.fresh && c.equity != null);
+  const when = fromTicks ? live!.at : c.prices_at;
+  if (equity == null || c.start_of_day == null || c.daily_limit == null) {
+    return (
+      <p data-testid="paper-challenge" data-state="stale" className="px-3 pb-1.5 text-xs text-muted-foreground">
+        Challenge · needs a live price{when ? ` (last ${at(when)})` : ""} to judge today against the limits.
+      </p>
+    );
+  }
+  const today = Math.round((equity - c.start_of_day) * 100) / 100;
+  const floor = Math.round(Math.max(c.peak, equity) * (1 - c.rules.max_dd_pct / 100) * 100) / 100;
+  const toTarget = Math.round((c.target_equity - equity) * 100) / 100;
+  const toFloor = Math.round((equity - floor) * 100) / 100;
+  const used = today < 0 ? -today / c.daily_limit : 0;
+  return (
+    <p data-testid="paper-challenge" data-state={stale ? "stale" : "live"} className={cn("flex flex-wrap gap-x-3 px-3 pb-1.5 text-xs tabular-nums", stale && "text-muted-foreground")}>
+      <span className={cn(!stale && "text-muted-foreground")}>Challenge</span>
+      <span data-testid="paper-challenge-today">Today <span className={stale ? undefined : used >= 0.66 ? "text-amber-300" : toneOf(today)}>{signed(today)}</span>
+        <span className={cn(!stale && "text-muted-foreground")}> of <span className="whitespace-nowrap">−{usd(c.daily_limit)}</span> limit</span></span>
+      <span data-testid="paper-challenge-target">{toTarget > 0 ? <>{usd(toTarget)} <span className={cn(!stale && "text-muted-foreground")} title={`Target: equity ${usd(c.target_equity)} (+${c.rules.target_pct}%)`}>to target</span></> : "At the target"}</span>
+      <span data-testid="paper-challenge-floor">{usd(toFloor)} <span className={cn(!stale && "text-muted-foreground")} title={`Max drawdown: equity ${usd(floor)} fails the run (−${c.rules.max_dd_pct}% from the ${usd(Math.max(c.peak, equity))} peak)`}>to max drawdown</span></span>
+      {stale && when && <span className="text-[11px]">as of {at(when)}</span>}
+    </p>
+  );
+}
+
 export function PaperScoreLine({ score, since, testId = "paper-score-line", className = "px-3 pt-1.5" }: {
   score: NonNullable<PaperBook["score"]>; since: number; testId?: string; className?: string;
 }) {
@@ -522,9 +586,9 @@ export default function DeskPaper({ book, failed, symbol, top = null, onPick }: 
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ticks = useDeskTicks(paperSymbols(book?.positions));
-  const start = async (reset: boolean) => {
+  const start = async (reset: boolean, challenge = false) => {
     setError(null);
-    try { await startPaper(Number(cash), reset); setResetting(false); } catch (e) { setError(e instanceof Error ? e.message : "Not started."); }
+    try { await startPaper(Number(cash), reset, challenge); setResetting(false); } catch (e) { setError(e instanceof Error ? e.message : "Not started."); }
   };
   const head = (
     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 px-3 pb-1.5 pt-2.5">
@@ -537,8 +601,17 @@ export default function DeskPaper({ book, failed, symbol, top = null, onPick }: 
     <section aria-label="Paper book" data-testid="desk-paper" className="rounded-lg border border-dashed border-violet-400/40 bg-card">{head}{children}</section>
   );
   if (!book) return frame(<p className="px-3 pb-2.5 text-xs text-muted-foreground">{failed ? "Your paper book could not be read; it reads again in a minute." : "Reading your paper book…"}</p>);
-  const startForm = (reset: boolean) => (
+  const cooldown = book.cooldown_until ?? null;
+  const startForm = (reset: boolean) => cooldown != null ? (
+    <p data-testid="paper-cooldown" className="text-xs text-muted-foreground">Your last challenge failed: a new run can start {dayTime(cooldown)}.
+      {reset && <button type="button" onClick={() => setResetting(false)} className={cn(QUIET, "ml-1")}>OK</button>}</p>
+  ) : (
     <div className="flex flex-wrap items-center gap-2">
+      <button type="button" data-testid={reset ? "paper-challenge-reset" : "paper-challenge-start"} onClick={() => start(reset, true)}
+        title="$10,000 · +10% target · a 3% daily loss locks opens until the next trading day · an 8% drawdown fails the run (no new run for 7 days)"
+        className={cn(BUTTON, "border-violet-400 bg-violet-400 font-semibold text-black hover:bg-violet-300")}>Start $10,000 challenge</button>
+      <span className="text-[11px] text-muted-foreground">+10% target · 3% daily lock · 8% max drawdown</span>
+      <span className="text-[11px] text-muted-foreground">or</span>
       <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Start with $
         <input aria-label="Paper starting cash" inputMode="numeric" value={cash} onChange={e => setCash(e.target.value.replace(/[^\d]/g, ""))} className={cn(INPUT, "w-24")} />
       </label>
@@ -565,6 +638,7 @@ export default function DeskPaper({ book, failed, symbol, top = null, onPick }: 
   return frame(
     <div className="pb-2">
       {top}
+      {book.challenge && <ChallengeLine c={book.challenge} live={value} />}
       <p data-testid="paper-account" className="flex flex-wrap gap-x-3 gap-y-0.5 px-3 pb-1.5 text-xs tabular-nums">
         <span data-testid="paper-value"><span className="text-muted-foreground">Value </span>{value ? <span className={cn(value.stale && "text-muted-foreground")}>{usd(value.value)}</span>
           : <span className="text-muted-foreground">needs a live price for {acct.unpriced} open</span>}</span>
@@ -605,7 +679,7 @@ export default function DeskPaper({ book, failed, symbol, top = null, onPick }: 
           })}
         </ul>
       ) : <p className="border-t border-border/60 px-3 py-1.5 text-xs text-muted-foreground">No paper positions. Paper on the Ticket or the Chain{symbol ? `, or ${symbol} shares here` : ""}.</p>}
-      {symbol && <div className="flex flex-wrap gap-2 px-3 pt-1.5"><PaperButton key={symbol} order={{ instrument: "stock", symbol }} quantity={10} label={`Paper buy ${symbol} shares`} /></div>}
+      {symbol && !(book.challenge?.lock || book.challenge?.result) && <div className="flex flex-wrap gap-2 px-3 pt-1.5"><PaperButton key={symbol} order={{ instrument: "stock", symbol }} quantity={10} label={`Paper buy ${symbol} shares`} /></div>}
       <PaperScoreLine score={score} since={book.run.started_at} />
       <BySource rows={score.paper.by_source} />
       {progress && (
@@ -629,7 +703,14 @@ export default function DeskPaper({ book, failed, symbol, top = null, onPick }: 
             ) : <p className="text-xs text-muted-foreground">None yet.</p>}
           </div>
           {book.earlier.length > 0 && (
-            <p className="text-[11px] text-muted-foreground">Earlier runs: {book.earlier.map(r => `run ${r.number} (${day(r.started_at)}–${day(r.ended_at)}, ${usd(r.starting_cash)} start) ${signed(r.realized)} closed over ${r.trades}`).join("; ")}.</p>
+            <div data-testid="paper-earlier" className="text-[11px] text-muted-foreground">
+              {book.earlier.some(r => r.challenge) && (
+                <ul className="mb-1">{book.earlier.filter(r => r.challenge).map(r => (
+                  <li key={r.number} data-testid="paper-run-record" className={cn(r.challenge!.result === "passed" ? "text-emerald-300" : r.challenge!.result === "failed" ? "text-rose-300" : undefined)}>{runRecord(r.number, r.challenge!)}</li>
+                ))}</ul>
+              )}
+              {book.earlier.some(r => !r.challenge) && <p>Earlier runs: {book.earlier.filter(r => !r.challenge).map(r => `run ${r.number} (${day(r.started_at)}–${day(r.ended_at)}, ${usd(r.starting_cash)} start) ${signed(r.realized)} closed over ${r.trades}`).join("; ")}.</p>}
+            </div>
           )}
           {resetting ? startForm(true) : (
             <button type="button" data-testid="paper-reset" onClick={() => setResetting(true)} className={QUIET}>New run…</button>
