@@ -24,18 +24,25 @@ when substantive work remains.
 
 ## Cheaper hands
 
-Before starting a worker, use the cheapest one that can be checked:
-- **Small checkable edit** (a test, copy, a rename): a Google-plan builder in a
-  throwaway worktree of tracked files outside `/Users/user/TradeJournal`, with
-  its CLI sandboxed to that folder. Its own lint/test loop runs first; the
-  owner reads the full patch and reruns the check before a normal PR.
-- **Read-only survey:** a Google-plan reader, run only in such a throwaway
-  worktree outside `/Users/user/TradeJournal`. The main checkout and the Claude
-  worktrees inside it can reach `.env` files and real data.
-- **Bounded UI work:** a Sonnet worker. Opus is for design, integration and
-  consequential work.
+Before starting a worker, use the cheapest one whose output a check can verify.
+The owner chose (2026-11-17) to let Google-plan Hydrogen work in this repo on
+the same footing as Codex; briefs still never paste secrets or real data.
 
-Never hand to Google or a cheap worker: money/FIFO/fills, Robinhood access,
+- **Hydrogen builder** (Google plan, its own throwaway worktree): it runs its
+  own lint/typecheck/test loop, then the owner reads the full patch, reruns the
+  checks and opens a normal PR. It moves up one level after three clean patches
+  at the current one (merged without the owner rewriting them), and drops back
+  a level after one that had to be rewritten or reverted:
+  1. tests, copy, renames, docs fixes;
+  2. small features and multi-file refactors that existing tests cover;
+  3. first drafts of larger features that the owner finishes.
+- **Hydrogen reader:** read-only surveys and second opinions, checked against
+  the code before use.
+- **Sonnet worker:** bounded UI work. Opus is for design, integration and
+  consequential work. Codex Luna or Sol are backups when the Google quota is
+  spent, on the Codex allowance.
+
+Never hand to Hydrogen or a cheap worker: money/FIFO/fills, Robinhood access,
 auth, secrets, deployment, migrations, CI or verification tooling, agent rules
 or settings, test safeguards such as the database pin, copilot tool lists,
 destructive data changes, or real data. Delegation does not lower the review
