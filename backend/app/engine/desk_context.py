@@ -455,7 +455,8 @@ def _live(now: float) -> bool:
 
 def today_minutes(symbol: str) -> list[dict]:
     """Today's minute bars (extended hours) with each regular-session minute's RTH VWAP and RVol (C2.4): the chart feed's
-    cached read, the same provider request as ``ping_images.today_bars``; the RVol baseline is read from disk only."""
+    cached read (the same Tradier request as ``ping_images.today_bars``, but this one falls back to the delayed Alpaca
+    SIP backup when Tradier fails); the RVol baseline is read from disk only."""
     from app.engine import chart_fallback
     from app.engine.chart_calendar import chart_calendar
     from app.engine.chart_history import chart_history
