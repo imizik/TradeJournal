@@ -24,7 +24,8 @@ from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_feed import ChartFeedError, chart_feed
 from app.engine.chart_history import HistoryError, chart_history
 from app.engine.chart_indices import is_index
-from app.engine import alpaca, chart_fallback, tradier
+from app.engine import alpaca  # noqa: F401  (monkeypatched by existing tests)
+from app.engine import chart_fallback, tradier
 from app.engine.chart_math import ET, INTERVALS, market_day
 from app.engine import symbol_info_tradier
 from app.engine import chart_journal, access, owner_lock
@@ -185,25 +186,7 @@ async def stream(request: Request, symbol: str = Query("", max_length=15), symbo
 
 
 def _workspace_prices(symbol, frames, watchlist, session, *, quotes=True, **kwargs):
-    """Try the normal workspace first. Preserve useful primary data if fallback also fails."""
-    primary = None
-    error = None
-    try:
-        primary = chart_feed.workspace(symbol, frames, watchlist, session, calendar=chart_calendar, quotes=quotes, **kwargs)
-    except ChartFeedError as exc:
-        error = exc
-    if not is_index(symbol) and alpaca.alpaca_configured() and (primary is None or primary.get("issues")):
-        try:
-            fallback = chart_fallback.workspace(symbol, frames, watchlist, session, calendar=chart_calendar, quotes=quotes)
-            if primary is None or all(not panel["bars"] or fallback["panels"][frame]["bars"]
-                                      for frame, panel in primary["panels"].items()):
-                return fallback
-        except ChartFeedError:
-            if primary is None:
-                raise
-    if error is not None:
-        raise error
-    return primary
+    return chart_fallback.workspace_or_fallback(symbol, frames, watchlist, session, calendar=chart_calendar, quotes=quotes, **kwargs)
 
 
 @router.get("/workspace")

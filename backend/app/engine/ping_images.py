@@ -122,9 +122,9 @@ def record(db: Session, ticket, state: str) -> None:
 
 def today_bars(symbol: str) -> list[dict]:
     """Today's minute bars (extended hours), from the chart feed: one cached Tradier read."""
+    from app.engine import chart_fallback
     from app.engine.chart_calendar import chart_calendar
-    from app.engine.chart_feed import chart_feed
-    data = chart_feed.workspace(symbol, ["1m"], [], "extended", calendar=chart_calendar, quotes=False)
+    data = chart_fallback.workspace_or_fallback(symbol, ["1m"], [], "extended", calendar=chart_calendar, quotes=False)
     return list(((data.get("panels") or {}).get("1m") or {}).get("bars") or [])
 
 

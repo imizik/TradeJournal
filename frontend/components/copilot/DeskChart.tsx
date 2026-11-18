@@ -1366,6 +1366,10 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
             </>}
           </div>
         )}
+        {data?.delayed && !unavailable && !switching && (
+          <p data-testid="desk-chart-delayed" title="The regular chart feed is down, so today's candles come from the Alpaca SIP backup."
+            className="pointer-events-none absolute left-2 top-1 z-10 rounded bg-background/80 px-1.5 text-[11px] text-muted-foreground">Alpaca backup · about 15 min delayed</p>
+        )}
         {(!read || switching) && !unavailable && (
           <div className="absolute inset-0 z-10 flex items-center justify-center rounded bg-background/60 text-sm text-muted-foreground">Reading the chart…</div>
         )}

@@ -116,6 +116,30 @@ def workspace(symbol: str, intervals: list[str], watchlist: list[str], session: 
             "history_note": "Alpaca consolidated SIP fallback. Intraday prices and watchlist updates are about 15 minutes delayed. Daily and weekly candles use completed sessions, split-adjusted only. Automatic levels and options overlays require the regular chart feed."}
 
 
+def workspace_or_fallback(symbol, frames, watchlist, session, *, calendar, quotes=True, **kwargs):
+    """Try the normal workspace first. Preserve useful primary data if fallback also fails."""
+    from app.engine import alpaca
+    from app.engine.chart_indices import is_index
+
+    primary = None
+    error = None
+    try:
+        primary = chart_feed.workspace(symbol, frames, watchlist, session, calendar=calendar, quotes=quotes, **kwargs)
+    except ChartFeedError as exc:
+        error = exc
+    if not is_index(symbol) and alpaca.alpaca_configured() and (primary is None or primary.get("issues")):
+        try:
+            fallback = workspace(symbol, frames, watchlist, session, calendar=calendar, quotes=quotes)
+            if primary is None or all(not panel["bars"] or fallback["panels"][frame]["bars"]
+                                      for frame, panel in primary["panels"].items()):
+                return fallback
+        except ChartFeedError:
+            pass
+    if error is not None:
+        raise error
+    return primary
+
+
 def page(symbol: str, interval: str, before: int, limit: int) -> dict:
     bars, _, issue = _daily(symbol, datetime.now(ET).date())
     if issue:
