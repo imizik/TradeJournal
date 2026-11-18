@@ -10,6 +10,7 @@ import { planContext } from "@/components/copilot/PlanATrade";
 import { UNDO_MS } from "@/components/copilot/DecisionBar";
 import { signedDollars } from "@/components/ProofView";
 import { PaperButton } from "@/components/copilot/DeskPaper";
+import { openRadarLog } from "@/components/copilot/DeskLogs";
 import { contractOrder } from "@/lib/paperBook";
 
 const KIND: Record<string, string> = { relative_to_spy: "vs SPY", relative_to_sector: "vs sector", dip_turn: "Dip turning up", gap_reversal: "Gap reversal" };
@@ -199,7 +200,7 @@ export default function RadarDecision({ eventId, symbol, fill }: { eventId: stri
       <p className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
         <span className="font-medium text-primary">Radar · {kind}</span>
         <span>{event.direction === "up" ? "up" : "down"} · first seen {hhmm(event.first_seen_at)}{today ? "" : ` on ${event.session_date}`}</span>
-        <Link href={`/radar?event=${encodeURIComponent(event.event_id)}`} className="ml-auto underline-offset-2 hover:text-foreground hover:underline">Open in Radar</Link>
+        <Link href={`/radar?event=${encodeURIComponent(event.event_id)}`} onClick={(e) => { e.preventDefault(); openRadarLog({ event: event.event_id }); }} className="ml-auto underline-offset-2 hover:text-foreground hover:underline">Open in Radar</Link>
       </p>
       <p className="mt-1 text-sm text-foreground">{summary}.</p>
       {setup && <SetupBlock setup={setup} reply={reply} paper={today} />}

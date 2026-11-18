@@ -78,8 +78,101 @@ test("Data health's Data sync opens the Sync Center; Resync All still asks first
   await expect(page.getByRole("heading", { name: "Data Sync Center" })).toHaveCount(0);
 });
 
-test("⌘K: Data sync opens the Sync Center; Scanner history and Radar log are one command away", async ({ page }) => {
+const DISAGREE = () => ({ count: 0, rules_priced: 0, rules_pnl: 0, shadow_priced: 0, shadow_pnl: 0, isaac_priced: 0, isaac_pnl_per_contract: 0, isaac_pnl_dollars: 0, evidence: "not enough" as const });
+const ISAAC = () => ({
+  setups: 0, traded: 0, assisted: 0, independent: 0, closed: 0, priced: 0, pnl_per_contract: 0, pnl_dollars: 0,
+  evidence: "not enough" as const,
+  group_evidence: { assisted: "not enough" as const, independent: "not enough" as const, closed: "not enough" as const },
+  disagreements: { shadow_only: DISAGREE(), isaac_only: DISAGREE(), both_took: DISAGREE(), both_passed: DISAGREE() },
+});
+const SCORECARD = (setups = 1) => ({
+  not_published: 0, shadow_setups: setups, isaac: ISAAC(), independent: ISAAC(),
+  setups, decisions: setups, take: setups, skip: 0, late: 0, no_response: 0, unresolved: 0,
+  rules_priced: setups, shadow_priced: setups, skipped_priced: 0, rules_pnl: 42, shadow_pnl: 42, skipped_rules_pnl: 0, clean_order: setups,
+  evidence: "not enough" as const,
+  group_evidence: { rules: "not enough" as const, takes: "not enough" as const, skipped: "not enough" as const },
+});
+const scannerDayBody = (day: string) => ({
+  date: day, scanner_version: "v1", params_hash: "abcdef1234567890", enabled: true, session: "open",
+  totals: { candidates: 1, trades: 1, resolved: 1, unresolved: 0, no_contract: 0, pnl: 42, pnl_2x_spread: 36, wins: 1 },
+  scorecard: { day: SCORECARD(1), cumulative: SCORECARD(5) },
+  candidates: [{
+    id: `cand-${day}`, scanner_version: "v1", params_hash: "abcdef1234567890", symbol: "AMZN", setup: "fade", direction: "long",
+    bar_end: `${day}T14:10:00Z`, detected_at: `${day}T14:10:05Z`, stop: 219.1, target: 222.4, flags: [],
+    facts: { scanner_universe: ["AMZN", "MU"] }, contract: { symbol: "AMZN261120C00220000", expiration: "2026-11-20", option_type: "call", strike: 220, delta: 0.45, bid: 1.8, ask: 1.9 },
+    status: "exit", paper_deadline: null,
+    shadow: { decision: "take", status: "exit", timing: "on_time", clean_order: true, publication: "written", reason: "Clean fade.", labels: [], entry: {}, result: { pnl: 42 } },
+    isaac: { traded: false, assisted: false, status: "none", pnl_per_contract: null, extra_trade_ids: [], trades: [] },
+    events: { entry: { at: `${day}T14:11:00Z`, ask: 1.9 }, exit: { at: `${day}T14:55:00Z`, bid: 2.32, reason: "target", pnl: 42 } },
+  }],
+  monitoring: { state: "fresh", checked_at: `${day}T15:00:00Z`, last_judged_bar_end: `${day}T15:00:00Z`, symbols_judged: 12, symbols_selected: 12 },
+});
+
+const RADAR_EVENT_ID = "evt_mu_20261113";
+const RADAR_DETAIL = (rating: string | null = null) => ({
+  event: {
+    event_id: RADAR_EVENT_ID, session_date: "2026-11-13", rule_version: "radar-rules-v1", universe_version: "radar-universe-v2",
+    kind: "relative_to_sector", direction: "up", symbols: ["MU"], benchmark: "SPY", group: "SMH",
+    first_seen_at: "2026-11-13T15:10:00Z", summary: "MU up 4.1% while SMH is up 0.6%",
+    measures: { change_pct: 4.1, relative_pct: 3.5 },
+    evidence: [{ symbol: "MU", pass_id: 1, retrieved_at: "2026-11-13T15:10:00Z", last: 112.5, change_pct: 4.1 }],
+    coverage: { passes_expected: 10, passes_recorded: 10, symbols_missing: [] }, chart: { symbol: "MU" },
+  },
+  revisions: [{
+    event_id: RADAR_EVENT_ID, revision: 1, recorded_at: "2026-11-13T15:25:00Z", status: "extended",
+    measures: { change_pct: 4.8 }, evidence: [{ symbol: "MU", pass_id: 2, retrieved_at: "2026-11-13T15:25:00Z", last: 113.2, change_pct: 4.8 }],
+    note: "Lead widened from 3.5 to 4.8 points",
+  }],
+  rating, news: { status: "none_found", checked_at: "2026-11-13T15:12:00Z", headlines: [] },
+  news_checks: [{ status: "none_found", checked_at: "2026-11-13T15:12:00Z", headlines: [] }],
+  plans: { planned: false, traded: false },
+});
+
+async function stubLogs(page: Page) {
+  const rated: Array<{ id: string; rating: string }> = [];
+  let savedRating: string | null = null;
+  await page.route(url => url.pathname.endsWith("/scanner/day"), route => {
+    const day = new URL(route.request().url()).searchParams.get("day") ?? "2026-11-13";
+    return route.fulfill({ json: scannerDayBody(day) });
+  });
+  await page.route(url => url.pathname.endsWith("/scanner/settings"), route =>
+    route.fulfill({ json: { symbols: ["AMZN", "MU"], revision: 1, max_symbols: 12 } }));
+  await page.route(url => url.pathname.endsWith("/radar/feed"), route => {
+    const reqSession = new URL(route.request().url()).searchParams.get("session") ?? "2026-11-13";
+    return route.fulfill({
+      json: {
+        state: "recording", reason: null, session: reqSession, sessions: ["2026-11-13", "2026-11-12"],
+        events: [{ ...RADAR_DETAIL(savedRating).event, on_movers: false, latest_status: "extended", revision_count: 1, rating: savedRating, news: RADAR_DETAIL().news }],
+        since_last_visit: [RADAR_EVENT_ID], last_visit_at: null,
+        coverage: { passes_recorded: 10, passes_expected: 10, passes_failed: 0, last_ok_pass_at: "2026-11-13T15:30:00Z", symbols_tracked: 169, symbols_missing: [], universe_version: "radar-universe-v2", live: true },
+        generated_at: "2026-11-13T15:30:00Z",
+        outside_list: [{ as_of: "2026-11-13T15:30:00Z", status: "ok", covered: 50, requested: 50, rows: [{ kind: "outside_list", symbol: "PLTR", price: 61.2, move_vs_spy_pp: 5.4, dollar_volume: 120_000_000, sector: "Software" }] }],
+      },
+    });
+  });
+  await page.route(url => url.pathname.endsWith(`/radar/events/${RADAR_EVENT_ID}`), route => route.fulfill({ json: RADAR_DETAIL(savedRating) }));
+  await page.route(url => url.pathname.endsWith(`/radar/events/${RADAR_EVENT_ID}/feedback`), async route => {
+    const body = route.request().postDataJSON() as { rating: string };
+    savedRating = body.rating;
+    rated.push({ id: RADAR_EVENT_ID, rating: body.rating });
+    return route.fulfill({ json: { rating: body.rating } });
+  });
+  await page.route(url => url.pathname.endsWith("/radar/visits"), route => route.fulfill({ json: { visited_at: "2026-11-13T15:30:00Z", previous_visit_at: null } }));
+  await page.route(url => url.pathname.endsWith("/radar/setups"), route => route.fulfill({ json: { session: "2026-11-13", setups: [], scorecard: [] } }));
+  await page.route(url => url.pathname.endsWith("/radar/movers"), route => route.fulfill({ json: { session: "2026-11-13", state: "off", reason: "No movers in fixture.", header: null, leaders: [], laggards: [], groups: [], missing: [] } }));
+  await page.route(url => url.pathname.endsWith("/radar/shadow-book"), route => route.fulfill({
+    json: {
+      enabled: true, max_turns: 4, week: { start: "2026-11-09", end: "2026-11-13" },
+      summary: { shadow: { decisions: 1, turns: 1, filtered: 0, plans: 1, closed: 0, pnl_usd: 0 }, owner: { state: "ok", trades: 1, pnl_usd: 50 }, note: "Shadow week fixture." },
+      decisions: [{ id: "sd1", radar_event_id: RADAR_EVENT_ID, session_date: "2026-11-13", event: { kind: "relative_to_sector", direction: "up", symbols: ["MU"], first_seen_at: "2026-11-13T15:10:00Z", summary: "MU up 4.1% while SMH is up 0.6%" }, decision: "skip", status: "skip", reason: "Shadow fixture skip", plan: null, model: "fake", decided_at: "2026-11-13T15:11:00Z", entry: null, exit: null, result: null, unresolved: null }],
+    },
+  }));
+  return { rated };
+}
+
+test("⌘K: Data sync opens the Sync Center; Scanner history and Radar log open their desk drawers", async ({ page }) => {
   await open(page);
+  await stubLogs(page);
   const palette = page.getByRole("dialog", { name: "Jump to" });
   await page.keyboard.press("ControlOrMeta+k");
   await palette.getByRole("combobox").fill("data sync");
@@ -99,12 +192,78 @@ test("⌘K: Data sync opens the Sync Center; Scanner history and Radar log are o
   await page.keyboard.press("ControlOrMeta+k");
   await palette.getByRole("combobox").fill("scanner history");
   await expect(palette.getByRole("option").first()).toContainText("Scanner history");
-  await page.keyboard.press("ControlOrMeta+k"); // closes it again
+  await page.keyboard.press("Enter");
+  const scannerDrawer = page.getByTestId("desk-scanner-history");
+  await expect(scannerDrawer).toBeVisible();
+  await expect(scannerDrawer.getByRole("region", { name: "Setups" }).getByText("AMZN", { exact: true })).toBeVisible();
+  await expect(scannerDrawer.getByRole("region", { name: "Day scorecard scorecard" })).toBeVisible();
+  await expect(scannerDrawer.getByRole("region", { name: "Cumulative scorecard scorecard" })).toBeVisible();
+  await scannerDrawer.getByRole("button", { name: "← Previous day" }).click();
+  await expect(scannerDrawer).toContainText("2026-11-12");
+  await expect(page).toHaveURL(/\/copilot-lab/);
+  await page.keyboard.press("Escape");
+  await expect(scannerDrawer).toHaveCount(0);
+
   await page.keyboard.press("ControlOrMeta+k");
   await palette.getByRole("combobox").fill("radar log");
   await expect(palette.getByRole("option").first()).toContainText("Radar log");
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/radar\?log=1$/);
+  const radarDrawer = page.getByTestId("desk-radar-log");
+  await expect(radarDrawer).toBeVisible();
+  await expect(radarDrawer.getByText("Developments", { exact: true })).toBeVisible();
+  await expect(radarDrawer.getByRole("region", { name: "Outside your list" })).toContainText("PLTR");
+  await expect(radarDrawer.getByTestId("shadow-book")).toContainText("Shadow fixture skip");
+  await radarDrawer.getByTestId("radar-event").getByRole("button").first().click();
+  await expect(radarDrawer.getByRole("region", { name: "Revisions" })).toContainText("Lead widened from 3.5 to 4.8 points");
+  await expect(radarDrawer.getByRole("group", { name: "Was this useful?" })).toBeVisible();
+  await expect(page).toHaveURL(/\/copilot-lab/);
+  await page.keyboard.press("Escape");
+  await expect(radarDrawer).toHaveCount(0);
+});
+
+test("old /scanner and /radar URLs open their desk drawers and phone rating links save the rating", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.clock.install({ time: NOW });
+  await page.route("**/api/backend/**", route => route.fulfill({ status: 404, json: { detail: "Not in this test." } }));
+  await page.route("**/copilot/status", route => route.fulfill({ json: ON }));
+  for (const [path, body] of Object.entries(READS)) await page.route(url => url.pathname.endsWith(path), route => route.fulfill({ json: body }));
+  await page.route("**/copilot/desk/minute?*", route => {
+    const reads = new URL(route.request().url()).searchParams.getAll("read").map(target => {
+      const body = READS[target.split("?")[0]];
+      return body ? { status: 200, body } : { status: 404, body: { detail: "Not in this test." } };
+    });
+    return route.fulfill({ json: { reads } });
+  });
+  const { rated } = await stubLogs(page);
+
+  await page.goto("/scanner?day=2026-11-12");
+  await expect(page).toHaveURL(/\/copilot-lab/);
+  await expect(page.getByTestId("desk-scanner-history")).toContainText("2026-11-12");
+  await page.keyboard.press("Escape");
+
+  await page.goto("/scanner?history=1");
+  await expect(page).toHaveURL(/\/copilot-lab/);
+  await expect(page.getByTestId("desk-scanner-history")).toContainText("2026-11-13");
+  await page.keyboard.press("Escape");
+
+  await page.goto(`/radar?event=${RADAR_EVENT_ID}&rate=useful`);
+  await expect(page).toHaveURL(/\/copilot-lab/);
+  await expect(page).not.toHaveURL(/rate=/);
+  expect(new URL(page.url()).searchParams.get("rate")).toBeNull();
+  const radarDrawer = page.getByTestId("desk-radar-log");
+  await expect(radarDrawer).toBeVisible();
+  await expect(radarDrawer.getByRole("button", { name: "Useful", exact: true })).toHaveAttribute("aria-pressed", "true");
+  expect(rated).toEqual([{ id: RADAR_EVENT_ID, rating: "useful" }]);
+  await page.keyboard.press("Escape");
+
+  await page.goto("/radar?session=2026-11-12");
+  await expect(page).toHaveURL(/\/copilot-lab/);
+  await expect(page.getByTestId("desk-radar-log").getByLabel("Session")).toHaveValue("2026-11-12");
+  await page.keyboard.press("Escape");
+
+  await page.goto("/radar?log=1");
+  await expect(page).toHaveURL(/\/copilot-lab/);
+  await expect(page.getByTestId("desk-radar-log").getByTestId("shadow-book")).toBeVisible();
 });
 
 test("while the desk is home the menu drops Radar, Scanner and Daily Practice; Signals and Advisor review stay", async ({ page }) => {

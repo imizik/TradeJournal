@@ -59,6 +59,7 @@ import { ChainPicker, PhoneOrders, PhoneValue, usePhone } from "@/components/cop
 import DeskHealthDot, { DeskStatusLine, reportBookLive } from "@/components/copilot/DeskHealth";
 import { DeskSyncCenter, openSyncCenter } from "@/components/DashboardActions";
 import DeskJournal, { openJournal } from "@/components/copilot/DeskJournal";
+import { DeskLogs, openRadarLog, openScannerHistory } from "@/components/copilot/DeskLogs";
 import { DeskResearch } from "@/components/copilot/DeskResearch";
 import { ModeSwitch, PaperValue, setDeskMode, useDeskMode } from "@/components/copilot/DeskMode";
 import ModeMark, { type Mode } from "@/components/copilot/ModeMark";
@@ -774,8 +775,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     // The old pages' pieces the desk has no home for yet (the pages themselves now open the desk).
     { id: "sync", name: "Data sync", hint: "Run a sync or one job, job history, Gmail. Rebuild and Resync All ask first.", run: openSyncCenter },
     { id: "journal", name: "Journal summary", hint: "Today's, this week's and all-time P&L, performance and the latest trades", run: openJournal },
-    { id: "scanner-history", name: "Scanner history", hint: "Past days, scorecards, shadow decisions and the scanner's tickers", run: () => go("/scanner?history=1") },
-    { id: "radar-log", name: "Radar log", hint: "Every Radar event with its evidence, Outside your list and the Shadow book", run: () => go("/radar?log=1") },
+    { id: "scanner-history", name: "Scanner history", hint: "Past days, scorecards, shadow decisions and the scanner's tickers", run: () => openScannerHistory() },
+    { id: "radar-log", name: "Radar log", hint: "Every Radar event with its evidence, Outside your list and the Shadow book", run: () => openRadarLog() },
     { id: "daily-practice", name: "Daily practice", hint: "Prepare morning setups and save choices in Practice", run: () => reveal([], "practice-line-daily", false, "daily") },
     { id: "saved-decisions", name: "Saved decisions", hint: "Frozen choices, evidence and practice paper timelines", run: () => reveal([], "practice-line-saved-decisions", false, "saved-decisions") },
     { id: "scalp-shortlist", name: "9:40 scalp shortlist", hint: "20-session opening paper study, history and rules", run: () => reveal([], "practice-line-scalp", false, "scalp") },
@@ -1432,6 +1433,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       {/* The Data Sync Center (Data health's "Data sync" and ⌘K's): hidden until opened. */}
       {on && <DeskSyncCenter />}
       {on && <DeskJournal />}
+      {on && <DeskLogs />}
       {/* The chart ticker's research (the chart's More, ⌘K's "Research NVDA"): hidden, and no reads, until opened. */}
       {on && <DeskResearch />}
       {/* A phone's tab bar is the desk's own: Positions, the ticker's Chart, Chain, Orders and Ask, then the app's More

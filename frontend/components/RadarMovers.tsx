@@ -45,20 +45,25 @@ function Table({ title, rows, movers, allGroups }: { title: string; rows: RadarM
   );
 }
 
-export default function RadarMovers({ session }: { session: string | undefined }) {
+export default function RadarMovers({ session, initialGroups, syncUrl = true }: { session: string | undefined; initialGroups?: string | null; syncUrl?: boolean }) {
   // Keyed by the session it was read for, so a switch never shows the previous session's numbers.
   const [read, setRead] = useState<{ session: string | undefined; movers: RadarMovers } | null>(null);
   const movers = read && read.session === session ? read.movers : null;
   const [error, setError] = useState(false);
-  const [allGroups, setAllGroups] = useState(false);
+  const [allGroups, setAllGroups] = useState(initialGroups === "all");
 
-  useEffect(() => { queueMicrotask(() => setAllGroups(new URLSearchParams(window.location.search).get("groups") === "all")); }, []);
+  useEffect(() => {
+    const selected = syncUrl ? new URLSearchParams(window.location.search).get("groups") : initialGroups;
+    queueMicrotask(() => setAllGroups(selected === "all"));
+  }, [initialGroups, syncUrl]);
   const toggleGroups = () => {
     const next = !allGroups;
     setAllGroups(next);
-    const url = new URL(window.location.href);
-    if (next) url.searchParams.set("groups", "all"); else url.searchParams.delete("groups");
-    window.history.replaceState(window.history.state, "", url);
+    if (syncUrl) {
+      const url = new URL(window.location.href);
+      if (next) url.searchParams.set("groups", "all"); else url.searchParams.delete("groups");
+      window.history.replaceState(window.history.state, "", url);
+    }
   };
 
   useEffect(() => {
