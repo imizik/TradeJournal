@@ -43,24 +43,6 @@ export type Company = {
   short: boolean;
 };
 
-export type CompanyTextField =
-  | "rev"
-  | "gm"
-  | "fcf"
-  | "thesis"
-  | "bear"
-  | "buy"
-  | "sell";
-export type CompanyScoreField =
-  | "q"
-  | "ai"
-  | "up"
-  | "bsRisk"
-  | "valRisk"
-  | "ccRisk"
-  | "cxRisk";
-export type CompanySelectField = "cap" | "mon" | "type" | "prio" | "status" | "layer";
-
 export type Layer = {
   id: string;
   name: string;
@@ -114,8 +96,6 @@ export type DeepDive = {
   prove: string;
   breakThesis: string;
 };
-
-export type DeepDiveField = keyof DeepDive;
 
 export type Signpost = {
   id: string;

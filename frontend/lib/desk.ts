@@ -392,9 +392,6 @@ export const nyDay = (at: Date = new Date()) => nyDate(at);
  * question not answered or skipped today. A ticker not followed never does. */
 export const needsYou = (row: DeskThread, day: string | null) => !row.hidden && (row.group === "act" || row.group === "draft" || !!row.fillToLink
   || (!!row.close && !row.close.reviewed && !(day && row.symbol && reviewSkipped(day, row.symbol))));
-/** The desk's one "needs you" count: tickers with the dot. */
-export const needingCount = (rows: DeskThread[], day: string | null) =>
-  new Set(rows.filter(r => r.symbol && r.group !== "pinned" && !r.key.startsWith("radar:") && needsYou(r, day)).map(r => r.symbol)).size;
 
 /** The conversation the address names (?thread=, or a deep link's ?investigation=), lower case; null when none. */
 /** The parameters a desk link may carry and still be followed in place: a symbol, its context line, its origin and drawn plan. */
@@ -467,8 +464,6 @@ export async function getThreadPlan(thread: Pick<DeskThreadRef, "id" | "symbol">
 
 // --------------------------------------------------------------------------- the Context pane
 
-/** The Context pane's tabs: the chart opens first; the timeline and the owner's history wait until asked for. */
-export type ContextTab = "chart" | "timeline" | "history";
 
 /** One thing that touched the thread (``GET /copilot/desk/{id}/timeline``); ``at`` is epoch seconds. */
 export type DeskTimelineRow = {
@@ -495,7 +490,6 @@ async function deskRead<T>(id: string, part: string, signal?: AbortSignal): Prom
 }
 
 export const getDeskTimeline = (id: string, signal?: AbortSignal) => deskRead<DeskTimeline>(id, "timeline", signal);
-export const getDeskHistory = (id: string, signal?: AbortSignal) => deskRead<DeskHistory>(id, "history", signal);
 
 /** The picture route's reserved id for the Briefing's chart: QQQ today with the day's fills and pings. */
 export const DESK_MARKET = "market";

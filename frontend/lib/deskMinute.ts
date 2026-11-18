@@ -132,13 +132,3 @@ async function flush() {
     item.resolve(new Response(empty ? null : JSON.stringify(read.body ?? null), { status: code, headers: { "Content-Type": "application/json" } }));
   });
 }
-
-/** For tests: forget the clock and every waiting read. */
-export function resetDeskMinute() {
-  stop();
-  readers.clear();
-  beatListeners.clear();
-  queue = [];
-  open = false;
-  beats = 0;
-}
