@@ -36,8 +36,11 @@ the same footing as Codex; briefs still never paste secrets or real data.
   1. tests, copy, renames, docs fixes;
   2. small features and multi-file refactors that existing tests cover;
   3. first drafts of larger features that the owner finishes.
+
+  Every level stays within the never-delegate list below. A new session starts
+  at level 1 unless the PR records show otherwise.
 - **Hydrogen reader:** read-only surveys and second opinions, checked against
-  the code before use.
+  the code before use; never a required review.
 - **Sonnet worker:** bounded UI work. Opus is for design, integration and
   consequential work. Codex Luna or Sol are backups when the Google quota is
   spent, on the Codex allowance.
