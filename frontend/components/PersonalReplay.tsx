@@ -16,7 +16,7 @@ const expiryLabel = (value: string) => {
   return Number.isFinite(date.getTime()) ? date.toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }) : value;
 };
 
-export default function PersonalReplay() {
+export default function PersonalReplay({ embedded = false }: { embedded?: boolean } = {}) {
   const initialAttemptId = useSearchParams().get("attempt");
   const [scenarios, setScenarios] = useState<ReplayScenario[]>([]);
   const [attempt, setAttempt] = useState<ReplayAttempt | null>(null);
@@ -86,7 +86,7 @@ export default function PersonalReplay() {
       if (version !== readVersion.current) return;
       sessionStorage.removeItem(key);
       setAttempt(next);
-      history.pushState({}, "", `/practice/replay?attempt=${encodeURIComponent(next.attempt_id)}`);
+      if (!embedded) history.pushState({}, "", `/practice/replay?attempt=${encodeURIComponent(next.attempt_id)}`);
     } catch (err) { if (version === readVersion.current) setError(err instanceof Error ? err.message : "Replay could not start. Retry safely with the same request."); }
     finally { if (version === readVersion.current) setBusy(false); }
   }
@@ -125,7 +125,7 @@ export default function PersonalReplay() {
   return <div className="min-w-0 space-y-4" data-testid="personal-replay">
     {!attempt && <section className="rounded-lg border bg-card p-4">
       <p className="text-xs text-muted-foreground">One synthetic scenario · two decision points</p>
-      {attemptLoading ? <p role="status">Resuming saved replay…</p> : activeScenario && !initialAttemptId && !error ? <><h2 className="mt-2 text-base font-semibold">{activeScenario.title}</h2><p className="mt-1 text-sm">{activeScenario.symbol} · {activeScenario.instrument}</p><p className="mt-2 text-sm text-muted-foreground">{activeScenario.description}</p><p className="mt-3 text-xs text-muted-foreground">Invented position and price path. No real journal records or live market feed. Option marks are synthetic reference estimates, not executable fills.</p>{activeScenario.repeat_status === "repeat" && <p className="mt-2 text-sm text-primary">You have opened this scenario before. Starting again creates a new attempt and does not change saved choices.</p>}<div className="mt-4 flex flex-wrap items-center gap-3">{activeScenario.latest_attempt_id && <a href={`/practice/replay?attempt=${encodeURIComponent(activeScenario.latest_attempt_id)}`} className="inline-flex min-h-11 items-center rounded-md border px-4 py-2 text-primary underline">Resume last replay</a>}<button type="button" disabled={busy} onClick={() => void start()} className="min-h-11 rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground">{busy ? "Opening replay…" : "Start replay"}</button></div></> : !error && <p>Loading the available replay…</p>}
+      {attemptLoading ? <p role="status">Resuming saved replay…</p> : activeScenario && !initialAttemptId && !error ? <><h2 className="mt-2 text-base font-semibold">{activeScenario.title}</h2><p className="mt-1 text-sm">{activeScenario.symbol} · {activeScenario.instrument}</p><p className="mt-2 text-sm text-muted-foreground">{activeScenario.description}</p><p className="mt-3 text-xs text-muted-foreground">Invented position and price path. No real journal records or live market feed. Option marks are synthetic reference estimates, not executable fills.</p>{activeScenario.repeat_status === "repeat" && <p className="mt-2 text-sm text-primary">You have opened this scenario before. Starting again creates a new attempt and does not change saved choices.</p>}<div className="mt-4 flex flex-wrap items-center gap-3">{activeScenario.latest_attempt_id && (embedded ? <button type="button" disabled={busy} onClick={() => void loadAttempt(activeScenario.latest_attempt_id!)} className="inline-flex min-h-11 items-center rounded-md border px-4 py-2 text-primary underline">Resume last replay</button> : <a href={`/practice/replay?attempt=${encodeURIComponent(activeScenario.latest_attempt_id)}`} className="inline-flex min-h-11 items-center rounded-md border px-4 py-2 text-primary underline">Resume last replay</a>)}<button type="button" disabled={busy} onClick={() => void start()} className="min-h-11 rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground">{busy ? "Opening replay…" : "Start replay"}</button></div></> : !error && <p>Loading the available replay…</p>}
     </section>}
 
     {attempt && <>

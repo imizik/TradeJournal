@@ -52,7 +52,7 @@ export function DecisionCard({ record, focused, openToken, withPaper, idPrefix =
   );
 }
 
-export default function PracticeDecisions({ records, focusId }: { records: DecisionRecord[]; focusId?: string }) {
+export default function PracticeDecisions({ records, focusId, onSaved }: { records: DecisionRecord[]; focusId?: string; onSaved?: (record: DecisionRecord) => void }) {
   const { owner } = useAppAccess();
   const paperIds = new Set(records.filter((r) => r.decision === "take").slice(0, PAPER_FETCH_LIMIT).map((r) => r.id));
   if (focusId && records.some((r) => r.id === focusId && r.decision === "take")) paperIds.add(focusId);
@@ -62,7 +62,7 @@ export default function PracticeDecisions({ records, focusId }: { records: Decis
         <h2 className="text-[13.5px] font-semibold tracking-tight">Practice decisions</h2>
         <p className="mt-1 text-xs text-muted-foreground">Frozen choices and evidence. Practice only; a TAKE is a paper plan once you arm it, never a real order.</p>
       </div>
-      {owner && <PracticeDecisionForm />}
+      {owner && <PracticeDecisionForm onSaved={onSaved} />}
       {records.length === 0 ? (
         <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">{owner ? "No saved decisions yet." : "No decision records are shared with this assistant."}</div>
       ) : records.map((record) => (

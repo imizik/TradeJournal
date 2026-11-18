@@ -1596,7 +1596,8 @@ Data health (the health list), Replay a past day and Redo one of my trades; Pape
 switch's; How I use the desk; then four pieces of the old pages: **Journal summary** (the Dashboard's closed P&L today / this week / all time, performance chart and five latest closes, a drawer from ⌘K and More → Journal, `DeskJournal`; the Dashboard's other pieces were already on the desk), **Data sync** (the Dashboard's Data Sync Center,
 unchanged, also under the Data health list's "Data sync" line), **Scanner history** (past days, setups, shadow
 decisions, scorecards and scanner tickers, in a desk drawer `DeskLogs`), and **Radar log** (Developments, event detail
-with revisions and ratings, Outside your list, movers and the Shadow book, in `DeskLogs`)). A command
+with revisions and ratings, Outside your list, movers and the Shadow book, in `DeskLogs`), and Practice's four lines (**Daily practice**, **Saved decisions**, **9:40 scalp shortlist**, and
+**Decision replay lab**)). A command
 that spends a model call says "Asks the copilot now" in its hint. A book-side place brings the phone's Positions view
 forward, shows a piece folded away (§ How I use the desk) for now, opens the line it lives in (Practice's paper line, My rules), scrolls to it and opens it when it is an editor (rules,
 goals, the note line). The places come from one list, `lib/deskPlaces.ts` (id, name, key, hint), which the copilot's
@@ -2154,7 +2155,10 @@ either. Parameterized `/scanner?day=` and `?history=1` open the desk's **Scanner
 `/radar?event=`, `?session=`, `?groups=` and `?log=1` open its **Radar log** drawer (`DeskLogs`), with phone rating
 links (`?event=…&rate=…`) still saving the rating once on arrival. ⌘K's **Scanner history** and **Radar log**, the
 Feed's "Scanner page →", and Radar card's "Open in Radar" open those drawers in place; no page code is deleted, and
-with the lab off both pages show as before. `/dashboard`, `/charts`, `/daily` and `/practice` are not retired yet (unless retired separately).
+with the lab off both pages show as before. While the desk is home, bare `/practice` also opens the desk (Daily practice, Saved decisions, 9:40 scalp shortlist
+history and rules, and Decision replay lab live closed inside the Practice block and in ⌘K, and `Daily Practice` leaves
+More → Practice for the owner; `?decision=` and `?practice_run=` links keep working). `/dashboard`, `/charts` and `/daily`
+are not retired yet (bare `/dashboard` opens the desk while the lab is on).
 
 From 768 px the **status line** along the desk's bottom (`DeskStatusLine` in `DeskHealth.tsx`) shows the mode's mark
 and whose book, then only what is not fine, in words: a source behind, money first, red when it leaves positions,

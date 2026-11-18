@@ -777,6 +777,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     { id: "journal", name: "Journal summary", hint: "Today's, this week's and all-time P&L, performance and the latest trades", run: openJournal },
     { id: "scanner-history", name: "Scanner history", hint: "Past days, scorecards, shadow decisions and the scanner's tickers", run: () => openScannerHistory() },
     { id: "radar-log", name: "Radar log", hint: "Every Radar event with its evidence, Outside your list and the Shadow book", run: () => openRadarLog() },
+    { id: "daily-practice", name: "Daily practice", hint: "Prepare morning setups and save choices in Practice", run: () => reveal([], "practice-line-daily", false, "daily") },
+    { id: "saved-decisions", name: "Saved decisions", hint: "Frozen choices, evidence and practice paper timelines", run: () => reveal([], "practice-line-saved-decisions", false, "saved-decisions") },
+    { id: "scalp-shortlist", name: "9:40 scalp shortlist", hint: "20-session opening paper study, history and rules", run: () => reveal([], "practice-line-scalp", false, "scalp") },
+    { id: "decision-replay", name: "Decision replay lab", hint: "Revisit two frozen moments from a synthetic options trade", run: () => reveal([], "practice-line-decision-replay", false, "decision-replay") },
     // The market's line and the day's money, off the top bar since the calm pass: one fact command (it moves
     // nothing), after the ones that act, so a typed word such as "close" still leads with Close the day.
     ...(todayWords.market || todayWords.money ? [{ id: "today", name: `Today${todayWords.market ? `: ${todayWords.market}` : ""}`,
@@ -788,7 +792,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       if (area === "Left") showBook(); else if (area === "Centre") { setGrid(false); showCentre(); } else if (area === "Right") showFeed();
       requestAnimationFrame(() => document.querySelector(`[data-use="${id}"]`)?.scrollIntoView({ block: "nearest" }));
     } })),
-  ], [actions, dayPhase, dayKind, placeRun, fill, planTrade, closeDay, showFeed, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre, pickMode, todayWords, go]);
+  ], [actions, dayPhase, dayKind, placeRun, fill, planTrade, closeDay, showFeed, showCopilot, openUse, foldedPieces, showNow, showBook, showCentre, pickMode, todayWords, go, reveal]);
 
   // J / K walk the conversations the thread list shows, subthreads included, in its order.
   const [walk, setWalk] = useState<string[]>([]);
@@ -1188,7 +1192,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
             market's line is ⌘K's "Today" and the status line's hover. */}
         {/* Paper mode: the paper book's value beside the real accounts, each with its mark. */}
         {on && viewMode === "paper" && <div className={cn("contents", styles.wideOnly)}><PaperValue book={paper.book} failed={paper.failed} onOpen={openPaper} className="sm:order-last" /></div>}
-        {on && <ScalpShortlistNudge />}
+        {on && <ScalpShortlistNudge onOpen={() => reveal([], "practice-line-scalp", false, "scalp")} />}
       </header>
       </div>
       {/* Replay never hides real money: one REAL line in its header from the rows, feed and session the hidden desk

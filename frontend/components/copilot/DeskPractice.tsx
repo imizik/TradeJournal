@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
+import { api, type DecisionRecord } from "@/lib/api";
 import { useDeskTicks } from "@/lib/deskTicks";
 import { paperPnl, paperSymbols, type PaperBook, type PaperStats } from "@/lib/paperBook";
 import { cn } from "@/lib/utils";
@@ -12,6 +14,10 @@ import { GoalsLine } from "./DeskGoals";
 import { RulesEditor, RulesSplitLine } from "./DeskRules";
 import { Fold } from "./DeskUse";
 import ModeMark, { type Mode } from "./ModeMark";
+import PersonalReplay from "@/components/PersonalReplay";
+import PracticeDecisions from "@/components/PracticeDecisions";
+import PracticeRoutine from "@/components/PracticeRoutine";
+import ScalpShortlistPanel from "@/components/ScalpShortlistPanel";
 
 /**
  * The lower half of the desk's left column (docs/copilot-lab.md § The desk), under the book, Watching and the day's block:
@@ -30,7 +36,7 @@ const KEPT = "desk.practice.v1";
 const OPEN_EVENT = "desk-open-place";
 
 /** A place under the book: a Practice line, or the rules-and-goals line. */
-export type DeskPlace = "paper" | "overnight" | "momentum" | "replay" | "rules";
+export type DeskPlace = "paper" | "overnight" | "momentum" | "replay" | "daily" | "saved-decisions" | "scalp" | "decision-replay" | "rules";
 /** Opens a place in place (⌘K, a desk key); the caller scrolls to it once it shows. */
 export const openDeskPlace = (place: DeskPlace) => window.dispatchEvent(new CustomEvent<DeskPlace>(OPEN_EVENT, { detail: place }));
 function useOpenPlace(open: (place: DeskPlace) => void) {
@@ -177,10 +183,53 @@ function Line({ id, mode, name, open, onToggle, extra, children, section }: {
   );
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function DeskPracticeDecisions({ focusId }: { focusId?: string }) {
+  const [records, setRecords] = useState<DecisionRecord[] | null>(null);
+  const [error, setError] = useState("");
+  const [reloadNonce, setReloadNonce] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    void api.decisions().then(async ({ decisions }) => {
+      const next = [...decisions];
+      if (focusId && UUID_RE.test(focusId) && !next.some((r) => r.id === focusId)) {
+        const focused = await api.decision(focusId).catch(() => null);
+        if (focused) next.unshift(focused);
+      }
+      if (!active) return;
+      setRecords(next);
+      setError("");
+    }).catch((err) => {
+      if (!active) return;
+      setError(err instanceof Error ? err.message : "Could not load saved decisions.");
+    });
+    return () => { active = false; };
+  }, [focusId, reloadNonce]);
+
+  const onSaved = useCallback((record: DecisionRecord) => {
+    setRecords((prev) => prev ? [record, ...prev.filter((r) => r.id !== record.id)] : [record]);
+    setReloadNonce((n) => n + 1);
+  }, []);
+
+  if (error) {
+    return (
+      <div className="space-y-2 py-2 text-xs">
+        <p role="alert" className="text-red-400">{error}</p>
+        <button type="button" onClick={() => { setError(""); setReloadNonce((n) => n + 1); }} className="underline">Retry</button>
+      </div>
+    );
+  }
+  if (records === null) return <p role="status" className="py-2 text-xs text-muted-foreground">Loading saved decisions…</p>;
+  return <PracticeDecisions records={records} focusId={focusId} onSaved={onSaved} />;
+}
+
 /**
- * The Practice block: Paper (his own paper book), QQQ overnight, QQQ momentum and Replay, one line each. Each line keeps
- * its piece id (``paper``, ``strategy.overnight``, ``strategy.momentum``, ``replay.practice``), so a piece he folded
- * away is still a slim stub here.
+ * The Practice block: Paper (his own paper book), QQQ overnight, QQQ momentum and Replay, plus Daily practice,
+ * Saved decisions, 9:40 scalp shortlist and Decision replay lab, one line each. Each main line keeps its piece id
+ * (``paper``, ``strategy.overnight``, ``strategy.momentum``, ``replay.practice``), so a piece he folded away is still
+ * a slim stub here.
  */
 export function Practice({ on, paper, symbol, review, onReplay, onPick }: {
   on: boolean; paper: { book: PaperBook | null; failed: boolean }; symbol: string | null;
@@ -191,10 +240,29 @@ export function Practice({ on, paper, symbol, review, onReplay, onPick }: {
   /** Shows a paper position's ticker on the desk, with its Position panel under the chart. */
   onPick?(symbol: string): void;
 }) {
+  const searchParams = useSearchParams();
+  const urlDecision = searchParams.get("decision") ?? undefined;
+  const urlPracticeRun = searchParams.get("practice_run") ?? undefined;
+  const [decisionFocus, setDecisionFocus] = useState<string | undefined>(urlDecision);
+  const [practiceRunFocus, setPracticeRunFocus] = useState<string | undefined>(urlPracticeRun);
   const overnight = useOvernightBook(on);
   const momentum = useMomentumBook(on);
   const replay = useReplayPractice();
   const [kept, set, openAll] = useKeptOpen();
+  useEffect(() => {
+    if (urlDecision) {
+      setDecisionFocus(urlDecision); // eslint-disable-line react-hooks/set-state-in-effect -- preserve focus if CopilotLab updates query params
+      set("saved-decisions", true);
+    }
+    if (urlPracticeRun) {
+      setPracticeRunFocus(urlPracticeRun);
+      set("daily", true);
+    }
+    if (window.location.hash === "#scalp-shortlist") {
+      set("scalp", true);
+      requestAnimationFrame(() => document.getElementById("scalp-shortlist")?.scrollIntoView({ block: "nearest" }));
+    }
+  }, [urlDecision, urlPracticeRun, set]);
   const book = paper.book;
   const positions = book?.positions ?? [];
   const orders = book?.orders ?? [];
@@ -277,6 +345,22 @@ export function Practice({ on, paper, symbol, review, onReplay, onPick }: {
           {replayed ? <span className={tone(card!.score.pnl)}>{signed(card!.score.pnl)}</span> : <span>bar by bar, scored apart</span>}
         </Line>
       </Fold>
+      <Line id="daily" mode="paper" name="Daily practice" open={isOpen("daily")} onToggle={() => set("daily", !isOpen("daily"))}
+        section={<PracticeRoutine initialRunId={practiceRunFocus} />}>
+        <span>· morning setups &amp; choices</span>
+      </Line>
+      <Line id="saved-decisions" mode="paper" name="Saved decisions" open={isOpen("saved-decisions")} onToggle={() => set("saved-decisions", !isOpen("saved-decisions"))}
+        section={<DeskPracticeDecisions focusId={decisionFocus} />}>
+        <span>· frozen choices &amp; paper plans</span>
+      </Line>
+      <Line id="scalp" mode="paper" name="9:40 scalp shortlist" open={isOpen("scalp")} onToggle={() => set("scalp", !isOpen("scalp"))}
+        section={<div id="scalp-shortlist" className="scroll-mt-4"><ScalpShortlistPanel history embedded /></div>}>
+        <span>· 20-session opening study &amp; rules</span>
+      </Line>
+      <Line id="decision-replay" mode="replay" name="Decision replay lab" open={isOpen("decision-replay")} onToggle={() => set("decision-replay", !isOpen("decision-replay"))}
+        section={<PersonalReplay embedded />}>
+        <span>· two frozen moments</span>
+      </Line>
     </section>
   );
 }
