@@ -12,7 +12,6 @@ import {
   qualityColor,
   riskColor,
   STATUS_BADGE,
-  STATUS_DOT,
   TYPE_BADGE,
   TYPE_LABEL,
 } from "@/lib/research/constants";
@@ -64,23 +63,6 @@ export function PositionDot({ open }: { open: boolean }) {
       title="Open position in journal"
       className="inline-block h-2 w-2 shrink-0 rounded-full bg-foreground"
     />
-  );
-}
-
-export function StatusDot({ status }: { status: Status }) {
-  return (
-    <span
-      title={status}
-      className={cn("inline-block h-2 w-2 shrink-0 rounded-full", STATUS_DOT[status])}
-    />
-  );
-}
-
-export function PriceTag({ price }: { price: number | null | undefined }) {
-  return (
-    <span className="text-xs tabular-nums text-foreground/80">
-      {price == null ? "—" : `$${price.toFixed(2)}`}
-    </span>
   );
 }
 
