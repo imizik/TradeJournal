@@ -5,7 +5,7 @@ import ModeMark from "./ModeMark";
 /**
  * One-line historical paper record for a kind of trade (intended for the real
  * order ticket, so the trader sees how similar paper trades have gone before
- * risking money). Self-contained groundwork component — not wired in yet.
+ * risking money). The real ticket shows it for the order's option type at this New York time (``usePaperRecord``).
  */
 
 export type PaperRecord = {

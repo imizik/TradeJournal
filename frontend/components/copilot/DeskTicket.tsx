@@ -6,7 +6,9 @@ import { useDeskMode } from "@/components/copilot/DeskMode";
 import { PaperButton } from "@/components/copilot/DeskPaper";
 import { RealRules } from "@/components/copilot/DeskRules";
 import { MODE_FRAME, PaperHalf, RealTicketLine } from "@/components/copilot/ModeMark";
+import PaperRecordLine from "@/components/copilot/PaperRecordLine";
 import PlayCheck, { type PlayCheckData } from "@/components/copilot/PlayCheck";
+import { usePaperRecord } from "@/components/copilot/WhatsWorking";
 import SetupRecordLines, { premiumLine } from "@/components/copilot/SetupRecordLines";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
 import { getSymbolLoop, type SetupRecord } from "@/lib/copilot";
@@ -255,6 +257,9 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
   const ageing = quotedAt(ticket) !== null && nowS - quotedAt(ticket)! > STALE_S;
   useEffect(() => { if (ageing && seeded) { setLimit(was => (was === seeded ? "" : was)); setSeeded(""); } }, [ageing, seeded]); // eslint-disable-line react-hooks/set-state-in-effect -- the quote aged on the clock
 
+  // Paper's record for this kind of order (its option type, entered at this New York time): informational, never blocks.
+  const paperRecord = usePaperRecord(ticket?.state === "ok" && !ticket.spread ? ticket.contract?.type ?? null : null);
+
   const symbol = ticket?.symbol;
   useEffect(() => {
     if (!symbol) return;
@@ -389,6 +394,7 @@ function TicketView({ investigationId, initialPick, onClose, onPlaced }: {
           <SetupRecordLines symbol={ticket.symbol} side={k.type} setup={setup} />
           {premium && <p className="text-xs text-muted-foreground">{premium}</p>}
           {!premium && !hasRecord(setup, k.type) && <span className="text-xs text-muted-foreground">No record for this setup in your journal yet.</span>}
+          <PaperRecordLine record={paperRecord} />
         </Row>
         <Row name="Before you place it">
           {fresh ? (

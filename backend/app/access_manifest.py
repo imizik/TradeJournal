@@ -138,6 +138,8 @@ DOMAIN_ROUTES = frozenset({
     'PATCH /copilot/paper/positions/{position_id}',  # a paper position's stop, target or note after entry: paper tables and the desk's kept prices only; never a fill
     'POST /copilot/desk/use',  # the desk's quiet use counts (piece ids, opens, taps, seconds on screen): the desk-use table only; no text, no tickers
     'GET /copilot/desk/use',  # how he uses the desk: the desk-use table and his folds, read only
+    'GET /copilot/desk/whats-working',  # his closed real and paper trades in buckets: journal trades and paper events, read only; no quote, no Robinhood
+    'GET /copilot/desk/whats-working/record',  # the paper record for the ticket's option type at this time: paper events, read only
     'PUT /copilot/desk/folds',  # which desk pieces he folded away, per device size: the desk-folds settings row only
     'GET /copilot/rules',  # his own trading rules: the rules table only
     'PUT /copilot/rules',  # save his own trading rules: the rules table only

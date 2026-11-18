@@ -771,6 +771,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
     // The mode switch's Real and Paper (its Replay is the Replay place above). Nothing is sent.
     { id: "mode-paper", name: "Paper mode", hint: "Paper first: tickets lead with Fill on paper, the paper value beside the real. Nothing is sent.", run: () => pickMode("paper") },
     { id: "mode-real", name: "Real mode", hint: "The desk as your real accounts show it", run: () => pickMode("real") },
+    { id: "whats-working", name: "What's working", hint: "Where your money comes from and where it leaks, real beside paper", run: () => reveal(["scorecard"], "whats-working-toggle", true) },
     { id: "desk-use", name: "How I use the desk", hint: "What you use most and least; fold away what you don't", run: openUse },
     // The old pages' pieces the desk has no home for yet (the pages themselves now open the desk).
     { id: "sync", name: "Data sync", hint: "Run a sync or one job, job history, Gmail. Rebuild and Resync All ask first.", run: openSyncCenter },

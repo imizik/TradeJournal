@@ -8,7 +8,8 @@ turn runner, figure check and hidden-ticker check it reuses): every dollar figur
 hold, and a review naming a ticker he does not follow is not shown. It never invents a trade: the facts list every one.
 Below the model's text, one line per QQQ strategy book (``engine/strategy_books.py``: the week's result, the running
 total and live against the backtest) is written here from the books' own rows, never by the model, and never suggests a
-rule change.
+rule change. Last, one line on the biggest leak in his last 30 days of real trades, phrased as one change to try on
+paper (``engine/whats_working.py``: written here, never by the model, and it never changes a rule or tunes a book).
 
 When and what it costs:
 
@@ -272,11 +273,12 @@ async def write(now: float) -> dict:
         log.warning("paper review facts unreadable", exc_info=True)
         return {"state": "error", "message": "The paper book or the journal could not be read."}
     books = await asyncio.to_thread(_strategy_lines, now, found["hidden"])
+    leak = await asyncio.to_thread(_leak_line, now)
     if not due(found):
         if not books:
             return {"state": "skipped", "message": "No closed paper trades this week, so no review was written."}
         # No paper trade to review: the strategy books' lines alone, written here with no model call.
-        entry = _entry(found, now, "No closed paper trades of yours this week.", 0.0, "", books)
+        entry = _entry(found, now, "No closed paper trades of yours this week.", 0.0, "", books, leak)
         await asyncio.to_thread(_save, found["day"], entry)
         return entry
     before = await asyncio.to_thread(_today_count)
@@ -303,7 +305,7 @@ async def write(now: float) -> dict:
     if named:
         log.warning("paper review named %d ticker(s) he does not follow", len(named))
         return {"state": "error", "cost_usd": result["cost_usd"], "message": "The review named a ticker you do not follow, so it is not shown."}
-    entry = _entry(found, now, result["text"], result["cost_usd"], facts_text, books)
+    entry = _entry(found, now, result["text"], result["cost_usd"], facts_text, books, leak)
     await asyncio.to_thread(_save, found["day"], entry)
     return entry
 
@@ -320,9 +322,27 @@ def _strategy_lines(now: float, hidden: set[str]) -> list[str]:
     return [] if all("no records on this server" in ln for ln in lines) else lines
 
 
-def _entry(found: dict, now: float, text: str, cost: float, facts_text: str, books: list[str]) -> dict:
+def _leak_line(now: float) -> str | None:
+    """One line, written here (never by the model) from the last 30 days of real trades: the single biggest leak with
+    enough trades, as one change to try on paper next week (``engine/whats_working.py``). It suggests only: it never
+    changes a rule or a strategy book. None when the journal cannot be read (the review stands without it)."""
+    from sqlmodel import Session
+    from app.database import engine
+    from app.engine import whats_working
+    try:
+        with Session(engine) as db:
+            return whats_working.leak_line(db, now)
+    except Exception:  # noqa: BLE001 - the review stands without it
+        log.warning("what's working unreadable for the paper review", exc_info=True)
+        return None
+
+
+def _entry(found: dict, now: float, text: str, cost: float, facts_text: str, books: list[str],
+           leak: str | None = None) -> dict:
     if books:
         text = text + "\n\nStrategy books (fixed rules, no money; judged after months):\n" + "\n".join(f"- {ln}" for ln in books)
+    if leak:
+        text = text + "\n\n" + leak
     return {"state": "ok", "text": text, "cost_usd": cost, "at": now, "day": found["day"], "monday": found["monday"],
             "facts": facts_text, "ping": {"state": "pending", "attempts": 0, "next_at": None, "error": None}}
 
