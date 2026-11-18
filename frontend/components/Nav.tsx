@@ -8,6 +8,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import PlanATrade from "@/components/copilot/PlanATrade";
 import PlanStreakChip from "@/components/PlanStreak";
+import { openJournal } from "@/components/copilot/DeskJournal";
 import { Bot, Crosshair, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Rocket, Scale, SlidersHorizontal, Target, Telescope, ChevronRight, ClipboardCheck, Menu, Sun, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
@@ -259,7 +260,8 @@ function NavLink({ item: { href, label, icon: Icon }, pathname, onNavigate, rail
   const link = (
     <Link
       href={href}
-      onClick={onNavigate}
+      // Already on the desk, the Journal summary opens in place: a link would remount the desk and drop an open investigation.
+      onClick={href === JOURNAL_SUMMARY.href && pathname.startsWith("/copilot-lab") ? (event) => { event.preventDefault(); onNavigate?.(); openJournal(); } : onNavigate}
       // The rail shows icons only: the name is the link's label and its tooltip.
       aria-label={rail ? label : undefined}
       aria-current={isActive ? "page" : undefined}

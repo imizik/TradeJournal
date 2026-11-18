@@ -89,7 +89,8 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
     if (value === "all") search.delete(name); else search.set(name, value);
     if (params.decision) search.set("decision", params.decision);
     if (params.practice_run) search.set("practice_run", params.practice_run);
-    return `${base}${search.size ? `?${search}` : ""}`;
+    // Bare /dashboard opens the desk while it is home, so a cleared filter keeps a parameter that means "all".
+    return `${base}${search.size ? `?${search}` : base === "/dashboard" ? "?account=all" : ""}`;
   }
 
   return <div className="min-w-0 space-y-4">

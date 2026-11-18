@@ -135,30 +135,29 @@ test("while the lab is on the desk is home: Today forwards to it, and Desk leads
   await expect(menu.getByRole("link", { name: "Desk", exact: true })).toHaveAttribute("href", "/copilot-lab");
   await expect(menu.getByRole("link", { name: "Today", exact: true })).toHaveCount(0);
   await expect(menu.getByRole("link", { name: "Copilot", exact: true })).toHaveCount(0); // one entry for one page
-  // The Dashboard leaves the tab bar for More → Journal, at its own address.
+  // The Dashboard leaves the menu: More → Journal lists the desk's Journal summary instead.
   await menu.getByRole("button", { name: "Journal", exact: true }).click();
-  await expect(menu.getByRole("link", { name: "Dashboard", exact: true })).toHaveAttribute("href", "/dashboard");
-  await menu.getByRole("link", { name: "Dashboard", exact: true }).click();
-  await expect(page).toHaveURL((url) => url.pathname === "/dashboard");
+  await expect(menu.getByRole("link", { name: "Dashboard", exact: true })).toHaveCount(0);
+  await expect(menu.getByRole("link", { name: "Journal summary", exact: true })).toHaveAttribute("href", "/copilot-lab?desk=journal");
+  await page.goto("/dashboard?account=all"); // a parameter keeps the page (bare /dashboard opens the desk once the server gate is on)
   await expect(page.getByTestId("owner-dashboard")).toBeVisible();
   // Every other page: the app's bar, Desk first, the Dashboard not on it.
   await expect(tabs.getByRole("link")).toHaveText(["Desk", "Charts", /Plan/, "Trades"]);
   await expect(tabs.getByRole("link", { name: "Desk" })).toHaveAttribute("href", "/copilot-lab");
 });
 
-test("while the lab is on the sidebar leads with Desk, then Charts; the Dashboard heads Journal at /dashboard", async ({ page }) => {
+test("while the lab is on the sidebar leads with Desk, then Charts; Journal summary heads Journal and the Dashboard is gone from the menu", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
-  await page.goto("/dashboard");
+  await page.goto("/dashboard?account=all");
   const sidebar = page.getByRole("navigation").filter({ has: page.getByRole("button", { name: "Journal", exact: true }) });
   await expect(sidebar.getByRole("link", { name: "Desk", exact: true })).toBeVisible();
   const primary = sidebar.getByRole("list").first().getByRole("link");
   await expect(primary).toHaveText(["Desk", "Charts"]);
   await expect(sidebar.getByRole("link", { name: "Today", exact: true })).toHaveCount(0);
-  // On the Dashboard its group opens by itself, with the Dashboard marked current.
-  await expect(sidebar.getByRole("button", { name: "Journal", exact: true })).toHaveAttribute("aria-expanded", "true");
-  await expect(sidebar.getByRole("link", { name: "Dashboard", exact: true })).toHaveAttribute("aria-current", "page");
-  await expect(sidebar.getByRole("link", { name: "Dashboard", exact: true })).toHaveAttribute("href", "/dashboard");
+  await sidebar.getByRole("button", { name: "Journal", exact: true }).click();
+  await expect(sidebar.getByRole("link", { name: "Dashboard", exact: true })).toHaveCount(0);
+  await expect(sidebar.getByRole("link", { name: "Journal summary", exact: true })).toHaveAttribute("href", "/copilot-lab?desk=journal");
   await expect(page.getByTestId("owner-dashboard")).toBeVisible();
   // Its filters stay on /dashboard rather than going home to the desk.
   await page.getByRole("group", { name: "Type" }).getByRole("link", { name: "Options" }).click();

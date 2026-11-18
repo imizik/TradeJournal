@@ -154,3 +154,19 @@ test("More → Journal summary opens the same drawer and drops the word from the
   await expect(page.getByTestId("desk-journal")).toBeVisible();
   await expect(page).not.toHaveURL(/desk=journal/);
 });
+
+test("Journal summary over the Sync Center: Escape closes the top one first and focus goes back", async ({ page }) => {
+  await open(page);
+  await stubJournal(page);
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByRole("dialog", { name: "Jump to" }).getByRole("combobox").fill("data sync");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Data Sync Center" })).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByRole("dialog", { name: "Jump to" }).getByRole("combobox").fill("journal summary");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("desk-journal")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("desk-journal")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Data Sync Center" })).toBeVisible(); // the one underneath stays
+});

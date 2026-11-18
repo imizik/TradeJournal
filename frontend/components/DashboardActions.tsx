@@ -240,7 +240,7 @@ export function DeskSyncCenter() {
     if (!open) return;
     const frame = requestAnimationFrame(() => document.querySelector<HTMLElement>('[aria-label="Close Sync Center"]')?.focus());
     // A native dialog opened above it (⌘K's palette) keeps its own Escape.
-    const key = (event: KeyboardEvent) => { if (event.key === "Escape" && !document.querySelector("dialog[open]")) { event.stopImmediatePropagation(); event.preventDefault(); setOpen(false); } };
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape" && !document.querySelector("dialog[open], [data-testid=desk-journal]")) { event.stopImmediatePropagation(); event.preventDefault(); setOpen(false); } };
     window.addEventListener("keydown", key, true);
     return () => { cancelAnimationFrame(frame); window.removeEventListener("keydown", key, true); };
   }, [open]);

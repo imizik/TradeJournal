@@ -51,13 +51,26 @@ export default function DeskJournal() {
       .catch(() => { if (live) setError(true); });
     return () => { live = false; };
   }, [open]);
-  // Focus moves in; Escape closes it before any desk key sees it (a native dialog above, such as ⌘K, keeps its own).
+  // Focus moves in and back out on close; Tab stays inside; Escape closes it before any desk key sees it (a native dialog
+  // above, such as ⌘K, keeps its own).
   useEffect(() => {
     if (!open) return;
+    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const frame = requestAnimationFrame(() => document.querySelector<HTMLElement>('[aria-label="Close journal summary"]')?.focus());
-    const key = (event: KeyboardEvent) => { if (event.key === "Escape" && !document.querySelector("dialog[open]")) { event.stopImmediatePropagation(); event.preventDefault(); setOpen(false); } };
+    const key = (event: KeyboardEvent) => {
+      if (document.querySelector("dialog[open]")) return;
+      if (event.key === "Escape") { event.stopImmediatePropagation(); event.preventDefault(); setOpen(false); return; }
+      if (event.key !== "Tab") return;
+      const box = document.querySelector<HTMLElement>('[data-testid="desk-journal"]');
+      const items = box ? Array.from(box.querySelectorAll<HTMLElement>("a[href], button, summary, input, [tabindex]:not([tabindex='-1'])")).filter(el => !el.hasAttribute("disabled")) : [];
+      if (!items.length) return;
+      const first = items[0], last = items[items.length - 1];
+      if (!box!.contains(document.activeElement)) { event.preventDefault(); first.focus(); }
+      else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
     window.addEventListener("keydown", key, true);
-    return () => { cancelAnimationFrame(frame); window.removeEventListener("keydown", key, true); };
+    return () => { cancelAnimationFrame(frame); window.removeEventListener("keydown", key, true); if (before?.isConnected) before.focus(); };
   }, [open]);
   if (!open) return null;
 
@@ -68,7 +81,7 @@ export default function DeskJournal() {
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" onClick={() => setOpen(false)} />
-      <aside role="region" aria-label="Journal summary" data-testid="desk-journal"
+      <aside role="dialog" aria-modal="true" aria-label="Journal summary" data-testid="desk-journal"
         className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-3xl flex-col border-l border-border bg-background shadow-2xl">
         <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
           <div>
