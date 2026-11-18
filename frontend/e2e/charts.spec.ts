@@ -7721,3 +7721,29 @@ for (const width of [390, 1440]) test(`later notes submit once while pending and
   expect(saved.notes.map((note) => note.text)).toEqual([words]);
   await expect(page.getByRole("region", { name: "Saved plan" })).toContainText(words);
 });
+
+test("Alpaca fallback labels delayed candles and skips the live stream", async ({ page }) => {
+  let streamRequests = 0;
+  await stubExhaustedHistory(page);
+  await page.route("**/api/backend/charts/stream?**", async (route) => {
+    streamRequests++;
+    await route.fulfill({ contentType: "text/event-stream", body: "" });
+  });
+  await openAt(page, TUESDAY_1032, (url) => {
+    const delayedAt = TUESDAY_1032 - 960;
+    const data = currentFixture(url, TUESDAY_1032, delayedAt);
+    data.intraday_as_of = delayedAt - 60;
+    data.provider = "Alpaca SIP";
+    data.delayed = true;
+    data.quotes = data.quotes.map((quote) => ({ ...quote, source: data.provider, trade_time: delayedAt }));
+    for (const panel of Object.values(data.panels)) {
+      panel?.bars.forEach((bar) => { bar.source = "alpaca_sip"; });
+    }
+    return data;
+  });
+  await expect(page.getByText("Alpaca SIP · 15m delayed", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("main candle values")).toContainText("SIP");
+  await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("Delayed data");
+  expect(streamRequests).toBe(0);
+  await page.screenshot({ path: test.info().outputPath("charts-alpaca-delayed.png"), animations: "disabled" });
+});

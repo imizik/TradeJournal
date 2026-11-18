@@ -40,7 +40,7 @@ import { fetchSymbolOverview } from "@/lib/symbolInfo";
 import type { NewsFocus } from "./SymbolInfo";
 import { useSymbolNews } from "@/lib/newsFeed";
 import ToolbarMenu from "./ToolbarMenu";
-import { instrumentSettings, isMacroSymbol, instrumentPrice, instrumentTime, supportedIntervals, TECH_RETURN_KEY, readTechReturn, macroArrangement, LAYOUT_PRESETS, cleanIndicatorColors, cleanFillLabels, INDICATOR_COLORS, INTERVAL_SECONDS, indicatorColors, activeLayout, applyLayout, applyPreset, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, explainCandle, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, INDICATOR_NAMES, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, OPENING_BARS, optionsQuery, PANEL_OPENING_BARS, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
+import { ALPACA_CHART_PROVIDER, instrumentSettings, isMacroSymbol, instrumentPrice, instrumentTime, supportedIntervals, TECH_RETURN_KEY, readTechReturn, macroArrangement, LAYOUT_PRESETS, cleanIndicatorColors, cleanFillLabels, INDICATOR_COLORS, INTERVAL_SECONDS, indicatorColors, activeLayout, applyLayout, applyPreset, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, explainCandle, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, INDICATOR_NAMES, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, OPENING_BARS, optionsQuery, PANEL_OPENING_BARS, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
 import { ZOOM_SPEED_NAMES, readZoomSpeed, writeZoomSpeed } from "@/lib/zoomSpeed";
 import type { ZoomSpeed } from "@/lib/zoomSpeed";
 import type { AutoZone, ColorKey, ChartBar, ChartPanelData, ChartQuote, ChartStreamTick, FillLabels, HiddenGroups, Indicators, Interval, LayoutPreset, MarketDay, OptionsLayer, PanelStudies, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
@@ -223,10 +223,11 @@ function WatchlistQuote({ live, quote, market, paused, wide }: { live: LiveFeed;
   const change = noSessionTrade ? null : shownTick ? sessionChange(shownTick.price, shownTick.session, quote)
     : freshQuote ? sessionChange(freshQuote.last, quoteSession, freshQuote) : quoteChange(quote, quoteSession);
   const quoteAge = quote?.trade_time == null || now < quote.trade_time ? null : Math.floor(now - quote.trade_time);
+  const quoteSource = quote?.source ? `${quote.source} · delayed` : "Tradier quote";
   const source = shownTick
     ? `${tickIsLive ? "Live trade" : paused ? "Paused trade" : tickAge! <= 45 ? "Recent trade" : "Stale streamed trade"} · ${tickAge}s old`
-    : quoteAge == null ? "Tradier quote · timestamp unavailable"
-      : `${quoteAge <= 45 ? "Tradier quote" : "Stale Tradier quote"} · ${quoteAge}s old`;
+    : quoteAge == null ? `${quoteSource} · timestamp unavailable`
+      : `${quoteAge <= 45 || quote?.source ? quoteSource : `Stale ${quoteSource}`} · ${quoteAge}s old`;
   const changeSource = noSessionTrade ? `${source} · last regular-session price; no premarket trade seen yet`
     : closing && change != null ? `${source} · change as of this ${shownTick ? "trade" : "quote"}` : source;
   if (isMacroSymbol(live.symbol)) {
@@ -245,10 +246,14 @@ function WatchlistQuote({ live, quote, market, paused, wide }: { live: LiveFeed;
     {wide && <span aria-hidden title={changeSource} className={`text-right font-mono ${tone} ${closing ? "opacity-70" : ""}`}>{dollars == null ? "—" : `${dollars >= 0 ? "+" : ""}${dollars.toFixed(2)}`}</span>}
     <span title={changeSource} aria-label={`${change == null ? "Change unavailable" : `${change >= 0 ? "+" : ""}${change.toFixed(2)} percent`}; ${changeSource}`}
       className={`text-right font-mono ${change == null ? "text-muted-foreground" : change < 0 ? "text-rose-400" : "text-emerald-400"} ${closing ? "opacity-70" : ""}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}</span>
-    <span title={quote?.volume != null ? `Today's volume ${quote.volume.toLocaleString("en-US")} · Tradier quote` : "Volume unavailable"} className="text-right font-mono text-muted-foreground">{quote?.volume != null ? watchVolume.format(quote.volume) : "—"}</span></>;
+    <span title={quote?.volume != null ? `Today's volume ${quote.volume.toLocaleString("en-US")} · ${quoteSource}` : "Volume unavailable"} className="text-right font-mono text-muted-foreground">{quote?.volume != null ? watchVolume.format(quote.volume) : "—"}</span></>;
 }
 
-function FeedStatus({ live, paused, delayed, hasData, failed, loading, sample = false }: { live: LiveFeed; paused: boolean; delayed: boolean; hasData: boolean; failed: boolean; loading: boolean; sample?: boolean }) {
+function dailyHistoryProvider(interval: Interval, provider?: string) {
+  return !intradayInterval(interval) && provider === ALPACA_CHART_PROVIDER ? "alpaca_sip" as const : undefined;
+}
+
+function FeedStatus({ live, paused, delayed, hasData, failed, loading, sample = false, alpaca = false }: { live: LiveFeed; paused: boolean; delayed: boolean; hasData: boolean; failed: boolean; loading: boolean; sample?: boolean; alpaca?: boolean }) {
   const stale = useClock((now) => staleCandles(now, live.fetched));
   const streaming = useStream(live, (_, state) => state.key === live.key && state.status === "connected");
   return <div className="flex shrink-0 items-center gap-1.5 text-muted-foreground" role="status">
@@ -256,13 +261,13 @@ function FeedStatus({ live, paused, delayed, hasData, failed, loading, sample = 
     {/* The source's detail lives in the tooltip; the strip names only the state. */}
     {streaming && !sample && !paused && !delayed && !isMacroSymbol(live.symbol)
       ? <span title="Tradier stream · studies refresh 15s">Live stream</span>
-      : sample ? "Simulated chart snapshot" : paused ? "Updates paused" : delayed ? "Tradier sandbox · delayed" : isMacroSymbol(live.symbol) ? "Tradier index observations · 60s polling" : "Tradier · 15s refresh"}
+      : sample ? "Simulated chart snapshot" : paused ? "Updates paused" : delayed ? (alpaca ? "Alpaca SIP · 15m delayed" : "Tradier sandbox · delayed") : isMacroSymbol(live.symbol) ? "Tradier index observations · 60s polling" : "Tradier · 15s refresh"}
     {loading && <Loader2 size={12} className="animate-spin" />}
   </div>;
 }
 
 /** The status strip's freshness: the newest minute candle (left out when `brief`, on a phone in full screen) and the shown price's age. */
-function LiveFooter({ live, quote, candle, market, asOf, brief = false }: { live: LiveFeed; quote?: ChartQuote; candle?: ChartBar; market?: MarketDay; asOf?: number | null; brief?: boolean }) {
+function LiveFooter({ live, quote, candle, market, asOf, delayed = false, brief = false }: { live: LiveFeed; quote?: ChartQuote; candle?: ChartBar; market?: MarketDay; asOf?: number | null; delayed?: boolean; brief?: boolean }) {
   const minute = useStream(live, (ticks) => asOf === undefined ? 0
     : ticks.reduce((latest, tick) => liveTick(tick, live) ? Math.max(latest, tick.minute) : latest, asOf ?? 0));
   const tick = useStream(live, (ticks) => latestTrade(ticks, live.symbol));
@@ -273,8 +278,8 @@ function LiveFooter({ live, quote, candle, market, asOf, brief = false }: { live
   const today = useClock((now) => etTime(now, true));
   return <>
     {/* Today's date is left out of the strip; the tooltip keeps the full stamp. */}
-    {!brief && <span className="min-w-0 truncate" title={minute ? `Last minute candle ${etTime(minute, true)} ${etTime(minute)} ET${closed ? "" : " · the latest candle may still be forming"}` : undefined}>
-      {minute ? `Last 1m candle ${etTime(minute, true) === today ? "" : `${etTime(minute, true)} `}${etTime(minute)} ET${closed ? "" : " · may be forming"}` : "New York time"}</span>}
+    {!brief && <span className="min-w-0 truncate" title={minute ? `Last minute candle ${etTime(minute, true)} ${etTime(minute)} ET${closed || delayed ? "" : " · the latest candle may still be forming"}` : undefined}>
+      {minute ? `Last 1m candle ${etTime(minute, true) === today ? "" : `${etTime(minute, true)} `}${etTime(minute)} ET${closed || delayed ? "" : " · may be forming"}` : "New York time"}</span>}
     <span className="shrink-0">{age !== null ? `${shown.source} ${age < 60 ? `${age}s` : `${Math.floor(age / 60)}m`} ago` : "No price timestamp"}</span>
   </>;
 }
@@ -438,7 +443,6 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   }, [cache, response, older, requestKey, restored, historyKey]);
   // Market trades survive symbol/session/layout changes; each consumer selects
   // its symbol and session. Reconnect only when the subscribed union changes.
-  const streamKey = "market";
   const subscriptionKey = [...new Set([...symbolsKey.split(","), ...watchlistKey.split(",").filter(Boolean)])].filter((s) => !isMacroSymbol(s)).sort().join(",");
   const data = response?.key === requestKey ? response.data : null;
   // Candles depend only on the symbol and session. While a request for a new
@@ -453,7 +457,9 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   // (watchlist quotes, market hours, notes).
   const latest = response?.data;
   const sampleChart = latest?.sample_data === true;
-  const streamReady = !!latest;
+  const alpacaFallback = latest?.provider === ALPACA_CHART_PROVIDER;
+  const streamKey = alpacaFallback ? "alpaca-polling" : "market";
+  const streamReady = !!latest && !alpacaFallback;
   const requestFailed = error?.key === requestKey;
   const currentOlder = useMemo(() => restored && historyKey !== requestKey ? saved!.older.panels : older.key === session ? older.panels : {}, [older, session, restored, saved, historyKey, requestKey]);
   const hasData = !!current;
@@ -470,7 +476,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
       const tail = feedFor(slot.symbol)?.panels[slot.interval];
       const past = currentOlder[key];
       if (!tail || merged.has(key)) continue;
-      if (!past?.bars.length || (past.adjustment && splitsKey(past.adjustment) !== splitsKey(feedFor(slot.symbol)?.adjustment))) { merged.set(key, tail); continue; }
+      if (!past?.bars.length || past.provider !== dailyHistoryProvider(slot.interval, feedFor(slot.symbol)?.provider) || (past.adjustment && splitsKey(past.adjustment) !== splitsKey(feedFor(slot.symbol)?.adjustment))) { merged.set(key, tail); continue; }
       const bars = mergeBars(retainHistory(past.bars, tail.bars, visibleTimes.current.get(key) ?? null), tail.bars);
       const times = new Set(bars.map((bar) => bar.time));
       merged.set(key, { bars, markers: [...new Map([...past.markers, ...tail.markers].filter((m) => times.has(m.time)).map((m) => [`${m.id}:${m.time}`, m])).values()] });
@@ -598,13 +604,18 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
 
   // A split recorded while the tab is open changes the basis of candles already loaded. Those are dropped,
   // never mixed with newer pages; scrolling back rereads them on the new basis.
-  const feedBasis = JSON.stringify([...wanted.keys()].map((name) => { const a = feedFor(name)?.adjustment; return [name, a ? splitsKey(a) : null]; }));
+  const feedBasis = JSON.stringify([...wanted.keys()].map((name) => {
+    const feed = feedFor(name);
+    return [name, { basis: feed?.adjustment ? splitsKey(feed.adjustment) : null, provider: feed?.provider }];
+  }));
   useEffect(() => {
-    const now = new Map(JSON.parse(feedBasis) as [string, string | null][]);
+    const now = new Map(JSON.parse(feedBasis) as [string, { basis: string | null; provider?: string }][] );
     const stale = new Set(slots.filter((slot) => {
-      const loaded = older.panels[frameKey(slot)]?.adjustment;
+      const loaded = older.panels[frameKey(slot)];
       const target = now.get(slot.symbol);
-      return loaded && target != null && splitsKey(loaded) !== target;
+      if (!loaded || !target?.basis) return false;
+      return loaded.provider !== dailyHistoryProvider(slot.interval, target.provider)
+        || (loaded.adjustment && splitsKey(loaded.adjustment) !== target.basis);
     }).map(frameKey));
     if (!stale.size) return;
     stale.forEach((key) => { historyFlights.current.get(key)?.abort(); historyFlights.current.delete(key); visibleTimes.current.delete(key); failedHistory.current.delete(key); });
@@ -615,7 +626,9 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
     const key = frameKey(frame);
     const feed = feedFor(frame.symbol);
     if (historyFlights.current.has(key) || !feed) return;
-    const past = currentOlder[key];
+    const provider = dailyHistoryProvider(frame.interval, feed.provider);
+    const previous = currentOlder[key];
+    const past = previous?.provider === provider ? previous : undefined;
     // Rendered mid-load: that flight has just ended but its candles are not drawn yet, so this
     // cursor is stale and the view that asked (a queued prefetch) is about to be replaced.
     if (past?.loading && !retry && beforeOverride === undefined) return;
@@ -626,11 +639,11 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
     const request = { before, limit };
     const controller = new AbortController();
     historyFlights.current.set(key, controller);
-    setOlder((state) => beginHistoryLoad(state, session, key, request));
+    setOlder((state) => beginHistoryLoad(state, session, key, request, provider));
     let continuation: string | null = null;
     try {
       while (!controller.signal.aborted) {
-        const page = await fetchChartHistory({ symbol: frame.symbol, interval: frame.interval, session, before, limit, continuation, signal: controller.signal });
+        const page = await fetchChartHistory({ symbol: frame.symbol, interval: frame.interval, session, before, limit, continuation, provider, signal: controller.signal });
         if (controller.signal.aborted) return;
         if (splitsKey(page.adjustment) !== splitsKey(feed.adjustment)) {
           // The page and the candles on screen disagree about splits; accepting it would mix two price bases.
@@ -651,7 +664,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
             issue: "Visible candles fill the 12,000-candle limit. Zoom in before loading more.", loading: false } } };
           const times = new Set(retained.map((bar) => bar.time));
           const markers = [...new Map([...(prior?.markers ?? []), ...page.markers].filter((m) => times.has(m.time)).map((m) => [`${m.id}:${m.time}`, m])).values()];
-          return { ...state, panels: { ...state.panels, [key]: { bars: retained, markers, request,
+          return { ...state, panels: { ...state.panels, [key]: { bars: retained, markers, request, provider,
             calendarNote: page.calendar_note ?? prior?.calendarNote ?? null, adjustment: page.adjustment, rvol: past.rvol, historyStart: page.history_start ?? prior?.historyStart ?? null,
             // Notes the workspace banner does not already carry (for example a jump that looks like an unrecorded split in older candles).
             adjustmentNote: page.adjustment.warnings.filter((note) => !feed.adjustment?.warnings.includes(note)).join(" ") || prior?.adjustmentNote || null,
@@ -896,6 +909,10 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
 
   // One stream for every symbol on screen; each chart applies only its own symbol's trades.
   useEffect(() => {
+    if (alpacaFallback) {
+      stream.status(streamKey, "fallback");
+      return;
+    }
     if (!ready || !streamReady || paused || sampleChart || !subscriptionKey) return;
     let alive = true;
     let source: EventSource | null = null;
@@ -936,7 +953,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
     connect();
     document.addEventListener("visibilitychange", visibility);
     return () => { alive = false; source?.close(); stream.flush(); document.removeEventListener("visibilitychange", visibility); };
-  }, [ready, streamReady, paused, sampleChart, subscriptionKey, streamKey, stream]);
+  }, [ready, streamReady, paused, sampleChart, alpacaFallback, subscriptionKey, streamKey, stream]);
 
   const setIntervalAt = (index: number, value: Interval) => setSettings((s) => ({ ...s, intervals: s.intervals.map((v, i) => i === index ? (supportedIntervals((index && s.panelSymbols[index]) || s.symbol).includes(value) ? value : "4h") : v) }));
   // Intervals are workspace settings, not per-symbol, so they carry over.
@@ -1321,7 +1338,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   // both, so the REST candle (without them) is the one that matters here.
   const quoteSlot = slots.find((slot) => slot.symbol === symbol && intradayInterval(slot.interval));
   const latestCandle = quoteSlot ? panels.get(frameKey(quoteSlot))?.bars.at(-1) : undefined;
-  const clockFor = (name: string) => ({ session, market: feedFor(name)?.market ?? latest?.equity_market ?? latest?.market, paused, delayed: !!latest?.delayed,
+  const clockFor = (name: string) => ({ session, market: feedFor(name)?.market ?? latest?.equity_market ?? latest?.market, paused, delayed: !!(feedFor(name)?.delayed ?? latest?.delayed),
     failed: requestFailed || !!feedFor(name)?.issues.length, fetched: feedFor(name)?.fetched_at.intraday });
   // Until this request's candles arrive, each chart keeps its last frame under
   // a label naming what is loading. A failed request clears it instead.
@@ -1796,7 +1813,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   const keysButton = <button className={`${plain(help, opened)} ${control} hidden sm:inline-flex`} onClick={() => { if (palette === null && !layoutMenu) setHelp(true); }} aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-expanded={help} title="Keyboard shortcuts (?)"><Keyboard size={13} /></button>;
 
   // What the data is, and the chart library's attribution: in the status strip on a desktop, in the More menu on a phone.
-  const about = <p className="w-72 whitespace-normal text-[11px] leading-5 text-foreground/80">{latest?.history_note ?? "US stock and ETF charts powered by Tradier."} RTH VWAP uses minute HLC3 and resets at 9:30 ET. Live trade prices update candles while connected; volume and studies reconcile from Tradier every 15 seconds. Watchlist quotes may show the regular close after hours.</p>;
+  const about = <p className="w-72 whitespace-normal text-[11px] leading-5 text-foreground/80">{latest?.history_note ?? "US stock and ETF charts."} RTH VWAP uses minute HLC3 and resets at 9:30 ET. {!alpacaFallback && "Live trade prices update candles while connected. Volume and studies reconcile from Tradier every 15 seconds."}</p>;
   const attribution = <span><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer" className="hover:text-foreground">TradingView Lightweight Charts™</a> <a href="/lightweight-charts-NOTICE.txt" className="hover:text-foreground">Copyright (с) 2025 TradingView, Inc.</a></span>;
   // Undo, redo and the drawing tools (C1.1, C1.2): a slim rail beside the charts on a desktop, a toolbar row on a phone.
   const tools = <>
@@ -2178,7 +2195,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
           </> : <div className={`flex flex-col items-center justify-center rounded-lg border border-border bg-background px-8 text-center ${fill ? "min-h-0 flex-1" : "min-h-[490px]"}`}>
             {loading ? <Loader2 className="mb-4 animate-spin text-muted-foreground" size={28} /> : <ChartCandlestick className="mb-4 text-muted-foreground" size={36} />}
             <p className="text-sm font-medium text-foreground">{loading ? `Loading ${settings.symbol} candles…` : "Your chart workspace is ready"}</p>
-            <p className="mt-2 max-w-md text-xs leading-6 text-muted-foreground">{loading ? "Loading shared intraday and daily history from Tradier." : "Charts appear when Tradier market data is available. Your watchlist, intervals, and levels are saved to your workspace on every device."}</p>
+            <p className="mt-2 max-w-md text-xs leading-6 text-muted-foreground">{loading ? "Loading intraday and daily market data." : "Charts appear when market data is available. Your watchlist, intervals, and levels are saved to your workspace on every device."}</p>
             {narrow && <div className="mt-3">{planButton}</div>}
           </div>}
         </div>
@@ -2195,11 +2212,11 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
 
       {/* Provider, freshness, session and price basis stay in view however dense the charts get; attribution too. */}
       <footer aria-label="Chart status" className={`flex items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground ${fill && !narrow ? "h-6 shrink-0 whitespace-nowrap border-t border-border px-2" : fill ? "shrink-0 flex-wrap border-t border-border px-2 py-1" : "flex-wrap px-1 pt-1"}`}>
-        <FeedStatus live={live} paused={paused} delayed={!!latest?.delayed} hasData={hasData} failed={failed} loading={loading} sample={sampleChart} />
+        <FeedStatus live={live} paused={paused} delayed={!!latest?.delayed} hasData={hasData} failed={failed} loading={loading} sample={sampleChart} alpaca={alpacaFallback} />
         {marketLabel && <span aria-label="Market hours" title={market?.description ?? undefined} className={`shrink-0 rounded-md px-1.5 py-px ${market?.note ? "bg-amber-400/10 text-amber-300" : "bg-secondary text-foreground/80"}`}>{marketLabel}</span>}
         {basis && <span role="status" aria-label="Price basis" title={basis?.basis === "index_native" ? "Tradier index observations; no split adjustment applies." : basisTitle} className={`shrink-0 rounded-md px-1.5 py-px ${basisNotes.length ? "bg-amber-400/10 text-amber-300" : "bg-secondary text-foreground/80"}`}>
           {basis.basis === "index_native" ? (symbol === "US10Y" ? "Yield % · TNX / 10" : "Index points") : basis.status === "unknown" ? "Splits unknown · prices as supplied" : `Split-adjusted${basis.splits.length ? ` · ${basis.splits.length} split${basis.splits.length > 1 ? "s" : ""}` : ""}`}</span>}
-        {!isMacroSymbol(symbol) && <LiveFooter live={live} quote={selected} candle={latestCandle} market={market} asOf={current ? current.intraday_as_of : undefined} brief={narrow && immersive} />}
+        {!isMacroSymbol(symbol) && <LiveFooter live={live} quote={selected} candle={latestCandle} market={market} asOf={current ? current.intraday_as_of : undefined} delayed={alpacaFallback} brief={narrow && immersive} />}
         {owner && depthSession.running && <span role="status" aria-label="Level 2 session" className="flex shrink-0 items-center gap-1 rounded-md bg-secondary px-1.5 py-px text-foreground">
           <span className="h-1.5 w-1.5 rounded-full bg-foreground/70" />{depthSession.symbol} Level 2 live
           <button onClick={depthSession.stop} className="ml-1 rounded px-1 text-foreground underline-offset-2 hover:underline">Stop</button></span>}

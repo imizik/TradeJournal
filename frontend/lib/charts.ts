@@ -5,6 +5,8 @@ import type { Drawing, DrawingKind, ToolStyle } from "./drawings";
 import type { Earnings } from "./symbolInfo";
 import type { AlertsPayload } from "./alerts";
 
+export const ALPACA_CHART_PROVIDER = "Alpaca SIP";
+
 export const INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"] as const;
 export type Interval = typeof INTERVALS[number];
 export type ChartBar = {
@@ -171,7 +173,7 @@ export type MarketDay = {
   sessions: { part: "pre" | "regular" | "post"; start: number; end: number }[]; note: string | null;
 };
 export type ChartQuote = {
-  symbol: string; name: string; instrument_type?: string; last: number | null; change: number | null;
+  symbol: string; name: string; source?: string; instrument_type?: string; last: number | null; change: number | null;
   change_percentage: number | null; volume: number | null; previous_close: number | null;
   /** Tradier's explicit current regular-session close; null until it is known. */
   unit?: "index_points" | "percent"; provider_symbol?: string; change_bps?: number | null;
@@ -180,6 +182,7 @@ export type ChartQuote = {
 };
 /** One symbol's candles in a workspace response. */
 export type SymbolPanels = {
+  provider?: string; delayed?: boolean;
   market?: MarketDay;
   instrument?: { kind: "index"; unit: "index_points" | "percent"; provider_symbol: string; name: string; scale: number };
   history_note?: string;
@@ -702,13 +705,14 @@ export async function fetchOptionsLadder({ symbol, scope, signed, spot }: { symb
   return response.json();
 }
 
-export async function fetchChartHistory({ symbol, interval, session, before, limit, continuation, signal }: {
+export async function fetchChartHistory({ symbol, interval, session, before, limit, continuation, provider, signal }: {
   symbol: string; interval: Interval; session: ChartSettings["session"]; before: number;
-  limit?: number; continuation?: string | null; signal: AbortSignal;
+  limit?: number; continuation?: string | null; provider?: "alpaca_sip"; signal: AbortSignal;
 }): Promise<HistoryPage> {
   const query = new URLSearchParams({ symbol, interval, session, before: String(before) });
   if (limit !== undefined) query.set("limit", String(limit));
   if (continuation) query.set("continuation", continuation);
+  if (provider) query.set("provider", provider);
   const response = await fetch(apiUrl(`/charts/history?${query}`), { cache: "no-store", signal });
   const body = await response.json();
   if (!response.ok) throw new Error(body.detail?.message ?? "Unable to load older candles.");
@@ -819,7 +823,7 @@ export function shownPrice({ tick, quote, candle, scope }: {
   if (tick && liveTick(tick, scope)) return { price: tick.price, source: "Live trade", at: tick.at };
   if (scope.session === "extended" && candle?.extended && candle.time > (quote?.trade_time ?? 0))
     return { price: candle.close, source: "Extended-hours candle", at: candle.time };
-  return { price: quote?.last, source: "Tradier quote", at: quote?.trade_time };
+  return { price: quote?.last, source: quote?.source ? `${quote.source} · delayed` : "Tradier quote", at: quote?.trade_time };
 }
 
 /** Intraday candles older than 45 seconds read as stale: the countdown and status stop implying freshness. */

@@ -16,7 +16,7 @@ import httpx
 from app.engine import market_http
 
 from app.engine.chart_timing import measured, measured_lock
-from app.engine import chart_levels, chart_rvol, tradier
+from app.engine import alpaca, chart_levels, chart_rvol, tradier
 from app.engine.chart_adjust import adjust_minutes, describe, factor_before, suspect_gaps
 from app.engine.chart_math import ET, chart_bars, market_day, normalize_bars
 from app.engine.chart_splits import UNAVAILABLE, ChartSplits, chart_splits
@@ -40,9 +40,10 @@ LOW_SLOTS = 2  # of those places, the most that background reads (``read(low=Tru
 
 
 class ChartFeed:
-    def __init__(self, splits: ChartSplits | None = None):
+    def __init__(self, splits: ChartSplits | None = None, *, use_alpaca: bool = False):
         from app.engine.chart_daily import ChartDaily  # imported here: chart_daily needs this module's errors
 
+        self.use_alpaca = use_alpaca
         self.splits = splits  # None: no split data, disclosed on every response
         self.daily = ChartDaily(self)
         from app.engine.chart_indices import ChartIndices
@@ -75,11 +76,19 @@ class ChartFeed:
             self._low.release()
 
     def _read(self, path: str, params: dict, ttl: int, keep: bool) -> tuple[dict, float, str | None]:
-        """One budgeted Tradier GET. ``keep=False`` skips the response cache (and its stale fallback):
+        """One budgeted market-data GET. ``keep=False`` skips the response cache (and its stale fallback):
         for a large answer the caller stores itself, so it is not held twice."""
-        if not tradier.tradier_configured():
+        if self.use_alpaca:
+            if not alpaca.alpaca_configured():
+                raise ChartFeedError("Alpaca chart credentials are not configured.", "not_configured")
+            base_url, provider = alpaca.DATA_URL, "Alpaca"
+            headers = alpaca._headers()
+        elif tradier.tradier_configured():
+            base_url, provider = tradier.TRADIER_BASE_URL, "Tradier"
+            headers = {"Authorization": f"Bearer {tradier.TRADIER_API_KEY}", "Accept": "application/json"}
+        else:
             raise ChartFeedError("Connect your Tradier account to load charts. Set TRADIER_API_KEY on the private backend.", "not_configured")
-        key = (tradier.TRADIER_BASE_URL, path, tuple(sorted(params.items())))
+        key = (base_url, path, tuple(sorted(params.items())))
         # The lock guards the cache, the budget and the backoffs, never a provider call: different requests (a copilot
         # turn's reads, the alert monitors, the Charts tab) go out side by side. A request already in flight is joined,
         # not sent twice, so several tabs, panels or reads asking for the same thing still make one call.
@@ -120,27 +129,26 @@ class ChartFeed:
                             self._queued -= 1
                 now = time.time()  # deadlines (cache, backoff, cooldown) count from the call, not from the wait for a slot
                 try:
-                    with measured("tradier_provider"):
+                    with measured("history_provider" if self.use_alpaca else "tradier_provider"):
                         response = market_http.get(
-                            f"{tradier.TRADIER_BASE_URL}{path}", params=params,
-                            headers={"Authorization": f"Bearer {tradier.TRADIER_API_KEY}", "Accept": "application/json"},
-                            timeout=10,
+                            f"{base_url}{path}", params=params, headers=headers,
+                            timeout=alpaca.FAST_TIMEOUT_SECONDS if self.use_alpaca else 10,
                         )
                 finally:
                     self._slots.release()
                 if response.status_code == 429:
                     with self._lock:  # a later deadline from a read that started after this one stands
                         self._retry_at = max(self._retry_at, now + 60)
-                    raise ChartFeedError("Tradier's data allowance is temporarily exhausted. Retrying in one minute.", "rate_limited")
+                    raise ChartFeedError(f"{provider}'s data allowance is temporarily exhausted. Retrying in one minute.", "rate_limited")
                 if response.status_code in (401, 403):
                     with self._lock:  # a later deadline from a read that started after this one stands
                         self._retry_at = max(self._retry_at, now + 60)
-                    raise ChartFeedError("Tradier refused market data. Check the token and account data access.", "access_denied")
+                    raise ChartFeedError(f"{provider} refused market data. Check the token and account data access.", "access_denied")
                 if response.status_code >= 400:
-                    raise ChartFeedError("Tradier could not load these charts. Please retry shortly.")
+                    raise ChartFeedError(f"{provider} could not load these charts. Please retry shortly.")
                 payload = response.json()
                 if not isinstance(payload, dict) or payload.get("fault") or payload.get("errors"):
-                    raise ChartFeedError("Tradier returned an unexpected market-data response.")
+                    raise ChartFeedError(f"{provider} returned an unexpected market-data response.")
             except (httpx.HTTPError, ValueError, ChartFeedError) as exc:
                 with self._lock:
                     return self._failure(key, saved, now, exc)
