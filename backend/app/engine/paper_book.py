@@ -270,14 +270,25 @@ def current_run(db: Session, lock: bool = False) -> PaperRun | None:
     return db.exec(select(PaperRun).where(PaperRun.id == newest.id).with_for_update()).one()
 
 
-def start_run(db: Session, starting_cash, reset: bool, now: float) -> PaperRun:
+def start_run(db: Session, starting_cash, reset: bool, now: float, challenge: bool = False) -> PaperRun:
+    """A new run (``challenge``: the paper challenge's $10,000 run with its target and limits, ``paper_challenge``).
+    Refused for ``COOLDOWN_DAYS`` after a failed challenge, whatever kind of run is asked for."""
+    from app.engine import paper_challenge
+    if challenge:
+        starting_cash = paper_challenge.CHALLENGE_CASH
     cash = DEFAULT_CASH if starting_cash is None else starting_cash
     if isinstance(cash, bool) or not isinstance(cash, (int, float)) or not MIN_CASH <= cash <= MAX_CASH:
         raise PaperError(f"Start with {usd(MIN_CASH)} to {usd(MAX_CASH)}.")
     if current_run(db) is not None and not reset:
         raise PaperError("A paper account is already running; a reset starts a new run.", 409)
+    cooldown = paper_challenge.cooldown_until(db, now)
+    if cooldown is not None:
+        raise PaperError(f"Your last paper challenge failed; a new run can start {paper_challenge._until_words(cooldown)}.", 409)
     run = PaperRun(starting_cash=round(float(cash), 2), started_at=_utc(now))
     db.add(run)
+    if challenge:
+        db.flush()
+        paper_challenge.start(db, run, now)
     db.commit()
     db.refresh(run)
     return run
@@ -471,7 +482,10 @@ PHONE_UNANSWERED = "Not answered (phone)."
 def open_order(db: Session, body: dict, now: float, preview: bool = False, phone: bool = False) -> dict:
     """Open a paper position at the live quote (``preview``: what it would fill at, nothing stored). ``phone``: Paper it
     on a Telegram ping (``engine/telegram_paper.py``), where there is no checklist to tick: his tick-box rules are kept
-    as not answered (``ask``, reason ``PHONE_UNANSWERED``), never as broken. The fill carries its checklist (``rules``)."""
+    as not answered (``ask``, reason ``PHONE_UNANSWERED``), never as broken. The fill carries its checklist (``rules``).
+    Refused while a paper challenge is locked, failed or passed (``paper_challenge.guard``)."""
+    from app.engine import paper_challenge
+    paper_challenge.guard(db, now, record=not preview)
     run = current_run(db, lock=not preview)
     if run is None:
         raise PaperError("Start a paper account first.", 409)
@@ -586,7 +600,11 @@ def _side_words(spec: dict, closing: bool) -> str:
 def place_limit(db: Session, body: dict, now: float, preview: bool = False) -> dict:
     """Place a day limit order (``action`` open, or close for an open position): it works until a fresh quote crosses
     the limit, the day's close or his cancel. Placed from 4:00 AM New York until the close on a trading day; checked at
-    once when the market is open, then once a minute (``minute_pass``)."""
+    once when the market is open, then once a minute (``minute_pass``). An opening limit is refused while a paper
+    challenge is locked, failed or passed."""
+    if body.get("action") != "close":
+        from app.engine import paper_challenge
+        paper_challenge.guard(db, now, record=not preview)
     run = current_run(db, lock=not preview)
     if run is None:
         raise PaperError("Start a paper account first.", 409)
@@ -785,6 +803,11 @@ def _try_limit(db: Session, order: dict, quotes: dict, now: float, floor: float 
     _checks[order["id"]] = {"at": now, "quoted_at": fill["quoted_at"], "natural": round(abs(per), 4), "issue": issue}
     if not crossed or issue:
         return None
+    if not closing:
+        from app.engine import paper_challenge
+        held = current_run(db)
+        if held is not None and paper_challenge.refusal(db, held, now):
+            return None  # a locked, failed or passed challenge opens nothing; its working opens were canceled
     run = current_run(db, lock=True)
     events = _events(db, run)
     state = next((o for o in orders(events) if o["id"] == order["id"]), None)
@@ -996,6 +1019,8 @@ def minute_pass(db: Session, now: float, minutes_for) -> list[dict]:
     if phase != "regular" or regular is None or not _market_open(now):
         return []
     out = _watch(db, run, _events(db, run), now, minutes_for, regular[0])
+    from app.engine import paper_challenge
+    out += paper_challenge.minute(db, run, now)  # before the limits: a lock this minute opens nothing
     return out + _execute(db, now)
 
 
@@ -1219,14 +1244,21 @@ def view(db: Session, now: float, settle_expired: bool = True) -> dict:
     close, are shown as they stand until the desk's own read settles or ends them."""
     run = current_run(db)
     runs = list(db.exec(select(PaperRun).where(PaperRun.kind == "live").order_by(col(PaperRun.started_at), col(PaperRun.id))).all())
+    from app.engine import paper_challenge
+    cooldown = paper_challenge.cooldown_until(db, now)
     if run is None:
-        return {"run": None, "default_cash": DEFAULT_CASH, "earlier": [], "market_open": _market_open(now)}
+        return {"run": None, "default_cash": DEFAULT_CASH, "earlier": [], "market_open": _market_open(now),
+                "challenge": None, "cooldown_until": cooldown}
     if settle_expired:
         _tidy(db, run, now)
     events = _events(db, run)
     positions = fold(events)
     if settle_expired and settle(db, run, positions, now):
         events = _events(db, run)
+        positions = fold(events)
+    challenge = paper_challenge.evaluate(db, run, now, record=settle_expired)
+    if challenge is not None and settle_expired:
+        events = _events(db, run)  # a lock, fail or pass may have canceled working opens
         positions = fold(events)
     working = [o for o in orders(events) if o["status"] == "working"]
     book = account(run, positions, working)
@@ -1258,10 +1290,13 @@ def view(db: Session, now: float, settle_expired: bool = True) -> dict:
     earlier = []
     for i, older in enumerate(runs[:number - 1], 1):
         folded = fold(_events(db, older))
-        earlier.append({"number": i, "started_at": _epoch(older.started_at), "ended_at": _epoch(runs[i].started_at),
-                        "starting_cash": older.starting_cash, "realized": round(sum(p["realized"] for p in folded), 2),
+        realized = round(sum(p["realized"] for p in folded), 2)
+        ended = _epoch(runs[i].started_at)
+        earlier.append({"number": i, "started_at": _epoch(older.started_at), "ended_at": ended,
+                        "starting_cash": older.starting_cash, "realized": realized,
                         "trades": sum(1 for p in folded if p["status"] != "open"),
-                        "left_open": sum(1 for p in folded if p["status"] == "open")})
+                        "left_open": sum(1 for p in folded if p["status"] == "open"),
+                        "challenge": paper_challenge.record_of(db, older, ended, realized)})
     return {
         "run": {"id": str(run.id), "number": number, "starting_cash": run.starting_cash, "started_at": _epoch(run.started_at)},
         "account": {**book, "equity": equity, "pnl": None if equity is None else round(equity - run.starting_cash, 2),
@@ -1273,4 +1308,5 @@ def view(db: Session, now: float, settle_expired: bool = True) -> dict:
                   "week": week_score(db, closed, now)},
         "my_rules": rules,
         "earlier": list(reversed(earlier)), "market_open": _market_open(now), "fresh_seconds": FRESH_SECONDS,
+        "challenge": challenge, "cooldown_until": cooldown,
     }

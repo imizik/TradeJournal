@@ -2574,6 +2574,25 @@ Proof: `backend/tests/test_paper_book.py`, `backend/tests/test_paper_orders.py`,
 `frontend/e2e/copilot-desk-paper-review.spec.ts`, `backend/tests/test_trading_rules.py`, `frontend/e2e/copilot-desk-rules.spec.ts`,
 `backend/tests/test_weekly_goals.py`, `frontend/e2e/copilot-desk-goals.spec.ts`.
 
+### Paper challenge
+
+The owner's choice on 2026-11-17: paper trading with real stakes (`backend/app/engine/paper_challenge.py`). **Start
+$10,000 challenge** in the Paper section (or the Paper button's first start) begins a run with a +10% profit target, a
+daily loss limit of 3% of the start-of-day equity (open P&L included), and a max drawdown of 8% from the run's peak
+equity.
+
+- **Equity** is cash plus open positions at the desk's newest prices, judged only while every held price is under two
+  minutes old (a flat account always). A stale price is never read as zero; the desk line goes grey with its time.
+- **Daily lock.** At or past the limit (exactly at it counts), every paper open is refused (button, ticket, limit,
+  copilot card, Telegram Paper it) until midnight New York of the next trading day; working opening limits are canceled;
+  closes stay allowed. One PAPER ping says so, in the paper ping budget.
+- **Fail.** At or past the drawdown the run fails: no more opens on it and no new run of any kind for 7 days.
+- **Pass.** At or past the target without a fail the run passes: a milestone; a new run can start at once.
+- **Record.** Each run keeps its result on the Progress scorecard ("Run 3 · failed Nov 21 · −8.1%"); a reset over a
+  running challenge is kept as abandoned. Everything is append-only `paper_event` rows (no migration).
+- The start of a day is its first fresh reading: the cash when flat, else the first fresh valuation after the open, so an
+  overnight gap counts toward the drawdown but not toward that day's limit.
+
 ### Paper replay
 
 Paper trading on a past day, any time (nights and weekends included): "Replay" on the desk chart

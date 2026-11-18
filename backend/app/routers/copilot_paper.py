@@ -5,7 +5,8 @@ scorecard beside his real closed trades over the same dates, and ``review``: the
 (``engine/paper_review.py``), shown until the next one. One of the desk's minute reads; it settles an expired option at
 its close and otherwise only reads.
 ``POST /copilot/paper/runs``: start the paper account (``starting_cash``, default $10,000), or with ``reset`` a new run;
-every older run keeps its history.
+every older run keeps its history. ``challenge`` starts the paper challenge (``engine/paper_challenge.py``): $10,000, a
++10% target, a daily loss limit that locks paper opens, and a max drawdown that fails the run (no new run for 7 days).
 ``POST /copilot/paper/orders``: open (``action: open``) or close/trim (``action: close``) a paper position at the live
 quote (an opening order names whose idea it was: ``source`` mine, copilot, radar or scanner, and ``idea_id``), or with ``order_type: limit`` and ``limit_price`` place a day limit order that works until a fresh quote crosses
 it, the close or a cancel; ``preview`` answers what it would fill at (or hold) and stores nothing. A market order is
@@ -52,6 +53,7 @@ def _settings():
 class RunAsk(BaseModel):
     starting_cash: float | None = None
     reset: bool = False
+    challenge: bool = False  # the paper challenge: $10,000, +10% target, 3% daily lock, 8% max drawdown
 
 
 class OrderAsk(BaseModel):
@@ -95,7 +97,7 @@ def paper(db: Session = Depends(get_session)):
 def start(body: RunAsk, db: Session = Depends(get_session)):
     _settings()
     try:
-        paper_book.start_run(db, body.starting_cash, body.reset, time.time())
+        paper_book.start_run(db, body.starting_cash, body.reset, time.time(), challenge=body.challenge)
     except paper_book.PaperError as exc:
         raise HTTPException(exc.status, str(exc)) from None
     return paper_book.view(db, time.time())
