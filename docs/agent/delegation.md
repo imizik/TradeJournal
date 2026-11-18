@@ -26,16 +26,21 @@ when substantive work remains.
 
 Before starting a worker, use the cheapest one that can be checked:
 - **Small checkable edit** (a test, copy, a rename): a Google-plan builder in a
-  throwaway worktree of tracked files. Its own lint/test loop runs first; the
+  throwaway worktree of tracked files outside `/Users/user/TradeJournal`, with
+  its CLI sandboxed to that folder. Its own lint/test loop runs first; the
   owner reads the full patch and reruns the check before a normal PR.
-- **Read-only survey:** a Google-plan reader, pointed only at a clean worktree,
-  never the main checkout (it holds `.env` and real data).
+- **Read-only survey:** a Google-plan reader, run only in such a throwaway
+  worktree outside `/Users/user/TradeJournal`. The main checkout and the Claude
+  worktrees inside it can reach `.env` files and real data.
 - **Bounded UI work:** a Sonnet worker. Opus is for design, integration and
   consequential work.
 
 Never hand to Google or a cheap worker: money/FIFO/fills, Robinhood access,
-auth, deployment, migrations, copilot tool lists, or real data. Delegation does
-not lower the review tier; worker PRs get the review their tier needs, once.
+auth, secrets, deployment, migrations, CI or verification tooling, agent rules
+or settings, test safeguards such as the database pin, copilot tool lists,
+destructive data changes, or real data. Delegation does not lower the review
+tier; worker PRs get the review their tier needs, and delegation adds no extra
+review.
 
 ## Review tiers
 
