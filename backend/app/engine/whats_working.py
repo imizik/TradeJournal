@@ -140,7 +140,8 @@ def paper_rows(db: Session) -> list[dict]:
 
 def bucket(label: str, pnls: list[Decimal]) -> dict:
     """Summed as ``/stats`` sums ``total_pnl`` (floats added, then ``round(..., 2)``), so a bucket of every trade is the
-    same figure to the cent, half-cent values included."""
+    same figure; only a total landing on a half cent can differ by one cent, when the database hands the rows back in
+    another order (float addition depends on order)."""
     wins = sum(1 for v in pnls if v > 0)
     total = sum((float(v) for v in pnls), start=0.0)
     n = len(pnls)
