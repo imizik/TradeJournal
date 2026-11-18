@@ -18,6 +18,7 @@ import { behindWords, useRobinhoodBehind } from "@/components/copilot/DeskHealth
 import { DESK_CHANGED_EVENT, DESK_TIMEFRAME_KEY } from "@/lib/deskAction";
 import { DeskChart, ReadingLine, type DeskChartActions, type DeskGuide } from "@/components/copilot/DeskChart";
 import { ChartHead, type ChartTools } from "@/components/copilot/DeskChartHead";
+import { noteChartPrice } from "@/components/copilot/DeskResearch";
 import { DeskTimeline } from "@/components/copilot/Inspector";
 import { ChartViewToggle, ContractChart, heldContract, useContractView } from "@/components/copilot/DeskContract";
 import { EarningsTag, PositionEarnings } from "@/components/copilot/EarningsTag";
@@ -588,6 +589,8 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
   const [tape, setTape] = useTapeOpen();
   const folds = useFolds(); // the chart's tools he folded away wait in its More (DeskChartHead.tsx)
   const name = symbol ?? "QQQ";
+  const lastRead = reading?.state === "ok" ? reading.reading : null;
+  useEffect(() => { noteChartPrice(name, lastRead?.last ?? null, lastRead?.at ?? null); }, [name, lastRead?.last, lastRead?.at]); // the Research drawer's Forecast uses the chart's price
   // The held position's plan for its panel: the chart's own read of its thread's plan (entry, invalidation, target), else
   // the book row's plan levels with the position's own thread. None without a stop.
   const levelAt = (role: "entry" | "invalidation" | "target") => reading?.levels.find(l => l.role === role)?.price ?? null;

@@ -5,6 +5,7 @@ import { TONE, numeric } from "@/components/copilot/ThreadRail";
 import type { InvestigationSummary } from "@/lib/copilot";
 import { searchConversations, type DeskThread } from "@/lib/desk";
 import { cn } from "@/lib/utils";
+import { openResearch } from "@/components/copilot/DeskResearch";
 
 /** A palette command: one of the desk's existing paths (ask, fill, plan a trade), never a new one. */
 export type PaletteCommand = { id: string; name: string; hint: string; key?: string; run(): void };
@@ -41,13 +42,21 @@ const words = (item: Exclude<Item, { kind: "talk" | "go" | "ask" }>) => (item.ki
  * thread make "Ask the copilot" the top option (``onAsk``, the desk's own ask, in the current conversation); it is
  * listed last when something else matches. Typing sends nothing: only Enter or a click on that option asks.
  */
-export default function CommandPalette({ open, onClose, threads, commands, onThread, onConversation, goTo, onAsk }: {
+export default function CommandPalette({ open, onClose, threads, commands: given, research = null, onThread, onConversation, goTo, onAsk }: {
+  /** The chart's ticker: lists "Research <ticker>" (its research drawer) beside Data sync. */
+  research?: string | null;
   open: boolean; onClose(): void; threads: DeskThread[]; commands: PaletteCommand[]; onThread(row: DeskThread): void; onConversation(id: string): void;
   /** The place a short phrase names, as a command, or null. */
   goTo?(query: string): PaletteCommand | null;
   /** Asks the copilot these words now, as the message box would. */
   onAsk?(text: string): void;
 }) {
+  const commands = useMemo(() => {
+    if (!research) return given;
+    const command: PaletteCommand = { id: "research", name: `Research ${research}`, hint: "Overview, news, events, forecast, financials, short interest and your trades in it", run: () => openResearch(research) };
+    const at = given.findIndex(c => c.id === "sync");
+    return at < 0 ? [...given, command] : [...given.slice(0, at), command, ...given.slice(at)];
+  }, [given, research]);
   const dialog = useRef<HTMLDialogElement>(null);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);

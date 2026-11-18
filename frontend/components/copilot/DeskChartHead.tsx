@@ -16,6 +16,7 @@ import { ChevronDown, Info, MoreHorizontal } from "lucide-react";
 import { useAppAccess } from "@/components/AccessProvider";
 import { useFolds } from "@/components/copilot/DeskUse";
 import { PIECE } from "@/lib/deskUse";
+import { openResearch } from "@/components/copilot/DeskResearch";
 import { DESK_TIMEFRAMES, type DeskTimeframe } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
@@ -141,7 +142,7 @@ export function ChartHead({ symbol, reading, held, view, timeframe, onTimeframe,
         )}
         {tools?.alerts}
         {tools && !narrow && tools.draw}
-        <ChartMenu label={<><MoreHorizontal size={14} aria-hidden /><span className="sr-only">More</span></>} title="More: Replay, Tape, Open in Charts, Reset"
+        <ChartMenu label={<><MoreHorizontal size={14} aria-hidden /><span className="sr-only">More</span></>} title="More: Replay, Tape, Research, Open in Charts, Reset"
           testId="desk-chart-more" open={more} onOpen={setMore} chevron={false}>
           <div role="group" aria-label="More chart tools" className="flex flex-col">
             {tools && narrow && (
@@ -174,6 +175,7 @@ export function ChartHead({ symbol, reading, held, view, timeframe, onTimeframe,
                   onClick={() => { close(); onTape(!tape); }} className={ITEM}>{tape ? "Hide Tape" : "Tape"}<span className="ml-1 text-muted-foreground">Level 2 · time &amp; sales</span></button>
               </FoldItem>
             )}
+            {owner && <button type="button" data-testid="desk-research-open" onClick={() => { close(); openResearch(symbol); }} className={ITEM}>Research {symbol}<span className="ml-1 text-muted-foreground">news · financials · short</span></button>}
             <Link href={charts} onClick={close} className={ITEM}>Open in Charts →</Link>
             {tools && <button type="button" onClick={() => { close(); tools.reset(); }} disabled={!tools.ready} className={cn(ITEM, "disabled:opacity-40")}>Reset</button>}
           </div>

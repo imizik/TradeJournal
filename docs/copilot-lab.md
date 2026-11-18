@@ -798,7 +798,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   price and today's change (the figure alone; its basis is its hover), the held contract (from 1536 px only: the book
   row and the Position panel name it), the Stock / Contract
   switch when it applies, the timeframes, then **Studies · N** (a menu of the study toggles), the bell (the symbol's
-  alerts, with the count), the pencil, **⋯** (More: **Replay a past day**, **Tape** (below), **Open in Charts →**,
+  alerts, with the count), the pencil, **⋯** (More: **Replay a past day**, **Tape** (below), **Research <ticker>** (the symbol research drawer: Charts' Overview, News, Events, Forecast, Financials, Short and You tabs for the chart's ticker, the same `SymbolInfo` panel and reads; closed by default and mounted only when opened, so no research read before then; Escape closes it; a full-height sheet on a phone; also ⌘K's "Research NBIS"; `DeskResearch.tsx`), **Open in Charts →**,
   **Reset**) and **ⓘ**. The ticker and its price never shrink and never paint over the timeframes (they did on
   2026-11-16); `copilot-desk-calm.spec.ts` checks it at 1440 and 1280 px. The **ⓘ** holds what used to be the quiet
   lines under the header: the plan's lines (or "no plan lines saved"), a Scanner row's guides, a time stop, the next
