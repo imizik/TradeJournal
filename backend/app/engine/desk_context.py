@@ -631,8 +631,10 @@ def _desk_read(symbol: str, timeframe: str, now: float) -> dict | None:
             reference += [{"key": "pm_high", "price": round(float(high), 4), "label": f"PM high {_price(high)}"},
                           {"key": "pm_low", "price": round(float(low), 4), "label": f"PM low {_price(low)}"}]
     return {"bars": [_plain(b) for b in shown], "studies": studies, "reading": reading, "reference": reference,
-            # Only today's candles can be the delayed fallback: stored earlier sessions carry the SIP source too.
-            "delayed": any(b.get("source") == "alpaca_sip" and datetime.fromtimestamp(b["time"], ET).date() == today
+            # Only today's candles can be the delayed fallback (stored earlier sessions carry the SIP source too); on 1D the
+            # fallback's daily series ends yesterday, so a SIP last candle means the backup is showing and today is missing.
+            "delayed": (bool(shown) and shown[-1].get("source") == "alpaca_sip") if timeframe == "1D" else
+                       any(b.get("source") == "alpaca_sip" and datetime.fromtimestamp(b["time"], ET).date() == today
                            for b in shown)}
 
 

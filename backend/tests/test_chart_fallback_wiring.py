@@ -232,7 +232,10 @@ def test_other_wired_readers_fall_back_when_primary_raises(monkeypatch):
     monkeypatch.setattr(chart_splits.chart_splits, "get", lambda symbol: {"splits": []})
     monkeypatch.setattr(chart_calendar, "hours", lambda d: None)
 
-    assert ping_images.today_bars("NBIS") == [minute_bar]
+    # Ping pictures, position alerts, day replay and the brief scorecard read today_bars as live: they stay on the
+    # regular feed only, so a Tradier outage leaves them empty rather than about 15 minutes stale.
+    with pytest.raises(ChartFeedError):
+        ping_images.today_bars("NBIS")
     assert setup_record._daily_bars("NBIS") == daily_bars
     moment = copilot_moment.live_chart("NBIS", day, "1D", now=day)
     assert moment["state"] == "ok" and moment["bar"]["c"] == 101.0
