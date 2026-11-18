@@ -243,17 +243,42 @@ export default function RadarFeedView({ initial, embedded = false }: { initial?:
   const [linked, setLinked] = useState<string | null>(null); // the event a phone alert's tap asked for
   const [unseenOnly, setUnseenOnly] = useState(true);
   const [setups, setSetups] = useState<Setups | null>(null);
-  const ratedOnce = useRef<string | null>(null);
+  const ratedOnce = useRef<{ key: string; promise: Promise<void> } | null>(null);
   useEffect(() => {
     let live = true;
     (async () => {
       const params = new URLSearchParams(window.location.search);
+      const event = radarEventId(embedded ? (initial?.event ?? null) : params.get("event"));
+      const rate = radarRating(embedded ? (initial?.rate ?? null) : params.get("rate"));
+      let day = embedded ? (initial?.session ?? null) : params.get("session");
+      if (event && rate) {
+        // A phone alert's Useful / Not useful action: the tap is the rating, saved once through the usual feedback
+        // route before showing the event or handing off to the desk, and stripped right after the save so a reload
+        // (or a second StrictMode effect run) cannot repeat it.
+        const key = `${event}:${rate}`;
+        if (ratedOnce.current?.key !== key) {
+          ratedOnce.current = { key, promise: rateEvent(event, rate).then(() => undefined) };
+        }
+        let failed = false;
+        try {
+          await ratedOnce.current.promise;
+        } catch {
+          failed = true;
+        }
+        if (!live) return;
+        if (failed) setNotice("That rating was not saved. You can rate the event below.");
+      }
+      const clean = new URL(window.location.href);
+      if (clean.searchParams.has("rate")) {
+        clean.searchParams.delete("rate");
+        window.history.replaceState(window.history.state, "", clean);
+      }
       if (!embedded && window.location.pathname === "/radar" && params.size > 0 && owner) {
         const status = await copilotStatus().catch(() => null);
         if (!live) return;
         if (status?.enabled) {
           const target = new URLSearchParams({ desk: "radar" });
-          for (const key of ["event", "rate", "session", "groups"]) {
+          for (const key of ["event", "session", "groups"]) {
             const value = params.get(key);
             if (value) target.set(key, value);
           }
@@ -261,25 +286,8 @@ export default function RadarFeedView({ initial, embedded = false }: { initial?:
           return;
         }
       }
-      const event = radarEventId(embedded ? (initial?.event ?? null) : params.get("event"));
-      const rate = radarRating(embedded ? (initial?.rate ?? null) : params.get("rate"));
-      let day = embedded ? (initial?.session ?? null) : params.get("session");
-      if (event) {
-        if (rate) {
-          // A phone alert's Useful / Not useful action: the tap is the rating, saved once through the usual feedback
-          // route before the event shows. It is dropped from the address first, so a reload (or a second effect run
-          // in React strict mode) cannot repeat it.
-          if (!embedded) {
-            const url = new URL(window.location.href); url.searchParams.delete("rate");
-            window.history.replaceState(window.history.state, "", url);
-          }
-          const key = `${event}:${rate}`;
-          if (ratedOnce.current !== key) {
-            ratedOnce.current = key;
-            try { await rateEvent(event, rate); } catch { if (live) setNotice("That rating was not saved. You can rate the event below."); }
-          }
-        }
-        if (!day) { try { day = (await getEvent(event)).event.session_date; } catch { /* the feed's default session, then */ } }
+      if (event && !day) {
+        try { day = (await getEvent(event)).event.session_date; } catch { /* the feed's default session, then */ }
       }
       if (!live) return;
       setLinked(event); setOpen(event);

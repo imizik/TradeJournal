@@ -104,7 +104,8 @@ export function DeskLogs() {
         groups: params.get("groups"),
       };
       setActive((prev) => ({ request, key: (prev?.key ?? 0) + 1 }));
-      for (const key of ["desk", "event", "rate", "session", "groups", "log"]) rest.delete(key);
+      for (const key of ["desk", "event", "session", "groups", "log"]) rest.delete(key);
+      if (!request.event || !request.rate) rest.delete("rate");
     }
     window.history.replaceState(null, "", `/copilot-lab${rest.size ? `?${rest}` : ""}`);
   }, [params]);

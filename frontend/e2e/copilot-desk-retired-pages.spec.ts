@@ -248,6 +248,7 @@ test("old /scanner and /radar URLs open their desk drawers and phone rating link
 
   await page.goto(`/radar?event=${RADAR_EVENT_ID}&rate=useful`);
   await expect(page).toHaveURL(/\/copilot-lab/);
+  await expect(page).not.toHaveURL(/rate=/);
   expect(new URL(page.url()).searchParams.get("rate")).toBeNull();
   const radarDrawer = page.getByTestId("desk-radar-log");
   await expect(radarDrawer).toBeVisible();
