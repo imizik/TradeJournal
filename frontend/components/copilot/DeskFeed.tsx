@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { deskGet, everyDeskMinute } from "@/lib/deskMinute";
@@ -13,6 +13,7 @@ import { RadarPaperIt } from "@/components/copilot/RadarDecision";
 import { todayNewYork } from "@/lib/charts";
 import type { FeedLink } from "@/lib/copilot";
 import { FoldMore, useFolds } from "@/components/copilot/DeskUse";
+import { recordVisit } from "@/lib/radar";
 
 export type FeedSource = "Alert" | "Plan" | "Radar" | "Radar setup" | "News" | "Calendar" | "Copilot note" | "TradingView" | "r/wallstreetbets" | "NYT";
 /** One feed row (``app/engine/desk_feed.py``). ``plan``: "setup" (a Radar setup card's own Plan it) or "own" (his own
@@ -195,6 +196,13 @@ export default function DeskFeed({ data, failed, since, onAsk, onPlan, onChart, 
   const filter: Filter = group === "ideas" ? idea : group === "market" ? marketShown : group;
   // Chatter gone (nothing to show this minute): back to News & calendar for good, so it never reopens without a tap.
   useEffect(() => { if (marketPick === "chatter" && data && !chatterOn) setMarket("news"); }, [marketPick, data, chatterOn, setMarket]); // follows the feed's own read
+  // Record one Radar visit each time the Radar ideas list becomes visible, so hits seen here do not stay marked new.
+  const radarVisible = since !== null && !!data && !failed && !symbol && group === "ideas" && idea === "radar";
+  const wasRadarVisible = useRef(false);
+  useEffect(() => {
+    if (radarVisible && !wasRadarVisible.current) recordVisit().catch(() => {});
+    wasRadarVisible.current = radarVisible;
+  }, [radarVisible]);
   const items = useMemo(() => {
     if ((filter === "chatter" || filter === "unusual" || filter === "scanner") && !symbol) return filter === "chatter" ? chatter?.items ?? [] : [];
     const all = (data?.items ?? []).filter(i => !i.chatter);
