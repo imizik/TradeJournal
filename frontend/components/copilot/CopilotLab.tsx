@@ -59,6 +59,7 @@ import { ChainPicker, PhoneOrders, PhoneValue, usePhone } from "@/components/cop
 import DeskHealthDot, { DeskStatusLine, reportBookLive } from "@/components/copilot/DeskHealth";
 import { DeskSyncCenter, openSyncCenter } from "@/components/DashboardActions";
 import DeskJournal, { openJournal } from "@/components/copilot/DeskJournal";
+import { DeskResearch } from "@/components/copilot/DeskResearch";
 import { ModeSwitch, PaperValue, setDeskMode, useDeskMode } from "@/components/copilot/DeskMode";
 import ModeMark, { type Mode } from "@/components/copilot/ModeMark";
 import { DeskUseRoot, Fold, FoldMore, FoldSuggestion, useCountOpen, useDeskUse } from "@/components/copilot/DeskUse";
@@ -1425,6 +1426,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       {/* The Data Sync Center (Data health's "Data sync" and ⌘K's): hidden until opened. */}
       {on && <DeskSyncCenter />}
       {on && <DeskJournal />}
+      {/* The chart ticker's research (the chart's More, ⌘K's "Research NVDA"): hidden, and no reads, until opened. */}
+      {on && <DeskResearch />}
       {/* A phone's tab bar is the desk's own: Positions, the ticker's Chart, Chain, Orders and Ask, then the app's More
           (Nav.tsx keeps its slot). Each counts as its view's piece (view.*). */}
       {/* Under the copilot's open sheet (which covers the bar) the desk's tabs wait hidden; More stays. */}
@@ -1456,7 +1459,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       {on && !replay && <button type="button" onClick={askCopilot} className={cn(styles.ask, "min-h-11 items-center gap-1.5 rounded-full border border-foreground/30 bg-card px-4 text-sm font-medium text-foreground shadow-lg hover:bg-secondary max-sm:size-12 max-sm:justify-center max-sm:px-0")}>
         <MessageCircle size={15} aria-hidden className="text-muted-foreground max-sm:size-5 max-sm:text-foreground" /><span className="max-sm:sr-only">Ask the copilot{picked && picked !== talking ? ` about ${picked}` : ""}</span>
       </button>}
-      {on && !replay && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} onConversation={actions.open} goTo={goTo} onAsk={askHere} />}
+      {on && !replay && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} research={centreSymbol} onThread={pick} onConversation={actions.open} goTo={goTo} onAsk={askHere} />}
       </DeskUseRoot>
     </div>
   );

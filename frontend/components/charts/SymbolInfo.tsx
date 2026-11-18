@@ -39,7 +39,7 @@ const REFRESH_MS = 60_000;
 /** `price` reads the chart's latest price for the symbol when a tab needs it (the Forecast tab's straddle). */
 /** `focus` (a click on a news marker) opens the News tab and lights the listed articles once: the panel keeps its own copy and calls `onFocusHandled`, so a later remount replays nothing. */
 export type NewsFocus = { symbol: string; ids: string[]; n: number };
-export default function SymbolInfo({ symbol, positions, price, quote, quoteFetchedAt, onSelectSymbol, focus, onFocusHandled, comparisonGroup, onComparisonGroup, radarOrigin, contextFocus, onContextHandled, onPeers }: { onPeers?(): void; contextFocus?: { symbol: string; target: "peers" | "holding"; n: number } | null; onContextHandled?(): void; symbol: string; positions?: ChartPosition[]; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void; focus?: NewsFocus | null; onFocusHandled?(): void; radarOrigin?: RadarChartContext | null; comparisonGroup?: RadarGroup | null; onComparisonGroup?(group: RadarGroup): void }) {
+export default function SymbolInfo({ symbol, positions, price, quote, quoteFetchedAt, onSelectSymbol, focus, onFocusHandled, comparisonGroup, onComparisonGroup, radarOrigin, contextFocus, onContextHandled, onPeers, embedded = false }: { /** The desk's Research drawer: always open, no header toggle (the drawer is the fold). */ embedded?: boolean; onPeers?(): void; contextFocus?: { symbol: string; target: "peers" | "holding"; n: number } | null; onContextHandled?(): void; symbol: string; positions?: ChartPosition[]; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void; focus?: NewsFocus | null; onFocusHandled?(): void; radarOrigin?: RadarChartContext | null; comparisonGroup?: RadarGroup | null; onComparisonGroup?(group: RadarGroup): void }) {
   const { owner, grants } = useAppAccess();
   const journal = owner || !!grants.journal_read;
   const id = useId();
@@ -55,9 +55,9 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
   useEffect(() => {
     let tab: Tab = "You";
     try { const saved = localStorage.getItem(TAB_KEY); if (TABS.includes(saved as Tab)) tab = saved as Tab; } catch { /* device storage is optional */ }
-    const expanded = window.matchMedia("(min-width: 1024px)").matches;
+    const expanded = embedded || window.matchMedia("(min-width: 1024px)").matches;
     queueMicrotask(() => setView((current) => focused.current ? { ...current, ready: true } : { ready: true, expanded, tab }));
-  }, []);
+  }, [embedded]);
   const contextN = owner && contextFocus?.symbol === symbol ? contextFocus.n : 0;
   useEffect(() => {
     if (!contextN) return;
@@ -105,7 +105,7 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
     // A refresh keeps what the tab shows if it fails; the first read says so.
     const run = (quiet: boolean) => {
       const spot = priceOf.current?.() ?? null;
-      if (tab === "Forecast" && spot === null) { waiting = setTimeout(() => run(quiet), 1000); return; } // the chart's price is still loading
+      if (tab === "Forecast" && spot === null && !embedded) { waiting = setTimeout(() => run(quiet), 1000); return; } // the chart's price is still loading
       BUILT[tab].load(symbol, controller.signal, spot).then((data) => {
         if (active) setResult({ key, data });
       }).catch(() => {
@@ -115,7 +115,7 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
     const timer = setTimeout(() => { setResult(null); run(false); }, 300);
     const again = tab === "Forecast" ? setInterval(() => { if (!document.hidden) run(true); }, REFRESH_MS) : undefined;
     return () => { active = false; clearTimeout(timer); clearTimeout(waiting); clearInterval(again); controller.abort(); };
-  }, [symbol, view.ready, view.expanded, view.tab, retry, journal]);
+  }, [symbol, view.ready, view.expanded, view.tab, retry, journal, embedded]);
 
   function select(tab: Tab) {
     setLit(null);
@@ -162,9 +162,9 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
   const shownMovement = handoffGroup && movement?.data?.group?.name !== handoffGroup.name ? null : movement;
   const peers = onSelectSymbol ? <div id={`${id}-peers`}><SymbolInfoPeers key={radarGroup || "normal"} sessionFirst={!!radarGroup} symbol={symbol} result={peersResult} movement={shownMovement} onGroup={owner ? (onComparisonGroup ?? setLocalGroup) : undefined} onSelect={onSelectSymbol} /></div> : null;
   return <section aria-label="Symbol info" className="min-w-0 overflow-hidden rounded-lg border border-border bg-card">
-    <button aria-expanded={view.expanded} aria-controls={`${id}-content`} onClick={() => setView((current) => ({ ...current, expanded: !current.expanded }))} className="flex min-h-11 w-full items-center justify-between px-3 py-3 text-xs font-medium text-foreground lg:min-h-0">
+    {!embedded && <button aria-expanded={view.expanded} aria-controls={`${id}-content`} onClick={() => setView((current) => ({ ...current, expanded: !current.expanded }))} className="flex min-h-11 w-full items-center justify-between px-3 py-3 text-xs font-medium text-foreground lg:min-h-0">
       <span>{symbol} symbol info</span>{view.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-    </button>
+    </button>}
     {view.expanded && <div id={`${id}-content`}>
       {/* Names never squeeze into each other: a narrow dock wraps the row, so every tab stays in sight. */}
       <div role="tablist" aria-label="Symbol info tabs" className="flex flex-wrap border-y border-border">
