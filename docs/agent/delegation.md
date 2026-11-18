@@ -22,6 +22,39 @@ recommendation, then continues unblocked work. No fixed-format packet is needed.
 The owner handles small follow-up fixes directly and resumes the worker only
 when substantive work remains.
 
+## Cheaper hands
+
+Before starting a worker, use the cheapest one whose output a check can verify.
+The owner chose (2026-11-17) to let Google-plan Hydrogen work in this repo on
+the same footing as Codex; briefs still never paste secrets or real data.
+Both builder and reader always run with the Antigravity sandbox on and no
+approval bypass: the builder edits only its own throwaway worktree with shell
+commands refused, and the reader runs in plan mode.
+
+- **Hydrogen builder** (Google plan, its own throwaway worktree): it runs its
+  own lint/typecheck/test loop, then the owner reads the full patch, reruns the
+  checks and opens a normal PR. It moves up one level after three clean patches
+  at the current one (merged without the owner rewriting them), and drops back
+  a level after one that had to be rewritten or reverted:
+  1. tests, copy, renames, docs fixes;
+  2. small features and multi-file refactors that existing tests cover;
+  3. first drafts of larger features that the owner finishes.
+
+  Every level stays within the never-delegate list below. A new session starts
+  at level 1 unless the PR records show otherwise.
+- **Hydrogen reader:** read-only surveys and second opinions, checked against
+  the code before use; never a required review.
+- **Sonnet worker:** bounded UI work. Opus is for design, integration and
+  consequential work. Codex Luna or Sol are backups when the Google quota is
+  spent, on the Codex allowance.
+
+Never hand to Hydrogen or a cheap worker: money/FIFO/fills, Robinhood access,
+auth, secrets, deployment, migrations, CI or verification tooling, agent rules
+or settings, test safeguards such as the database pin, copilot tool lists,
+destructive data changes, or real data. Delegation does not lower the review
+tier; worker PRs get the review their tier needs, and delegation adds no extra
+review.
+
 ## Review tiers
 
 [pr-review.md](pr-review.md) is the only review policy. Ordinary changes need no
