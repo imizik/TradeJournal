@@ -116,3 +116,57 @@ test("while the desk is home the menu drops Radar and Scanner; Signals stays", a
   await expect(page.getByRole("link", { name: "Radar", exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Scanner", exact: true })).toHaveCount(0);
 });
+
+// The Dashboard's closed P&L, performance and latest closes: a desk drawer from More → Journal and ⌘K, invented numbers.
+const TRADE = (id: string, closed_at: string, pnl: number) => ({ id, account_id: "a1", ticker: "XYZ", instrument_type: "stock", option_type: null, strike: null,
+  expiration: null, contracts: 10, avg_entry_premium: 10, avg_exit_premium: 11, total_premium_paid: 100, realized_pnl: pnl, pnl_pct: pnl, hold_duration_mins: 30,
+  entry_time_bucket: null, expired_worthless: false, opened_at: closed_at, closed_at, status: "closed", ai_review: null });
+
+async function stubJournal(page: Page) {
+  await page.route(url => url.pathname.endsWith("/trades"), route => route.fulfill({ json: [TRADE("t1", "2026-11-13T10:00:00", 120), TRADE("t2", "2026-11-12T10:00:00", -45)] }));
+  await page.route(url => url.pathname.endsWith("/accounts"), route => route.fulfill({ json: [{ id: "a1", name: "Invented", type: "roth" }] }));
+  await page.route(url => url.pathname.endsWith("/stats"), route => route.fulfill({ json: { total_pnl: 75, closed_trades: 2 } }));
+}
+
+test("⌘K: Journal summary opens closed P&L and the latest closes on the desk; Escape closes it", async ({ page }) => {
+  await open(page);
+  await stubJournal(page);
+  await expect(page.getByTestId("desk-journal")).toHaveCount(0); // nothing on the first screen
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByRole("dialog", { name: "Jump to" }).getByRole("combobox").fill("journal summary");
+  await page.keyboard.press("Enter");
+  const journal = page.getByTestId("desk-journal");
+  await expect(journal.getByLabel("Journal summary figures").getByText("All-Time Closed P&L")).toBeVisible();
+  await expect(journal.getByLabel("Journal summary figures").getByText("+$75.00").first()).toBeVisible();
+  await expect(journal.getByRole("region", { name: "Recent closed trades" }).getByText("XYZ").first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(journal).toHaveCount(0);
+});
+
+test("More → Journal summary opens the same drawer and drops the word from the address", async ({ page }) => {
+  await stubJournal(page);
+  await open(page);
+  await page.getByRole("button", { name: /open menu|menu/i }).first().click();
+  const journal = page.getByRole("button", { name: "Journal", exact: true });
+  if ((await journal.getAttribute("aria-expanded")) !== "true") await journal.click();
+  await expect(page.getByRole("link", { name: "Dashboard", exact: true })).toHaveCount(0);
+  await page.getByRole("link", { name: "Journal summary", exact: true }).click();
+  await expect(page.getByTestId("desk-journal")).toBeVisible();
+  await expect(page).not.toHaveURL(/desk=journal/);
+});
+
+test("Journal summary over the Sync Center: Escape closes the top one first and focus goes back", async ({ page }) => {
+  await open(page);
+  await stubJournal(page);
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByRole("dialog", { name: "Jump to" }).getByRole("combobox").fill("data sync");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Data Sync Center" })).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByRole("dialog", { name: "Jump to" }).getByRole("combobox").fill("journal summary");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("desk-journal")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("desk-journal")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Data Sync Center" })).toBeVisible(); // the one underneath stays
+});
