@@ -55,7 +55,7 @@ const SPARKS = { as_of: "2026-11-13T16:00:00Z", spy_change_pct: 0.4, rows: {
 
 type Feed = { orcl: number; orclMark: number };
 
-async function open(page: Page, feed: Feed, { width = 1440, height = 900 } = {}) {
+async function open(page: Page, feed: Feed, { width = 1440, height = 900, stubs }: { width?: number; height?: number; stubs?: () => Promise<void> } = {}) {
   await page.setViewportSize({ width, height });
   await page.clock.install({ time: NOW });
   await page.route("**/copilot/status", route => route.fulfill({ json: ON }));
@@ -77,6 +77,8 @@ async function open(page: Page, feed: Feed, { width = 1440, height = 900 } = {})
       NBIS: { last: 105, change_pct: 0.8, prev_close: 104.2, at },
     } } });
   });
+  // Stubs that win over the catch-alls above, in place before the page asks for anything.
+  await stubs?.();
   await page.goto("/copilot-lab");
   await expect(page.getByTestId("desk-book")).toBeVisible();
 }
@@ -127,17 +129,19 @@ test("one leg of a spread shows no numbers, and a stock row has no standing", as
 });
 
 test("What if…: folded by default and remembered; presets, sliders and the estimate against today's mark", async ({ page }) => {
-  await open(page, { orcl: 247, orclMark: 4.1 });
-  // After open(): these win over its catch-alls. The plan's entry 252 and stop 240 on ORCL, and a report on Wednesday November 18, inside the 11/20 call's life.
-  await page.route("**/copilot/desk/*/chart*", route => route.fulfill({ json: {
-    symbol: "ORCL", timeframe: "15m", step: 900, as_of: epoch("2026-11-13T16:00:00Z"), live: true, state: "ok", reason: null,
-    bars: Array.from({ length: 40 }, (_, i) => { const time = epoch("2026-11-13T14:30:00Z") + i * 900 - 30 * 900, px = 247 + Math.sin(i / 4);
-      return { time, open: px, high: px + 0.4, low: px - 0.4, close: px, volume: 1000, extended: false }; }),
-    studies: {}, reference: [], reading: { last: 247, at: epoch("2026-11-13T16:00:00Z"), daily: false, prev_close: 249.5, vwap: null, vwap_at: null, rvol: null },
-    levels: [{ role: "entry", price: 252, label: "Entry 252.00" }, { role: "invalidation", price: 240, label: "Invalidation 240.00" }],
-    alerts: [], marks: [], time_stop: null } }));
-  await page.route("**/copilot/desk/events*", route => route.fulfill({ json: { state: "ok", today: "2026-11-13", loading: false,
-    rows: { ORCL: { symbol: "ORCL", date: "2026-11-18", status: null, trading_days: 3, label: "Earnings Wed", tone: "amber", through: ["2026-11-20"] } } } }));
+  // These win over open()'s catch-alls and are in place before the page loads, so the chart is never asked for
+  // (and answered "no chart") before they exist. The plan's entry 252 and stop 240 on ORCL, and a report on Wednesday November 18, inside the 11/20 call's life.
+  await open(page, { orcl: 247, orclMark: 4.1 }, { stubs: async () => {
+    await page.route("**/copilot/desk/*/chart*", route => route.fulfill({ json: {
+      symbol: "ORCL", timeframe: "15m", step: 900, as_of: epoch("2026-11-13T16:00:00Z"), live: true, state: "ok", reason: null,
+      bars: Array.from({ length: 40 }, (_, i) => { const time = epoch("2026-11-13T14:30:00Z") + i * 900 - 30 * 900, px = 247 + Math.sin(i / 4);
+        return { time, open: px, high: px + 0.4, low: px - 0.4, close: px, volume: 1000, extended: false }; }),
+      studies: {}, reference: [], reading: { last: 247, at: epoch("2026-11-13T16:00:00Z"), daily: false, prev_close: 249.5, vwap: null, vwap_at: null, rvol: null },
+      levels: [{ role: "entry", price: 252, label: "Entry 252.00" }, { role: "invalidation", price: 240, label: "Invalidation 240.00" }],
+      alerts: [], marks: [], time_stop: null } }));
+    await page.route("**/copilot/desk/events*", route => route.fulfill({ json: { state: "ok", today: "2026-11-13", loading: false,
+      rows: { ORCL: { symbol: "ORCL", date: "2026-11-18", status: null, trading_days: 3, label: "Earnings Wed", tone: "amber", through: ["2026-11-20"] } } } }));
+  } });
   await book(page).getByRole("button", { name: "ORCL 11/20/26 250C" }).click();
   const pane = page.getByTestId("desk-chart");
   // The plan's levels come with the chart's read: wait for it.
