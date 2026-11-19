@@ -166,12 +166,6 @@ def _minute_cache_path(ticker: str, day: date) -> Path:
     return p
 
 
-def _hourly_cache_path(ticker: str) -> Path:
-    p = CACHE_DIR / "stocks" / "1Hour" / ALPACA_DATA_FEED / f"{ticker}.json"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    return p
-
-
 def _option_bars_cache_path(symbol: str, timeframe: str, start: date | datetime, end: date | datetime) -> Path:
     safe_symbol = "".join(ch for ch in symbol.upper() if ch.isalnum())
     safe_timeframe = "".join(ch for ch in timeframe if ch.isalnum())

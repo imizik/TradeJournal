@@ -45,15 +45,6 @@ export function useDeskUnusual(on: boolean): UnusualReply | null {
 
 export const unusualPick = (row: UnusualRow): ChainPick => ({ symbol: row.symbol, expiry: row.expiration, strike: row.strike, side: row.side });
 
-/** The Chain tab's marks: the unusual contracts of ``symbol`` at ``expiry``, by "side:strike". */
-export function unusualAt(reply: UnusualReply | null, symbol: string | null, expiry: string | null): Map<string, UnusualRow> {
-  const out = new Map<string, UnusualRow>();
-  for (const row of reply?.rows ?? []) {
-    if (row.symbol === symbol && row.expiration === expiry) out.set(`${row.side}:${row.strike}`, row);
-  }
-  return out;
-}
-
 const num = (n: number) => n.toLocaleString("en-US");
 const clock = (epoch: number) => new Date(epoch * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
 const dayText = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });

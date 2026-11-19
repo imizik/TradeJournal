@@ -22,13 +22,6 @@ export function openInterestChangeText(change: { session: string | null; previou
   const signed = (value: number | null | undefined) => value == null ? "—" : `${value > 0 ? "+" : value < 0 ? "−" : ""}${contracts(Math.abs(value))}`;
   return `Δ OI calls ${signed(change?.calls)} · puts ${signed(change?.puts)} · ${previous} → ${current}`;
 }
-export function openInterestSideText(change: { session: string | null; previous_session: string | null; calls?: number | null; puts?: number | null } | undefined, side: "calls" | "puts"): string {
-  const current = sessionDay(change?.session), previous = sessionDay(change?.previous_session);
-  if (!current || !previous) return "Δ —";
-  const value = change?.[side];
-  const amount = value == null ? "—" : `${value > 0 ? "+" : value < 0 ? "−" : ""}${contracts(Math.abs(value))}`;
-  return `Δ ${amount}`;
-}
 export function openInterestPeriodText(change: { session: string | null; previous_session: string | null } | undefined): string {
   const current = sessionDay(change?.session), previous = sessionDay(change?.previous_session);
   return current && previous ? `OI change: ${previous} → ${current}` : "OI change unavailable; two recorded sessions are needed.";

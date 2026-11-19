@@ -195,8 +195,6 @@ export function moversHeader(movers: RadarMovers): string {
   return `SPY ${pctText(h.spy_day_pct)} · QQQ ${pctText(h.qqq_day_pct)} · ${h.symbols_with_data} of ${h.symbols_tracked} symbols · ${time}`;
 }
 
-/** A gap day: the move since the open is under a third of the move since the previous close. */
-export const isGap = (m: RadarMover) => m.from_open_pct != null && Math.abs(m.from_open_pct) < Math.abs(m.day_pct) / 3;
 
 /** "AI networking · 5 of 6 behind SPY · median −9.9 · most: COHR" */
 export function groupLine(g: RadarMoverGroup): string {

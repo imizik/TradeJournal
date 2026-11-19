@@ -138,7 +138,6 @@ export function useDeskDrawings(symbol: string | null) {
     canUndo: history.undo.length > 0, undoName: history.undo.length ? editName(history.undo.at(-1)!) : null,
   };
 }
-export type DeskDrawings = ReturnType<typeof useDeskDrawings>;
 
 /**
  * Delete, Backspace and Cmd/Ctrl+Z (Shift for redo) while drawing, as in Charts (``readHotkey``); Escape drops the armed

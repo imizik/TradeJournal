@@ -237,18 +237,3 @@ export function commitImport({
     body,
   });
 }
-
-export const strategyLabApi = {
-  listStrategies,
-  createStrategy,
-  getStrategy,
-  createVersion,
-  getVersion,
-  listRuns,
-  getRun,
-  getRunTrades,
-  getMetricsOrNull,
-  recalculateMetrics,
-  previewImport,
-  commitImport,
-};

@@ -204,14 +204,6 @@ export function staleSince(ticks: DeskTicks, symbols: readonly (string | null | 
   return times.length ? Math.min(...times) : null;
 }
 
-/** For tests: forget everything the ticker holds and stop it. */
-export function resetDeskTicks() {
-  stop();
-  wanted.clear();
-  restAt = 0;
-  snapshot = EMPTY;
-}
-
 type Reading = NonNullable<DeskChartData["reading"]>;
 const nyDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
 const nyDay = (seconds: number) => nyDate.format(seconds * 1000);

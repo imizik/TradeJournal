@@ -25,12 +25,6 @@ export function usePracticeLine(on: boolean): string | null {
   return line;
 }
 
-/** The lab home's line under Review my week; nothing while no goal is active. */
-export function PracticeLine({ className }: { className?: string }) {
-  const line = usePracticeLine(true);
-  return line ? <p className={className ?? "text-xs text-muted-foreground"}>{line}</p> : null;
-}
-
 const BUTTON = "inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border px-3 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-9";
 
 /**
