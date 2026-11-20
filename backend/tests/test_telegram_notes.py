@@ -2,7 +2,7 @@
 and the Sunday digest sends the week's notes back. Every Bot API call goes to a stub; no model call."""
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlmodel import Session, select
 
@@ -63,6 +63,13 @@ def test_plain_questions_still_go_to_copilot(case, monkeypatch):  # noqa: F811
     assert bot.named("sendMessage")[0]["text"].startswith("Verdict:") and notes(db_engine) == []
 
 
+def test_only_the_words_note_and_idea_make_a_note():
+    assert telegram_replies.note_words("IDEA: fade the gap") == ("idea", "fade the gap")
+    assert telegram_replies.note_words("note") == ("note", "")
+    for text in ("Idea?", "note-worthy move in AMD", "Note’s fine", "Noted", "notes on MU", "Ideas for tomorrow"):
+        assert telegram_replies.note_words(text) is None, text
+
+
 def test_a_bare_note_is_not_saved(case):  # noqa: F811
     db_engine, _ = case
     bot = Bot()
@@ -104,7 +111,10 @@ def test_the_digest_counts_themes_ratings_and_quotes_an_idea_once_on_sunday(case
     replies = telegram_replies.Replies(db_engine, call=bot)
     for i, text in enumerate(("note MU fading into the close again", "note MU gap fill worked", "idea buy MU dips at VWAP")):
         asyncio.run(replies.handle(said(text, update_id=i + 1)))
-    now = datetime.now(ET).timestamp()
+    today = datetime.now(ET)
+    now = (today.replace(hour=18, minute=5) + timedelta(days=(6 - today.weekday()) % 7)).timestamp()  # the coming digest
+    if now < today.timestamp():  # Sunday after 18:05: today's notes are next week's
+        now += 7 * 86400
     with Session(db_engine) as db:
         _, title, body = note_digest.build(db, now)
     lines = body.splitlines()

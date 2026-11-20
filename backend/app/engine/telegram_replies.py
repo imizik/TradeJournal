@@ -54,7 +54,8 @@ never asked (``_save_note``): one day journal entry (``day_journal.append``; not
 the words after the prefix, the time, the known tickers it names (``note_tickers``; as a reply to a ping naming none, the
 ping's ``ping_symbol``), the symbols open then and, as a reply to a ping, that ping's message id and kind (``ping_kind``),
 in the entry's ``context_json``. The reply is one line, "Saved." (a voice note's: "Saved: <the heard words>"); no model
-call but the transcription, and it is saved even while a turn runs. ``engine/note_digest.py`` sends them back on Sundays.
+call but the transcription. A typed note is saved even while a turn runs; a voice note then gets the busy reply, as any
+voice note does, since it is only read once transcribed. ``engine/note_digest.py`` sends them back on Sundays.
 
 A typed message is otherwise a question for copilot: one bounded turn, as Why? runs, answered as a reply to it. Sent as a
 reply to a ping, the ping is its context: a position alert's (found from the ping's ``fb:``/``why:``/``done:`` button) is
@@ -150,9 +151,9 @@ PLAN_CAPTURE_SIDE = {("long", "stock"): "buy_stock", ("short", "stock"): "short_
 PART_NAME = {"plan": "Plan", "entry": "Entry", "invalidation": "Invalidation", "timeStop": "Time stop"}
 HORIZON_LABEL = {"day": "Day trade", "swing": "Swing", "long": "Long hold"}
 CONDITION = {"touches": "touches", "crosses": "crosses", "closes_beyond": "closes beyond"}
-NOTE = re.compile(r"^(note|idea)\b[\s:,.;!\-–—]*", re.I)  # "note ...", "Idea: ...": saved, never asked
+NOTE = re.compile(r"^(note|idea)(?=$|[\s:,.;!–—])[\s:,.;!–—]*", re.I)  # "note ...", "Idea: ...": saved; "Idea?", "note-worthy" asked
 NOTE_SAVED = "Saved."
-NOTE_EMPTY = "Say the thought after the word note, in the same message."
+NOTE_EMPTY = "Say the thought after note or idea, in the same message."
 # The kind of ping a note replied to, from its buttons when it has no ``ask:<kind>``.
 PING_VERBS = {"fb": "position_alert", "why": "position_alert", "rr": "radar", "rp": "radar_setup", "pc": "companion",
               "pu": "companion", "pl": "plan", "hd": "copilot_answer", "cc": "call_check", "pp": "paper"}
@@ -551,6 +552,8 @@ class Replies:
                 day_journal.append(db, day=datetime.now(ET).date(), operation_id=f"telegram:{message.get('message_id')}",
                                    kind="idea" if word == "idea" else "update", text=text[:day_journal.MAX_TEXT],
                                    symbol=tickers[0] if len(tickers) == 1 else None, context=context)
+        except day_journal.EntryConflict:  # the same message read again after a restart and heard a little differently
+            return NOTE_SAVED
         except Exception:  # noqa: BLE001 - the owner hears that it was not saved, never silence
             log.exception("Telegram note not saved")
             return "The note could not be saved."

@@ -164,7 +164,7 @@ def test_day_journal_migration_round_trips_without_touching_existing_data(tmp_pa
     _alembic(database_path, "upgrade", CURRENT_HEAD)
     inspector = inspect(engine)
     assert {column["name"] for column in inspector.get_columns("day_journal_entry")} == {
-        "id", "operation_id", "day", "kind", "text", "symbol", "not_traded", "created_at", "actor"}
+        "id", "operation_id", "day", "kind", "text", "symbol", "not_traded", "created_at", "actor", "context_json"}
     assert inspector.get_unique_constraints("day_journal_entry") == [
         {"name": "uq_day_journal_entry_operation_id", "column_names": ["operation_id"]}]
 

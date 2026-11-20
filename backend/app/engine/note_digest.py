@@ -4,9 +4,9 @@ A note is a message or voice note to the bot that starts with note or idea (``te
 journal with its context (``DayJournalEntry.context_json``). On Sunday at or after ``AT`` (18:00 New York) this sends one
 ping, ``NOTES · week of <Monday>``, under its own budget (``note_digest``: one a day in ``notification_policy``):
 
-- how many notes the last seven days hold;
+- how many notes the week holds (Sunday ``AT`` to Sunday ``AT``, so no note is counted twice);
 - their recurring themes: the tickers named most, then the words used in two or more notes (at most ``THEMES``);
-- how many of the week's sent position-alert and Radar pings he rated, of how many;
+- how many of the week's sent position-alert and Radar pings (``sent`` or ``unknown``) he rated, of how many;
 - one "worth testing?" note, quoted: the newest that began with idea, else the newest naming a theme ticker, else the
   newest.
 
@@ -82,7 +82,7 @@ def ratings(db: Session, start_utc: datetime, end_utc: datetime) -> tuple[int, i
     alerts = db.exec(select(PositionAlert.id).where(PositionAlert.delivery.in_(("sent", "unknown")), PositionAlert.detected_at >= start_utc,
                                                     PositionAlert.detected_at < end_utc)).all()
     rated = len(db.exec(select(PositionAlertFeedback.alert_id).where(PositionAlertFeedback.alert_id.in_(alerts))).all()) if alerts else 0
-    radar = db.exec(select(RadarAlert.event_id).where(RadarAlert.delivery == "sent", RadarAlert.detected_at >= start_utc,
+    radar = db.exec(select(RadarAlert.event_id).where(RadarAlert.delivery.in_(("sent", "unknown")), RadarAlert.detected_at >= start_utc,
                                                       RadarAlert.detected_at < end_utc)).all()
     if radar:
         try:
@@ -123,10 +123,16 @@ def render(found: list[tuple], rated: int, got: int, week_of: str) -> tuple[str,
 
 
 def build(db: Session, now: float) -> tuple[str, str, str]:
-    """(week key, title, body) for the seven days before ``now``."""
-    end = datetime.fromtimestamp(now, UTC).replace(tzinfo=None)
-    start = end - timedelta(days=7)
+    """(week key, title, body) for the week ending at this Sunday's ``AT`` (the latest one at or before ``now``), so two
+    digests never count the same note and a late send counts the same week."""
     local = datetime.fromtimestamp(now, ET).date()
+    sunday = local - timedelta(days=(local.weekday() + 1) % 7)
+    cut = datetime.combine(sunday, datetime.min.time(), ET) + timedelta(minutes=AT)
+    if cut.timestamp() > now:
+        sunday, cut = sunday - timedelta(days=7), cut - timedelta(days=7)
+    end = cut.astimezone(UTC).replace(tzinfo=None)
+    start = end - timedelta(days=7)
+    local = sunday
     monday = local - timedelta(days=local.weekday())
     found = notes(db, start, end)
     title, body = render(found, *ratings(db, start, end), monday.strftime("%b %-d"))
