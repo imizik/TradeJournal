@@ -76,9 +76,37 @@ def seed(tmp_path, move: float = 0.004, close: float = 100.0, n: int = ib.LOOKBA
     return path
 
 
-def book(tmp_path, clock, feed, quote=None, calendar=None, seed_path=None):
+class Backup:
+    """Alpaca's reads, by default with nothing to give; ``calls`` counts every ask."""
+
+    def __init__(self, clock: Clock, bars: Feed | None = None, spread: float = 0.04, age: float = 1.0,
+                 prev: tuple[str, float] | None = None, sip: Feed | None = None):
+        self.clock, self.bars, self.spread, self.age, self.prev, self.sip = clock, bars, spread, age, prev, sip
+        self.calls: list[str] = []
+
+    def quote(self, symbol):
+        self.calls.append("quote")
+        if self.bars is None:
+            return None
+        last = self.bars.today_minutes(symbol, self.clock.t)[-1]["close"]
+        ms = int((self.clock.t - self.age) * 1000)
+        return TradierQuote(symbol=symbol, bid=round(last - self.spread / 2, 2), ask=round(last + self.spread / 2, 2),
+                            bid_date=ms, ask_date=ms)
+
+    def minutes(self, symbol, day, now, feed):
+        self.calls.append(f"minutes:{feed}")
+        source = self.sip if feed == "sip" else self.bars
+        return None if source is None else source.today_minutes(symbol, now)
+
+    def previous_close(self, symbol, day):
+        self.calls.append("previous_close")
+        return None if self.prev is None else (date.fromisoformat(self.prev[0]), self.prev[1])
+
+
+def book(tmp_path, clock, feed, quote=None, calendar=None, seed_path=None, backup=None):
     store = ib.Store(tmp_path / "book.sqlite3", seed=seed_path or seed(tmp_path))
-    return ib.IntradayMomentumBook(calendar or Calendar(), feed, clock=clock, quote=quote or quotes(clock, feed=feed), store=store)
+    return ib.IntradayMomentumBook(calendar or Calendar(), feed, clock=clock, quote=quote or quotes(clock, feed=feed),
+                                   backup=backup or Backup(clock), store=store)
 
 
 def run_until(b, clock, day, hh, mm, step=20):
@@ -288,3 +316,119 @@ def test_read_carries_today_only_while_the_book_is_on(tmp_path, monkeypatch):
     monkeypatch.setenv("INTRADAY_MOMENTUM_BOOK_ENABLED", "true")
     today = ib.read(at(DAY, 11, 0))["today"]
     assert today["checks"][0]["upper"] == 100.5 and today["ahead"] == []  # no window in this store: nothing projected
+
+
+# ------------------------------------------------------------------ the Alpaca backup
+
+
+class DownFeed:
+    def today_minutes(self, symbol, now):
+        raise RuntimeError("Tradier timesales failed")
+
+
+def tradier_down(symbols):
+    raise RuntimeError("Tradier is down")
+
+
+def test_tradier_down_trades_from_alpaca_bars_close_and_quote_and_says_so(tmp_path, monkeypatch):
+    clock = Clock(at(DAY, 10, 0, 5))
+    alpaca = Feed(clock, path={580: 101.0})
+    backup = Backup(clock, bars=alpaca, prev=(PREV, 100.0))
+    b = book(tmp_path, clock, DownFeed(), quote=tradier_down, backup=backup)
+    b.run()
+    (t,) = b.store.trades()
+    assert (t["side"], t["entry"], t["entry_source"]) == (1, 101.02, "alpaca_iex")
+    (c,) = b.store.checks()
+    assert (c["status"], c["source"]) == ("done", "alpaca")
+    b.feed, b.quote = Feed(clock, path={580: 101.0}), quotes(clock, feed=alpaca)  # Tradier is back by the close
+    clock.t = at(DAY, 15, 59, 5)
+    b.run()
+    t = b.store.trades()[0]
+    assert (t["how"], t["exit"], t["exit_source"]) == ("close", 100.99, "tradier")
+    monkeypatch.setenv("INTRADAY_MOMENTUM_BOOK_ENABLED", "true")
+    row = ib.summary(b.store.trades(), b.store.checks(), at("2026-11-17", 12, 0), True)["days"][0]
+    assert row["backup"] is True and row["trades"][0]["entry_source"] == "alpaca_iex"
+
+
+def test_tradier_fine_never_asks_alpaca_all_day(tmp_path):
+    clock = Clock(at(DAY, 9, 59, 30))
+    feed = Feed(clock, path={580: 101.0})
+    backup = Backup(clock, bars=feed, prev=(PREV, 100.0), sip=feed)
+    b = book(tmp_path, clock, feed, backup=backup)
+    run_until(b, clock, DAY, 16, 30)
+    assert backup.calls == []
+    assert len(b.store.trades()) == 1 and b.store.has_session(DAY)
+    assert {c["source"] for c in b.store.checks()} == {"tradier"}
+    assert ib.summary(b.store.trades(), b.store.checks(), at("2026-11-17", 12, 0), True)["days"][0]["backup"] is False
+
+
+def test_tradier_bars_a_few_seconds_behind_do_not_ask_alpaca(tmp_path):
+    clock = Clock(at(DAY, 10, 0, 5))
+    feed = Feed(clock, path={580: 101.0})
+    backup = Backup(clock, bars=feed, prev=(PREV, 100.0))
+    b = book(tmp_path, clock, feed, backup=backup)
+    b._bars = lambda now: [x for x in feed.today_minutes("QQQ", now) if x["time"] < at(DAY, 9, 58)]  # the 09:59 bar lags
+    b.run()
+    assert backup.calls == [] and b.store.checks() == []
+    clock.t = at(DAY, 10, 2, 5)  # still short two minutes after the check: Alpaca's bars decide
+    b.run()
+    assert backup.calls[0] == "minutes:iex" and b.store.checks()[0]["source"] == "alpaca"
+
+
+def test_a_stale_alpaca_quote_trades_nothing_and_the_check_is_missed_as_before(tmp_path):
+    clock = Clock(at(DAY, 10, 0, 5))
+    alpaca = Feed(clock, path={580: 101.0})
+    b = book(tmp_path, clock, DownFeed(), quote=tradier_down, backup=Backup(clock, bars=alpaca, prev=(PREV, 100.0), age=61))
+    run_until(b, clock, DAY, 10, 6)
+    assert b.store.trades() == []
+    (c,) = b.store.checks()
+    assert (c["status"], c["source"]) == ("missed", None)
+
+
+def test_an_alpaca_close_from_an_older_session_is_not_the_previous_close(tmp_path):
+    clock = Clock(at(DAY, 10, 0, 5))
+    alpaca = Feed(clock, path={580: 101.0})
+    stale = Backup(clock, bars=alpaca, prev=("2026-11-12", 100.0))  # Thursday's close, but Friday was a session
+    b = book(tmp_path, clock, DownFeed(), quote=tradier_down, backup=stale)
+    b.run()
+    assert b.store.checks() == [] and b.store.trades() == []
+
+
+def test_a_session_tradier_cannot_give_is_recorded_from_alpaca_sip_after_its_delay(tmp_path):
+    clock = Clock(at(DAY, 16, 0, 30))
+    sip = Feed(clock)
+    backup = Backup(clock, sip=sip)
+    b = book(tmp_path, clock, DownFeed(), quote=tradier_down, backup=backup)
+    b.run()
+    assert not b.store.has_session(DAY) and backup.calls == []  # SIP is still inside its 15-minute delay
+    clock.t = at(DAY, 16, 16, 30)
+    b.run()
+    assert b.store.has_session(DAY) and backup.calls == ["minutes:sip"]
+    import sqlite3
+
+    with sqlite3.connect(b.store.path) as db:
+        assert db.execute("SELECT source FROM session WHERE day = ?", (DAY,)).fetchone()[0] == "alpaca_sip"
+
+
+def test_rows_from_before_the_backup_read_as_tradier(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.sqlite3"
+    db = sqlite3.connect(path)
+    db.executescript(ib.SCHEMA)  # the tables as #826 shipped them, no source columns
+    db.execute("INSERT INTO session VALUES ('2026-11-13', 100, 100, '{}')")
+    db.execute("INSERT INTO check_row VALUES ('2026-11-16', 600, 'done', 101, 100.5, 99.5, 100.4, NULL)")
+    db.execute("INSERT INTO check_row VALUES ('2026-11-16', 660, 'missed', NULL, NULL, NULL, NULL, 'late')")
+    db.execute("INSERT INTO trade (day, side, day_open, entry_at, entry, exit_at, exit, how, status) "
+               "VALUES ('2026-11-16', 1, 100, 1, 101.01, 2, 101.2, 'close', 'closed')")
+    db.commit()
+    db.close()
+    store = ib.Store(path, seed=None)
+    (t,) = store.trades()
+    assert (t["entry_source"], t["exit_source"]) == ("tradier", "tradier")
+    assert [c["source"] for c in store.checks()] == ["tradier", None]
+    row = ib.summary(store.trades(), store.checks(), at("2026-11-17", 12, 0), True)["days"][0]
+    assert row["backup"] is False
+    store.add_session("2026-11-16", 100, 101, {}, "alpaca_sip")  # the upgraded file takes new rows
+    store.add_check("2026-11-17", 600, "done", price=1, source="alpaca")
+    assert store.checks_on("2026-11-17")[0]["source"] == "alpaca"

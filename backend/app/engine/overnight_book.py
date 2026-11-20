@@ -11,6 +11,11 @@ a 15:59 the process never saw (switched on or restarted later, the calendar unre
 trying, at most once a minute, until it fills, and records its own time, so a late exit shows as late instead of being
 dropped; while it is unsold no new night starts and the skipped entry day leaves no row.
 
+Tradier first: only when its quote call fails or gives no fresh quote does a pass ask Alpaca's latest IEX quote
+(``qqq_backup``), under the same freshness rule. Each leg records where its price came from (``entry_source``,
+``exit_source``: ``tradier`` or ``alpaca_iex``; rows from before the backup read as ``tradier``); a night neither
+gives a fresh quote for is missed exactly as before, and a past missed night is never filled in.
+
 Paper only: normally one to three quote requests at 15:59 and one at the open (an unfilled exit, once a minute),
 nothing placed anywhere, no message sent.
 Storage is a SQLite file of its own (``OVERNIGHT_BOOK_PATH``), not the journal database: no migration. Everything is
@@ -29,7 +34,7 @@ import sqlite3
 import time
 from typing import Callable
 
-from app.engine import tradier
+from app.engine import qqq_backup, tradier
 from app.engine.chart_math import ET
 
 log = logging.getLogger(__name__)
@@ -75,6 +80,10 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as db, db:
             db.executescript(SCHEMA)
+            have = {r[1] for r in db.execute("PRAGMA table_info(night)")}
+            for column in ("entry_source", "exit_source"):  # added with the Alpaca backup; older rows are Tradier's
+                if column not in have:
+                    db.execute(f"ALTER TABLE night ADD COLUMN {column} TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=30)
@@ -83,31 +92,40 @@ class Store:
 
     def nights(self) -> list[dict]:
         with closing(self._connect()) as db:
-            return [dict(r) for r in db.execute("SELECT * FROM night ORDER BY day")]
+            return [_sourced(dict(r)) for r in db.execute("SELECT * FROM night ORDER BY day")]
 
     def night(self, day: str) -> dict | None:
         with closing(self._connect()) as db:
             row = db.execute("SELECT * FROM night WHERE day = ?", (day,)).fetchone()
-        return None if row is None else dict(row)
+        return None if row is None else _sourced(dict(row))
 
     def open_night(self) -> dict | None:
         with closing(self._connect()) as db:
             row = db.execute("SELECT * FROM night WHERE status = 'open' ORDER BY day DESC LIMIT 1").fetchone()
-        return None if row is None else dict(row)
+        return None if row is None else _sourced(dict(row))
 
-    def enter(self, day: str, at: float, bid: float, ask: float) -> None:
+    def enter(self, day: str, at: float, bid: float, ask: float, source: str = "tradier") -> None:
         with closing(self._connect()) as db, db:
-            db.execute("INSERT OR IGNORE INTO night (day, status, entry_at, entry_bid, entry_ask) VALUES (?, 'open', ?, ?, ?)",
-                       (day, at, bid, ask))
+            db.execute("INSERT OR IGNORE INTO night (day, status, entry_at, entry_bid, entry_ask, entry_source) "
+                       "VALUES (?, 'open', ?, ?, ?, ?)", (day, at, bid, ask, source))
 
     def miss(self, day: str, note: str) -> None:
         with closing(self._connect()) as db, db:
             db.execute("INSERT OR IGNORE INTO night (day, status, note) VALUES (?, 'missed', ?)", (day, note))
 
-    def exit(self, day: str, exit_day: str, at: float, bid: float, ask: float) -> None:
+    def exit(self, day: str, exit_day: str, at: float, bid: float, ask: float, source: str = "tradier") -> None:
         with closing(self._connect()) as db, db:
-            db.execute("UPDATE night SET status = 'closed', exit_day = ?, exit_at = ?, exit_bid = ?, exit_ask = ? "
-                       "WHERE day = ? AND status = 'open'", (exit_day, at, bid, ask, day))
+            db.execute("UPDATE night SET status = 'closed', exit_day = ?, exit_at = ?, exit_bid = ?, exit_ask = ?, "
+                       "exit_source = ? WHERE day = ? AND status = 'open'", (exit_day, at, bid, ask, source, day))
+
+
+def _sourced(night: dict) -> dict:
+    """A filled leg recorded before the backup existed came from Tradier; a leg not filled has no source."""
+    if night.get("entry_at") is not None and not night.get("entry_source"):
+        night["entry_source"] = "tradier"
+    if night.get("exit_at") is not None and not night.get("exit_source"):
+        night["exit_source"] = "tradier"
+    return night
 
 
 # ------------------------------------------------------------------ rules (pure)
@@ -139,7 +157,8 @@ def summary(nights: list[dict], now: float, on: bool, state: str) -> dict:
         rows.append({"day": n["day"], "status": n["status"], "entry_at": n.get("entry_at"), "entry": n.get("entry_ask"),
                      "exit_day": n.get("exit_day"), "exit_at": n.get("exit_at"), "exit": n.get("exit_bid"),
                      "bp": None if bp is None else round(bp, 2), "dollars": None if bp is None else round(STAKE * bp / 10_000, 2),
-                     "note": n.get("note")})
+                     "note": n.get("note"),
+                     "entry_source": n.get("entry_source"), "exit_source": n.get("exit_source")})
     return {
         "enabled": on, "state": state, "symbol": SYMBOL, "stake": STAKE, "now": now, "backtest": BACKTEST,
         "nights": rows,
@@ -155,10 +174,12 @@ def summary(nights: list[dict], now: float, on: bool, state: str) -> dict:
 
 class OvernightBook:
     def __init__(self, calendar=None, *, clock: Callable[[], float] = time.time,
-                 quote: Callable = tradier.get_quotes_once, store: Store | None = None):
+                 quote: Callable = tradier.get_quotes_once, backup: Callable = qqq_backup.quote,
+                 store: Store | None = None):
         self.calendar = calendar
         self.clock = clock
         self.quote = quote
+        self.backup = backup  # Alpaca's IEX quote, asked only when Tradier gives no fresh quote
         self.store = store or Store(store_path())
         self._last_run = 0.0
         self._last_exit_try = 0.0
@@ -179,12 +200,22 @@ class OvernightBook:
             return None
         return int(found.get("open") or OPEN_MINUTE), int(found["close"]), True
 
-    def _quote(self, now: float) -> tuple[float, float] | None:
+    def _quote(self, now: float) -> tuple[float, float, str] | None:
+        """(bid, ask, source) from a fresh Tradier quote, else from a fresh Alpaca IEX quote, else None (the next pass
+        tries again)."""
         try:
-            return fresh(self.quote([SYMBOL]).get(SYMBOL), now)
-        except Exception as exc:  # a provider failure: the next pass tries again
+            got = fresh(self.quote([SYMBOL]).get(SYMBOL), now)
+        except Exception as exc:  # a provider failure: the backup is asked
             log.warning("Overnight book quote failed: %s", exc)
+            got = None
+        if got is not None:
+            return (*got, "tradier")
+        try:
+            got = fresh(self.backup(SYMBOL), now)
+        except Exception as exc:
+            log.warning("Overnight book backup quote failed: %s", exc)
             return None
+        return None if got is None else (*got, qqq_backup.SOURCE)
 
     def run(self) -> None:
         try:

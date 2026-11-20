@@ -14,6 +14,16 @@ after each full session the book records that day's moves and close from its own
 the server never saw is left out of the window (the window is the 60 most recent recorded sessions). Early closes and
 closed days are not traded or recorded.
 
+Tradier first, with an Alpaca backup (``qqq_backup``) asked only when Tradier fails: when the timesales read fails
+(or still lacks the bar before the check ``BACKUP_AFTER_MINUTES`` after it), the check uses Alpaca's IEX minute bars
+(real time; the VWAP is then an IEX-volume VWAP); without Tradier's previous close, the last SIP daily close before
+today, accepted only when it is the previous open session; without a fresh Tradier quote, a fresh Alpaca IEX quote
+under the same rule. A finished session the timesales cannot give is recorded from Alpaca's SIP minute bars once
+their delay has passed. Each check, fill leg and recorded session says where it came from (``source``,
+``entry_source``, ``exit_source``: ``tradier``, ``alpaca`` for a check with any Alpaca input, ``alpaca_iex`` for a
+fill, ``alpaca_sip`` for a session; rows from before the backup read as ``tradier``). When neither has what a check
+needs it waits and is missed exactly as before; a past missed check is never filled in.
+
 Paper only: a timesales read and at most one quote request a check, nothing placed anywhere, no message sent. Storage is
 a SQLite file of its own (``INTRADAY_MOMENTUM_BOOK_PATH``), no migration. Off unless
 ``INTRADAY_MOMENTUM_BOOK_ENABLED=true`` (the owner's switch); it runs on the level alert monitor's loop and never raises
@@ -23,7 +33,7 @@ into it.
 from __future__ import annotations
 
 from contextlib import closing
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import json
 import logging
 import os
@@ -32,7 +42,7 @@ import sqlite3
 import time
 from typing import Callable
 
-from app.engine import tradier
+from app.engine import qqq_backup, tradier
 from app.engine.chart_math import ET
 
 log = logging.getLogger(__name__)
@@ -45,6 +55,8 @@ OPEN_MINUTE, CLOSE_MINUTE, FULL_CLOSE = 570, 959, 960
 LATE_MINUTES = 5
 QUOTE_AGE_SECONDS = 60
 RUN_SECONDS = 5
+BACKUP_AFTER_MINUTES = 2  # Tradier's bars still short this long after a check: ask Alpaca's
+SIP_DELAY_MINUTES = 16  # Alpaca's free SIP bars are delayed 15 minutes: a backup session record waits this long
 STAKE = 10_000.0
 BACKTEST = {"protocol_id": PROTOCOL_ID, "mean_bp": 4.4, "interval_bp": [2.1, 6.85], "years": "2022-2026",
             "settings": {"lookback": LOOKBACK, "vm": VM, "every": 60, "stop": "band_vwap"},
@@ -82,9 +94,15 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as db, db:
             db.executescript(SCHEMA)
+            for table, columns in (("session", ("source",)), ("check_row", ("source",)),
+                                   ("trade", ("entry_source", "exit_source"))):
+                have = {r[1] for r in db.execute(f"PRAGMA table_info({table})")}
+                for column in columns:  # added with the Alpaca backup; older rows are Tradier's (or the seed's)
+                    if column not in have:
+                        db.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
             if seed is not None and db.execute("SELECT COUNT(*) FROM session").fetchone()[0] == 0:
                 for s in json.loads(Path(seed).read_text())["sessions"]:
-                    db.execute("INSERT OR IGNORE INTO session VALUES (?, ?, ?, ?)",
+                    db.execute("INSERT OR IGNORE INTO session (day, open, close, moves) VALUES (?, ?, ?, ?)",
                                (s["day"], s["open"], s["close"], json.dumps(s["moves"])))
 
     def _connect(self) -> sqlite3.Connection:
@@ -102,9 +120,10 @@ class Store:
         with closing(self._connect()) as db:
             return db.execute("SELECT 1 FROM session WHERE day = ?", (day,)).fetchone() is not None
 
-    def add_session(self, day: str, open_: float, close: float, moves: dict) -> None:
+    def add_session(self, day: str, open_: float, close: float, moves: dict, source: str = "tradier") -> None:
         with closing(self._connect()) as db, db:
-            db.execute("INSERT OR IGNORE INTO session VALUES (?, ?, ?, ?)", (day, open_, close, json.dumps(moves)))
+            db.execute("INSERT OR IGNORE INTO session (day, open, close, moves, source) VALUES (?, ?, ?, ?, ?)",
+                       (day, open_, close, json.dumps(moves), source))
 
     def checked(self, day: str) -> set[int]:
         with closing(self._connect()) as db:
@@ -112,35 +131,55 @@ class Store:
 
     def add_check(self, day: str, minute: int, status: str, **row) -> None:
         with closing(self._connect()) as db, db:
-            db.execute("INSERT OR IGNORE INTO check_row VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                       (day, minute, status, row.get("price"), row.get("upper"), row.get("lower"), row.get("vwap"), row.get("note")))
+            db.execute("INSERT OR IGNORE INTO check_row (day, minute, status, price, upper, lower, vwap, note, source) "
+                       "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                       (day, minute, status, row.get("price"), row.get("upper"), row.get("lower"), row.get("vwap"),
+                        row.get("note"), row.get("source")))
 
     def open_trade(self) -> dict | None:
         with closing(self._connect()) as db:
             row = db.execute("SELECT * FROM trade WHERE status = 'open' ORDER BY id DESC LIMIT 1").fetchone()
-        return None if row is None else dict(row)
+        return None if row is None else _trade(dict(row))
 
-    def enter(self, day: str, side: int, day_open: float, at: float, price: float) -> None:
+    def enter(self, day: str, side: int, day_open: float, at: float, price: float, source: str = "tradier") -> None:
         with closing(self._connect()) as db, db:
-            db.execute("INSERT INTO trade (day, side, day_open, entry_at, entry, status) VALUES (?, ?, ?, ?, ?, 'open')",
-                       (day, side, day_open, at, price))
+            db.execute("INSERT INTO trade (day, side, day_open, entry_at, entry, status, entry_source) "
+                       "VALUES (?, ?, ?, ?, ?, 'open', ?)", (day, side, day_open, at, price, source))
 
-    def exit(self, trade_id: int, at: float, price: float, how: str) -> None:
+    def exit(self, trade_id: int, at: float, price: float, how: str, source: str = "tradier") -> None:
         with closing(self._connect()) as db, db:
-            db.execute("UPDATE trade SET exit_at = ?, exit = ?, how = ?, status = 'closed' WHERE id = ? AND status = 'open'",
-                       (at, price, how, trade_id))
+            db.execute("UPDATE trade SET exit_at = ?, exit = ?, how = ?, status = 'closed', exit_source = ? "
+                       "WHERE id = ? AND status = 'open'", (at, price, how, source, trade_id))
 
     def trades(self) -> list[dict]:
         with closing(self._connect()) as db:
-            return [dict(r) for r in db.execute("SELECT * FROM trade ORDER BY id")]
+            return [_trade(dict(r)) for r in db.execute("SELECT * FROM trade ORDER BY id")]
 
     def checks(self) -> list[dict]:
         with closing(self._connect()) as db:
-            return [dict(r) for r in db.execute("SELECT * FROM check_row ORDER BY day, minute")]
+            return [_check(dict(r)) for r in db.execute("SELECT * FROM check_row ORDER BY day, minute")]
 
     def checks_on(self, day: str) -> list[dict]:
         with closing(self._connect()) as db:
-            return [dict(r) for r in db.execute("SELECT * FROM check_row WHERE day = ? ORDER BY minute", (day,))]
+            return [_check(dict(r)) for r in db.execute("SELECT * FROM check_row WHERE day = ? ORDER BY minute", (day,))]
+
+
+def _trade(t: dict) -> dict:
+    """A leg recorded before the backup existed came from Tradier; an unfilled exit has no source."""
+    t["entry_source"] = t.get("entry_source") or "tradier"
+    t["exit_source"] = (t.get("exit_source") or "tradier") if t.get("exit_at") is not None else None
+    return t
+
+
+def _check(c: dict) -> dict:
+    """A done check recorded before the backup existed used Tradier; a missed one used nothing."""
+    if c.get("status") == "done" and not c.get("source"):
+        c["source"] = "tradier"
+    return c
+
+
+def backup_used(row: dict) -> bool:
+    return any(row.get(k) not in (None, "tradier") for k in ("source", "entry_source", "exit_source"))
 
 
 # ------------------------------------------------------------------ rules (pure)
@@ -231,11 +270,15 @@ def summary(trades: list[dict], checks: list[dict], now: float, on: bool) -> dic
     held = next((t for t in reversed(trades) if t["status"] == "open"), None)
     rows = [{"day": d, "bp": round(by_day[d], 2), "dollars": round(STAKE * by_day[d] / 10_000, 2),
              "trades": [{"side": t["side"], "entry_at": t["entry_at"], "entry": t["entry"], "exit_at": t["exit_at"],
-                         "exit": t["exit"], "how": t["how"]} for t in trades if t["day"] == d and t["status"] == "closed"]}
+                         "exit": t["exit"], "how": t["how"], "entry_source": t.get("entry_source"),
+                         "exit_source": t.get("exit_source")} for t in trades if t["day"] == d and t["status"] == "closed"],
+             # Any check or fill that day priced or decided from the Alpaca backup: the desk notes it on the row.
+             "backup": any(backup_used(x) for x in [*trades, *checks] if x["day"] == d)}
             for d in sorted(by_day, reverse=True)]
     return {
         "enabled": on, "symbol": SYMBOL, "stake": STAKE, "now": now, "backtest": BACKTEST,
-        "holding": None if held is None else {"side": held["side"], "entry_at": held["entry_at"], "entry": held["entry"]},
+        "holding": None if held is None else {"side": held["side"], "entry_at": held["entry_at"], "entry": held["entry"],
+                                              "entry_source": held.get("entry_source")},
         "days": rows,
         "totals": {"days": len(days), "days_traded": sum(1 for d in sorted(by_day) if any(t["day"] == d for t in trades)),
                    "mean_bp": round(sum(days) / len(days), 2) if days else None,
@@ -300,13 +343,15 @@ def today_view(store: Store, now: float, on: bool) -> dict | None:
 
 class IntradayMomentumBook:
     def __init__(self, calendar=None, feed=None, *, clock: Callable[[], float] = time.time,
-                 quote: Callable = tradier.get_quotes_once, store: Store | None = None):
+                 quote: Callable = tradier.get_quotes_once, backup=qqq_backup, store: Store | None = None):
         self.calendar = calendar
         self.feed = feed
         self.clock = clock
         self.quote = quote
+        self.backup = backup  # Alpaca reads (``quote``, ``minutes``, ``previous_close``), asked only when Tradier fails
         self.store = store or Store(store_path())
         self._last_run = 0.0
+        self._last_backup_session = 0.0  # a backup session record asks Alpaca at most once a minute
 
     def deliver(self) -> None:
         """Nothing to send; present so the monitor can treat it like its other stages."""
@@ -334,8 +379,39 @@ class IntradayMomentumBook:
             log.warning("Intraday momentum book quote failed: %s", exc)
             return None
 
-    def _quote(self, now: float) -> tuple[float, float] | None:
-        return fresh(self._raw_quote(), now)
+    def _quote(self, now: float, raw=None, asked: bool = False) -> tuple[float, float, str] | None:
+        """(bid, ask, source) from a fresh Tradier quote (``raw`` when the caller already asked), else a fresh Alpaca IEX
+        quote, else None."""
+        got = fresh(raw if asked else self._raw_quote(), now)
+        if got is not None:
+            return (*got, "tradier")
+        try:
+            got = fresh(self.backup.quote(SYMBOL), now)
+        except Exception as exc:
+            log.warning("Intraday momentum book backup quote failed: %s", exc)
+            return None
+        return None if got is None else (*got, qqq_backup.SOURCE)
+
+    def _backup_bars(self, today: date, now: float, feed: str) -> list[dict] | None:
+        try:
+            return self.backup.minutes(SYMBOL, today, now, feed)
+        except Exception as exc:
+            log.warning("Intraday momentum book backup bars failed: %s", exc)
+            return None
+
+    def _backup_previous_close(self, today: date) -> float | None:
+        """The SIP daily close of the previous open session, or None (unreadable, or the bar is not that session's)."""
+        try:
+            got = self.backup.previous_close(SYMBOL, today)
+        except Exception as exc:
+            log.warning("Intraday momentum book backup previous close failed: %s", exc)
+            return None
+        if got is None:
+            return None
+        prior = today - timedelta(days=1)
+        while not self.open_day(prior):
+            prior -= timedelta(days=1)
+        return got[1] if got[0] == prior else None
 
     def run(self) -> None:
         try:
@@ -358,7 +434,7 @@ class IntradayMomentumBook:
                 return
             got = self._quote(now)
             if got is not None:
-                self.store.exit(held["id"], now, got[0] if held["side"] > 0 else got[1], "late close")
+                self.store.exit(held["id"], now, got[0] if held["side"] > 0 else got[1], "late close", got[2])
             return
         if not self.full_session(today) or minute < CHECKS[0]:
             return
@@ -370,7 +446,7 @@ class IntradayMomentumBook:
             if held is not None:
                 got = self._quote(now)
                 if got is not None:
-                    self.store.exit(held["id"], now, got[0] if held["side"] > 0 else got[1], "close")
+                    self.store.exit(held["id"], now, got[0] if held["side"] > 0 else got[1], "close", got[2])
             return
         done = self.store.checked(day)
         for m in CHECKS:
@@ -389,48 +465,76 @@ class IntradayMomentumBook:
         if sig is None or not history:
             self.store.add_check(day, m, "missed", note="no 60-session history")
             return
-        try:
-            bars = self._bars(now)
-        except Exception as exc:  # the chart feed refused or is stale: the next pass inside the five minutes tries again
-            log.info("Intraday momentum book could not read QQQ bars: %s", exc)
-            return
-        before = regular(bars, today, m)
         start = datetime(today.year, today.month, today.day, 9, 30, tzinfo=ET).timestamp()
-        if not before or before[0]["time"] != start or before[-1]["time"] < start + (m - OPEN_MINUTE - 1) * 60:
-            return  # the 09:30 bar or the bar just before the check is not in yet: the next pass tries again
+
+        def complete(bars: list[dict] | None) -> list[dict] | None:
+            got = regular(bars or [], today, m)
+            if not got or got[0]["time"] != start or got[-1]["time"] < start + (m - OPEN_MINUTE - 1) * 60:
+                return None  # the 09:30 bar or the bar just before the check is not in yet
+            return got
+
+        signal = "tradier"
+        try:
+            before = complete(self._bars(now))
+            tradier_failed = False
+        except Exception as exc:  # the chart feed refused or is stale: Alpaca's bars are asked
+            log.info("Intraday momentum book could not read QQQ bars: %s", exc)
+            before, tradier_failed = None, True
+        if before is None:
+            minute = int((now - start) // 60) + OPEN_MINUTE
+            if not tradier_failed and minute < m + BACKUP_AFTER_MINUTES:
+                return  # Tradier is answering and may just be a few seconds behind: the next pass tries again
+            before = complete(self._backup_bars(today, now, "iex"))
+            if before is None:
+                return  # neither has the bars yet: the next pass inside the check's five minutes tries again
+            signal = qqq_backup.SIGNAL_SOURCE
         # The previous session's official close (Tradier's ``prevclose``): the real previous session, an early close
         # included, whatever this book recorded. One quote request a check; it also fills any order.
         q = self._raw_quote()
         prev = previous_close(q)
         if prev is None:
-            return  # no quote yet: the next pass inside the check's five minutes tries again
+            prev = self._backup_previous_close(today)
+            if prev is None:
+                return  # no previous close yet: the next pass inside the check's five minutes tries again
+            signal = qqq_backup.SIGNAL_SOURCE
         price, open_ = before[-1]["close"], before[0]["open"]
         lv = levels(open_, prev, sig, vwap(before))
         side = held["side"] if held is not None else 0
         stop, want = decide(side, price, lv)
         if stop or want:
-            got = fresh(q, now)
+            got = self._quote(now, q, asked=True)
             if got is None:
                 return  # no fresh quote yet: the next pass inside the check's five minutes tries again
-            bid, ask = got
+            bid, ask, source = got
             if stop:
-                self.store.exit(held["id"], now, bid if side > 0 else ask, "stop")
+                self.store.exit(held["id"], now, bid if side > 0 else ask, "stop", source)
             if want:
-                self.store.enter(day, want, open_, now, ask if want > 0 else bid)
-        self.store.add_check(day, m, "done", price=price, upper=lv["upper"], lower=lv["lower"], vwap=lv["vwap"])
+                self.store.enter(day, want, open_, now, ask if want > 0 else bid, source)
+        self.store.add_check(day, m, "done", price=price, upper=lv["upper"], lower=lv["lower"], vwap=lv["vwap"],
+                             source=signal)
 
     def _record_session(self, today: date, now: float) -> None:
         day = today.isoformat()
         if self.store.has_session(day):
             return
+        start = datetime(today.year, today.month, today.day, 9, 30, tzinfo=ET).timestamp()
+        whole = lambda got: bool(got) and got[0]["time"] == start and got[-1]["time"] == start + (CLOSE_MINUTE - OPEN_MINUTE) * 60  # noqa: E731
+        source = "tradier"
         try:
             bars = regular(self._bars(now), today, FULL_CLOSE)
         except Exception as exc:
             log.info("Intraday momentum book could not read today's bars: %s", exc)
-            return
-        start = datetime(today.year, today.month, today.day, 9, 30, tzinfo=ET).timestamp()
-        if not bars or bars[0]["time"] != start or bars[-1]["time"] != start + (CLOSE_MINUTE - OPEN_MINUTE) * 60:
-            return  # the 09:30 or the 15:59 bar is not in (a stale cached read): a later pass tries again
+            bars = []
+        if not whole(bars):
+            # Tradier failed or still lacks the 09:30 or 15:59 bar: Alpaca's consolidated (SIP) bars, the seed's own
+            # source, once their 15-minute delay has passed; else a later pass tries again.
+            if now < start + (FULL_CLOSE - OPEN_MINUTE + SIP_DELAY_MINUTES) * 60 or now - self._last_backup_session < 60:
+                return
+            self._last_backup_session = now
+            bars = regular(self._backup_bars(today, now, "sip") or [], today, FULL_CLOSE)
+            if not whole(bars):
+                return
+            source = "alpaca_sip"
         open_ = bars[0]["open"]
         moves = {}
         for m in CHECKS:
@@ -438,7 +542,7 @@ class IntradayMomentumBook:
             if p:
                 moves[str(m)] = round(abs(p[-1]["close"] / open_ - 1), 6)
         if len(moves) == len(CHECKS):
-            self.store.add_session(day, open_, bars[-1]["close"], moves)
+            self.store.add_session(day, open_, bars[-1]["close"], moves, source)
 
 
 def read(now: float | None = None) -> dict:
