@@ -41,8 +41,9 @@ def quote_feed(bid: float, ask: float, clock: Clock, age: float = 1.0, calls: li
     return get
 
 
-def book(tmp_path, clock, quote, days=None):
-    return ob.OvernightBook(Calendar(days or {}), clock=clock, quote=quote, store=ob.Store(tmp_path / "book.sqlite3"))
+def book(tmp_path, clock, quote, days=None, backup=None):
+    return ob.OvernightBook(Calendar(days or {}), clock=clock, quote=quote, backup=backup or (lambda symbol: None),
+                            store=ob.Store(tmp_path / "book.sqlite3"))
 
 
 def test_buys_at_1559_at_the_ask_and_sells_at_the_next_open_at_the_bid(tmp_path):
@@ -172,3 +173,102 @@ def test_an_unfilled_exit_asks_once_a_minute(tmp_path):
         clock.t = at("2026-11-13", 9, 30) + s
         b.run()
     assert len(calls) == 10
+
+
+# ------------------------------------------------------------------ the Alpaca backup
+
+
+def tradier_down(symbols):
+    raise RuntimeError("Tradier is down")
+
+
+def backup_feed(bid: float, ask: float, clock: Clock, age: float = 1.0, calls: list | None = None):
+    def get(symbol):
+        if calls is not None:
+            calls.append(clock.t)
+        ms = int((clock.t - age) * 1000)
+        return TradierQuote(symbol=symbol, bid=bid, ask=ask, bid_date=ms, ask_date=ms)
+    return get
+
+
+def test_tradier_down_fills_from_a_fresh_alpaca_quote_and_records_the_source(tmp_path):
+    clock = Clock(at("2026-11-12", 15, 59, 3))
+    b = book(tmp_path, clock, tradier_down, backup=backup_feed(500.00, 500.03, clock))
+    b.run()
+    n = b.store.night("2026-11-12")
+    assert (n["status"], n["entry_ask"], n["entry_source"]) == ("open", 500.03, "alpaca_iex")
+    b.quote = quote_feed(502.00, 502.02, clock)  # Tradier is back for the exit: it prices the sell
+    clock.t = at("2026-11-13", 9, 30, 4)
+    b.run()
+    n = b.store.night("2026-11-12")
+    assert (n["exit_bid"], n["exit_source"]) == (502.00, "tradier")
+    row = ob.summary(b.store.nights(), clock.t, True, "flat")["nights"][0]
+    assert (row["entry_source"], row["exit_source"]) == ("alpaca_iex", "tradier")
+
+
+def test_a_stale_tradier_quote_also_asks_the_backup(tmp_path):
+    clock = Clock(at("2026-11-12", 15, 59, 3))
+    b = book(tmp_path, clock, quote_feed(500.0, 500.02, clock, age=300), backup=backup_feed(500.0, 500.04, clock))
+    b.run()
+    assert b.store.night("2026-11-12")["entry_source"] == "alpaca_iex"
+
+
+def test_a_stale_alpaca_quote_is_missed_as_before(tmp_path):
+    clock, calls = Clock(at("2026-11-12", 15, 59, 3)), []
+    b = book(tmp_path, clock, tradier_down, backup=backup_feed(500.0, 500.02, clock, age=61, calls=calls))
+    for s in (0, 20, 40):
+        clock.t = at("2026-11-12", 15, 59, 3) + s
+        b.run()
+    assert b.store.nights() == [] and len(calls) == 3
+    clock.t = at("2026-11-12", 16, 0, 5)
+    b.run()
+    n = b.store.night("2026-11-12")
+    assert (n["status"], n["entry_source"]) == ("missed", None)
+
+
+def test_a_crossed_or_empty_alpaca_quote_never_fills(tmp_path):
+    clock = Clock(at("2026-11-12", 15, 59, 3))
+    for bid, ask in ((500.05, 500.0), (0.0, 500.0), (500.0, 0.0)):
+        b = book(tmp_path / f"{bid}-{ask}", clock, tradier_down, backup=backup_feed(bid, ask, clock))
+        b.run()
+        assert b.store.nights() == []
+
+
+def test_tradier_fine_never_asks_alpaca(tmp_path):
+    clock, calls = Clock(at("2026-11-12", 15, 59, 3)), []
+    b = book(tmp_path, clock, quote_feed(500.0, 500.02, clock), backup=backup_feed(1.0, 1.0, clock, calls=calls))
+    b.run()
+    clock.t = at("2026-11-13", 9, 30, 4)
+    b.run()
+    assert b.store.night("2026-11-12")["status"] == "closed" and calls == []
+
+
+def test_rows_from_before_the_backup_read_as_tradier(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.sqlite3"
+    db = sqlite3.connect(path)
+    db.executescript(ob.SCHEMA)  # the table as #819 shipped it, no source columns
+    db.execute("INSERT INTO night (day, status, entry_at, entry_bid, entry_ask, exit_day, exit_at, exit_bid, exit_ask) "
+               "VALUES ('2026-11-16', 'closed', 1, 600, 600.02, '2026-11-17', 2, 601, 601.02)")
+    db.execute("INSERT INTO night (day, status, note) VALUES ('2026-11-17', 'missed', 'no fresh QQQ quote')")
+    db.commit()
+    db.close()
+    store = ob.Store(path)
+    closed, missed = store.nights()
+    assert (closed["entry_source"], closed["exit_source"]) == ("tradier", "tradier")
+    assert (missed["status"], missed["entry_source"], missed["exit_source"]) == ("missed", None, None)
+    store.enter("2026-11-18", 3, 600, 600.02, "alpaca_iex")  # the upgraded file takes new rows
+    assert store.night("2026-11-18")["entry_source"] == "alpaca_iex"
+
+
+def test_two_openers_upgrading_an_old_file_at_once_both_succeed(tmp_path):
+    import sqlite3
+    from concurrent.futures import ThreadPoolExecutor
+
+    for k in range(20):
+        path = tmp_path / f"old{k}.sqlite3"
+        with sqlite3.connect(path) as db:
+            db.executescript(ob.SCHEMA)  # as #819 shipped it
+        with ThreadPoolExecutor(4) as pool:
+            list(pool.map(lambda _: ob.Store(path), range(4)))  # none raises

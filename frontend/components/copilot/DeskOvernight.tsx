@@ -14,7 +14,9 @@ import PaperCoverage, { type Coverage } from "./PaperCoverage";
  */
 
 type Night = { day: string; status: "open" | "closed" | "missed"; entry_at: number | null; entry: number | null;
-  exit_day: string | null; exit_at: number | null; exit: number | null; bp: number | null; dollars: number | null; note: string | null };
+  exit_day: string | null; exit_at: number | null; exit: number | null; bp: number | null; dollars: number | null; note: string | null;
+  /** Where each leg's price came from: Tradier, or Alpaca's IEX quote when Tradier failed. */
+  entry_source?: string | null; exit_source?: string | null };
 export type OvernightBook = { enabled: boolean; state: "holding" | "flat"; symbol: string; stake: number;
   backtest: { mean_bp: number; years: string };
   coverage?: Coverage | null;
@@ -33,6 +35,8 @@ const late = (epoch: number | null) => {
   const [h, m] = new Date(epoch * 1000).toLocaleTimeString("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" }).split(":").map(Number);
   return h * 60 + m > 9 * 60 + 35;
 };
+/** A leg priced from the Alpaca backup quote instead of Tradier. */
+const backup = (n: Night) => [n.entry_source, n.exit_source].some(s => s != null && s !== "tradier");
 const time = (epoch: number) => new Date(epoch * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
 
 /** The overnight book: read on mount and on the desk's shared minute (joining its one request) while the desk is on. */
@@ -71,7 +75,7 @@ export default function DeskOvernight({ book, failed }: { book: OvernightBook | 
         <>
           <p data-testid="desk-overnight-state" className="mt-1 text-sm">
             {held && held.entry != null && held.entry_at != null
-              ? <>Holding since {date(held.day)} {time(held.entry_at)} at {held.entry.toFixed(2)} (the ask). Sells at the next open, at the bid.</>
+              ? <>Holding since {date(held.day)} {time(held.entry_at)} at {held.entry.toFixed(2)} (the ask{backup(held) ? ", Alpaca backup" : ""}). Sells at the next open, at the bid.</>
               : <>Flat. Buys at 3:59 PM on a full session{book.enabled ? "" : " once switched on"}.</>}
           </p>
           {t && t.closed > 0 && (
@@ -86,11 +90,12 @@ export default function DeskOvernight({ book, failed }: { book: OvernightBook | 
           {book.nights.filter(n => n.status !== "open").length > 0 && (
             <ul className="mt-1 space-y-0.5 text-xs tabular-nums">
               {book.nights.filter(n => n.status !== "open").slice(0, SHOWN).map(n => (
-                <li key={n.day} className="flex justify-between gap-2">
+                <li key={n.day} className="flex flex-wrap justify-between gap-x-2">
                   <span className="min-w-0 truncate text-muted-foreground">{date(n.day)}{n.exit_day ? ` → ${date(n.exit_day)}` : ""}{late(n.exit_at) ? " · late" : ""}</span>
                   {n.status === "missed"
                     ? <span className="shrink-0 whitespace-nowrap text-muted-foreground">missed: no fresh quote</span>
                     : <span className="shrink-0 whitespace-nowrap"><span className={cn(tone(n.bp))}>{bp(n.bp ?? 0)}</span> <span className={cn("ml-1", tone(n.dollars))}>{usd(n.dollars ?? 0)}</span></span>}
+                  {backup(n) && <span data-testid="desk-overnight-backup" className="basis-full pl-2 text-[11px] text-sky-300/80">Alpaca backup: Tradier failed</span>}
                 </li>
               ))}
             </ul>

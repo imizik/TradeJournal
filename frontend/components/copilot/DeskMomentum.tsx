@@ -13,10 +13,12 @@ import PaperCoverage, { type Coverage } from "./PaperCoverage";
  * 15:59. This section shows what it holds now, the recorded days and the running result beside the exam. Read-only.
  */
 
-type Trade = { side: number; entry_at: number; entry: number; exit_at: number | null; exit: number | null; how: string | null };
-type Day = { day: string; bp: number; dollars: number; trades: Trade[] };
+type Trade = { side: number; entry_at: number; entry: number; exit_at: number | null; exit: number | null; how: string | null;
+  entry_source?: string | null; exit_source?: string | null };
+/** ``backup``: a check or fill that day used Alpaca because Tradier failed. */
+type Day = { day: string; bp: number; dollars: number; trades: Trade[]; backup?: boolean };
 export type MomentumBook = { enabled: boolean; symbol: string; stake: number; now: number; backtest: { mean_bp: number; years: string };
-  holding: { side: number; entry_at: number; entry: number } | null; days: Day[];
+  holding: { side: number; entry_at: number; entry: number; entry_source?: string | null } | null; days: Day[];
   coverage?: Coverage | null;
   totals: { days: number; days_traded: number; mean_bp: number | null; dollars: number | null; up: number; missed_checks: number } };
 
@@ -67,7 +69,7 @@ export default function DeskMomentum({ book, failed }: { book: MomentumBook | nu
         <>
           <p data-testid="desk-momentum-state" className="mt-1 text-sm">
             {book.holding
-              ? <>{word(book.holding.side)} since {sameDay(book.holding.entry_at, book.now) ? "" : `${date(nyDay(book.holding.entry_at))} `}{time(book.holding.entry_at)} at {book.holding.entry.toFixed(2)}. {sameDay(book.holding.entry_at, book.now) ? "Checks on the hour; flat by 3:59 PM." : "Left open by an outage; it closes at the next open."}</>
+              ? <>{word(book.holding.side)} since {sameDay(book.holding.entry_at, book.now) ? "" : `${date(nyDay(book.holding.entry_at))} `}{time(book.holding.entry_at)} at {book.holding.entry.toFixed(2)}{book.holding.entry_source && book.holding.entry_source !== "tradier" ? " (Alpaca backup)" : ""}. {sameDay(book.holding.entry_at, book.now) ? "Checks on the hour; flat by 3:59 PM." : "Left open by an outage; it closes at the next open."}</>
               : <>Flat. Checks QQQ on the hour from 10:00{book.enabled ? "" : " once switched on"}.</>}
           </p>
           {t && t.days > 0 && (
@@ -82,11 +84,12 @@ export default function DeskMomentum({ book, failed }: { book: MomentumBook | nu
           {book.days.length > 0 && (
             <ul className="mt-1 space-y-0.5 text-xs tabular-nums">
               {book.days.slice(0, SHOWN).map(d => (
-                <li key={d.day} className="flex justify-between gap-2">
+                <li key={d.day} className="flex flex-wrap justify-between gap-x-2">
                   <span className="min-w-0 truncate text-muted-foreground">
                     {date(d.day)}{d.trades.length === 0 ? " · no trade" : ` · ${d.trades.map(x => `${word(x.side).toLowerCase()} ${x.how ?? ""}`.trim()).join(", ")}`}
                   </span>
                   <span className="shrink-0 whitespace-nowrap"><span className={cn(tone(d.bp))}>{bp(d.bp)}</span> <span className={cn("ml-1", tone(d.dollars))}>{usd(d.dollars)}</span></span>
+                  {d.backup && <span data-testid="desk-momentum-backup" className="basis-full pl-2 text-[11px] text-sky-300/80">Alpaca backup: Tradier failed</span>}
                 </li>
               ))}
             </ul>
