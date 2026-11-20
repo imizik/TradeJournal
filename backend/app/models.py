@@ -290,6 +290,9 @@ class DayJournalEntry(SQLModel, table=True):
     not_traded: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
     actor: str = Field(default="owner", max_length=16)
+    # A note sent to the Telegram bot (``telegram_replies``): JSON with its source, the word it began with, the tickers
+    # it names, the symbols open when it was sent and, as a reply to a ping, that ping's message id and kind.
+    context_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
 class MonthlyReviewRecord(SQLModel, table=True):
