@@ -74,6 +74,15 @@ def store_path() -> Path:
 # ------------------------------------------------------------------ store
 
 
+def add_column(db: sqlite3.Connection, table: str, column: str) -> None:
+    """Add a TEXT column; another opener (the monitor beside a desk read) that added it first is fine."""
+    try:
+        db.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+    except sqlite3.OperationalError as exc:
+        if "duplicate column" not in str(exc):
+            raise
+
+
 class Store:
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -83,7 +92,7 @@ class Store:
             have = {r[1] for r in db.execute("PRAGMA table_info(night)")}
             for column in ("entry_source", "exit_source"):  # added with the Alpaca backup; older rows are Tradier's
                 if column not in have:
-                    db.execute(f"ALTER TABLE night ADD COLUMN {column} TEXT")
+                    add_column(db, "night", column)
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=30)

@@ -432,3 +432,15 @@ def test_rows_from_before_the_backup_read_as_tradier(tmp_path):
     store.add_session("2026-11-16", 100, 101, {}, "alpaca_sip")  # the upgraded file takes new rows
     store.add_check("2026-11-17", 600, "done", price=1, source="alpaca")
     assert store.checks_on("2026-11-17")[0]["source"] == "alpaca"
+
+
+def test_two_openers_upgrading_an_old_file_at_once_both_succeed(tmp_path):
+    import sqlite3
+    from concurrent.futures import ThreadPoolExecutor
+
+    for k in range(20):
+        path = tmp_path / f"old{k}.sqlite3"
+        with sqlite3.connect(path) as db:
+            db.executescript(ib.SCHEMA)  # as #826 shipped it
+        with ThreadPoolExecutor(4) as pool:
+            list(pool.map(lambda _: ib.Store(path, seed=None), range(4)))  # none raises

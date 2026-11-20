@@ -43,6 +43,7 @@ import time
 from typing import Callable
 
 from app.engine import qqq_backup, tradier
+from app.engine.overnight_book import add_column
 from app.engine.chart_math import ET
 
 log = logging.getLogger(__name__)
@@ -99,7 +100,7 @@ class Store:
                 have = {r[1] for r in db.execute(f"PRAGMA table_info({table})")}
                 for column in columns:  # added with the Alpaca backup; older rows are Tradier's (or the seed's)
                     if column not in have:
-                        db.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+                        add_column(db, table, column)
             if seed is not None and db.execute("SELECT COUNT(*) FROM session").fetchone()[0] == 0:
                 for s in json.loads(Path(seed).read_text())["sessions"]:
                     db.execute("INSERT OR IGNORE INTO session (day, open, close, moves) VALUES (?, ?, ?, ?)",
