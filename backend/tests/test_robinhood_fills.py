@@ -682,8 +682,14 @@ def test_off_and_shadow_leave_fills_trades_and_pnl_byte_for_byte_unchanged(tmp_p
 
 # --------------------------------------------------------------------------- masking and the owner's read
 
-def test_no_account_number_reaches_a_row_a_log_line_or_the_owner_read(desk, caplog):
+def test_no_account_number_reaches_a_row_a_log_line_or_the_owner_read(desk, caplog, monkeypatch):
     caplog.set_level(logging.DEBUG)
+
+    class OnTheDay(datetime):  # the owner's read shows the last 7 days: read it on the fixture's day, not today
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.fromtimestamp(epoch(17, 0), tz)
+    monkeypatch.setattr(rf, "datetime", OnTheDay)
     desk.stock(recurring_vti())
     desk.option(mu_buy("o1", "2.00000", "1.93000000", 10, 5))
     desk.at(10, 6).poll()
