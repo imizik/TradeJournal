@@ -326,10 +326,10 @@ def decide(full: dict, periods: dict[str, dict]) -> str:
 # ---------------------------------------------------------------- data
 
 
-def load_extract(path: Path) -> tuple[list[dict], dict[str, list[dict]], dict]:
+def load_extract(path: Path, protocol_id: str = PROTOCOL_ID) -> tuple[list[dict], dict[str, list[dict]], dict]:
     data = json.loads(path.read_text())
-    if data.get("protocol_id") != PROTOCOL_ID:
-        raise SystemExit(f"extract is not for {PROTOCOL_ID}")
+    if data.get("protocol_id") != protocol_id:
+        raise SystemExit(f"extract is not for {protocol_id}")
     fills = defaultdict(list)
     for f in data["fills"]:
         fills[f["trade_id"]].append({"side": f["side"], "contracts": Decimal(str(f["contracts"])),
