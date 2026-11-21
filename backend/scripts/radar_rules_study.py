@@ -281,7 +281,7 @@ def prepare_day(args):
     prior, day = args
     root, universe, daily = _STATE["root"], _STATE["universe"], _STATE["daily"]
     out = root / "prepared" / f"{day}.npz"
-    if out.exists():
+    if out.exists() and np.load(out)["prices"].dtype == np.float64:
         return day, "cached"
     symbols = [s["symbol"] for s in universe["symbols"]]
     previous, _ = replay.daily_inputs(daily, date.fromisoformat(prior), date.fromisoformat(day))
@@ -343,8 +343,10 @@ class Book:
         self.days, self.raw, self.filled, self.events, self.liquid = [], {}, {}, {}, {}
         for i, d in enumerate(all_days):
             path = root / "prepared" / f"{d}.npz"
-            if d in HALF_DAYS or not path.exists():
+            if d in HALF_DAYS or not FIRST <= date.fromisoformat(d) <= LAST:
                 continue
+            if not path.exists():
+                raise SystemExit(f"{d} is not prepared; run prepare to completion first")
             z = np.load(path)
             self.days.append(d)
             self.raw[d] = z["prices"].astype(np.float64)
@@ -355,7 +357,7 @@ class Book:
 
     def history(self, day):
         i = self.position[day]
-        return [self.filled[d] for d in self.days[max(0, i - NORMAL_DAYS * 2):i]]
+        return [self.filled[d] for d in self.days[:i]]  # normal() stops at the latest 20 usable
 
     def score(self, day, row, flag, sign, delay=1) -> dict | None:
         span = horizons(flag, delay)
