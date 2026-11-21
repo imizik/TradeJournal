@@ -348,6 +348,8 @@ class Book:
             if not path.exists():
                 raise SystemExit(f"{d} is not prepared; run prepare to completion first")
             z = np.load(path)
+            if z["prices"].dtype != np.float64:
+                raise SystemExit(f"{d} was prepared at reduced precision; run prepare again")
             self.days.append(d)
             self.raw[d] = z["prices"].astype(np.float64)
             self.filled[d] = ffill(self.raw[d])
