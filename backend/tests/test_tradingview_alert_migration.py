@@ -13,7 +13,7 @@ from app import models as _models  # noqa: F401  # registers all SQLModel tables
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 PREVIOUS_HEAD = "f1a2b3c4d5e6"
-CURRENT_HEAD = "e2b6d0f4a8c1"
+CURRENT_HEAD = "a3c7e1f9b2d4"
 DAY_JOURNAL_PARENT = "d4f1a7c3e9b2"
 
 EXPECTED_COLUMNS = {
@@ -164,7 +164,7 @@ def test_day_journal_migration_round_trips_without_touching_existing_data(tmp_pa
     _alembic(database_path, "upgrade", CURRENT_HEAD)
     inspector = inspect(engine)
     assert {column["name"] for column in inspector.get_columns("day_journal_entry")} == {
-        "id", "operation_id", "day", "kind", "text", "symbol", "not_traded", "created_at", "actor"}
+        "id", "operation_id", "day", "kind", "text", "symbol", "not_traded", "created_at", "actor", "context_json"}
     assert inspector.get_unique_constraints("day_journal_entry") == [
         {"name": "uq_day_journal_entry_operation_id", "column_names": ["operation_id"]}]
 

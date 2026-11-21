@@ -487,6 +487,17 @@ async def _maybe_start_self_check(app_: FastAPI):
     return asyncio.create_task(check.loop())
 
 
+async def _maybe_start_note_digest(_app: FastAPI):
+    """The Sunday notes digest (app/engine/note_digest.py): the week's Telegram notes in one ping. Off unless
+    NOTE_DIGEST_ENABLED=true."""
+    if os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    from app.engine import note_digest
+    if not note_digest.enabled():
+        return None
+    return asyncio.create_task(note_digest.NoteDigest(engine).loop())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Alembic owns the schema. The app used to call create_all() here, which
@@ -529,6 +540,7 @@ async def lifespan(_app: FastAPI):
     robinhood_fills = await _maybe_start_robinhood_fills(_app)
     paper_runner = await _maybe_start_paper_runner(_app)
     self_check = await _maybe_start_self_check(_app)
+    note_digest = await _maybe_start_note_digest(_app)
     from app.routers.copilot_desk import warm_at_start
     warm_at_start()  # the desk's market calendar, on its own thread
     try:
@@ -536,6 +548,8 @@ async def lifespan(_app: FastAPI):
     finally:
         if self_check is not None:
             self_check.cancel()
+        if note_digest is not None:
+            note_digest.cancel()
         if paper_runner is not None:
             paper_runner.cancel()
         if robinhood_fills is not None:

@@ -49,6 +49,14 @@ ticket), Pass and Why?. An ambiguous one is answered as a question with Check as
 with no caption is first checked as a call; when the model says it is not one, it is the broker screenshot below. A
 captioned photo whose caption is a call is checked with the image.
 
+A typed message or voice note that starts with note or idea (any case; a voice note's transcript) is a note, saved and
+never asked (``_save_note``): one day journal entry (``day_journal.append``; note is an ``update``, idea an ``idea``) with
+the words after the prefix, the time, the known tickers it names (``note_tickers``; as a reply to a ping naming none, the
+ping's ``ping_symbol``), the symbols open then and, as a reply to a ping, that ping's message id and kind (``ping_kind``),
+in the entry's ``context_json``. The reply is one line, "Saved." (a voice note's: "Saved: <the heard words>"); no model
+call but the transcription. A typed note is saved even while a turn runs; a voice note then gets the busy reply, as any
+voice note does, since it is only read once transcribed. ``engine/note_digest.py`` sends them back on Sundays.
+
 A typed message is otherwise a question for copilot: one bounded turn, as Why? runs, answered as a reply to it. Sent as a
 reply to a ping, the ping is its context: a position alert's (found from the ping's ``fb:``/``why:``/``done:`` button) is
 ``ask_context`` on that alert, any other ping's is its text, with the symbol it is about (``ping_symbol``: from the row
@@ -113,7 +121,8 @@ ANSWER_MAX = 1500
 QUESTION_MAX = 1000
 HELP = ("I send TradeJournal's phone pings. Tap a ping's buttons to answer it, or type or speak a question for copilot "
         "(or send a screenshot of your positions). Reply to a ping to ask about that alert. Share a Discord trade call "
-        "here (or start a message with check) to get it checked.")
+        "here (or start a message with check) to get it checked. Start a message or voice note with note or idea to "
+        "save a thought to today's journal.")
 BUSY = "Copilot is still answering the last question; ask again in a moment."
 WHY_QUESTION = "Why does this matter for me right now, and what should I check before acting?"
 RECONCILE_QUESTION = ("What positions does this screenshot show? For each one you can read, give the contract, quantity and "
@@ -142,6 +151,18 @@ PLAN_CAPTURE_SIDE = {("long", "stock"): "buy_stock", ("short", "stock"): "short_
 PART_NAME = {"plan": "Plan", "entry": "Entry", "invalidation": "Invalidation", "timeStop": "Time stop"}
 HORIZON_LABEL = {"day": "Day trade", "swing": "Swing", "long": "Long hold"}
 CONDITION = {"touches": "touches", "crosses": "crosses", "closes_beyond": "closes beyond"}
+NOTE = re.compile(r"^(note|idea)(?=$|[\s:,.;!–—])[\s:,.;!–—]*", re.I)  # "note ...", "Idea: ...": saved; "Idea?", "note-worthy" asked
+NOTE_SAVED = "Saved."
+NOTE_EMPTY = "Say the thought after note or idea, in the same message."
+# The kind of ping a note replied to, from its buttons when it has no ``ask:<kind>``.
+PING_VERBS = {"fb": "position_alert", "why": "position_alert", "rr": "radar", "rp": "radar_setup", "pc": "companion",
+              "pu": "companion", "pl": "plan", "hd": "copilot_answer", "cc": "call_check", "pp": "paper"}
+
+
+def note_words(text: str) -> tuple[str, str] | None:
+    """``(word, the rest)`` when ``text`` starts with note or idea (any case), else None."""
+    found = NOTE.match(text.strip())
+    return (found.group(1).lower(), text.strip()[found.end():].strip()) if found else None
 
 
 def feedback_buttons(alert_id, ratings: tuple[str, ...] = tuple(FEEDBACK_LABELS)) -> tuple[tuple[str, str], ...]:
@@ -276,8 +297,9 @@ class Replies:
         return verb
 
     async def handle_message(self, message: dict | None) -> str | None:
-        """A message from the owner: a typed question (``ask``), a voice note (``voice``) or a photo (``photo``), or the
-        help note for a command; ``refused`` when a voice note cannot be taken, ``busy`` while a turn runs."""
+        """A message from the owner: a typed note (``note``), a typed question (``ask``), a voice note (``voice``) or a
+        photo (``photo``), or the help note for a command; ``refused`` when a voice note cannot be taken, ``busy`` while a
+        turn runs."""
         from app.engine import captures, transcribe
         owner = telegram.chat_id()
         if not message or str((message.get("chat") or {}).get("id")) != owner or str((message.get("from") or {}).get("id")) != owner:
@@ -292,6 +314,9 @@ class Replies:
             if text.startswith("/"):
                 await asyncio.to_thread(self._reply, message, HELP)
                 return "help"
+            if (note := note_words(text)) is not None:  # saved even while a turn runs: no model call
+                await asyncio.to_thread(self._reply, message, await asyncio.to_thread(self._save_note, *note, message))
+                return "note"
             from app.engine import call_check
             call, said = call_check.classify(text, replying=bool(message.get("reply_to_message")))
             if call == "call" and not said:  # "check" or "check this", as a reply to a message: that message is the call
@@ -496,11 +521,43 @@ class Replies:
         else:
             if not heard:
                 answer = "No words were heard in that voice note."
+            elif (note := note_words(heard)) is not None:
+                saved = await asyncio.to_thread(self._save_note, *note, message)
+                answer = f"Saved: {note[1]}" if saved == NOTE_SAVED else saved  # the heard words, to catch a mishearing
             else:
                 await asyncio.to_thread(self._reply, message, f"Heard: {heard}")
                 await self._ask(heard[:QUESTION_MAX], message)
                 return
         await asyncio.to_thread(self._reply, message, answer)
+
+    def _save_note(self, word: str, text: str, message: dict) -> str:
+        """A note (``word``: note or idea) saved to today's day journal with what was true when it was sent; the line to
+        reply with. No model call."""
+        from sqlmodel import select
+        from app.engine import day_journal
+        from app.engine.chart_math import ET
+        from app.models import Trade
+        if not text:
+            return NOTE_EMPTY
+        replied = message.get("reply_to_message")
+        try:
+            with Session(self.engine) as db:
+                tickers = note_tickers(db, text)
+                if not tickers and replied and (about := ping_symbol(db, replied)):
+                    tickers = [about]  # "note: trimmed half" as a reply to a ping is about the ping's name
+                held = sorted({str(t).upper() for t in db.exec(select(Trade.ticker).where(Trade.status == "open")).all() if t})
+                context = {"source": "telegram", "word": word, "tickers": tickers, "open": held}
+                if replied:
+                    context["ping"] = {"message_id": replied.get("message_id"), "kind": ping_kind(replied)}
+                day_journal.append(db, day=datetime.now(ET).date(), operation_id=f"telegram:{message.get('message_id')}",
+                                   kind="idea" if word == "idea" else "update", text=text[:day_journal.MAX_TEXT],
+                                   symbol=tickers[0] if len(tickers) == 1 else None, context=context)
+        except day_journal.EntryConflict:  # the same message read again after a restart and heard a little differently
+            return NOTE_SAVED
+        except Exception:  # noqa: BLE001 - the owner hears that it was not saved, never silence
+            log.exception("Telegram note not saved")
+            return "The note could not be saved."
+        return NOTE_SAVED
 
     def _transcribe(self, data: bytes, extension: str) -> str:
         """The words in a clip, spoken tickers written as symbols, primed as the composer's hold-to-talk is."""
@@ -827,6 +884,32 @@ def ping_symbol(db: Session, ping: dict) -> str | None:
     if known - BENCHMARKS:  # a benchmark beside a name is the yardstick; alone, it is the subject
         known -= BENCHMARKS
     return next(iter(known)) if len(known) == 1 else None
+
+
+NOTE_TICKER = re.compile(r"(?<![A-Za-z0-9$])(\$?)([A-Za-z][A-Za-z0-9]{0,4}(?:\.[A-Za-z])?)(?![A-Za-z0-9])")
+
+
+def note_tickers(db: Session, text: str) -> list[str]:
+    """The known tickers a note names, in order: written in capitals or with a ``$`` (any case), or a company's name
+    (``spoken_tickers.map_tickers``, "nvidia" is NVDA). As ``ping_symbol`` reads text: only Radar's universe and the
+    owner's traded tickers count, a ticker that is also a word ("AI") only with a ``$``, and a one-letter one never."""
+    from app.engine import spoken_tickers
+    known = spoken_tickers.known_symbols(spoken_tickers.traded(db))
+    found: list[str] = []
+    for dollar, word in NOTE_TICKER.findall(spoken_tickers.map_tickers(text, known)[0]):
+        symbol = word.upper()
+        if (dollar or (word.isupper() and len(word) > 1 and symbol not in WORD_TICKERS)) and symbol in known and symbol not in found:
+            found.append(symbol)
+    return found
+
+
+def ping_kind(ping: dict) -> str:
+    """What kind of ping a message is, from its buttons: a factual ping's ``ask:<kind>``, else its own buttons' verb
+    (``PING_VERBS``); ``message`` when it has none (an answer, a note's reply)."""
+    verbs = [str(b.get("callback_data") or "").partition(":") for row in (ping.get("reply_markup") or {}).get("inline_keyboard") or []
+             for b in row]
+    return (next((rest for verb, _, rest in verbs if verb == "ask" and rest), None)
+            or next((PING_VERBS[verb] for verb, _, _ in verbs if verb in PING_VERBS), "message"))
 
 
 def thread_for(db: Session, symbol: str) -> str | None:

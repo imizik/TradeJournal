@@ -2242,6 +2242,27 @@ today's run had a failure or never finished). At most three Tradier
 reads a day, each through the chart feed's single-flight and budget; no Robinhood call (the health strip's existing
 reader of the feed's kept state only). `SELF_CHECK_ENABLED=false` switches it off; it is on by default.
 
+### Notes on Telegram
+
+A message or voice note to the bot that starts with **note** or **idea** (any case; for a voice note, its transcript) is
+saved, not asked: no copilot turn and no model call beyond the voice note's transcription
+(`backend/app/engine/telegram_replies.py`, `_save_note`). It becomes one entry in that New York day's journal
+(`DayJournalEntry`; note is an Update, idea an Idea, so it shows in the day's review under Thoughts) with the words after
+the prefix, the time, the known tickers it names (`note_tickers`: in capitals or with a `$`, or a company's name; as a
+reply to a ping that names none, the ping's symbol through `ping_symbol`), the symbols open at that moment, and, as a reply
+to a ping, that ping's message id and kind, in `context_json` (additive
+`alembic/versions/a3c7e1f9b2d4_day_journal_note_context.py`). The bot answers "Saved." (a voice note: "Saved: <the heard
+words>", to catch a mishearing). A typed note is saved even while a copilot turn runs; a voice note then gets the busy
+reply, as any voice note does.
+
+**Sunday digest** (`backend/app/engine/note_digest.py`, off unless `NOTE_DIGEST_ENABLED=true`; switching it on is the
+owner's call): on Sunday at or after 18:00 New York, one ping, "NOTES · week of <Monday>", with the week's note count
+(Sunday 18:00 to Sunday 18:00, so no note is counted twice), up to five recurring themes (the tickers named most, then words in two or more notes), how many of the week's sent
+position-alert and Radar pings he rated of how many, and one "Worth testing?" note quoted (the newest idea, else the newest
+naming a theme ticker, else the newest). Written from the rows with no model call, under a dozen lines; a week with no
+notes still sends it. Its own ping kind, `note_digest`, with a budget of one a day (§ Phone ping policy); the week is
+claimed through the policy (`new_only`), so a restart never sends it twice. Its tap opens the day journal (`/daily`).
+
 ### The desk read
 
 When the owner selects a ticker on the desk (a book row, a Watching row, a strip tile) and no conversation about it is
@@ -3366,7 +3387,9 @@ since-entry comparison, the news reader) and writes nothing.
   its turn's `turn_id` in `metrics`, so the scorecard meets it (source
   `telegram`) even on a thread older than its window. The bot's taps: `fb:`,
   `rr:`, `hd:`, `pc:`, `pu:`, `pl:`, `why:` and `ask:`
-  (`engine/telegram_replies.py`).
+  (`engine/telegram_replies.py`). A message or voice note starting with note
+  or idea is saved to the day journal instead of asked
+  ([Notes on Telegram](#notes-on-telegram)).
 - Headlines are read through a two-minute cache per symbol and entry, so the
   desk header's and Charts' minute refresh and repeated turns make one news read.
 - The context route is owner-only: it is in `access_manifest.DOMAIN_ROUTES`,
@@ -4328,8 +4351,8 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   single pings that carry a [setup card](radar.md#setup-cards-off-by-default),
   ranked just above `radar_event`), `radar_event` 4 (Radar's other single
   pings), `radar_digest` 2, `thesis_watch` 2, `research` 1, `paper` 6 (his
-  [paper book](#paper)'s PAPER pings), `paper_review` 1 (the Friday [paper review](#paper)) and `self_check` 1 (the
-  [open self-check](#open-self-check)'s line), ranked last. Before 09:30
+  [paper book](#paper)'s PAPER pings), `paper_review` 1 (the Friday [paper review](#paper)), `self_check` 1 (the
+  [open self-check](#open-self-check)'s line) and `note_digest` 1 (the [Sunday digest](#notes-on-telegram)), ranked last. Before 09:30
   New York these kinds together also have `PING_PREOPEN_ALLOWANCE` (default 2)
   pings, so pre-open headlines cannot spend the day. While the
   [morning brief](#pre-market-prep) is on and not yet decided today, one of them

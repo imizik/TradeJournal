@@ -83,7 +83,7 @@ def done(session: Session) -> dict[str, datetime]:
 
 
 def append(session: Session, *, day: date, operation_id: str, kind: str, text: str,
-           symbol: str | None = None, not_traded: bool = False) -> DayJournalEntry:
+           symbol: str | None = None, not_traded: bool = False, context: dict | None = None) -> DayJournalEntry:
     if not operation_id.strip() or len(operation_id) > 100:
         raise EntryError("operation_id must contain 1 to 100 characters")
     if kind not in KINDS:
@@ -108,7 +108,8 @@ def append(session: Session, *, day: date, operation_id: str, kind: str, text: s
         return existing
 
     row = DayJournalEntry(operation_id=operation_id, day=day, kind=kind, text=text, symbol=symbol,
-                          not_traded=not_traded, created_at=datetime.now(timezone.utc).replace(tzinfo=None), actor="owner")
+                          not_traded=not_traded, created_at=datetime.now(timezone.utc).replace(tzinfo=None), actor="owner",
+                          context_json=json.dumps(context) if context is not None else None)
     try:
         session.add(row)
         # This SELECT can trigger ORM autoflush, so it belongs inside the
