@@ -429,12 +429,18 @@ class RadarAlerts:
             if not PING_RULE_FLAGS:  # a rule flag queued before the flags went silent never goes out either
                 flagged = RadarAlert.kind.in_(radar_rules.RULE_KINDS) & (RadarAlert.delivery == DIGEST)
                 for built in db.exec(select(RadarAlert).where(RadarAlert.kind == DIGEST, RadarAlert.delivery == "pending")).all():
-                    if db.exec(select(RadarAlert.id).where(flagged, RadarAlert.session_date == built.session_date,
-                                                           RadarAlert.detected_at <= built.detected_at)).first() is not None:
-                        built.delivery, built.last_error = "skipped", "It listed Radar rule flags, which went silent before it was sent."
-                        db.add(built)
-                        db.flush()
-                        self._settle(db, built)
+                    members = (RadarAlert.delivery == DIGEST) & (RadarAlert.session_date == built.session_date) & (
+                        RadarAlert.kind != DIGEST) & (RadarAlert.detected_at <= built.detected_at)
+                    if db.exec(select(RadarAlert.id).where(flagged, members)).first() is None:
+                        continue
+                    keep = db.exec(select(RadarAlert).where(members, RadarAlert.kind.not_in(radar_rules.RULE_KINDS))
+                                   .order_by(RadarAlert.first_seen_at.desc(), RadarAlert.event_id)).all()
+                    if keep:  # rebuilt without the flags, so its setups still go
+                        since = built.title.split(" since ", 1)[1] if " since " in built.title else "the open"
+                        built.title, built.body = digest_message([r.body for r in keep], since)
+                    else:
+                        built.delivery, built.last_error = "skipped", "It listed only Radar rule flags, which went silent before it was sent."
+                    db.add(built)
                 db.exec(update(RadarAlert).where(RadarAlert.kind.in_(radar_rules.RULE_KINDS),
                                                  RadarAlert.delivery.in_(("pending", DIGEST)))
                         .values(delivery="skipped", last_error=SILENT))

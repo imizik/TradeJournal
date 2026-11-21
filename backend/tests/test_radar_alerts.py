@@ -954,3 +954,23 @@ def test_a_digest_built_with_rule_flags_before_the_change_is_not_sent(engine, mo
     assert sent == []
     assert {r.event_id: r.delivery for r in digests(engine)} == {built.event_id: "skipped"}
     assert {r.event_id: r.delivery for r in rows(engine)} == {"weak": "skipped"}
+
+
+def test_a_mixed_digest_built_before_the_change_goes_without_its_flags(engine, monkeypatch):
+    monkeypatch.setattr(radar_alerts, "PING_RULE_FLAGS", True)
+    clock = Clock(at(20))
+    alerts = RadarAlerts(engine, clock=clock)
+    alerts.record([_reversal()])  # AAA's setup single; the next AAA setup waits for the digest
+    alerts.record([_dip("rd0-later"), _event("weak", "BBB", 20, relative=4.6)])
+    clock.now = at(30)
+    built = alerts.digest()
+    assert "BBB" in built.body and "AAA dip turning up" in built.body
+    monkeypatch.setattr(radar_alerts, "PING_RULE_FLAGS", SHIPPED_PING_RULE_FLAGS)  # deploy-now before it was sent
+    sent = []
+    sent_to(monkeypatch, sent)
+    alerts.deliver()
+    [digest] = [p for p in sent if p["title"].startswith("Radar digest")]
+    assert digest["title"] == "Radar digest: 1 event since the open"
+    assert "AAA dip turning up" in digest["body"] and "BBB" not in digest["body"]
+    assert {r.event_id: r.delivery for r in rows(engine)}["weak"] == "skipped"
+    assert {r.event_id: r.delivery for r in rows(engine)}["rd0-later"] == "sent"

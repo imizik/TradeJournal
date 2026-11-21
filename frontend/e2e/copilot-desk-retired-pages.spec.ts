@@ -112,7 +112,7 @@ const RADAR_EVENT_ID = "evt_mu_20261113";
 const RADAR_DETAIL = (rating: string | null = null) => ({
   event: {
     event_id: RADAR_EVENT_ID, session_date: "2026-11-13", rule_version: "radar-rules-v1", universe_version: "radar-universe-v2",
-    kind: "gap_reversal", direction: "up", symbols: ["MU"], benchmark: "SPY", group: "SMH",
+    kind: "relative_to_sector", direction: "up", symbols: ["MU"], benchmark: "SPY", group: "SMH",
     first_seen_at: "2026-11-13T15:10:00Z", summary: "MU up 4.1% while SMH is up 0.6%",
     measures: { change_pct: 4.1, relative_pct: 3.5 },
     evidence: [{ symbol: "MU", pass_id: 1, retrieved_at: "2026-11-13T15:10:00Z", last: 112.5, change_pct: 4.1 }],
@@ -128,7 +128,8 @@ const RADAR_DETAIL = (rating: string | null = null) => ({
   plans: { planned: false, traded: false },
 });
 
-async function stubLogs(page: Page) {
+/** ``kind``: the feed event's kind; a rule flag (the default) shows in the drawer only when a link names it. */
+async function stubLogs(page: Page, kind = RADAR_DETAIL().event.kind) {
   const rated: Array<{ id: string; rating: string }> = [];
   let savedRating: string | null = null;
   await page.route(url => url.pathname.endsWith("/scanner/day"), route => {
@@ -142,7 +143,7 @@ async function stubLogs(page: Page) {
     return route.fulfill({
       json: {
         state: "recording", reason: null, session: reqSession, sessions: ["2026-11-13", "2026-11-12"],
-        events: [{ ...RADAR_DETAIL(savedRating).event, on_movers: false, latest_status: "extended", revision_count: 1, rating: savedRating, news: RADAR_DETAIL().news }],
+        events: [{ ...RADAR_DETAIL(savedRating).event, kind, on_movers: false, latest_status: "extended", revision_count: 1, rating: savedRating, news: RADAR_DETAIL().news }],
         since_last_visit: [RADAR_EVENT_ID], last_visit_at: null,
         coverage: { passes_recorded: 10, passes_expected: 10, passes_failed: 0, last_ok_pass_at: "2026-11-13T15:30:00Z", symbols_tracked: 169, symbols_missing: [], universe_version: "radar-universe-v2", live: true },
         generated_at: "2026-11-13T15:30:00Z",
@@ -172,7 +173,7 @@ async function stubLogs(page: Page) {
 
 test("⌘K: Data sync opens the Sync Center; Scanner history and Radar log open their desk drawers", async ({ page }) => {
   await open(page);
-  await stubLogs(page);
+  await stubLogs(page, "gap_reversal");  // a setup: rule flags are silent in the drawer
   const palette = page.getByRole("dialog", { name: "Jump to" });
   await page.keyboard.press("ControlOrMeta+k");
   await palette.getByRole("combobox").fill("data sync");
@@ -421,7 +422,7 @@ for (const width of [1440, 390]) {
     // Study radar-rules-20261121-v1: vs SPY, vs sector and group flags stay stored but are no longer shown on the desk.
     await open(page, width);
     await stubLogs(page);
-    const base = { ...RADAR_DETAIL().event, on_movers: false, latest_status: null, revision_count: 0, rating: null, news: RADAR_DETAIL().news };
+    const base = { ...RADAR_DETAIL().event, kind: "gap_reversal", on_movers: false, latest_status: null, revision_count: 0, rating: null, news: RADAR_DETAIL().news };
     const flag = (id: string, kind: string, symbol: string) =>
       ({ ...base, event_id: id, kind, symbols: [symbol], summary: `${symbol} ahead of SPY by 5.2% over 30 min` });
     await page.route(url => url.pathname.endsWith("/radar/feed"), route => route.fulfill({ json: {
