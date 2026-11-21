@@ -14,6 +14,8 @@ from app.engine.tradier import TradierQuote
 from app.models import PhonePing, RadarAlert
 from tests.test_radar_rules import DAY, OPEN, PATHS, UNIVERSE, Calendar, _iso, _store_with, steps
 
+SHIPPED_PING_RULE_FLAGS = radar_alerts.PING_RULE_FLAGS  # read at import, before any fixture sets it
+
 EVENT = "rv0-2030-01-15-spy-aaa-up-1"
 
 
@@ -866,7 +868,7 @@ def test_with_the_lab_on_a_card_with_a_contract_also_carries_paper_it_beside_pla
 # ------------------------------------------------------------ silent rule flags (study radar-rules-20261121-v1)
 
 def test_by_default_a_rule_flag_is_stored_and_written_skipped_never_pinged(tmp_path, engine, monkeypatch):
-    monkeypatch.setattr(radar_alerts, "PING_RULE_FLAGS", False)  # the shipped default
+    monkeypatch.setattr(radar_alerts, "PING_RULE_FLAGS", SHIPPED_PING_RULE_FLAGS)
     monkeypatch.setenv("RADAR_SINGLE_MIN_RELATIVE_PCT", "5")  # strong enough for a single before the study
     store = _store_with(tmp_path, 36)
     sent = []
@@ -885,7 +887,7 @@ def test_by_default_a_rule_flag_is_stored_and_written_skipped_never_pinged(tmp_p
 
 
 def test_by_default_a_digest_never_lists_rule_flags_but_setups_still_ping(engine, monkeypatch):
-    monkeypatch.setattr(radar_alerts, "PING_RULE_FLAGS", False)
+    monkeypatch.setattr(radar_alerts, "PING_RULE_FLAGS", SHIPPED_PING_RULE_FLAGS)
     sent = []
     sent_to(monkeypatch, sent)
     clock = Clock(at(20))
@@ -900,3 +902,38 @@ def test_by_default_a_digest_never_lists_rule_flags_but_setups_still_ping(engine
     alerts.deliver()
     assert all("BBB" not in p["body"] and "CCC" not in p["body"] for p in sent)
     assert {r.event_id: r.delivery for r in rows(engine)} == {"weak": "skipped", "strong": "skipped", setup.event_id: "sent"}
+
+
+def test_the_shipped_default_is_silent():
+    assert SHIPPED_PING_RULE_FLAGS is False
+
+
+def test_by_default_a_setup_still_rides_the_digest_without_the_flags(engine, monkeypatch):
+    monkeypatch.setattr(radar_alerts, "PING_RULE_FLAGS", SHIPPED_PING_RULE_FLAGS)
+    sent = []
+    sent_to(monkeypatch, sent)
+    clock = Clock(at(20))
+    alerts = RadarAlerts(engine, clock=clock)
+    alerts.record([_reversal()])  # the stock's setup single for the session
+    alerts.deliver()
+    clock.now = at(25)
+    alerts.record([_dip("rd0-later"), _event("flag", "CCC", 25)])  # a second setup on AAA waits for the digest; the flag is silent
+    clock.now = at(30)  # 10:00
+    alerts.deliver()
+    digest = [p for p in sent if p["title"].startswith("Radar digest")]
+    assert len(digest) == 1 and "AAA dip turning up" in digest[0]["body"] and "CCC" not in digest[0]["body"]
+
+
+def test_a_rule_flag_queued_before_the_change_is_never_sent(engine, monkeypatch):
+    monkeypatch.setattr(radar_alerts, "PING_RULE_FLAGS", True)  # written while the flags still pinged
+    clock = Clock(at(20))
+    alerts = RadarAlerts(engine, clock=clock)
+    alerts.record([_event("strong", "AAA", 20), _event("weak", "BBB", 20, relative=4.6)])
+    assert {r.event_id: r.delivery for r in rows(engine)} == {"strong": "pending", "weak": "digest"}
+    monkeypatch.setattr(radar_alerts, "PING_RULE_FLAGS", SHIPPED_PING_RULE_FLAGS)  # the upgrade
+    sent = []
+    sent_to(monkeypatch, sent)
+    clock.now = at(30)
+    alerts.deliver()
+    assert sent == [] and {r.event_id: (r.delivery, r.last_error) for r in rows(engine)} == {
+        "strong": ("skipped", radar_alerts.SILENT), "weak": ("skipped", radar_alerts.SILENT)}

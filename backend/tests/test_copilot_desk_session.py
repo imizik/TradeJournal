@@ -71,7 +71,7 @@ def test_the_days_events_in_time_order_and_the_time_stops_ahead(desk, engine, tm
     monkeypatch.setenv("RADAR_ENABLED", "true")
     monkeypatch.setenv("RADAR_STORE", str(path))
     store = RadarStore(path)
-    store.append_event(RADAR_EVENT)  # yesterday's: not on today's strip
+    store.append_event({**RADAR_EVENT, "kind": "gap_reversal"})  # yesterday's: not on today's strip
     store.append_event({**RADAR_EVENT, "event_id": "today-1", "kind": "gap_reversal", "session_date": "2026-10-21",
                         "first_seen_at": "2026-10-21T14:12:04.000Z"})
     store.append_event({**RADAR_EVENT, "event_id": "today-flag", "session_date": "2026-10-21",  # a rule flag: silent

@@ -419,6 +419,9 @@ def assignment(job: dict) -> tuple[str, list[str], str]:
         event = RadarStore(store, read_only=True).event(data["event_id"])
         if event is None:
             raise QueueError("not_found", f"Radar event {data['event_id']} is not in the Radar store.")
+        from app.engine import radar_rules
+        if radar_rules.silent(event):  # queued before the rule flags went silent
+            raise QueueError("not_found", f"Radar event {data['event_id']} is a silent rule flag, so it is not researched.")
         symbols = [s for s in event.get("symbols", []) if isinstance(s, str)][:8]
         question = (f"Radar recorded this event at {event.get('first_seen_at')} (session {event.get('session_date')}): "
                     f"{event.get('kind')} {event.get('direction')} in {', '.join(symbols) or 'unknown symbols'} versus "

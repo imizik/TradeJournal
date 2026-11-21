@@ -1,6 +1,11 @@
 """Radar phone pings (``docs/radar.md`` § Phone alerts): two digests a session and, for a strong event, one
 ping the minute the recorder writes it. Off unless ``RADAR_ALERTS_ENABLED=true``.
 
+The rules' own flags (``radar_rules.silent``: vs SPY, vs sector, group) are silent since study
+``radar-rules-20261121-v1``: each still gets its outbox row, written ``skipped``, and never a single or a digest
+line (``PING_RULE_FLAGS``). What follows about strong events describes them only when that is switched back on;
+setup events ping as described.
+
 The end goal's first step is timely, factual alerts without waiting for AI analysis. Every new Radar event
 gets one outbox row. A **strong** event (``strong``: a stock at least ``RADAR_SINGLE_MIN_RELATIVE_PCT``,
 default 7.0, against SPY, or a group with every member moving the same way and a median at least
@@ -421,6 +426,10 @@ class RadarAlerts:
                     .values(delivery="unknown", last_error="The send was interrupted and may have reached the phone, so it was not resent."))
             for digest_id in digests:
                 self._settle(db, db.get(RadarAlert, digest_id))
+            if not PING_RULE_FLAGS:  # a rule flag queued before the flags went silent never goes out either
+                db.exec(update(RadarAlert).where(RadarAlert.kind.in_(radar_rules.RULE_KINDS),
+                                                 RadarAlert.delivery.in_(("pending", DIGEST)))
+                        .values(delivery="skipped", last_error=SILENT))
             db.commit()
         self.digest()
         with Session(self.engine) as db:

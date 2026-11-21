@@ -772,8 +772,8 @@ news and feedback. Movers refresh every 60 seconds while the tab is visible.
 
 Since 2026-11-02 the copilot has two read-only tools over the same store
 ([Copilot Lab](copilot-lab.md#what-runs)): `get_radar_today`
-(`backend/app/engine/radar_today.py`) returns the session's saved events newest
-first with their latest revision, latest news check and rating, plus the latest
+(`backend/app/engine/radar_today.py`) returns the session's saved events, less the
+[silent rule flags](#silent-rule-flags), newest first with their latest revision, latest news check and rating, plus the latest
 pass's movers in the shape above (five leaders and laggards, six groups), and
 `get_market_regime` (`backend/app/engine/radar_regime.py`) returns the benchmark
 rows Movers now computes and drops: SPY, QQQ, IWM, RSP and a stock's sector
@@ -949,6 +949,8 @@ more sessions. Passing earns a screen section next; phone alerts remain a
 separate decision.
 
 ## Phone alerts (off by default)
+
+Since `radar-rules-20261121-v1` the rule flags never ping (see [Silent rule flags](#silent-rule-flags)); the strong-event singles and digest lines below apply to setup events only, unless `PING_RULE_FLAGS` in `radar_alerts.py` is switched back on.
 
 Off unless `RADAR_ALERTS_ENABLED=true` in the VPS `backend.env`; switching it
 on is Isaac's call (a new phone alert is an activation). It has been on on the
