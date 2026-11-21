@@ -192,7 +192,8 @@ def test_reasons_only_when_the_app_already_knows_one(rig):
               "PLTR": {"next": None, "reports": [{"date": "2026-10-01", "label": "Q3"}]}}  # weeks ago: no reason
     rig["patch"].setattr(symbol_events, "_earnings", lambda symbol, today, reports, issue: cached.get(symbol, {"next": None, "reports": []}))
     reasons = {m["symbol"]: m["reason"] for m in moving(rig)["movers"]}
-    assert reasons["MU"] == "Earnings" and reasons["NBIS"] == "Dip turn" and reasons["AMD"] == "Radar"
+    assert reasons["MU"] == "Earnings" and reasons["NBIS"] == "Dip turn"
+    assert reasons["AMD"] is None  # a rule flag is silent (radar_rules.silent): stored, never a reason
     assert reasons["PLTR"] is None and reasons["TSLA"] is None and reasons["CRWV"] is None
 
 

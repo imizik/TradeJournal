@@ -63,7 +63,8 @@ from sqlalchemy import or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import notification_policy, ntfy, phone, ping_images, radar_dip, radar_reversal, radar_setup, telegram_replies
+from app.engine import (notification_policy, ntfy, phone, ping_images, radar_dip, radar_reversal, radar_rules, radar_setup,
+                        telegram_replies)
 from app.engine.chart_math import ET
 from app.engine.radar_movers import event_movers_tags
 from app.models import RadarAlert, RadarSetup
@@ -83,6 +84,8 @@ DIGEST_LINES = 12
 SINGLE_MIN_RELATIVE_PCT = 7.0
 SINGLE_MIN_GROUP_PCT = 3.0
 ALSO_ON_MOVERS = "Also on Movers: "
+SILENT = "A Radar rule flag: stored for scoring, not pinged (study radar-rules-20261121-v1)."
+PING_RULE_FLAGS = False  # the rule flags (radar_rules.silent) are written skipped; True restores their pings (tests)
 # Singles that count toward the hourly rule: waiting to be tried, or tried. A held or skipped single and an event that
 # rode a digest were never tried (attempts 0).
 SINGLE = (RadarAlert.kind != DIGEST) & or_(RadarAlert.delivery.in_(("pending", "sending")), RadarAlert.attempts > 0)
@@ -283,6 +286,16 @@ class RadarAlerts:
         with Session(self.engine) as db:
             for event in events:
                 if db.exec(select(RadarAlert.id).where(RadarAlert.event_id == event["event_id"])).first() is not None:
+                    continue
+                if radar_rules.silent(event) and not PING_RULE_FLAGS:  # stored and scored, never pinged (docs/radar.md § Silent rule flags)
+                    db.add(RadarAlert(event_id=event["event_id"], session_date=event["session_date"],
+                                      rule_version=event["rule_version"], kind=event["kind"], subject=subject(event),
+                                      title=message(event)[0], body=digest_line(event), delivery="skipped", last_error=SILENT,
+                                      first_seen_at=_utc(_parse(event["first_seen_at"])), detected_at=_utc(now)))
+                    try:
+                        db.commit()
+                    except IntegrityError:
+                        db.rollback()
                     continue
                 setup = _setup(db, event["event_id"]) if radar_setup.enabled() and radar_setup.is_setup(event) else None
                 title, body = _card(db, event, setup) if setup is not None else message(event)

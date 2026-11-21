@@ -108,6 +108,13 @@ def from_env() -> Rules:
         return V0
 
 _KIND_TAG = {"relative_to_spy": "spy", "relative_to_sector": "sector", "group_move": "group"}
+RULE_KINDS = tuple(_KIND_TAG)  # the flag kinds these rules write; setup kinds (dip_turn, gap_reversal) are not here
+
+
+def silent(event: dict) -> bool:
+    """Whether an event is one of these rules' flags, which the recorder still stores and scores but nothing shows or
+    pings: they were no better than a coin flip (study ``radar-rules-20261121-v1``, docs/radar.md)."""
+    return event.get("kind") in RULE_KINDS
 
 
 def _epoch(value: str) -> float:

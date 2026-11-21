@@ -7,6 +7,7 @@ appear. Ratings carry no time the store exposes, so they are shown only with no 
 """
 from datetime import datetime, UTC
 
+from app.engine import radar_rules
 from app.engine.radar_comparison import epoch
 from app.engine.radar_movers import build_movers, earlier_pass
 from app.engine.radar_store import RadarStore, load_universe
@@ -80,7 +81,7 @@ def feed(store: RadarStore, session: str, before: float | None = None, *, group:
     ratings = store.latest_ratings() if before is None else {}
     rows = []
     for event in store.events(session):
-        if not _before(event["first_seen_at"], before) or not _matches(event, group):
+        if not _before(event["first_seen_at"], before) or not _matches(event, group) or radar_rules.silent(event):
             continue
         revisions = [r for r in store.revisions(event["event_id"]) if _before(r["recorded_at"], before)]
         checks = [c for c in store.news_checks(event["event_id"]) if _before(c["checked_at"], before)]

@@ -107,7 +107,8 @@ def test_cancelled_while_running_stays_cancelled_and_restart_requeues():
 
 def test_radar_events_enqueue_once_and_become_an_assignment(tmp_path, monkeypatch):
     store_path = tmp_path / "radar.sqlite"
-    RadarStore(store_path).append_event(copy.deepcopy(EVENT))
+    RadarStore(store_path).append_event({**copy.deepcopy(EVENT), "kind": "gap_reversal"})
+    RadarStore(store_path).append_event({**copy.deepcopy(EVENT), "event_id": "silent-flag"})  # a rule flag: no research job
     assert q.enqueue_radar_events(str(store_path), EVENT["session_date"]) == 1
     assert q.enqueue_radar_events(str(store_path), EVENT["session_date"]) == 0
     [job] = q.list_jobs()

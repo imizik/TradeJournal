@@ -53,8 +53,7 @@ MINE = 6  # his own movers shown
 BROAD = 8  # the recorder's movers shown after his
 MEMBERS = 30  # a group's popover list
 QUOTE_MAX = 250  # symbols in the one batched read: the ETFs, his held and watched names and every research company fit
-REASON = {"dip_turn": "Dip turn", "gap_reversal": "Gap reversal", "group_move": "Group move",
-          "relative_to_spy": "Radar", "relative_to_sector": "Radar"}
+REASON = {"dip_turn": "Dip turn", "gap_reversal": "Gap reversal"}  # setups only: rule flags are silent (radar_rules.silent)
 
 _lock = threading.Lock()  # one fill at a time: a second request waits and finds the first one's read
 _changes: dict[str, tuple[float, date, float | None]] = {}  # symbol -> (valid until, New York date, change %)

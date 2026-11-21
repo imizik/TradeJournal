@@ -112,7 +112,7 @@ const RADAR_EVENT_ID = "evt_mu_20261113";
 const RADAR_DETAIL = (rating: string | null = null) => ({
   event: {
     event_id: RADAR_EVENT_ID, session_date: "2026-11-13", rule_version: "radar-rules-v1", universe_version: "radar-universe-v2",
-    kind: "relative_to_sector", direction: "up", symbols: ["MU"], benchmark: "SPY", group: "SMH",
+    kind: "gap_reversal", direction: "up", symbols: ["MU"], benchmark: "SPY", group: "SMH",
     first_seen_at: "2026-11-13T15:10:00Z", summary: "MU up 4.1% while SMH is up 0.6%",
     measures: { change_pct: 4.1, relative_pct: 3.5 },
     evidence: [{ symbol: "MU", pass_id: 1, retrieved_at: "2026-11-13T15:10:00Z", last: 112.5, change_pct: 4.1 }],
@@ -415,3 +415,32 @@ test("desk ?decision= deep-link opens Saved decisions and focuses that card; 9:4
   await expect(page.getByTestId("practice-line-scalp")).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByTestId("scalp-shortlist")).toContainText("ANET");
 });
+
+for (const width of [1440, 390]) {
+  test(`the Radar log leaves out the silent rule flags and says how many at ${width}px`, async ({ page }) => {
+    // Study radar-rules-20261121-v1: vs SPY, vs sector and group flags stay stored but are no longer shown on the desk.
+    await open(page, width);
+    await stubLogs(page);
+    const base = { ...RADAR_DETAIL().event, on_movers: false, latest_status: null, revision_count: 0, rating: null, news: RADAR_DETAIL().news };
+    const flag = (id: string, kind: string, symbol: string) =>
+      ({ ...base, event_id: id, kind, symbols: [symbol], summary: `${symbol} ahead of SPY by 5.2% over 30 min` });
+    await page.route(url => url.pathname.endsWith("/radar/feed"), route => route.fulfill({ json: {
+      state: "recording", reason: null, session: "2026-11-13", sessions: ["2026-11-13"],
+      events: [base, flag("evt_amd", "relative_to_spy", "AMD"), flag("evt_semis", "group_move", "NVDA")],
+      since_last_visit: [RADAR_EVENT_ID, "evt_amd", "evt_semis"], last_visit_at: null,
+      coverage: { passes_recorded: 10, passes_expected: 10, passes_failed: 0, last_ok_pass_at: "2026-11-13T15:30:00Z", symbols_tracked: 169, symbols_missing: [], universe_version: "radar-universe-v2", live: true },
+      generated_at: "2026-11-13T15:30:00Z", outside_list: [],
+    } }));
+    const palette = page.getByRole("dialog", { name: "Jump to" });
+    await page.keyboard.press("ControlOrMeta+k");
+    await palette.getByRole("combobox").fill("radar log");
+    await page.keyboard.press("Enter");
+    const drawer = page.getByTestId("desk-radar-log");
+    await expect(drawer.getByTestId("radar-event")).toHaveCount(1);
+    await expect(drawer.getByTestId("radar-event")).toContainText("MU up 4.1%");
+    await expect(drawer).not.toContainText("AMD ahead of SPY");
+    await expect(drawer.getByTestId("radar-silenced")).toHaveText(
+      "2 rule flags (vs SPY, vs sector, group) not shown: they tested no better than a coin flip.");
+    await drawer.screenshot({ path: test.info().outputPath(`radar-log-silent-${width}.png`) });
+  });
+}

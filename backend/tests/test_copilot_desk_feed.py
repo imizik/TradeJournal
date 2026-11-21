@@ -256,3 +256,22 @@ def test_the_sandbox_shows_two_invented_alerts(engine):  # noqa: F811
                                              ("1D", "1D"), ("W", "1W")])
 def test_tradingview_intervals_read_as_the_desk_says_them(timeframe, said):
     assert desk_feed._timeframe_words(timeframe) == said
+
+
+def test_rule_flags_are_silent_in_the_feeds_radar_but_setups_show(tmp_path, monkeypatch):
+    """Study radar-rules-20261121-v1: the rule flags (vs SPY, vs sector, group) stay stored and leave the Feed."""
+    from datetime import date
+
+    from app.engine.radar_store import RadarStore
+    from tests.test_today import RADAR_EVENT
+    path = tmp_path / "radar.sqlite"
+    monkeypatch.setenv("RADAR_ENABLED", "true")
+    monkeypatch.setenv("RADAR_STORE", str(path))
+    store = RadarStore(path)
+    day = RADAR_EVENT["session_date"]
+    for n, kind in enumerate(("relative_to_spy", "relative_to_sector", "group_move", "gap_reversal", "dip_turn")):
+        store.append_event({**RADAR_EVENT, "event_id": f"e-{kind}", "kind": kind,
+                            "first_seen_at": f"{day}T15:1{n}:00.000Z"})
+    rows = desk_feed._radar(date.fromisoformat(day))["rows"]
+    assert [r["radar_event_id"] for r in rows] == ["e-dip_turn", "e-gap_reversal"]
+    assert len(store.events(day)) == 5

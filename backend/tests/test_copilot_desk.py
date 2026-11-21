@@ -223,7 +223,8 @@ def test_new_since_you_looked_and_open_investigations(desk, engine, tmp_path, mo
     monkeypatch.setenv("RADAR_ENABLED", "true")
     monkeypatch.setenv("RADAR_STORE", str(path))
     monkeypatch.setattr(radar, "_regular_window", lambda day: (570, 960))
-    RadarStore(path).append_event(RADAR_EVENT)
+    RadarStore(path).append_event({**RADAR_EVENT, "kind": "gap_reversal"})
+    RadarStore(path).append_event({**RADAR_EVENT, "event_id": "silent-flag"})  # a rule flag: stored, never on the desk
     investigation(engine, NBIS, "NBIS", "Is the NBIS recovery real?", conclusion="Group confirms.")
     investigation(engine, CRWV, "CRWV", "CRWV capacity terms", source="research_job", conclusion="untrusted web text")
     investigation(engine, APLD, "APLD", "Closed one", status="closed")
@@ -239,7 +240,7 @@ def test_new_since_you_looked_and_open_investigations(desk, engine, tmp_path, mo
     thesis, event = [r for r in body["threads"] if r["group"] == "new"]
     assert (thesis["title"], thesis["status"]["text"], thesis["investigation_id"]) == (
         "Is the NBIS recovery real?", "News · NBIS headline 2", NBIS)
-    assert (event["symbol"], event["status"]["text"], event["path"]) == ("MU", "Radar · vs sector", f"/copilot-lab?symbol=MU&radar={RADAR_EVENT['event_id']}")
+    assert (event["symbol"], event["status"]["text"], event["path"]) == ("MU", "Radar · Gap reversal", f"/copilot-lab?symbol=MU&radar={RADAR_EVENT['event_id']}")
     assert event["title"].startswith("MU up 4.1%") and event["radar_event_id"] == RADAR_EVENT["event_id"]
     [research] = [r for r in body["threads"] if r["group"] == "watch"]  # NBIS is under New; the closed one is gone
     assert (research["key"], research["instrument"], research["status"]["text"]) == (f"investigation:{CRWV}", "research", "Research")

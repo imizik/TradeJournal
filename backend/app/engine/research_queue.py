@@ -371,9 +371,12 @@ def requeue_interrupted(session: Session | None = None) -> int:
 
 def enqueue_radar_events(store_path: str, session_date: str | None = None, session: Session | None = None) -> int:
     """One radar_event job per event in the session (default today), read only from the Radar store."""
+    from app.engine import radar_rules
     from app.engine.radar_store import RadarStore
     created = 0
     for event in RadarStore(store_path, read_only=True).events(session_date or _today()):
+        if radar_rules.silent(event):
+            continue
         _, new = enqueue("radar_event", {"event_id": event["event_id"]}, f"radar_event:{event['event_id']}", session)
         created += new
     return created

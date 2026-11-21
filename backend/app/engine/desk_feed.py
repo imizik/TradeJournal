@@ -47,6 +47,7 @@ from urllib.parse import quote, urlencode
 
 from sqlmodel import Session, col, select
 
+from app.engine import radar_rules
 from app.engine.chart_math import ET
 
 log = logging.getLogger(__name__)
@@ -196,7 +197,7 @@ def _radar(day: date) -> dict:
     rows = []
     for event in store.events(day.isoformat()):
         at = _epoch(event.get("first_seen_at"))
-        if at is None:
+        if at is None or radar_rules.silent(event):
             continue
         symbols = [x for x in event.get("symbols") or [] if isinstance(x, str)]
         symbol = symbols[0] if symbols else None

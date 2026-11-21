@@ -44,6 +44,8 @@ def env(monkeypatch):
                  "PING_BUDGET_RADAR_EVENT", "PING_BUDGET_RADAR_DIGEST", "PING_BUDGET_RADAR_SETUP", "RADAR_SETUP_SIDES"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    # Most tests here drive the outbox, digests and policy with rule flags; the silent default has its own tests below.
+    monkeypatch.setattr(radar_alerts, "PING_RULE_FLAGS", True)
 
 
 def sent_to(monkeypatch, record):
@@ -859,3 +861,42 @@ def test_with_the_lab_on_a_card_with_a_contract_also_carries_paper_it_beside_pla
                              ("📝 Paper it", f"pp:r:{setup.id.hex}"), ("Why?", "ask:radar_setup"))
     keyboard = telegram.keyboard(buttons=kw["buttons"])["inline_keyboard"]
     assert [b["text"] for b in keyboard[-1]] == ["Plan it", "📝 Paper it", "Why?"]
+
+
+# ------------------------------------------------------------ silent rule flags (study radar-rules-20261121-v1)
+
+def test_by_default_a_rule_flag_is_stored_and_written_skipped_never_pinged(tmp_path, engine, monkeypatch):
+    monkeypatch.setattr(radar_alerts, "PING_RULE_FLAGS", False)  # the shipped default
+    monkeypatch.setenv("RADAR_SINGLE_MIN_RELATIVE_PCT", "5")  # strong enough for a single before the study
+    store = _store_with(tmp_path, 36)
+    sent = []
+    sent_to(monkeypatch, sent)
+    alerts = RadarAlerts(engine)
+    _runner(store, 37, alerts).run_once()
+    [event] = store.events(DAY)  # the recorder still detects and stores it
+    assert event["kind"] == "relative_to_spy"
+    [row] = rows(engine)
+    assert (row.event_id, row.delivery, row.attempts, row.last_error) == (event["event_id"], "skipped", 0, radar_alerts.SILENT)
+    alerts.deliver()
+    assert sent == []
+    group = _event("g1", "BBB", 40, kind="group_move", group="Chips", median=4.0, same=5)
+    alerts.record([group])
+    assert {r.event_id: r.delivery for r in rows(engine)}["g1"] == "skipped"
+
+
+def test_by_default_a_digest_never_lists_rule_flags_but_setups_still_ping(engine, monkeypatch):
+    monkeypatch.setattr(radar_alerts, "PING_RULE_FLAGS", False)
+    sent = []
+    sent_to(monkeypatch, sent)
+    clock = Clock(at(20))
+    alerts = RadarAlerts(engine, clock=clock)
+    alerts.record([_event("weak", "BBB", 20, relative=4.6), _event("strong", "CCC", 21)])
+    clock.now = at(22)
+    [setup] = alerts.record([_reversal()])
+    assert setup.delivery == "pending"
+    alerts.deliver()
+    assert [p["title"] for p in sent] == ["Radar reversal: AAA reversing up, +2.2% vs SPY from the open (gapped −3.1%)"]
+    clock.now = at(30)  # 10:00, the first digest: nothing of the flags waits for it
+    alerts.deliver()
+    assert all("BBB" not in p["body"] and "CCC" not in p["body"] for p in sent)
+    assert {r.event_id: r.delivery for r in rows(engine)} == {"weak": "skipped", "strong": "skipped", setup.event_id: "sent"}

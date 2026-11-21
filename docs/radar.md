@@ -252,6 +252,10 @@ rule version. They change at most every few days, never mid-session. A
 candidate `radar-rules-v1` sits beside v0, unused until Isaac picks it
 ([Rules v1 candidate](#rules-v1-candidate-october-26-2026)).
 
+### Silent rule flags
+
+The registered study `radar-rules-20261121-v1` (2023–2026 minute replay of these rules, exam on 2025–2026) found the flags no better than a coin flip, so the recorder still detects, stores and scores them (`radar_rules.silent`), but they never ping (their alert row is written `skipped`), and the desk's Feed, Radar log drawer, session strip, Movers reasons, copilot Radar read and research triggers leave them out; setup cards are unchanged.
+
 ### Calibration and replay
 
 `backend/scripts/radar_replay.py /abs/path/radar.sqlite [--rules v1] [--session D] [--set name=value] [--quiet]`
