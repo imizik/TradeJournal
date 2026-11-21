@@ -80,7 +80,11 @@ def detect(prices: np.ndarray, spy: int, stocks: list[int], window: int, trigger
     """{stock row: (flag pass, +1 up / -1 down)} — the first pass in [first, last] where the stock's ``window``-minute
     return minus SPY's is at least ``trigger`` points the same way, with its own move at least the live floor, on
     ``PERSIST`` consecutive passes. ``prices`` is [row, pass 0..MINUTES] last prices, NaN where a pass has no quote
-    (column 0 unused); a reading needs a quote at both ends, as in ``radar_rules._readings``."""
+    (column 0 unused); a reading needs a quote at both ends, as in ``radar_rules._readings``.
+
+    Known gaps against the live code, none of which touch the live baseline (that comes from the exact replay): a
+    pass with no quotes at all is not skipped over (the live rule would use a neighbouring pass), and a flag on the
+    last pass is not reported (it could not be scored anyway)."""
     end = prices[:, window:]
     start = prices[:, :-window].copy()
     # at pass ``window`` the live rule's nearest pass to the (missing) pass 0 is pass 1, inside its 90 s tolerance
@@ -295,7 +299,7 @@ def prepare_day(args):
               for e, _ in radar_rules.replay(universe, passes, quotes, radar_rules.V0)]
     out.parent.mkdir(exist_ok=True)
     tmp = out.with_suffix(".tmp.npz")
-    np.savez_compressed(tmp, prices=prices.astype(np.float32), events=json.dumps(events))
+    np.savez_compressed(tmp, prices=prices, events=json.dumps(events))  # float64: no rounding at the trigger edge
     tmp.replace(out)
     return day, "prepared"
 
