@@ -937,3 +937,20 @@ def test_a_rule_flag_queued_before_the_change_is_never_sent(engine, monkeypatch)
     alerts.deliver()
     assert sent == [] and {r.event_id: (r.delivery, r.last_error) for r in rows(engine)} == {
         "strong": ("skipped", radar_alerts.SILENT), "weak": ("skipped", radar_alerts.SILENT)}
+
+
+def test_a_digest_built_with_rule_flags_before_the_change_is_not_sent(engine, monkeypatch):
+    monkeypatch.setattr(radar_alerts, "PING_RULE_FLAGS", True)  # the old code builds the 10:00 digest with a flag in it
+    clock = Clock(at(20))
+    alerts = RadarAlerts(engine, clock=clock)
+    alerts.record([_event("weak", "BBB", 20, relative=4.6)])
+    clock.now = at(30)
+    built = alerts.digest()
+    assert built.delivery == "pending" and "BBB" in built.body
+    monkeypatch.setattr(radar_alerts, "PING_RULE_FLAGS", SHIPPED_PING_RULE_FLAGS)  # the upgrade, before it was sent
+    sent = []
+    sent_to(monkeypatch, sent)
+    alerts.deliver()
+    assert sent == []
+    assert {r.event_id: r.delivery for r in digests(engine)} == {built.event_id: "skipped"}
+    assert {r.event_id: r.delivery for r in rows(engine)} == {"weak": "skipped"}

@@ -427,6 +427,14 @@ class RadarAlerts:
             for digest_id in digests:
                 self._settle(db, db.get(RadarAlert, digest_id))
             if not PING_RULE_FLAGS:  # a rule flag queued before the flags went silent never goes out either
+                flagged = RadarAlert.kind.in_(radar_rules.RULE_KINDS) & (RadarAlert.delivery == DIGEST)
+                for built in db.exec(select(RadarAlert).where(RadarAlert.kind == DIGEST, RadarAlert.delivery == "pending")).all():
+                    if db.exec(select(RadarAlert.id).where(flagged, RadarAlert.session_date == built.session_date,
+                                                           RadarAlert.detected_at <= built.detected_at)).first() is not None:
+                        built.delivery, built.last_error = "skipped", "It listed Radar rule flags, which went silent before it was sent."
+                        db.add(built)
+                        db.flush()
+                        self._settle(db, built)
                 db.exec(update(RadarAlert).where(RadarAlert.kind.in_(radar_rules.RULE_KINDS),
                                                  RadarAlert.delivery.in_(("pending", DIGEST)))
                         .values(delivery="skipped", last_error=SILENT))
