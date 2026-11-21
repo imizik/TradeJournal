@@ -98,8 +98,10 @@ def scorecard(store: RadarStore, db: Session, now: float, days: int = WINDOW_DAY
     hits = []
     for session in sorted(s for s in store.sessions() if s >= since):
         hits += [e for e in store.events(session) if e.get("kind") in kinds and e.get("symbols")
-                 and (only is None or e["event_id"] in only) and e["event_id"] not in skip]
+                 and (only is None or e["event_id"] in only)]
     hits.sort(key=lambda e: (e["first_seen_at"], e["event_id"]))
+    every = hits  # a skipped hit still ends the hit before it, so a decision after it is never credited to an earlier one
+    hits = [e for e in hits if e["event_id"] not in skip]
     symbols = {e["symbols"][0] for e in hits}
     decisions = list(db.exec(select(DayJournalEntry).where(DayJournalEntry.kind == "decision", DayJournalEntry.symbol.in_(symbols),
                                                            DayJournalEntry.day >= start)
@@ -111,7 +113,8 @@ def scorecard(store: RadarStore, db: Session, now: float, days: int = WINDOW_DAY
     for i, event in enumerate(hits):
         symbol, session = event["symbols"][0], event["session_date"]
         seen = _naive_utc(event["first_seen_at"])
-        nxt = next((_naive_utc(o["first_seen_at"]) for o in hits[i + 1:] if o["symbols"][0] == symbol and o["session_date"] == session), None)
+        nxt = next((_naive_utc(o["first_seen_at"]) for o in every if o["symbols"][0] == symbol and o["session_date"] == session
+                    and (o["first_seen_at"], o["event_id"]) > (event["first_seen_at"], event["event_id"])), None)
         decided = next((d for d in decisions if d.symbol == symbol and d.day.isoformat() == session and d.created_at >= seen
                         and (nxt is None or d.created_at < nxt) and choice(d.text)), None)
         if session not in passes:

@@ -411,7 +411,7 @@ export default function RadarFeedView({ initial, embedded = false }: { initial?:
         All developments were on Movers when first seen. Clear Not on Movers to show them.
       </p>}
 
-      {feed.state !== "off" && shown.length === 0 && (
+      {feed.state !== "off" && shown.length === 0 && silenced === 0 && (
         <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
           {feed.state === "no_data" ? "Nothing has been recorded for this session yet." : "Radar has not produced any developments yet for this session. The recording status below shows what it has covered."}
         </p>

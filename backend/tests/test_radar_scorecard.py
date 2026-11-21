@@ -129,3 +129,10 @@ def test_the_route_carries_the_radar_card_and_says_when_the_file_is_unreadable(s
         raise ValueError("damaged")
     monkeypatch.setattr(radar_scorecard, "scorecard", broken)
     assert copilot_desk.desk_scorecard(db)["radar"] == {"state": "unavailable", "reason": "The Radar file could not be read right now."}
+
+
+def test_a_skipped_hit_still_ends_the_hit_before_it(store, db):
+    _decide(db, "AAA", "Planning. Radar: AAA up.", DONE, "11:02")  # answers aaa2, which the desk leaves out
+    card = radar_scorecard.scorecard(store, db, NOW, skip={"aaa2"})
+    by = {r["event_id"]: r for r in card["rows"]}
+    assert "aaa2" not in by and by["aaa1"]["decision"] is None
