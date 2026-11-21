@@ -115,6 +115,15 @@ def test_the_route_carries_the_radar_card_and_says_when_the_file_is_unreadable(s
     monkeypatch.setattr(copilot_desk.today, "_now", lambda: NOW)
     monkeypatch.setattr(radar, "_store", lambda read_only=False: (store, None))
     assert copilot_desk.desk_scorecard(db)["radar"]["hits"] == 4
+    # A rule flag written silent (study radar-rules-20261121-v1) is no desk hit; the store still has it.
+    from datetime import datetime
+    from app.engine import radar_alerts
+    from app.models import RadarAlert
+    db.add(RadarAlert(event_id="bbb", session_date=TODAY, rule_version="radar-rules-v1", kind="relative_to_spy", subject="BBB",
+                      title="t", body="b", delivery="skipped", last_error=radar_alerts.SILENT,
+                      first_seen_at=datetime(2026, 1, 1), detected_at=datetime(2026, 1, 1)))
+    db.commit()
+    assert copilot_desk.desk_scorecard(db)["radar"]["hits"] == 3
 
     def broken(*_args, **_kwargs):
         raise ValueError("damaged")

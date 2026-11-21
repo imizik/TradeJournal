@@ -1548,7 +1548,7 @@ def desk_scorecard(db: Session = Depends(get_session)):
     else:
         try:
             with timed("scorecard radar"):
-                hits = radar_scorecard.scorecard(store, db, now)
+                hits = radar_scorecard.scorecard(store, db, now, skip=_silenced(db))
         except Exception as exc:  # noqa: BLE001 -- a busy or damaged Radar file or odd event must not take the alert card down
             db.rollback()  # Postgres refuses every later statement in an aborted transaction; this route wrote nothing
             log.warning("radar scorecard unreadable: %s", exc)
@@ -1595,6 +1595,13 @@ def _alerts_to_rate(db: Session, start: datetime) -> dict:
          "label": a.contract, "detail": KIND.get(a.kind, "Position alert"), "at": _utc_epoch(a.detected_at),
          "answers": list(alert_feedback.RATINGS)}
         for a in waiting if (a.account_id, a.source_key) in trades]}
+
+
+def _silenced(db: Session) -> set[str]:
+    """Radar rule flags written silent (``radar_alerts.SILENT``): stored and scored by the weekly scorer, never a desk hit."""
+    from app.engine import radar_alerts
+    from app.models import RadarAlert
+    return set(db.exec(select(RadarAlert.event_id).where(RadarAlert.last_error == radar_alerts.SILENT)).all())
 
 
 def _hits_to_rate_since(db: Session, first, day) -> dict:
