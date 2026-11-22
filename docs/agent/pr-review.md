@@ -79,17 +79,18 @@ or move work between PRs to avoid the gate.
 Use native reviewers in the same client on the signed-in plan, with fresh context,
 not the implementation worker. Profiles live in `.codex/agents/` and
 `.claude/agents/`; use the exact profile or model/effort above. Report unavailable
-profiles or substitutions; do not silently downgrade. No cross-provider CLI,
+profiles or substitutions; do not silently downgrade. Apart from the Codex
+exception below, no cross-provider CLI,
 paid API review or waiting for GitHub comments.
 
-Pilot exception, until three Claude Code PR records name Codex as the tier 1 provider
-(afterwards Sonnet resumes until the user decides): the tier 1
-general reviewer may be local headless Codex (GPT-6.2 Sol, medium, Standard
+Codex exception for Claude Code (the user kept it on 2026-11-18 after a
+three-PR pilot): the tier 1 general reviewer is local headless Codex (GPT-6.2 Sol, medium, Standard
 speed) on the signed-in ChatGPT plan, run read-only with no purchased credits
 or API key, given the same brief and [contract](#reviewer-contract). The owner
 calls it explicitly at the review checkpoint; there are no hooks, GitHub gate or
 watchdog. A verdict counts only if it names the requested head SHA. Anything
-else (usage limit, unavailable, timeout, unusable output) falls back to native
+else (Codex weekly usage at 90% or more, 5-hour usage at 80% or more,
+purchased credits present, unavailable, timeout, unusable output) falls back to native
 Sonnet in the same round. Valid findings from an interrupted run are added
 to the round's findings; the round still needs a full verdict on the requested
 head from the Sonnet fallback. The call passes model and effort explicitly. The PR record names the provider and any fallback reason.
