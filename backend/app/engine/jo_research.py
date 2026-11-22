@@ -167,7 +167,10 @@ def _radar(day: date, now: datetime) -> dict:
         LOG.warning("Jo research: Radar unreadable (%s)", type(exc).__name__)
         return {"state": "unavailable", "reason": "The Radar file could not be read."}
     groups, stocks = [], []
+    from app.engine import radar_rules
     for e in feed["events"]:
+        if radar_rules.silent(e):  # stored, never an idea (study radar-rules-20261121-v1)
+            continue
         row = {"direction": e["direction"], "summary": e["summary"], "first_seen_at": e["first_seen_at"],
                "latest_status": e["latest_status"]}
         if e["kind"] == "group_move":

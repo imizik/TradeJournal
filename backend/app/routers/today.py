@@ -28,6 +28,7 @@ from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
 from app.database import get_session
+from app.engine import radar_rules
 from app.engine.chart_math import ET
 
 log = logging.getLogger(__name__)
@@ -190,7 +191,8 @@ def _radar(now: float, symbol: str | None = None) -> dict:
         return {"state": "off", "reason": reason, "rows": [], "count": 0}
     feed = radar._read_feed(store, None, None, now)
     new = set(feed["since_last_visit"])
-    events = [e for e in feed["events"] if e["event_id"] in new and (symbol is None or symbol in (e.get("symbols") or []))]
+    events = [e for e in feed["events"] if e["event_id"] in new and not radar_rules.silent(e)
+              and (symbol is None or symbol in (e.get("symbols") or []))]
     events.sort(key=lambda e: e["first_seen_at"], reverse=True)
     rows = [{"event_id": e["event_id"], "symbol": (e.get("symbols") or [""])[0], "kind": e.get("kind"),
              "direction": e.get("direction"), "summary": e.get("summary"), "first_seen_at": e.get("first_seen_at"),

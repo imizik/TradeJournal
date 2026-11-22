@@ -107,7 +107,8 @@ def test_cancelled_while_running_stays_cancelled_and_restart_requeues():
 
 def test_radar_events_enqueue_once_and_become_an_assignment(tmp_path, monkeypatch):
     store_path = tmp_path / "radar.sqlite"
-    RadarStore(store_path).append_event(copy.deepcopy(EVENT))
+    RadarStore(store_path).append_event({**copy.deepcopy(EVENT), "kind": "gap_reversal"})
+    RadarStore(store_path).append_event({**copy.deepcopy(EVENT), "event_id": "silent-flag"})  # a rule flag: no research job
     assert q.enqueue_radar_events(str(store_path), EVENT["session_date"]) == 1
     assert q.enqueue_radar_events(str(store_path), EVENT["session_date"]) == 0
     [job] = q.list_jobs()
@@ -115,6 +116,9 @@ def test_radar_events_enqueue_once_and_become_an_assignment(tmp_path, monkeypatc
     monkeypatch.setenv("RADAR_STORE", str(store_path))
     question, symbols, title = q.assignment(job)
     assert EVENT["first_seen_at"] in question and symbols == EVENT["symbols"][:8] and title.startswith("Radar:")
+    queued_before = {**job, "input": {"event_id": "silent-flag"}}  # a rule-flag job queued before the flags went silent
+    with pytest.raises(q.QueueError, match="silent rule flag"):
+        q.assignment(queued_before)
     RadarStore(tmp_path / "empty.sqlite")  # a store without the event
     monkeypatch.setenv("RADAR_STORE", str(tmp_path / "empty.sqlite"))
     with pytest.raises(q.QueueError, match="not in the Radar store"):

@@ -335,3 +335,22 @@ def test_daily_cap_rejects_beyond_the_bound(check, monkeypatch):
         capped = jo_research.import_submission(db, config, actor, keyed(actor, "second"), RECEIPT)
         assert capped["status"] == "rejected" and "Daily cap" in capped["reason"]
         assert len(db.exec(select(CopilotInvestigation)).all()) == 1
+
+
+def test_the_dossier_radar_leaves_out_silent_rule_flags(tmp_path, monkeypatch):
+    """Study radar-rules-20261121-v1: vs SPY, vs sector and group flags are stored but never seed research."""
+    from datetime import date, datetime
+
+    from app.engine import jo_research
+    from app.engine.chart_math import ET
+    from app.engine.radar_store import RadarStore
+    from tests.test_today import RADAR_EVENT
+    path = tmp_path / "radar.sqlite"
+    monkeypatch.setenv("RADAR_ENABLED", "true")
+    monkeypatch.setenv("RADAR_STORE", str(path))
+    store = RadarStore(path)
+    day = RADAR_EVENT["session_date"]
+    for kind in ("relative_to_spy", "relative_to_sector", "group_move", "gap_reversal"):
+        store.append_event({**RADAR_EVENT, "event_id": f"e-{kind}", "kind": kind})
+    out = jo_research._radar(date.fromisoformat(day), datetime.fromisoformat(f"{day}T20:00:00").replace(tzinfo=ET))
+    assert out["groups"] == [] and [e["kind"] for e in out["stock_events"]] == ["gap_reversal"]

@@ -371,9 +371,12 @@ def requeue_interrupted(session: Session | None = None) -> int:
 
 def enqueue_radar_events(store_path: str, session_date: str | None = None, session: Session | None = None) -> int:
     """One radar_event job per event in the session (default today), read only from the Radar store."""
+    from app.engine import radar_rules
     from app.engine.radar_store import RadarStore
     created = 0
     for event in RadarStore(store_path, read_only=True).events(session_date or _today()):
+        if radar_rules.silent(event):
+            continue
         _, new = enqueue("radar_event", {"event_id": event["event_id"]}, f"radar_event:{event['event_id']}", session)
         created += new
     return created
@@ -416,6 +419,9 @@ def assignment(job: dict) -> tuple[str, list[str], str]:
         event = RadarStore(store, read_only=True).event(data["event_id"])
         if event is None:
             raise QueueError("not_found", f"Radar event {data['event_id']} is not in the Radar store.")
+        from app.engine import radar_rules
+        if radar_rules.silent(event):  # queued before the rule flags went silent
+            raise QueueError("not_found", f"Radar event {data['event_id']} is a silent rule flag, so it is not researched.")
         symbols = [s for s in event.get("symbols", []) if isinstance(s, str)][:8]
         question = (f"Radar recorded this event at {event.get('first_seen_at')} (session {event.get('session_date')}): "
                     f"{event.get('kind')} {event.get('direction')} in {', '.join(symbols) or 'unknown symbols'} versus "

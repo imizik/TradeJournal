@@ -71,8 +71,11 @@ def test_the_days_events_in_time_order_and_the_time_stops_ahead(desk, engine, tm
     monkeypatch.setenv("RADAR_ENABLED", "true")
     monkeypatch.setenv("RADAR_STORE", str(path))
     store = RadarStore(path)
-    store.append_event(RADAR_EVENT)  # yesterday's: not on today's strip
-    store.append_event({**RADAR_EVENT, "event_id": "today-1", "session_date": "2026-10-21", "first_seen_at": "2026-10-21T14:12:04.000Z"})
+    store.append_event({**RADAR_EVENT, "kind": "gap_reversal"})  # yesterday's: not on today's strip
+    store.append_event({**RADAR_EVENT, "event_id": "today-1", "kind": "gap_reversal", "session_date": "2026-10-21",
+                        "first_seen_at": "2026-10-21T14:12:04.000Z"})
+    store.append_event({**RADAR_EVENT, "event_id": "today-flag", "session_date": "2026-10-21",  # a rule flag: silent
+                        "first_seen_at": "2026-10-21T14:13:04.000Z"})
     buy(engine, 500, minute=5)  # 10:05 New York, the journal's wall clock
     time_stop(engine, NBIS, "NBIS", due_minute=330)  # 15:30, still scheduled
     time_stop(engine, APLD, "APLD", client_id="card-2", due_minute=60, delivery="skipped")  # judged already
@@ -92,7 +95,7 @@ def test_the_days_events_in_time_order_and_the_time_stops_ahead(desk, engine, tm
     assert body["events"][0]["at"] == day_replay._ny(datetime(2026, 10, 21, 10, 5))
     assert [e["at"] for e in body["events"]] == sorted(e["at"] for e in body["events"])
     [radar] = [e for e in body["events"] if e["kind"] == "radar"]
-    assert (radar["symbol"], radar["at"]) == ("MU", at(12) + 4) and radar["text"] == "Radar · MU vs sector"
+    assert (radar["symbol"], radar["at"]) == ("MU", at(12) + 4) and radar["text"] == "Radar · MU Gap reversal"
     assert body["time_stops"] == [{"symbol": "NBIS", "at": at(330), "clock": "15:30"}]
     assert body["pings"] == {"sent": 1, "held": 1, "cap": None}
     assert body["prep"] == {"at": at(-90), "line": "NBIS 100C expires Friday.", "lines": ["NBIS 100C expires Friday."],

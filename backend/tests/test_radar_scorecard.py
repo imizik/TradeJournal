@@ -114,9 +114,30 @@ def test_the_route_carries_the_radar_card_and_says_when_the_file_is_unreadable(s
     monkeypatch.setattr(copilot_desk.copilot, "settings", lambda: SimpleNamespace(enabled=True))
     monkeypatch.setattr(copilot_desk.today, "_now", lambda: NOW)
     monkeypatch.setattr(radar, "_store", lambda read_only=False: (store, None))
-    assert copilot_desk.desk_scorecard(db)["radar"]["hits"] == 4
+    # Rule flags are silent (study radar-rules-20261121-v1): one a ping reached stays a desk hit, one no ping reached does not.
+    from datetime import datetime
+    from app.models import RadarAlert
+    for event_id in ("aaa1", "fff", "aaa2", "bbb"):
+        db.add(RadarAlert(event_id=event_id, session_date=DONE, rule_version="radar-rules-v1", kind="relative_to_spy", subject="X",
+                          title="t", body="b", delivery="skipped" if event_id == "bbb" else "sent",
+                          first_seen_at=datetime(2026, 1, 1), detected_at=datetime(2026, 1, 1)))
+    db.commit()
+    assert copilot_desk.desk_scorecard(db)["radar"]["hits"] == 3
+    assert len(store.events(TODAY)) == 1  # bbb is still stored
 
     def broken(*_args, **_kwargs):
         raise ValueError("damaged")
     monkeypatch.setattr(radar_scorecard, "scorecard", broken)
     assert copilot_desk.desk_scorecard(db)["radar"] == {"state": "unavailable", "reason": "The Radar file could not be read right now."}
+
+
+def test_a_skipped_hit_still_ends_the_hit_before_it(store, db):
+    _decide(db, "AAA", "Planning. Radar: AAA up.", DONE, "11:02")  # answers aaa2, which the desk leaves out
+    from datetime import datetime as dt
+    from app.models import RadarAlert
+    db.add(RadarAlert(event_id="aaa1", session_date=DONE, rule_version="radar-rules-v1", kind="relative_to_spy", subject="AAA",
+                      title="t", body="b", delivery="sent", first_seen_at=dt(2026, 1, 1), detected_at=dt(2026, 1, 1)))
+    db.commit()
+    card = radar_scorecard.scorecard(store, db, NOW, unpinged_flags=False)  # aaa2 reached by no ping
+    by = {r["event_id"]: r for r in card["rows"]}
+    assert "aaa2" not in by and by["aaa1"]["decision"] is None

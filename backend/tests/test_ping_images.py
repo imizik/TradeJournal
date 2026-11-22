@@ -547,7 +547,7 @@ class Store:
     """The Radar store's reads a picture uses."""
 
     def event(self, event_id):
-        return {"event_id": event_id, "kind": "relative_to_spy", "symbols": ["LAD"], "benchmark": "SPY", "group": None}
+        return {"event_id": event_id, "kind": "gap_reversal", "symbols": ["LAD"], "benchmark": "SPY", "group": None}
 
     def passes(self, session_date):
         return [{"id": i, "status": "ok", "finished_at": datetime.fromtimestamp(at("09:35") + 300 * i, UTC).isoformat()} for i in range(10)]
@@ -558,7 +558,8 @@ class Store:
 
 def radar_alert(engine):
     with Session(engine) as db:
-        db.add(RadarAlert(event_id="rv0-2026-10-21-spy-lad-up-1", session_date="2026-10-21", rule_version="v0", kind="relative_to_spy",
+        # A setup: the rule flags are silent (study radar-rules-20261121-v1) and never reach the sender.
+        db.add(RadarAlert(event_id="rv0-2026-10-21-spy-lad-up-1", session_date="2026-10-21", rule_version="v0", kind="gap_reversal",
                           subject="LAD", title="Radar: LAD +5.4% vs SPY +0.2%", body="LAD up · 10:20 AM ET",
                           first_seen_at=utc(at("10:20")), detected_at=utc(at("10:20"))))
         db.commit()

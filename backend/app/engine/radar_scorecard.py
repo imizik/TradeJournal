@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlmodel import Session, select
 
-from app.engine import radar_proof
+from app.engine import radar_proof, radar_rules
 from app.engine.chart_math import ET
 from app.engine.radar_comparison import _endpoint, epoch
 from app.engine.radar_store import RadarStore
@@ -88,9 +88,11 @@ def _mean(values: list[float]) -> float | None:
 
 
 def scorecard(store: RadarStore, db: Session, now: float, days: int = WINDOW_DAYS, kinds: tuple[str, ...] = STOCK_KINDS,
-              only: set[str] | None = None) -> dict:
+              only: set[str] | None = None, unpinged_flags: bool = True) -> dict:
     """``kinds``: the event kinds scored (the stock hits by default; the desk's "How the pings did" adds the setup kinds).
-    ``only``: when given, just these event ids are scored (the ones a ping reached), before the row cap."""
+    ``only``: when given, just these event ids are scored (the ones a ping reached), before the row cap.
+    ``unpinged_flags=False`` leaves out rule flags no ping reached (``radar_rules.silent``, study
+    ``radar-rules-20261121-v1``): the desk's card; a flag a ping reached before they went silent stays."""
     today = datetime.fromtimestamp(now, ET).date()
     start = today - timedelta(days=days)
     since = start.isoformat()  # Radar's session names are ISO dates; the journal's day column is a date
@@ -99,6 +101,11 @@ def scorecard(store: RadarStore, db: Session, now: float, days: int = WINDOW_DAY
         hits += [e for e in store.events(session) if e.get("kind") in kinds and e.get("symbols")
                  and (only is None or e["event_id"] in only)]
     hits.sort(key=lambda e: (e["first_seen_at"], e["event_id"]))
+    every = hits  # a skipped hit still ends the hit before it, so a decision after it is never credited to an earlier one
+    if not unpinged_flags:
+        flags = [e["event_id"] for e in hits if radar_rules.silent(e)]
+        skip = set(flags) - radar_proof.alerted_events(db, flags)
+        hits = [e for e in hits if e["event_id"] not in skip]
     symbols = {e["symbols"][0] for e in hits}
     decisions = list(db.exec(select(DayJournalEntry).where(DayJournalEntry.kind == "decision", DayJournalEntry.symbol.in_(symbols),
                                                            DayJournalEntry.day >= start)
@@ -110,7 +117,8 @@ def scorecard(store: RadarStore, db: Session, now: float, days: int = WINDOW_DAY
     for i, event in enumerate(hits):
         symbol, session = event["symbols"][0], event["session_date"]
         seen = _naive_utc(event["first_seen_at"])
-        nxt = next((_naive_utc(o["first_seen_at"]) for o in hits[i + 1:] if o["symbols"][0] == symbol and o["session_date"] == session), None)
+        nxt = next((_naive_utc(o["first_seen_at"]) for o in every if o["symbols"][0] == symbol and o["session_date"] == session
+                    and (o["first_seen_at"], o["event_id"]) > (event["first_seen_at"], event["event_id"])), None)
         decided = next((d for d in decisions if d.symbol == symbol and d.day.isoformat() == session and d.created_at >= seen
                         and (nxt is None or d.created_at < nxt) and choice(d.text)), None)
         if session not in passes:

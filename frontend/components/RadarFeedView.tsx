@@ -22,6 +22,7 @@ const DIRECTION = {
   up: { label: "Up", className: "bg-emerald-500/10 text-emerald-400" },
   down: { label: "Down", className: "bg-red-500/10 text-red-400" },
 };
+const RULE_FLAG_KINDS = new Set<string>(["relative_to_spy", "relative_to_sector", "group_move"]);
 const KIND = { relative_to_spy: "vs SPY", relative_to_sector: "vs sector", group_move: "Group move", dip_turn: "Dip turning up", gap_reversal: "Gap reversal" };
 
 function OutsideList({ checkpoints }: { checkpoints: OutsideCheckpoint[] }) {
@@ -337,8 +338,11 @@ export default function RadarFeedView({ initial, embedded = false }: { initial?:
 
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
   const fresh = new Set(feed.since_last_visit);
+  // On the desk the rule flags are silent (study radar-rules-20261121-v1: no better than a coin flip); a linked one still opens.
+  const shown = embedded ? feed.events.filter((e) => !RULE_FLAG_KINDS.has(e.kind) || e.event_id === linked) : feed.events;
+  const silenced = feed.events.length - shown.length;
   // A phone/chart deep link must still open its event while the default filter is on.
-  const visible = feed.events.filter((e) => !unseenOnly || e.on_movers !== true || e.event_id === linked);
+  const visible = shown.filter((e) => !unseenOnly || e.on_movers !== true || e.event_id === linked);
   const newEvents = visible.filter((e) => fresh.has(e.event_id)).reverse();
   const earlier = visible.filter((e) => !fresh.has(e.event_id)).reverse();
   const rated = (id: string) => (rating: RadarRating) =>
@@ -397,14 +401,17 @@ export default function RadarFeedView({ initial, embedded = false }: { initial?:
           Not on Movers
         </label>
       </div>}
-      {unseenOnly && feed.events.length > 0 && <p className="text-xs text-muted-foreground">
+      {unseenOnly && shown.length > 0 && <p className="text-xs text-muted-foreground">
         Movers membership when first seen. Unavailable comparisons and linked events remain visible.
       </p>}
-      {feed.events.length > 0 && visible.length === 0 && <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+      {silenced > 0 && <p className="text-xs text-muted-foreground" data-testid="radar-silenced">
+        {silenced} rule flag{silenced === 1 ? "" : "s"} (vs SPY, vs sector, group) not shown: they tested no better than a coin flip.
+      </p>}
+      {shown.length > 0 && visible.length === 0 && <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
         All developments were on Movers when first seen. Clear Not on Movers to show them.
       </p>}
 
-      {feed.state !== "off" && feed.events.length === 0 && (
+      {feed.state !== "off" && shown.length === 0 && silenced === 0 && (
         <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
           {feed.state === "no_data" ? "Nothing has been recorded for this session yet." : "Radar has not produced any developments yet for this session. The recording status below shows what it has covered."}
         </p>

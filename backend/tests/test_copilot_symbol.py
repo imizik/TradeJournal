@@ -80,7 +80,8 @@ def test_new_on_the_symbol_only(lab, engine, tmp_path, monkeypatch):  # noqa: F8
     monkeypatch.setenv("RADAR_ENABLED", "true")
     monkeypatch.setenv("RADAR_STORE", str(path))
     monkeypatch.setattr(radar, "_regular_window", lambda day: (570, 960))
-    RadarStore(path).append_event(RADAR_EVENT)  # an MU event
+    RadarStore(path).append_event({**RADAR_EVENT, "kind": "gap_reversal"})  # an MU setup event
+    RadarStore(path).append_event({**RADAR_EVENT, "event_id": "silent-flag"})  # an MU rule flag: silent
     with Session(engine) as db:
         db.add(ThesisWatchTrigger(symbol="NBIS", kind="news", dedupe_key="news:a", investigation_id=UUID(NBIS), day="2026-10-21",
                                   fired_at=T0 + timedelta(minutes=30), text="NBIS wins a contract", path="/copilot-lab?symbol=NBIS",

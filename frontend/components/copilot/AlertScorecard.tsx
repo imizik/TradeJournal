@@ -63,7 +63,7 @@ function RadarCard({ card }: { card: RadarScorecard }) {
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Radar scorecard</h2>
         <span className="text-xs text-muted-foreground">last {card.window_days} days · the stock vs SPY, the way Radar flagged it, by the close</span>
       </div>
-      {!card.hits ? <p className="text-muted-foreground">Radar flagged no stock in the last {card.window_days} days.</p> : (
+      {!card.hits ? <p className="text-muted-foreground">No Radar vs-SPY or vs-sector ping reached a stock in the last {card.window_days} days.</p> : (
         <>
           <p className="text-foreground">
             {card.hits} hit{card.hits === 1 ? "" : "s"}. {radarLine(watching, "watched")}{radarLine(planning, "planned")}{radarLine(passing, "passed on")}

@@ -184,7 +184,8 @@ def test_new_since_you_looked(client, engine, tmp_path, monkeypatch):  # noqa: F
     monkeypatch.setenv("RADAR_STORE", str(path))
     monkeypatch.setattr(radar, "_regular_window", lambda day: (570, 960))
     store = RadarStore(path)
-    store.append_event(RADAR_EVENT)
+    store.append_event({**RADAR_EVENT, "kind": "gap_reversal"})
+    store.append_event({**RADAR_EVENT, "event_id": "silent-flag"})  # a rule flag: stored, never new on the desk
     path_inv = f"/copilot-lab?investigation={NBIS}&context=New%20since%20my%20thesis"
     with Session(engine) as db:
         db.add(ThesisWatchTrigger(symbol="NBIS", kind="news", dedupe_key="news:a", investigation_id=UUID(NBIS), day="2026-10-21",

@@ -1,6 +1,11 @@
 """Radar phone pings (``docs/radar.md`` § Phone alerts): two digests a session and, for a strong event, one
 ping the minute the recorder writes it. Off unless ``RADAR_ALERTS_ENABLED=true``.
 
+The rules' own flags (``radar_rules.silent``: vs SPY, vs sector, group) are silent since study
+``radar-rules-20261121-v1``: each still gets its outbox row, written ``skipped``, and never a single or a digest
+line (``PING_RULE_FLAGS``). What follows about strong events describes them only when that is switched back on;
+setup events ping as described.
+
 The end goal's first step is timely, factual alerts without waiting for AI analysis. Every new Radar event
 gets one outbox row. A **strong** event (``strong``: a stock at least ``RADAR_SINGLE_MIN_RELATIVE_PCT``,
 default 7.0, against SPY, or a group with every member moving the same way and a median at least
@@ -63,7 +68,8 @@ from sqlalchemy import or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import notification_policy, ntfy, phone, ping_images, radar_dip, radar_reversal, radar_setup, telegram_replies
+from app.engine import (notification_policy, ntfy, phone, ping_images, radar_dip, radar_reversal, radar_rules, radar_setup,
+                        telegram_replies)
 from app.engine.chart_math import ET
 from app.engine.radar_movers import event_movers_tags
 from app.models import RadarAlert, RadarSetup
@@ -83,6 +89,8 @@ DIGEST_LINES = 12
 SINGLE_MIN_RELATIVE_PCT = 7.0
 SINGLE_MIN_GROUP_PCT = 3.0
 ALSO_ON_MOVERS = "Also on Movers: "
+SILENT = "A Radar rule flag: stored for scoring, not pinged (study radar-rules-20261121-v1)."
+PING_RULE_FLAGS = False  # the rule flags (radar_rules.silent) are written skipped; True restores their pings (tests)
 # Singles that count toward the hourly rule: waiting to be tried, or tried. A held or skipped single and an event that
 # rode a digest were never tried (attempts 0).
 SINGLE = (RadarAlert.kind != DIGEST) & or_(RadarAlert.delivery.in_(("pending", "sending")), RadarAlert.attempts > 0)
@@ -284,6 +292,16 @@ class RadarAlerts:
             for event in events:
                 if db.exec(select(RadarAlert.id).where(RadarAlert.event_id == event["event_id"])).first() is not None:
                     continue
+                if radar_rules.silent(event) and not PING_RULE_FLAGS:  # stored and scored, never pinged (docs/radar.md § Silent rule flags)
+                    db.add(RadarAlert(event_id=event["event_id"], session_date=event["session_date"],
+                                      rule_version=event["rule_version"], kind=event["kind"], subject=subject(event),
+                                      title=message(event)[0], body=digest_line(event), delivery="skipped", last_error=SILENT,
+                                      first_seen_at=_utc(_parse(event["first_seen_at"])), detected_at=_utc(now)))
+                    try:
+                        db.commit()
+                    except IntegrityError:
+                        db.rollback()
+                    continue
                 setup = _setup(db, event["event_id"]) if radar_setup.enabled() and radar_setup.is_setup(event) else None
                 title, body = _card(db, event, setup) if setup is not None else message(event)
                 alert = RadarAlert(event_id=event["event_id"], session_date=event["session_date"], rule_version=event["rule_version"],
@@ -408,6 +426,24 @@ class RadarAlerts:
                     .values(delivery="unknown", last_error="The send was interrupted and may have reached the phone, so it was not resent."))
             for digest_id in digests:
                 self._settle(db, db.get(RadarAlert, digest_id))
+            if not PING_RULE_FLAGS:  # a rule flag queued before the flags went silent never goes out either
+                flagged = RadarAlert.kind.in_(radar_rules.RULE_KINDS) & (RadarAlert.delivery == DIGEST)
+                for built in db.exec(select(RadarAlert).where(RadarAlert.kind == DIGEST, RadarAlert.delivery == "pending")).all():
+                    members = (RadarAlert.delivery == DIGEST) & (RadarAlert.session_date == built.session_date) & (
+                        RadarAlert.kind != DIGEST) & (RadarAlert.detected_at <= built.detected_at)
+                    if db.exec(select(RadarAlert.id).where(flagged, members)).first() is None:
+                        continue
+                    keep = db.exec(select(RadarAlert).where(members, RadarAlert.kind.not_in(radar_rules.RULE_KINDS))
+                                   .order_by(RadarAlert.first_seen_at.desc(), RadarAlert.event_id)).all()
+                    if keep:  # rebuilt without the flags, so its setups still go
+                        since = built.title.split(" since ", 1)[1] if " since " in built.title else "the open"
+                        built.title, built.body = digest_message([r.body for r in keep], since)
+                    else:
+                        built.delivery, built.last_error = "skipped", "It listed only Radar rule flags, which went silent before it was sent."
+                    db.add(built)
+                db.exec(update(RadarAlert).where(RadarAlert.kind.in_(radar_rules.RULE_KINDS),
+                                                 RadarAlert.delivery.in_(("pending", DIGEST)))
+                        .values(delivery="skipped", last_error=SILENT))
             db.commit()
         self.digest()
         with Session(self.engine) as db:

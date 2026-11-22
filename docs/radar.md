@@ -252,6 +252,10 @@ rule version. They change at most every few days, never mid-session. A
 candidate `radar-rules-v1` sits beside v0, unused until Isaac picks it
 ([Rules v1 candidate](#rules-v1-candidate-october-26-2026)).
 
+### Silent rule flags
+
+The registered study `radar-rules-20261121-v1` (2023–2026 minute replay of these rules, exam on 2025–2026) found the flags no better than a coin flip, so the recorder still detects, stores and scores them (`radar_rules.silent`), but they never ping (their alert row is written `skipped`), and the desk's Feed, Radar log drawer, session strip, Movers reasons, copilot Radar read and research triggers leave them out; setup cards are unchanged.
+
 ### Calibration and replay
 
 `backend/scripts/radar_replay.py /abs/path/radar.sqlite [--rules v1] [--session D] [--set name=value] [--quiet]`
@@ -768,8 +772,8 @@ news and feedback. Movers refresh every 60 seconds while the tab is visible.
 
 Since 2026-11-02 the copilot has two read-only tools over the same store
 ([Copilot Lab](copilot-lab.md#what-runs)): `get_radar_today`
-(`backend/app/engine/radar_today.py`) returns the session's saved events newest
-first with their latest revision, latest news check and rating, plus the latest
+(`backend/app/engine/radar_today.py`) returns the session's saved events, less the
+[silent rule flags](#silent-rule-flags), newest first with their latest revision, latest news check and rating, plus the latest
 pass's movers in the shape above (five leaders and laggards, six groups), and
 `get_market_regime` (`backend/app/engine/radar_regime.py`) returns the benchmark
 rows Movers now computes and drops: SPY, QQQ, IWM, RSP and a stock's sector
@@ -945,6 +949,8 @@ more sessions. Passing earns a screen section next; phone alerts remain a
 separate decision.
 
 ## Phone alerts (off by default)
+
+Since `radar-rules-20261121-v1` the rule flags never ping (see [Silent rule flags](#silent-rule-flags)); the strong-event singles and digest lines below apply to setup events only, unless `PING_RULE_FLAGS` in `radar_alerts.py` is switched back on.
 
 Off unless `RADAR_ALERTS_ENABLED=true` in the VPS `backend.env`; switching it
 on is Isaac's call (a new phone alert is an activation). It has been on on the

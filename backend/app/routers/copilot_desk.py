@@ -77,7 +77,7 @@ from sqlmodel import Session, col, select
 from app.ai import copilot
 from app.database import get_session
 from app.engine.radar_evidence import rule_side
-from app.engine import trade_notes
+from app.engine import radar_rules, trade_notes
 from app.engine.captures import CaptureError
 from app.engine.chart_math import ET, session_windows
 from app.routers import today
@@ -1072,7 +1072,7 @@ def _radar_events(day) -> dict:
     for event in store.events(day.isoformat()):
         at = _epoch(event.get("first_seen_at"))
         symbol = (event.get("symbols") or [None])[0]
-        if at is not None:
+        if at is not None and not radar_rules.silent(event):
             rows.append({"kind": "radar", "at": at, "symbol": symbol, "text": f"Radar · {symbol or 'event'} {RADAR_KIND.get(event.get('kind'), '')}".strip()})
     return {"state": "ok", "rows": rows}
 
@@ -1548,7 +1548,7 @@ def desk_scorecard(db: Session = Depends(get_session)):
     else:
         try:
             with timed("scorecard radar"):
-                hits = radar_scorecard.scorecard(store, db, now)
+                hits = radar_scorecard.scorecard(store, db, now, unpinged_flags=False)
         except Exception as exc:  # noqa: BLE001 -- a busy or damaged Radar file or odd event must not take the alert card down
             db.rollback()  # Postgres refuses every later statement in an aborted transaction; this route wrote nothing
             log.warning("radar scorecard unreadable: %s", exc)

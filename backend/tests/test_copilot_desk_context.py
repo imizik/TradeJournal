@@ -210,7 +210,10 @@ def radar_hits(tmp_path, monkeypatch, *hits):
     monkeypatch.setenv("RADAR_STORE", str(path))
     store = RadarStore(path)
     for i, (symbol, at) in enumerate(hits):
-        store.append_event({**RADAR_EVENT, "event_id": f"hit-{i}", "symbols": [symbol], "session_date": at[:10], "first_seen_at": at})
+        store.append_event({**RADAR_EVENT, "event_id": f"hit-{i}", "kind": "gap_reversal", "symbols": [symbol], "session_date": at[:10],
+                            "first_seen_at": at})
+        store.append_event({**RADAR_EVENT, "event_id": f"flag-{i}", "symbols": [symbol], "session_date": at[:10],
+                            "first_seen_at": at})  # a rule flag at the same minute: silent, never marked
 
 
 def test_the_thread_picture_marks_todays_pings_and_radar_hits_on_its_symbol(lab, engine, tmp_path, monkeypatch):  # noqa: F811

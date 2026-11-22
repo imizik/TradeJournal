@@ -14,6 +14,7 @@ SESSION = "2026-10-22"
 
 def _event(n: int, first_seen: str, **over) -> dict:
     event = copy.deepcopy(SAMPLE["event"])
+    over = {"kind": "gap_reversal", **over}  # a setup: rule flags are silent (test below)
     event.update(event_id=f"rad_t_{n}", session_date=SESSION, first_seen_at=_stamp(first_seen), universe_version="t", **over)
     return event
 
@@ -97,3 +98,13 @@ def test_an_empty_session_and_no_usable_spy(tmp_path):
     store.append_pass(_pass("14:34"), [_q("AAA", 90.0)])  # a pass without SPY
     out = radar_today.feed(store, SESSION, None, universe=UNIVERSE)
     assert out["state"] == "ok" and out["movers"] is None and "SPY" in out["movers_reason"]
+
+
+def test_rule_flags_stay_out_of_the_copilots_read(tmp_path):
+    store = RadarStore(tmp_path / "radar.sqlite")
+    store.append_event(_event(1, "14:20", symbols=["AAA"], summary="a setup"))
+    store.append_event(_event(2, "14:21", symbols=["BBB"], kind="relative_to_spy", summary="a rule flag"))
+    store.append_event(_event(3, "14:22", symbols=["CCC"], kind="group_move", summary="a group flag"))
+    out = radar_today.feed(store, SESSION, None, universe=UNIVERSE)
+    assert [e["event_id"] for e in out["events"]] == ["rad_t_1"] and out["events_total"] == 1
+    assert len(store.events(SESSION)) == 3  # still stored
