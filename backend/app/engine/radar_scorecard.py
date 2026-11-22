@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlmodel import Session, select
 
-from app.engine import radar_proof
+from app.engine import radar_proof, radar_rules
 from app.engine.chart_math import ET
 from app.engine.radar_comparison import _endpoint, epoch
 from app.engine.radar_store import RadarStore
@@ -88,10 +88,11 @@ def _mean(values: list[float]) -> float | None:
 
 
 def scorecard(store: RadarStore, db: Session, now: float, days: int = WINDOW_DAYS, kinds: tuple[str, ...] = STOCK_KINDS,
-              only: set[str] | None = None, skip: set[str] = frozenset()) -> dict:
+              only: set[str] | None = None, unpinged_flags: bool = True) -> dict:
     """``kinds``: the event kinds scored (the stock hits by default; the desk's "How the pings did" adds the setup kinds).
-    ``only``: when given, just these event ids are scored (the ones a ping reached), before the row cap. ``skip``: event
-    ids left out (the rule flags written silent, ``radar_alerts.SILENT``)."""
+    ``only``: when given, just these event ids are scored (the ones a ping reached), before the row cap.
+    ``unpinged_flags=False`` leaves out rule flags no ping reached (``radar_rules.silent``, study
+    ``radar-rules-20261121-v1``): the desk's card; a flag a ping reached before they went silent stays."""
     today = datetime.fromtimestamp(now, ET).date()
     start = today - timedelta(days=days)
     since = start.isoformat()  # Radar's session names are ISO dates; the journal's day column is a date
@@ -101,7 +102,10 @@ def scorecard(store: RadarStore, db: Session, now: float, days: int = WINDOW_DAY
                  and (only is None or e["event_id"] in only)]
     hits.sort(key=lambda e: (e["first_seen_at"], e["event_id"]))
     every = hits  # a skipped hit still ends the hit before it, so a decision after it is never credited to an earlier one
-    hits = [e for e in hits if e["event_id"] not in skip]
+    if not unpinged_flags:
+        flags = [e["event_id"] for e in hits if radar_rules.silent(e)]
+        skip = set(flags) - radar_proof.alerted_events(db, flags)
+        hits = [e for e in hits if e["event_id"] not in skip]
     symbols = {e["symbols"][0] for e in hits}
     decisions = list(db.exec(select(DayJournalEntry).where(DayJournalEntry.kind == "decision", DayJournalEntry.symbol.in_(symbols),
                                                            DayJournalEntry.day >= start)
