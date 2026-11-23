@@ -848,6 +848,15 @@ def desk_pairing(session: Session, orders: list[dict]) -> dict[str, str]:
 
 # --------------------------------------------------------------------------- the poller
 
+def exit_working(orders: list[dict], last4: str | None, symbol: str, option_type: str | None, strike, expiry: str) -> bool:
+    """Whether a ``sell_to_close`` order for this option contract is working in this account, among ``Poller.working``'s
+    lines (for the open-trade alerts' no-exit-order check)."""
+    key = rb.contract_key(symbol, "option", option_type, strike, expiry)
+    return key is not None and any(
+        o["working"] and o["action"] == "sell_to_close" and o["last4"] == last4
+        and rb.contract_key(o["symbol"], o["instrument"], o["option_type"], o["strike"], o["expiry"]) == key for o in orders)
+
+
 class Poller:
     """Reads the order history on the feed's schedule (a minute in market hours, fifteen otherwise), one pass at a
     time, at most ``MAX_CALLS`` calls each, and commits each pass in one transaction."""

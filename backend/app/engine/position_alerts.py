@@ -267,10 +267,8 @@ def no_exit_due(opened_at: datetime, today: date, regular) -> int | None:
 
 def exit_order_working(orders: list[dict], last4: str | None, trade: Trade) -> bool:
     """Whether a ``sell_to_close`` order for this contract is working in this account (``robinhood_fills`` order lines)."""
-    from app.engine.robinhood_book import contract_key
-    key = contract_key(trade.ticker, "option", trade.option_type, trade.strike, trade.expiration.isoformat())
-    return any(o["working"] and o["action"] == "sell_to_close" and o["last4"] == last4
-               and contract_key(o["symbol"], o["instrument"], o["option_type"], o["strike"], o["expiry"]) == key for o in orders)
+    from app.engine.robinhood_fills import exit_working  # the order lines' own module matches their contracts
+    return exit_working(orders, last4, trade.ticker, trade.option_type, trade.strike, trade.expiration.isoformat())
 
 
 def read_working_orders(now: float) -> tuple[list[dict], float] | None:
