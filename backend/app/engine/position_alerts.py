@@ -75,6 +75,18 @@ monitor's loop (``level_alert_monitor.py``), at most every ``RUN_SECONDS``:
   re-decision and suggests no order; no bars means no alert. Once per position (generation 0); due at or after the close
   or more than ``WRONG_WAY_GRACE`` minutes late, it is skipped.
 
+- **No exit order at 5 minutes.** Also off unless ``POSITION_NO_EXIT_ALERTS=true``. From 2026-10-25 to 11-23, ten
+  long options were left to expire worthless for -$8,445, six of them bought the same day, while the expiry and
+  one-hour alerts were live: telling him late in the trade did not change the exit. This moves the decision to the
+  entry. A position opened today is checked once, ``NO_EXIT_MINUTES`` after its first entry fill (an entry before the
+  open counts from the open), within ``NO_EXIT_GRACE`` minutes: when Robinhood's order history
+  (``robinhood_fills.poller.working``, the pass that already reads it each minute) shows no working ``sell_to_close``
+  order for that contract in that account, one alert asks him to set his stop and target. It needs that read to be
+  current and taken after the deadline; with the order-history switch or the feed off, signed out or stale, it stays
+  silent (it cannot tell), never guesses. An order placed more than four days ago (that read's window) is not seen.
+  Once per position (generation 0). It is a prompt to set an exit, not an exit, so the alert scorecard's
+  sell-at-the-alert measure leaves it out.
+
 An already-qualified alert also freezes optional same-session Radar entry context.
 This does not participate in judging or delivery eligibility. Missing/stale context
 never suppresses an alert; retries reuse the saved observations, not newer data.
@@ -135,10 +147,12 @@ HOLD_MINUTES = 60
 OPENING_MINUTES = 60  # entries in the session's first hour are checked for the wrong way
 WRONG_WAY_MINUTES = 30
 WRONG_WAY_GRACE = 5
+NO_EXIT_MINUTES = 5
+NO_EXIT_GRACE = 10
 RECORD_MIN_TRADES = 5  # per side of the record, or the message leaves it out
 QUICK_MINUTES, LONG_MINUTES = 30, 120
 INDEX_UNDERLYING = {"SPXW": "SPY", "SPX": "SPY", "XSP": "SPY", "NDX": "QQQ", "NDXP": "QQQ"}
-KINDS = ("giveback", "expiry_first", "expiry_final", "expiry_eve", "hold_hour", "wrong_way")
+KINDS = ("giveback", "expiry_first", "expiry_final", "expiry_eve", "hold_hour", "wrong_way", "no_exit")
 
 
 def enabled() -> bool:
@@ -171,6 +185,10 @@ def hold_enabled() -> bool:
 
 def wrong_way_enabled() -> bool:
     return enabled() and os.environ.get("POSITION_WRONG_WAY_ALERTS", "").lower() == "true"
+
+
+def no_exit_enabled() -> bool:
+    return enabled() and os.environ.get("POSITION_NO_EXIT_ALERTS", "").lower() == "true"
 
 
 def _utc(stamp: float) -> datetime:
@@ -236,6 +254,34 @@ def wrong_way_due(opened_at: datetime, today: date, regular) -> int | None:
         return None
     due = entry + 1 + WRONG_WAY_MINUTES
     return due if due < regular[2] else None
+
+
+def no_exit_due(opened_at: datetime, today: date, regular) -> int | None:
+    """The minute (ET) a position opened today is checked for a working exit order, or None: opened another day, or due
+    at or after the close."""
+    if opened_at.date() != today:
+        return None
+    due = max(opened_at.hour * 60 + opened_at.minute, regular[1]) + NO_EXIT_MINUTES
+    return due if due < regular[2] else None
+
+
+def exit_order_working(orders: list[dict], last4: str | None, trade: Trade) -> bool:
+    """Whether a ``sell_to_close`` order for this contract is working in this account (``robinhood_fills`` order lines)."""
+    from app.engine.robinhood_book import contract_key
+    key = contract_key(trade.ticker, "option", trade.option_type, trade.strike, trade.expiration.isoformat())
+    return any(o["working"] and o["action"] == "sell_to_close" and o["last4"] == last4
+               and contract_key(o["symbol"], o["instrument"], o["option_type"], o["strike"], o["expiry"]) == key for o in orders)
+
+
+def read_working_orders(now: float) -> tuple[list[dict], float] | None:
+    """Robinhood's working orders and when they were read, from the order-history pass in memory; None when it cannot
+    tell (the switch or the feed off, signed out, stale, or an error)."""
+    try:
+        from app.engine import robinhood_fills
+        return robinhood_fills.poller.working(now)
+    except Exception:  # noqa: BLE001 - no read means no judgment, never a failed pass
+        log.info("No-exit check: order history unreadable", exc_info=True)
+        return None
 
 
 def trading_days_after(calendar, day: date, count: int) -> list[date]:
@@ -490,6 +536,12 @@ def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_
                 else "")
         return (f"{alert.contract} expires {when}, still open",
                 f"{vs}.{at_expiry(alert, facts.get('underlying'), f'at expiry {when}')} {_count(alert.contracts)} open.{risk}", 4)
+    if alert.kind == "no_exit":
+        if alert.mark is None:
+            now_part = _thin(alert)
+        return (f"{alert.contract}: no exit order set",
+                f"Bought {NO_EXIT_MINUTES} min ago, {now_part}. {_count(alert.contracts)} open and no sell order working "
+                f"on Robinhood for it. Set your stop and your target now, while it is calm.", 4)
     if alert.kind == "hold_hour":
         if alert.mark is None:
             now_part = _thin(alert)
@@ -551,7 +603,8 @@ def desk_path(db: Session, alert: PositionAlert) -> str:
 
 
 ASK_KIND = {"giveback": "Give-back alert", "hold_hour": "One-hour alert", "expiry_first": "Expires-today alert",
-            "expiry_final": "30-minutes-left alert", "expiry_eve": "Day-before-expiry alert", "wrong_way": "Wrong-way alert"}
+            "expiry_final": "30-minutes-left alert", "expiry_eve": "Day-before-expiry alert", "wrong_way": "Wrong-way alert",
+            "no_exit": "No-exit-order alert"}
 
 
 def ask_context(alert: PositionAlert) -> str:
@@ -606,12 +659,14 @@ def _surely_unsent(exc: ntfy.NtfyError) -> bool:
 
 
 class PositionAlerts:
-    def __init__(self, engine, calendar=None, *, clock: Callable[[], float] = time.time, quotes=get_quotes_once, underlying=None):
+    def __init__(self, engine, calendar=None, *, clock: Callable[[], float] = time.time, quotes=get_quotes_once, underlying=None,
+                 orders=None):
         self.engine = engine
         self.calendar = calendar
         self.clock = clock
         self.quotes = quotes
         self.underlying = underlying or read_underlying  # the underlyings' last prices, for what a contract is worth at expiry
+        self.orders = orders or read_working_orders  # Robinhood's working orders, for the no-exit-order check
         self._last_run = 0.0
 
     def run(self) -> None:
@@ -640,6 +695,8 @@ class PositionAlerts:
                 found.extend(self._judge(db, position, mark, today, minute, regular, now))
                 if tomorrow is not None and position["expiration"] == tomorrow:
                     found.append(self._alert(position, "expiry_eve", 0, mark, *self._gain(position, mark), None, now))
+            if no_exit_enabled():
+                found.extend(self._no_exit(db, positions, marks, today, minute, regular, now))
             db.commit()
         for alert in found:
             self._record(alert, regular=regular)
@@ -702,6 +759,26 @@ class PositionAlerts:
                 move = underlying_move(trade.ticker, position["opened_at"])
                 if move is not None and move * (1 if trade.option_type == "call" else -1) < 0:
                     found.append(self._alert(position, "wrong_way", 0, mark, gain, gain_pct, watch, now))
+        return found
+
+    def _no_exit(self, db: Session, positions: list[dict], marks: dict, today: date, minute: int, regular, now: float) -> list[PositionAlert]:
+        """Positions opened today, ``NO_EXIT_MINUTES`` in, with no working sell order on Robinhood: one alert each."""
+        due = [p for p in positions if (at := no_exit_due(p["opened_at"], today, regular)) is not None and at <= minute < at + NO_EXIT_GRACE]
+        if not due:
+            return []
+        read = self.orders(now)
+        if read is None:
+            return []
+        orders, read_at = read
+        from app.models import Account
+        last4 = {a.id: a.last4 for a in db.exec(select(Account).where(Account.id.in_({p["account_id"] for p in due}))).all()}
+        found = []
+        for position in due:
+            deadline = datetime.combine(today, datetime.min.time(), ET).timestamp() + no_exit_due(position["opened_at"], today, regular) * 60
+            if read_at < deadline or exit_order_working(orders, last4.get(position["account_id"]), position["trade"]):
+                continue  # the read predates the deadline (the next pass decides), or an exit is set
+            mark = marks.get(position["occ"])
+            found.append(self._alert(position, "no_exit", 0, mark, *self._gain(position, mark), None, now))
         return found
 
     def _alert(self, position: dict, kind: str, generation: int, mark: dict | None, gain, gain_pct, watch, now: float) -> PositionAlert:
@@ -854,7 +931,7 @@ class PositionAlerts:
 
 PICTURE_TITLE = {"giveback": "gave back", "hold_hour": "held 1h", "expiry_first": "expires today", "expiry_final": "expires today",
                  "expiry_eve": "expires next session",
-                 "wrong_way": "wrong way 30m"}
+                 "wrong_way": "wrong way 30m", "no_exit": "no exit order"}
 
 
 def _picture(db: Session, alert: PositionAlert, now: float):

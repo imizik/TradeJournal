@@ -542,6 +542,11 @@ After an explicitly approved activation, restart `tradejournal-api.service`.
 Clearing this setting restores the dollar floor for future arming; already-armed
 watches retain their normal give-back coverage. Existing position-alert enablement
 and delivery settings must be preserved when applying this optional setting.
+The no-exit-order alert (a same-day long option with no working sell order on
+Robinhood 5 minutes after its first entry) needs `POSITION_NO_EXIT_ALERTS=true`
+as well, plus the Robinhood order-history read (`ROBINHOOD_READ_ENABLED=true` and
+`ROBINHOOD_FILLS_ENABLED` `shadow` or `true` in `backend.env`); without a current
+read it stays silent rather than guess.
 
 Radar phone alerts (two digests a session plus single pings for strong events) are separate too and
 remain off unless `RADAR_ALERTS_ENABLED=true` is in `backend.env`; see

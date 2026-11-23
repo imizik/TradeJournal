@@ -876,6 +876,12 @@ class Poller:
         return [dict(o) for o in view["orders"]
                 if o["working"] or o["filled_at"] is not None and datetime.fromtimestamp(o["filled_at"], ET).date() == day]
 
+    def working(self, now: float | None = None) -> tuple[list[dict], float] | None:
+        """The orders still working in the last good pass, with that pass's time (epoch seconds); None as ``desk``. For
+        the open-trade alerts' no-exit-order check, which must know the read is newer than its deadline. No call, no write."""
+        view, _now = self._current(now)
+        return None if view is None else ([dict(o) for o in view["orders"] if o["working"]], view["at"])
+
     def filled(self, now: float | None = None) -> list[dict] | None:
         """Every order line with a fill in the last good pass, whatever its day (the desk's account line asks for its
         session's, which on a weekend is Friday's); None as ``desk``. No call and no write."""
