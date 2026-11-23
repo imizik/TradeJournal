@@ -1,13 +1,13 @@
 import { expect, test } from "@playwright/test";
 
-// The sidebar: three primary links, four folded groups, remembered per device. The assistant's view is in browser-access.auth.ts.
+// The sidebar: two primary links (Today is retired), four folded groups, remembered per device. The assistant's view is in browser-access.auth.ts.
 const GROUPS = ["Journal", "Market", "Practice", "Research"];
 
-test("the sidebar shows three links and four collapsed groups; the current page's group opens by itself; choices are remembered", async ({ page }) => {
+test("the sidebar shows two links and four collapsed groups; the current page's group opens by itself; choices are remembered", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   const sidebar = page.getByRole("navigation").filter({ has: page.getByRole("button", { name: "Journal", exact: true }) });
-  for (const name of ["Today", "Dashboard", "Charts"]) await expect(sidebar.getByRole("link", { name, exact: true })).toBeVisible();
+  for (const name of ["Dashboard", "Charts"]) await expect(sidebar.getByRole("link", { name, exact: true })).toBeVisible();
   for (const name of GROUPS) await expect(sidebar.getByRole("button", { name, exact: true })).toHaveAttribute("aria-expanded", "false");
   await expect(sidebar.getByRole("link", { name: "Trades", exact: true })).toHaveCount(0);
   // Assistant access and Deploys sit beside Sync, not in the list.
@@ -49,12 +49,12 @@ test("the sidebar shows three links and four collapsed groups; the current page'
   await page.screenshot({ path: test.info().outputPath("nav-groups-desktop.png") });
 });
 
-test("the phone's More menu has the same three links and groups; the tab bar is unchanged", async ({ page }) => {
+test("the phone's More menu has the same two links and groups; the tab bar is unchanged", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/");
   await page.getByRole("button", { name: /^Open menu/ }).click();
   const menu = page.getByRole("dialog", { name: "Menu" });
-  for (const name of ["Today", "Dashboard", "Charts"]) await expect(menu.getByRole("link", { name, exact: true })).toBeVisible();
+  for (const name of ["Dashboard", "Charts"]) await expect(menu.getByRole("link", { name, exact: true })).toBeVisible();
   for (const name of GROUPS) await expect(menu.getByRole("button", { name, exact: true })).toHaveAttribute("aria-expanded", "false");
   await menu.getByRole("button", { name: "Practice", exact: true }).click();
   await menu.getByRole("link", { name: "Daily Practice", exact: true }).click();

@@ -9,12 +9,21 @@ export const dynamic = "force-dynamic";
 
 type PracticeParams = { decision?: string; practice_run?: string };
 
-/** While the desk is home, the bare address opens the desk (where Practice lives). Parameterized links such as
- * ``?decision=`` or ``?practice_run=`` keep this page working as well. */
+/** Retired while the desk is home: every visit opens the desk's Practice fold (routine, saved decisions, 9:40 scalp
+ * shortlist, Decision replay lab). ``?decision=`` and ``?practice_run=`` carry over (the desk opens that line on them),
+ * and a ``#scalp-shortlist`` anchor survives the redirect. With the desk off (development, the browser suite) the page
+ * still renders. */
 export default async function PracticePage({ searchParams }: { searchParams: Promise<PracticeParams> }) {
   if (!(await requireAccess()).owner) notFound();
   const params = await searchParams;
-  if (!Object.keys(params).length && await api.copilotOn()) redirect("/copilot-lab");
+  if (await api.copilotOn()) {
+    const kept = new URLSearchParams();
+    for (const key of ["decision", "practice_run"] as const) {
+      const value = params[key];
+      if (typeof value === "string" && value.trim()) kept.set(key, value.trim());
+    }
+    redirect(kept.size ? `/copilot-lab?${kept}` : "/copilot-lab");
+  }
   const { decision } = params;
   const { decisions } = await api.decisions();
   // Alert links can name records outside the recent-decision window.

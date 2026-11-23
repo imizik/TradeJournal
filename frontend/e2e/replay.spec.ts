@@ -12,12 +12,6 @@ const DAY = {
   date: "2026-10-23", fills: 3, pings: 2,
   clips: [{ symbol: "NBIS", frames: 20, fps: 10, width: 720, height: 360, bytes: CLIP.length, times: TIMES, path: "/replay/2026-10-23/NBIS" }],
 };
-const UNAVAILABLE = { state: "unavailable" };
-const TODAY = {
-  as_of: "2026-10-23T20:30:00Z", day: "2026-10-23", quotes_at: null, quote_issue: null, act_now: UNAVAILABLE, plans: UNAVAILABLE,
-  new: { radar: UNAVAILABLE, thesis: UNAVAILABLE, prep: UNAVAILABLE }, held: UNAVAILABLE, week: UNAVAILABLE,
-};
-
 async function stub(page: Page) {
   await page.route("**/api/backend/replay", (route) => route.fulfill({ json: { days: [{ date: "2026-10-23", symbols: ["NBIS"] }] } }));
   await page.route("**/api/backend/replay/2026-10-23", (route) => route.fulfill({ json: DAY }));
@@ -65,18 +59,4 @@ test("a day without a replay says why", async ({ page }) => {
   await page.route("**/api/backend/replay/2026-10-22", (route) => route.fulfill({ status: 404, json: { detail: "No replay for that day." } }));
   await page.goto("/replay/2026-10-22");
   await expect(page.getByRole("status")).toContainText("clips are built at the close on days you trade and kept 14 days");
-});
-
-test("Today offers Watch today once the day's replay exists", async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 812 });
-  await stub(page);
-  await page.route("**/copilot/status", (route) => route.fulfill({ json: { enabled: false } }));
-  await page.route("**/api/backend/today", (route) => route.fulfill({ json: TODAY }));
-  await page.goto("/today");
-  const watch = page.getByRole("link", { name: "Watch today" });
-  await expect(watch).toHaveAttribute("href", "/replay/2026-10-23");
-  await fits(page);
-  await watch.click();
-  await expect(page).toHaveURL(/\/replay\/2026-10-23$/);
-  await expect(page.getByRole("region", { name: "NBIS replay" })).toBeVisible();
 });
