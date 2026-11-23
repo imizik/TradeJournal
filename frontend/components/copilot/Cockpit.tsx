@@ -16,11 +16,12 @@ import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
 import { getExposure, type Exposure } from "@/lib/copilot";
 import { behindWords, useRobinhoodBehind } from "@/components/copilot/DeskHealth";
 import { DESK_CHANGED_EVENT, DESK_TIMEFRAME_KEY } from "@/lib/deskAction";
-import { DeskChart, ReadingLine, type DeskChartActions, type DeskGuide } from "@/components/copilot/DeskChart";
+import type { DeskChartActions, DeskGuide } from "@/components/copilot/DeskChart";
+import { ReadingLine } from "@/components/copilot/DeskReading";
 import { ChartHead, type ChartTools } from "@/components/copilot/DeskChartHead";
 import { noteChartPrice } from "@/components/copilot/DeskResearch";
 import { DeskTimeline } from "@/components/copilot/Inspector";
-import { ChartViewToggle, ContractChart, heldContract, useContractView } from "@/components/copilot/DeskContract";
+import { ChartViewToggle, heldContract, useContractView } from "@/components/copilot/DeskContract";
 import { EarningsTag, PositionEarnings } from "@/components/copilot/EarningsTag";
 import {
   DESK_MARKET, DESK_TIMEFRAMES, daysTo, deskSymbolThread, getDeskSparks, liveOn, money, nyDay, readLook, saveLook, signedPct, sinceLines,
@@ -43,6 +44,9 @@ import { deskBeats, everyDeskMinute, onDeskBeat } from "@/lib/deskMinute";
 
 // The Tape's code (Level 2, the depth session) loads the first time it is opened.
 const DeskTape = dynamic(() => import("@/components/copilot/DeskTape").then(m => m.DeskTape), { ssr: false });
+// The chart library loads with the chart, after the book is on screen (a phone opens on Positions).
+const DeskChart = dynamic(() => import("@/components/copilot/DeskChart").then(m => m.DeskChart), { ssr: false, loading: () => <div data-testid="desk-chart-loading" className="min-h-64 flex-1" /> });
+const ContractChart = dynamic(() => import("@/components/copilot/DeskContractChart").then(m => m.ContractChart), { ssr: false, loading: () => <div className="min-h-64 flex-1" /> });
 
 export const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
 const ET = "America/New_York";
@@ -549,11 +553,13 @@ function useDeskTimeframe(): [DeskTimeframe, (next: DeskTimeframe) => void] {
  * symbol: QQQ with the owner's fills and pings. ``dock`` places the Position content (the desk's dock under the chart,
  * its Position tab); without it the content follows the chart.
  */
-export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], earnings = null, guides, onReplay, paper = NO_PAPER, paperOrders, onPlan, ordersLive = false, dock, className, chartClassName }: {
+export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], earnings = null, guides, onReplay, paper = NO_PAPER, paperOrders, onPlan, ordersLive = false, dock, className, chartClassName, chartLater = false }: {
   /** The dock under the chart, given the Position content for its Position tab. */
   dock?(position: ReactNode): ReactNode;
   /** The whole (chart and dock) and the chart's own part: the desk's layout classes. */
   className?: string; chartClassName?: string;
+  /** Not drawn yet (a phone on its Positions, Orders or Feed): the chart and its library load when it is first shown. */
+  chartLater?: boolean;
   symbol: string | null; thread: DeskThreadRef | null; row: DeskThread | null; sparks: DeskSparks | null; actions?: DeskChartActions;
   /** Opens Replay: paper trading on a past day (``DeskReplay``). */
   onReplay?(): void;
@@ -650,7 +656,7 @@ export function CentreChart({ symbol, thread, row, sparks, actions, rows = [], e
         {head(null, <p className="text-[11px] leading-4 tabular-nums text-muted-foreground"><ReadingLine part="facts" symbol={name} data={reading} fallback={fallback} live={live} /></p>)}
         {tapePanel}
       </>}
-      {onContract ? <ContractChart held={held} data={contract.data!} /> : (
+      {chartLater ? <div data-testid="desk-chart-later" className="min-h-64 flex-1" /> : onContract ? <ContractChart held={held} data={contract.data!} /> : (
         <DeskChart id={ref?.id ?? DESK_MARKET} timeframe={timeframe} refreshKey={ref?.refreshKey ?? 0} onRead={setShown} actions={actions} live={live} guides={guides}
           head={head} under={tapePanel} reading={<ReadingLine part="facts" symbol={name} data={reading} fallback={fallback} live={live} />} onTimeframe={pickTimeframe}
           label={`${name} ${SPAN[timeframe]}${ref ? " with the plan's entry and invalidation lines, your fills, and today's pings and Radar hits" : " with your fills and the phone pings sent today"}`} />

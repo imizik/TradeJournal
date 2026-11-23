@@ -49,7 +49,7 @@ export default function GmailStatusBanner() {
           type="button"
           onClick={reconnect}
           disabled={connecting}
-          className={`inline-flex items-center gap-1.5 rounded border border-red-400/40 text-xs font-medium text-red-100 hover:bg-red-500/20 disabled:opacity-60 ${compact ? "px-2 py-0.5" : "px-3 py-1.5"}`}
+          className={`inline-flex items-center gap-1.5 rounded border border-red-400/40 text-xs font-medium text-red-100 hover:bg-red-500/20 disabled:opacity-60 ${compact ? "px-2 py-0.5" + " relative after:absolute after:-inset-y-3.5 after:-inset-x-1 after:content-[''] sm:after:hidden" : "px-3 py-1.5"}`}
         >
           {connecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
           Reconnect Gmail

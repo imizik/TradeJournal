@@ -98,3 +98,10 @@
       linear-gradient(to left, hsl(var(--foreground) / 0.18), transparent) right center / 14px 100% no-repeat scroll;
   }
 }
+
+/* A phone's browser zooms the page when a field under 16px takes focus (iOS Safari), and the page stays zoomed. */
+@media (max-width: 767px) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), select, textarea {
+    font-size: 16px !important;
+  }
+}

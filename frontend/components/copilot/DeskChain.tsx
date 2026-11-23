@@ -433,7 +433,7 @@ function Cells({ cell, cols, itm, chosen, onPick, side, strike }: {
           <button type="button" onClick={onPick} aria-label={i === 0 ? `${strikeText(strike)} ${side}` : undefined} tabIndex={i === 0 ? 0 : -1}
             aria-hidden={i === 0 ? undefined : true} aria-pressed={i === 0 ? chosen : undefined}
             title={cell.state === "stale" ? `Quote from ${clock(cell.quoted_at)}` : cell.state === "missing" ? "No usable bid and ask" : c.key === "mark" && cell.spread_note ? cell.spread_note : undefined}
-            className={cn("block min-h-9 w-full px-1.5 py-1 text-right hover:bg-secondary", quiet && "text-muted-foreground",
+            className={cn("block min-h-11 w-full px-1.5 sm:min-h-9 py-1 text-right hover:bg-secondary", quiet && "text-muted-foreground",
               c.key === "mark" && cell.wide && cell.state === "ok" && "text-amber-300")}>
             {c.show(cell)}
           </button>

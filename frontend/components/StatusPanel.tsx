@@ -221,7 +221,8 @@ export default function StatusPanel({ open, onClose }: Props) {
           </div>
           <button
             onClick={onClose}
-            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            aria-label="Close background jobs"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md p-1.5 text-muted-foreground md:min-h-0 md:min-w-0 transition-colors hover:bg-secondary hover:text-foreground"
           >
             <X className="h-4 w-4" />
           </button>

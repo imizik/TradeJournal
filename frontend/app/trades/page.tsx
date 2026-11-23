@@ -97,7 +97,7 @@ function FilterGroup({ label, children }: { label: string; children: React.React
 /** A filter chip; the link is taller than the chip so it stays easy to tap. */
 function FilterPill({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
   return (
-    <a href={href} aria-current={active ? "true" : undefined} className="group inline-flex min-h-9 items-center">
+    <a href={href} aria-current={active ? "true" : undefined} className="group inline-flex min-h-11 items-center sm:min-h-9">
       <span className={`inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium capitalize transition-colors ${
         active ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground group-hover:text-foreground"
       }`}>{children}</span>

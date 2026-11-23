@@ -169,7 +169,7 @@ export default function TradesTable({
           {sorted.slice(0, shown).map((t) => (
             <tr key={t.id} className="hover:bg-muted/50">
               <Td>
-                <a href={`/trades/${t.id}${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`} className="font-semibold hover:underline">
+                <a href={`/trades/${t.id}${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`} className="font-semibold hover:underline relative after:absolute after:-inset-y-3.5 after:-inset-x-1 after:content-[''] sm:after:hidden">
                   {t.ticker}
                 </a>
                 {t.instrument_type === "option" && (

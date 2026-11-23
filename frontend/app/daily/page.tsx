@@ -43,7 +43,7 @@ export default async function DailyReviewPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <a href={access.owner ? "/dashboard" : "/"} className="text-sm text-muted-foreground hover:text-foreground">
+          <a href={access.owner ? "/dashboard" : "/"} className="text-sm text-muted-foreground hover:text-foreground relative after:absolute after:-inset-y-3.5 after:-inset-x-1 after:content-[''] sm:after:hidden">
             Back to Dashboard
           </a>
           <div className="mt-2 flex flex-wrap items-baseline gap-x-2">
@@ -264,7 +264,7 @@ function Legend({ jo }: { jo: JoMonths | null }) {
       <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-primary" aria-hidden />Review needs refresh</span>
       {/* The explanations fold away; the colour key above stays one line. */}
       <details className="open:basis-full">
-        <summary className="cursor-pointer list-none underline decoration-dotted underline-offset-2 hover:text-foreground [&::-webkit-details-marker]:hidden">What the marks mean</summary>
+        <summary className="relative after:absolute after:-inset-y-3.5 after:-inset-x-1 after:content-[''] sm:after:hidden cursor-pointer list-none underline decoration-dotted underline-offset-2 hover:text-foreground [&::-webkit-details-marker]:hidden">What the marks mean</summary>
         <p className="mt-1">Darker means a bigger day. Click a day to open its review.</p>
         {jo && <p className="mt-1" data-testid="jo-calendar-legend">
           Jo (last {JO_MONTHS} months): <span className="text-primary">Jo !</span> missed or late briefing or read, or a refused watch ·{" "}
