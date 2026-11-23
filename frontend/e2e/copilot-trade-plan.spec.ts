@@ -697,11 +697,14 @@ test("a plan drafted without a target saves none and reads as before", async ({ 
 test("Paper it opens the paper confirm prefilled from the plan and records it as the copilot's idea", async ({ page }) => {
   const server: Server = { alerts: [], posts: [] };
   const orders: Record<string, unknown>[] = [];
+  // Before the plan's 11/21 expiry, so the copilot's idea reads 11/21/26 whatever day the suite runs.
+  const now = new Date("2026-10-24T14:00:00Z");
+  await page.clock.install({ time: now });
   await lab(page, server);
   await page.route("**/copilot/paper/orders", (route) => {
     const body = route.request().postDataJSON();
     orders.push(body);
-    const fill = { label: "NBIS $100 Call 11/21/26", quantity: body.quantity, per_share: -3.4, cash: -340 * body.quantity, quoted_at: Date.now() / 1000 - 2,
+    const fill = { label: "NBIS $100 Call 11/21/26", quantity: body.quantity, per_share: -3.4, cash: -340 * body.quantity, quoted_at: now.getTime() / 1000 - 2,
       stock: 94.35, legs: { NBIS261121C00100000: { action: "buy", bid: 3.3, ask: 3.4, price: 3.4 } }, buying_power: 10000, need_each: 340 };
     return route.fulfill({ json: body.preview ? { preview: fill } : { filled: { ...fill, position_id: "p-1" } } });
   });

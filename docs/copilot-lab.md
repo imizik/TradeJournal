@@ -291,36 +291,23 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   read for the distance, and `position_alerts.for_trade`. The only id out is
   each row's trade id. Browser proof: `frontend/e2e/dashboard-plans-card.spec.ts`
   (with a 375 px phone check); route tests: `tests/test_plan_positions.py`.
-- **Today** (`/today`, `components/today/TodayView.tsx`): the owner's phone
-  landing page, the first phone tab and ahead of Dashboard in the sidebar
-  (Dashboard is the second phone tab). One column, top to bottom, each
-  section collapsed to its count when empty:
-  - **Act now**: open positions within 1% of an armed invalidation (or past a
-    hit one), expiring today, with the give-back alert fired, or with a time
-    stop due within 30 minutes.
-  - **Plans near a trigger**: armed plans not yet in a position within 1% of
-    their entry or invalidation.
-  - **New since you looked**: Radar events since the last Radar visit,
-    thesis-watch triggers fired today and today's pre-market prep.
-  - **Held back**: pings the notification policy held today (merged, quiet
-    window or over a category budget), with their text.
-  - **Your week so far**: this week's planned/total entries and the streak.
-  - Then **Plan a trade** and **Review my week**.
-
-  A position row opens its review (`Review this position: <trade id>`), a plan
-  or trigger or prep its investigation, a Radar event `/radar?event=<id>`. It
-  shows its as-of time and refreshes every minute while visible. While the lab
-  is off the page still reads; a position opens its trade page instead and the
-  other copilot links and both buttons are left out. It reads one owner-only
-  `GET /today` (`app/routers/today.py`) that composes the readers above in
-  process (`copilot_plans.board`, then `plan_positions.positions`, sharing one
-  batched quote read), the Radar feed reader, `ThesisWatchTrigger`,
-  `PremarketPrep`, `PhonePing` and `plan_streak.streak`. Each section stands
-  alone: one that fails reads `unavailable` and the rest stand. Read-only: it
-  records no Radar visit and sends nothing. The only ids out are the trade,
-  Radar event and investigation ids its rows link to. Browser proof:
-  `frontend/e2e/today.spec.ts` (375 and 1440 px); route tests:
-  `tests/test_today.py`.
+- **Today read** (`GET /today`, `app/routers/today.py`): the retired Today
+  screen's one owner-only read, kept for the desk's decision bar. It composes,
+  each section on its own (one that fails reads `unavailable` and the rest
+  stand): **Act now** (open positions within 1% of an armed invalidation or
+  past a hit one, expiring today, with the give-back alert fired, or with a
+  time stop due within 30 minutes), **Plans near a trigger** (armed plans not
+  yet in a position within 1% of their entry or invalidation), **New since
+  you looked** (Radar events since the last visit, thesis-watch triggers fired
+  today, today's pre-market prep), **Held back** (pings the notification
+  policy held today) and the week's planned/total entries and streak. It
+  reads `copilot_plans.board`, then `plan_positions.positions` (one batched
+  quote read), the Radar feed reader, `ThesisWatchTrigger`, `PremarketPrep`,
+  `PhonePing` and `plan_streak.streak`. Read-only: it records no Radar visit
+  and sends nothing. The Today page itself is retired: `/today` opens the desk
+  (the Dashboard while the lab is off). Route tests: `tests/test_today.py`;
+  browser proof of the redirect, the menu and the proxy:
+  `frontend/e2e/today.spec.ts`.
 - **Open threads read** (`GET /copilot/threads`): `{positions,
   investigations, watches, as_of}` from the no-symbol owner context pack
   (Owner context, below), each open investigation with its last three
@@ -1658,12 +1645,13 @@ back). A phone keeps its tab bar. Every icon in the Charts rail names itself
 on hover or focus (`NavHint`), the sync dot included. Plan a trade is not on the bar since the calm pass: N and ⌘K
 start one, and the chart's level menu, the Chain, the Feed and the Position panel keep their own Plan buttons. The read-only note sits under the message box.
 
-**The desk is home.** While the lab is on, the desk takes the Today screen's
+**The desk is home.** While the lab is on, the desk takes the Dashboard's
 place: it is first in the menu and the phone's first tab ("Desk",
-`withDesk` in `frontend/components/Nav.tsx`), `/today` forwards to it, and
-the Labs entry for the same page goes. What Today showed that the desk did
-not now sits in the Feed (the pings held back today, each saying why) and, after the close, Watch
-today under the day report once a replay was kept. With the lab off, Today is unchanged.
+`withDesk` in `frontend/components/Nav.tsx`), and the Labs entry for the same
+page goes. The Today screen is retired: what it showed sits on the desk (the
+pings held back today in the Feed, each saying why, and after the close Watch
+today under the day report once a replay was kept), so `/today` opens the desk,
+or the Dashboard while the lab is off, and the menu no longer lists it.
 
 The message box (desk and side panel alike) is one box: on the desk the
 "About <symbol>" chip, then a full-width text area that starts three lines

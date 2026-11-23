@@ -9,7 +9,7 @@ import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import PlanATrade from "@/components/copilot/PlanATrade";
 import PlanStreakChip from "@/components/PlanStreak";
 import { openJournal } from "@/components/copilot/DeskJournal";
-import { Bot, Crosshair, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Rocket, Scale, SlidersHorizontal, Target, Telescope, ChevronRight, ClipboardCheck, Menu, Sun, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { Bot, Crosshair, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Rocket, Scale, SlidersHorizontal, Target, Telescope, ChevronRight, ClipboardCheck, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
 import { useGmailHealth } from "@/lib/useGmailHealth";
@@ -58,9 +58,9 @@ export const useDeskTabSlot = () => useSyncExternalStore(subscribeSlot, () => de
 
 type NavItem = { href: string; label: string; icon: typeof Bot };
 
-/** The three pages always in view (two while the desk is home: Desk and Charts, see ``withDesk``). */
+/** The two pages always in view (while the desk is home: Desk and Charts, see ``withDesk``). Today is retired: its
+ * address opens the desk. */
 const PRIMARY: NavItem[] = [
-  { href: "/today", label: "Today", icon: Sun }, // owner-only: what matters right now
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/charts", label: "Charts", icon: ChartCandlestick },
 ];
@@ -183,8 +183,8 @@ function SyncTrigger({ open, running, onToggle, compact = false }: { open: boole
   );
 }
 
-/** While the Copilot Lab is on, the desk is home (`/` lands there): it takes Today's place, first in the menu and on the
- * phone's tab bar (Today forwards there), and the Dashboard leaves the bar for More → Journal at `/dashboard`. */
+/** While the Copilot Lab is on, the desk is home (`/` lands there): it takes the Dashboard's place, first in the menu and
+ * on the phone's tab bar, and the Dashboard leaves the bar for More → Journal at `/dashboard`. */
 const DESK = { href: "/copilot-lab", label: "Desk", icon: MessagesSquare };
 /** The Dashboard's closed P&L, performance and latest closes, as a desk drawer (``DeskJournal``); the Dashboard itself leaves the menu. */
 const JOURNAL_SUMMARY: NavItem = { href: "/copilot-lab?desk=journal", label: "Journal summary", icon: LayoutDashboard };
@@ -192,9 +192,10 @@ const JOURNAL_SUMMARY: NavItem = { href: "/copilot-lab?desk=journal", label: "Jo
 const DESK_USE: NavItem = { href: "/copilot-lab?desk=use", label: "How I use the desk", icon: SlidersHorizontal };
 function withDesk<T extends { href: string }>(items: T[], copilot: boolean): T[] {
   if (!copilot) return items;
-  return items.filter(item => item.href !== "/").map(item => (item.href === "/today" ? { ...item, ...DESK } : item));
+  return items.map(item => (item.href === "/" ? { ...item, ...DESK } : item));
 }
-/** Pages retired while the desk is home: their addresses open the desk's Feed (Radar, Scanner) or Practice (Daily Practice), so the menu drops them. */
+/** Pages retired while the desk is home: their addresses open the desk's Feed (Radar, Scanner) or Practice (Daily
+ * Practice and its Decision replay lab), so the menu drops them. */
 const RETIRED = new Set(["/radar", "/scanner", "/practice"]);
 /** The folded groups; while the desk is home the Journal summary heads Journal and the retired pages leave. */
 function navGroups(copilot: boolean) {
@@ -209,10 +210,9 @@ function shownHref(href: string, owner: boolean, enabled: boolean, journal: bool
   return owner || ["/", "/charts", "/daily", ...(journal ? ["/trades", "/fills", "/analytics"] : [])].includes(href);
 }
 
-/** The phone tab bar's pages; everything else is under More. The owner gets Today, Dashboard, Charts and Trades (while
- * the desk is home: Desk, Charts and Trades), with Daily Review under More; an assistant keeps Daily Review. */
+/** The phone tab bar's pages; everything else is under More. The owner gets Dashboard, Charts and Trades (while the desk
+ * is home: Desk, Charts and Trades), with Daily Review under More; an assistant keeps Daily Review. */
 const TABS = [
-  { href: "/today", label: "Today", icon: Sun },
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/charts", label: "Charts", icon: ChartCandlestick },
   { href: "/daily", label: "Daily Review", icon: ClipboardList },

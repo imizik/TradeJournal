@@ -4354,12 +4354,12 @@ test("on the charts page the journal navigation is a rail that expands and is re
   const rail = page.getByRole("navigation").filter({ has: page.getByRole("button", { name: "Expand navigation" }) });
   expect((await rail.boundingBox())!.width).toBeLessThanOrEqual(48);
   await page.screenshot({ path: test.info().outputPath("navigation-rail-desktop.png") });
-  // The three primary pages are named links, the current one marked, with sync status and the Sync drawer reachable.
-  for (const name of ["Today", "Dashboard", "Charts"]) await expect(rail.getByRole("link", { name, exact: true })).toBeVisible();
+  // The two primary pages are named links, the current one marked, with sync status and the Sync drawer reachable.
+  for (const name of ["Dashboard", "Charts"]) await expect(rail.getByRole("link", { name, exact: true })).toBeVisible();
   await expect(rail.getByRole("link", { name: "Trades", exact: true })).toHaveCount(0);
   await expect(rail.getByRole("link", { name: "Charts", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(rail.getByTitle("Sync & enrichment status")).toBeVisible();
-  for (const name of ["Today", "Charts", "Dashboard"]) {
+  for (const name of ["Charts", "Dashboard"]) {
     await rail.getByRole("link", { name, exact: true }).hover();
     await expect(page.getByRole("tooltip")).toHaveText(name);
     expect((await page.getByRole("tooltip").boundingBox())!.x).toBeGreaterThan(48);

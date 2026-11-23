@@ -49,7 +49,7 @@ test("the sidebar is replaced by a menu that navigates", async ({ page }) => {
 
   await page.getByRole("button", { name: "Open menu" }).click();
   const menu = page.getByRole("dialog", { name: "Menu" });
-  expect((await menu.getByRole("link").allTextContents()).slice(0, 3)).toEqual(["Today", "Dashboard", "Charts"]);
+  expect((await menu.getByRole("link").allTextContents()).filter((text) => ["Today", "Dashboard", "Charts"].includes(text)).slice(0, 2)).toEqual(["Dashboard", "Charts"]);
   for (const group of ["Market", "Practice", "Research", "Journal"]) await menu.getByRole("button", { name: group, exact: true }).click();
   for (const name of ["Fills", "Signals", "Scanner", "Advisor review", "Strategy Lab", "Research Studio", "Level 2 lab", "AI Buildout"]) {
     await menu.getByRole("link", { name, exact: true }).scrollIntoViewIfNeeded();
@@ -63,14 +63,15 @@ test("the sidebar is replaced by a menu that navigates", async ({ page }) => {
 });
 
 test("a tab bar at the bottom reaches the main pages in one tap and never covers the page's end", async ({ page }) => {
-  await page.goto("/today");
+  await page.goto("/");
   const tabs = page.getByRole("navigation", { name: "Main tabs" });
   await expect(tabs).toBeInViewport();
-  for (const name of ["Today", "Dashboard", "Charts", "Trades", "More"]) {
+  for (const name of ["Dashboard", "Charts", "Trades", "More"]) {
     const target = name === "More" ? tabs.getByRole("button", { name: "Open menu" }) : tabs.getByRole("link", { name });
     expect(Math.min(...Object.values((await target.boundingBox())!).slice(2)), name).toBeGreaterThanOrEqual(44);
   }
-  await expect(tabs.getByRole("link", { name: "Today" })).toHaveAttribute("aria-current", "page");
+  await expect(tabs.getByRole("link", { name: "Dashboard" })).toHaveAttribute("aria-current", "page");
+  await expect(tabs.getByRole("link", { name: "Today" })).toHaveCount(0); // retired: its address opens home
   await expect(tabs.getByRole("link", { name: "Daily Review" })).toHaveCount(0); // the owner's Daily Review is under More
   await tabs.getByRole("link", { name: "Trades" }).click();
   await expect(page).toHaveURL(/\/trades$/);
