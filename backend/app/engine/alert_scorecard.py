@@ -160,3 +160,46 @@ def scorecard(db: Session, now: float, days: int = WINDOW_DAYS) -> dict:
         }
     rows.reverse()
     return {"window_days": days, "alerts": len(rows), "summary": summary, "rows": rows[:MAX_ROWS], "truncated": len(rows) > MAX_ROWS}
+
+
+def week_cost(db: Session, start_utc: datetime, end_utc: datetime) -> dict:
+    """What holding past the pings did, for the Sunday digest: the positions that got a sent position alert in the window
+    (naive UTC), each measured once from its first alert there (several alerts on one position would count the same
+    contracts again), as ``_outcome`` measures it. ``vs_alert_usd`` sums the closed ones: negative means selling at the
+    first ping would have fetched that much more than what he did. Positions still open are counted apart."""
+    alerts = db.exec(select(PositionAlert).where(PositionAlert.detected_at >= start_utc, PositionAlert.detected_at < end_utc,
+                                                 PositionAlert.delivery.in_(SENT)).order_by(PositionAlert.detected_at)).all()
+    first: dict = {}
+    for alert in alerts:
+        first.setdefault((alert.account_id, alert.source_key), alert)
+    found: dict = {}
+    closed = []
+    still_open = 0
+    for alert in first.values():
+        outcome = _outcome(db, alert, _trade(db, alert, found))
+        if outcome["state"] == "closed":
+            closed.append(outcome["vs_alert_usd"])
+        elif outcome["state"] == "open":
+            still_open += 1
+    return {"positions": len(first), "closed": len(closed), "open": still_open,
+            "better": sum(1 for v in closed if v > 0), "worse": sum(1 for v in closed if v < 0),
+            "vs_alert_usd": round(sum(closed), 2)}
+
+
+def cost_line(cost: dict) -> str | None:
+    """The digest's one line for ``week_cost``; None when no pinged position has closed."""
+    if not cost["closed"]:
+        return None
+    n = cost["closed"]
+    total = cost["vs_alert_usd"]
+    head = f"Pings: {n} pinged position{'' if n == 1 else 's'} closed. "
+    if total < 0:
+        head += f"Selling at the first ping would have made ${-total:,.0f} more"
+    elif total > 0:
+        head += f"Holding past the pings made ${total:,.0f} more than selling at the first one"
+    else:
+        head += "Selling at the first ping would have come out the same"
+    head += f" (selling then was better on {cost['worse']}, worse on {cost['better']})."
+    if cost["open"]:
+        head += f" {cost['open']} still open."
+    return head

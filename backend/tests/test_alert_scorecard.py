@@ -225,3 +225,30 @@ def test_a_failed_desk_link_read_still_sends_the_alert_to_the_trade_page(db, mon
     path, more = position_alerts._links(db, row)
     assert path == f"/trades/{row.trade_id}?alert={row.id}"
     assert db.exec(__import__("sqlmodel").select(Account)).first() is not None  # the caller's session still works
+
+
+def test_the_week_cost_measures_each_pinged_position_once_from_its_first_alert(db):
+    # Rode into expiry after two pings: selling 3 at the first ping's $150 bid would have fetched $450 more.
+    sndk, sndk_key = position(db, "SNDK", [(3, 300, ny(23, 11, 51))], status="expired", closed_at=ny(23, 16))
+    alert(db, sndk, sndk_key, utc(23, 14, 30), contracts=3, bid=150, kind="expiry_first")
+    alert(db, sndk, sndk_key, utc(23, 15, 30), contracts=3, bid=20, kind="expiry_final")
+    # Held past a give-back and sold higher: +$100 against the ping.
+    nbis, nbis_key = position(db, "NBIS", [(1, 400, ny(23, 9, 41))], [(1, 500, ny(23, 11, 0))], status="closed", closed_at=ny(23, 11, 0))
+    alert(db, nbis, nbis_key, utc(23, 10, 31), contracts=1, bid=400)
+    # Still open, and one outside the window.
+    mu, mu_key = position(db, "MU", [(2, 200, ny(23, 10))])
+    alert(db, mu, mu_key, utc(23, 11), contracts=2, bid=180)
+    old, old_key = position(db, "AMD", [(1, 100, ny(20, 10))], status="expired", closed_at=ny(20, 16))
+    alert(db, old, old_key, utc(20, 14, 30), contracts=1, bid=90, kind="expiry_first")
+
+    cost = alert_scorecard.week_cost(db, datetime(2026, 10, 21), datetime(2026, 10, 28))
+    assert cost == {"positions": 3, "closed": 2, "open": 1, "better": 1, "worse": 1, "vs_alert_usd": -350.0}
+    assert alert_scorecard.cost_line(cost) == ("Pings: 2 pinged positions closed. Selling at the first ping would have made $350 more "
+                                               "(selling then was better on 1, worse on 1). 1 still open.")
+
+
+def test_the_cost_line_is_left_out_until_a_pinged_position_closes_and_says_when_holding_paid():
+    assert alert_scorecard.cost_line({"positions": 1, "closed": 0, "open": 1, "better": 0, "worse": 0, "vs_alert_usd": 0}) is None
+    assert alert_scorecard.cost_line({"positions": 1, "closed": 1, "open": 0, "better": 1, "worse": 0, "vs_alert_usd": 1234.4}) == (
+        "Pings: 1 pinged position closed. Holding past the pings made $1,234 more than selling at the first one "
+        "(selling then was better on 0, worse on 1).")

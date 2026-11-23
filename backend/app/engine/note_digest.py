@@ -7,6 +7,8 @@ ping, ``NOTES · week of <Monday>``, under its own budget (``note_digest``: one 
 - how many notes the week holds (Sunday ``AT`` to Sunday ``AT``, so no note is counted twice);
 - their recurring themes: the tickers named most, then the words used in two or more notes (at most ``THEMES``);
 - how many of the week's sent position-alert and Radar pings (``sent`` or ``unknown``) he rated, of how many;
+- what holding past the week's position alerts did (``alert_scorecard.week_cost``): each pinged position measured once
+  from its first alert, the dollars selling at that ping would have made against what he did, when one has closed;
 - one "worth testing?" note, quoted: the newest that began with idea, else the newest naming a theme ticker, else the
   newest.
 
@@ -103,7 +105,7 @@ def worth_testing(found: list[tuple], top: list[tuple[str, int]]) -> tuple | Non
             or next((n for n in newest if top_tickers & set(n[1].get("tickers") or ())), None) or newest[0])
 
 
-def render(found: list[tuple], rated: int, got: int, week_of: str) -> tuple[str, str]:
+def render(found: list[tuple], rated: int, got: int, week_of: str, cost: str | None = None) -> tuple[str, str]:
     """The ping's title and body."""
     title = f"NOTES · week of {week_of}"
     count = len(found)
@@ -114,6 +116,8 @@ def render(found: list[tuple], rated: int, got: int, week_of: str) -> tuple[str,
         lines.append("Themes: " + ", ".join(f"{name} ×{n}" if n > 1 else name for name, n in top))
     lines.append(f"Rated {rated} of {got} alert and Radar ping{'' if got == 1 else 's'}." if got else
                  "No alert or Radar pings this week.")
+    if cost:
+        lines.append(cost)
     if (pick := worth_testing(found, top)) is not None:
         row = pick[0]
         text = row.text if len(row.text) <= QUOTE else row.text[:QUOTE - 1].rstrip() + "…"
@@ -135,7 +139,9 @@ def build(db: Session, now: float) -> tuple[str, str, str]:
     local = sunday
     monday = local - timedelta(days=local.weekday())
     found = notes(db, start, end)
-    title, body = render(found, *ratings(db, start, end), monday.strftime("%b %-d"))
+    from app.engine import alert_scorecard
+    cost = alert_scorecard.cost_line(alert_scorecard.week_cost(db, start, end))
+    title, body = render(found, *ratings(db, start, end), monday.strftime("%b %-d"), cost)
     return local.isoformat(), title, body
 
 

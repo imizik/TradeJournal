@@ -2246,7 +2246,10 @@ reply, as any voice note does.
 **Sunday digest** (`backend/app/engine/note_digest.py`, off unless `NOTE_DIGEST_ENABLED=true`; switching it on is the
 owner's call): on Sunday at or after 18:00 New York, one ping, "NOTES · week of <Monday>", with the week's note count
 (Sunday 18:00 to Sunday 18:00, so no note is counted twice), up to five recurring themes (the tickers named most, then words in two or more notes), how many of the week's sent
-position-alert and Radar pings he rated of how many, and one "Worth testing?" note quoted (the newest idea, else the newest
+position-alert and Radar pings he rated of how many, what holding past the week's position alerts did once a pinged
+position has closed (`alert_scorecard.week_cost`: each position measured once from its first alert, as the alert
+scorecard measures it, e.g. "Pings: 3 pinged positions closed. Selling at the first ping would have made $1,240 more
+(selling then was better on 2, worse on 1)."), and one "Worth testing?" note quoted (the newest idea, else the newest
 naming a theme ticker, else the newest). Written from the rows with no model call, under a dozen lines; a week with no
 notes still sends it. Its own ping kind, `note_digest`, with a budget of one a day (§ Phone ping policy); the week is
 claimed through the policy (`new_only`), so a restart never sends it twice. Its tap opens the day journal (`/daily`).
