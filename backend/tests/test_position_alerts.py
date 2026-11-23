@@ -1267,3 +1267,25 @@ def test_the_scorecard_leaves_the_no_exit_alert_out(engine, exits, no_exit_on):
         row.delivery = "sent"
         db.commit()
         assert alert_scorecard.scorecard(db, clock.now)["alerts"] == 0
+
+
+def test_a_position_in_another_broker_s_account_is_not_judged(engine, exits, no_exit_on):
+    clock, quotes, orders, watcher = exits
+    webull = UUID(int=2)
+    with Session(engine) as db:
+        db.add(Account(id=webull, name="Webull", type="individual", last4="wb01", broker="webull"))
+        db.commit()
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00", account_id=webull)
+    quotes.set(4.00)
+    run_at(clock, watcher, WED, "10:05")
+    assert alerts(engine) == []
+
+
+def test_the_order_read_is_none_when_a_tried_page_was_not_read_whole():
+    from app.engine.robinhood_fills import Poller
+    poller = Poller(now=lambda: 1_000.0)
+    line = {"working": True, "action": "sell_to_close"}
+    poller._desk = {"at": 1_000.0, "orders": [line], "whole": True}
+    assert poller.working(1_000.0) == ([line], 1_000.0)
+    poller._desk["whole"] = False
+    assert poller.working(1_000.0) is None

@@ -878,9 +878,12 @@ class Poller:
 
     def working(self, now: float | None = None) -> tuple[list[dict], float] | None:
         """The orders still working in the last good pass, with that pass's time (epoch seconds); None as ``desk``. For
-        the open-trade alerts' no-exit-order check, which must know the read is newer than its deadline. No call, no write."""
+        the open-trade alerts' no-exit-order check, which must know the read is newer than its deadline. Also None when
+        the pass could not read every account and kind it tried whole: an order placed since is then unseen. No call, no write."""
         view, _now = self._current(now)
-        return None if view is None else ([dict(o) for o in view["orders"] if o["working"]], view["at"])
+        if view is None or not view.get("whole", True):
+            return None
+        return [dict(o) for o in view["orders"] if o["working"]], view["at"]
 
     def filled(self, now: float | None = None) -> list[dict] | None:
         """Every order line with a fill in the last good pass, whatever its day (the desk's account line asks for its
@@ -945,7 +948,7 @@ class Poller:
                 # any state (its new state wins: a cancelled one is gone) and a line not read for three intervals.
                 lines += [o for o in self._desk["orders"] if (o["last4"], o["instrument"]) in got.tried - got.complete
                           and o["order_id"] not in got.seen and now - o["read_at"] <= rb.STALE_REFRESHES * rb.ttl(o["read_at"])]
-            self._desk = {"at": now, "orders": lines}
+            self._desk = {"at": now, "orders": lines, "whole": got.tried <= got.complete}
             self._status = {"at": int(now), "state": "ok", "mode": current, "new_executions": new, "written": result.written,
                             "calls": got.calls, "outcomes": result.outcomes,
                             "complete": len(got.complete) == 2 * len(got.account_types)}

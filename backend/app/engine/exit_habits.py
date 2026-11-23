@@ -330,7 +330,9 @@ def build(db: Session, go_live: date = GO_LIVE) -> dict:
 
     out["verdict"] = verdict(out)
     # Every sent alert counts toward the follow-up tally; only the newest ALERTS_SHOWN are listed.
-    alerts = db.exec(select(PositionAlert).where(PositionAlert.delivery.in_(alert_feedback.ELIGIBLE_DELIVERIES))
+    from app.engine.alert_scorecard import NOT_SCORED  # a no-exit-order ping asks for an exit order, not a sale
+    alerts = db.exec(select(PositionAlert).where(PositionAlert.delivery.in_(alert_feedback.ELIGIBLE_DELIVERIES),
+                                                 PositionAlert.kind.not_in(NOT_SCORED))
                      .order_by(PositionAlert.detected_at.desc())).all()
     feedback = alert_feedback.for_alerts(db, [a.id for a in alerts])
     listed = []

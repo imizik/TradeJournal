@@ -82,8 +82,8 @@ monitor's loop (``level_alert_monitor.py``), at most every ``RUN_SECONDS``:
   open counts from the open), within ``NO_EXIT_GRACE`` minutes: when Robinhood's order history
   (``robinhood_fills.poller.working``, the pass that already reads it each minute) shows no working ``sell_to_close``
   order for that contract in that account, one alert asks him to set his stop and target. It needs that read to be
-  current and taken after the deadline; with the order-history switch or the feed off, signed out or stale, it stays
-  silent (it cannot tell), never guesses. An order placed more than four days ago (that read's window) is not seen.
+  current, whole and taken after the deadline; with the order-history switch or the feed off, signed out, stale or a
+  page unread, it stays silent (it cannot tell), never guesses. Only Robinhood accounts are judged. An order placed more than four days ago (that read's window) is not seen.
   Once per position (generation 0). It is a prompt to set an exit, not an exit, so the alert scorecard's
   sell-at-the-alert measure leaves it out.
 
@@ -771,11 +771,12 @@ class PositionAlerts:
             return []
         orders, read_at = read
         from app.models import Account
-        last4 = {a.id: a.last4 for a in db.exec(select(Account).where(Account.id.in_({p["account_id"] for p in due}))).all()}
+        last4 = {a.id: a.last4 for a in db.exec(select(Account).where(Account.id.in_({p["account_id"] for p in due}))).all()
+                 if a.broker == "robinhood"}  # the order history is Robinhood's: another broker's positions cannot be judged
         found = []
         for position in due:
             deadline = datetime.combine(today, datetime.min.time(), ET).timestamp() + no_exit_due(position["opened_at"], today, regular) * 60
-            if read_at < deadline or exit_order_working(orders, last4.get(position["account_id"]), position["trade"]):
+            if position["account_id"] not in last4 or read_at < deadline or exit_order_working(orders, last4.get(position["account_id"]), position["trade"]):
                 continue  # the read predates the deadline (the next pass decides), or an exit is set
             mark = marks.get(position["occ"])
             found.append(self._alert(position, "no_exit", 0, mark, *self._gain(position, mark), None, now))
