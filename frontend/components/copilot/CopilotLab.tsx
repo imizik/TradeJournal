@@ -369,11 +369,15 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const feed = useDeskFeed(on);
   const feedOpen = feedShown || phoneView === "feed";
   const feedNew = useFeedNew(feed.data, on && feedOpen);
-  const unusual = useDeskUnusual(on);
-  const scanner = useDeskScanner(on);
   const [scanLines, setScanLines] = useState<{ symbol: string; lines: DeskGuide[] } | null>(null); // a Scanner row's levels on the chart
   const [chainFocus, setChainFocus] = useState<{ pick: ChainPick; n: number } | null>(null); // a Feed row's unusual contract
   const chainOpen = !grid && dockPick === "chain";
+  // Unusual activity and the scanner are read only for the Feed (and the Chain's unusual marks): not on load, only from the
+  // first time either opens, then on the shared minute as before.
+  const [feedRead, setFeedRead] = useState(false);
+  if (!feedRead && (feedOpen || chainOpen)) setFeedRead(true);
+  const unusual = useDeskUnusual(on && feedRead);
+  const scanner = useDeskScanner(on && feedRead);
   // The phone's Chain view is the ticker's view on its Chain: anything that moves the dock off it (a contract's Put on
   // ticket, a key, ⌘K) leaves it for the ticker's own view, so the chart comes back with the tab it opened.
   useEffect(() => { if (phoneView === "chain" && !chainOpen) setPhoneView("ticker"); }, [phoneView, chainOpen]); // eslint-disable-line react-hooks/set-state-in-effect -- follows the dock

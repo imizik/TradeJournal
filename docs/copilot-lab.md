@@ -22,7 +22,10 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   the lab is off.
   - The nav, every panel and every Ask copilot button share one
     `/copilot/status` read per page load (`lib/copilot.ts` `copilotStatus`,
-    `useCopilotOn`).
+    `useCopilotOn`). The root layout reads it once on the server too
+    (`CopilotOnProvider`), so the nav and the desk paint on or off from the start
+    instead of off first; the page's own read still settles it. The message box
+    says "Copilot Lab is off" only once the status has been read.
 - **Hold to talk** (`frontend/components/copilot/VoiceInput.tsx`, every
   variant): a 44 px mic beside Send, shown only while the lab is on and
   something can listen.
@@ -2072,6 +2075,12 @@ are 12 of them (`GET /copilot/desk/ticks` every 5 s, § Live prices); the rest:
   proxy allows); owner-only; no cache or provider call of its own. A read past 8 s answers 504 for itself and the next
   minute asks again, so one stuck provider never holds the others. A backend without the route (404) gets the reads one
   by one.
+- **Feed-only reads wait for the Feed.** Unusual options and the scanner are read the first time the Feed (or the
+  Chain, for its unusual marks) opens, not on load, and then join the minute as above. Measured 2026-11-24 on a dev
+  build at 375 px: a cold desk made 38 API requests before this change and its server-read on/off, 28 after (42 → 32
+  wide): these two reads, and nine reads (the book, what's moving, practice and others) that a cold load sent twice
+  while the lab read as off first now go out once.
+  The first reads stay separate requests (batching them would hold every piece to the slowest read).
 - **Nothing while the page is hidden.** The beat skips; showing the page after a skipped beat turns one at once (one
   request). Before, the Feed, unusual options, scanner and armed plans kept polling a hidden tab.
 - The app-wide job dot and Gmail health read once a minute, not every 30 s.

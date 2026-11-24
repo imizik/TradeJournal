@@ -10,6 +10,8 @@ import { PRIVATE_ACCESS } from "@/lib/accessTypes";
 import { ChartSessionProvider } from "@/lib/chartSession";
 import AppMain from "@/components/AppMain";
 import LockSignInNotice from "@/components/LockSignInNotice";
+import { CopilotOnProvider } from "@/components/copilot/useCopilotOn";
+import { api } from "@/lib/serverApi";
 
 // Session identity and permissions are evaluated per request in both profiles.
 export const dynamic = "force-dynamic";
@@ -43,14 +45,15 @@ export default async function RootLayout({
 }>) {
   const access = await currentAccess();
   const owner = access?.owner ?? false;
-  const signInNeeded = await lockSignInNeeded();
+  // Read once here so the nav and the desk paint as on or off from the start (a failed read is off, as on the client).
+  const [signInNeeded, copilotOn] = await Promise.all([lockSignInNeeded(), owner ? api.copilotOn() : Promise.resolve(false)]);
   return (
     <html lang="en" className="dark">
       <body className={`${sans.variable} ${mono.variable} font-sans antialiased`} suppressHydrationWarning>
-        <AccessProvider access={access ?? { ...PRIVATE_ACCESS, owner: false, enabled: true }}><div className="flex min-h-screen flex-col pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:flex-row">
+        <AccessProvider access={access ?? { ...PRIVATE_ACCESS, owner: false, enabled: true }}><CopilotOnProvider on={copilotOn}><div className="flex min-h-screen flex-col pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:flex-row">
           {access && <Nav owner={owner} journal={owner || !!access.grants.journal_read} />}
           <ChartSessionProvider><AppMain banner={owner ? <>{signInNeeded && <LockSignInNotice />}<GmailStatusBanner /></> : access ? <AssistantSession /> : null}>{children}</AppMain></ChartSessionProvider>
-        </div></AccessProvider>
+        </div></CopilotOnProvider></AccessProvider>
       </body>
     </html>
   );
