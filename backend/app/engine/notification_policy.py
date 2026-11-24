@@ -112,7 +112,7 @@ log = logging.getLogger(__name__)
 
 PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "interrupt", "companion_update", "nudge", "prep", "evening_review",
             "radar_setup", "radar_event", "radar_digest", "thesis_watch", "research", "paper", "paper_review", "self_check", "note_digest")
-ALIASES = {"expiry_first": "time_stop", "expiry_eve": "time_stop", "same_day_1pm": "time_stop", "wrong_way": "hold_hour", "no_exit": "hold_hour", "hold_check_in": "hold_hour", "link": "nudge", "no_plan": "nudge",
+ALIASES = {"expiry_first": "time_stop", "expiry_eve": "time_stop", "same_day_1pm": "time_stop", "wrong_way": "hold_hour", "no_exit": "hold_hour", "hold_check_in": "hold_hour", "interrupt_size": "hold_hour", "link": "nudge", "no_plan": "nudge",
            "companion_adopt": "nudge",
            "week_review": "prep", "day_replay": "prep"}
 NEVER_QUIET = 2  # ranks 0-1 (last-day final, invalidation) are never held by the quiet window
@@ -375,7 +375,7 @@ def _appended(db: Session, into: PhonePing) -> str:
 
 def _label(kind: str) -> str:
     return {"expiry_final": "last-day final", "expiry_first": "expires-today", "giveback": "give-back", "hold_hour": "one-hour", "wrong_way": "wrong-way", "no_exit": "no-exit-order", "same_day_1pm": "same-day 1 PM",
-            "time_stop": "time stop", "entry": "entry trigger", "interrupt": "pattern", "invalidation": "invalidation", "nudge": "plan nudge",
+            "time_stop": "time stop", "entry": "entry trigger", "interrupt": "pattern", "interrupt_size": "size-by-adding pattern", "invalidation": "invalidation", "nudge": "plan nudge",
             "no_plan": "plan nudge", "link": "plan link", "prep": "pre-market prep", "week_review": "week review", "day_replay": "Watch your day",
             "evening_review": "evening review", "expiry_eve": "day-before-expiry", "radar_digest": "Radar digest",
             "radar_setup": "Radar setup", "radar_event": "Radar", "thesis_watch": "thesis watch", "research": "research", "companion_adopt": "adopted position",

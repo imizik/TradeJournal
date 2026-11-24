@@ -65,7 +65,11 @@ unique per account and fill key); a fill that fired nothing is recorded ``none``
 sends one message listing each. Delivery is at-most-once, as plan nudges': a send that may have reached the phone
 is ``unknown`` and never resent, and a message not sent within ``EXPIRE_SECONDS`` or before the close is dropped.
 Right before the send ``notification_policy.decide`` may hold it (kind ``interrupt``, ranked just below
-``hold_hour``, its own daily budget ``PING_BUDGET_INTERRUPT``, default 4; the quiet window is per position).
+``hold_hour``, its own daily budget ``PING_BUDGET_INTERRUPT``, default 4; the quiet window is per position). A message
+with a loud line (``size_by_adding``) goes as kind ``interrupt_size``, ranked with ``hold_hour``: a silent pattern line
+sent for the same position minutes earlier does not hold it, and it does not spend the silent lines' budget or wait on
+it. A once-per-position line counts as said only when its message reached the phone or is on its way (``SAID``): one
+the policy held, or that expired, is judged again at the position's next fill.
 
 While Copilot Lab is on the message opens the desk's ping card on the interrupt (``card=interrupt:<id>``: Close,
 Trim and Set stop first; any of them records the acknowledgement), else the trade page on it. Its Noted button opens
@@ -113,6 +117,8 @@ KINDS = ("add_to_loser", "put_entry", "opened_green", "late_short_dated", "ticke
          "quick_reentry")
 ONCE_PER_POSITION = ("put_entry", "opened_green", "late_short_dated", "ticker_record", "large_size", "size_by_adding", "quick_reentry")
 NOT_SENT = frozenset({"large_size", "late_short_dated"})  # judged for the desk's play check, never a phone message
+SAID = ("pending", "sending", "sent", "unknown")  # a line held by the policy or expired never reached the phone: not said
+LOUD_POLICY_KIND = "interrupt_size"  # the policy's kind for a message with a loud line; the rest go as "interrupt"
 FOOTER = "Your record, not advice."
 
 
@@ -490,7 +496,8 @@ class FillInterrupts:
         last = last_close([(wall_time(c), _num(p) or 0.0) for c, p in [*closes, *same_minute]], fill["executed_at"])
         # The put, green-day and late-buy rules describe the position: once each, so scaling in does not repeat them.
         said = {k for kinds in db.exec(select(FillInterrupt.kinds).where(
-            FillInterrupt.account_id == fill["account_id"], FillInterrupt.position_key == position)) for k in kinds.split(",")}
+            FillInterrupt.account_id == fill["account_id"], FillInterrupt.position_key == position,
+            FillInterrupt.delivery.in_(SAID))) for k in kinds.split(",")}
         key = anchor(entries)
         recs = {"ticker_record": record(rows, "ticker_record", key, ticker=trade.ticker),
                 "large_size": record(rows, "large_size", key, day=fill["executed_at"].date()),
@@ -556,7 +563,8 @@ class FillInterrupts:
                 db.commit()
                 return
             ticket = notification_policy.decide(
-                db, sender="fill_interrupts", source_id=str(row.id), kind="interrupt", title=row.title, body=row.body, now=now,
+                db, sender="fill_interrupts", source_id=str(row.id), title=row.title, body=row.body, now=now,
+                kind=LOUD_POLICY_KIND if LOUD_KINDS & set(row.kinds.split(",")) else "interrupt",
                 anchor=notification_policy.anchor(row.account_id, row.position_key), symbol=row.ticker, trade_id=row.trade_id)
             if ticket.held:
                 row.delivery, row.last_error = "held", ticket.reason
