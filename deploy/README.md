@@ -523,13 +523,20 @@ low-priority kind (`PING_BUDGET_<KIND>`, e.g. `PING_BUDGET_RADAR_EVENT=4`),
 morning brief until it is decided while `PREMARKET_PREP_ENABLED=true`) and
 `PING_QUIET_MINUTES` (default 10, per position). Each sender's own switch below still decides whether it runs
 at all; Jo's senders are not gated. Held pings are recorded, never lost silently.
+Only pings about money at risk in a held position make a sound (give-back,
+expiry countdown, wrong way, no exit order, the day locks, plan stops and
+levels); every other ping arrives silent (ntfy priority 2).
 
 Level alerts set on the charts (Charts C5.1) go to the same topic: the API
 service reads `alerts.env` too (optional, as above) and sends each firing
 itself, with the symbol, the level, the price and the time.
 
 Open-position phone alerts are separate and remain off unless
-`POSITION_ALERTS_ENABLED=true` is configured. The new exception is separately
+`POSITION_ALERTS_ENABLED=true` is configured. Within them the one-hour,
+wrong-way and no-exit-order pings each need their own switch as well
+(`POSITION_HOLD_ALERTS`, `POSITION_WRONG_WAY_ALERTS`, `POSITION_NO_EXIT_ALERTS`,
+all default off), and the real-money day lock is `DAY_LOCK_ALERTS` (default
+off). The new exception is separately
 disabled when `POSITION_ALERTS_FLOORLESS_ACCOUNT_ID` is empty. Only after owner
 approval, verify the running database with `GET /health`, inspect `GET /accounts`,
 and copy the intended Roth IRA UUID into that setting.
@@ -546,6 +553,10 @@ and delivery settings must be preserved when applying this optional setting.
 Radar phone alerts (two digests a session plus single pings for strong events) are separate too and
 remain off unless `RADAR_ALERTS_ENABLED=true` is in `backend.env`; see
 [Radar phone alerts](../docs/radar.md#phone-alerts-off-by-default).
+Radar setup cards (`RADAR_SETUP_CARDS`, [section](../docs/radar.md#setup-cards-off-by-default))
+and the paper proving ground that trades them and other idea sources on paper
+(`PROVING_GROUND_ENABLED`, [section](../docs/copilot-lab.md#paper-proving-ground))
+are off by default as well; switching either on is the owner's call.
 
 Create `/etc/tradejournal/alerts.env` from `deploy/alerts.env.example` (root
 owned, mode 0600). Anyone who knows a topic on ntfy.sh can read it, so use a

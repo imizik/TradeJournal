@@ -74,6 +74,17 @@ A third card, "Do planned trades do better?" (`GET /analytics/plan-proof`,
 since the plan card went live; it is a secondary read, not a third proof, and
 selection-biased (he plans the trades he is more careful about).
 
+Where the two proofs stand (November 24, 2026). Since PR #888 `/proof` leads with
+the dollars lost each week to expiries and give-backs (`exit_habits.weekly_leak`,
+12 weeks trended), the two leaks of the October 21 audit. Radar's rule flags
+tested no better than a coin flip in a registered study and were silenced, kept
+only as records ([Silent rule flags](radar.md#silent-rule-flags)); the setup-card
+lab and the four-family strategy search found no evidence either way. New idea
+sources now have to earn their phone pings on paper first: the
+[paper proving ground](copilot-lab.md#paper-proving-ground) trades each on one
+bracket, and a source graduates at 40 closed trades net positive (off until
+`PROVING_GROUND_ENABLED=true`).
+
 Then connect the successful workflows through a natural conversational
 experience, reusing the infrastructure already built. The conversational
 copilot (step 3) waits for both proofs. The owner-only, off-by-default
