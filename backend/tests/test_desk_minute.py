@@ -94,10 +94,13 @@ def test_a_read_past_its_time_answers_504_for_itself_and_the_rest_land(desk, mon
 
     async def slow(app, scope, target):
         if target.startswith("/copilot/desk/session"):
-            await asyncio.sleep(5)
+            await asyncio.sleep(60)  # cancelled at the budget, so this never costs a minute
         return await real(app, scope, target)
     monkeypatch.setattr(desk_minute, "_one", slow)
-    monkeypatch.setattr(desk_minute, "READ_SECONDS", 0.5)
+    # 0.5 s was too tight for the real threads read on a loaded CI runner: it timed
+    # out too and the test saw [504, 504] (Nov 14 and Nov 24). 3 s leaves the quick
+    # read room while the stuck one is still cut off.
+    monkeypatch.setattr(desk_minute, "READ_SECONDS", 3.0)
     got = minute(desk, "/copilot/desk/threads", "/copilot/desk/session").json()["reads"]
     assert [r["status"] for r in got] == [200, 504]
 
