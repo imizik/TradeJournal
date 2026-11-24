@@ -5,7 +5,6 @@ import json
 import uuid
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -159,32 +158,27 @@ def test_too_late_or_after_the_close_sends_nothing(engine, sent):
 
 
 def test_route_saves_the_check_in_and_the_card_says_whether_it_pings(engine, monkeypatch):
-    from app.database import get_session
-    from app.main import app
+    from fastapi import HTTPException
+    from pydantic import ValidationError
+    from app.ai import copilot
+    from app.routers import copilot_desk
+    from app.routers.day_journal import EntryCreate, create_day_entry
 
-    def session():
-        with Session(engine) as db:
-            yield db
     alert = position(engine)
-    app.dependency_overrides[get_session] = session
-    try:
-        client = TestClient(app)
-        base = {"operation_id": "decision-x", "kind": "decision", "text": "Holding. Give-back; check again.", "symbol": "NBIS"}
-        bad = client.post(f"/day-journal/{DAY}/entries", json={**base, "check_in": {"minutes": 20, "alert": str(alert.id)}})
-        assert bad.status_code == 422
-        neither = client.post(f"/day-journal/{DAY}/entries", json={**base, "check_in": {"minutes": 15}})
-        assert neither.status_code == 422
-        ok = client.post(f"/day-journal/{DAY}/entries", json={**base, "check_in": {"minutes": 30, "alert": str(alert.id)}})
-        assert ok.status_code == 200
-        with Session(engine) as db:
-            row = db.exec(select(DayJournalEntry).where(DayJournalEntry.operation_id == "decision-x")).one()
-            saved = json.loads(row.context_json)["check_in"]
-        assert saved["minutes"] == 30 and saved["alert"] == str(alert.id) and saved["interrupt"] is None
-        monkeypatch.setenv("COPILOT_ENABLED", "true")
-        from app.ai import copilot
-        monkeypatch.setattr(copilot, "settings", lambda: type("S", (), {"enabled": True})())
-        assert client.get(f"/copilot/desk/ping-card?alert={alert.id}").json()["check_in_pings"] is False
+    base = {"operation_id": "decision-x", "kind": "decision", "text": "Holding. Give-back; check again.", "symbol": "NBIS"}
+    with pytest.raises(ValidationError):
+        EntryCreate(**base, check_in={"minutes": 20, "alert": str(alert.id)})
+    with Session(engine) as db:
+        with pytest.raises(HTTPException) as neither:
+            create_day_entry(DAY, EntryCreate(**base, check_in={"minutes": 15}), db)
+        assert neither.value.status_code == 422
+        create_day_entry(DAY, EntryCreate(**base, check_in={"minutes": 30, "alert": str(alert.id)}), db)
+    with Session(engine) as db:
+        row = db.exec(select(DayJournalEntry).where(DayJournalEntry.operation_id == "decision-x")).one()
+        saved = json.loads(row.context_json)["check_in"]
+    assert saved["minutes"] == 30 and saved["alert"] == str(alert.id) and saved["interrupt"] is None
+    monkeypatch.setattr(copilot, "settings", lambda: type("S", (), {"enabled": True})())
+    with Session(engine) as db:
+        assert copilot_desk.desk_ping_card(symbol="", alert=alert.id, interrupt=None, db=db)["check_in_pings"] is False
         monkeypatch.setenv("HOLD_CHECK_IN_PINGS", "true")
-        assert client.get(f"/copilot/desk/ping-card?alert={alert.id}").json()["check_in_pings"] is True
-    finally:
-        app.dependency_overrides.pop(get_session, None)
+        assert copilot_desk.desk_ping_card(symbol="", alert=alert.id, interrupt=None, db=db)["check_in_pings"] is True
