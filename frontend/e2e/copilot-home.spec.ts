@@ -137,10 +137,10 @@ test("on a wide screen the app's navigation folds into the desk bar's Menu, and 
   const menu = page.getByRole("button", { name: "Open menu" }).first();
   await menu.click();
   const dialog = page.getByRole("dialog", { name: "Menu" });
-  // The desk is home: Desk and Charts on top; the Dashboard waits under Journal.
-  for (const name of ["Desk", "Charts"]) await expect(dialog.getByRole("link", { name, exact: true })).toBeVisible();
+  // The desk is home: Desk and Proof lead, then Charts and Trades; the Dashboard waits under Journal.
+  for (const name of ["Desk", "Proof", "Charts", "Trades"]) await expect(dialog.getByRole("link", { name, exact: true })).toBeVisible();
   await expect(dialog.getByRole("link", { name: "Dashboard", exact: true })).toHaveCount(0);
-  for (const name of ["Journal", "Market", "Practice", "Research"]) await expect(dialog.getByRole("button", { name, exact: true })).toBeVisible();
+  for (const name of ["Journal", "More pages"]) await expect(dialog.getByRole("button", { name, exact: true })).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("desk-menu-1440.png") });
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);

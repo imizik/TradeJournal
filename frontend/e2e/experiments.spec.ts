@@ -20,8 +20,8 @@ for (const [size, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844
     if (size === "phone") await page.getByRole("button", { name: /^Open menu/ }).click();
     const navigation = size === "phone"
       ? page.getByRole("dialog", { name: "Menu" })
-      : page.getByRole("navigation").filter({ has: page.getByRole("button", { name: "Market", exact: true }) });
-    await navigation.getByRole("button", { name: "Market", exact: true }).click();
+      : page.getByRole("navigation").filter({ has: page.getByRole("button", { name: "More pages", exact: true }) });
+    await navigation.getByRole("button", { name: "More pages", exact: true }).click();
     await navigation.getByRole("link", { name: "Experiments", exact: true }).click();
     await expect(page).toHaveURL(/\/experiments$/);
     if (size === "phone") await expect(navigation).toHaveCount(0);
