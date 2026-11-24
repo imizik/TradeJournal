@@ -24,6 +24,7 @@ import { useDeskActionHost } from "@/components/copilot/DeskActionCard";
 import type { AnyClosingTicket } from "@/lib/closingTicket";
 import CopilotPanel, { rememberedThread, type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import DecisionBar from "@/components/copilot/DecisionBar";
+import PingCard from "@/components/copilot/PingCard";
 import FillLinkBar, { FillsToLink, useFillLinks } from "@/components/copilot/FillLinkBar";
 import RadarDecision from "@/components/copilot/RadarDecision";
 import { ThreadAlertAnswers, ThreadHitRating } from "@/components/copilot/ProofAnswers";
@@ -49,7 +50,7 @@ import ThisWeek from "@/components/copilot/ThisWeek";
 import { ScalpShortlistNudge } from "@/components/ScalpShortlistPanel";
 import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
-import { WHAT_MATTERS_PROMPT, copilotLabHref, mainChatLabel, type FeedLink, type InvestigationSummary } from "@/lib/copilot";
+import { WHAT_MATTERS_PROMPT, copilotLabHref, mainChatLabel, type CardLink, type FeedLink, type InvestigationSummary } from "@/lib/copilot";
 import { useKept } from "@/components/copilot/DeskMemory";
 import { afterClose, answerSymbol, deskLinkIn, deskNeeds, liveOn, refreshRobinhood, type DeskLive, deskSymbolThread, nyDay, readOpened, saveFollow, saveHorizon, saveOpened, threadInUrl, toReview, type DeskCommand, type DeskPlan, type DeskThreads, type DeskHorizon, type DeskHooks, type DeskNeed, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
@@ -179,10 +180,12 @@ function typing(target: EventTarget | null) {
  * desk's own tab bar (Positions, Chart, Chain, Orders, Ask) or the Feed chip, and the copilot as its sheet. Every place has a key (C O T L G, F, B, /) and a ⌘K
  * command.
  */
-export default function CopilotLab({ link: linkProp = null, close = false, daily: dailyProp = false, feed: feedLink = null }: {
+export default function CopilotLab({ link: linkProp = null, close = false, daily: dailyProp = false, feed: feedLink = null, card: cardLink = null }: {
   link?: PanelLink | null; close?: boolean; daily?: boolean;
   /** A Radar or scanner ping's card (?feed=): the desk opens with the Feed forward on it. */
   feed?: FeedLink | null;
+  /** A position ping's ?card=: the desk opens on its ticker with the ping card (``PingCard``) first, the copilot's sheet closed. */
+  card?: CardLink | null;
 }) {
   const on = useCopilotOn();
   const router = useRouter();
@@ -192,7 +195,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const navFolded = useFoldedNav();
   const session = useDeskSession(on);
   // Below 1180 px the copilot is a sheet: a deep link or a saved thread opens on it, Now on the cockpit.
-  const [sheet, setSheet] = useState(!daily && !feedLink);
+  // A position ping's card comes first: the conversation waits behind Ask.
+  const [sheet, setSheet] = useState(!daily && !feedLink && !cardLink);
+  const [card, setCard] = useState<CardLink | null>(cardLink);
   const [command, setCommand] = useState<DeskCommand | null>(null);
   const [thread, setThread] = useState<DeskThreadRef | null>(null);
   // Now: today's Main chat (or the desk's bare address while it opens). An earlier day's Main chat is that day's
@@ -288,7 +293,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   useEffect(() => { feedKept.current = feedShown; }, [feedShown]);
   // A phone shows one view at a time (its tab bar at the bottom, the Feed chip in its top row). It opens on Positions; a link that names a ticker (a ping's) opens on that ticker's view, under the copilot's sheet.
   // A ping's ?feed= opens on the Feed (its view on a phone; the drawer or the side's Feed tab wider).
-  const [phoneView, setPhoneView] = useState<DeskView>(feedLink ? "feed" : linkProp?.symbol ? "ticker" : "book");
+  const [phoneView, setPhoneView] = useState<DeskView>(feedLink ? "feed" : linkProp?.symbol || cardLink ? "ticker" : "book");
   // Once, on the link's load: a phone's Feed is its view, not the drawer; wider, the Feed is the drawer or the side's tab
   // and the phone's view goes back to what a link without ?feed= opens on (so "the Feed is open" follows feedShown alone).
   useEffect(() => { if (!feedLink) return; if (narrow()) setFeedShown(false); else setPhoneView(linkProp?.symbol ? "ticker" : "book"); }, []); // eslint-disable-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
@@ -1017,6 +1022,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const pickChain = useCallback((symbol: string) => { setPicked(symbol); setPickedKey(null); setGrid(false); setDockPick("chain"); }, []);
   const askWatched = useCallback((symbol: string) => { setPicked(symbol); setPickedKey(null); if (symbol !== talking) openWatched(symbol); showCopilot(); }, [openWatched, talking, showCopilot]);
   const planWatched = useCallback((symbol: string) => go(copilotLabHref(symbol, planContext(), { kind: "copilot", ref: null })), [go]);
+  // The ping card read its ticker: the centre shows it (a plan conversation's link names no symbol of its own).
+  const cardSymbol = useCallback((symbol: string) => { setPicked(symbol); setPickedKey(null); }, []);
   // Ask the copilot (the sheet's button): about the picked position (or watched name) when the copilot is on another ticker.
   const askCopilot = () => {
     const row = picked && picked !== talking ? followed.find(r => r.symbol === picked) : undefined;
@@ -1281,6 +1288,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 Ticket, Notes, Check a call). The Grid of many tickers takes the whole centre until Back to chart. The Feed
                 is not here: it sits beside the copilot, so the chart stays while he reads it. A phone's Chain view puts
                 the tickers it can open above the Chain, as chips. */}
+            {/* A position ping lands here: what fired and Close / Trim / Set stop, over the ticker's chart. */}
+            {card && <PingCard card={card} rows={rows} ordersLive={liveOn(booked.live)} onSymbol={cardSymbol} onAsk={fill} onPlan={planWatched} onDismiss={() => setCard(null)} />}
             {phone && <div className={styles.chainPick}><ChainPicker held={gridHeld} watched={watched.filter(s => !gridHidden.has(s))} selected={centreSymbol} onPick={pickChain} /></div>}
             {grid ? (
               <div data-testid="desk-grid-view" className={styles.gridView}>

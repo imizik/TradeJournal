@@ -118,7 +118,8 @@ def _outcome(db: Session, alert: PositionAlert, trade: Trade | None) -> dict:
             "vs_alert_usd": round(actual - at_alert, 2), "ended_at": _epoch_ny(ended) if ended else None}
 
 
-def scorecard(db: Session, now: float, days: int = WINDOW_DAYS) -> dict:
+def _rows(db: Session, now: float, days: int) -> list[dict]:
+    """Every scored alert of the window, oldest first (``scorecard``'s rows before they are cut)."""
     since = datetime.fromtimestamp(now, UTC).replace(tzinfo=None) - timedelta(days=days)
     alerts = list(db.exec(select(PositionAlert).where(PositionAlert.detected_at >= since, PositionAlert.delivery.in_(SENT),
                                                       PositionAlert.kind.not_in(NOT_SCORED))
@@ -149,6 +150,11 @@ def scorecard(db: Session, now: float, days: int = WINDOW_DAYS) -> dict:
             "decided_at": _epoch_utc(decided.created_at) if decided else None,
             "outcome": _outcome(db, alert, _trade(db, alert, found)),
         })
+    return rows
+
+
+def scorecard(db: Session, now: float, days: int = WINDOW_DAYS) -> dict:
+    rows = _rows(db, now, days)
     summary = {}
     for choice in ("holding", "exiting", None):
         mine = [r for r in rows if r["decision"] == choice]
@@ -162,6 +168,17 @@ def scorecard(db: Session, now: float, days: int = WINDOW_DAYS) -> dict:
         }
     rows.reverse()
     return {"window_days": days, "alerts": len(rows), "summary": summary, "rows": rows[:MAX_ROWS], "truncated": len(rows) > MAX_ROWS}
+
+
+def habit(db: Session, now: float, kind: str, days: int = WINDOW_DAYS) -> dict:
+    """What not acting on ``kind`` alerts did over the window, for the ping card's line: the alerts of that kind with no
+    Exiting logged after them (held, or no decision), and for the closed ones what they fetched against selling at the
+    alert (``vs_alert_usd``: negative means selling at the ping would have made that much more)."""
+    held = [r for r in _rows(db, now, days) if r["kind"] == kind and r["decision"] != "exiting"]
+    closed = [r["outcome"]["vs_alert_usd"] for r in held if r["outcome"]["state"] == "closed"]
+    return {"kind": kind, "kind_label": KIND.get(kind, "Position alert"), "window_days": days, "held": len(held),
+            "closed": len(closed), "better": sum(1 for v in closed if v > 0), "worse": sum(1 for v in closed if v < 0),
+            "vs_alert_usd": round(sum(closed), 2)}
 
 
 def week_cost(db: Session, start_utc: datetime, end_utc: datetime) -> dict:

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import CopilotLab from "@/components/copilot/CopilotLab";
 import { requireAccess } from "@/lib/accessServer";
-import { readDeepLink, readFeedLink } from "@/lib/copilot";
+import { readCardLink, readDeepLink, readFeedLink } from "@/lib/copilot";
 
 export const dynamic = "force-dynamic";
 
@@ -15,13 +15,15 @@ export default async function CopilotLabPage({ searchParams }: { searchParams: P
   const fresh = params.view === "new";
   // A Radar or scanner ping's ?feed=: the Feed forward on that card (with ?symbol=, its chart in the centre).
   const feed = readFeedLink(params.feed);
+  // A position ping's ?card=alert:<id> (or a fill interrupt's interrupt:<id>): its card first, with Close / Trim / Set stop.
+  const card = readCardLink(params.card);
   // Anything else opens Now: the day above today's Main chat. The old Briefing address (?view=briefing) and the evening
   // review's ?close=1 land there too.
   const daily = !link && !params.thread && !fresh;
   return (
     // Full screen beside the nav rail on a wide screen (AppMain), the desk fills the height left under the banner.
     <div className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
-      <CopilotLab key={JSON.stringify([link, daily, fresh, feed])} link={link} close={close} daily={daily} feed={feed} />
+      <CopilotLab key={JSON.stringify([link, daily, fresh, feed, card])} link={link} close={close} daily={daily} feed={feed} card={card} />
     </div>
   );
 }

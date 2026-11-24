@@ -25,13 +25,14 @@ function save(day: string, write: DayJournalWrite, keepalive = false) {
 
 /**
  * The open thread's decision bar (docs/copilot-lab.md#the-desk). While the market is open and the thread's position has an
- * Act-now reason (``GET /today``), it says what fired and what the plan says, and logs Holding or Exiting as a ``decision``
+ * Act-now reason (``GET /today``), it says what fired and what the plan says, and logs Close it (primary, saved as
+ * "Exiting. …") or Holding as a ``decision``
  * day-journal entry after a short Undo window. After the close it asks the thread list row's close question (``close``:
  * its horizon decides whether there is one today) and saves the answer as a ``reflection``; a position with no plan is
  * asked "Want a plan for this?" once, its answer saved as a ``plan_ask`` entry, and Plan it opens planning it (``plan``).
  * An exited plan asks its one exit review at any hour: the answer is a ``reflection``, and an answer or Skip saves a
  * ``plan_done`` entry, so the plan is done and never asks again.
- * Advice only: Exiting never places, sizes or sends an order. ``fill`` puts a question in the message box, unsent.
+ * Advice only: Close it never places, sizes or sends an order. ``fill`` puts a question in the message box, unsent.
  * ``onActive`` reports whether the bar is asking for a decision right now, so the desk can quiet the rest of the thread
  * (the plan ladder shrinks to one line while it asks). ``onReviewed`` hears the review answered or skipped, so the
  * desk's close pass can move on.
@@ -242,8 +243,9 @@ export default function DecisionBar({ symbol, close = null, fill, plan, onActive
       {words.others.length > 0 && <p className="mt-0.5 text-xs text-muted-foreground">{words.others.join(" · ")}</p>}
       <p className="mt-1 text-sm text-foreground">{words.plan ?? "No plan on file for this position."}</p>
       <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-        <button type="button" onClick={() => choose("holding")} className={`${BUTTON} bg-primary text-primary-foreground`}>Holding</button>
-        <button type="button" onClick={() => choose("exiting")} className={`${BUTTON} border text-foreground hover:bg-secondary`}>Exiting</button>
+        {/* Close first and loudest: holding past a ping is the habit the pings exist to break. */}
+        <button type="button" onClick={() => choose("exiting")} className={`${BUTTON} bg-primary text-primary-foreground`}>Close it</button>
+        <button type="button" onClick={() => choose("holding")} className={`${BUTTON} border text-foreground hover:bg-secondary`}>Holding</button>
         <button type="button" onClick={() => fill(words.ask)} className="min-h-11 px-2 text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline sm:ml-auto sm:min-h-9">
           Ask why
         </button>

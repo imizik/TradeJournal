@@ -1556,6 +1556,55 @@ def desk_scorecard(db: Session = Depends(get_session)):
     return {**alerts, "radar": hits}
 
 
+# --------------------------------------------------------------------------- the ping card
+
+PING_CARD_HOURS = 16  # "the latest alert" without an id: one from today's session, never yesterday's
+
+
+@router.get("/desk/ping-card")
+def desk_ping_card(symbol: str = Query("", max_length=12), alert: uuid.UUID | None = None, interrupt: uuid.UUID | None = None,
+                   db: Session = Depends(get_session)):
+    """What a position ping's card leads with (docs/copilot-lab.md § Where a ping opens): the ping that fired (an open-trade
+    alert by ``alert`` id, else the symbol's newest one sent in the last ``PING_CARD_HOURS``; or a fill-time pattern
+    interrupt by ``interrupt`` id) and, for an alert, what holding past that kind of alert did over the scorecard's window
+    (``alert_scorecard.habit``). The live figures (P&L, mark, contracts, working orders, value at expiry) are the desk's
+    own book. Read-only, owner-only, refused while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import alert_scorecard, fill_interrupts, position_alerts
+    from app.models import FillInterrupt, PositionAlert
+    now = today._now()
+    symbol = symbol.strip().upper()
+    found = None
+    if alert is not None:
+        found = db.get(PositionAlert, alert)
+    elif symbol and interrupt is None:
+        since = datetime.fromtimestamp(now, UTC).replace(tzinfo=None) - timedelta(hours=PING_CARD_HOURS)
+        found = db.exec(select(PositionAlert).where(PositionAlert.detected_at >= since, col(PositionAlert.contract).startswith(f"{symbol} "),
+                                                    PositionAlert.delivery.in_(alert_scorecard.SENT))
+                        .order_by(PositionAlert.detected_at.desc())).first()
+    body: dict = {"symbol": symbol or None, "alert": None, "interrupt": None, "habit": None, "broker": None}
+    if found is not None:
+        body["symbol"] = (found.contract or "").split(" ")[0] or body["symbol"]
+        body["alert"] = {"id": str(found.id), "kind": found.kind, "kind_label": alert_scorecard.KIND.get(found.kind, "Position alert"),
+                         "at": int(found.detected_at.replace(tzinfo=UTC).timestamp()), "contract": found.contract,
+                         "contracts": found.contracts, "bid": found.bid, "mark": found.mark, "gain": found.gain,
+                         "gain_pct": found.gain_pct, "avg_cost": found.avg_cost,
+                         "quoted_at": int(found.quoted_at.replace(tzinfo=UTC).timestamp()) if found.quoted_at else None}
+        if found.kind not in alert_scorecard.NOT_SCORED:
+            body["habit"] = alert_scorecard.habit(db, now, found.kind)
+        link = position_alerts.robinhood_link(db, found)
+        body["broker"] = {"label": link[0], "url": link[1]} if link else None
+    if interrupt is not None:
+        row = db.get(FillInterrupt, interrupt)
+        if row is not None:
+            body["symbol"] = row.ticker
+            body["interrupt"] = {**fill_interrupts.shape(row), "trade_id": str(row.trade_id)}
+    if body["alert"] is None and body["interrupt"] is None and not body["symbol"]:
+        raise HTTPException(404, "No such ping.")
+    return body
+
+
 # --------------------------------------------------------------------------- the retired Rate yesterday card's read
 
 TO_RATE_ROWS = 30  # the card's list, newest first; ``count`` is every item waiting

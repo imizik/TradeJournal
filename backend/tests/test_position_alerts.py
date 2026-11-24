@@ -353,7 +353,7 @@ def test_a_ping_carries_two_answer_buttons_and_opens_the_desk_while_the_lab_is_o
         db.commit()
     monkeypatch.setenv("COPILOT_ENABLED", "true")
     watcher.deliver()
-    assert sent[1][1] == "/copilot-lab?symbol=SNDK"  # no plan card saved this position: the desk opens on the symbol
+    assert sent[1][1] == f"/copilot-lab?symbol=SNDK&card=alert%3A{alert.id}"  # no plan card saved this position: the desk opens on the symbol
     assert buttons[1] == buttons[0]  # the answers still open the trade page, where Ask copilot is the primary action
 
     with Session(engine) as db:
@@ -373,10 +373,10 @@ def test_the_desk_link_opens_the_plan_conversation_a_plan_card_saved(engine, wor
     newer = SimpleNamespace(received_at=datetime(2026, 10, 21, 13), context_json="{}", client_id="c2")
     monkeypatch.setattr(capture_links, "for_trade", lambda db, trade_id: [newer, older])
     with Session(engine) as db:
-        assert position_alerts.desk_path(db, alert) == f"/copilot-lab?investigation={plan}"
+        assert position_alerts.desk_path(db, alert) == f"/copilot-lab?investigation={plan}&card=alert%3A{alert.id}"
     monkeypatch.setattr(capture_links, "for_trade", lambda db, trade_id: [])
     with Session(engine) as db:
-        assert position_alerts.desk_path(db, alert) == "/copilot-lab?symbol=SNDK"
+        assert position_alerts.desk_path(db, alert) == f"/copilot-lab?symbol=SNDK&card=alert%3A{alert.id}"
 
 
 def test_publish_adds_the_extra_actions_after_open_app(monkeypatch):
