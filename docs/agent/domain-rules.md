@@ -103,7 +103,11 @@ patterns that can create N+1 calls.
 - An open option is written off as expired worthless by the first rebuild at
   or after 16:30 New York on its expiration day (`reconstructor.expiry_cutoff`,
   read from the New York clock, never the server's date). Until that rebuild
-  runs it stays open with no loss.
+  runs it stays open with no loss. The level alert monitor asks for that
+  rebuild itself: every five minutes it queues one `trade_rebuild` job when an
+  open option is past its expiration and no sync job is active
+  (`LevelAlertMonitor.settle_expired`, `sync.queue_expiry_rebuild`), so a
+  Friday expiry is written off before the 16:45 week review.
 
 ### Known: same-timestamp ordering is arbitrary
 

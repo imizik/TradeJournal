@@ -515,3 +515,46 @@ def test_the_sync_pipeline_rebuilds_when_an_option_expired_with_no_new_fill(monk
             db.delete(run)
         db.commit()
     assert "trade_rebuild" not in run_pipeline()  # nothing new and nothing expired: the rebuild is skipped as before
+
+
+def test_the_monitor_queues_one_rebuild_for_an_expired_option_and_not_again_while_it_waits(monkeypatch):
+    """After the close the monitor asks for the rebuild itself, so a Friday expiry is written off before the 16:45
+    week review reads the week, not at the next fill."""
+    import uuid
+    from datetime import date
+    from decimal import Decimal
+    from app.engine import level_alert_monitor
+    from app.models import Account, JobRun, Trade
+    from app.routers import sync
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    SQLModel.metadata.create_all(engine)
+    submitted = []
+    monkeypatch.setattr(sync, "submit_job", submitted.append)
+    cutoff = [date(2026, 11, 13)]  # Friday, still trading
+    monkeypatch.setattr(sync, "expiry_cutoff", lambda now=None: cutoff[0])
+    account = uuid.uuid4()
+    with Session(engine) as db:
+        db.add(Account(id=account, name="Roth", type="roth_ira", last4="0001"))
+        db.add(Trade(account_id=account, ticker="NBIS", instrument_type="option", option_type="call", strike=Decimal("123"),
+                     expiration=date(2026, 11, 13), contracts=Decimal("2"), avg_entry_premium=Decimal("150"),
+                     total_premium_paid=Decimal("300"), opened_at=datetime(2026, 11, 13, 9, 45), status="open"))
+        db.commit()
+    clock = [1_000_000.0]
+    monitor = level_alert_monitor.LevelAlertMonitor(engine, clock=lambda: clock[0])
+
+    def jobs() -> list[str]:
+        with Session(engine) as db:
+            return [r.job_type for r in db.exec(select(JobRun)).all()]
+
+    monitor.settle_expired()
+    assert jobs() == [] and submitted == []  # its last session has not settled
+    cutoff[0] = date(2026, 11, 14)  # 16:30 New York on Friday
+    monitor.settle_expired()
+    assert jobs() == []  # looked a moment ago: not again for five minutes
+    clock[0] += level_alert_monitor.EXPIRY_REBUILD_SECONDS
+    monitor.settle_expired()
+    assert jobs() == ["trade_rebuild"] and len(submitted) == 1
+    clock[0] += level_alert_monitor.EXPIRY_REBUILD_SECONDS
+    monitor.settle_expired()
+    assert jobs() == ["trade_rebuild"]  # the queued rebuild is still waiting: no second one
