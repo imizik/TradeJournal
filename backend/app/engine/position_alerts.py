@@ -647,15 +647,24 @@ TICKER = re.compile(r"[A-Z]{1,5}(\.[A-Z])?")
 
 
 def robinhood_link(db: Session, alert: PositionAlert) -> tuple[str, str] | None:
-    """One tap from the ping to the position in Robinhood: its stock's page (``robinhood.com/stocks/<ticker>``, a link
-    the Robinhood app opens when installed), where the option position is listed. Only for a Robinhood account (its
-    ``broker`` is empty or ``robinhood``) and a plain ticker; an index option (SPXW) has no stock page. Robinhood's own
-    option id would open the contract itself, but the feed's ids never leave the server
-    (docs/robinhood-read-feed.md)."""
-    from app.models import Account
+    """One tap from the ping to the position in Robinhood. The contract itself (``robinhood.com/options/<id>``) when the
+    Robinhood read feed's last healthy read holds it in this account: the owner allowed that one id into this link on
+    Nov 24, 2026 (docs/robinhood-read-feed.md). Otherwise its stock's page (``robinhood.com/stocks/<ticker>``), where
+    the option position is listed. Both open in the Robinhood app when installed. Only for a Robinhood account (its
+    ``broker`` is empty or ``robinhood``); an index option (SPXW) has no stock page, so it gets only the contract link."""
+    from app.engine import robinhood_book
+    from app.models import Account, Trade
     ticker = (alert.contract or "").split(" ")[0]
     account = db.get(Account, alert.account_id)
-    if account is None or (account.broker or "robinhood") != "robinhood" or ticker in INDEX_UNDERLYING or not TICKER.fullmatch(ticker):
+    if account is None or (account.broker or "robinhood") != "robinhood" or not TICKER.fullmatch(ticker):
+        return None
+    trade = db.get(Trade, alert.trade_id)
+    if trade is not None and trade.instrument_type == "option":
+        url = robinhood_book.option_link(account.last4, trade.ticker, trade.option_type, trade.strike,
+                                         trade.expiration.isoformat() if trade.expiration else None)
+        if url:
+            return "Robinhood", url
+    if ticker in INDEX_UNDERLYING:
         return None
     return "Robinhood", f"https://robinhood.com/stocks/{ticker}"
 

@@ -65,7 +65,10 @@ The app's own code is the only guard:
   The one exception is separate and off by default: with `ROBINHOOD_FILLS_ENABLED=true`, a recurring buy (which
   Robinhood never emails) is written as a fill from the order history; everything else from the order history stays a
   provisional record paired with the emails ([fills from Robinhood's order history](robinhood-order-fills.md)).
-  Account numbers leave the server masked to the last four (to the desk; never to the copilot). Robinhood's `guide`
+  Account numbers leave the server masked to the last four (to the desk; never to the copilot). Robinhood's ids stay
+  on the server, except one the owner allowed on November 24, 2026: a held option's instrument id goes into a position
+  ping's Robinhood button (`https://robinhood.com/options/<id>`, `robinhood_book.option_link`), read from the cached
+  snapshot, never sent to a model. Robinhood's `guide`
   text (its instructions to an AI) and every other string from Robinhood are treated as data: dropped or shown as data,
   never sent to a model. Only numbers, tickers and fixed words reach the copilot (below).
 

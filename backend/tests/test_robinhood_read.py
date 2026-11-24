@@ -123,8 +123,11 @@ def test_only_the_client_names_the_endpoint_or_builds_a_tools_call():
     assert "tools/call" not in signin.read_text() and "_transport" not in signin.read_text()
     # The feed and the order-history fills are the client's callers; the desk's thread read and the copilot's book view
     # the feed. The copilot's book reads the cached snapshot and the feed's match, never a refresh and never the client.
-    assert sorted(users) == ["backend/app/ai/copilot_book.py", "backend/app/engine/desk_watch.py", "backend/app/engine/robinhood_book.py",
-                             "backend/app/engine/robinhood_fills.py", "backend/app/routers/copilot_desk.py"]
+    # A position ping's Robinhood button reads the cached snapshot's option id (``robinhood_book.option_link``), no I/O.
+    assert sorted(users) == ["backend/app/ai/copilot_book.py", "backend/app/engine/desk_watch.py", "backend/app/engine/position_alerts.py",
+                             "backend/app/engine/robinhood_book.py", "backend/app/engine/robinhood_fills.py", "backend/app/routers/copilot_desk.py"]
+    alerts = (REPO / "backend" / "app" / "engine" / "position_alerts.py").read_text()
+    assert "robinhood_book.option_link(" in alerts and "robinhood_read" not in alerts and ".refresh(" not in alerts
     watch = (REPO / "backend" / "app" / "engine" / "desk_watch.py").read_text()
     # The desk's watchlist import calls only the two watchlist reads, through the feed's sign-in, and never a write.
     assert set(re.findall(r"\.(get_\w+)\(", watch)) == {"get_watchlists", "get_watchlist_items"}

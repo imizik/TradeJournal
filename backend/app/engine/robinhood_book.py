@@ -10,7 +10,8 @@ feed.
 
 Display only. Nothing here writes to the journal (fills, trades, P&L, FIFO). The copilot sees only numbers, tickers and
 fixed words from the cached snapshot, through ``copilot_book.live_book``, and never triggers a read. An account appears as its label and its number masked to the last four (``••8267``); the full number, the
-sign-in, Robinhood's ids and its ``guide`` text never leave the server. A field missing or of an unexpected shape reads
+sign-in, Robinhood's ids and its ``guide`` text never leave the server, with one exception the owner allowed
+(Nov 24, 2026): a held option's instrument id in a position ping's Robinhood link (``option_link``). A field missing or of an unexpected shape reads
 as unavailable (``None``), never as zero.
 """
 
@@ -35,6 +36,7 @@ TYPE_LABELS = {"ira_roth": "Roth IRA", "ira_traditional": "Traditional IRA", "in
 MAX_CALLS = 40
 MAX_PAGES = 5
 CHUNK = 20  # quotes above 20 drop their closes
+OPTION_ID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")  # Robinhood option instrument id
 MARKET_TTL, QUIET_TTL = 60, 15 * 60
 FORCE_GAP_SECONDS = 15
 STALE_REFRESHES = 3
@@ -309,6 +311,16 @@ def read_snapshot(reader: rh.Reader, picks: tuple[str, ...], now: float) -> dict
 
     built = [(a, _option_row(a, p, instruments.get(p.get("option_id")), quotes.get(p.get("option_id")))) for a, p in held_options]
     built += [(a, _stock_row(a, p, stock_quotes.get((_text(p.get("symbol"), 12) or "").upper()))) for a, p in held_stocks]
+    # Robinhood's option id by the account and contract, for the ping's Robinhood button only (``option_link``). Kept
+    # off the rows, so no desk view, copilot context or other route ever carries it.
+    option_ids = {}
+    for a, p in held_options:
+        inst = instruments.get(p.get("option_id"))
+        key = contract_key(_text(p.get("chain_symbol"), 12) or _text((inst or {}).get("chain_symbol"), 12), "option",
+                           (inst or {}).get("type"), (inst or {}).get("strike_price"),
+                           _text(p.get("expiration_date"), 10) or _text((inst or {}).get("expiration_date"), 10))
+        if key is not None and isinstance(p.get("option_id"), str) and OPTION_ID.fullmatch(p["option_id"]):
+            option_ids[(a["last4"], key)] = p["option_id"].lower()
     positions, owned = [], {}
     for a, row in built:
         if row is None:
@@ -326,6 +338,7 @@ def read_snapshot(reader: rh.Reader, picks: tuple[str, ...], now: float) -> dict
                       "complete": a["complete"]} for a in shown],
         "complete": all(a["complete"] for a in accounts),
         "positions": positions,
+        "option_ids": option_ids,
         "calls": reader.calls,
     }
 
@@ -457,6 +470,15 @@ def contract_key(symbol: str | None, instrument: str | None, side: str | None, s
     if side not in ("call", "put") or value is None or not expiry:
         return None
     return (symbol.upper(), side, round(value, 3), str(expiry)[:10])
+
+
+def option_link(last4: str | None, symbol: str, side: str | None, strike, expiry: str | None) -> str | None:
+    """``robinhood.com/options/<id>``, which opens the contract itself in Robinhood, when the feed's last healthy read
+    holds this contract in this account; else None. No I/O: the snapshot the desk already read."""
+    _summary, snap = feed.snapshot(kick=False)
+    key = contract_key(symbol, "option", side, strike, expiry)
+    found = (snap or {}).get("option_ids", {}).get((last4, key)) if key and last4 else None
+    return f"https://robinhood.com/options/{found}" if found else None
 
 
 def label(live: dict) -> str:
