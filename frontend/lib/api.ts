@@ -302,6 +302,8 @@ export type DayJournalWrite = {
   text: string;
   symbol?: string | null;
   not_traded?: boolean;
+  /** Keep holding on the ping card: ping again after this many minutes if the pinged position is still open. */
+  check_in?: { minutes: 15 | 30; alert?: string | null; interrupt?: string | null } | null;
 };
 
 export type RuleCheck = { rule: string; set_on: string; result: "kept" | "broken" | "partly" | "not_tested"; evidence: string };

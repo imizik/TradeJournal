@@ -148,6 +148,17 @@ test("Keep holding is not one tap: it asks for a check-in time or a price stop f
   await pick.getByRole("button", { name: "+15m" }).click();
   await expect(card(page).getByTestId("ping-card-done")).toHaveText("Holding. Check again at 11:15 AM.");
   await expect.poll(() => posted(writes)).toEqual(["Holding. Give-back ping at 10:57 AM; check again at 11:15 AM."]);
+  // The hold carries its check-in, so the server can ping again then (when its switch is on).
+  expect(writes.find(w => w.url().endsWith("/entries"))!.postDataJSON().check_in).toEqual({ minutes: 15, alert: ALERT_ID });
+});
+
+test("with check-in pings on, Keep holding says it will ping at that time", async ({ page }) => {
+  const writes = await open(page, { card: { ...CARD, check_in_pings: true } });
+  await card(page).getByTestId("ping-card-hold").click();
+  await card(page).getByTestId("ping-card-hold-pick").getByRole("button", { name: "+30m" }).click();
+  await expect(card(page).getByTestId("ping-card-done")).toHaveText("Holding. I'll ping you at 11:30 AM if it's still open.");
+  await expect.poll(() => writes.filter(w => w.url().endsWith("/entries")).map(w => w.postDataJSON().check_in))
+    .toEqual([{ minutes: 30, alert: ALERT_ID }]);
 });
 
 test("a stale bid prices at the mid and says so; the card puts away to the chart", async ({ page }) => {

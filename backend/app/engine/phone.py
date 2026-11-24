@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 # ``disable_notification``, ntfy's low priority. A fill-time pattern interrupt is loud only for its size and late
 # short-dated rules (the sender says, with ``loud``).
 LOUD = frozenset({"giveback", "hold_hour", "expiry_first", "expiry_final", "expiry_eve", "wrong_way", "no_exit",
-                  "day_loss", "day_green", "plan_size", "plan_exit", "plan_late", "invalidation", "target", "time_stop", "level_alert"})
+                  "day_loss", "day_green", "plan_size", "plan_exit", "plan_late", "hold_check_in", "invalidation", "target", "time_stop", "level_alert"})
 SILENT = 2  # Telegram sends priority 2 or lower without a sound; ntfy's 2 is "low": no sound or vibration
 
 

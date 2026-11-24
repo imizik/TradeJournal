@@ -1,15 +1,26 @@
 from datetime import date, timezone
+import time
 from typing import Literal
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session
 
 from app.database import get_session
-from app.engine import day_journal
+from app.engine import day_journal, hold_check_ins
 from app.engine.chart_journal import contract_label
 
 router = APIRouter()
+
+
+class CheckIn(BaseModel):
+    """The ping card's Keep holding: ping again after ``minutes`` if the pinged position is still open
+    (``engine/hold_check_ins.py``). One ping: an open-trade alert or a fill-time pattern interrupt."""
+    model_config = ConfigDict(extra="forbid")
+    minutes: Literal[15, 30]
+    alert: uuid.UUID | None = None
+    interrupt: uuid.UUID | None = None
 
 
 class EntryCreate(BaseModel):
@@ -19,6 +30,7 @@ class EntryCreate(BaseModel):
     text: str = Field(min_length=1, max_length=day_journal.MAX_TEXT)
     symbol: str | None = Field(default=None, max_length=16)
     not_traded: bool = False
+    check_in: CheckIn | None = None
 
 
 class EntryResponse(BaseModel):
@@ -60,9 +72,15 @@ def get_day_journal(day: date, session: Session = Depends(get_session)):
 
 @router.post("/{day}/entries", response_model=EntryResponse)
 def create_day_entry(day: date, body: EntryCreate, session: Session = Depends(get_session)):
+    context = None
+    if body.check_in is not None:
+        found = body.check_in
+        if body.kind != "decision" or not body.symbol or (found.alert is None) == (found.interrupt is None):
+            raise HTTPException(status_code=422, detail="A check-in rides on a decision with a symbol and names one alert or interrupt")
+        context = hold_check_ins.context(found.minutes, found.alert, found.interrupt, time.time())
     try:
         row = day_journal.append(session, day=day, operation_id=body.operation_id, kind=body.kind,
-                                 text=body.text, symbol=body.symbol, not_traded=body.not_traded)
+                                 text=body.text, symbol=body.symbol, not_traded=body.not_traded, context=context)
     except day_journal.EntryConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except day_journal.EntryError as exc:

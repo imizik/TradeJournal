@@ -1651,7 +1651,7 @@ def desk_ping_card(symbol: str = Query("", max_length=12), alert: uuid.UUID | No
     own book. Read-only, owner-only, refused while the lab is off."""
     if not copilot.settings().enabled:
         raise HTTPException(503, "Copilot Lab is off.")
-    from app.engine import alert_scorecard, fill_interrupts, position_alerts
+    from app.engine import alert_scorecard, fill_interrupts, hold_check_ins, position_alerts
     from app.models import FillInterrupt, PositionAlert
     now = today._now()
     symbol = symbol.strip().upper()
@@ -1665,7 +1665,9 @@ def desk_ping_card(symbol: str = Query("", max_length=12), alert: uuid.UUID | No
                         .order_by(PositionAlert.detected_at.desc())).first()
     # ``position``: the trade now holding the pinged position (trades are rebuilt with new ids) and whether it is still
     # open, so the card acts on that position and no other contract or account in the ticker.
-    body: dict = {"symbol": symbol or None, "alert": None, "interrupt": None, "habit": None, "broker": None, "position": None}
+    body: dict = {"symbol": symbol or None, "alert": None, "interrupt": None, "habit": None, "broker": None, "position": None,
+                  # Whether Keep holding's +15m / +30m pings again then (``hold_check_ins``, HOLD_CHECK_IN_PINGS)
+                  "check_in_pings": hold_check_ins.enabled()}
 
     def held(trade) -> dict | None:
         return {"trade_id": str(trade.id), "open": trade.status == "open"} if trade is not None else {"trade_id": None, "open": False}
