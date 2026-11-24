@@ -4663,7 +4663,11 @@ flagged trades that made money):
   position, every entry fill so far, to 2× that same median or more. Positions
   that became large this way lost the most in the audit. Its record is the
   past short-dated positions built the same way. The only interrupt that makes
-  a sound.
+  a sound. Its message goes to the notification policy as its own kind
+  (`interrupt_size`, ranked with the one-hour alert), so a silent pattern line
+  sent for the position minutes earlier does not hold it and the silent lines'
+  daily budget does not apply to it. A once-per-position line the policy held,
+  or that expired, was never said: it is judged again at the next fill.
 - **Back in after a loss:** a position's first `buy_to_open` of an option within 5 minutes of the
   account's latest close that New York day, when that close was a loss (a
   close and an entry in the same minute count). Its record is the past entries made that way.

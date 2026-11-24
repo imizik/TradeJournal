@@ -46,7 +46,7 @@ def traffic():
     for kind in ("link", "no_plan", "companion_adopt", "week_review", "day_replay"):
         add("09:40", kind, f"alias-{kind}")
     # Distinct positions: quiet-window suppression cannot explain starvation.
-    for i, kind in enumerate(("hold_hour", "wrong_way", "no_exit", "hold_check_in", "time_stop", "expiry_first", "expiry_eve", "same_day_1pm", "entry")):
+    for i, kind in enumerate(("hold_hour", "wrong_way", "no_exit", "hold_check_in", "time_stop", "expiry_first", "expiry_eve", "same_day_1pm", "interrupt_size", "entry")):
         add(f"09:{41 + i:02d}", kind, f"position-{kind}")
     for i in range(5):
         add(f"{10 + i:02d}:05", "radar_event", f"radar-single-{i}")
@@ -121,7 +121,7 @@ def test_gap_day_radar_gets_its_budget_without_waiting(replay, kind):
 def test_gap_day_position_alerts_are_not_starved_by_other_kinds(replay):
     rows, _, _ = replay
     positions = [row for row in rows if row.source_id.startswith(("position-", "late-"))]
-    assert len(positions) == 12
+    assert len(positions) == 13
     assert all(policy.budget(row.kind) is None for row in positions)
     assert [(row.kind, row.reason) for row in positions if row.decision != "sent"] == []
     assert all(row.delivered_at == row.decided_at for row in positions)

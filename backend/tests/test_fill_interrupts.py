@@ -685,3 +685,61 @@ def test_two_fills_judged_in_one_pass_say_a_once_per_position_line_once(engine, 
     tick(clock, interrupts, "10:07")
     assert [r.kinds for r in rows(engine)] == ["put_entry", ""]
     assert len(sent) == 1
+
+
+def test_a_silent_line_minutes_earlier_does_not_hold_the_size_message_and_a_held_line_is_said_at_the_next_add(engine, world, sent, monkeypatch):
+    """The day the rule was built for: a first entry sends a silent line, an add below cost six minutes later takes the
+    position past twice the median, and more adds follow."""
+    monkeypatch.setenv("ALERT_POLICY_ENABLED", "true")
+    clock, interrupts = world
+    exp = date(2026, 10, 30)
+    for i in range(20):  # twenty closed NBIS calls, $100 each, a losing record: the ticker line fires on the first entry
+        fill(engine, ny("10:00", date(2026, 9, 1 + i)), option_type="call", strike=150 + i, price=100, expiration=exp, rebuild=False)
+        fill(engine, ny("10:30", date(2026, 9, 1 + i)), side="sell_to_close", option_type="call", strike=150 + i, price=80, expiration=exp,
+             rebuild=False)
+    fill(engine, ny("11:51"), option_type="call", qty=1, price=150)  # the first entry: the silent ticker line
+    tick(clock, interrupts, "11:52")
+    fill(engine, ny("11:57"), option_type="call", qty=1, price=120)  # six minutes later, below cost: $270 in against a $100 median
+    tick(clock, interrupts, "11:58")
+    found = rows(engine)
+    assert [(r.kinds, r.delivery) for r in found] == [("ticker_record", "sent"), ("add_to_loser,size_by_adding", "sent")]
+    assert sent[1][2]["priority"] == 4 and "Size by adding: $270 in this position is 2.7× your median ($100)" in sent[1][1]
+    with Session(engine) as db:
+        from app.models import PhonePing
+        assert [(p.kind, p.decision) for p in db.exec(select(PhonePing).order_by(PhonePing.decided_at)).all()] == [
+            ("interrupt", "sent"), ("interrupt_size", "sent")]
+
+
+def test_a_once_per_position_line_the_policy_held_is_judged_again_at_the_next_fill(engine, world, sent):
+    clock, interrupts = world
+    fill(engine, ny("10:05"), qty=1, price=310)
+    tick(clock, interrupts, "10:06")
+    with Session(engine) as db:  # stand in for a hold: the phone never got this line
+        row = db.exec(select(FillInterrupt)).one()
+        assert (row.kinds, row.delivery) == ("put_entry", "sent")
+        row.delivery = "held"
+        db.add(row)
+        db.commit()
+    fill(engine, ny("10:20"), qty=1, price=320)  # above cost: only the line that was never said
+    tick(clock, interrupts, "10:21")
+    fill(engine, ny("10:40"), qty=1, price=330)  # said now: not repeated
+    tick(clock, interrupts, "10:41")
+    assert [(r.kinds, r.delivery) for r in rows(engine)] == [("put_entry", "held"), ("put_entry", "sent"), ("", "none")]
+
+
+def test_a_line_the_policy_merged_into_another_ping_was_said_there(engine, world, sent):
+    clock, interrupts = world
+    fill(engine, ny("10:05"), qty=1, price=310)
+    tick(clock, interrupts, "10:06")
+    with Session(engine) as db:  # stand in for a merge: held here, its words appended to a ping still being sent
+        from app.models import PhonePing
+        row = db.exec(select(FillInterrupt)).one()
+        row.delivery = "held"
+        db.add(row)
+        ping = db.exec(select(PhonePing).where(PhonePing.source_id == str(row.id))).one()
+        ping.decision = "merged"
+        db.add(ping)
+        db.commit()
+    fill(engine, ny("10:20"), qty=1, price=320)
+    tick(clock, interrupts, "10:21")
+    assert [(r.kinds, r.delivery) for r in rows(engine)] == [("put_entry", "held"), ("", "none")]
