@@ -660,12 +660,20 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   (`copilot_desk._book_state`): **Past stop** (the plan's invalidation was hit), **Near stop** (within Act now's 1% of
   it), **Giving back** (still in profit now, and the give-back alert fired with no new high since), **On plan** (an
   invalidation or time stop stands) or no plan. The row shows (`Cockpit.tsx` `bookTag`) Past stop, Near stop or
-  Giving back, else **Expires today** for an option on its last day (in place of its days left), else On plan; a
-  position with no plan shows no tag (its missing bar and the day report's "Open without a plan" line say so). A
+  Giving back, else On plan; a
+  position with no plan shows no tag (its missing bar and the day report's "Open without a plan" line say so).
+  **Risk badges** come before the tag: **0DTE · 1h 05m left** for an option on its last day (amber, red in the last
+  hour; to 16:00 New York, early closes not known), **No exit order** for a long option with no sell order working
+  (only while every working order was just read whole: the live view's `orders_read`, from the order-history pass the
+  no-exit alert uses; otherwise nothing is said), and **N× usual size** when a long option's premium paid is at least
+  2× his median long option position over 12 months (`book.size_x`, `fill_interrupts.usual_size`: the large-size
+  interrupt's usual, from 20 positions). A
   position under its entry is never Giving back, however recently the alert fired. While the Robinhood feed is live,
   "in profit" is Robinhood's P&L. The row's facts wrap onto a second line rather than run under the P&L, at any
   width. Its pen (a note) and eye (Not following) show on the row's hover or keyboard focus with a mouse; a touch
-  screen always shows them. These come from each position row's `book` (`copilot_desk._book`). Selecting a row shows it in the centre at once and, where the copilot sits beside it, opens
+  screen always shows them. A phone row keeps only a full-size pen: the eye beside it hid positions by mistake, so on
+  a phone a ticker is hidden from its thread's header. A phone's top row is the Feed chip, the data health dot, the Day, Jump to and one
+  **More** holding Threads. These come from each position row's `book` (`copilot_desk._book`). Selecting a row shows it in the centre at once and, where the copilot sits beside it, opens
   its conversation (its own, else the ticker's newest open one, else its link; a position whose link leaves the desk
   opens the symbol's desk view). The desk never reloads for it: a symbol's desk view opens in place (see *The address*
   below), so the book, the top bar, the strip and the centre keep their data. Each row's eye sets its ticker to **Not following**; those sit behind "N not followed

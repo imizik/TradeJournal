@@ -535,7 +535,12 @@ for (const width of [1440, 375]) {
     await expect(book.getByRole("heading", { level: 2 })).toHaveText("Your book · 2");
     expect(entries.map(e => [e.kind, e.symbol, e.text])).toEqual([["follow", "SLS", "Following"]]);
 
-    // Hide it again from its row: one tap, saved for every device.
+    // Hide it again from its row: one tap, saved for every device. A phone row has no eye (it sat beside Note and hid
+    // positions by mistake); a phone hides a ticker from its thread's header.
+    if (width === 375) {
+      await expect(book.getByRole("button", { name: "Hide SLS: not following" })).toBeHidden();
+      return;
+    }
     await book.getByRole("button", { name: "Hide SLS: not following" }).click();
     await expect(book.getByRole("heading", { level: 2 })).toHaveText("Your book · 1");
     expect(entries.map(e => e.text)).toEqual(["Following", "Not following"]);

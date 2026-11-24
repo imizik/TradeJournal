@@ -501,6 +501,22 @@ def history_signature(db: Session, today: date) -> tuple:
     return today, count, round(float(total or 0), 2)
 
 
+_USUAL: tuple | None = None
+
+
+def usual_size(db: Session, today: date) -> float | None:
+    """The median premium paid for a long option position over ``LARGE_LOOKBACK_DAYS`` (the large-size rule's usual,
+    from the same cached record rows), or None while fewer than ``LARGE_MIN_ENTRIES`` are in the window. Cached per
+    ``history_signature``, so the desk's read pays for it once a day or when a trade closes."""
+    global _USUAL
+    signature = history_signature(db, today)
+    if _USUAL is None or _USUAL[0] != signature:
+        since = today - timedelta(days=LARGE_LOOKBACK_DAYS)
+        window = [r["premium"] for r in load_history(db) if r["long_option"] and since <= r["entered"] <= today]
+        _USUAL = (signature, median(window) if len(window) >= LARGE_MIN_ENTRIES else None)
+    return _USUAL[1]
+
+
 def load_history(db: Session) -> list[dict]:
     """``history_rows`` over every closed trade outside Webull."""
     trades = db.exec(select(Trade).join(Account, Account.id == Trade.account_id)

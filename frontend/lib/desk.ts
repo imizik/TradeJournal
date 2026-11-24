@@ -121,6 +121,8 @@ export type DeskBook = {
   /** The plan's two exits on the underlying (its invalidation and saved target; null without one), for the closing
    * ticket (``lib/closingTicket.ts``). Absent from an older backend. */
   plan_levels?: { stop: number | null; target: number | null };
+  /** A long option's premium paid over his median long option position, when at least 2× (``_size_x`` in copilot_desk.py). */
+  size_x?: number;
 };
 
 /** One Robinhood order on the desk (docs/robinhood-order-fills.md § On the desk): still working (``working``, with what

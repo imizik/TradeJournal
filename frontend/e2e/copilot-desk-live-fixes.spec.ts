@@ -247,7 +247,8 @@ test("each tag the book can show reads in the desk's words", async ({ page }) =>
   await expect(tag("GRN")).toHaveText("Giving back");
   await expect(tag("RED")).toHaveCount(0); // no plan: no tag, the days left still show
   await expect(page.getByTestId("desk-book").getByRole("button", { name: /^RED / })).toContainText("37d left");
-  await expect(tag("TOD")).toHaveText("Expires today");
+  await expect(tag("TOD")).toHaveCount(0); // its last day is the 0DTE badge, with the time left, not a tag
+  await expect(page.getByTestId("desk-book").getByRole("button", { name: /^TOD / }).getByTestId("book-0dte")).toContainText(/^0DTE · /);
   await expect(tag("PLN")).toHaveText("On plan");
   await expect(tag("NER")).toHaveText("Near stop");
   await expect(tag("PST")).toHaveText("Past stop");

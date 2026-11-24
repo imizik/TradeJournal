@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { ArrowLeft, Briefcase, CalendarCheck, ChartCandlestick, LayoutGrid, ListChecks, Menu, MessageCircle, MessagesSquare, Moon, PanelLeft, Search, Sunrise, TableProperties, X } from "lucide-react";
+import { ArrowLeft, Briefcase, CalendarCheck, ChartCandlestick, Ellipsis, LayoutGrid, ListChecks, Menu, MessageCircle, MessagesSquare, Moon, PanelLeft, Search, Sunrise, TableProperties, X } from "lucide-react";
 import { openNavMenu, useDeskTabSlot, useFoldedNav } from "@/components/Nav";
 import CheckACall from "@/components/copilot/CheckACall";
 import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
@@ -235,6 +235,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   }, [on, liveState, liveAsOf]);
   const [saved, setSaved] = useState<InvestigationSummary[]>([]);
   const [palette, setPalette] = useState(false);
+  const [topMore, setTopMore] = useState(false); // a phone's top row More (Threads)
   // Replay (DeskReplay): paper trading on a past day. While it runs the live desk stays mounted but hidden, so leaving
   // puts it back exactly as it was; of its live pieces only the REAL line in Replay's header shows beside a replayed price.
   const [replay, setReplay] = useState(false);
@@ -1178,16 +1179,33 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               className={cn(styles.feedButton, "min-h-11 items-center gap-1.5 rounded-md border px-2.5 text-xs text-muted-foreground hover:text-foreground sm:min-h-8", feedShown && "bg-secondary")}>
               Feed{feedNew.count > 0 && <span data-testid="feed-new-bar" className="tabular-nums">{feedNew.count}<span className="sr-only"> new</span></span>}
             </button>
-            {/* No count here: what needs him is the strip's, counted once there. */}
-            <button type="button" onClick={toggleThreads} aria-pressed={threadsShown} aria-label="Threads" data-use="threads" title="The thread list and previous days ( [ )"
+            {/* No count here: what needs him is the strip's, counted once there. A phone keeps Threads in the top row's
+                More (it rarely opens there), so the row is the Feed, the health dot, the Day and Jump to. */}
+            {!phone && <button type="button" onClick={toggleThreads} aria-pressed={threadsShown} aria-label="Threads" data-use="threads" title="The thread list and previous days ( [ )"
               className={cn("inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground sm:min-h-8", threadsShown && "bg-secondary")}>
               <PanelLeft size={15} aria-hidden /><span className="hidden sm:inline">Threads</span>
-            </button>
+            </button>}
             <button type="button" onClick={() => setPalette(true)} aria-label="Jump to a thread or command, or ask the copilot" aria-haspopup="dialog" data-use="palette"
               className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md border bg-card px-2.5 text-xs text-muted-foreground hover:text-foreground sm:min-h-8">
               {/* A phone keeps the bar short: icons only, as the button's label already says. */}
               <Search size={14} aria-hidden /><span className="hidden sm:inline">Jump to or ask…</span><kbd className={cn(KBD, "hidden md:inline")}>{jumpKey}</kbd>
             </button>
+            {phone && (
+              <div className="relative">
+                <button type="button" onClick={() => setTopMore(was => !was)} aria-expanded={topMore} aria-label="More: threads" data-testid="desk-top-more"
+                  className={cn("inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border text-muted-foreground hover:text-foreground", (topMore || threadsShown) && "bg-secondary")}>
+                  <Ellipsis size={16} aria-hidden />
+                </button>
+                {topMore && (
+                  <div role="menu" data-testid="desk-top-menu" className="absolute right-0 top-full z-30 mt-1 w-56 rounded-lg border bg-card p-1 shadow-lg">
+                    <button type="button" role="menuitem" onClick={() => { setTopMore(false); toggleThreads(); }} aria-pressed={threadsShown} data-use="threads"
+                      className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm hover:bg-secondary">
+                      <PanelLeft size={15} aria-hidden />Threads and previous days
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

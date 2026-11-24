@@ -537,3 +537,23 @@ def test_the_green_day_interrupt_carries_the_practice_goal_above_the_footer(engi
     practice = ["Practice this week: no new trade while the day is green · kept 2 of 3 so far"] if goal == "no_opening_while_green" else []
     assert sent[0][1].split("\n") == ["Day already green (+$200 today): 1 past trade opened green, too few to read", *practice,
                                       "Your record, not advice."]
+
+
+def test_the_desk_s_usual_size_is_the_median_long_option_premium_once_twenty_are_in_the_window(engine, world, monkeypatch):
+    rows = [{"long_option": True, "entered": WED, "premium": p} for p in [100.0] * 10 + [300.0] * 11]
+    monkeypatch.setattr(fill_interrupts, "load_history", lambda db: rows)
+    monkeypatch.setattr(fill_interrupts, "_USUAL", None)
+    with Session(engine) as db:
+        assert fill_interrupts.usual_size(db, WED) == 300.0
+        rows[:] = rows[:19]  # nineteen: too few to say what is usual (the cache is per signature, so clear it)
+        monkeypatch.setattr(fill_interrupts, "_USUAL", None)
+        assert fill_interrupts.usual_size(db, WED) is None
+
+
+def test_a_desk_row_says_its_size_only_at_twice_the_usual_or_more():
+    from app.routers.copilot_desk import _size_x
+    row = lambda cost, qty, direction="long": {"book": {"option": {"cost": cost, "quantity": qty, "direction": direction}}}  # noqa: E731
+    big, small, short = row(250, 4), row(150, 2), row(250, 4, "short")
+    for r in (big, small, short):
+        _size_x(r, 400.0)
+    assert big["book"]["size_x"] == 2.5 and "size_x" not in small["book"] and "size_x" not in short["book"]
