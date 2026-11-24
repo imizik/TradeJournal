@@ -47,7 +47,9 @@ monitor's loop (``level_alert_monitor.py``), at most every ``RUN_SECONDS``:
   ``WEEK_TRADING_DAYS`` trading days and their cost basis, as premium at risk
   (there are no account balances, so never a share of the account). Regular
   hours only, within ``FIRST_GRACE_MINUTES`` of its time; a quote that cannot
-  be judged still sends, saying so.
+  be judged still sends, saying so. A position that is red, or cannot be
+  priced, adds the owner's record on options carried into their expiration
+  day (``carry_record``): how many, how many expired worthless, and the total.
 - **Held an hour.** Also off unless ``POSITION_HOLD_ALERTS=true``. Trades the
   audit found held from an hour to the same-day close lost $17,558, and 53 of
   those losers had been up 10% within their first hour; its suggestion was to
@@ -60,7 +62,17 @@ monitor's loop (``level_alert_monitor.py``), at most every ``RUN_SECONDS``:
   alert per position: it is recorded with the give-back generation current
   when it fired, and adding to the position (a new generation) neither restarts
   the clock nor sends another. A quote that cannot be judged still sends, saying so;
-  the peak shown is what this loop saw.
+  the peak shown is what this loop saw. The November 25, 2026 edge audit found the hour itself says little: trades
+  down less than a fifth of their premium at the hour mostly came back, while options with at most
+  ``SHORT_DATED_DAYS`` calendar days to expiry that were down ``DEEP_RED_PCT`` or more mostly went on to lose more
+  than a sale at the hour. So that case, and only that case, gets its own words: the loss in the
+  title, the days left, and the owner's record on short-dated options closed inside the hour against those held two
+  hours or more (``short_dated_record``).
+- **Morning same-day option at 1 PM.** A position that expires today, first bought before ``MORNING_END`` (noon New
+  York) and still open at ``AFTERNOON_MINUTE`` (13:00) gets one alert (kind ``same_day_1pm``), within
+  ``FIRST_GRACE_MINUTES`` of it and only while more than ``FINAL_MINUTES`` remain. In the same audit nearly every such
+  position finished lower than a sale at 13:00. The message carries the owner's record on same-day options bought
+  before noon: closed by 13:00 against still open after it (``morning_record``). Once per position (generation 0).
 - **Wrong way at 30 minutes.** Also off unless ``POSITION_WRONG_WAY_ALERTS=true``.
   In a read-only review of 2026's opening option trades, those whose underlying
   had moved against them 30 minutes in and were then held past two hours were
@@ -151,8 +163,12 @@ NO_EXIT_MINUTES = 5
 NO_EXIT_GRACE = 10
 RECORD_MIN_TRADES = 5  # per side of the record, or the message leaves it out
 QUICK_MINUTES, LONG_MINUTES = 30, 120
+DEEP_RED_PCT = -0.30  # of cost: the one-hour alert's own words for a short-dated option down this much or more
+SHORT_DATED_DAYS = 3  # calendar days to expiry
+MORNING_END = 12 * 60  # a same-day option first bought before noon New York...
+AFTERNOON_MINUTE = 13 * 60  # ...and still open at 13:00 gets the 1 PM alert
 INDEX_UNDERLYING = {"SPXW": "SPY", "SPX": "SPY", "XSP": "SPY", "NDX": "QQQ", "NDXP": "QQQ"}
-KINDS = ("giveback", "expiry_first", "expiry_final", "expiry_eve", "hold_hour", "wrong_way", "no_exit")
+KINDS = ("giveback", "expiry_first", "expiry_final", "expiry_eve", "hold_hour", "wrong_way", "no_exit", "same_day_1pm")
 
 
 def enabled() -> bool:
@@ -282,6 +298,14 @@ def read_working_orders(now: float) -> tuple[list[dict], float] | None:
         return None
 
 
+def same_day_due(opened_at: datetime, expiration: date, today: date, regular) -> int | None:
+    """The minute (ET) of the 1 PM alert for a position that expires today and was first bought today before noon, or
+    None: another day's entry or expiry, an afternoon entry, or a close within ``FINAL_MINUTES`` of it (a half day)."""
+    if expiration != today or opened_at.date() != today or opened_at.hour * 60 + opened_at.minute >= MORNING_END:
+        return None
+    return AFTERNOON_MINUTE if AFTERNOON_MINUTE < regular[2] - FINAL_MINUTES else None
+
+
 def trading_days_after(calendar, day: date, count: int) -> list[date]:
     """The ``count`` trading days after ``day``, from the market calendar (weekdays when it is unavailable)."""
     found, probe = [], day
@@ -334,11 +358,84 @@ def opening_record(db: Session) -> str | None:
     held = [float(r.realized_pnl) for r in opening if r.hold_duration_mins >= LONG_MINUTES]
     if min(len(quick), len(held)) < RECORD_MIN_TRADES:
         return None
+    return (f"Your past opening option trades: closed within {QUICK_MINUTES} min, {_side(quick)}; "
+            f"held {LONG_MINUTES // 60} h or more, {_side(held)}.")
 
-    def side(pnls: list[float]) -> str:
-        return f"{len(pnls)} won {sum(p > 0 for p in pnls) / len(pnls):.0%} ({_money(sum(pnls))})"
-    return (f"Your past opening option trades: closed within {QUICK_MINUTES} min, {side(quick)}; "
-            f"held {LONG_MINUTES // 60} h or more, {side(held)}.")
+
+def _side(pnls: list[float]) -> str:
+    return f"{len(pnls)} won {sum(p > 0 for p in pnls) / len(pnls):.0%} ({_money(sum(pnls))})"
+
+
+def _closed_options(db: Session) -> list:
+    return db.exec(select(Trade.opened_at, Trade.closed_at, Trade.expiration, Trade.hold_duration_mins, Trade.realized_pnl,
+                          Trade.expired_worthless)
+                   .where(Trade.instrument_type == "option", Trade.status.in_(("closed", "expired")), Trade.realized_pnl.is_not(None),
+                          Trade.expiration.is_not(None), Trade.closed_at.is_not(None))).all()
+
+
+def short_dated_record(db: Session) -> str | None:
+    """The owner's closed options first bought with at most ``SHORT_DATED_DAYS`` calendar days to expiry: closed within
+    ``HOLD_MINUTES`` against held ``LONG_MINUTES`` or more (overnight included); None when either side has fewer than
+    ``RECORD_MIN_TRADES``."""
+    rows = [r for r in _closed_options(db) if r.hold_duration_mins is not None
+            and 0 <= (r.expiration - r.opened_at.date()).days <= SHORT_DATED_DAYS]
+    quick = [float(r.realized_pnl) for r in rows if r.hold_duration_mins < HOLD_MINUTES]
+    held = [float(r.realized_pnl) for r in rows if r.hold_duration_mins >= LONG_MINUTES]
+    if min(len(quick), len(held)) < RECORD_MIN_TRADES:
+        return None
+    return (f"Your options with {SHORT_DATED_DAYS} days or less to expiry: closed within the hour, {_side(quick)}; "
+            f"held {LONG_MINUTES // 60} h or more, {_side(held)}.")
+
+
+def morning_record(db: Session) -> str | None:
+    """The owner's closed same-day options first bought before noon: closed by 13:00 against still open after it; None
+    when either side has fewer than ``RECORD_MIN_TRADES``."""
+    rows = [r for r in _closed_options(db) if r.expiration == r.opened_at.date() and r.opened_at.hour * 60 + r.opened_at.minute < MORNING_END]
+    by_one = [float(r.realized_pnl) for r in rows if r.closed_at.date() == r.expiration and r.closed_at.hour * 60 + r.closed_at.minute < AFTERNOON_MINUTE]
+    after = [float(r.realized_pnl) for r in rows if not (r.closed_at.date() == r.expiration
+                                                         and r.closed_at.hour * 60 + r.closed_at.minute < AFTERNOON_MINUTE)]
+    if min(len(by_one), len(after)) < RECORD_MIN_TRADES:
+        return None
+    return f"Your same-day options bought before noon: closed by 1 PM, {_side(by_one)}; still open after 1 PM, {_side(after)}."
+
+
+def carry_record(db: Session) -> str | None:
+    """The owner's closed options bought before their expiration day and still open on it (closed that day, or expired):
+    how many, how many expired worthless, and their total; None under ``RECORD_MIN_TRADES``."""
+    rows = [r for r in _closed_options(db) if r.opened_at.date() < r.expiration <= r.closed_at.date()]
+    if len(rows) < RECORD_MIN_TRADES:
+        return None
+    return (f"Your record carrying an option into its expiration day: {len(rows)} trades, "
+            f"{sum(1 for r in rows if r.expired_worthless)} expired worthless, {_money(sum(float(r.realized_pnl) for r in rows))}.")
+
+
+def hold_facts(db: Session, alert: PositionAlert, now: float) -> dict:
+    """What a one-hour message says when the position is short-dated and deep red: the calendar days to expiry and the
+    owner's record. Empty for any other position; a failure never holds the alert back."""
+    facts = {"days": None, "record": None}
+    try:
+        if alert.gain_pct is None or alert.gain_pct > DEEP_RED_PCT:
+            return facts
+        expiration = db.exec(select(Trade.expiration).where(Trade.id == alert.trade_id)).first()
+        if expiration is None:
+            return facts
+        days = (expiration - datetime.fromtimestamp(now, ET).date()).days
+        if 0 <= days <= SHORT_DATED_DAYS:
+            facts["days"] = days
+            facts["record"] = short_dated_record(db)
+    except Exception:  # noqa: BLE001 - the alert matters more than its extras
+        log.warning("One-hour facts skipped", exc_info=True)
+    return facts
+
+
+def morning_facts(db: Session) -> dict:
+    """What a 1 PM message says beyond the alert row: the owner's record. None never holds the alert back."""
+    facts = {"record": None}
+    try:
+        facts["record"] = morning_record(db)
+    except Exception:  # noqa: BLE001 - the alert matters more than its extras
+        log.warning("1 PM facts skipped", exc_info=True)
+    return facts
 
 
 def wrong_way_facts(db: Session, alert: PositionAlert) -> dict:
@@ -532,8 +629,16 @@ def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_
         week = facts.get("week")
         risk = (f" Expiring this week: {_count(week['contracts'])}, ${week['premium']:,.0f} premium at risk." if week and week["contracts"]
                 else "")
+        record = f" {facts['record']}" if facts.get("record") and (alert.gain is None or alert.gain < 0) else ""
         return (f"{alert.contract} expires {when}, still open",
-                f"{vs}.{at_expiry(alert, facts.get('underlying'), f'at expiry {when}')} {_count(alert.contracts)} open.{risk}", 4)
+                f"{vs}.{at_expiry(alert, facts.get('underlying'), f'at expiry {when}')} {_count(alert.contracts)} open.{risk}{record}", 4)
+    if alert.kind == "same_day_1pm":
+        if alert.mark is None:
+            now_part = _thin(alert)
+        record = f" {facts['record']}" if facts.get("record") else ""
+        return (f"{alert.contract}: bought this morning, expires today, still open at 1 PM",
+                f"{_count(alert.contracts)} open, {now_part}.{at_expiry(alert, facts.get('underlying'))}{record} "
+                f"Re-decide: close, trim, or set your exit.", 4)
     if alert.kind == "no_exit":
         if alert.mark is None:
             now_part = _thin(alert)
@@ -544,6 +649,13 @@ def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_
         if alert.mark is None:
             now_part = _thin(alert)
         peak = "" if alert.peak_gain is None else f", best seen by the alert watch {_money(alert.peak_gain)} ({_pct(alert.peak_gain_pct)})"
+        if facts.get("days") is not None and alert.gain_pct is not None:
+            days = facts["days"]
+            left = "Expires today" if days == 0 else "Expires tomorrow" if days == 1 else f"Expires in {days} days"
+            record = f" {facts['record']}" if facts.get("record") else ""
+            return (f"{alert.contract}: down {abs(alert.gain_pct) * 100:.0f}% an hour in",
+                    f"Open {HOLD_MINUTES} min, {now_part}{peak}. {left}. {_count(alert.contracts)} open.{record} "
+                    f"This is the state your record says to cut: close or trim.", 4)
         return (f"{alert.contract}: open an hour, re-decide",
                 f"Open {HOLD_MINUTES} min, {now_part}{peak}. {_count(alert.contracts)} open. "
                 f"Re-decide: close, trim, or set your exit.", 4)
@@ -602,7 +714,7 @@ def desk_path(db: Session, alert: PositionAlert) -> str:
 
 ASK_KIND = {"giveback": "Give-back alert", "hold_hour": "One-hour alert", "expiry_first": "Expires-today alert",
             "expiry_final": "30-minutes-left alert", "expiry_eve": "Day-before-expiry alert", "wrong_way": "Wrong-way alert",
-            "no_exit": "No-exit-order alert"}
+            "no_exit": "No-exit-order alert", "same_day_1pm": "1 PM same-day alert"}
 
 
 def ask_context(alert: PositionAlert) -> str:
@@ -773,6 +885,9 @@ class PositionAlerts:
                     else "expiry_first" if first <= minute < first + FIRST_GRACE_MINUTES else None)
             if kind is not None:
                 found.append(self._alert(position, kind, 0, mark, gain, gain_pct, None, now))
+        due = same_day_due(position["opened_at"], position["expiration"], today, regular)
+        if due is not None and due <= minute < due + FIRST_GRACE_MINUTES:
+            found.append(self._alert(position, "same_day_1pm", 0, mark, gain, gain_pct, None, now))
         if hold_enabled():
             due = hold_due(position["opened_at"], today, regular, position["expiration"] == today)
             if due is not None and due <= minute < due + FIRST_GRACE_MINUTES:
@@ -884,8 +999,10 @@ class PositionAlerts:
                 db.commit()
                 return
             facts = (wrong_way_facts(db, alert) if alert.kind == "wrong_way" else self._eve_facts(db, alert, now) if alert.kind == "expiry_eve"
-                     else giveback_facts(db) if alert.kind == "giveback" else None)
-            if alert.kind in ("expiry_eve", "expiry_first", "expiry_final"):
+                     else giveback_facts(db) if alert.kind == "giveback"
+                     else hold_facts(db, alert, _epoch(alert.detected_at)) if alert.kind == "hold_hour"
+                     else morning_facts(db) if alert.kind == "same_day_1pm" else None)
+            if alert.kind in ("expiry_eve", "expiry_first", "expiry_final", "same_day_1pm"):
                 facts = {**(facts or {}), "underlying": self._underlying_last(alert)}
             title, body, priority = message(alert, _clock_label(_minute_of(close)) if close else None,
                                             max(1, int((close - now) // 60)) if close else None, facts,
@@ -938,7 +1055,7 @@ class PositionAlerts:
 
     def _eve_facts(self, db: Session, alert: PositionAlert, now: float) -> dict:
         """What a day-before-expiry message says beyond the alert row: the expiry's day and this week's premium at risk."""
-        facts = {"expires": None, "week": None}
+        facts = {"expires": None, "week": None, "record": None}
         try:
             today = datetime.fromtimestamp(now, ET).date()
             ahead = trading_days_after(self.calendar, today, WEEK_TRADING_DAYS)
@@ -946,6 +1063,7 @@ class PositionAlerts:
             if expiration is not None and (expiration - today).days > 1:
                 facts["expires"] = expiration.strftime("%A")  # after a weekend or holiday: "expires Monday"
             facts["week"] = week_at_risk(open_positions(db), ahead)
+            facts["record"] = carry_record(db)
         except Exception:  # noqa: BLE001 - the alert matters more than its extras
             log.warning("Day-before-expiry facts skipped", exc_info=True)
         return facts
@@ -962,7 +1080,7 @@ class PositionAlerts:
 
 PICTURE_TITLE = {"giveback": "gave back", "hold_hour": "held 1h", "expiry_first": "expires today", "expiry_final": "expires today",
                  "expiry_eve": "expires next session",
-                 "wrong_way": "wrong way 30m", "no_exit": "no exit order"}
+                 "wrong_way": "wrong way 30m", "no_exit": "no exit order", "same_day_1pm": "0DTE at 1 PM"}
 
 
 def _picture(db: Session, alert: PositionAlert, now: float):

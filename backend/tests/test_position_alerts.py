@@ -1323,3 +1323,150 @@ def test_robinhood_link_opens_the_contract_or_the_stock_page_for_robinhood_posit
     # On Telegram it sits beside Open, whole, even beside the answer buttons.
     rows = telegram.keyboard("/x", (("Why?", "why:a"),), (("Robinhood", "https://robinhood.com/stocks/SNDK"),))["inline_keyboard"]
     assert rows[-1] == [{"text": "Robinhood", "url": "https://robinhood.com/stocks/SNDK"}]  # no ALERT_APP_URL: Open is left out
+
+
+# ------------------------------------------------------------ the November 25, 2026 audit's changes
+
+def ended(db, opened, closed_at, expiration, pnl, worthless=False):
+    """A closed option trade as the records read it: when it opened and closed, its expiry and its P&L."""
+    start, end = datetime.fromisoformat(opened), datetime.fromisoformat(closed_at)
+    db.add(Trade(account_id=ROTH, ticker="NBIS", instrument_type="option", contracts=1, avg_entry_premium=1, total_premium_paid=100,
+                 realized_pnl=pnl, hold_duration_mins=int((end - start).total_seconds() // 60), opened_at=start, closed_at=end,
+                 expiration=expiration, expired_worthless=worthless, status="expired" if worthless else "closed"))
+
+
+def test_a_short_dated_option_down_thirty_percent_at_the_hour_gets_its_own_words_and_record(engine, world, hold_on):
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 2, 400, "2026-10-21T10:00")  # expires Friday: two calendar days
+        for i in range(5):
+            day = f"2026-09-0{i + 1}"
+            ended(db, f"{day}T10:00", f"{day}T10:20", date(2026, 9, i + 2), 90.0 if i < 4 else -40.0)  # inside the hour: +$320
+            ended(db, f"{day}T10:30", f"{day}T13:00", date(2026, 9, i + 3), -300.0 if i else 60.0)       # held 2.5 h: -$1,140
+        ended(db, "2026-09-01T11:00", "2026-09-01T15:00", date(2026, 9, 18), -9999.0)                    # 17 days out: not short-dated
+        ended(db, "2026-09-01T11:00", "2026-09-01T12:30", date(2026, 9, 2), -9999.0)                     # 90 minutes: neither side
+        db.commit()
+        assert position_alerts.short_dated_record(db) == ("Your options with 3 days or less to expiry: closed within the hour, "
+                                                          "5 won 80% (+$320); held 2 h or more, 5 won 20% (-$1,140).")
+    quotes.set(2.78)  # mid $2.80: -30%, -$240
+    run_at(clock, watcher, WED, "11:00")
+    [alert] = alerts(engine)
+    with Session(engine) as db:
+        facts = position_alerts.hold_facts(db, alert, at(WED, "11:00"))
+        assert facts["days"] == 2
+        title, body, priority = position_alerts.message(alert, facts=facts)
+        assert (title, priority) == ("SNDK 10/23/26 230C: down 30% an hour in", 4)
+        assert body == ("Open 60 min, now -$240 (-30%) at a $2.80 mid, bid $2.78, best seen by the alert watch -$240 (-30%). "
+                        "Expires in 2 days. 2 contracts open. Your options with 3 days or less to expiry: closed within the hour, "
+                        "5 won 80% (+$320); held 2 h or more, 5 won 20% (-$1,140). "
+                        "This is the state your record says to cut: close or trim.") + OFF_CONTEXT
+        # Down 29%, a longer-dated contract, or no quote to judge: the hour alert's usual words.
+        alert.gain_pct = -0.29
+        assert position_alerts.hold_facts(db, alert, at(WED, "11:00")) == {"days": None, "record": None}
+        assert position_alerts.message(alert, facts={"days": None, "record": None})[0] == "SNDK 10/23/26 230C: open an hour, re-decide"
+        alert.gain_pct = -0.50
+        assert position_alerts.hold_facts(db, alert, at(date(2026, 10, 19), "11:00"))["days"] is None  # four days left
+        alert.gain_pct = None
+        assert position_alerts.hold_facts(db, alert, at(WED, "11:00"))["days"] is None
+
+
+def test_the_deep_red_hour_alert_is_sent_with_its_title_and_expiry_day_says_today(engine, world, hold_on, monkeypatch):
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00", expiration=WED)
+    quotes.set(1.98)  # mid $2.00: -50%
+    run_at(clock, watcher, WED, "11:00")
+    sent = []
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: sent.append((title, body)))
+    watcher.deliver()
+    [(title, body)] = sent
+    assert title == "SNDK 10/21/26 230C: down 50% an hour in"
+    assert "Expires today. 1 contract open. This is the state your record says to cut: close or trim." in body  # no record yet: no line
+
+
+def test_a_morning_same_day_option_still_open_at_one_gets_one_alert_with_the_record(engine, world, monkeypatch):
+    clock, quotes, watcher = world
+    monkeypatch.setenv("POSITION_ALERTS_ENABLED", "true")
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 2, 150, "2026-10-21T10:15", expiration=WED)
+        for i in range(5):
+            day = f"2026-09-0{i + 1}"
+            ended(db, f"{day}T09:50", f"{day}T10:30", date(2026, 9, i + 1), 120.0 if i < 3 else -60.0)        # out by 1 PM: +$240
+            ended(db, f"{day}T10:10", f"{day}T16:00", date(2026, 9, i + 1), -150.0, worthless=True)           # held: -$750
+        ended(db, "2026-09-01T12:30", "2026-09-01T16:00", date(2026, 9, 1), -9999.0, worthless=True)          # bought after noon
+        ended(db, "2026-09-01T10:00", "2026-09-01T15:00", date(2026, 9, 4), -9999.0)                          # not same-day
+        db.commit()
+        assert position_alerts.morning_record(db) == ("Your same-day options bought before noon: closed by 1 PM, 5 won 60% (+$240); "
+                                                      "still open after 1 PM, 5 won 0% (-$750).")
+    quotes.set(0.88)  # mid $0.90: -40%
+    run_at(clock, watcher, WED, "12:59")
+    assert alerts(engine) == []
+    run_at(clock, watcher, WED, "13:00", "13:01", "13:14")
+    [alert] = alerts(engine)
+    assert (alert.kind, alert.generation) == ("same_day_1pm", 0)
+    sent = []
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: sent.append((title, body, kw["priority"])))
+    watcher.underlying = lambda symbols: {"SNDK": 228.0}
+    clock.now = at(WED, "13:01")
+    watcher.deliver()
+    watcher.deliver()
+    [(title, body, priority)] = sent
+    assert (title, priority) == ("SNDK 10/21/26 230C: bought this morning, expires today, still open at 1 PM", 4)
+    assert body.startswith("2 contracts open, now -$120 (-40%) at a $0.90 mid, bid $0.88. SNDK 228.00 is 2.00 below the 230 strike: "
+                           "worth $0 at expiry if it stays here. Your same-day options bought before noon: closed by 1 PM, "
+                           "5 won 60% (+$240); still open after 1 PM, 5 won 0% (-$750). Re-decide: close, trim, or set your exit.")
+    assert position_alerts.ask_context(alert).endswith("1 PM same-day alert at 1:00 PM: now -$120.")
+    with Session(engine) as db:
+        from app.models import PhonePing
+        ping = db.exec(select(PhonePing)).one()
+        assert (ping.kind, ping.decision) == ("same_day_1pm", "sent")
+
+
+@pytest.mark.parametrize("opened, expiration, close, times", [
+    ("2026-10-21T12:00", WED, 960, ("13:00",)),             # bought at noon: not a morning entry
+    ("2026-10-21T10:15", FRI, 960, ("13:00",)),             # does not expire today
+    ("2026-10-20T10:15", WED, 960, ("13:00",)),             # carried in from yesterday: the last-day alerts cover it
+    ("2026-10-21T10:15", WED, 960, ("13:15", "13:40")),     # more than fifteen minutes late: skipped
+    ("2026-10-21T10:15", WED, 13 * 60 + 20, ("13:00",)),    # a close within thirty minutes: the last-day alert's job
+])
+def test_the_one_pm_alert_is_only_for_a_morning_entry_expiring_today_on_time(engine, world, monkeypatch, opened, expiration, close, times):
+    clock, quotes, watcher = world
+    monkeypatch.setenv("POSITION_ALERTS_ENABLED", "true")
+    watcher.calendar = Calendar(close=close)
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 150, opened, expiration=expiration)
+    quotes.set(0.88)
+    run_at(clock, watcher, WED, *times)
+    assert "same_day_1pm" not in kinds(engine)
+
+
+def test_the_day_before_expiry_alert_adds_the_carry_record_only_when_red(engine, world, monkeypatch):
+    clock, quotes, watcher = world
+    watcher.calendar = Weekdays()
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 2, 400, "2026-10-21T09:45")  # expires Friday the 23rd
+        for i in range(4):
+            ended(db, f"2026-09-0{i + 1}T10:00", f"2026-09-0{i + 3}T16:00", date(2026, 9, i + 3), -200.0, worthless=True)
+        ended(db, "2026-09-08T10:00", "2026-09-10T11:00", date(2026, 9, 10), 150.0)       # sold on its expiration day
+        ended(db, "2026-09-08T10:00", "2026-09-09T11:00", date(2026, 9, 10), -9999.0)     # out the day before: not carried
+        ended(db, "2026-09-10T10:00", "2026-09-10T16:00", date(2026, 9, 10), -9999.0, worthless=True)  # bought that day
+        db.commit()
+        assert position_alerts.carry_record(db) == ("Your record carrying an option into its expiration day: 5 trades, "
+                                                    "4 expired worthless, -$650.")
+    quotes.set(3.00)  # mid $3.02: red
+    clock.now = at(THU, "15:30")
+    watcher.run()
+    [eve] = alerts(engine)
+    sent = []
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: sent.append(body))
+    watcher.deliver()
+    assert sent[0].startswith("Mark $3.02 vs cost $4.00: -$196 (-24%). 2 contracts open. Expiring this week: 2 contracts, $800 premium "
+                              "at risk. Your record carrying an option into its expiration day: 5 trades, 4 expired worthless, -$650.")
+    facts = {"record": "Your record carrying an option into its expiration day: 5 trades, 4 expired worthless, -$650."}
+    eve.gain, eve.gain_pct = 104.0, 0.13
+    assert "Your record" not in position_alerts.message(eve, facts=facts)[1]  # green: the record stays out
+    eve.mark = eve.gain = eve.gain_pct = None
+    assert "Your record carrying" in position_alerts.message(eve, facts=facts)[1]  # no price to judge: it is said

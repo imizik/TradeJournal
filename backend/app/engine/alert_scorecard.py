@@ -32,7 +32,7 @@ WINDOW_DAYS = 30
 MAX_ROWS = 60
 SENT = ("sent", "unknown")
 KIND = {"giveback": "Give-back", "hold_hour": "Held an hour", "expiry_first": "Expires today", "expiry_final": "30 minutes left",
-        "expiry_eve": "Expires next session", "wrong_way": "Wrong way at 30 min"}
+        "expiry_eve": "Expires next session", "wrong_way": "Wrong way at 30 min", "same_day_1pm": "Same-day option at 1 PM"}
 NOT_SCORED = ("no_exit",)  # a prompt to set an exit at the entry, not to sell: selling at it is not its alternative
 EPSILON = 1e-9
 

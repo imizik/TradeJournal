@@ -12,7 +12,7 @@ import { copilotLabHref } from "@/lib/copilot";
 type Sent = { id?: string; contract?: string; quoted_at?: number | null; feedback?: AlertFeedback | null;
   /** Ask copilot's context with what the alert saw (backend position_alerts.ask_context); position alerts only. */
   ask_context?: string;
-  kind: "giveback" | "expiry_first" | "expiry_final" | "expiry_eve" | "hold_hour" | "wrong_way" | "no_exit" | "plan_nudge" | "plan_link"; detected_at: number; entry?: string; contracts: number; mark: number | null; bid?: number | null;
+  kind: "giveback" | "expiry_first" | "expiry_final" | "expiry_eve" | "hold_hour" | "wrong_way" | "no_exit" | "same_day_1pm" | "plan_nudge" | "plan_link"; detected_at: number; entry?: string; contracts: number; mark: number | null; bid?: number | null;
   gain: number | null; gain_pct: number | null; peak_gain: number | null; peak_gain_pct: number | null;
   delivery: "pending" | "sending" | "sent" | "expired" | "unknown" | "skipped" | "held"; error: string | null; delivered_at: number | null;
   /** What the fills or a plan link show happened after the ping, e.g. "closed in 6 min" (backend notification_policy.then_text). */
@@ -24,7 +24,7 @@ type Watch = { peak_gain: number | null; peak_gain_pct: number | null; armed: bo
 type Body = { enabled: boolean; giveback_dollar_floor_applies?: boolean; alerts: Sent[]; watch: Watch | null };
 
 const KIND: Record<Sent["kind"], string> = { giveback: "Give-back triggered", expiry_first: "Expires today", expiry_final: "30 minutes to the close",
-  expiry_eve: "Expires next session", hold_hour: "Open an hour: re-decide", wrong_way: "Wrong way at 30 min", no_exit: "No exit order at 5 min",
+  expiry_eve: "Expires next session", hold_hour: "Open an hour: re-decide", wrong_way: "Wrong way at 30 min", no_exit: "No exit order at 5 min", same_day_1pm: "Same-day option open at 1 PM",
   plan_nudge: "No plan yet: plan nudge",
   plan_link: "Saved plan found: link ping" };
 const DELIVERY: Record<Sent["delivery"], string> = { pending: "not sent yet", sending: "sending", sent: "accepted by ntfy; phone display unconfirmed",
@@ -130,7 +130,7 @@ export default function TradePhoneAlerts({ tradeId, alertId, answer, symbol, sta
           className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-muted">View underlying chart at alert</Link>
       </div>
       <p className="text-xs text-muted-foreground">Delivery: {selected.delivery === "held" && selected.error ? selected.error : DELIVERY[selected.delivery]}{selected.then && <> Then: {selected.then}.</>}{selected.after && <> After: {selected.after}.</>}</p>
-      {owner && selected.id && selected.feedback !== undefined && ["giveback", "hold_hour", "wrong_way", "no_exit", "expiry_first", "expiry_final", "expiry_eve"].includes(selected.kind)
+      {owner && selected.id && selected.feedback !== undefined && ["giveback", "hold_hour", "wrong_way", "no_exit", "same_day_1pm", "expiry_first", "expiry_final", "expiry_eve"].includes(selected.kind)
         && ["sent", "unknown"].includes(selected.delivery) && <PositionAlertFeedback key={`${tradeId}:${selected.id}`}
           tradeId={tradeId} alertId={selected.id} initial={selected.feedback}
           answer={answer && answer in ALERT_FEEDBACK_LABELS ? answer as AlertFeedbackRating : undefined} />}
