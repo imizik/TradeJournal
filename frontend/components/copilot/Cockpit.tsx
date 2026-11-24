@@ -301,6 +301,7 @@ function ZeroDte({ now }: { now: number }) {
 
 /** A long option with no sell-to-close order working (a working buy to open is a scale-in, not an exit), said only when every working order was just read (``orders_read``). */
 export const noExit = (row: DeskThread, read: boolean) => read && row.book?.option?.direction === "long"
+  && (row.book.live === "matched" || row.book.live === "new") // Robinhood holds it now (not a row its close has yet to reach)
   && !(row.book.orders ?? []).some(o => o.working && /^sell to close$/i.test(o.action));
 
 /**

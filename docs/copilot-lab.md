@@ -663,9 +663,10 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   Giving back, else On plan; a
   position with no plan shows no tag (its missing bar and the day report's "Open without a plan" line say so).
   **Risk badges** come before the tag: **0DTE · 1h 05m left** for an option on its last day (amber, red in the last
-  hour; to 16:00 New York, early closes not known), **No exit order** for a long option with no sell order working
-  (only while every working order was just read whole: the live view's `orders_read`, from the order-history pass the
-  no-exit alert uses; otherwise nothing is said), and **N× usual size** when a long option's premium paid is at least
+  hour; to 16:00 New York, early closes not known), **No exit order** for a long option Robinhood holds now (the row
+  matched or new in the live book) with no sell-to-close working (a buy to open is a scale-in, not an exit; only while
+  every working order was just read whole: the live view's `orders_read`, from the order-history pass the no-exit alert
+  uses; otherwise nothing is said), and **N× usual size** when a long option's premium paid is at least
   2× his median long option position over 12 months (`book.size_x`, `fill_interrupts.usual_size`: the large-size
   interrupt's usual, from 20 positions). A
   position under its entry is never Giving back, however recently the alert fired. While the Robinhood feed is live,

@@ -97,7 +97,7 @@ async function open(page: Page, { width = 375, height = 812, threads = THREADS, 
 
 const book = (page: Page) => page.getByTestId("desk-book");
 
-const ZERO = { ...ORCL, book: { ...ORCL.book, expiry: "2026-11-13", size_x: 2.6, option: { ...ORCL.book.option, expiry: "2026-11-13" } } };
+const ZERO = { ...ORCL, book: { ...ORCL.book, live: "matched", expiry: "2026-11-13", size_x: 2.6, option: { ...ORCL.book.option, expiry: "2026-11-13" } } };
 const LIVE_THREADS = { ...THREADS, threads: [ZERO], robinhood: { state: "ok", as_of: epoch("2026-11-13T15:59:00Z"), joined: true, orders_read: true,
   accounts: [{ label: "Roth IRA", masked: "••8267", total_value: 10000, cash: 1000, buying_power: 1000 }] } };
 const row = (book: object) => ({ symbol: "ORCL", instrument: "11/13/26 250C", book } as unknown as DeskThread);
@@ -106,11 +106,14 @@ test("the badges' rules: today's expiry, minutes to 16:00 New York, and no exit 
   expect(zeroDte(row({ expiry: "2026-11-13", option: {} }), "2026-11-13")).toBe(true);
   expect(zeroDte(row({ expiry: "2026-11-14", option: {} }), "2026-11-13")).toBe(false);
   expect(minutesToClose(epoch("2026-11-13T19:55:00Z"))).toBe(65); // 14:55 New York
-  const long = { option: { direction: "long" }, orders: [{ working: true, action: "Buy to open" }] };
+  const long = { live: "matched", option: { direction: "long" }, orders: [{ working: true, action: "Buy to open" }] };
   expect(noExit(row(long), true)).toBe(true);
   expect(noExit(row(long), false)).toBe(false); // the order read is off or partial: say nothing
   expect(noExit(row({ ...long, orders: [{ working: true, action: "Sell to close" }] }), true)).toBe(false);
   expect(noExit(row({ ...long, orders: [{ working: true, action: "Buy to open" }] }), true)).toBe(true); // a scale-in is not an exit
+  expect(noExit(row({ ...long, live: "new" }), true)).toBe(true);
+  expect(noExit(row({ ...long, live: "not_on_robinhood" }), true)).toBe(false); // sold; its close has not reached the journal
+  expect(noExit(row({ ...long, live: undefined }), true)).toBe(false);
 });
 
 test("a phone row shows 0DTE with time left, No exit order and the size, and no eye beside its Note", async ({ page }) => {
