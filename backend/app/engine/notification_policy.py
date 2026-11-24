@@ -112,7 +112,7 @@ log = logging.getLogger(__name__)
 
 PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "interrupt", "companion_update", "nudge", "prep", "evening_review",
             "radar_setup", "radar_event", "radar_digest", "thesis_watch", "research", "paper", "paper_review", "self_check", "note_digest")
-ALIASES = {"expiry_first": "time_stop", "expiry_eve": "time_stop", "wrong_way": "hold_hour", "link": "nudge", "no_plan": "nudge",
+ALIASES = {"expiry_first": "time_stop", "expiry_eve": "time_stop", "wrong_way": "hold_hour", "no_exit": "hold_hour", "link": "nudge", "no_plan": "nudge",
            "companion_adopt": "nudge",
            "week_review": "prep", "day_replay": "prep"}
 NEVER_QUIET = 2  # ranks 0-1 (last-day final, invalidation) are never held by the quiet window
@@ -374,7 +374,7 @@ def _appended(db: Session, into: PhonePing) -> str:
 
 
 def _label(kind: str) -> str:
-    return {"expiry_final": "last-day final", "expiry_first": "expires-today", "giveback": "give-back", "hold_hour": "one-hour", "wrong_way": "wrong-way",
+    return {"expiry_final": "last-day final", "expiry_first": "expires-today", "giveback": "give-back", "hold_hour": "one-hour", "wrong_way": "wrong-way", "no_exit": "no-exit-order",
             "time_stop": "time stop", "entry": "entry trigger", "interrupt": "pattern", "invalidation": "invalidation", "nudge": "plan nudge",
             "no_plan": "plan nudge", "link": "plan link", "prep": "pre-market prep", "week_review": "week review", "day_replay": "Watch your day",
             "evening_review": "evening review", "expiry_eve": "day-before-expiry", "radar_digest": "Radar digest",
@@ -555,7 +555,7 @@ def then_text(then: str | None, minutes: int | None) -> str | None:
 
 
 SENDER_OF_KIND = {"giveback": "position_alerts", "expiry_first": "position_alerts", "expiry_final": "position_alerts", "expiry_eve": "position_alerts",
-                  "hold_hour": "position_alerts", "wrong_way": "position_alerts", "plan_nudge": "plan_nudges", "plan_link": "plan_nudges"}
+                  "hold_hour": "position_alerts", "wrong_way": "position_alerts", "no_exit": "position_alerts", "plan_nudge": "plan_nudges", "plan_link": "plan_nudges"}
 
 
 def annotate(db: Session, rows: list[dict]) -> list[dict]:

@@ -880,7 +880,8 @@ export const money = (value: number) => `${value > 0 ? "+" : value < 0 ? "−" :
 export const signedPct = (value: number, digits = 0) => `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(digits)}%`;
 
 /** A position alert's kind in the strip's words; an expiry alert is the strip's expiring item instead. */
-const ALERT_WORDS: Record<string, string> = { giveback: "give-back alert", wrong_way: "wrong-way alert", hold_hour: "held-an-hour alert" };
+const ALERT_WORDS: Record<string, string> = { giveback: "give-back alert", wrong_way: "wrong-way alert", hold_hour: "held-an-hour alert",
+  no_exit: "no-exit-order alert" };
 const EXPIRY_ALERTS = new Set(["expiry_first", "expiry_final", "expiry_eve"]);
 const nyClock = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
 

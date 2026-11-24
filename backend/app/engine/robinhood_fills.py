@@ -848,6 +848,15 @@ def desk_pairing(session: Session, orders: list[dict]) -> dict[str, str]:
 
 # --------------------------------------------------------------------------- the poller
 
+def exit_working(orders: list[dict], last4: str | None, symbol: str, option_type: str | None, strike, expiry: str) -> bool:
+    """Whether a ``sell_to_close`` order for this option contract is working in this account, among ``Poller.working``'s
+    lines (for the open-trade alerts' no-exit-order check)."""
+    key = rb.contract_key(symbol, "option", option_type, strike, expiry)
+    return key is not None and any(
+        o["working"] and o["action"] == "sell_to_close" and o["last4"] == last4
+        and rb.contract_key(o["symbol"], o["instrument"], o["option_type"], o["strike"], o["expiry"]) == key for o in orders)
+
+
 class Poller:
     """Reads the order history on the feed's schedule (a minute in market hours, fifteen otherwise), one pass at a
     time, at most ``MAX_CALLS`` calls each, and commits each pass in one transaction."""
@@ -875,6 +884,15 @@ class Poller:
         day = datetime.fromtimestamp(now, ET).date()
         return [dict(o) for o in view["orders"]
                 if o["working"] or o["filled_at"] is not None and datetime.fromtimestamp(o["filled_at"], ET).date() == day]
+
+    def working(self, now: float | None = None) -> tuple[list[dict], float] | None:
+        """The orders still working in the last good pass, with that pass's time (epoch seconds); None as ``desk``. For
+        the open-trade alerts' no-exit-order check, which must know the read is newer than its deadline. Also None when
+        the pass could not read every account and kind it tried whole: an order placed since is then unseen. No call, no write."""
+        view, _now = self._current(now)
+        if view is None or not view.get("whole", True):
+            return None
+        return [dict(o) for o in view["orders"] if o["working"]], view["at"]
 
     def filled(self, now: float | None = None) -> list[dict] | None:
         """Every order line with a fill in the last good pass, whatever its day (the desk's account line asks for its
@@ -939,7 +957,7 @@ class Poller:
                 # any state (its new state wins: a cancelled one is gone) and a line not read for three intervals.
                 lines += [o for o in self._desk["orders"] if (o["last4"], o["instrument"]) in got.tried - got.complete
                           and o["order_id"] not in got.seen and now - o["read_at"] <= rb.STALE_REFRESHES * rb.ttl(o["read_at"])]
-            self._desk = {"at": now, "orders": lines}
+            self._desk = {"at": now, "orders": lines, "whole": got.tried <= got.complete}
             self._status = {"at": int(now), "state": "ok", "mode": current, "new_executions": new, "written": result.written,
                             "calls": got.calls, "outcomes": result.outcomes,
                             "complete": len(got.complete) == 2 * len(got.account_types)}

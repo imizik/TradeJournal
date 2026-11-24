@@ -1156,3 +1156,136 @@ def test_the_one_hour_alert_ends_with_the_practice_goal_it_tests(engine, world, 
     assert alerts(engine)[0].delivery == "sent" and "Re-decide: close, trim, or set your exit." in sent[0]
     assert sent[0].endswith("\nPractice this week: no_trade_after_hour_red · kept 2 of 3 so far") == (goal == "no_trade_after_hour_red")
     assert ("Practice" in sent[0]) == (goal == "no_trade_after_hour_red")
+
+
+# ---------------------------------------------------------------- no exit order at 5 minutes
+
+
+@pytest.fixture
+def no_exit_on(monkeypatch):
+    monkeypatch.setenv("POSITION_ALERTS_ENABLED", "true")
+    monkeypatch.setenv("POSITION_NO_EXIT_ALERTS", "true")
+
+
+class Orders:
+    """Robinhood's working orders as the order-history pass holds them: ``read_at`` is that pass's time; None is no read."""
+
+    def __init__(self, clock):
+        self.clock, self.rows, self.off, self.lag = clock, [], False, 0
+
+    def sell(self, last4="8267", strike=230, expiry="2026-10-23", option_type="call", action="sell_to_close"):
+        self.rows.append({"working": True, "action": action, "last4": last4, "symbol": "SNDK", "instrument": "option",
+                          "option_type": option_type, "strike": strike, "expiry": expiry})
+
+    def __call__(self, now):
+        return None if self.off else (list(self.rows), now - self.lag)
+
+
+@pytest.fixture
+def exits(engine):
+    clock = Clock(at(WED, "10:00"))
+    quotes = Quotes(clock)
+    orders = Orders(clock)
+    watcher = PositionAlerts(engine, Calendar(), clock=clock, quotes=quotes, underlying=lambda symbols: {}, orders=orders)
+    return clock, quotes, orders, watcher
+
+
+def test_no_sell_order_five_minutes_after_the_buy_sends_one_alert(engine, exits, no_exit_on):
+    clock, quotes, orders, watcher = exits
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 2, 400, "2026-10-21T10:00")
+    quotes.set(3.90, 3.94)  # mid $3.92: -$16
+    run_at(clock, watcher, WED, "10:04")
+    assert alerts(engine) == []
+    run_at(clock, watcher, WED, "10:05", "10:06", "10:12")
+    assert kinds(engine) == ["no_exit"]
+    title, body, _ = position_alerts.message(alerts(engine)[0])
+    assert title == "SNDK 10/23/26 230C: no exit order set"
+    assert body == ("Bought 5 min ago, now -$16 (-2%) at a $3.92 mid, bid $3.90. 2 contracts open and no sell order working on "
+                    "Robinhood for it. Set your stop and your target now, while it is calm.") + OFF_CONTEXT
+
+
+def test_a_working_sell_order_for_that_contract_and_account_keeps_it_quiet(engine, exits, no_exit_on):
+    clock, quotes, orders, watcher = exits
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
+    quotes.set(4.00)
+    orders.sell()
+    run_at(clock, watcher, WED, "10:05", "10:10")
+    assert alerts(engine) == []
+
+
+@pytest.mark.parametrize("other", [{"last4": "1111"}, {"strike": 235}, {"expiry": "2026-10-30"}, {"option_type": "put"},
+                                   {"action": "buy_to_open"}])
+def test_an_order_on_another_contract_account_or_side_is_not_an_exit(engine, exits, no_exit_on, other):
+    clock, quotes, orders, watcher = exits
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
+    quotes.set(4.00)
+    orders.sell(**other)
+    run_at(clock, watcher, WED, "10:05")
+    assert kinds(engine) == ["no_exit"]
+
+
+def test_no_order_read_or_a_read_from_before_the_deadline_never_guesses(engine, exits, no_exit_on):
+    clock, quotes, orders, watcher = exits
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
+    quotes.set(4.00)
+    orders.off = True
+    run_at(clock, watcher, WED, "10:05")
+    orders.off, orders.lag = False, 90  # the last pass was at 10:04:30, before the 10:05 deadline
+    run_at(clock, watcher, WED, "10:06")
+    assert alerts(engine) == []
+    orders.lag = 30
+    run_at(clock, watcher, WED, "10:07")  # read at 10:06:30: after the deadline
+    assert kinds(engine) == ["no_exit"]
+
+
+def test_it_is_skipped_late_for_yesterday_s_positions_and_without_both_switches(engine, exits, monkeypatch):
+    clock, quotes, orders, watcher = exits
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-20T15:00")  # yesterday's
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00", expiration=date(2026, 10, 30))
+    quotes.set(4.00)
+    monkeypatch.setenv("POSITION_ALERTS_ENABLED", "true")
+    run_at(clock, watcher, WED, "10:05")  # the no-exit switch is off
+    monkeypatch.setenv("POSITION_NO_EXIT_ALERTS", "true")
+    run_at(clock, watcher, WED, "10:15", "10:30")  # past the 10-minute grace
+    assert alerts(engine) == []
+
+
+def test_the_scorecard_leaves_the_no_exit_alert_out(engine, exits, no_exit_on):
+    from app.engine import alert_scorecard
+    clock, quotes, orders, watcher = exits
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
+    quotes.set(4.00)
+    run_at(clock, watcher, WED, "10:05")
+    with Session(engine) as db:
+        row = db.exec(select(PositionAlert)).one()
+        row.delivery = "sent"
+        db.commit()
+        assert alert_scorecard.scorecard(db, clock.now)["alerts"] == 0
+
+
+def test_a_position_in_another_broker_s_account_is_not_judged(engine, exits, no_exit_on):
+    clock, quotes, orders, watcher = exits
+    webull = UUID(int=2)
+    with Session(engine) as db:
+        db.add(Account(id=webull, name="Webull", type="individual", last4="wb01", broker="webull"))
+        db.commit()
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00", account_id=webull)
+    quotes.set(4.00)
+    run_at(clock, watcher, WED, "10:05")
+    assert alerts(engine) == []
+
+
+def test_the_order_read_is_none_when_a_tried_page_was_not_read_whole():
+    from app.engine.robinhood_fills import Poller
+    poller = Poller(now=lambda: 1_000.0)
+    line = {"working": True, "action": "sell_to_close"}
+    poller._desk = {"at": 1_000.0, "orders": [line], "whole": True}
+    assert poller.working(1_000.0) == ([line], 1_000.0)
+    poller._desk["whole"] = False
+    assert poller.working(1_000.0) is None

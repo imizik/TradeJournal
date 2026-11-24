@@ -33,6 +33,7 @@ MAX_ROWS = 60
 SENT = ("sent", "unknown")
 KIND = {"giveback": "Give-back", "hold_hour": "Held an hour", "expiry_first": "Expires today", "expiry_final": "30 minutes left",
         "expiry_eve": "Expires next session", "wrong_way": "Wrong way at 30 min"}
+NOT_SCORED = ("no_exit",)  # a prompt to set an exit at the entry, not to sell: selling at it is not its alternative
 EPSILON = 1e-9
 
 
@@ -119,7 +120,8 @@ def _outcome(db: Session, alert: PositionAlert, trade: Trade | None) -> dict:
 
 def scorecard(db: Session, now: float, days: int = WINDOW_DAYS) -> dict:
     since = datetime.fromtimestamp(now, UTC).replace(tzinfo=None) - timedelta(days=days)
-    alerts = list(db.exec(select(PositionAlert).where(PositionAlert.detected_at >= since, PositionAlert.delivery.in_(SENT))
+    alerts = list(db.exec(select(PositionAlert).where(PositionAlert.detected_at >= since, PositionAlert.delivery.in_(SENT),
+                                                      PositionAlert.kind.not_in(NOT_SCORED))
                           .order_by(PositionAlert.detected_at)).all())
     later: dict[int, datetime] = {}
     for i, alert in enumerate(alerts):
@@ -168,7 +170,8 @@ def week_cost(db: Session, start_utc: datetime, end_utc: datetime) -> dict:
     contracts again), as ``_outcome`` measures it. ``vs_alert_usd`` sums the closed ones: negative means selling at the
     first ping would have fetched that much more than what he did. Positions still open are counted apart."""
     alerts = db.exec(select(PositionAlert).where(PositionAlert.detected_at >= start_utc, PositionAlert.detected_at < end_utc,
-                                                 PositionAlert.delivery.in_(SENT)).order_by(PositionAlert.detected_at)).all()
+                                                 PositionAlert.delivery.in_(SENT), PositionAlert.kind.not_in(NOT_SCORED))
+                     .order_by(PositionAlert.detected_at)).all()
     first: dict = {}
     for alert in alerts:
         first.setdefault((alert.account_id, alert.source_key), alert)
