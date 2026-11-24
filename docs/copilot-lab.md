@@ -1305,7 +1305,10 @@ taken in FIFO order up to the contracts the alert saw open; contracts that expir
 nothing; a position still open is "still open"; a short position, an alert
 with no price, or a trade that cannot be found is "not measured". One line
 sums it ("You held 5: 3 better than selling at the alert, 1 worse, 1 still
-open (net +$412)"), and each alert is behind "Each alert". Alerts are prompts
+open (net +$412)"): the counts are per alert, the net counts each position
+once, from its first measured alert with that decision, because several
+alerts on one position are measured on the same contracts. Each alert is
+behind "Each alert". Alerts are prompts
 to decide, not exit rules (the 2026-10-24 exit study), so their value shows
 here, in what was decided after them. Read-only; it changes no alert or
 threshold. Proof: `tests/test_alert_scorecard.py`,
