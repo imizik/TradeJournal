@@ -222,7 +222,7 @@ class _Thursday(date):
 @pytest.fixture(autouse=True)
 def on_thursday(monkeypatch):
     """Trade rebuilds expire contracts past the machine's own date; these run as of Oct 23, whatever today is."""
-    monkeypatch.setattr(reconstructor, "date", _Thursday)
+    monkeypatch.setattr(reconstructor, "expiry_cutoff", lambda now=None: _Thursday.today())
 
 
 @pytest.fixture

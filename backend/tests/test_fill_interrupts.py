@@ -56,7 +56,7 @@ class _Wednesday(date):
 
 @pytest.fixture(autouse=True)
 def on_wednesday(monkeypatch):
-    monkeypatch.setattr(reconstructor, "date", _Wednesday)
+    monkeypatch.setattr(reconstructor, "expiry_cutoff", lambda now=None: _Wednesday.today())
     for name in ("FILL_INTERRUPTS_ENABLED", "PING_BUDGET_INTERRUPT", "PING_QUIET_MINUTES", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
                  "ALERT_APP_URL"):
         monkeypatch.delenv(name, raising=False)

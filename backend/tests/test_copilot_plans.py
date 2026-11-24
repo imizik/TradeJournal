@@ -36,7 +36,7 @@ class _Wednesday(date):
 
 @pytest.fixture
 def engine(monkeypatch):
-    monkeypatch.setattr(reconstructor, "date", _Wednesday)
+    monkeypatch.setattr(reconstructor, "expiry_cutoff", lambda now=None: _Wednesday.today())
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:

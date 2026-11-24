@@ -93,7 +93,7 @@ class Phone:
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
-    monkeypatch.setattr(reconstructor, "date", _Wednesday)
+    monkeypatch.setattr(reconstructor, "expiry_cutoff", lambda now=None: _Wednesday.today())
     monkeypatch.setenv("POSITION_COMPANION_ENABLED", "true")
     monkeypatch.setenv("COPILOT_ENABLED", "true")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")

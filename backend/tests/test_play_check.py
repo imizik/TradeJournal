@@ -28,7 +28,7 @@ class _Wednesday(date):
 
 @pytest.fixture
 def engine(monkeypatch):
-    monkeypatch.setattr(reconstructor, "date", _Wednesday)
+    monkeypatch.setattr(reconstructor, "expiry_cutoff", lambda now=None: _Wednesday.today())
     monkeypatch.setattr(play_check, "_history", None)
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     SQLModel.metadata.create_all(engine)
@@ -332,7 +332,7 @@ def test_a_stale_leg_is_grey_with_its_time_and_no_number():
 
 def test_the_ticket_carries_the_check(monkeypatch):
     from tests.test_desk_ticket import NOW as TICKET_NOW, plan
-    monkeypatch.setattr(reconstructor, "date", _Wednesday)
+    monkeypatch.setattr(reconstructor, "expiry_cutoff", lambda now=None: _Wednesday.today())
     monkeypatch.setattr(chart_feed, "quote_rows", lambda symbols: ([], None, None))
     monkeypatch.setattr(play_check, "_history", None)
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)

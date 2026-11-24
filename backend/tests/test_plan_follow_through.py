@@ -64,7 +64,7 @@ class _Wednesday(date):
 
 @pytest.fixture(autouse=True)
 def on_wednesday(monkeypatch):
-    monkeypatch.setattr(reconstructor, "date", _Wednesday)
+    monkeypatch.setattr(reconstructor, "expiry_cutoff", lambda now=None: _Wednesday.today())
     monkeypatch.delenv("PLAN_TIME_STOPS_ENABLED", raising=False)
 
 

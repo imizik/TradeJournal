@@ -129,7 +129,7 @@ def test_score_drops_what_it_cannot_price_and_flags_gaps():
 
 @pytest.fixture(autouse=True)
 def quiet(monkeypatch):
-    monkeypatch.setattr(reconstructor, "date", type("Wed", (date,), {"today": classmethod(lambda cls: WED)}))
+    monkeypatch.setattr(reconstructor, "expiry_cutoff", lambda now=None: WED)
     monkeypatch.delenv("EXPRESSION_RECORDER_ENABLED", raising=False)
 
 

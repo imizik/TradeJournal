@@ -169,7 +169,7 @@ class _Thursday(date):
 @pytest.fixture(autouse=True)
 def on_thursday(monkeypatch):
     """Trade rebuilds expire contracts past the machine's own date; these run as of Oct 23, whatever today is."""
-    monkeypatch.setattr(reconstructor, "date", _Thursday)
+    monkeypatch.setattr(reconstructor, "expiry_cutoff", lambda now=None: _Thursday.today())
 
 
 @pytest.fixture
@@ -484,6 +484,8 @@ def test_the_sync_pipeline_rebuilds_when_an_option_expired_with_no_new_fill(monk
     monkeypatch.setattr(sync, "_import_fills_from_gmail", lambda session, start_enrichment: {"saved": 0, "skipped": 0})
     monkeypatch.setattr(sync, "_run_existing_enrichment", lambda *a: types.SimpleNamespace(total=0, id=None))
     monkeypatch.setattr(sync, "_run_outcomes", lambda session, job_id: (0, "nothing"))
+    for module in (sync, reconstructor):  # Friday's session has settled: its options are expired
+        monkeypatch.setattr(module, "expiry_cutoff", lambda now=None: date(2026, 11, 14))
 
     def run_pipeline() -> list[str]:
         with Session(engine) as db:
