@@ -649,8 +649,9 @@ def test_a_card_ping_carries_the_card_and_plan_it_on_its_own_row(engine, monkeyp
     setup = _card(engine, event)
     alerts = RadarAlerts(engine, clock=Clock(at(22)))
     [row] = alerts.record([event])
-    assert (row.title, row.body) == radar_setup.card_text(event, setup)
-    assert row.title == "Radar setup: AAA reversing up after a gap down"
+    title, body = radar_setup.card_text(event, setup)
+    assert (row.title, row.body) == (f"PAPER · {title}", body)  # labeled until Radar setups graduate (proving_ground)
+    assert row.title == "PAPER · Radar setup: AAA reversing up after a gap down"
     assert row.body.splitlines()[0] == "In near 99.20 · out below 96.40 (−2.8%)"
     alerts.deliver()
     [(title, _, kw)] = sent
@@ -680,7 +681,7 @@ def test_a_card_skips_the_movers_demotion_but_a_plain_setup_event_does_not(engin
     carded, plain = _reversal(), _reversal("rg0-bbb", "BBB")
     _card(engine, carded)
     first, second = RadarAlerts(engine, store=object(), clock=Clock(at(22))).record([carded, plain])
-    assert first.delivery == "pending" and first.title.startswith("Radar setup: AAA")
+    assert first.delivery == "pending" and first.title.startswith("PAPER · Radar setup: AAA")
     assert second.delivery == "digest" and second.body == "Also on Movers: BBB"
 
 
@@ -713,7 +714,7 @@ def test_a_card_ping_has_its_own_kind_and_budget_and_a_setup_without_a_card_stay
     monkeypatch.setenv("RADAR_SETUP_CARDS", "true")
     monkeypatch.setenv("PING_BUDGET_RADAR_EVENT", "0")  # strong movers spent: the card ping still goes
     sent = _deliver_one(engine, _reversal(), monkeypatch)
-    assert len(sent) == 1 and sent[0]["title"].startswith("Radar setup: AAA")
+    assert len(sent) == 1 and sent[0]["title"].startswith("PAPER · Radar setup: AAA")
     [ping] = pings(engine)
     assert (ping.kind, ping.decision, ping.rank) == ("radar_setup", "sent", notification_policy.rank("radar_event") - 1)
     # The same kind of event without a card is a plain radar_event ping, held by that budget.
@@ -745,7 +746,7 @@ def test_by_default_both_sides_of_a_setup_ping(engine, monkeypatch, sides):
     monkeypatch.setenv("RADAR_SETUP_CARDS", "true")
     _card(engine, down := _reversal("rg0-down", "BBB", direction="down"))
     [row] = RadarAlerts(engine, clock=Clock(at(22))).record([down])
-    assert row.delivery == "pending" and row.title.startswith("Radar setup: BBB reversing down")
+    assert row.delivery == "pending" and row.title.startswith("PAPER · Radar setup: BBB reversing down")
 
 
 @pytest.mark.parametrize("cards", ("true", ""))

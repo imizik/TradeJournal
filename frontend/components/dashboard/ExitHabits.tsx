@@ -19,7 +19,11 @@ export type ExitHabitsBody = { go_live: string; window: number; since_go_live: n
   /** Closed or trimmed within 15 minutes: the frozen pre-alert baseline next to settled sent alerts. Absent from an older backend. */
   before_after?: { source: string; rows: { kind: string; before: { n: number; of: number; pct: number };
     since: { n: number; of: number; pct: number | null; left_out: number } }[] };
+  /** Dollars lost each week to expiries and give-backs, oldest first, the current partial week last. Absent from an older backend. */
+  leak?: LeakBody;
   verdict: { verdict: "helping" | "not_helping" | "not_enough_data"; reason: string; rule: string; sample: number } };
+export type LeakWeek = { week: string; expired: number; giveback: number; total: number; trades: number; no_path: number };
+export type LeakBody = { weeks: LeakWeek[]; this_week: LeakWeek; last_4_avg: number | null; prior_4_avg: number | null };
 
 const KIND: Record<string, string> = { giveback: "Gave back its gain", expiry_first: "Expires today", expiry_final: "Last 30 minutes",
   hold_hour: "Held an hour", wrong_way: "Wrong way at 30 min", no_exit: "No exit order at 5 min" };

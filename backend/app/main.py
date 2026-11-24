@@ -305,6 +305,31 @@ async def _maybe_start_radar(app_: FastAPI):
     return asyncio.create_task(loop())
 
 
+async def _maybe_start_proving_ground(app_: FastAPI):
+    """The paper proving ground (app/engine/proving_ground.py): every idea source on one bracket; off unless
+    PROVING_GROUND_ENABLED=true."""
+    app_.state.proving_ground = None
+    if os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    from app.engine.proving_ground import RUN_SECONDS, ground_from_env
+    try:
+        ground = ground_from_env(engine)
+    except Exception:
+        # A bad path must not keep the journal API (and S1, alerts, fills) from starting.
+        logging.getLogger(__name__).exception("Proving ground could not start; it stays off")
+        ground = None
+    app_.state.proving_ground = ground
+    if ground is None:
+        return None
+
+    async def loop():
+        while True:
+            await asyncio.to_thread(ground.run)  # never raises
+            await asyncio.sleep(RUN_SECONDS - time.time() % RUN_SECONDS + 5)  # just after each Radar pass
+
+    return asyncio.create_task(loop())
+
+
 async def _maybe_start_jo_morning(app_: FastAPI):
     """Optional publication/import only, inside the existing API process."""
     app_.state.jo_morning = None
@@ -535,6 +560,7 @@ async def lifespan(_app: FastAPI):
     research = await _maybe_start_research_queue(_app)
     thesis_watch = await _maybe_start_thesis_watch(_app)
     shadow_book = await _maybe_start_shadow_book(_app)
+    proving_ground = await _maybe_start_proving_ground(_app)
     companion = await _maybe_start_position_companion(_app)
     chatter = await _maybe_start_chatter(_app)
     robinhood_fills = await _maybe_start_robinhood_fills(_app)
@@ -560,6 +586,8 @@ async def lifespan(_app: FastAPI):
             companion.cancel()
         if shadow_book is not None:
             shadow_book.cancel()
+        if proving_ground is not None:
+            proving_ground.cancel()
         if thesis_watch is not None:
             thesis_watch.cancel()
         if jo_morning is not None:

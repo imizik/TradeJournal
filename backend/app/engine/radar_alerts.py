@@ -68,7 +68,7 @@ from sqlalchemy import or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import (notification_policy, ntfy, phone, ping_images, radar_dip, radar_reversal, radar_rules, radar_setup,
+from app.engine import (notification_policy, ntfy, phone, ping_images, proving_ground, radar_dip, radar_reversal, radar_rules, radar_setup,
                         telegram_replies)
 from app.engine.chart_math import ET
 from app.engine.radar_movers import event_movers_tags
@@ -268,7 +268,8 @@ def _setup(db: Session, event_id: str) -> RadarSetup | None:
 def _card(db: Session, event: dict, setup: RadarSetup) -> tuple[str, str]:
     """The setup card as the ping's title and body; the plain message if the card cannot be written."""
     try:
-        return radar_setup.card_text(event, setup, paper_line=radar_setup.paper_record(db, setup.kind, setup.direction))
+        title, body = radar_setup.card_text(event, setup, paper_line=radar_setup.paper_record(db, setup.kind, setup.direction))
+        return proving_ground.label("radar_setup", title), body  # PAPER until the source graduates
     except Exception:
         log.exception("Radar setup card text failed for %s; the plain ping goes instead", event["event_id"])
         return message(event)

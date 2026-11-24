@@ -14,6 +14,10 @@ for (const [size, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844
     page.on("pageerror", (error) => errors.push(error.message));
     await page.setViewportSize({ width, height });
     await page.goto("/proof");
+    // The one number leads: every seeded trade closed long ago, so nothing was lost this week.
+    await expect(page.getByTestId("proof-leak-number")).toHaveText("$0");
+    await expect(page.getByTestId("proof-leak-weeks").locator("div")).toHaveCount(12);
+    await page.getByTestId("proof-leak").screenshot({ path: test.info().outputPath(`proof-leak-${size}.png`) });
     // Alerts: every seeded trade predates the alerts, so nothing is claimed.
     const alerts = page.getByTestId("proof-alerts-verdict");
     await expect(alerts).toContainText("Not enough data");
