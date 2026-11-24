@@ -729,10 +729,15 @@ export function readFeedLink(value: string | string[] | undefined): FeedLink | n
 
 /** A position ping's ``card=alert:<id>`` or ``card=interrupt:<id>`` (docs/copilot-lab.md § Where a ping opens): the desk
  * opens on that ping's card (``PingCard``). Anything else is dropped. */
-export type CardLink = { kind: "alert" | "interrupt"; id: string };
-export function readCardLink(value: string | string[] | undefined): CardLink | null {
-  const match = /^(alert|interrupt):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(((Array.isArray(value) ? value[0] : value) ?? "").trim());
-  return match ? { kind: match[1].toLowerCase() as CardLink["kind"], id: match[2].toLowerCase() } : null;
+/** ``act`` is the ping's Close or Trim button (``&do=close|trim``): the card points at that button. It never copies by
+ * itself, because the clipboard needs his tap and the price is read again on the card. */
+export type CardLink = { kind: "alert" | "interrupt"; id: string; act?: "close" | "trim" };
+export function readCardLink(value: string | string[] | undefined, act?: string | string[]): CardLink | null {
+  const first = (v: string | string[] | undefined) => ((Array.isArray(v) ? v[0] : v) ?? "").trim().toLowerCase();
+  const match = /^(alert|interrupt):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(first(value));
+  if (!match) return null;
+  const to = first(act);
+  return { kind: match[1].toLowerCase() as CardLink["kind"], id: match[2].toLowerCase(), ...(to === "close" || to === "trim" ? { act: to } : {}) };
 }
 
 // --------------------------------------------------------------------------- research queue

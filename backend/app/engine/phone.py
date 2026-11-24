@@ -26,6 +26,19 @@ from app.engine import ntfy, ping_images, telegram
 
 log = logging.getLogger(__name__)
 
+# Two tiers (docs/phone-pings.md § Two tiers): only a ping about risk on an open position makes a sound. Everything else
+# (Radar, briefs, paper, plan nudges, reviews, the companion, digests) arrives silently: Telegram's
+# ``disable_notification``, ntfy's low priority. A fill-time pattern interrupt is loud only for its size and late
+# short-dated rules (the sender says, with ``loud``).
+LOUD = frozenset({"giveback", "hold_hour", "expiry_first", "expiry_final", "expiry_eve", "wrong_way", "no_exit",
+                  "day_loss", "day_green", "invalidation", "target", "time_stop", "level_alert"})
+SILENT = 2  # Telegram sends priority 2 or lower without a sound; ntfy's 2 is "low": no sound or vibration
+
+
+def loud(kind: str, said: bool | None = None) -> bool:
+    """Whether a ``kind`` ping makes a sound: ``said`` when the sender decides (a pattern interrupt), else ``LOUD``."""
+    return said if said is not None else kind in LOUD
+
 SendError = ntfy.NtfyError
 NO_WHY = frozenset({"prep", "week_review", "day_replay", "evening_review", "companion_adopt", "companion_update",
                     "paper_review", "self_check", "note_digest"})
@@ -59,15 +72,20 @@ def transport() -> str | None:
 
 def send(title: str, message: str, *, kind: str, path: str = "", buttons: tuple[tuple[str, str], ...] = (), image: bytes | None = None,
          priority: int | None = None, reply_to: str | None = None, open_label: str = "Open",
-         broker_link: tuple[str, str] | None = None, **ntfy_options) -> tuple[str | None, str]:
+         broker_link: tuple[str, str] | None = None, sound: bool | None = None, keep_links: bool = False,
+         **ntfy_options) -> tuple[str | None, str]:
     """Send one ping of ``kind`` (the policy's kind, for the log); see the module docstring. ``reply_to`` (a Telegram
     message id) and ``open_label`` are Telegram's only: ntfy has no threads, and its Open is its own. ``broker_link`` is
-    (label, whole https URL), a button beside Open on Telegram; on ntfy only while its three actions have room."""
+    (label, whole https URL), a button beside Open on Telegram; on ntfy only while its three actions have room.
+    ``sound``: the sender's own tier (``loud``); a ping that is not loud goes at ``SILENT`` priority or lower.
+    ``keep_links``: ``more`` are action links, not ntfy's copies of the reply ``buttons``, so Telegram shows both."""
+    if not loud(kind, sound):
+        priority = min(3 if priority is None else priority, SILENT)
     external = (broker_link,) if broker_link else ()
     if telegram.configured():
         # The ping's own answer buttons replace its answer links; the added Why? does not.
         options = {"path": path, "buttons": with_why(kind, tuple(buttons)), "priority": 4 if priority is None else priority,
-                   "links": (() if buttons else tuple(ntfy_options.get("more", ()))) + external, "reply_to": reply_to,
+                   "links": (() if buttons and not keep_links else tuple(ntfy_options.get("more", ()))) + external, "reply_to": reply_to,
                    "open_label": open_label}
         if image is not None and telegram.caption_fits(title, message):
             try:

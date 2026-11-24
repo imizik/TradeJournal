@@ -58,6 +58,8 @@ export function exitOrders(orders: readonly DeskOrder[] | undefined): DeskOrder[
 
 /** A bid older than this is not "the bid": the card prices at the mid now instead and says so. */
 const FRESH_BID_SECONDS = 10 * 60;
+/** The button the ping's Close or Trim link asked for. */
+const ASKED = "ring-4 ring-amber-400 ring-offset-2 ring-offset-card";
 const BIG = "flex min-h-12 w-full items-center justify-center rounded-lg px-4 text-base font-semibold";
 const hhmm = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
 const usd0 = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}$${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
@@ -110,7 +112,7 @@ export default function PingCard({ card, rows, ordersLive, onSymbol, onAsk, onPl
         : !body ? <p role="status" className="pr-10 text-sm text-muted-foreground">Reading the ping…</p>
         : <>
           <Trigger body={body} />
-          {row ? <Act key={row.key} body={body} row={row} rows={rows} ordersLive={ordersLive} onAsk={onAsk} onPlan={onPlan} />
+          {row ? <Act key={row.key} act={card.act} body={body} row={row} rows={rows} ordersLive={ordersLive} onAsk={onAsk} onPlan={onPlan} />
             : <p data-testid="ping-card-closed" className="text-sm text-muted-foreground">
                 {body.position?.open === false ? `This ${body.symbol ?? ""} position is closed.`
                   : rows.length ? `This ${body.symbol ?? ""} position is not on the desk now: it may already be closed.` : "Reading your positions…"}
@@ -143,8 +145,8 @@ function Trigger({ body }: { body: PingCardBody }) {
 type Done = { text: string; copied?: boolean };
 
 /** The position as it stands, and what to do about it. */
-function Act({ body, row, rows, ordersLive, onAsk, onPlan }: {
-  body: PingCardBody; row: DeskThread; rows: readonly DeskThread[]; ordersLive: boolean; onAsk(text: string): void; onPlan(symbol: string): void;
+function Act({ act, body, row, rows, ordersLive, onAsk, onPlan }: {
+  act?: "close" | "trim"; body: PingCardBody; row: DeskThread; rows: readonly DeskThread[]; ordersLive: boolean; onAsk(text: string): void; onPlan(symbol: string): void;
 }) {
   const book = row.book!;
   const symbol = row.symbol!;
@@ -236,11 +238,13 @@ function Act({ body, row, rows, ordersLive, onAsk, onPlan }: {
 
       <div role="group" aria-label="Act on this position" className="space-y-2">
         {copyable ? <>
-          <button type="button" data-testid="ping-card-close" onClick={() => void copyClose(held!)} className={cn(BIG, "bg-primary text-primary-foreground")}>
+          <button type="button" data-testid="ping-card-close" data-asked={act === "close" || undefined} autoFocus={act === "close"}
+            onClick={() => void copyClose(held!)} className={cn(BIG, "bg-primary text-primary-foreground", act === "close" && ASKED)}>
             Copy Close all {held} @ {basis} {sellAt!.toFixed(2)}
           </button>
           <div className="grid grid-cols-2 gap-2">
-            {half ? <button type="button" data-testid="ping-card-trim" onClick={() => void copyClose(half)} className={cn(BIG, "border text-foreground hover:bg-secondary")}>Copy Trim {half}</button>
+            {half ? <button type="button" data-testid="ping-card-trim" data-asked={act === "trim" || undefined} autoFocus={act === "trim"}
+              onClick={() => void copyClose(half)} className={cn(BIG, "border text-foreground hover:bg-secondary", act === "trim" && ASKED)}>Copy Trim {half}</button>
               : <span />}
             <button type="button" data-testid="ping-card-stop" onClick={() => plan && side ? setStopping(stopping === "stop" ? null : "stop") : onPlan(symbol)}
               className={cn(BIG, "border text-foreground hover:bg-secondary")}>Set stop</button>

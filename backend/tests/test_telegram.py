@@ -207,11 +207,39 @@ def test_phone_falls_back_to_ntfy_unchanged_and_drops_reply_buttons(monkeypatch)
     sent = []
     monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: sent.append((title, body, kw)) or "ntfy-id")
     assert phone.transport() == "ntfy"
-    assert phone.send("T", "m", kind="week_review", path="/w", buttons=(("Why?", "why:a"),), priority=3, tags=("bar_chart",),
+    assert phone.send("T", "m", kind="giveback", path="/w", buttons=(("Why?", "why:a"),), priority=3, tags=("bar_chart",),
                       direct_click=True) == ("ntfy-id", "none")
     assert sent == [("T", "m", {"path": "/w", "priority": 3, "tags": ("bar_chart",), "direct_click": True})]
     phone.send("T", "m", kind="level_alert", path="/charts")
     assert sent[-1] == ("T", "m", {"path": "/charts"})  # exactly the keywords the sender gave
+
+
+def test_only_position_risk_pings_make_a_sound(monkeypatch):
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    sent = []
+    monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: sent.append(kw) or "ntfy-id")
+    for kind in ("giveback", "expiry_final", "no_exit", "wrong_way", "hold_hour", "day_loss", "invalidation", "time_stop"):
+        phone.send("T", "m", kind=kind, priority=4)
+        assert sent[-1]["priority"] == 4, kind
+    for kind in ("radar_move", "prep", "paper", "nudge", "week_review", "companion_update", "evening_review"):
+        phone.send("T", "m", kind=kind, priority=4)
+        assert sent[-1]["priority"] == 2, kind  # ntfy's low: no sound or vibration
+    phone.send("T", "m", kind="prep")
+    assert sent[-1]["priority"] == 2  # a sender that names no priority goes silent too
+    phone.send("T", "m", kind="interrupt", priority=4, sound=True)
+    assert sent[-1]["priority"] == 4
+    phone.send("T", "m", kind="interrupt", priority=4, sound=False)
+    assert sent[-1]["priority"] == 2
+
+
+def test_on_telegram_a_quiet_ping_disables_the_notification_and_kept_links_sit_beside_reply_buttons(monkeypatch):
+    calls = []
+    monkeypatch.setattr(telegram, "configured", lambda: True)
+    monkeypatch.setattr(telegram, "publish", lambda title, body, **kw: calls.append(kw) or "1")
+    phone.send("T", "m", kind="paper", priority=4)
+    assert calls[-1]["priority"] == 2  # telegram.publish sends priority 2 or lower with disable_notification
+    phone.send("T", "m", kind="giveback", buttons=(("Why?", "why:a"),), more=(("Close", "/c"),), keep_links=True)
+    assert calls[-1]["links"] == (("Close", "/c"),) and calls[-1]["priority"] == 4
 
 
 def test_nothing_configured_means_not_configured():

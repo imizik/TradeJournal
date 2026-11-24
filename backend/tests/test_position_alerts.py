@@ -332,7 +332,7 @@ def test_on_telegram_the_answers_and_why_are_reply_buttons_not_links(engine, wor
     assert alerts(engine)[0].delivery == "sent"
 
 
-def test_a_ping_carries_two_answer_buttons_and_opens_the_desk_while_the_lab_is_on(engine, world, monkeypatch):
+def test_a_ping_carries_close_and_trim_into_its_card_while_the_lab_is_on_and_the_answers_while_it_is_off(engine, world, monkeypatch):
     from urllib.parse import parse_qs, urlsplit
     clock, _, watcher = world
     alert = fired(engine, world)
@@ -354,7 +354,8 @@ def test_a_ping_carries_two_answer_buttons_and_opens_the_desk_while_the_lab_is_o
     monkeypatch.setenv("COPILOT_ENABLED", "true")
     watcher.deliver()
     assert sent[1][1] == f"/copilot-lab?symbol=SNDK&card=alert%3A{alert.id}"  # no plan card saved this position: the desk opens on the symbol
-    assert buttons[1] == buttons[0]  # the answers still open the trade page, where Ask copilot is the primary action
+    card = f"/copilot-lab?symbol=SNDK&card=alert%3A{alert.id}"
+    assert buttons[1] == (("Close", f"{card}&do=close"), ("Trim", f"{card}&do=trim"))  # the desk on: Close and Trim, not the survey
 
     with Session(engine) as db:
         db.get(PositionAlert, alert.id).delivery = "pending"

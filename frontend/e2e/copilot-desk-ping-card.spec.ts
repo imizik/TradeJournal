@@ -178,3 +178,13 @@ test("only a working closing order counts as the exit: a working buy to open is 
   expect(exitOrders([order("Buy to open"), order("Sell to close")]).map(o => o.action)).toEqual(["Sell to close"]);
   expect(exitOrders(undefined)).toEqual([]);
 });
+
+test("a risk ping's Trim button lands on the card pointing at Trim, without copying anything by itself", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const writes = await open(page, { path: `${LINK}&do=trim` });
+  const trim = card(page).getByTestId("ping-card-trim");
+  await expect(trim).toHaveAttribute("data-asked", "true");
+  await expect(trim).toBeFocused();
+  await expect(card(page).getByTestId("ping-card-close")).not.toHaveAttribute("data-asked");
+  expect(posted(writes)).toEqual([]);
+});

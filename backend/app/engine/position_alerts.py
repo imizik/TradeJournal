@@ -623,18 +623,21 @@ def answer_path(alert: PositionAlert, rating: str) -> str:
 
 
 def _links(db: Session, alert: PositionAlert) -> tuple[str, tuple[tuple[str, str], ...]]:
-    """Where the ping opens, and its answer buttons. While Copilot Lab is on the tap (and ntfy's Open app) opens the
-    desk's thread for the position, so it lands on the decision; otherwise the trade page. Either way the two answer
-    buttons open the trade page on the alert with the feedback saved, where Ask copilot (with ask_context) is the primary action (ntfy
-    shows three actions: Open app and these two). A desk link that cannot be built falls back to the trade page, so it
-    never holds back the alert."""
+    """Where the ping opens, and its two action links. While Copilot Lab is on the tap (and ntfy's Open app) opens the
+    desk's ping card for the position, and the two links are Close and Trim (the same card, that button marked). With
+    the lab off the tap opens the trade page and the two links are the answer buttons, which open the trade page on
+    the alert with the feedback saved (ntfy shows three actions: Open app and these two). A desk link that cannot be
+    built falls back to the trade page and the answers, so it never holds back the alert."""
     trade = f"/trades/{alert.trade_id}?alert={alert.id}"
     answers = tuple((label, answer_path(alert, rating)) for label, rating in ANSWER_ACTIONS)
     if os.environ.get("COPILOT_ENABLED") != "true":
         return trade, answers
     try:
         with Session(db.get_bind()) as own:  # its own session: a failed read cannot abort the alert's transaction
-            return desk_path(own, alert), answers
+            card = desk_path(own, alert)
+            # Close and Trim instead of the survey: each opens the ping card on that button. What he did is measured
+            # from his fills (the alert scorecard), not from an answer.
+            return card, (("Close", f"{card}&do=close"), ("Trim", f"{card}&do=trim"))
     except Exception:  # noqa: BLE001 - the alert matters more than where it opens
         log.warning("Desk link skipped for a position alert", exc_info=True)
         return trade, answers
@@ -893,7 +896,10 @@ class PositionAlerts:
             try:
                 _, image_state = phone.send(title, body + ticket.append, kind=alert.kind, image=image, priority=priority, tags=("warning",),
                                             path=path, direct_click=True, more=more, broker_link=robinhood_link(db, alert),
-                                            buttons=telegram_replies.feedback_buttons(alert.id))  # all four answers; ntfy keeps ANSWER_ACTIONS
+                                            # With the desk on: Close and Trim links, and Why? alone as a reply button.
+                                            # Without it: the four answers (ntfy keeps ANSWER_ACTIONS).
+                                            **({"buttons": (("Why?", f"why:{alert.id}"),), "keep_links": True} if path.startswith("/copilot-lab")
+                                               else {"buttons": telegram_replies.feedback_buttons(alert.id)}))
             except phone.SendError as exc:
                 if not _surely_unsent(exc):
                     alert.delivery, alert.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
