@@ -6,6 +6,7 @@ import type { DeskPlan, DeskSession } from "@/lib/desk";
 import type { PaperBook } from "@/lib/paperBook";
 import { cn } from "@/lib/utils";
 import MorningBrief from "./MorningBrief";
+import DayPlanCard from "./DayPlanCard";
 import { GoalsLine } from "./DeskGoals";
 import { PaperScoreLine } from "./DeskPaper";
 import { RulesSplitLine } from "./DeskRules";
@@ -43,7 +44,7 @@ function Step({ id, n, name, state, run, open, body, done }: {
  * The Day button's checklist (docs/copilot-lab.md § The desk, The day's checklist): the day's routine as one short list in
  * the copilot column, each step one line with its state. A step opens the piece that already does it, where it lives or
  * in place here; nothing is re-implemented and every piece stays where it is on the desk.
- * - **Start the day**: the morning brief (the session read's ``prep``), plans to arm (Arm today's plans' checklist), this
+ * - **Start the day**: the morning brief (the session read's ``prep``), today's max size and exit time (``DayPlanCard``), plans to arm (Arm today's plans' checklist), this
  *   week's goals (the goals line and its editor), and the prep question (into the box, unsent).
  * - **Close the day**: your day (the day read at the top of Now), to review (the close pass), paper next to real (the
  *   paper book's score line), rules followed vs broken, goals, and one thing for tomorrow (the close question, unsent).
@@ -93,9 +94,10 @@ export default function DayChecklist({ kind, early = false, prep, plans, book, b
             state={lines.length ? `written${prep?.at != null ? ` ${hhmm(prep.at)} ET` : ""}${prep?.fallback ? " · facts only" : ""}` : "not written yet"}
             run={lines.length ? () => setBrief(b => !b) : undefined}
             body={brief && lines.length ? <MorningBrief prep={prep} fill={fill} max={3} /> : undefined} />
-          <Step id="arm" n={2} name={"Arm today's plans"} state={armed ? `${plural(armed, "plan")} armed` : "none armed"} run={onArm} />
-          {goalsStep(3)}
-          <Step id="prep" n={4} name="Prep the day" state="its question into the box, unsent" run={onPrep} />
+          <Step id="day-plan" n={2} name="Max size and exit time" state="" body={<DayPlanCard bare className="border-0 bg-transparent p-0" />} />
+          <Step id="arm" n={3} name={"Arm today's plans"} state={armed ? `${plural(armed, "plan")} armed` : "none armed"} run={onArm} />
+          {goalsStep(4)}
+          <Step id="prep" n={5} name="Prep the day" state="its question into the box, unsent" run={onPrep} />
         </ol>
       ) : (
         <ol className="divide-y">

@@ -16,7 +16,8 @@ from app.models import DailyReviewRecord, DayJournalEntry
 # header. ``plan_ask``: the answer to the desk's one "Want a plan for this?" about a position with no plan.
 # ``plan_done``: the symbol's plan is done (its exit review answered or skipped, or Mark done). ``follow``: whether the
 # owner follows a ticker on the desk (``FOLLOW``' words; the newest entry wins), from Now's Hide or the thread header.
-KINDS = {"outlook", "update", "idea", "reflection", "decision", "horizon", "plan_ask", "plan_done", "follow"}
+# ``day_plan``: the pre-market plan card's max size and exit time (``day_plan``), its numbers in ``context_json``.
+KINDS = {"outlook", "update", "idea", "reflection", "decision", "horizon", "plan_ask", "plan_done", "follow", "day_plan"}
 HORIZONS = {"Day trade": "day", "Swing": "swing", "Long hold": "long"}
 FOLLOW = {"Not following": False, "Following": True}
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9./-]{0,14}$")
@@ -87,7 +88,7 @@ def append(session: Session, *, day: date, operation_id: str, kind: str, text: s
     if not operation_id.strip() or len(operation_id) > 100:
         raise EntryError("operation_id must contain 1 to 100 characters")
     if kind not in KINDS:
-        raise EntryError("kind must be outlook, update, idea, reflection, decision, horizon, plan_ask, plan_done, or follow")
+        raise EntryError("kind must be outlook, update, idea, reflection, decision, horizon, plan_ask, plan_done, follow, or day_plan")
     if kind == "horizon" and text not in HORIZONS:
         raise EntryError(f"a horizon is one of {', '.join(HORIZONS)}")
     if kind == "follow" and (text not in FOLLOW or not symbol):

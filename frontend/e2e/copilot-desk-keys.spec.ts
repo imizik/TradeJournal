@@ -1077,6 +1077,16 @@ test("before the open the Day button is Start the day: one checklist, Arm opens 
     plan({ stage: "in_position", symbol: "NBIS", investigation_id: NBIS })] });
   const lines = ["**Wait** — **CPI at 8:30 sets the tone.**", "- APLD needs 31.00 on volume.", "- CRWV short only under 99.00."];
   await page.route("**/day-journal/2026-10-23", (route) => route.fulfill({ json: { day: "2026-10-23", entries: [], trade_plans: {} } }));
+  // Today's plan: none yet; saving one posts the two numbers and shows them (DayPlanCard.tsx).
+  const planPosts: Record<string, unknown>[] = [];
+  await page.route("**/copilot/desk/day-plan", (route) => {
+    if (route.request().method() === "POST") {
+      const sent = route.request().postDataJSON();
+      planPosts.push(sent);
+      return route.fulfill({ json: { day: "2026-10-23", pings: true, plan: { day: "2026-10-23", max_usd: sent.max_usd, exit_by: sent.exit_by, text: "", saved_at: 0 } } });
+    }
+    return route.fulfill({ json: { day: "2026-10-23", plan: null, pings: true } });
+  });
   const { chats } = await dayDesk(page, { time: new Date("2026-10-23T12:45:00Z"), threads, showThreads: false, // 8:45 New York, a Friday
     session: { ...SESSION, now: epoch("2026-10-23T12:45:00Z"), phase: "pre", events: [], time_stops: [],
       prep: { at: epoch("2026-10-23T12:30:00Z"), line: lines[0], lines, fallback: false, path: null } } });
@@ -1089,10 +1099,23 @@ test("before the open the Day button is Start the day: one checklist, Arm opens 
   await dayButton(page).click();
   const list = dayList(page);
   await expect(list).toHaveAttribute("data-kind", "start");
-  await expect(list.getByRole("listitem")).toHaveText([/^1Morning briefwritten 08:30 ET/, /^2Arm today's plans2 plans armed/,
-    /^3This week's goals1 of 1 on track/, /^4Prep the dayits question into the box, unsent/]);
+  await expect(list.getByRole("listitem")).toHaveText([/^1Morning briefwritten 08:30 ET/, /^2Max size and exit time/, /^3Arm today's plans2 plans armed/,
+    /^4This week's goals1 of 1 on track/, /^5Prep the dayits question into the box, unsent/]);
   expect(chats).toEqual([]); // opening it sends nothing
   await expect(dayButton(page)).not.toHaveClass(/bg-primary/); // opened today: nothing left to nudge
+  // Before the open the plan card also leads the left column; set it from the checklist.
+  await expect(page.getByTestId("day-plan")).toHaveCount(2);
+  const card = list.getByTestId("day-plan");
+  await card.getByTestId("day-plan-set").click();
+  await card.getByRole("button", { name: "Save plan" }).click();
+  await expect(card.getByRole("alert")).toHaveText("Set a max size, an exit time or both.");
+  await card.getByLabel("Max size in dollars").fill("500");
+  await card.getByLabel("Hard exit time").fill("11:30");
+  await card.getByRole("button", { name: "Save plan" }).click();
+  await expect(card.getByTestId("day-plan-line")).toHaveText("Max $500 a position · out by 11:30 AM ET");
+  await expect(page.getByTestId("day-plan-line")).toHaveText(Array(2).fill("Max $500 a position · out by 11:30 AM ET")); // both cards
+  expect(planPosts).toEqual([expect.objectContaining({ max_usd: 500, exit_by: "11:30" })]);
+  await card.screenshot({ path: test.info().outputPath("day-plan-saved-1440.png") });
   // The brief opens in place, as the left column shows it; the goals line is the desk's own.
   await list.getByRole("button", { name: /Morning brief/ }).click();
   await expect(list.getByTestId("morning-brief")).toContainText("APLD needs 31.00 on volume.");
