@@ -4352,7 +4352,7 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
 - **Two tiers: only position risk makes a sound.** `phone.loud(kind, …)` (`phone.LOUD`) keeps the
   sound for the pings about money at risk in a position he holds: give-back, held an hour, the expiry
   countdown (expires today, the last-day 90 and 30 minutes), wrong way, no exit order, the day's loss
-  and green-day locks, a plan's invalidation, target, time stop and level alerts, and the fill-time
+  and green-day locks, a Keep holding check-in, a plan's invalidation, target, time stop and level alerts, and the fill-time
   interrupts for oversized and late short-dated buys (`fill_interrupts.LOUD_KINDS`). Every other ping
   (Radar, briefs and prep, plan nudges and entry levels, paper, reviews, digests, the companion, research
   results, other interrupts) is sent silent: ntfy priority 2 (no sound) and Telegram
@@ -4506,8 +4506,14 @@ under 10 minutes old) and mid, contracts, whether an exit order is working ("unk
 the value at expiry if the stock stays where it is. **Copy Close all @ bid** is the primary button (the mid when the bid
 is stale, and it says so), then **Copy Trim half** and **Set stop** (the plan's stop editor, or Plan it with no plan).
 **Keep holding** is not one tap: it asks for +15m, +30m or a price stop first. Each copy puts Robinhood's order lines on
-the clipboard and logs an `Exiting. …` decision; a hold logs `Holding. …` with the check-in time (nothing pings at that
-time yet). On an interrupt's card any choice also records its Noted. Nothing is sent to Robinhood. The decision bar's
+the clipboard and logs an `Exiting. …` decision; a hold logs `Holding. …` with the check-in time, and +15m / +30m save
+that check-in on the entry (`check_in` on `POST /day-journal/{day}/entries`, kept in its `context_json`). With
+`HOLD_CHECK_IN_PINGS=true` (off by default; the card's body says which, `check_in_pings`) the card says "I'll ping you at
+…" and `engine/hold_check_ins.py` sends one loud ping at that time, in the regular session, if the pinged position is
+still open: "Check-in: <contract> still open", opening this same card (with Close and Trim while the desk is on). A newer
+hold on the same ping replaces it, an `Exiting` decision on the symbol after it cancels it, a check-in more than 10
+minutes late is dropped, and it is claimed once through the notification policy (sender `hold_check_in`, ranked with
+the one-hour alert, anchored to the position). Off, the hold is logged as before and nothing pings. On an interrupt's card any choice also records its Noted. Nothing is sent to Robinhood. The decision bar's
 primary button is **Close it** (saved as Exiting), with Holding beside it.
 
 ## Position companion
