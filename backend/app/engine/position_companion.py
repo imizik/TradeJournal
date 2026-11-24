@@ -85,7 +85,7 @@ UPDATE_WORDS = 80
 CLOSE_GRACE_MINUTES = 30  # a position closed near the bell still gets its exit note this long after the close
 DAY_HORIZON_DAYS = 7  # a contract expiring within this many days is drafted as a day trade
 # The position's own pings that call for an update (the policy's kinds).
-POSITION_KINDS = ("giveback", "hold_hour", "wrong_way", "expiry_eve", "expiry_first", "expiry_final", "same_day_1pm", "time_stop", "invalidation")
+POSITION_KINDS = ("giveback", "hold_hour", "wrong_way", "expiry_eve", "expiry_first", "expiry_final", "time_stop", "invalidation")
 ANSWERS = {"closed": "Closed it", "holding": "Holding"}
 NOT_FOLLOWED = "Not followed on the desk: no update or exit note while hidden."
 NO_ORDER = "Nothing here places, changes or suggests an order; say what each choice means and leave the decision to him."

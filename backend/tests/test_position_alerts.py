@@ -1496,5 +1496,42 @@ def test_the_records_count_long_options_only_never_the_alerts_own_trade_and_a_on
         # The short is in neither group; the 13:00 closes are out by one.
         assert position_alerts.morning_record(db) == ("Your same-day options bought before noon: closed by 1 PM, 5 won 100% (+$500); "
                                                       "still open after 1 PM, 6 won 0% (-$1,050).")
-        assert position_alerts.morning_record(db, own.id) == ("Your same-day options bought before noon: closed by 1 PM, 5 won 100% "
+        assert position_alerts.morning_record(db, {own.id}) == ("Your same-day options bought before noon: closed by 1 PM, 5 won 100% "
                                                               "(+$500); still open after 1 PM, 5 won 0% (-$750).")
+
+
+def test_a_one_pm_alert_whose_position_closed_before_the_send_is_not_sent_and_an_earlier_entry_keeps_it_out_of_its_record(engine, world, monkeypatch):
+    clock, quotes, watcher = world
+    monkeypatch.setenv("POSITION_ALERTS_ENABLED", "true")
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 150, "2026-10-21T10:15", expiration=WED)
+    quotes.set(0.88)
+    run_at(clock, watcher, WED, "13:00")
+    [alert] = alerts(engine)
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 160, "2026-10-21T09:50", expiration=WED)  # an earlier entry arrives: the trade gets a new id
+        [now] = db.exec(select(Trade)).all()
+        assert now.id != alert.trade_id and position_alerts.own_trades(db, alert) == {alert.trade_id, now.id}
+        fill(db, "sell_to_close", 2, 90, "2026-10-21T13:00", expiration=WED)  # and its 13:00 exit before the send
+        [closed_trade] = db.exec(select(Trade)).all()
+        assert closed_trade.status == "closed" and closed_trade.id in position_alerts.own_trades(db, alert)
+    sent = []
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: sent.append(title))
+    clock.now = at(WED, "13:02")
+    watcher.deliver()
+    assert sent == [] and [(a.delivery, a.last_error) for a in alerts(engine)] == [
+        ("expired", "The position was closed before this was sent, so it was not sent.")]
+
+
+def test_the_deep_red_hour_words_survive_a_new_trade_id(engine, world, hold_on):
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
+    quotes.set(1.98)
+    run_at(clock, watcher, WED, "11:00")
+    [alert] = alerts(engine)
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T09:55")  # an earlier entry arrives before the send
+        assert db.get(Trade, alert.trade_id) is None
+        assert position_alerts.hold_facts(db, alert, at(WED, "11:01"))["days"] == 2

@@ -278,7 +278,8 @@ def test_eight_rules_fire_in_order_in_one_message():
     entry = {**option_fill(price=2500), "contracts": 1}
     prior = [lot("buy_to_open", 3100, "14:05", qty=2)]
     last = (ny("14:17"), -120.0)
-    kinds = fill_interrupts.fired(entry, prior, 200.0, ticker_rec, size_rec, built_rec, last)
+    # An add cannot be a re-entry, so the eighth rule is judged on the position's first fill.
+    kinds = fill_interrupts.fired(entry, prior, 200.0, ticker_rec, size_rec, built_rec, last) + fill_interrupts.fired(entry, [], None, last=last)[-1:]
     assert kinds == list(fill_interrupts.KINDS) == ["add_to_loser", "put_entry", "opened_green", "late_short_dated", "ticker_record",
                                                     "large_size", "size_by_adding", "quick_reentry"]
     assert fill_interrupts.fired(entry, [], None) == ["put_entry", "late_short_dated"]  # without the records and the close, no more
@@ -337,6 +338,13 @@ def test_quick_reentry_is_an_option_bought_within_five_minutes_of_a_losing_close
     tied = [(ny("10:10"), -80.0), (ny("10:10"), 100.0)]
     assert fill_interrupts.last_close(tied, ny("10:12")) == fill_interrupts.last_close(tied[::-1], ny("10:12")) == (ny("10:10"), 20.0)
     assert not fill_interrupts.quick_reentry(buy, fill_interrupts.last_close(tied, ny("10:12")))
+    # A manual fill can carry seconds: closes are still read a whole minute at a time.
+    seconds = [(ny("10:10").replace(second=5), 100.0), (ny("10:10").replace(second=45), -80.0)]
+    assert fill_interrupts.last_close(seconds, ny("10:11")) == fill_interrupts.last_close(seconds[::-1], ny("10:11")) == (ny("10:10"), 20.0)
+    assert fill_interrupts.last_close(seconds, ny("10:10").replace(second=20)) == (ny("10:10"), 20.0)  # the fill's own minute, whole
+    # An add to a position already open is not a re-entry: the record counts first entries, and so does the rule.
+    assert fill_interrupts.fired(buy, [], None, last=(ny("10:10"), -80.0)) == ["put_entry", "quick_reentry"]
+    assert fill_interrupts.fired(buy, [lot("buy_to_open", 200, "09:40")], None, last=(ny("10:10"), -80.0)) == ["put_entry"]
     assert fill_interrupts.quick_reentry(buy, (ny("10:10"), -80.0))
     assert not fill_interrupts.quick_reentry(buy, (ny("10:09"), -80.0))  # five minutes is not within five
     assert not fill_interrupts.quick_reentry(buy, (ny("10:12"), 80.0)) and not fill_interrupts.quick_reentry(buy, (ny("10:12"), 0.0))

@@ -21,8 +21,9 @@ are larger. Eight pure rules judge each new **entry** fill, newest-first order:
 - ``size_by_adding``: an add below cost (``add_to_loser``) to a long option with at most ``BUILT_DAYS`` calendar days to
   expiry that takes the premium paid into the position (every entry fill so far) to ``LARGE_MULTIPLE`` times that same
   median or more;
-- ``quick_reentry``: a ``buy_to_open`` of an option within ``REENTRY_MINUTES`` of the account's latest close that New
-  York day, when that close was a loss.
+- ``quick_reentry``: a position's first ``buy_to_open`` of an option within ``REENTRY_MINUTES`` of the account's latest
+  close that New York day, when that minute's closes lost money together (an add to an open position is not a
+  re-entry).
 
 The November 25, 2026 edge audit replayed these rules over every closed long option trade. A large first entry and a
 late short-dated buy both flagged trades that, taken together, made money, while short-dated positions that became
@@ -195,7 +196,9 @@ def last_close(closes: list[tuple[datetime, float]], at: datetime) -> tuple[date
     """The latest minute with a close among the ``(closed_at, pnl)`` closes on ``at``'s New York day at or before
     ``at``, and that minute's total P&L (fill times carry minutes only, so a close and an entry in the same minute
     count as close then entry, and several closes in one minute are read together, whatever order they come in)."""
-    same_day = [c for c in closes if c[0].date() == at.date() and c[0] <= at]
+    def minute(moment: datetime) -> datetime:
+        return moment.replace(second=0, microsecond=0)  # a manual fill can carry seconds
+    same_day = [(minute(c[0]), c[1]) for c in closes if c[0].date() == at.date() and minute(c[0]) <= minute(at)]
     if not same_day:
         return None
     latest = max(c[0] for c in same_day)
@@ -204,10 +207,10 @@ def last_close(closes: list[tuple[datetime, float]], at: datetime) -> tuple[date
 
 def quick_reentry(fill: dict, last: tuple[datetime, float] | None) -> bool:
     """A ``buy_to_open`` of an option within ``REENTRY_MINUTES`` of ``last``, the account's latest close that day
-    (``last_close``), when that close lost money."""
+    (``last_close``, a whole minute), when that close lost money."""
     if fill["side"] != "buy_to_open" or fill.get("instrument_type") != "option" or last is None:
         return False
-    return last[1] < 0 and fill["executed_at"] - last[0] < timedelta(minutes=REENTRY_MINUTES)
+    return last[1] < 0 and fill["executed_at"].replace(second=0, microsecond=0) - last[0] < timedelta(minutes=REENTRY_MINUTES)
 
 
 def fired(fill: dict, prior: list[dict], day_pnl_before: float | None, ticker_rec: dict | None = None,
@@ -230,7 +233,7 @@ def fired(fill: dict, prior: list[dict], day_pnl_before: float | None, ticker_re
         out.append("large_size")
     if size_by_adding(fill, prior, (built_rec or {}).get("median")):
         out.append("size_by_adding")
-    if quick_reentry(fill, last):
+    if quick_reentry(fill, last) and not any(f["side"] == "buy_to_open" for f in prior):  # a position's first entry, as its record counts
         out.append("quick_reentry")
     return out
 
@@ -480,9 +483,10 @@ class FillInterrupts:
             Trade.account_id == fill["account_id"], Trade.id != trade.id, Trade.status.in_(("closed", "expired")),
             Trade.closed_at >= start, Trade.closed_at < fill["executed_at"])).all()
         day = day_pnl_before([(wall_time(c), _num(p) or 0.0) for c, p in closes], fill["executed_at"])
+        minute = fill["executed_at"].replace(second=0, microsecond=0)
         same_minute = db.exec(select(Trade.closed_at, Trade.realized_pnl).where(
             Trade.account_id == fill["account_id"], Trade.id != trade.id, Trade.status.in_(("closed", "expired")),
-            Trade.closed_at == fill["executed_at"])).all()
+            Trade.closed_at >= fill["executed_at"], Trade.closed_at < minute + timedelta(minutes=1))).all()
         last = last_close([(wall_time(c), _num(p) or 0.0) for c, p in [*closes, *same_minute]], fill["executed_at"])
         # The put, green-day and late-buy rules describe the position: once each, so scaling in does not repeat them.
         said = {k for kinds in db.exec(select(FillInterrupt.kinds).where(

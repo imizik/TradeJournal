@@ -4664,7 +4664,7 @@ flagged trades that made money):
   that became large this way lost the most in the audit. Its record is the
   past short-dated positions built the same way. The only interrupt that makes
   a sound.
-- **Back in after a loss:** a `buy_to_open` of an option within 5 minutes of the
+- **Back in after a loss:** a position's first `buy_to_open` of an option within 5 minutes of the
   account's latest close that New York day, when that close was a loss (a
   close and an entry in the same minute count). Its record is the past entries made that way.
 
