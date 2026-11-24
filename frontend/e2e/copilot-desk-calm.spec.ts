@@ -249,7 +249,7 @@ test("one amber thing at a time; the book is one heading line; the chart is cand
   await expect(book.getByTestId("book-head").getByRole("heading")).toHaveAttribute("title", /Open −\$726 · Realized today \+\$539/);
   await expect(book.getByRole("img", { name: /today$/ })).toHaveCount(0);
   // Positions stay, with their P&L and tags; the pen and the eye wait for the row's hover.
-  await expect(book.getByRole("button", { name: /^NVDA / })).toContainText("Expires today");
+  await expect(book.getByRole("button", { name: /^NVDA / })).toContainText("0DTE · ");
   const tools = book.getByTestId("book-row-tools").first();
   await expect(tools).toHaveCSS("opacity", "0");
   await book.locator("li").filter({ has: page.getByRole("button", { name: /^NVDA / }) }).hover();

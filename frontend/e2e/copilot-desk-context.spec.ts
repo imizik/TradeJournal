@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openDeskThreads } from "./desk-fixtures";
 
 // The cockpit's centre: the Chart of the open thread's ticker (or the market), its timeframes, and its Timeline folded
 // under it; and This week, folded at the foot of the thread list's drawer. Every lab route is stubbed in the browser, so
@@ -331,7 +332,7 @@ test("this week's proof lines say when a proof read is missing or fails", async 
   await page.route("**/copilot/answer-scorecard*", (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
   await page.route("**/copilot/brief-scorecard*", (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
   await page.goto("/copilot-lab?view=briefing");
-  await page.getByRole("button", { name: /^Threads(?:,|$)/ }).click();
+  await openDeskThreads(page); // a phone keeps Threads in the top row's More
   const pane = page.getByRole("complementary", { name: "Threads" });
   await pane.getByTestId("this-week").locator("summary").click();
   const proof = pane.getByRole("region", { name: "Proof this week" });

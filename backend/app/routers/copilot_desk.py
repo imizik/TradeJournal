@@ -755,8 +755,13 @@ def threads(db: Session, now: float) -> dict:
         lines = today._section(db, "desk robinhood orders", lambda: {"state": "ok", "rows": _order_lines(found, act + watch, now, hidden)})
         if lines.get("rows"):
             live["view"]["orders"] = lines["rows"]
-        # Whether every working order was read just now, so "no exit order" is a fact and not a missing read.
+        # Whether every working order was read just now, so a row's "No exit order" is a fact and not a missing read.
         live["view"]["orders_read"] = lines["state"] == "ok" and _orders_read(now)
+    # "N× usual size": an option position's premium paid against his median (the large-size interrupt's usual).
+    sized = today._section(db, "desk usual size", lambda: {"state": "ok", "usual": _usual_size(db, now)})
+    if sized.get("usual"):
+        for row in act + near + watch:
+            _size_x(row, sized["usual"])
     if _after_close(now):
         touched = today._section(db, "desk touched", lambda: _touched(db, now, day))
         happened = None
@@ -964,10 +969,30 @@ def day_provisional(now: float, hidden: set[str]) -> list[dict]:
     return out
 
 
+SIZE_BADGE_X = 2.0  # the large-size interrupt's multiple: below it a row says nothing about size
+
+
 def _orders_read(now: float) -> bool:
     """The order-history pass read every account whole and recently (``Poller.working``, as the no-exit alert asks)."""
     from app.engine import robinhood_fills
     return robinhood_fills.poller.working(now) is not None
+
+
+def _usual_size(db: Session, now: float) -> float | None:
+    from app.engine import fill_interrupts
+    return fill_interrupts.usual_size(db, datetime.fromtimestamp(now, ET).date())
+
+
+def _size_x(row: dict, usual: float) -> None:
+    """``book.size_x``: a long option's premium paid (cost a contract × contracts) over ``usual``, when at least
+    ``SIZE_BADGE_X``; left out otherwise."""
+    option = (row.get("book") or {}).get("option") or {}
+    cost, quantity = option.get("cost"), option.get("quantity")
+    if option.get("direction") != "long" or not cost or not quantity or usual <= 0:
+        return
+    times = cost * quantity / usual
+    if times >= SIZE_BADGE_X:
+        row["book"]["size_x"] = round(times, 1)
 
 
 def _order_lines(found: dict, rows: list[dict], now: float, hidden: set[str] = frozenset()) -> list[dict]:

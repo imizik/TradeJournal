@@ -281,6 +281,29 @@ const left = (expiry: string | null, day: string) => {
   return n < 0 ? "expired" : n === 0 ? "expires today" : `${n}d left`;
 };
 
+/** An option that expires today (the book's ``day``, New York). */
+export const zeroDte = (row: DeskThread, day: string) => !!row.book?.expiry && row.instrument !== "stock" && daysTo(row.book.expiry, day) === 0;
+
+/** Minutes to the 16:00 New York close at ``now`` (epoch seconds); negative after it. Early closes are not known here. */
+export function minutesToClose(now: number) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    .formatToParts(new Date(now * 1000)).map(p => [p.type, p.value]));
+  return 16 * 60 - (Number(parts.hour) * 60 + Number(parts.minute));
+}
+
+/** "0DTE · 1h 05m left": amber, red in the last hour. */
+function ZeroDte({ now }: { now: number }) {
+  const left = minutesToClose(now);
+  const words = left <= 0 ? "closed" : left >= 60 ? `${Math.floor(left / 60)}h ${String(left % 60).padStart(2, "0")}m left` : `${left}m left`;
+  return <span data-testid="book-0dte" data-urgent={left < 60 || undefined}
+    className={cn("rounded border px-1 font-semibold tabular-nums", left < 60 ? "border-rose-400/70 text-rose-300" : "border-amber-400/60 text-amber-300")}>0DTE · {words}</span>;
+}
+
+/** A long option with no sell-to-close order working (a working buy to open is a scale-in, not an exit), said only when every working order was just read (``orders_read``). */
+export const noExit = (row: DeskThread, read: boolean) => read && row.book?.option?.direction === "long"
+  && (row.book.live === "matched" || row.book.live === "new") // Robinhood holds it now (not a row its close has yet to reach)
+  && !(row.book.orders ?? []).some(o => o.working && /^sell to close$/i.test(o.action));
+
 /**
  * The book: one dense row per followed open position (ticker, contract, unrealized P&L in dollars and percent, where it
  * sits between invalidation and entry, days to expiry and one state tag; no sparkline since the calm pass: the chart has it).
@@ -327,6 +350,9 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
     onFollow(symbol, following).catch(() => setFailed(`${symbol}: not saved. Try again.`));
   };
   const allTicks = useDeskTicks(held.map(r => r.book?.tick?.quote));
+  // The 0DTE countdown's clock, on the desk's shared minute.
+  const [nowS, setNowS] = useState(() => Date.now() / 1000);
+  useEffect(() => everyDeskMinute(() => setNowS(Date.now() / 1000)), []);
   const moneyWords = dayMoneyWords(held, allTicks, realized, read);
   return (
     <section aria-label="Your book" data-testid="desk-book" data-desk-book className="rounded-lg border bg-card">
@@ -385,10 +411,15 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                       {mixed && book?.account && <span data-testid="book-account" title={`${book.account.label} ${book.account.masked}`}>{book.account.label}</span>}
                       {book?.stop_pct != null && <span className="tabular-nums">{Math.abs(book.stop_pct).toFixed(1)}% to stop</span>}
                       {book && left(book.expiry, day) && state !== EXPIRES_TODAY && <span className="tabular-nums">{left(book.expiry, day)}</span>}
+                      {/* Risk first: a same-day option's time left, no exit order working, a size well over his usual. */}
+                      {book && zeroDte(row, day) && <ZeroDte now={nowS} />}
+                      {book && noExit(row, isLive && live?.orders_read === true) && <span data-testid="book-no-exit" className="rounded border border-amber-400/60 px-1 font-medium text-amber-300">No exit order</span>}
+                      {book?.size_x != null && <span data-testid="book-size" title="Premium paid against your median long option position (last 12 months)"
+                        className="rounded border border-amber-400/60 px-1 font-medium tabular-nums text-amber-300">{book.size_x.toFixed(1)}× usual size</span>}
                       {book?.live === "new" ? <span data-testid="book-state" aria-label="New · not in the journal yet" title="New · not in the journal yet"
                         className="inline-flex items-center rounded text-sky-300 md:border md:border-sky-300/40 md:px-1">
                         <CircleDashed size={12} aria-hidden className="md:hidden" /><span className="max-md:hidden">New · not in the journal yet</span></span>
-                        : state && <span data-testid="book-state" className={cn("rounded border px-1", state.className)}>{state.label}</span>}
+                        : state && state !== EXPIRES_TODAY && <span data-testid="book-state" className={cn("rounded border px-1", state.className)}>{state.label}</span>}
                       <EarningsTag tag={row.symbol ? earnings?.rows[row.symbol] : undefined} day={day} />
                       {book?.live === "not_on_robinhood" && <span data-testid="book-not-live" className="rounded border px-1">Not on Robinhood</span>}
                     </span>
@@ -399,14 +430,15 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                     {pnl.pct != null && <span className="block text-[11px]">{signedPct(pnl.pct)}</span>}
                   </span>
                 </button>
-                {/* The pen and the eye: side by side on a phone, stacked in one column beside the narrow book. With a mouse
-                    they show on the row's hover or focus (the space stays, so nothing moves); a touch screen always has them. */}
+                {/* The pen, and from 640 px the eye, stacked in one column beside the narrow book. With a mouse they show on the
+                    row's hover or focus (the space stays, so nothing moves). A phone keeps only a full-size Note: an eye beside
+                    it hid positions by mistake, so a phone hides a ticker from its thread's header instead. */}
                 <span data-testid="book-row-tools" className="flex shrink-0 sm:flex-col-reverse [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:group-focus-within/row:opacity-100">
-                  {rowTrade(row) && <NoteButton notes={notes} id={row.key} label="this position" className="sm:flex-1" />}
+                  {rowTrade(row) && <NoteButton notes={notes} id={row.key} label="this position" className="max-sm:w-11 sm:flex-1" />}
                   {row.symbol && (
                     <button type="button" onClick={() => follow(row.symbol!, false)} aria-label={`Hide ${row.symbol}: not following`}
                       title="Not following: hide this ticker from the desk and every count (Show again undoes it)"
-                      className="flex w-8 shrink-0 items-center justify-center text-muted-foreground/40 hover:bg-secondary hover:text-foreground sm:flex-1">
+                      className="flex w-8 shrink-0 items-center justify-center text-muted-foreground/40 hover:bg-secondary hover:text-foreground max-sm:hidden sm:flex-1">
                       <EyeOff size={13} aria-hidden />
                     </button>
                   )}

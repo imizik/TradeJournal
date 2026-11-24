@@ -112,11 +112,13 @@ for (const width of [375, 393, 440]) {
     await expect(accounts.last()).toBeInViewport();
     expect(await sideways(page)).toBeLessThanOrEqual(0);
     await value.getByTestId("value-open").click();
-    // A five-figure P&L stays in its own column, clear of the hide button.
+    // A five-figure P&L stays in its own column, clear of the row's note button; a phone row has no hide button beside
+    // it (it hid positions by mistake).
     const amd = page.getByTestId("desk-book").getByRole("listitem").filter({ hasText: "AMD" });
     const figure = await amd.getByText("+$12,345").evaluate(el => el.getBoundingClientRect().right);
-    const eye = await amd.getByRole("button", { name: /^Hide AMD/ }).evaluate(el => el.getBoundingClientRect().left);
-    expect(figure).toBeLessThanOrEqual(eye);
+    const tools = await amd.getByTestId("book-row-tools").evaluate(el => el.getBoundingClientRect().left);
+    expect(figure).toBeLessThanOrEqual(tools);
+    await expect(amd.getByRole("button", { name: /^Hide AMD/ })).toBeHidden();
     // The other two views, and the ticker's dock tabs under its chart (five and the Grid's button: they fit the width
     // without swiping).
     await page.getByTestId("desk-view-feed").click();
