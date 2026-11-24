@@ -112,7 +112,7 @@ log = logging.getLogger(__name__)
 
 PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "interrupt", "companion_update", "nudge", "prep", "evening_review",
             "radar_setup", "radar_event", "radar_digest", "thesis_watch", "research", "paper", "paper_review", "self_check", "note_digest")
-ALIASES = {"expiry_first": "time_stop", "expiry_eve": "time_stop", "wrong_way": "hold_hour", "no_exit": "hold_hour", "link": "nudge", "no_plan": "nudge",
+ALIASES = {"expiry_first": "time_stop", "expiry_eve": "time_stop", "wrong_way": "hold_hour", "no_exit": "hold_hour", "hold_check_in": "hold_hour", "link": "nudge", "no_plan": "nudge",
            "companion_adopt": "nudge",
            "week_review": "prep", "day_replay": "prep"}
 NEVER_QUIET = 2  # ranks 0-1 (last-day final, invalidation) are never held by the quiet window
@@ -137,7 +137,7 @@ ACTED = ("entered", "closed", "trimmed", "linked")
 EPS = 1e-9
 # What answers each kind: an entry fill in the symbol, an exit of the position, or a plan link.
 TRACKED = {"entry": "entry", "invalidation": "exit", "time_stop": "exit", "giveback": "exit", "hold_hour": "exit", "wrong_way": "exit",
-           "expiry_first": "exit", "expiry_final": "exit", "expiry_eve": "exit", "nudge": "link", "link": "link", "no_plan": "link",
+           "expiry_first": "exit", "expiry_final": "exit", "expiry_eve": "exit", "hold_check_in": "exit", "nudge": "link", "link": "link", "no_plan": "link",
            "radar_setup": "entry", "radar_event": "entry"}
 WINDOW = {"entry": ENTRY_MINUTES, "exit": EXIT_MINUTES, "link": LINK_MINUTES}
 

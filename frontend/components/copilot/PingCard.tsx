@@ -5,7 +5,8 @@
  * It leads with what fired and what holding past that kind of ping has done for him in dollars, then the position as it
  * stands (P&L, bid and mid, contracts, whether an exit order is working, what it is worth at expiry if the stock stays
  * flat), then thumb-sized actions: Copy Close all at the bid (primary), Copy Trim half, Set stop. Keep holding is not
- * one tap: it asks for a check-in time (+15m or +30m) or a price stop first.
+ * one tap: it asks for a check-in time (+15m or +30m) or a price stop first. A check-in time rides on the hold's journal
+ * entry, and with HOLD_CHECK_IN_PINGS on the server pings again then if the position is still open (engine/hold_check_ins.py).
  *
  * Copy only: an order's lines go on the clipboard, to paste into Robinhood. Nothing here places, sizes or sends an
  * order. Each choice is a ``decision`` day-journal entry ("Exiting. …" / "Holding. …"), so the alert scorecard measures
@@ -36,7 +37,9 @@ type Habit = { kind_label: string; window_days: number; held: number; closed: nu
 export type PingCardBody = { symbol: string | null; alert: PingAlert | null; interrupt: PingInterrupt | null; habit: Habit | null;
   broker: { label: string; url: string } | null;
   /** The trade now holding the pinged position, and whether it is still open (absent from an older backend). */
-  position?: { trade_id: string | null; open: boolean } | null };
+  position?: { trade_id: string | null; open: boolean } | null;
+  /** Whether Keep holding's +15m / +30m pings again at that time while the position is open (HOLD_CHECK_IN_PINGS). */
+  check_in_pings?: boolean };
 
 /** The pinged position's book row: by its trade (trades are rebuilt, so the server resolves the current one), else a
  * Robinhood-only row of the same contract; never another strike, expiry or account in the ticker. Null when it is closed. */
@@ -188,8 +191,10 @@ function Act({ act, body, row, rows, ordersLive, onAsk, onPlan }: {
     const i = body.interrupt;
     if (i && i.noted_at == null) await fetch(apiUrl(`/trades/${encodeURIComponent(i.trade_id)}/fill-interrupts/${encodeURIComponent(i.id)}/noted`), { method: "POST" }).catch(() => undefined);
   };
-  const log = async (choice: "Exiting" | "Holding", what: string) => {
-    await api.addDayJournalEntry(nyDay(), { operation_id: `decision-${uid()}`, kind: "decision", symbol, text: `${choice}. ${fired}; ${what}.` });
+  const log = async (choice: "Exiting" | "Holding", what: string, checkIn?: 15 | 30) => {
+    const ping = checkIn ? (alert ? { alert: alert.id } : body.interrupt ? { interrupt: body.interrupt.id } : null) : null;
+    await api.addDayJournalEntry(nyDay(), { operation_id: `decision-${uid()}`, kind: "decision", symbol, text: `${choice}. ${fired}; ${what}.`,
+      ...(ping ? { check_in: { minutes: checkIn!, ...ping } } : {}) });
     await noted();
   };
   const copyClose = async (contracts: number) => {
@@ -203,12 +208,12 @@ function Act({ act, body, row, rows, ordersLive, onAsk, onPlan }: {
     setDone({ text: `Copied: sell ${contracts} at ${limit}. Paste it in Robinhood.`, copied: true });
     log("Exiting", what).catch(() => setError("Copied, but the decision was not saved."));
   };
-  const keepFor = async (minutes: number) => {
+  const keepFor = async (minutes: 15 | 30) => {
     const at = Date.now() / 1000 + minutes * 60;
     setHolding(false);
     try {
-      await log("Holding", `check again at ${hhmm(at)}`);
-      setDone({ text: `Holding. Check again at ${hhmm(at)}.` });
+      await log("Holding", `check again at ${hhmm(at)}`, minutes);
+      setDone({ text: body.check_in_pings ? `Holding. I'll ping you at ${hhmm(at)} if it's still open.` : `Holding. Check again at ${hhmm(at)}.` });
     } catch (e) { setError(e instanceof Error ? e.message : "Not saved."); }
   };
 

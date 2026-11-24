@@ -33,7 +33,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import day_lock, expression_recorder, fill_interrupts, intraday_momentum_book, level_alerts, notification_policy, overnight_book, phone, ping_images, practice_goal
+from app.engine import day_lock, hold_check_ins, expression_recorder, fill_interrupts, intraday_momentum_book, level_alerts, notification_policy, overnight_book, phone, ping_images, practice_goal
 from app.engine.chart_feed import ChartFeedError
 from app.engine.chart_math import ET, chart_bars, normalize_bars, session_windows
 from app.models import LevelAlert, LevelAlertEvent
@@ -68,7 +68,7 @@ class LevelAlertMonitor:
                  clock: Callable[[], float] = time.time, sweep_seconds: float = SWEEP_SECONDS, paper=None, scanner=None,
                  positions=None, nudges=None, time_stops=None, prep=None, week_review=None, day_replay=None, evening_review=None,
                  follow_ups=None, interrupts=None, expressions=None, paper_review=None, overnight=None, momentum=None,
-                 day_locks=None):
+                 day_locks=None, check_ins=None):
         self.engine = engine
         self.paper = paper  # Practice paper plans (A2), judged on the same pass and the same feed
         self.scanner = scanner  # Paper S1 and/or stock-only awareness; each retains its own enable flag.
@@ -81,6 +81,9 @@ class LevelAlertMonitor:
         if day_locks is None and day_lock.enabled():
             day_locks = day_lock.DayLock(engine, calendar, clock=clock)
         self.day_locks = day_locks  # The real-money daily loss lock and green walk-away pings, when DAY_LOCK_ALERTS
+        if check_ins is None and hold_check_ins.enabled():
+            check_ins = hold_check_ins.HoldCheckIns(engine, calendar, clock=clock)
+        self.check_ins = check_ins  # The ping card's Keep holding check-in pings, when HOLD_CHECK_IN_PINGS
         if expressions is None and expression_recorder.enabled():
             try:
                 expressions = expression_recorder.ExpressionRecorder(engine, calendar, clock=clock)
@@ -243,6 +246,8 @@ class LevelAlertMonitor:
                                                             await asyncio.to_thread(self.momentum.run)  # never raises
                                                         if self.day_locks is not None:
                                                             await asyncio.to_thread(self.day_locks.run)  # never raises
+                                                        if self.check_ins is not None:
+                                                            await asyncio.to_thread(self.check_ins.run)  # never raises
                                                         if self.follow_ups is not None:
                                                             await asyncio.to_thread(self.follow_ups.run)
 
