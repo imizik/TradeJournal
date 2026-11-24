@@ -278,7 +278,7 @@ export function OpenPositionsTable({
               <tr key={trade.id} className="hover:bg-muted/50">
                 <Td>
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <a href={`/trades/${trade.id}`} className="font-semibold hover:underline">
+                    <a href={`/trades/${trade.id}`} className="font-semibold hover:underline relative after:absolute after:-inset-y-3.5 after:-inset-x-1 after:content-[''] sm:after:hidden">
                       {trade.ticker}
                     </a>
                     {expiresToday && (
@@ -403,7 +403,7 @@ export function RecentClosedTable({
           {sorted.map((trade) => (
             <tr key={trade.id} className="hover:bg-muted/50">
               <Td>
-                <a href={`/trades/${trade.id}`} className="font-semibold hover:underline">
+                <a href={`/trades/${trade.id}`} className="font-semibold hover:underline relative after:absolute after:-inset-y-3.5 after:-inset-x-1 after:content-[''] sm:after:hidden">
                   {trade.ticker}
                 </a>
               </Td>

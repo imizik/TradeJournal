@@ -200,7 +200,7 @@ export default function DashboardActions() {
         onClick={() => setOpen(true)}
         aria-label="Sync / Update Data"
         title="Open the Sync Center to update data now"
-        className="inline-flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        className="inline-flex min-h-11 items-center gap-1.5 rounded border px-2.5 py-1.5 text-xs font-medium text-muted-foreground md:min-h-0 transition-colors hover:bg-secondary hover:text-foreground"
       >
         <RefreshCw className="h-3.5 w-3.5" />
         Sync
@@ -426,7 +426,7 @@ function SyncCenterDrawer({
             </div>
             <button
               onClick={onClose}
-              className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground md:min-h-0 md:min-w-0"
               aria-label="Close Sync Center"
             >
               <X className="h-4 w-4" />
@@ -438,7 +438,7 @@ function SyncCenterDrawer({
             <button
               onClick={runPipeline}
               disabled={!!busyAction || !!running}
-              className="inline-flex items-center gap-2 rounded bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-emerald-950 transition-colors hover:bg-emerald-400 disabled:opacity-50"
+              className="inline-flex min-h-11 items-center gap-2 rounded bg-emerald-500 px-3 py-1.5 md:min-h-0 text-xs font-semibold text-emerald-950 transition-colors hover:bg-emerald-400 disabled:opacity-50"
             >
               {busyAction === "pipeline" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
               Sync Everything
@@ -491,14 +491,14 @@ function SyncCenterDrawer({
                       value={range}
                       onChange={(e) => setRange(e.target.value as EnrichRange)}
                       suppressHydrationWarning
-                      className="appearance-none rounded border border-border bg-background py-1 pl-2 pr-7 text-xs text-foreground focus:outline-none"
+                      className="min-h-11 appearance-none rounded border border-border bg-background py-1 pl-2 pr-7 text-xs md:min-h-0 text-foreground focus:outline-none"
                     >
                       <option value="day">1d</option>
                       <option value="week">1w</option>
                       <option value="month">1mo</option>
                       <option value="all">All</option>
                     </select>
-                    <ChevronDown className="pointer-events-none absolute right-1.5 top-1.5 h-3 w-3 text-muted-foreground" />
+                    <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
                   </span>
                 </label>
                 <label className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -506,7 +506,7 @@ function SyncCenterDrawer({
                     type="checkbox"
                     checked={forceAll}
                     onChange={(e) => setForceAll(e.target.checked)}
-                    className="accent-emerald-500"
+                    className="h-5 w-5 accent-emerald-500 md:h-auto md:w-auto"
                     suppressHydrationWarning
                   />
                   Force re-run existing enrichment/path metrics
@@ -514,7 +514,7 @@ function SyncCenterDrawer({
                 <button
                   onClick={connectGmail}
                   disabled={!!busyAction}
-                  className="inline-flex items-center gap-1.5 rounded border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded border border-border px-2.5 py-1 text-xs text-muted-foreground md:min-h-0 transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
                 >
                   {busyAction === "gmail_auth" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                   Connect Gmail

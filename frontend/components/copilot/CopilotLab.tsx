@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -18,7 +18,7 @@ import DeskReplay from "@/components/copilot/DeskReplay";
 import ReplayLiveLine from "@/components/copilot/ReplayLiveLine";
 import PaperReviewCard from "@/components/copilot/PaperReview";
 import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
-import DeskRoll from "@/components/copilot/DeskRoll";
+const DeskRoll = dynamic(() => import("@/components/copilot/DeskRoll"), { ssr: false });
 import type { RollFrom } from "@/lib/rollTicket";
 import { useDeskActionHost } from "@/components/copilot/DeskActionCard";
 import type { AnyClosingTicket } from "@/lib/closingTicket";
@@ -120,6 +120,7 @@ function showDock() {
  * (Positions, Chart, Chain, Orders; Ask opens the copilot's sheet) and the Feed chip in the top row. ``chain`` is the
  * ticker's view on its Chain, under a row of ticker chips; ``orders`` lists Robinhood's working orders and today's fills. */
 type DeskView = "book" | "ticker" | "chain" | "orders" | "feed";
+const noSubscribe = () => () => {};
 /** A phone's view changed: the page goes to where that view starts. */
 function toView(view: DeskView) {
   requestAnimationFrame(() => {
@@ -377,6 +378,12 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const jumpKey = useJumpKey();
   const tabSlot = useDeskTabSlot(); // the phone tab bar's slot while it is the desk's (Nav.tsx)
   const phone = usePhone();
+  const hydrated = useSyncExternalStore(noSubscribe, () => true, () => false); // the first render cannot know it is a phone
+  // A phone draws the chart (and loads its library and first read) only once its ticker or Chain view is shown; after
+  // that it stays, so going back to it is instant.
+  const [chartShown, setChartShown] = useState(false);
+  const chartNow = hydrated && (!phone || phoneView === "ticker" || phoneView === "chain");
+  useEffect(() => { if (chartNow) setChartShown(true); }, [chartNow]); // eslint-disable-line react-hooks/set-state-in-effect -- latches once
   // How he uses the desk: quiet counts, and the pieces he folded away on this device size (DeskUse.tsx).
   const use = useDeskUse(on);
   // The account line folded away: a narrowed book would hide the other accounts with nothing on screen saying so.
@@ -1293,7 +1300,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               <CentreChart symbol={centreSymbol} thread={centreThread} row={centreRow} sparks={sparks} actions={chartActions} rows={rows} earnings={events} onReplay={() => setReplay(true)}
                 guides={scanLines && scanLines.symbol === centreSymbol ? scanLines.lines : undefined}
                 paper={centrePaper} paperOrders={paper.book?.orders} onPlan={planWatched} ordersLive={liveOn(booked.live)}
-                className={styles.centreBody} chartClassName={styles.chartPart} dock={position => (
+                className={styles.centreBody} chartClassName={styles.chartPart} chartLater={!chartNow && !chartShown} dock={position => (
                   <div data-testid="desk-dock" className={styles.dock}>
                     {/* From 1024 px: drag (or arrow keys) to give the chart or the dock more room; kept for this browser. */}
                     <div role="separator" aria-orientation="horizontal" aria-label="Chart and dock size" aria-valuemin={SHARE.min * 100} aria-valuemax={SHARE.max * 100}
