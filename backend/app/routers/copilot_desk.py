@@ -1613,8 +1613,10 @@ def desk_ping_card(symbol: str = Query("", max_length=12), alert: uuid.UUID | No
         row = db.get(FillInterrupt, interrupt)
         if row is not None:
             body["symbol"] = row.ticker
-            body["interrupt"] = {**fill_interrupts.shape(row), "trade_id": str(row.trade_id)}
-            body["position"] = held(_interrupt_trade(db, row))
+            trade = _interrupt_trade(db, row)
+            # The trade it is on now (a late earlier fill rebuilds the trade under a new id): its Noted goes there.
+            body["interrupt"] = {**fill_interrupts.shape(row), "trade_id": str(trade.id if trade is not None else row.trade_id)}
+            body["position"] = held(trade)
     if body["alert"] is None and body["interrupt"] is None and not body["symbol"]:
         raise HTTPException(404, "No such ping.")
     return body

@@ -362,6 +362,7 @@ def test_an_earlier_fill_whose_email_comes_late_stays_on_the_same_position(engin
         from app.routers import copilot_desk
         held = copilot_desk._interrupt_trade(db, db.get(type(later), later.id))  # the ping card still finds the position
         assert held is not None and held.status == "open"
+        assert fill_interrupts.note(db, held, later.id, 0) is not None  # its Noted lands on the trade the card names
 
 
 def test_scaling_in_repeats_only_adding_to_a_loser(engine, world, sent):
