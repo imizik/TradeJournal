@@ -148,3 +148,19 @@ def test_no_graduation_short_of_forty_or_at_breakeven(tmp_path, closed, pnl):
         store.add("open_window", f"d{i}", "2026-11-24", "MU", "up", contract("MU1"), 0.0)
         store.update(i + 1, "pending", state="closed", pnl=pnl / closed, pnl_2x=0.0, reason="stop")
     assert not next(r for r in pg.board(store.trades()) if r["source"] == "open_window")["graduated"]
+
+
+def test_an_entered_trade_with_no_exit_quote_closes_at_its_last_bid_next_session(tmp_path):
+    w = World(tmp_path)
+    c = "MU1"
+    w.store.add("open_window", f"{DAY}:MU", DAY.isoformat(), "MU", "up", contract(c), et("09:45"))
+    w.book.update(MU=quote("MU", last=100, open_=100), NBIS=quote("NBIS", last=50, open_=50))
+    w.at("09:46", **{c: quote(c, 1.9, 2.0, et("09:46"))})
+    w.at("09:50", **{c: quote(c, 1.8, 1.9, et("09:50"))})  # seen, no bracket hit
+    w.book[c] = quote(c, 1.0, 1.1, et("09:50"))  # stale from here on: no fresh exit quote
+    w.now = et("09:40") + 86400
+    w.ground._last_run = 0.0
+    w.ground.run()
+    row = next(t for t in w.store.trades() if t["symbol"] == "MU" and t["source"] == "open_window" and t["day"] == DAY.isoformat())
+    assert (row["state"], row["reason"], row["exit"]) == ("closed", "no_exit", 1.8)
+    assert row["pnl"] == round((1.8 - 2.0) * 100 - 1.3, 2)

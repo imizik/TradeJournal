@@ -21,7 +21,7 @@ export type ProvingGround = { enabled: boolean; graduate_trades: number;
 const usd = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 const tone = (n: number | null) => n == null || n === 0 ? "text-muted-foreground" : n > 0 ? "text-emerald-300" : "text-rose-300";
 const pct = (n: number) => `${Math.round(n * 100)}%`;
-const REASON: Record<string, string> = { take_profit: "target", stop: "stop", time_stop: "60 min", session_close: "close" };
+const REASON: Record<string, string> = { take_profit: "target", stop: "stop", time_stop: "60 min", session_close: "close", no_exit: "no exit quote" };
 
 export function useProvingGround(on: boolean): { ground: ProvingGround | null; failed: boolean } {
   const [ground, setGround] = useState<ProvingGround | null>(null);

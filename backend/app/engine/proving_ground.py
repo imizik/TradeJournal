@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS trade (
     id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, ref TEXT NOT NULL, day TEXT NOT NULL,
     symbol TEXT NOT NULL, direction TEXT NOT NULL, contract TEXT, created_at REAL NOT NULL,
     state TEXT NOT NULL,  -- pending | open | closed | unresolved
-    entry REAL, entry_bid REAL, entry_at REAL, exit REAL, exit_at REAL, reason TEXT, pnl REAL, pnl_2x REAL, note TEXT,
+    entry REAL, entry_bid REAL, entry_at REAL, mark REAL, mark_ask REAL, exit REAL, exit_at REAL, reason TEXT, pnl REAL, pnl_2x REAL, note TEXT,
     UNIQUE (source, ref)
 );
 """
@@ -138,6 +138,13 @@ class Store:
             return [_row(r) for r in db.execute("SELECT * FROM trade ORDER BY id")]
 
 
+def _read_only(path: Path) -> list[dict]:
+    """Every trade, through a read-only connection: the ping path never writes or creates the file."""
+    with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)) as db:
+        db.row_factory = sqlite3.Row
+        return [_row(r) for r in db.execute("SELECT * FROM trade ORDER BY id")]
+
+
 def _row(r: sqlite3.Row) -> dict:
     out = dict(r)
     out["contract"] = json.loads(out["contract"]) if out["contract"] else None
@@ -188,7 +195,7 @@ def board(trades: list[dict]) -> list[dict]:
             "avg": round(pnl / len(closed), 2) if closed else None,
             "open": sum(t["state"] in ("pending", "open") for t in mine),
             "unresolved": sum(t["state"] == "unresolved" for t in mine),
-            "exits": {r: sum(t["reason"] == r for t in closed) for r in ("take_profit", "stop", "time_stop", "session_close")},
+            "exits": {r: sum(t["reason"] == r for t in closed) for r in ("take_profit", "stop", "time_stop", "session_close", "no_exit")},
             "graduated": len(closed) >= GRADUATE_TRADES and pnl > 0,
         })
     return sorted(out, key=lambda r: (r["closed"] == 0, -r["pnl"]))
@@ -200,7 +207,7 @@ def graduated(source: str, path: Path | None = None) -> bool:
         path = path or store_path()
         if not path.exists():
             return False
-        return next(r["graduated"] for r in board(Store(path).trades()) if r["source"] == source)
+        return next(r["graduated"] for r in board(_read_only(path)) if r["source"] == source)
     except Exception:
         log.exception("Proving ground: graduation read failed; the ping stays labeled PAPER")
         return False
@@ -310,7 +317,7 @@ class ProvingGround:
             direction = jo_direction(item)
             picks[0] -= 1
             contract = self.pick(symbol, direction, today)
-            self.store.add("jo_morning", ref, today.isoformat(), symbol, direction, contract, now,
+            self.store.add("jo_morning", ref, today.isoformat(), symbol, direction, contract, now,  # one per symbol a day
                            note="no liquid contract")
 
     def _jo_picks(self, today: date) -> list[tuple[str, dict, str]]:
@@ -325,7 +332,7 @@ class ProvingGround:
         if row is None:
             return []
         body = json.loads(row.body_json)
-        return [(item["symbol"], item, f"{row.id}:{item['symbol']}") for item in body.get("opportunities") or []
+        return [(item["symbol"], item, f"{today.isoformat()}:{item['symbol']}") for item in body.get("opportunities") or []
                 if item.get("status") == "conditional" and item.get("symbol")]
 
     # ------------------------------------------------------------ entries and exits
@@ -334,7 +341,16 @@ class ProvingGround:
         live = self.store.live()
         wanted: list[dict] = []
         for row in live:
-            if row["day"] != today.isoformat():
+            if row["day"] != today.isoformat() and row["state"] == "open":
+                # Entered but never given a fresh exit quote: closed at the last bid seen (zero if none), so a trade
+                # that could not get out still counts against its source.
+                mark = row["mark"] or 0.0
+                scored = scanner_rules.result({"bid": row["entry_bid"], "ask": row["entry"]},
+                                              {"bid": mark, "ask": row["mark_ask"] or mark}, int(row["contract"].get("multiplier") or 100))
+                self.store.update(row["id"], "open", state="closed", exit=mark, reason="no_exit", pnl=scored["pnl"],
+                                  pnl_2x=scored["pnl_2x_spread"],
+                                  note=f"no fresh exit quote in session {row['day']}; closed at the last bid seen")
+            elif row["day"] != today.isoformat():
                 self.store.update(row["id"], row["state"], state="unresolved",
                                   note=f"session {row['day']} ended with the trade still {row['state']}; nothing is carried overnight")
             elif not inside:
@@ -353,6 +369,8 @@ class ProvingGround:
                 if fill is not None:
                     self.store.update(row["id"], "pending", state="open", entry=fill["price"], entry_bid=fill["bid"], entry_at=now)
                 continue
+            if quote is not None and quote.bid is not None:
+                self.store.update(row["id"], "open", mark=quote.bid, mark_ask=quote.ask)
             reason = bracket(row, quote, now, close_at)
             if reason is None or not fresh(quote, row["entry_at"]):
                 continue  # the clock exits wait for a fresh quote, as the setup cards' paper book does

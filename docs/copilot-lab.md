@@ -2857,7 +2857,8 @@ minutes after the entry, or 5 minutes before the close, whichever comes first; n
 Entries are the ask of the first quote whose bid and ask both updated after the idea (none within 2 minutes:
 unresolved); exits the bid of the first fresh quote at or after the condition; $0.65 a side; the bracket is checked once
 a minute, so it fills at that minute's bid, never at the bracket price. A pessimistic result at twice the spread is kept
-beside it. A source **graduates** at 40 closed trades with net dollars above zero; until then its phone pings are titled
+beside it. A trade that got in but never saw a fresh exit quote is closed after its session at the last bid
+seen (zero if none), so it still counts. A source **graduates** at 40 closed trades with net dollars above zero; until then its phone pings are titled
 `PAPER · …` (`proving_ground.label`). Only Radar setup pings exist today; Jo's brief and the 9:45 rule send no trade
 pings, so for them graduation shows on the board only.
 
