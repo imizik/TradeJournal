@@ -1589,6 +1589,20 @@ def desk_scorecard(db: Session = Depends(get_session)):
     return {**alerts, "radar": hits}
 
 
+@router.get("/desk/ping-week")
+def desk_ping_week(db: Session = Depends(get_session)):
+    """The weekly ping scorecard (``alert_scorecard.week_by_kind``) for /proof: per ping type, how many he acted on and
+    what ignoring the rest cost, for the last full digest week (Sunday 6 PM New York to Sunday 6 PM) and the week so far.
+    Read-only; position alerts are recorded whether or not the lab is on, so this is not refused while it is off."""
+    from app.engine import alert_scorecard, note_digest
+    now = today._now()
+    sunday, start, end = note_digest.window(now)
+    current = datetime.fromtimestamp(now, UTC).replace(tzinfo=None)
+    return {"act_minutes": alert_scorecard.ACT_MINUTES,
+            "last_week": {"ended": sunday.isoformat(), "kinds": alert_scorecard.week_by_kind(db, start, end)},
+            "this_week": {"since": sunday.isoformat(), "kinds": alert_scorecard.week_by_kind(db, end, current + timedelta(seconds=1))}}
+
+
 # --------------------------------------------------------------------------- the ping card
 
 PING_CARD_HOURS = 16  # "the latest alert" without an id: one from today's session, never yesterday's

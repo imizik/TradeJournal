@@ -9,10 +9,12 @@ ping, ``NOTES · week of <Monday>``, under its own budget (``note_digest``: one 
 - how many of the week's sent position-alert and Radar pings (``sent`` or ``unknown``) he rated, of how many;
 - what holding past the week's position alerts did (``alert_scorecard.week_cost``): each pinged position measured once
   from its first alert, the dollars selling at that ping would have made against what he did, when one has closed;
+- the weekly ping scorecard (``alert_scorecard.week_by_kind``): one line per ping type, how many he acted on (sold within
+  15 minutes or logged Exiting) and what ignoring the rest cost;
 - one "worth testing?" note, quoted: the newest that began with idea, else the newest naming a theme ticker, else the
   newest.
 
-It is written here from the rows, with no model call, and is under a dozen lines. A week with no notes still sends the
+It is written here from the rows, with no model call, and is short (about a dozen lines). A week with no notes still sends the
 digest (zero notes, the ratings line, and how to save one). Off unless ``NOTE_DIGEST_ENABLED=true``: switching it on is
 the owner's call. At most once a week: the week is claimed through the notification policy (``new_only``), so a restart
 never sends it twice, and a send that fails is not retried.
@@ -105,7 +107,8 @@ def worth_testing(found: list[tuple], top: list[tuple[str, int]]) -> tuple | Non
             or next((n for n in newest if top_tickers & set(n[1].get("tickers") or ())), None) or newest[0])
 
 
-def render(found: list[tuple], rated: int, got: int, week_of: str, cost: str | None = None) -> tuple[str, str]:
+def render(found: list[tuple], rated: int, got: int, week_of: str, cost: str | None = None,
+           kinds: list[str] | None = None) -> tuple[str, str]:
     """The ping's title and body."""
     title = f"NOTES · week of {week_of}"
     count = len(found)
@@ -118,6 +121,7 @@ def render(found: list[tuple], rated: int, got: int, week_of: str, cost: str | N
                  "No alert or Radar pings this week.")
     if cost:
         lines.append(cost)
+    lines.extend(kinds or ())
     if (pick := worth_testing(found, top)) is not None:
         row = pick[0]
         text = row.text if len(row.text) <= QUOTE else row.text[:QUOTE - 1].rstrip() + "…"
@@ -126,22 +130,28 @@ def render(found: list[tuple], rated: int, got: int, week_of: str, cost: str | N
     return title, "\n".join(lines)
 
 
-def build(db: Session, now: float) -> tuple[str, str, str]:
-    """(week key, title, body) for the week ending at this Sunday's ``AT`` (the latest one at or before ``now``), so two
-    digests never count the same note and a late send counts the same week."""
+def window(now: float) -> tuple:
+    """(Sunday, start, end): the digest week ending at the latest Sunday ``AT`` at or before ``now``, naive UTC."""
     local = datetime.fromtimestamp(now, ET).date()
     sunday = local - timedelta(days=(local.weekday() + 1) % 7)
     cut = datetime.combine(sunday, datetime.min.time(), ET) + timedelta(minutes=AT)
     if cut.timestamp() > now:
         sunday, cut = sunday - timedelta(days=7), cut - timedelta(days=7)
     end = cut.astimezone(UTC).replace(tzinfo=None)
-    start = end - timedelta(days=7)
+    return sunday, end - timedelta(days=7), end
+
+
+def build(db: Session, now: float) -> tuple[str, str, str]:
+    """(week key, title, body) for the week ending at this Sunday's ``AT`` (the latest one at or before ``now``), so two
+    digests never count the same note and a late send counts the same week."""
+    sunday, start, end = window(now)
     local = sunday
     monday = local - timedelta(days=local.weekday())
     found = notes(db, start, end)
     from app.engine import alert_scorecard
     cost = alert_scorecard.cost_line(alert_scorecard.week_cost(db, start, end))
-    title, body = render(found, *ratings(db, start, end), monday.strftime("%b %-d"), cost)
+    kinds = alert_scorecard.kind_lines(alert_scorecard.week_by_kind(db, start, end))
+    title, body = render(found, *ratings(db, start, end), monday.strftime("%b %-d"), cost, kinds)
     return local.isoformat(), title, body
 
 

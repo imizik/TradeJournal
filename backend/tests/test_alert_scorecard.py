@@ -60,8 +60,8 @@ def position(db, ticker, buys, sells=(), status="open", closed_at=None, side="bu
     return trade, anchor(entries)
 
 
-def alert(db, trade, key, at, contracts, bid, kind="giveback", delivery="sent", mark=None, gain_pct=-0.25):
-    row = PositionAlert(account_id=ROTH, source_key=key, kind=kind, generation=1, trade_id=trade.id, contract=f"{trade.ticker} 11/21/26 100C",
+def alert(db, trade, key, at, contracts, bid, kind="giveback", delivery="sent", mark=None, gain_pct=-0.25, generation=1):
+    row = PositionAlert(account_id=ROTH, source_key=key, kind=kind, generation=generation, trade_id=trade.id, contract=f"{trade.ticker} 11/21/26 100C",
                         contracts=contracts, avg_cost=400, mark=mark if mark is not None else bid, bid=bid, gain_pct=gain_pct,
                         detected_at=at, delivery=delivery)
     db.add(row)
@@ -291,3 +291,51 @@ def test_the_ping_card_route_reads_one_alert_with_its_habit_and_refuses_while_th
     with pytest.raises(HTTPException) as missing:
         copilot_desk.desk_ping_card("", uuid.uuid4(), None, db)
     assert missing.value.status_code == 404
+
+
+def test_the_weekly_ping_scorecard_splits_acted_from_ignored_per_ping_type(db):
+    # Expires-today ping ignored, rode to expiry: selling 3 at the $150 bid would have fetched $450 more.
+    sndk, sndk_key = position(db, "SNDK", [(3, 300, ny(23, 11, 51))], status="expired", closed_at=ny(23, 16))
+    alert(db, sndk, sndk_key, utc(23, 14, 30), contracts=3, bid=150, kind="expiry_first")
+    # Expires-today ping acted on: sold 8 minutes after it.
+    mu, mu_key = position(db, "MU", [(2, 200, ny(23, 10))], [(2, 190, ny(23, 14, 38))], status="closed", closed_at=ny(23, 14, 38))
+    alert(db, mu, mu_key, utc(23, 14, 30), contracts=2, bid=180, kind="expiry_first")
+    # Give-back pinged twice on one position (counted once), ignored and sold higher an hour later: +$100.
+    nbis, nbis_key = position(db, "NBIS", [(1, 400, ny(23, 9, 41))], [(1, 500, ny(23, 11, 30))], status="closed", closed_at=ny(23, 11, 30))
+    alert(db, nbis, nbis_key, utc(23, 10, 31), contracts=1, bid=400)
+    alert(db, nbis, nbis_key, utc(23, 10, 40), contracts=1, bid=390, generation=2)
+    # Give-back with an Exiting decision logged, sold later: acted.
+    apld, apld_key = position(db, "APLD", [(1, 400, ny(23, 9, 45))], [(1, 250, ny(23, 12, 0))], status="closed", closed_at=ny(23, 12, 0))
+    alert(db, apld, apld_key, utc(23, 10, 50), contracts=1, bid=300)
+    decide(db, "APLD", "Exiting at the bid.", utc(23, 10, 52))
+    # Give-back ignored, still open. No-exit pings are left out.
+    amd, amd_key = position(db, "AMD", [(1, 100, ny(23, 10))])
+    alert(db, amd, amd_key, utc(23, 11), contracts=1, bid=90)
+    alert(db, amd, amd_key, utc(23, 10, 5), contracts=1, bid=95, kind="no_exit")
+
+    rows = alert_scorecard.week_by_kind(db, datetime(2026, 10, 21), datetime(2026, 10, 28))
+    assert [(r["kind"], r["pings"], r["acted"], r["ignored"], r["ignored_closed"], r["ignored_open"], r["ignored_vs_alert_usd"])
+            for r in rows] == [("giveback", 3, 1, 2, 1, 1, 100.0), ("expiry_first", 2, 1, 1, 1, 0, -450.0)]
+    assert alert_scorecard.kind_lines(rows) == ["Give-back: acted on 1 of 3. Ignoring 1 paid $100 (1 still open).",
+                                                "Expires today: acted on 1 of 2. Ignoring 1 cost $450."]
+
+
+def test_a_sell_after_the_act_window_is_not_acting_on_the_ping(db):
+    trade, key = position(db, "NBIS", [(1, 400, ny(23, 9, 41))], [(1, 200, ny(23, 10, 47))], status="closed", closed_at=ny(23, 10, 47))
+    alert(db, trade, key, utc(23, 10, 31), contracts=1, bid=300)  # sold 16 minutes later
+    [row] = alert_scorecard.week_by_kind(db, datetime(2026, 10, 21), datetime(2026, 10, 28))
+    assert (row["acted"], row["ignored"], row["ignored_vs_alert_usd"]) == (0, 1, -100.0)
+    assert alert_scorecard.kind_lines([row]) == ["Give-back: acted on 0 of 1. Ignoring 1 cost $100."]
+
+
+def test_the_ping_week_route_splits_the_last_digest_week_from_the_week_so_far(db, monkeypatch):
+    from app.routers import copilot_desk, today
+    last, key = position(db, "SNDK", [(3, 300, ny(23, 11, 51))], status="expired", closed_at=ny(23, 16))
+    alert(db, last, key, utc(23, 14, 30), contracts=3, bid=150, kind="expiry_first")  # Friday: before Sunday 6 PM
+    now, key2 = position(db, "MU", [(2, 200, ny(26, 10))])
+    alert(db, now, key2, utc(26, 11), contracts=2, bid=180)  # Monday
+    monkeypatch.setattr(today, "_now", lambda: datetime(2026, 10, 27, 14, tzinfo=UTC).timestamp())
+    body = copilot_desk.desk_ping_week(db)
+    assert body["last_week"]["ended"] == "2026-10-25" and body["this_week"]["since"] == "2026-10-25"
+    assert [(k["kind"], k["ignored_vs_alert_usd"]) for k in body["last_week"]["kinds"]] == [("expiry_first", -450.0)]
+    assert [(k["kind"], k["ignored_open"]) for k in body["this_week"]["kinds"]] == [("giveback", 1)]

@@ -2267,10 +2267,18 @@ owner's call): on Sunday at or after 18:00 New York, one ping, "NOTES · week of
 position-alert and Radar pings he rated of how many, what holding past the week's position alerts did once a pinged
 position has closed (`alert_scorecard.week_cost`: each position measured once from its first alert, as the alert
 scorecard measures it, e.g. "Pings: 3 pinged positions closed. Selling at the first ping would have made $1,240 more
-(selling then was better on 2, worse on 1)."), and one "Worth testing?" note quoted (the newest idea, else the newest
-naming a theme ticker, else the newest). Written from the rows with no model call, under a dozen lines; a week with no
+(selling then was better on 2, worse on 1)."), the weekly ping scorecard (below), and one "Worth testing?" note quoted (the newest idea, else the newest
+naming a theme ticker, else the newest). Written from the rows with no model call, about a dozen lines; a week with no
 notes still sends it. Its own ping kind, `note_digest`, with a budget of one a day (§ Phone ping policy); the week is
 claimed through the policy (`new_only`), so a restart never sends it twice. Its tap opens the day journal (`/daily`).
+
+**Weekly ping scorecard** (`alert_scorecard.week_by_kind`): per position-ping type, how many pinged positions he acted
+on and what ignoring the rest cost. Acted means a closing fill within 15 minutes of the ping (`ACT_MINUTES`) or an
+Exiting decision logged after it that day; each position counts once per type, from that type's first ping in the
+week; the cost is what the ignored, closed ones fetched against selling at the ping's bid, as the alert scorecard
+measures it. No-exit-order pings are left out (they ask for an order, not a sale). It is one line per type in the Sunday
+digest ("Expires today: acted on 1 of 2. Ignoring 1 cost $450.") and the "Which pings you acted on" card on /proof
+(`GET /copilot/desk/ping-week`: the last full digest week and the week so far; read-only, served while the lab is off).
 
 ### The desk read
 
