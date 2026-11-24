@@ -48,7 +48,7 @@ def publish(title: str, message: str, *, priority: int = 4, tags: tuple[str, ...
     target = urlsplit(url)
     body: dict = {"topic": target.path.strip("/"), "title": title, "message": message, "priority": priority, "tags": list(tags)}
     if app_url := os.environ.get("ALERT_APP_URL", "").strip():
-        body["actions"] = [{"action": "view", "label": label, "url": app_url.rstrip("/") + link}
+        body["actions"] = [{"action": "view", "label": label, "url": link if link.startswith("https://") else app_url.rstrip("/") + link}
                            for label, link in (("Open app", path), *more)]
         if direct_click:
             body["click"] = app_url.rstrip("/") + path
@@ -72,7 +72,7 @@ def publish_image(title: str, message: str, image: bytes, *, priority: int = 4, 
     headers = {"Title": _encoded(title), "Message": _encoded(message), "Priority": str(priority), "Tags": ",".join(tags),
                "Filename": "chart.png", "Content-Type": "image/png"}
     if app_url := os.environ.get("ALERT_APP_URL", "").strip():
-        actions = [{"action": "view", "label": label, "url": app_url.rstrip("/") + link} for label, link in (("Open app", path), *more)]
+        actions = [{"action": "view", "label": label, "url": link if link.startswith("https://") else app_url.rstrip("/") + link} for label, link in (("Open app", path), *more)]
         headers["Actions"] = json.dumps(actions, ensure_ascii=True, separators=(",", ":"))
         if direct_click:
             headers["Click"] = app_url.rstrip("/") + path

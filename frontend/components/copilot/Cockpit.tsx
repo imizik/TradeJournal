@@ -9,7 +9,7 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { EyeOff, RefreshCw } from "lucide-react";
+import { CircleDashed, EyeOff, RefreshCw } from "lucide-react";
 import { useKeptState } from "@/components/copilot/DeskMemory";
 import { NotFollowed } from "@/components/copilot/SessionTape";
 import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
@@ -367,24 +367,27 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
             return (<Fragment key={row.key}>
               <li data-selected={on || undefined} className={cn("group/row flex items-stretch border-t", on && "bg-secondary shadow-[inset_2px_0_0_hsl(var(--foreground))]")}>
                 <button type="button" onClick={() => onSelect(row)} aria-pressed={on} aria-label={`${row.symbol} ${full}`}
-                  className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(60px,auto)] items-center gap-2 py-2 pl-3 text-left hover:bg-secondary">
+                  className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(60px,auto)] items-center gap-2 py-1.5 pl-3 text-left hover:bg-secondary md:py-2">
                   <span className="min-w-0 overflow-hidden">
                     <span className="flex items-baseline gap-1.5">
                       <span className="text-sm font-semibold text-foreground">{row.symbol}</span>
                       <span className="min-w-0 truncate text-xs tabular-nums text-muted-foreground">{contract}{count}</span>
                     </span>
-                    {/* A phone (as Robinhood's list does): the contract's price now and its move today. */}
-                    {book && <span data-testid="book-now" className={cn("block text-[11px] tabular-nums text-muted-foreground md:hidden", now.stale && "opacity-50")}>
-                      <span data-testid="book-price">{now.price == null ? "—" : premium(now.price)}</span> · today{" "}
-                      <span data-testid="book-today" className={tone(now.today)}>{now.today == null ? "—" : money(now.today)}</span>
-                    </span>}
                     {book ? <Track track={book.track} /> : <span className="block truncate text-xs text-muted-foreground">{row.status.text}</span>}
-                    {/* Wraps rather than spilling: a tag never runs under the sparkline or the P&L, at any width. */}
+                    {/* Wraps rather than spilling: a tag never runs under the sparkline or the P&L, at any width. On a phone the
+                        price and today's move lead this line (as Robinhood's list does), so a row is two lines and about
+                        eight positions fit a screen. */}
                     <span data-testid="book-meta" className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground [&>*]:max-w-full [&>*]:truncate [&>*]:whitespace-nowrap">
+                      {book && <span data-testid="book-now" className={cn("tabular-nums md:hidden", now.stale && "opacity-50")}>
+                        <span data-testid="book-price">{now.price == null ? "—" : premium(now.price)}</span> · today{" "}
+                        <span data-testid="book-today" className={tone(now.today)}>{now.today == null ? "—" : money(now.today)}</span>
+                      </span>}
                       {mixed && book?.account && <span data-testid="book-account" title={`${book.account.label} ${book.account.masked}`}>{book.account.label}</span>}
                       {book?.stop_pct != null && <span className="tabular-nums">{Math.abs(book.stop_pct).toFixed(1)}% to stop</span>}
                       {book && left(book.expiry, day) && state !== EXPIRES_TODAY && <span className="tabular-nums">{left(book.expiry, day)}</span>}
-                      {book?.live === "new" ? <span data-testid="book-state" className="rounded border border-sky-300/40 px-1 text-sky-300">New · not in the journal yet</span>
+                      {book?.live === "new" ? <span data-testid="book-state" aria-label="New · not in the journal yet" title="New · not in the journal yet"
+                        className="inline-flex items-center rounded text-sky-300 md:border md:border-sky-300/40 md:px-1">
+                        <CircleDashed size={12} aria-hidden className="md:hidden" /><span className="max-md:hidden">New · not in the journal yet</span></span>
                         : state && <span data-testid="book-state" className={cn("rounded border px-1", state.className)}>{state.label}</span>}
                       <EarningsTag tag={row.symbol ? earnings?.rows[row.symbol] : undefined} day={day} />
                       {book?.live === "not_on_robinhood" && <span data-testid="book-not-live" className="rounded border px-1">Not on Robinhood</span>}

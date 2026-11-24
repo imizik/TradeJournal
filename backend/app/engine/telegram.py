@@ -96,8 +96,12 @@ def keyboard(path: str = "", buttons: tuple[tuple[str, str], ...] = (), links: t
         rows.extend(pairs)
     elif reply:
         rows.append(reply)
-    if app_url := os.environ.get("ALERT_APP_URL", "").strip():
-        rows.append([{"text": label, "url": app_url.rstrip("/") + link} for label, link in ((open_label, path), *links)])
+    app_url = os.environ.get("ALERT_APP_URL", "").strip()
+    # A link that is already a whole https URL (a broker's page) goes as it is, with or without the app's URL.
+    last = [{"text": label, "url": link if link.startswith("https://") else app_url.rstrip("/") + link}
+            for label, link in ((open_label, path), *links) if app_url or link.startswith("https://")]
+    if last:
+        rows.append(last)
     return {"inline_keyboard": rows} if rows else None
 
 
