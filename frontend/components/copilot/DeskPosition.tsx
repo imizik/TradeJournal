@@ -63,7 +63,7 @@ function StockNow({ symbol, last, change, live }: { symbol: string; last: number
 }
 
 /** Two stock prices in place, Save and Cancel. ``needStop``: a stop cannot be cleared here (a real plan's stop is its alert). */
-function LevelsEditor({ symbol, side, last, stop, target, needStop, save, onDone, note }: {
+export function LevelsEditor({ symbol, side, last, stop, target, needStop, save, onDone, note }: {
   symbol: string; side: PlanSide; last: number | null; stop: number | null; target: number | null; needStop: boolean;
   save(stop: number | null, target: number | null): Promise<string>; onDone(said: string | null): void; note?: ReactNode;
 }) {

@@ -325,7 +325,7 @@ def test_the_seeded_day_one_message_per_fill(engine, world, sent, monkeypatch, c
     add = found[3]
     kw = sent[2][2]
     # The tap opens the desk on the ticker while the copilot is on (the trade page otherwise); Noted stays the trade page's.
-    assert kw["path"] == ("/copilot-lab?symbol=NBIS" if copilot else f"/trades/{add.trade_id}?interrupt={add.id}")
+    assert kw["path"] == (f"/copilot-lab?symbol=NBIS&card=interrupt%3A{add.id}" if copilot else f"/trades/{add.trade_id}?interrupt={add.id}")
     assert kw["more"] == (("Noted", f"/trades/{add.trade_id}?interrupt={add.id}&noted=1"),)
     with Session(engine) as db:
         pings = db.exec(select(PhonePing).order_by(PhonePing.decided_at)).all()
@@ -359,6 +359,10 @@ def test_an_earlier_fill_whose_email_comes_late_stays_on_the_same_position(engin
     with Session(engine) as db:
         trade = db.get(Trade, earlier.trade_id)
         assert [r["id"] for r in fill_interrupts.for_trade(db, trade)] == [str(later.id)]  # still listed on the rebuilt trade
+        from app.routers import copilot_desk
+        held = copilot_desk._interrupt_trade(db, db.get(type(later), later.id))  # the ping card still finds the position
+        assert held is not None and held.status == "open"
+        assert fill_interrupts.note(db, held, later.id, 0) is not None  # its Noted lands on the trade the card names
 
 
 def test_scaling_in_repeats_only_adding_to_a_loser(engine, world, sent):

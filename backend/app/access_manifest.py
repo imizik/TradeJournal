@@ -122,6 +122,7 @@ DOMAIN_ROUTES = frozenset({
     'POST /copilot/checks',
     'POST /copilot/checks/{check_id}/pass',
     'GET /copilot/desk/scorecard',
+    'GET /copilot/desk/ping-card',  # the ping card: one alert or interrupt and its habit line; database reads only
     'GET /copilot/desk/pings',
     'GET /copilot/desk/day-report',
     'GET /copilot/desk/notes',  # his notes on the book's trades: database reads only; no Robinhood

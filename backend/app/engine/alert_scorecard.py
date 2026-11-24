@@ -59,21 +59,24 @@ def _trade(db: Session, alert: PositionAlert, found: dict) -> Trade | None:
     """The alert's position as a trade now. Trades are rebuilt with new ids, so the alert's own id is checked against the
     position's identity (its first entry fill) and, failing that, the account's trades in the symbol are searched."""
     key = (alert.account_id, alert.source_key)
-    if key in found:
-        return found[key]
-    trade = db.get(Trade, alert.trade_id)
+    if key not in found:
+        found[key] = position_trade(db, alert.account_id, (alert.contract or "").split(" ")[0], alert.source_key, alert.trade_id)
+    return found[key]
+
+
+def position_trade(db: Session, account_id, symbol: str, source_key: str, trade_id) -> Trade | None:
+    """The trade now holding the position whose first entry fill anchors as ``source_key`` (``trade_id`` first: it was
+    that trade when the ping fired), or None when no trade of the account's options in ``symbol`` is that position."""
+    trade = db.get(Trade, trade_id)
     entries = _fills(db, trade.id, "entry") if trade is not None else []
-    if not entries or anchor(entries) != alert.source_key:
-        trade = None
-        symbol = (alert.contract or "").split(" ")[0]
-        for candidate in db.exec(select(Trade).where(Trade.account_id == alert.account_id, Trade.ticker == symbol,
-                                                     Trade.instrument_type == "option")).all():
-            entries = _fills(db, candidate.id, "entry")
-            if entries and anchor(entries) == alert.source_key:
-                trade = candidate
-                break
-    found[key] = trade
-    return trade
+    if entries and anchor(entries) == source_key:
+        return trade
+    for candidate in db.exec(select(Trade).where(Trade.account_id == account_id, Trade.ticker == symbol,
+                                                 Trade.instrument_type == "option")).all():
+        entries = _fills(db, candidate.id, "entry")
+        if entries and anchor(entries) == source_key:
+            return candidate
+    return None
 
 
 def _choice(entry: DayJournalEntry) -> str | None:
@@ -118,7 +121,8 @@ def _outcome(db: Session, alert: PositionAlert, trade: Trade | None) -> dict:
             "vs_alert_usd": round(actual - at_alert, 2), "ended_at": _epoch_ny(ended) if ended else None}
 
 
-def scorecard(db: Session, now: float, days: int = WINDOW_DAYS) -> dict:
+def _rows(db: Session, now: float, days: int) -> list[dict]:
+    """Every scored alert of the window, oldest first (``scorecard``'s rows before they are cut)."""
     since = datetime.fromtimestamp(now, UTC).replace(tzinfo=None) - timedelta(days=days)
     alerts = list(db.exec(select(PositionAlert).where(PositionAlert.detected_at >= since, PositionAlert.delivery.in_(SENT),
                                                       PositionAlert.kind.not_in(NOT_SCORED))
@@ -149,6 +153,11 @@ def scorecard(db: Session, now: float, days: int = WINDOW_DAYS) -> dict:
             "decided_at": _epoch_utc(decided.created_at) if decided else None,
             "outcome": _outcome(db, alert, _trade(db, alert, found)),
         })
+    return rows
+
+
+def scorecard(db: Session, now: float, days: int = WINDOW_DAYS) -> dict:
+    rows = _rows(db, now, days)
     summary = {}
     for choice in ("holding", "exiting", None):
         mine = [r for r in rows if r["decision"] == choice]
@@ -162,6 +171,17 @@ def scorecard(db: Session, now: float, days: int = WINDOW_DAYS) -> dict:
         }
     rows.reverse()
     return {"window_days": days, "alerts": len(rows), "summary": summary, "rows": rows[:MAX_ROWS], "truncated": len(rows) > MAX_ROWS}
+
+
+def habit(db: Session, now: float, kind: str, days: int = WINDOW_DAYS) -> dict:
+    """What not acting on ``kind`` alerts did over the window, for the ping card's line: the alerts of that kind with no
+    Exiting logged after them (held, or no decision), and for the closed ones what they fetched against selling at the
+    alert (``vs_alert_usd``: negative means selling at the ping would have made that much more)."""
+    held = [r for r in _rows(db, now, days) if r["kind"] == kind and r["decision"] != "exiting"]
+    closed = [r["outcome"]["vs_alert_usd"] for r in held if r["outcome"]["state"] == "closed"]
+    return {"kind": kind, "kind_label": KIND.get(kind, "Position alert"), "window_days": days, "held": len(held),
+            "closed": len(closed), "better": sum(1 for v in closed if v > 0), "worse": sum(1 for v in closed if v < 0),
+            "vs_alert_usd": round(sum(closed), 2)}
 
 
 def week_cost(db: Session, start_utc: datetime, end_utc: datetime) -> dict:

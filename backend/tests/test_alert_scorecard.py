@@ -252,3 +252,42 @@ def test_the_cost_line_is_left_out_until_a_pinged_position_closes_and_says_when_
     assert alert_scorecard.cost_line({"positions": 1, "closed": 1, "open": 0, "better": 1, "worse": 0, "vs_alert_usd": 1234.4}) == (
         "Pings: 1 pinged position closed. Holding past the pings made $1,234 more than selling at the first one "
         "(selling then was better on 0, worse on 1).")
+
+
+def test_the_habit_line_sums_held_alerts_of_one_kind_and_leaves_exits_and_other_kinds_out(db):
+    held, key = position(db, "NBIS", [(2, 400, ny(27, 9, 41))], [(2, 200, ny(27, 11, 5))], status="closed", closed_at=ny(27, 11, 5))
+    alert(db, held, key, utc(27, 10, 31), contracts=2, bid=300)  # held: sold for 400 vs 600 at the bid
+    left, key2 = position(db, "APLD", [(1, 400, ny(27, 9, 45))], [(1, 250, ny(27, 10, 50))], status="closed", closed_at=ny(27, 10, 50))
+    alert(db, left, key2, utc(27, 10, 40), contracts=1, bid=300)
+    decide(db, "APLD", "Exiting. Give-back fired at 10:40; no plan on file.", utc(27, 10, 45))  # acted: not the habit
+    other, key3 = position(db, "QQQ", [(1, 150, ny(27, 10))], status="expired", closed_at=ny(27, 16))
+    alert(db, other, key3, utc(27, 15, 30), contracts=1, bid=50, kind="expiry_final")
+    habit = alert_scorecard.habit(db, NOW, "giveback")
+    assert habit == {"kind": "giveback", "kind_label": "Give-back", "window_days": 30, "held": 1, "closed": 1, "better": 0,
+                     "worse": 1, "vs_alert_usd": -200.0}
+
+
+def test_the_ping_card_route_reads_one_alert_with_its_habit_and_refuses_while_the_lab_is_off(db, monkeypatch):
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    from app.routers import copilot_desk
+    trade, key = position(db, "NBIS", [(2, 400, ny(28, 9, 41))])
+    row = alert(db, trade, key, utc(28, 10, 31), contracts=2, bid=300, mark=320)
+    monkeypatch.setattr(copilot_desk.copilot, "settings", lambda: SimpleNamespace(enabled=False))
+    with pytest.raises(HTTPException) as refused:
+        copilot_desk.desk_ping_card("NBIS", None, None, db)
+    assert refused.value.status_code == 503
+    monkeypatch.setattr(copilot_desk.copilot, "settings", lambda: SimpleNamespace(enabled=True))
+    monkeypatch.setattr(copilot_desk.today, "_now", lambda: NOW)
+    by_id = copilot_desk.desk_ping_card("", row.id, None, db)
+    latest = copilot_desk.desk_ping_card("nbis", None, None, db)  # no id: the symbol's newest alert today
+    assert by_id == latest
+    assert by_id["symbol"] == "NBIS" and by_id["interrupt"] is None
+    assert {k: by_id["alert"][k] for k in ("id", "kind", "kind_label", "contracts", "bid", "mark")} == {
+        "id": str(row.id), "kind": "giveback", "kind_label": "Give-back", "contracts": 2, "bid": 300, "mark": 320}
+    assert by_id["habit"]["held"] == 1 and by_id["habit"]["closed"] == 0  # this one is still open
+    assert by_id["broker"] == {"label": "Robinhood", "url": "https://robinhood.com/stocks/NBIS"}
+    assert copilot_desk.desk_ping_card("APLD", None, None, db)["alert"] is None  # nothing fired today: the card shows the book
+    with pytest.raises(HTTPException) as missing:
+        copilot_desk.desk_ping_card("", uuid.uuid4(), None, db)
+    assert missing.value.status_code == 404

@@ -727,6 +727,14 @@ export function readFeedLink(value: string | string[] | undefined): FeedLink | n
   return match ? { kind: match[1] as FeedLink["kind"], id: match[2] ?? null } : null;
 }
 
+/** A position ping's ``card=alert:<id>`` or ``card=interrupt:<id>`` (docs/copilot-lab.md § Where a ping opens): the desk
+ * opens on that ping's card (``PingCard``). Anything else is dropped. */
+export type CardLink = { kind: "alert" | "interrupt"; id: string };
+export function readCardLink(value: string | string[] | undefined): CardLink | null {
+  const match = /^(alert|interrupt):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(((Array.isArray(value) ? value[0] : value) ?? "").trim());
+  return match ? { kind: match[1].toLowerCase() as CardLink["kind"], id: match[2].toLowerCase() } : null;
+}
+
 // --------------------------------------------------------------------------- research queue
 
 export type ResearchJob = {

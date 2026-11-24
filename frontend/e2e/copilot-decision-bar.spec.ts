@@ -136,7 +136,7 @@ test("a position ping with no plan conversation opens the desk on its symbol, st
 test("Undo inside the window posts nothing and brings the bar back", async ({ page }) => {
   const { posts } = await desk(page);
   const bar = page.getByRole("region", { name: "Decision" });
-  await bar.getByRole("button", { name: "Exiting" }).click();
+  await bar.getByRole("button", { name: "Close it" }).click();
   await expect(page.getByTestId("desk-decision-pending")).toContainText("Logged exiting");
   await page.getByRole("button", { name: "Undo" }).click();
   await expect(bar.getByRole("button", { name: "Holding" })).toBeVisible();
@@ -149,7 +149,7 @@ test("Exiting says to close it in Robinhood, and Ask why fills the message box w
   const bar = page.getByRole("region", { name: "Decision" });
   await bar.getByRole("button", { name: "Ask why" }).click();
   await expect(page.getByLabel("Message")).toHaveValue("Give-back fired at 10:31 on NBIS; plan says hold above 85.00 (3.1% above). Should I hold or exit here, and why?");
-  await bar.getByRole("button", { name: "Exiting" }).click();
+  await bar.getByRole("button", { name: "Close it" }).click();
   await expect(page.getByTestId("desk-decision-logged"))
     .toHaveText("You logged exiting at 10:44. Close it in Robinhood; the fill links to the plan on its own.", { timeout: 7_000 });
   expect(posts.map(p => p.text)).toEqual(["Exiting. Give-back fired at 10:31; plan says hold above 85.00 (3.1% above)."]);
@@ -162,7 +162,7 @@ test("on a 375 px phone the two choices are full-width and thumb-sized", async (
   const bar = page.getByRole("region", { name: "Decision" });
   await expect(bar).toContainText("Give-back fired at 10:31.");
   const width = (await bar.boundingBox())!.width;
-  for (const name of ["Holding", "Exiting"]) {
+  for (const name of ["Holding", "Close it"]) {
     const box = (await bar.getByRole("button", { name }).boundingBox())!;
     expect(box.height).toBeGreaterThanOrEqual(44);
     expect(box.width).toBeGreaterThan(width - 40);

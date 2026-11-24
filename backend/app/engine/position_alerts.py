@@ -583,9 +583,9 @@ def since_line(db: Session, alert: PositionAlert, now: float) -> str | None:
 
 
 def desk_path(db: Session, alert: PositionAlert) -> str:
-    """The Copilot desk's thread for this position (docs/copilot-lab.md § The desk), which opens on its decision bar:
-    the plan's conversation when a plan card saved the position's plan (its oldest linked capture, as the Plans card
-    reads it), else the symbol."""
+    """The Copilot desk on this position (docs/copilot-lab.md § Where a ping opens): it opens on the ping card (``card``:
+    the alert's own id) with Close, Trim and Set stop first, the conversation behind it the plan's when a plan card saved
+    the position's plan (its oldest linked capture, as the Plans card reads it), else the symbol's."""
     from app.engine import capture_links, plan_nudges  # plan_nudges imports this module
     linked = capture_links.for_trade(db, alert.trade_id)  # a rebuilt trade id finds none: the symbol still opens
     if linked:
@@ -596,8 +596,8 @@ def desk_path(db: Session, alert: PositionAlert) -> str:
                            .order_by(PlanTimeStop.created_at.desc())).first()
             investigation = stop.investigation_id if stop else None
         if investigation:
-            return "/copilot-lab?" + urlencode({"investigation": investigation})
-    return "/copilot-lab?" + urlencode({"symbol": (alert.contract or "").split(" ")[0]})
+            return "/copilot-lab?" + urlencode({"investigation": investigation, "card": f"alert:{alert.id}"})
+    return "/copilot-lab?" + urlencode({"symbol": (alert.contract or "").split(" ")[0], "card": f"alert:{alert.id}"})
 
 
 ASK_KIND = {"giveback": "Give-back alert", "hold_hour": "One-hour alert", "expiry_first": "Expires-today alert",

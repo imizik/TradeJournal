@@ -50,8 +50,10 @@ is ``unknown`` and never resent, and a message not sent within ``EXPIRE_SECONDS`
 Right before the send ``notification_policy.decide`` may hold it (kind ``interrupt``, ranked just below
 ``hold_hour``, its own daily budget ``PING_BUDGET_INTERRUPT``, default 4; the quiet window is per position).
 
-The message opens the trade page on the interrupt; its Noted button opens the same page with ``noted=1``, where
-the page records the acknowledgement once (``POST /trades/{trade_id}/fill-interrupts/{id}/noted``).
+While Copilot Lab is on the message opens the desk's ping card on the interrupt (``card=interrupt:<id>``: Close,
+Trim and Set stop first; any of them records the acknowledgement), else the trade page on it. Its Noted button opens
+the trade page with ``noted=1``, where the page records the acknowledgement once
+(``POST /trades/{trade_id}/fill-interrupts/{id}/noted``).
 """
 
 from collections import defaultdict
@@ -464,7 +466,7 @@ class FillInterrupts:
             row.attempts += 1
             try:
                 _, image_state = phone.send(row.title, row.body + ticket.append, kind="interrupt", image=image, priority=4, tags=("mirror",),
-                                            path=phone.desk_link(path(row), symbol=row.ticker), direct_click=True,
+                                            path=phone.desk_link(path(row), symbol=row.ticker, card=f"interrupt:{row.id}"), direct_click=True,
                                             more=(("Noted", path(row, noted=True)),))
             except phone.SendError as exc:
                 if not _surely_unsent(exc):
