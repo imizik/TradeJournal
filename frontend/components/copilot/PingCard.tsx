@@ -15,7 +15,7 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { api, apiUrl } from "@/lib/api";
-import { money, nyDay, signedPct, type DeskThread } from "@/lib/desk";
+import { money, nyDay, signedPct, type DeskOrder, type DeskThread } from "@/lib/desk";
 import { tickedBook, useDeskTicks } from "@/lib/deskTicks";
 import { everyDeskMinute } from "@/lib/deskMinute";
 import { heldContracts, markNow, planSide, savePlanLevels, type PanelPlan } from "@/lib/deskPosition";
@@ -48,6 +48,12 @@ export function pingRow(body: PingCardBody, rows: readonly DeskThread[]): DeskTh
   const contract = body.alert?.contract ?? body.interrupt?.contract;
   const same = contract ? mine.filter(r => !r.tradeId && `${r.symbol} ${r.instrument}` === contract) : [];
   return same.length === 1 ? same[0] : null;
+}
+
+/** The working exit orders among a row's orders: only a closing order is an exit, never a working buy to open (a
+ * scale-in) on the same contract (as ``robinhood_fills.exit_working``). */
+export function exitOrders(orders: readonly DeskOrder[] | undefined): DeskOrder[] {
+  return (orders ?? []).filter(o => o.working && /to close$/i.test(o.action));
 }
 
 /** A bid older than this is not "the bid": the card prices at the mid now instead and says so. */
@@ -167,7 +173,7 @@ function Act({ body, row, rows, ordersLive, onAsk, onPlan }: {
   const copyable = !!standing && !!option && option.direction === "long" && (option.side === "call" || option.side === "put") && option.strike != null && option.expiry
     && held != null && Number.isInteger(held) && held >= 1 && sellAt !== null && sellAt > 0;
   const half = held && held >= 2 ? trimCount(held, { half: true }) : null;
-  const working = ordersLive ? (book.orders ?? []).filter(o => o.working) : null;
+    const working = ordersLive ? exitOrders(book.orders) : null;
   const atExpiry = standing?.standing.atExpiry ?? null;
   const stockNow = standing?.stock?.last ?? null;
   const plan: PanelPlan | null = row.investigationId && book.plan_levels?.stop != null
@@ -175,10 +181,14 @@ function Act({ body, row, rows, ordersLive, onAsk, onPlan }: {
   const side = planSide({ entry: null, stop: plan?.stop }, { option, sign: book.tick?.sign });
   const fired = alert ? `${alert.kind_label} ping at ${hhmm(alert.at)}` : body.interrupt ? `Fill pattern: ${body.interrupt.title}` : "Ping";
 
-  const log = async (choice: "Exiting" | "Holding", what: string) => {
-    await api.addDayJournalEntry(nyDay(), { operation_id: `decision-${uid()}`, kind: "decision", symbol, text: `${choice}. ${fired}; ${what}.` });
+  // An interrupt's card: any choice made here (a copy, a hold, a stop saved) records its Noted.
+  const noted = async () => {
     const i = body.interrupt;
     if (i && i.noted_at == null) await fetch(apiUrl(`/trades/${encodeURIComponent(i.trade_id)}/fill-interrupts/${encodeURIComponent(i.id)}/noted`), { method: "POST" }).catch(() => undefined);
+  };
+  const log = async (choice: "Exiting" | "Holding", what: string) => {
+    await api.addDayJournalEntry(nyDay(), { operation_id: `decision-${uid()}`, kind: "decision", symbol, text: `${choice}. ${fired}; ${what}.` });
+    await noted();
   };
   const copyClose = async (contracts: number) => {
     if (!copyable || sellAt === null) return;
@@ -243,6 +253,7 @@ function Act({ body, row, rows, ordersLive, onAsk, onPlan }: {
             save={async (stop, target) => {
               const saved = await savePlanLevels({ symbol, plan, side, stop, target });
               if (stopping === "hold") await log("Holding", `stop moved to ${saved.stop != null ? priceText(saved.stop) : "none"}`);
+              else await noted();
               return saved.text;
             }}
             onDone={words => { setStopping(null); if (words) setDone({ text: words }); }}

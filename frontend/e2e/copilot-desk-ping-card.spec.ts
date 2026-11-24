@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Request } from "@playwright/test";
+import { exitOrders } from "@/components/copilot/PingCard";
 
 // The ping card (docs/copilot-lab.md § Where a ping opens): a position ping's tap lands on what fired, what holding past
 // that kind of ping has cost, the position as it stands, and Copy Close all @ bid first; the copilot's sheet waits behind
@@ -167,4 +168,13 @@ test("a ping names its own position: another ORCL row on the desk is not it", as
   await open(page, { card: { ...CARD, position: { trade_id: "99999999-9999-4999-8999-999999999999", open: true } } });
   await expect(card(page).getByTestId("ping-card-closed")).toContainText("not on the desk now");
   await expect(card(page).getByTestId("ping-card-close")).toHaveCount(0);
+});
+
+test("only a working closing order counts as the exit: a working buy to open is a scale-in", () => {
+  const order = (action: string, working = true) => ({ contract: "ORCL 11/20/26 250C", symbol: "ORCL", instrument: "option" as const, action, working,
+    quantity: 1, filled: 0, price_kind: "limit" as const, limit: 5, avg: null, placed_at: null, filled_at: null, account: { label: "RH", masked: "1234" }, pairing: null });
+  expect(exitOrders([order("Buy to open")])).toEqual([]);
+  expect(exitOrders([order("Sell to close", false)])).toEqual([]);
+  expect(exitOrders([order("Buy to open"), order("Sell to close")]).map(o => o.action)).toEqual(["Sell to close"]);
+  expect(exitOrders(undefined)).toEqual([]);
 });
