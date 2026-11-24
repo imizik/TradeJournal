@@ -243,6 +243,19 @@ test("sidecar crash with surviving child refuses early recovery then retries exa
   } finally { if(ownedPid!==null){try{process.kill(ownedPid,"SIGCONT");process.kill(ownedPid,"SIGTERM");}catch{}} }
 });
 
+test("a worker start refused while a preview is preparing waits and starts the run",async({page})=>{
+  // The sidecar-crash test failed CI when Retry's execute met a preview still
+  // holding the preparation lock: the 409 left the run queued for good.
+  let refused=0;
+  await page.route("**/research-studio/command",async route=>{if(route.request().postDataJSON().action==="execute" && refused<2){refused++;await route.fulfill({status:409,json:{detail:"Research preparation is busy; retry shortly"}});}else await route.continue();});
+  await page.goto("/research-studio");await expect(page.getByRole("status").filter({hasText:"Preview:"})).toBeVisible();
+  await openConditions(page);
+  await page.getByLabel("Condition 2 minimum",{exact:true}).fill("1.82");await expect(page.getByRole("button",{name:"Run analysis",exact:true})).toBeEnabled();
+  await page.getByRole("button",{name:"Run analysis",exact:true}).click();
+  await expect(page.getByRole("button",{name:"Reveal analysis (records exposure)"})).toBeVisible();
+  expect(refused).toBe(2);await expect(page.getByRole("alert",{name:"Research error"})).toHaveCount(0);
+});
+
 test("R4 frozen variant comparison and append-only conclusions survive reload",async({page})=>{
   const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));
   await page.goto("/research-studio");await expect(page.getByRole("status").filter({hasText:"Preview:"})).toContainText("7 events");

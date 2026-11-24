@@ -55,7 +55,7 @@ export default function ResearchStudio() {
       if (seq !== runSequence.current) return;
       ++chartSequence.current; setChart(null); setSelected(null); setChartLoading(false);
       setRun(s); setRunKey(frozen); setResult(null);
-      if (s.status === "queued") await command("execute");
+      if (s.status === "queued") await prepared("execute", {});
       await history();
     } catch (e) { setError((e as Error).message); } finally { if (seq === runSequence.current) setSubmitting(false); }
   }
@@ -110,7 +110,7 @@ export default function ResearchStudio() {
     } catch (e) { setError((e as Error).message); }
   }
   async function control(action: "cancel" | "retry") {
-    if (!run) return; const seq = runSequence.current; try { const s = await command<Status>(action, {run_id: run.run_id, operation_id: crypto.randomUUID()}); if (seq === runSequence.current) setRun(s); if (action === "retry") await command("execute"); await history(); } catch (e) { setError((e as Error).message); }
+    if (!run) return; const seq = runSequence.current; try { const s = await command<Status>(action, {run_id: run.run_id, operation_id: crypto.randomUUID()}); if (seq === runSequence.current) setRun(s); if (action === "retry") await prepared("execute", {}); await history(); } catch (e) { setError((e as Error).message); }
   }
   async function recover() {
     if (!run) return; const seq=runSequence.current; setError("");
@@ -166,7 +166,7 @@ export default function ResearchStudio() {
     {run&&<section className={card+" space-y-3"} aria-label="Run status">
       <div className="flex flex-wrap items-center justify-between gap-3"><div><p className={"text-sm font-medium "+(previous?"text-primary":"")}>{previous?"Previous result — draft changed":parent?"Frozen variant":"Frozen run"} · attempt {run.attempt}</p><p className="mt-1 text-xs text-muted-foreground">{run.status==="completed"?"Calculation saved. Reveal outcomes explicitly when ready.":run.status==="running"?"Calculating in the isolated research worker.":"This run keeps its original data and attempt history."}</p></div><strong className="rounded-md border bg-secondary px-2 py-1 text-xs capitalize">{run.status}</strong></div>
       {run.reason&&<p className="text-sm text-primary">{run.reason}</p>}
-      <div className="flex flex-wrap gap-2">{["queued","running"].includes(run.status)&&<><button className={button} onClick={()=>control("cancel")}>Cancel run</button><button className={button} onClick={()=>run.status==="running"?recover():command("execute").catch(e=>setError(e.message))}>{run.status==="running"?"Check worker / recover interrupted run":"Start queued worker"}</button></>}
+      <div className="flex flex-wrap gap-2">{["queued","running"].includes(run.status)&&<><button className={button} onClick={()=>control("cancel")}>Cancel run</button><button className={button} onClick={()=>run.status==="running"?recover():prepared("execute", {}).catch(e=>setError(e.message))}>{run.status==="running"?"Check worker / recover interrupted run":"Start queued worker"}</button></>}
         {["failed","cancelled"].includes(run.status)&&<button className={button} onClick={()=>control("retry")}>Retry frozen run</button>}
         {run.status==="completed"&&!result&&<button className={button+" bg-primary text-primary-foreground hover:bg-primary/90"} disabled={submitting} onClick={()=>revealResult(run)}>Reveal analysis (records exposure)</button>}
         {result&&supportsR4&&<button className={button} disabled={submitting||comparing} onClick={duplicate}><Copy size={14}/>Duplicate as variant</button>}

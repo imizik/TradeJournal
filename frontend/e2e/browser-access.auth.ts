@@ -2,6 +2,15 @@ import { test, expect } from "@playwright/test";
 const ownerOrigin = `http://127.0.0.1:${process.env.AUTH_OWNER_PORT ?? 3129}`;
 const publicOrigin = `http://127.0.0.1:${process.env.AUTH_ASSISTANT_PORT ?? 3130}`;
 
+// A dropped keep-alive socket (ECONNRESET) says nothing about access, so retry
+// it a couple of times; every real response is returned on the first try.
+async function statusAllowingReset(send: () => Promise<{ status(): number }>): Promise<number> {
+  for (let attempt = 1; ; attempt++) {
+    try { return (await send()).status(); }
+    catch (error) { if (attempt >= 3 || !/ECONNRESET/.test(String(error))) throw error; }
+  }
+}
+
 test("cloud-style login, restricted SSR/UI, mutation denial, and owner revocation", async ({ page, browser }) => {
   await page.goto("/");
   await expect(page).toHaveURL(/\/login$/);
@@ -184,7 +193,13 @@ test("native login submission never puts an access key in the URL", async ({ bro
   expect(request.method()).toBe("POST");
   expect(new URL(request.url()).search).toBe("");
   expect(request.postData()).toContain("synthetic-native-proof-key");
-  expect((await context.request.get("/api/backend/trades")).status()).toBe(401);
+  // Let the refused login finish before probing. Probing while that navigation
+  // was still in flight failed main CI four times (Oct 28 – Nov 22) with
+  // ECONNRESET, never with a wrong status. A reset is a transport failure, not
+  // an answer, so only that is retried; any status still has to be 401.
+  await request.response();
+  await page.waitForLoadState("load");
+  expect(await statusAllowingReset(() => context.request.get("/api/backend/trades"))).toBe(401);
   await context.close();
 });
 
