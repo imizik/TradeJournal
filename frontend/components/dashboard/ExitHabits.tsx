@@ -26,7 +26,8 @@ export type LeakWeek = { week: string; expired: number; giveback: number; total:
 export type LeakBody = { weeks: LeakWeek[]; this_week: LeakWeek; last_4_avg: number | null; prior_4_avg: number | null };
 
 const KIND: Record<string, string> = { giveback: "Gave back its gain", expiry_first: "Expires today", expiry_final: "Last 30 minutes",
-  hold_hour: "Held an hour", wrong_way: "Wrong way at 30 min", no_exit: "No exit order at 5 min" };
+  hold_hour: "Held an hour", wrong_way: "Wrong way at 30 min", no_exit: "No exit order at 5 min",
+  same_day_1pm: "Same-day option open at 1 PM" };
 export const RESPONSE: Record<string, string> = { closed_15m: "Closed within 15 min", trimmed_15m: "Trimmed within 15 min",
   closed_later: "Closed later that day", held_overnight: "Held overnight", expired: "Let it expire", still_open: "Still open", rolled: "Rolled it" };
 const ALERTS_SHOWN = 3;

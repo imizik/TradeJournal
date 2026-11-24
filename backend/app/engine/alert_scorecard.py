@@ -16,6 +16,9 @@ so its value can only show in the owner's decisions after it. Read-only; nothing
   nothing for contracts that expired. ``vs_alert_usd`` is actual minus selling at the alert: positive means holding
   past the alert paid. A position with contracts still open is ``open``; a short position, an alert with no price, or
   a trade that cannot be found is ``not_measured``.
+- Summary, per decision: the counts are per alert, the dollars (``vs_alert_usd``) per position, from its first measured
+  alert with that decision. Several alerts on one position are measured on the same contracts, so their dollars are
+  never added together (``week_cost`` reads a week the same way).
 
 Units follow the journal: an option fill's ``price`` and the alert's ``bid``/``mark``/``avg_cost`` are dollars per
 contract. Alert and journal times are naive UTC; fill and trade times are naive New York wall clock (domain rules).
@@ -32,7 +35,7 @@ WINDOW_DAYS = 30
 MAX_ROWS = 60
 SENT = ("sent", "unknown")
 KIND = {"giveback": "Give-back", "hold_hour": "Held an hour", "expiry_first": "Expires today", "expiry_final": "30 minutes left",
-        "expiry_eve": "Expires next session", "wrong_way": "Wrong way at 30 min"}
+        "expiry_eve": "Expires next session", "wrong_way": "Wrong way at 30 min", "same_day_1pm": "Same-day option at 1 PM"}
 NOT_SCORED = ("no_exit",)  # a prompt to set an exit at the entry, not to sell: selling at it is not its alternative
 EPSILON = 1e-9
 
@@ -146,6 +149,7 @@ def _rows(db: Session, now: float, days: int) -> list[dict]:
         decided = next((d for d in decisions if d.symbol == symbol and d.created_at >= alert.detected_at
                         and _ny(d.created_at).date() == day and (until is None or d.created_at < until) and _choice(d)), None)
         rows.append({
+            "position": f"{alert.account_id}:{alert.source_key}",
             "at": _epoch_utc(alert.detected_at), "kind": alert.kind, "kind_label": KIND.get(alert.kind, "Position alert"),
             "contract": alert.contract, "symbol": symbol,
             "pnl_pct_at_alert": round(alert.gain_pct * 100, 1) if alert.gain_pct is not None else None,
@@ -162,13 +166,22 @@ def scorecard(db: Session, now: float, days: int = WINDOW_DAYS) -> dict:
     for choice in ("holding", "exiting", None):
         mine = [r for r in rows if r["decision"] == choice]
         closed = [r["outcome"]["vs_alert_usd"] for r in mine if r["outcome"]["state"] == "closed"]
+        # The counts are per alert; the dollars count each position once, from its first measured alert here. A position
+        # often gets several alerts (give-back, one-hour, expires-today, 30 minutes left) and each is measured on the
+        # same contracts, so adding them all up said the same loss two to four times.
+        once: dict = {}
+        for r in mine:  # oldest first
+            if r["outcome"]["state"] == "closed":
+                once.setdefault(r["position"], r["outcome"]["vs_alert_usd"])
         summary["none" if choice is None else choice] = {
             "alerts": len(mine), "closed": len(closed), "better": sum(1 for v in closed if v > 0),
             "worse": sum(1 for v in closed if v < 0), "even": sum(1 for v in closed if v == 0),
             "open": sum(1 for r in mine if r["outcome"]["state"] == "open"),
             "not_measured": sum(1 for r in mine if r["outcome"]["state"] == "not_measured"),
-            "vs_alert_usd": round(sum(closed), 2),
+            "vs_alert_usd": round(sum(once.values()), 2),
         }
+    for r in rows:
+        del r["position"]
     rows.reverse()
     return {"window_days": days, "alerts": len(rows), "summary": summary, "rows": rows[:MAX_ROWS], "truncated": len(rows) > MAX_ROWS}
 

@@ -41,9 +41,9 @@ const OVERNIGHT = { enabled: true, state: "holding", symbol: "QQQ", stake: 10000
   totals: { closed: 1, missed: 0, mean_bp: 19.1, dollars: 19.09, up: 1 } };
 const MOMENTUM = { enabled: true, symbol: "QQQ", stake: 10000, now: epoch("2026-11-13T16:00:00Z"), backtest: { mean_bp: 4.4, years: "2022-2026" }, holding: null,
   days: [{ day: "2026-11-12", bp: -6.2, dollars: -6.2, trades: [] }], totals: { days: 1, days_traded: 0, mean_bp: -6.2, dollars: -6.2, up: 0, missed_checks: 0 } };
-const BOARD_ROW = { open: 0, unresolved: 0, pnl_2x: 0, exits: {}, graduated: false };
-const PROVING = { enabled: true, graduate_trades: 40, bracket: { take_profit: 0.2, stop: 0.15, hold_minutes: 60, flat_minutes: 5 },
-  board: [{ ...BOARD_ROW, source: "open_window", name: "9:45 MU/NBIS rule", closed: 12, green: 7, pnl: 184, pnl_2x: 40, avg: 15.33, open: 1 },
+const BOARD_ROW = { open: 0, unresolved: 0, pnl_2x: 0, exits: {}, graduated: false, status: "PAPER · 0 of 20 days, 0 of 40 trades" };
+const PROVING = { enabled: true, graduate_trades: 40, graduate_days: 20, graduate_score: 3, review_days: 10, bracket: { take_profit: 0.2, stop: 0.15, hold_minutes: 60, flat_minutes: 5 },
+  board: [{ ...BOARD_ROW, source: "open_window", name: "9:45 MU/NBIS rule", closed: 12, green: 7, pnl: 184, pnl_2x: 40, avg: 15.33, open: 1, status: "PAPER · 6 of 20 days, 12 of 40 trades" },
     { ...BOARD_ROW, source: "radar_setup", name: "Radar setups", closed: 9, green: 3, pnl: -212, avg: -23.56 },
     { ...BOARD_ROW, source: "jo_morning", name: "Jo's morning picks", closed: 0, green: 0, pnl: 0, avg: null }],
   recent: [{ source: "open_window", day: "2026-11-13", symbol: "MU", direction: "up", state: "closed", entry: 2, exit: 2.45, reason: "take_profit", pnl: 43.7, note: null, contract: "MU1" }] };
@@ -216,10 +216,10 @@ for (const width of [1440, 375]) {
 test("the proving ground line names the leading source and opens to the board by source", async ({ page }) => {
   await open(page, 1440);
   const line = page.getByTestId("practice-line-proving");
-  await expect(line).toContainText("Proving ground· 9:45 MU/NBIS rule +$184 (12/40)");
+  await expect(line).toContainText("Proving ground· 9:45 MU/NBIS rule +$184 (not proven)");
   await line.click();
   const board = page.getByTestId("desk-proving-board");
-  await expect(board.getByTestId("desk-proving-open_window")).toContainText("9:45 MU/NBIS rule12 +1 open7 of 12+$184PAPER 12/40");
+  await expect(board.getByTestId("desk-proving-open_window")).toContainText("9:45 MU/NBIS rule12 +1 open7 of 12+$184PAPER · 6 of 20 days, 12 of 40 trades");
   await expect(board.getByTestId("desk-proving-jo_morning")).toContainText("—");
   await page.getByTestId("desk-proving").screenshot({ path: test.info().outputPath("desk-proving.png") });
 });

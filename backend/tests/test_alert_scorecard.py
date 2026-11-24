@@ -127,6 +127,31 @@ def test_a_position_still_open_is_open_and_unsent_alerts_do_not_count(db):
     assert card["summary"]["none"]["open"] == 1 and card["summary"]["none"]["closed"] == 0
 
 
+def test_the_summary_counts_a_position_s_dollars_once_however_many_alerts_it_got(db):
+    """Three alerts on one position that expired worthless are one loss, not three. Until 2026-11 the summary added each
+    alert's shortfall, so the same contracts were counted again for every alert."""
+    trade, key = position(db, "SNDK", [(2, 400, ny(27, 9, 41))], status="expired", closed_at=ny(27, 16))
+    alert(db, trade, key, utc(27, 10, 41), contracts=2, bid=300, kind="hold_hour")
+    alert(db, trade, key, utc(27, 14, 30), contracts=2, bid=100, kind="expiry_first")
+    alert(db, trade, key, utc(27, 15, 30), contracts=2, bid=20, kind="expiry_final")
+    other, other_key = position(db, "MU", [(1, 500, ny(27, 10))], [(1, 550, ny(27, 13))], status="closed", closed_at=ny(27, 13))
+    alert(db, other, other_key, utc(27, 12), contracts=1, bid=450)
+    card = alert_scorecard.scorecard(db, NOW)
+    assert [r["outcome"]["vs_alert_usd"] for r in card["rows"]] == [-40.0, -200.0, 100.0, -600.0]  # each row keeps its own measure
+    assert all("position" not in r for r in card["rows"])
+    assert card["summary"]["none"] == {"alerts": 4, "closed": 4, "better": 1, "worse": 3, "even": 0, "open": 0, "not_measured": 0,
+                                       "vs_alert_usd": -500.0}  # SNDK from its first alert (-600) and MU (+100), not -740
+
+
+def test_a_decision_counts_its_own_alert_s_dollars_when_an_earlier_alert_had_none(db):
+    trade, key = position(db, "NBIS", [(1, 400, ny(27, 9, 41))], [(1, 450, ny(28, 10))], status="closed", closed_at=ny(28, 10))
+    alert(db, trade, key, utc(27, 10, 31), contracts=1, bid=300, kind="giveback")
+    alert(db, trade, key, utc(27, 14, 30), contracts=1, bid=280, kind="expiry_first")
+    decide(db, "NBIS", "Holding. Thesis intact.", utc(27, 14, 35))
+    summary = alert_scorecard.scorecard(db, NOW)["summary"]
+    assert (summary["none"]["vs_alert_usd"], summary["holding"]["vs_alert_usd"]) == (150.0, 170.0)  # one per decision, each once
+
+
 def test_a_decision_belongs_to_the_alert_before_it_not_an_earlier_one(db):
     trade, key = position(db, "NBIS", [(1, 400, ny(27, 9, 41))], [(1, 450, ny(28, 10))], status="closed", closed_at=ny(28, 10))
     alert(db, trade, key, utc(27, 10, 31), contracts=1, bid=300, kind="giveback")

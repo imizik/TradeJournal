@@ -2,6 +2,7 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 import json
+import re
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -114,8 +115,15 @@ def test_automatic_once_per_session_restart_tool_import_and_disabled(morning):
         assert len(packets) == 1
         saved = store.get_packet(session, packets[0].id)
         encoded = json.dumps(saved)
-        for secret in ("SECRET", "5511", "8822", "secret-email", "Private name", str(config.account_ids[0])):
+        for secret in ("SECRET", "secret-email", "Private name", str(config.account_ids[0])):
             assert secret not in encoded
+        # An account's last four digits, looked for as a number of their own. A plain substring search also matched
+        # the same digits inside a random id, a hash or a timestamp's microseconds (about one run in a thousand).
+        for last4 in ("5511", "8822"):
+            assert not re.search(rf"(?<![0-9A-Za-z.]){last4}(?![0-9A-Za-z])", encoded)
+        assert re.search(r"(?<![0-9A-Za-z.])8822(?![0-9A-Za-z])", 'Unapproved ••8822') and re.search(
+            r"(?<![0-9A-Za-z.])8822(?![0-9A-Za-z])", '"last4": "8822"')  # the search still sees a real leak
+        assert not re.search(r"(?<![0-9A-Za-z.])8822(?![0-9A-Za-z])", '"2026-11-24T13:00:02.588221", "id": "a8822f6c-88220"')
         evidence = {e["id"]: e for e in saved["body"]["evidence"]}
         assert evidence["market-SPY"]["observed_at"] != evidence["market-SPY"]["retrieved_at"]
         assert datetime.fromisoformat(saved["body"]["as_of"]) == NOW+timedelta(seconds=2)

@@ -82,7 +82,7 @@ only as records ([Silent rule flags](radar.md#silent-rule-flags)); the setup-car
 lab and the four-family strategy search found no evidence either way. New idea
 sources now have to earn their phone pings on paper first: the
 [paper proving ground](copilot-lab.md#paper-proving-ground) trades each on one
-bracket, and a source graduates at 40 closed trades net positive (off until
+bracket, and a source graduates only when its record is too good to be luck (off until
 `PROVING_GROUND_ENABLED=true`).
 
 Then connect the successful workflows through a natural conversational

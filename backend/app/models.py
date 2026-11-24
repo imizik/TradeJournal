@@ -588,7 +588,7 @@ class PositionAlert(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     account_id: uuid.UUID
     source_key: str = Field(index=True)
-    kind: str  # giveback | expiry_first | expiry_final | expiry_eve | hold_hour | wrong_way | no_exit
+    kind: str  # giveback | expiry_first | expiry_final | expiry_eve | hold_hour | wrong_way | no_exit | same_day_1pm
     generation: int  # the give-back arming (hold_hour: the one current when it fired); 0 for expiry alerts
     trade_id: uuid.UUID  # the trade when it fired, for the notification's link (trades are rebuilt; read by source_key)
     contract: str  # e.g. "SNDK 9/18/26 230C"

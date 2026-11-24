@@ -512,7 +512,7 @@ export type JobStatus = {
 };
 
 /** One open-trade phone alert, as `GET /trades/{id}/phone-alerts` lists it (the trade page reads the rest). */
-export type TradePhoneAlert = { id: string; kind: "giveback" | "expiry_first" | "expiry_final" | "hold_hour" | "wrong_way" | "no_exit"; detected_at: number;
+export type TradePhoneAlert = { id: string; kind: "giveback" | "expiry_first" | "expiry_final" | "hold_hour" | "wrong_way" | "no_exit" | "same_day_1pm"; detected_at: number;
   contracts: number; gain: number | null; gain_pct: number | null; peak_gain: number | null; peak_gain_pct: number | null };
 
 export type SyncJob = {
