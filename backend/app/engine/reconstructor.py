@@ -7,12 +7,13 @@ Handles both options and stocks. Pure logic - no DB access.
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/New_York")
 _CLOSE_HOUR = 16
+_SETTLED = time(16, 30)  # New York: every option session is over (index and ETF options trade until 16:15)
 _ZERO = Decimal("0")
 _EPSILON = Decimal("0.000000001")
 
@@ -119,9 +120,17 @@ class _OpenTrade:
     closed_at: datetime | None = None
 
 
+def expiry_cutoff(now: datetime | None = None) -> date:
+    """The first New York date whose options have not expired yet: today, or tomorrow once today's session has
+    settled. Read from the New York clock, never the server's own date."""
+    moment = (now or datetime.now(ET)).astimezone(ET)
+    return moment.date() + timedelta(days=1) if moment.time() >= _SETTLED else moment.date()
+
+
 def reconstruct(fills: list[FillInput], today: date | None = None) -> ReconstructResult:
+    """``today``: open options expiring before it are written off; ``expiry_cutoff()`` when not given."""
     if today is None:
-        today = date.today()
+        today = expiry_cutoff()
 
     open_trades: dict[ContractKey, _OpenTrade] = {}
     completed: list[_OpenTrade] = []

@@ -91,7 +91,7 @@ class _Wednesday(date):
 
 @pytest.fixture(autouse=True)
 def fresh(monkeypatch):
-    monkeypatch.setattr(reconstructor, "date", _Wednesday)  # the test positions are open on WED
+    monkeypatch.setattr(reconstructor, "expiry_cutoff", lambda now=None: _Wednesday.today())  # the test positions are open on WED
     chart_render._cache.clear()
     monkeypatch.setenv("PING_IMAGES_ENABLED", "true")
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")

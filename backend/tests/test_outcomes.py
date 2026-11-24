@@ -169,7 +169,7 @@ class _Thursday(date):
 @pytest.fixture(autouse=True)
 def on_thursday(monkeypatch):
     """Trade rebuilds expire contracts past the machine's own date; these run as of Oct 23, whatever today is."""
-    monkeypatch.setattr(reconstructor, "date", _Thursday)
+    monkeypatch.setattr(reconstructor, "expiry_cutoff", lambda now=None: _Thursday.today())
 
 
 @pytest.fixture
@@ -465,3 +465,53 @@ def test_a_failed_outcomes_step_never_fails_the_sync_pipeline(monkeypatch):
         runs = {r.job_type: r for r in db.exec(select(JobRun)).all()}
     assert (runs["full_pipeline"].status, runs["full_pipeline"].done, runs["full_pipeline"].total) == ("succeeded", 7, 7)
     assert runs["compute_outcomes"].status == "failed" and "outcome table missing" in runs["compute_outcomes"].error
+
+
+def test_the_sync_pipeline_rebuilds_when_an_option_expired_with_no_new_fill(monkeypatch):
+    """A rebuild is what writes an expired option off. Until 2026-11 the pipeline rebuilt only after importing a new
+    fill, so a Friday expiry stayed open, with no loss, until Monday's first trade."""
+    import types
+    import uuid
+    from datetime import date
+    from decimal import Decimal
+    from app.models import Account, Fill, JobRun, Trade
+    from app.routers import sync
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(sync, "engine", engine)
+    monkeypatch.setattr(sync, "execute_job", lambda job_id, runner: runner())
+    monkeypatch.setattr(sync, "_import_fills_from_gmail", lambda session, start_enrichment: {"saved": 0, "skipped": 0})
+    monkeypatch.setattr(sync, "_run_existing_enrichment", lambda *a: types.SimpleNamespace(total=0, id=None))
+    monkeypatch.setattr(sync, "_run_outcomes", lambda session, job_id: (0, "nothing"))
+    for module in (sync, reconstructor):  # Friday's session has settled: its options are expired
+        monkeypatch.setattr(module, "expiry_cutoff", lambda now=None: date(2026, 11, 14))
+
+    def run_pipeline() -> list[str]:
+        with Session(engine) as db:
+            pipeline = sync._create_run(db, sync.JOB_FULL_PIPELINE, "test", total=sync.PIPELINE_STEPS)
+        sync._run_pipeline(pipeline.id)
+        with Session(engine) as db:
+            assert db.get(JobRun, pipeline.id).status == "succeeded"
+            return sorted(r.job_type for r in db.exec(select(JobRun)).all())
+
+    account, fill_id = uuid.uuid4(), uuid.uuid4()
+    with Session(engine) as db:
+        db.add(Account(id=account, name="Roth", type="roth_ira", last4="0001"))
+        db.add(Fill(id=fill_id, account_id=account, ticker="NBIS", instrument_type="option", side="buy_to_open", contracts=Decimal("2"),
+                    price=Decimal("150"), executed_at=datetime(2026, 11, 13, 9, 45), raw_email_id="m1", option_type="call",
+                    strike=Decimal("123"), expiration=date(2026, 11, 13)))
+        # The journal as the last rebuild left it, while the option was still trading: open, no loss.
+        db.add(Trade(id=fill_id, account_id=account, ticker="NBIS", instrument_type="option", option_type="call", strike=Decimal("123"),
+                     expiration=date(2026, 11, 13), contracts=Decimal("2"), avg_entry_premium=Decimal("150"),
+                     total_premium_paid=Decimal("300"), opened_at=datetime(2026, 11, 13, 9, 45), status="open"))
+        db.commit()
+    assert "trade_rebuild" in run_pipeline()
+    with Session(engine) as db:
+        trade = db.exec(select(Trade)).one()
+        assert (trade.id, trade.status, trade.expired_worthless, float(trade.realized_pnl)) == (fill_id, "expired", True, -300.0)
+        assert trade.closed_at == datetime(2026, 11, 13, 16, 0)
+        for run in db.exec(select(JobRun)).all():
+            db.delete(run)
+        db.commit()
+    assert "trade_rebuild" not in run_pipeline()  # nothing new and nothing expired: the rebuild is skipped as before

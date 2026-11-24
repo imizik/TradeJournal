@@ -56,7 +56,7 @@ class _Wednesday(date):
 
 @pytest.fixture(autouse=True)
 def on_wednesday(monkeypatch):
-    monkeypatch.setattr(reconstructor, "date", _Wednesday)
+    monkeypatch.setattr(reconstructor, "expiry_cutoff", lambda now=None: _Wednesday.today())
     for name in ("PLAN_NUDGE_GRACE_MINUTES", "PLAN_NUDGE_DAILY_CAP", "PLAN_NUDGE_ENABLED", "POSITION_COMPANION_ENABLED",
                  "COPILOT_ENABLED"):
         monkeypatch.delenv(name, raising=False)

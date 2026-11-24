@@ -66,7 +66,7 @@ class _Wednesday(date):
 
 @pytest.fixture(autouse=True)
 def settings(monkeypatch):
-    monkeypatch.setattr(reconstructor, "date", _Wednesday)
+    monkeypatch.setattr(reconstructor, "expiry_cutoff", lambda now=None: _Wednesday.today())
     for name in ("ALERT_POLICY_ENABLED", "PING_DAILY_CAP", "PING_QUIET_MINUTES", "PLAN_NUDGE_DAILY_CAP", "PING_PREOPEN_ALLOWANCE",
                  "PREMARKET_PREP_ENABLED", "PREMARKET_PREP_AT",
                  *(f"PING_BUDGET_{kind.upper()}" for kind in policy.BUDGETS)):

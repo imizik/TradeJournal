@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 
 from app.database import get_session
 from app.models import Account, Tag, Trade, TradeTag
-from app.engine.analytics import analyze
+from app.engine.analytics import ET, analyze
 
 router = APIRouter()
 
@@ -103,8 +103,8 @@ async def get_stats(
             except (json.JSONDecodeError, AttributeError):
                 pass
 
-    # Today's PnL
-    today = date.today()
+    # Today's PnL: the New York day (trade times are New York wall clocks), not the server's own date
+    today = datetime.now(ET).date()
     today_pnl = sum(
         (
             float(t.realized_pnl)

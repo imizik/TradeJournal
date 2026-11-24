@@ -9,7 +9,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 
-from app.engine.reconstructor import FillInput, reconstruct
+from app.engine.reconstructor import FillInput, expiry_cutoff, reconstruct
 
 ET = ZoneInfo("America/New_York")
 ACCOUNT = uuid.uuid4()
@@ -154,6 +154,26 @@ def test_different_strikes_separate_trades():
     strikes = {t.strike for t in result.trades}
     assert strikes == {D("500.0"), D("510.0")}
     assert all(t.status == "open" for t in result.trades)
+
+
+def test_an_option_is_written_off_once_its_last_session_has_settled_in_new_york():
+    """A Friday expiry is over that evening: until 2026-11 it stayed open until the next calendar day by the server's
+    own date, which the Friday week review and that evening's reads never saw."""
+    friday = date(2026, 11, 13)
+    assert expiry_cutoff(datetime(2026, 11, 13, 15, 59, tzinfo=ET)) == friday  # still trading
+    assert expiry_cutoff(datetime(2026, 11, 13, 16, 29, tzinfo=ET)) == friday  # index and ETF options trade to 16:15
+    assert expiry_cutoff(datetime(2026, 11, 13, 16, 30, tzinfo=ET)) == date(2026, 11, 14)
+    # The New York clock decides, whatever zone the server keeps: 01:00 UTC on the 14th is 20:00 Friday in New York,
+    # and 13:00 UTC on the 13th is 08:00 Friday there.
+    utc = ZoneInfo("UTC")
+    assert expiry_cutoff(datetime(2026, 11, 14, 1, 0, tzinfo=utc)) == date(2026, 11, 14)
+    assert expiry_cutoff(datetime(2026, 11, 13, 13, 0, tzinfo=utc)) == friday
+
+    fills = [_fill("buy_to_open", "2", price="150.0", executed_at=datetime(2026, 11, 13, 9, 45, tzinfo=ET), expiration=friday)]
+    during = reconstruct(fills, today=expiry_cutoff(datetime(2026, 11, 13, 15, 59, tzinfo=ET))).trades[0]
+    assert (during.status, during.realized_pnl) == ("open", None)
+    after = reconstruct(fills, today=expiry_cutoff(datetime(2026, 11, 13, 16, 45, tzinfo=ET))).trades[0]
+    assert (after.status, after.expired_worthless, after.realized_pnl) == ("expired", True, D("-300.000000"))
 
 
 def test_open_trade_not_expired():

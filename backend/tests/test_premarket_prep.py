@@ -64,7 +64,7 @@ class _Monday(date):
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
-    monkeypatch.setattr(reconstructor, "date", _Monday)
+    monkeypatch.setattr(reconstructor, "expiry_cutoff", lambda now=None: _Monday.today())
     monkeypatch.setenv("PREMARKET_PREP_ENABLED", "true")
     monkeypatch.setenv("COPILOT_ENABLED", "true")
     monkeypatch.setenv("COPILOT_BACKEND", "fake")
