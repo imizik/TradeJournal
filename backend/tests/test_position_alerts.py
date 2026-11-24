@@ -1521,7 +1521,7 @@ def test_a_one_pm_alert_whose_position_closed_before_the_send_is_not_sent_and_an
     clock.now = at(WED, "13:02")
     watcher.deliver()
     assert sent == [] and [(a.delivery, a.last_error) for a in alerts(engine)] == [
-        ("expired", "The position was closed before this was sent, so it was not sent.")]
+        ("expired", "The position was no longer a morning entry still open when this was sent, so it was not sent.")]
 
 
 def test_the_deep_red_hour_words_survive_a_new_trade_id(engine, world, hold_on):

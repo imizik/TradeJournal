@@ -202,7 +202,7 @@ def last_close(closes: list[tuple[datetime, float]], at: datetime) -> tuple[date
     if not same_day:
         return None
     latest = max(c[0] for c in same_day)
-    return latest, sum(c[1] for c in same_day if c[0] == latest)
+    return latest, round(sum(c[1] for c in same_day if c[0] == latest), 2)  # to the cent: a flat minute is not a loss
 
 
 def quick_reentry(fill: dict, last: tuple[datetime, float] | None) -> bool:

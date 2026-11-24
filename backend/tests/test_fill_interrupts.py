@@ -342,6 +342,8 @@ def test_quick_reentry_is_an_option_bought_within_five_minutes_of_a_losing_close
     seconds = [(ny("10:10").replace(second=5), 100.0), (ny("10:10").replace(second=45), -80.0)]
     assert fill_interrupts.last_close(seconds, ny("10:11")) == fill_interrupts.last_close(seconds[::-1], ny("10:11")) == (ny("10:10"), 20.0)
     assert fill_interrupts.last_close(seconds, ny("10:10").replace(second=20)) == (ny("10:10"), 20.0)  # the fill's own minute, whole
+    flat = [(ny("10:10"), -1000.10), (ny("10:10"), -1000.20), (ny("10:10"), 2000.30)]  # sums to a hair under zero as floats
+    assert fill_interrupts.last_close(flat, ny("10:12")) == (ny("10:10"), 0.0) and not fill_interrupts.quick_reentry(buy, (ny("10:10"), 0.0))
     # An add to a position already open is not a re-entry: the record counts first entries, and so does the rule.
     assert fill_interrupts.fired(buy, [], None, last=(ny("10:10"), -80.0)) == ["put_entry", "quick_reentry"]
     assert fill_interrupts.fired(buy, [lot("buy_to_open", 200, "09:40")], None, last=(ny("10:10"), -80.0)) == ["put_entry"]

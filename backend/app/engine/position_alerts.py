@@ -908,7 +908,7 @@ class PositionAlerts:
         # send it again.
         if due is not None and due <= minute < due + FIRST_GRACE_MINUTES and db.exec(select(PositionAlert.id).where(
                 PositionAlert.account_id == position["account_id"], PositionAlert.contract == position["contract"],
-                PositionAlert.kind == "same_day_1pm")).first() is None:
+                PositionAlert.kind == "same_day_1pm", PositionAlert.delivery != "expired")).first() is None:
             found.append(self._alert(position, "same_day_1pm", 0, mark, gain, gain_pct, None, now))
         if hold_enabled():
             due = hold_due(position["opened_at"], today, regular, position["expiration"] == today)
@@ -1021,10 +1021,14 @@ class PositionAlerts:
                 db.commit()
                 return
             if alert.kind == "same_day_1pm":
-                # Its words are "still open at 1 PM": an exit that arrived since the alert was written takes them back.
-                states = db.exec(select(Trade.status).where(Trade.id.in_(own_trades(db, alert)))).all()
-                if states and "open" not in states:
-                    alert.delivery, alert.last_error = "expired", "The position was closed before this was sent, so it was not sent."
+                # Its words are "bought this morning, still open at 1 PM": a fill that arrived since the alert was written
+                # (an exit, an earlier entry on another day, a correction) can take them back.
+                today = datetime.fromtimestamp(_epoch(alert.detected_at), ET).date()
+                held = db.exec(select(Trade.opened_at, Trade.expiration).where(Trade.id.in_(own_trades(db, alert)), Trade.status == "open")).all()
+                if not any(t.expiration == today and t.opened_at.date() == today and t.opened_at.hour * 60 + t.opened_at.minute < MORNING_END
+                           for t in held):
+                    alert.delivery = "expired"
+                    alert.last_error = "The position was no longer a morning entry still open when this was sent, so it was not sent."
                     db.commit()
                     return
             facts = (wrong_way_facts(db, alert) if alert.kind == "wrong_way" else self._eve_facts(db, alert, now) if alert.kind == "expiry_eve"
