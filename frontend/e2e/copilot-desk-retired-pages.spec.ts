@@ -270,12 +270,12 @@ test("old /scanner and /radar URLs open their desk drawers and phone rating link
 test("while the desk is home the menu drops Radar, Scanner and Daily Practice; Signals and Advisor review stay", async ({ page }) => {
   await open(page);
   await page.getByRole("button", { name: /open menu|menu/i }).first().click();
-  const market = page.getByRole("button", { name: "Market", exact: true });
+  const market = page.getByRole("button", { name: "More pages", exact: true });
   if ((await market.getAttribute("aria-expanded")) !== "true") await market.click();
   await expect(page.getByRole("link", { name: "Signals", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Radar", exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Scanner", exact: true })).toHaveCount(0);
-  const practice = page.getByRole("button", { name: "Practice", exact: true });
+  const practice = page.getByRole("button", { name: "More pages", exact: true });
   if ((await practice.getAttribute("aria-expanded")) !== "true") await practice.click();
   await expect(page.getByRole("link", { name: "Advisor review", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Daily Practice", exact: true })).toHaveCount(0);

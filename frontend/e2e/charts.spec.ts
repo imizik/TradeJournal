@@ -4354,9 +4354,9 @@ test("on the charts page the journal navigation is a rail that expands and is re
   const rail = page.getByRole("navigation").filter({ has: page.getByRole("button", { name: "Expand navigation" }) });
   expect((await rail.boundingBox())!.width).toBeLessThanOrEqual(48);
   await page.screenshot({ path: test.info().outputPath("navigation-rail-desktop.png") });
-  // The two primary pages are named links, the current one marked, with sync status and the Sync drawer reachable.
-  for (const name of ["Dashboard", "Charts"]) await expect(rail.getByRole("link", { name, exact: true })).toBeVisible();
-  await expect(rail.getByRole("link", { name: "Trades", exact: true })).toHaveCount(0);
+  // The four primary pages are named links, the current one marked, with sync status and the Sync drawer reachable.
+  for (const name of ["Dashboard", "Proof", "Charts", "Trades"]) await expect(rail.getByRole("link", { name, exact: true })).toBeVisible();
+  await expect(rail.getByRole("link", { name: "Fills", exact: true })).toHaveCount(0);
   await expect(rail.getByRole("link", { name: "Charts", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(rail.getByTitle("Sync & enrichment status")).toBeVisible();
   for (const name of ["Charts", "Dashboard"]) {
@@ -4391,7 +4391,7 @@ test("on the charts page the journal navigation is a rail that expands and is re
   await rail.getByRole("button", { name: "More", exact: true }).click();
   const drawer = page.getByRole("dialog", { name: "Menu" });
   await drawer.getByRole("button", { name: "Journal", exact: true }).click();
-  await drawer.getByRole("button", { name: "Research", exact: true }).click();
+  await drawer.getByRole("button", { name: "More pages", exact: true }).click();
   await page.screenshot({ path: test.info().outputPath("navigation-rail-more.png") });
   await drawer.getByRole("link", { name: "Fills", exact: true }).click();
   await expect(page).toHaveURL(/\/fills$/);

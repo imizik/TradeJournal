@@ -2189,8 +2189,14 @@ links (`?event=…&rate=…`) still saving the rating once on arrival. ⌘K's **
 Feed's "Scanner page →", and Radar card's "Open in Radar" open those drawers in place; no page code is deleted, and
 with the lab off both pages show as before. While the desk is home, bare `/practice` also opens the desk (Daily practice, Saved decisions, 9:40 scalp shortlist
 history and rules, and Decision replay lab live closed inside the Practice block and in ⌘K, and `Daily Practice` leaves
-More → Practice for the owner; `?decision=` and `?practice_run=` links keep working). `/dashboard`, `/charts` and `/daily`
+More → More pages for the owner; `?decision=` and `?practice_run=` links keep working). `/dashboard`, `/charts` and `/daily`
 are not retired yet (bare `/dashboard` opens the desk while the lab is on).
+
+The app's navigation (`Nav.tsx`) leads with the desk (Dashboard while the lab is off) and **Proof**, then Charts and
+Trades, in the sidebar, the menu and the phone's tab bar. Everything else folds into two groups: **Journal** (Fills,
+Daily Review, Analytics; with the desk home, Journal summary and How I use the desk first) and **More pages** (Signals,
+Jo, Experiments, Advisor review, Strategy Lab, Level 2 lab, Research Studio, Company Research, AI Buildout, and Radar,
+Scanner and Daily Practice while the lab is off). No page is removed.
 
 From 768 px the **status line** along the desk's bottom (`DeskStatusLine` in `DeskHealth.tsx`) shows the mode's mark
 and whose book, then only what is not fine, in words: a source behind, money first, red when it leaves positions,

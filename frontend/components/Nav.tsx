@@ -58,36 +58,32 @@ export const useDeskTabSlot = () => useSyncExternalStore(subscribeSlot, () => de
 
 type NavItem = { href: string; label: string; icon: typeof Bot };
 
-/** The two pages always in view (while the desk is home: Desk and Charts, see ``withDesk``). Today is retired: its
- * address opens the desk. */
+/** The pages always in view: the desk (while it is home, see ``withDesk``) and Proof lead, then Charts and Trades. Today
+ * is retired: its address opens the desk. */
 const PRIMARY: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/proof", label: "Proof", icon: ClipboardCheck },
   { href: "/charts", label: "Charts", icon: ChartCandlestick },
+  { href: "/trades", label: "Trades", icon: FileText },
 ];
 
-/** Everything else, folded away until asked for. */
+/** Everything else, folded away until asked for: the journal's other pages, then every rarely used page in one group. */
 const GROUPS: { name: string; items: NavItem[] }[] = [
   { name: "Journal", items: [
-    { href: "/trades", label: "Trades", icon: FileText },
     { href: "/fills", label: "Fills", icon: Activity },
     { href: "/daily", label: "Daily Review", icon: ClipboardList },
     { href: "/analytics", label: "Analytics", icon: BarChart2 },
   ] },
-  { name: "Market", items: [
+  { name: "More pages", items: [
     { href: "/radar", label: "Radar", icon: Telescope },
     { href: "/scanner", label: "Scanner", icon: Radar },
     { href: "/signals", label: "Signals", icon: Radio },
     { href: "/morning", label: "Jo", icon: Bot },
-    { href: "/proof", label: "Proof", icon: ClipboardCheck },
-    { href: "/experiments", label: "Experiments", icon: FlaskConical },
-  ] },
-  { name: "Practice", items: [
     { href: "/practice", label: "Daily Practice", icon: Target },
+    { href: "/experiments", label: "Experiments", icon: FlaskConical },
     { href: "/advisor-review", label: "Advisor review", icon: Scale },
     { href: "/strategy-lab", label: "Strategy Lab", icon: GitBranch },
     { href: "/level2-lab", label: "Level 2 lab", icon: FlaskConical },
-  ] },
-  { name: "Research", items: [
     { href: "/research-studio", label: "Research Studio", icon: FlaskConical },
     { href: "/research/companies", label: "Company Research", icon: FileText },
     { href: "/research/ai-buildout", label: "AI Buildout", icon: FileText },
@@ -210,10 +206,11 @@ function shownHref(href: string, owner: boolean, enabled: boolean, journal: bool
   return owner || ["/", "/charts", "/daily", ...(journal ? ["/trades", "/fills", "/analytics"] : [])].includes(href);
 }
 
-/** The phone tab bar's pages; everything else is under More. The owner gets Dashboard, Charts and Trades (while the desk
- * is home: Desk, Charts and Trades), with Daily Review under More; an assistant keeps Daily Review. */
+/** The phone tab bar's pages; everything else is under More. The owner gets Dashboard, Proof, Charts and Trades (while
+ * the desk is home: Desk, Proof, Charts and Trades), with Daily Review under More; an assistant keeps Daily Review. */
 const TABS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/proof", label: "Proof", icon: ClipboardCheck },
   { href: "/charts", label: "Charts", icon: ChartCandlestick },
   { href: "/daily", label: "Daily Review", icon: ClipboardList },
   { href: "/trades", label: "Trades", icon: FileText },
@@ -283,7 +280,7 @@ function NavLink({ item: { href, label, icon: Icon }, pathname, onNavigate, rail
   return <li>{rail ? <NavHint label={label}>{link}</NavHint> : link}</li>;
 }
 
-/** The three primary links, then (unless on the rail, whose More button opens them) the groups this viewer has pages in. */
+/** The primary links, then (unless on the rail, whose More button opens them) the groups this viewer has pages in. */
 function NavLinks({ pathname, groups, onNavigate, rail = false }: { pathname: string; groups?: NavGroups; onNavigate?: () => void; rail?: boolean }) {
   const { owner, grants, enabled } = useAppAccess();
   const journal = owner || !!grants.journal_read;
