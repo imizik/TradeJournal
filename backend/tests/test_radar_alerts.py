@@ -111,7 +111,7 @@ def test_a_new_event_pings_once_with_its_read_and_rating_actions(tmp_path, engin
     [push] = sent
     assert push["title"] == "Radar: AAA +6.0% vs SPY 0.0%"
     assert push["body"] == f"{event['summary']} · 10:07 AM ET"
-    assert push["path"] == f"/radar?event={EVENT}" and push["direct_click"] is True and push["priority"] == 4
+    assert push["path"] == f"/radar?event={EVENT}" and push["direct_click"] is True and push["priority"] == 2  # Radar is the quiet tier: no sound
     assert push["more"] == (("Useful", f"/radar?event={EVENT}&rate=useful"), ("Not useful", f"/radar?event={EVENT}&rate=irrelevant"))
     [row] = rows(engine)
     assert (row.event_id, row.subject, row.kind, row.delivery, row.attempts, row.last_error) == (EVENT, "AAA", "relative_to_spy", "sent", 1, None)
@@ -254,7 +254,7 @@ def test_on_telegram_a_single_carries_rating_buttons_and_a_digest_only_why(tmp_p
         digest_id = digest.id
     alerts.clock = lambda: at(38)
     alerts._send(digest_id)
-    assert sent[1]["buttons"] == (("Why?", "ask:radar_digest"),) and sent[1]["path"] == "/radar" and sent[1]["priority"] == 3
+    assert sent[1]["buttons"] == (("Why?", "ask:radar_digest"),) and sent[1]["path"] == "/radar" and sent[1]["priority"] == 2
 
 
 def test_one_single_per_subject_an_hour_and_the_rest_wait_for_the_digest(engine, monkeypatch):
@@ -313,7 +313,7 @@ def test_the_digest_lists_every_waiting_event_newest_first_and_opens_radar(engin
     digest = sent[-1]
     assert digest["title"] == "Radar digest: 3 events since the open"
     assert digest["body"] == "Semis up 2.3% vs SPY (4 of 5) · 9:55 AM\nBBB down 4.6% vs SPY · 9:50 AM\nAAA up 5.2% vs SPY · 9:40 AM"
-    assert digest["path"] == "/radar" and digest["more"] == () and digest["priority"] == 3
+    assert digest["path"] == "/radar" and digest["more"] == () and digest["priority"] == 2
     assert [(r.subject, r.delivery) for r in rows(engine)] == [("AAA", "sent"), ("BBB", "sent"), ("LAD", "sent"), ("Semis", "sent")]
     [row] = digests(engine)
     assert (row.event_id, row.delivery, row.attempts) == (f"digest-{DAY}-1000", "sent", 1)

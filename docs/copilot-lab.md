@@ -3537,7 +3537,12 @@ otherwise. While the lab is on (`COPILOT_ENABLED=true`), a position alert's
 tap opens the desk on that position's decision (`position_alerts.desk_path`:
 the plan's conversation when a plan card saved the position's plan, else
 `/copilot-lab?symbol=…`, which opens on the decision bar); with the lab off the
-tap opens the trade page as before. Either way the push carries two answer
+tap opens the trade page as before. With the lab on, a position alert
+carries **Close** and **Trim** instead of the survey answers: each opens the ping card
+(§ Where a ping opens) with `&do=close` or `&do=trim`, which rings and focuses that button;
+nothing is copied until he taps it, and on Telegram they ride beside Why? (`phone.send(keep_links=True)`).
+Whether he acted is still read from his fills and the alert scorecard, not from a tap. With the lab
+off the push carries two answer
 actions next to Open app (ntfy shows three; all need `ALERT_APP_URL`):
 **Prompted review** and **Already aware** (`position_alerts.ANSWER_ACTIONS`)
 open the trade page on the alert with `&answer=prompted_review` or
@@ -4335,6 +4340,14 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   Radar alerts and thesis watch are anchored per symbol (the symbol's open
   position when there is one; a Radar group event to its group); a ping they
   hold is recorded `held` and counts toward neither sender's own caps.
+- **Two tiers: only position risk makes a sound.** `phone.loud(kind, …)` (`phone.LOUD`) keeps the
+  sound for the pings about money at risk in a position he holds: give-back, held an hour, the expiry
+  countdown (expires today, the last-day 90 and 30 minutes), wrong way, no exit order, the day's loss
+  and green-day locks, a plan's invalidation, target, time stop and level alerts, and the fill-time
+  interrupts for oversized and late short-dated buys (`fill_interrupts.LOUD_KINDS`). Every other ping
+  (Radar, briefs and prep, plan nudges and entry levels, paper, reviews, digests, the companion, research
+  results, other interrupts) is sent silent: ntfy priority 2 (no sound) and Telegram
+  `disable_notification`. The message, its budget and its links are unchanged.
 - **Not followed:** a ping whose ticker the owner set to not followed on the desk
   (§ The desk, **Not following**) is held, decision `not_followed`, reason "Not sent:
   you don't follow SLS on the desk (Show again there to hear about it).", before the

@@ -89,6 +89,7 @@ LARGE_MULTIPLE = 2.0
 LARGE_LOOKBACK_DAYS = 365
 LARGE_MIN_ENTRIES = 20
 EPS = 1e-9
+LOUD_KINDS = frozenset({"large_size", "late_short_dated"})  # position risk: these make a sound (phone.LOUD); the rest arrive silently
 KINDS = ("add_to_loser", "put_entry", "opened_green", "late_short_dated", "ticker_record", "large_size")
 ONCE_PER_POSITION = ("put_entry", "opened_green", "late_short_dated", "ticker_record", "large_size")
 FOOTER = "Your record, not advice."
@@ -466,6 +467,7 @@ class FillInterrupts:
             row.attempts += 1
             try:
                 _, image_state = phone.send(row.title, row.body + ticket.append, kind="interrupt", image=image, priority=4, tags=("mirror",),
+                                            sound=bool(LOUD_KINDS & set(row.kinds.split(","))),
                                             path=phone.desk_link(path(row), symbol=row.ticker, card=f"interrupt:{row.id}"), direct_click=True,
                                             more=(("Noted", path(row, noted=True)),))
             except phone.SendError as exc:

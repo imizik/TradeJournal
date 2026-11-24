@@ -15,8 +15,9 @@ export default async function CopilotLabPage({ searchParams }: { searchParams: P
   const fresh = params.view === "new";
   // A Radar or scanner ping's ?feed=: the Feed forward on that card (with ?symbol=, its chart in the centre).
   const feed = readFeedLink(params.feed);
-  // A position ping's ?card=alert:<id> (or a fill interrupt's interrupt:<id>): its card first, with Close / Trim / Set stop.
-  const card = readCardLink(params.card);
+  // A position ping's ?card=alert:<id> (or a fill interrupt's interrupt:<id>): its card first, with Close / Trim / Set stop;
+  // &do=close|trim (a risk ping's own buttons) points the card at that button.
+  const card = readCardLink(params.card, params.do);
   // Anything else opens Now: the day above today's Main chat. The old Briefing address (?view=briefing) and the evening
   // review's ?close=1 land there too.
   const daily = !link && !params.thread && !fresh;
