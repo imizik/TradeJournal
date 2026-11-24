@@ -33,8 +33,9 @@ board only. The rule (``judge``) asks whether the record could be luck, not only
 - the score is the average session over its standard error (a t statistic), and it must reach ``GRADUATE_SCORE``
   (3.0) on at least ``GRADUATE_DAYS`` (20) sessions and ``GRADUATE_TRADES`` (40) closed trades, with the
   twice-the-spread dollars above zero as well;
-- the record is judged only at every ``REVIEW_DAYS``th (10th) session, on the sessions up to that one, so looking at
-  the board every minute gives luck no extra chances and the label does not flicker in between. A graduated source
+- the record is judged only at every ``REVIEW_DAYS``th (10th) session, on the sessions up to that one, and a session
+  counts from the day after it (never while its trades are still closing), so looking at the board every minute
+  gives luck no extra chances and the label does not flicker in between. A graduated source
   whose score falls back under the bar at a later review is labeled ``PAPER`` again.
 
 The bar is set for all of ``SOURCES`` at once: with every source at break-even after costs, the chance that any one
@@ -209,30 +210,33 @@ def _return(trade: dict) -> float | None:
     return trade["pnl"] / (trade["entry"] * int((trade["contract"] or {}).get("multiplier") or 100) + scanner_rules.COMMISSION_PER_SIDE)
 
 
-def judge(closed: list[dict]) -> dict:
-    """Whether one source's closed trades could be luck (the module docstring has the rule and why).
+def judge(closed: list[dict], today: str | None = None) -> dict:
+    """Whether one source's closed trades could be luck (the module docstring has the rule and why). Sessions from
+    ``today`` (an ISO date) on are not counted yet.
 
     ``days`` and ``reviewed_days`` count sessions with a closed trade, all of them and those up to the last review;
     ``score`` is the average reviewed session's summed return over its standard error, None before two sessions."""
     by_day: dict[str, list[dict]] = {}
     for t in closed:
-        if _return(t) is not None:
+        if _return(t) is not None and (today is None or t["day"] < today):
             by_day.setdefault(t["day"], []).append(t)
     days = sorted(by_day)
     reviewed = days[:len(days) // REVIEW_DAYS * REVIEW_DAYS]
     seen = [t for d in reviewed for t in by_day[d]]
+    counted = sum(len(v) for v in by_day.values())
     sums = [sum(_return(t) for t in by_day[d]) for d in reviewed]
     score = None
     if len(sums) >= 2:
         spread = statistics.stdev(sums)
-        score = round(statistics.fmean(sums) / (spread / math.sqrt(len(sums))), 2) if spread > 0 else 0.0
+        mean = statistics.fmean(sums)  # every session the same: no spread to measure against, so the cap either way
+        score = round(mean / (spread / math.sqrt(len(sums))), 2) if spread > 0 else math.copysign(99.0, mean) if mean else 0.0
     proven = score is not None and score >= GRADUATE_SCORE
     wide = sum(t["pnl_2x"] or 0 for t in seen) > 0
     enough = len(reviewed) >= GRADUATE_DAYS and len(seen) >= GRADUATE_TRADES
     if enough and proven and wide:
         status = "Graduated"
-    elif len(days) < GRADUATE_DAYS or len(closed) < GRADUATE_TRADES:
-        status = f"PAPER · {len(days)} of {GRADUATE_DAYS} days, {len(closed)} of {GRADUATE_TRADES} trades"
+    elif len(days) < GRADUATE_DAYS or counted < GRADUATE_TRADES:
+        status = f"PAPER · {len(days)} of {GRADUATE_DAYS} days, {counted} of {GRADUATE_TRADES} trades"
     elif enough and proven:
         status = "PAPER · in the red at twice the spread"
     else:
@@ -241,9 +245,10 @@ def judge(closed: list[dict]) -> dict:
             "status": status}
 
 
-def board(trades: list[dict]) -> list[dict]:
+def board(trades: list[dict], today: str | None = None) -> list[dict]:
     """One row per source, best net first: closed trades, green, net dollars (base and at twice the spread), exits,
-    and ``judge``'s verdict on whether it has graduated."""
+    and ``judge``'s verdict on the sessions before ``today`` (New York's date unless given)."""
+    today = today or datetime.now(ET).date().isoformat()
     out = []
     for source, name in SOURCES.items():
         mine = [t for t in trades if t["source"] == source]
@@ -256,7 +261,7 @@ def board(trades: list[dict]) -> list[dict]:
             "open": sum(t["state"] in ("pending", "open") for t in mine),
             "unresolved": sum(t["state"] == "unresolved" for t in mine),
             "exits": {r: sum(t["reason"] == r for t in closed) for r in ("take_profit", "stop", "time_stop", "session_close", "no_exit")},
-            **judge(closed),
+            **judge(closed, today),
         })
     return sorted(out, key=lambda r: (r["closed"] == 0, -r["pnl"]))
 

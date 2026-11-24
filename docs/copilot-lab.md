@@ -2912,8 +2912,8 @@ trade pings, so for them graduation shows on the board only. The rule:
   trades taken the same morning move together and are not separate evidence.
 - The score is the average session over its standard error. It must reach 3.0 on at least 20 sessions and 40 closed
   trades, and the dollars at twice the spread must be above zero too.
-- The record is judged at every tenth session only, on the sessions up to that one, so watching the board gives luck
-  no extra chances. A graduated source whose score falls under 3.0 at a later review says `PAPER` again.
+- The record is judged at every tenth session only, on the sessions up to that one, and a session counts from the day
+  after it, so watching the board gives luck no extra chances. A graduated source whose score falls under 3.0 at a later review says `PAPER` again.
 
 The bar covers all the sources at once: if every source only broke even after costs, the chance that any one of them
 graduates within a year of sessions is about 5% (simulated in `tests/test_proving_ground.py`, which fails if a source is

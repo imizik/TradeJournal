@@ -168,6 +168,22 @@ def test_a_green_record_is_not_enough_to_graduate():
     assert not wide["graduated"] and wide["status"] == "PAPER · in the red at twice the spread"
 
 
+def test_a_session_counts_only_once_it_is_over():
+    """Codex on #907: the tenth session's first close must not be judged before its second."""
+    trades = closed("x", [[30.0, 10.0], [30.0, -10.0]] * 10)
+    last = trades[-1]["day"]
+    assert not pg.judge(trades[:-1], today=last)["graduated"]  # day 20 is still open: 19 sessions count
+    assert pg.judge(trades[:-1], today=last)["status"] == "PAPER · 19 of 20 days, 38 of 40 trades"
+    assert pg.judge(trades, today="d9999")["graduated"]
+    board = pg.board([{**t, "source": "radar_setup"} for t in trades], today=last)
+    assert not next(r for r in board if r["source"] == "radar_setup")["graduated"]
+
+
+def test_identical_sessions_score_by_their_sign():
+    assert pg.judge(closed("x", [[40.0, 40.0]] * 20))["graduated"]
+    assert pg.judge(closed("x", [[-40.0, -40.0]] * 20))["score"] == -99.0
+
+
 def test_a_dear_contract_weighs_no_more_than_a_cheap_one():
     cheap = closed("x", [[30.0, 10.0], [30.0, -10.0]] * 10)
     dear = [{**t, "entry": 20.0, "pnl": t["pnl"] * 10} for t in cheap]  # the same percentages on a 20.00 contract
