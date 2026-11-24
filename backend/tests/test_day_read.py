@@ -373,6 +373,7 @@ def test_the_route_reads_and_the_timings_view_counts_the_days_reads(facts_from, 
         body = client.post("/copilot/desk/day-read", json={}).json()
         assert body["state"] == "ok" and body["today"]["count"] == 1
         assert client.post("/copilot/desk/day-read", json={}).json()["cached"] is True
+        _rows(1)  # the turn row is written off the request on the default executor
         assert client.get("/copilot/desk/timings").json()["day_reads"]["count"] == 1
         monkeypatch.setattr(copilot_desk.copilot, "settings", lambda: SimpleNamespace(enabled=False))
         assert client.post("/copilot/desk/day-read", json={}).status_code == 503
