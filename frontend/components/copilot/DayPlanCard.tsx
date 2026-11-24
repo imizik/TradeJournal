@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { getDayPlan, saveDayPlan, type DayPlanBody } from "@/lib/desk";
 
+const SAVED = "tradejournal:day-plan-saved";
 const clock = (hhmm: string) => {
   const [h, m] = hhmm.split(":").map(Number);
   return `${(h + 11) % 12 + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
@@ -26,7 +27,10 @@ export default function DayPlanCard({ className = "", bare = false }: { classNam
   useEffect(() => {
     const controller = new AbortController();
     getDayPlan(controller.signal).then(setBody).catch(() => { if (!controller.signal.aborted) setFailed(true); });
-    return () => controller.abort();
+    // The card can show twice (the left column and Start the day): a save in one updates the other.
+    const saved = (event: Event) => { setBody((event as CustomEvent<DayPlanBody>).detail); setEditing(false); };
+    window.addEventListener(SAVED, saved);
+    return () => { controller.abort(); window.removeEventListener(SAVED, saved); };
   }, []);
 
   const plan = body?.plan ?? null;
@@ -43,8 +47,7 @@ export default function DayPlanCard({ className = "", bare = false }: { classNam
     setSaving(true);
     setError(null);
     try {
-      setBody(await saveDayPlan(max, exit || null));
-      setEditing(false);
+      window.dispatchEvent(new CustomEvent(SAVED, { detail: await saveDayPlan(max, exit || null) }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save.");
     } finally {

@@ -114,3 +114,15 @@ def test_the_pings_are_loud_and_off_by_default(monkeypatch):
     assert not day_plan.enabled()
     assert all(phone.loud(k) for k in ("plan_size", "plan_exit", "plan_late"))
     assert notification_policy._label("plan_exit") == "day plan exit time"
+
+
+def test_a_ticker_he_hid_on_the_desk_is_left_out(engine, sent):
+    from app.engine import day_journal
+    with Session(engine) as db:
+        day_plan.save(db, DAY, 500, "11:30", "op")
+        option(db, "NVDA", 3, 250, 9, 45)  # over size, but hidden
+        option(db, "AMD", 1, 400, 10, 0)
+        day_journal.append(db, day=DAY, operation_id="hide", kind="follow", symbol="NVDA", text="Not following")
+    day_plan.DayPlanPings(engine, clock=lambda: at(11, 45)).run()
+    assert [(k, t) for k, t, _ in sent] == [("plan_exit", "11:30 AM: your exit time, 1 still open")]
+    assert "NVDA" not in sent[0][2]

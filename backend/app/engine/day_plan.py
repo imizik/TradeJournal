@@ -32,7 +32,7 @@ from typing import Callable
 
 from sqlmodel import Session, col, select
 
-from app.engine import notification_policy, phone
+from app.engine import day_journal, notification_policy, phone
 from app.engine.chart_journal import contract_label
 from app.engine.chart_math import ET, session_windows
 from app.models import Account, DayJournalEntry, Fill, Trade, TradeFill
@@ -87,7 +87,6 @@ def check(max_usd: float | None, exit_by: str | None) -> tuple[float | None, str
 
 
 def save(db: Session, day: date, max_usd: float | None, exit_by: str | None, operation_id: str) -> dict:
-    from app.engine import day_journal
     max_usd, exit_by = check(max_usd, exit_by)
     row = day_journal.append(db, day=day, operation_id=operation_id, kind=KIND, text=describe(max_usd, exit_by),
                              context={"source": "day_plan", "max_usd": max_usd, "exit_by": exit_by})
@@ -215,7 +214,8 @@ class DayPlanPings:
                 self._ping(db, LATE, f"{LATE}:{day}:{key}", *late_message(trade, plan["exit_by"]), symbol=trade.ticker, now=now)
             # The exit-time ping names the positions opened before it; one opened later has its own ping.
             late_ids = {id(t) for t, _ in opened_late}
-            still = [t for t in exit_due(trades, plan["exit_by"], minute) if id(t) not in late_ids]
+            hidden = day_journal.quiet(db)  # tickers he hid on the desk; the policy also holds a one-ticker ping for them
+            still = [t for t in exit_due(trades, plan["exit_by"], minute) if id(t) not in late_ids and t.ticker not in hidden]
             if still:
                 self._ping(db, EXIT, f"{EXIT}:{day}", *exit_message(still, plan["exit_by"]),
                            symbol=still[0].ticker if len(still) == 1 else None, now=now)
@@ -226,7 +226,7 @@ class DayPlanPings:
             return
         self._done.add(source)
         ticket = notification_policy.decide(db, sender=SENDER, source_id=source, kind=kind, title=title, body=body,
-                                            now=now, new_only=True)
+                                            now=now, symbol=symbol, new_only=True)
         if ticket.held:
             log.info("Day plan %s held: %s", kind, ticket.reason)
             return

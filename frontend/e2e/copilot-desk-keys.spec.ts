@@ -1113,6 +1113,7 @@ test("before the open the Day button is Start the day: one checklist, Arm opens 
   await card.getByLabel("Hard exit time").fill("11:30");
   await card.getByRole("button", { name: "Save plan" }).click();
   await expect(card.getByTestId("day-plan-line")).toHaveText("Max $500 a position · out by 11:30 AM ET");
+  await expect(page.getByTestId("day-plan-line")).toHaveText(Array(2).fill("Max $500 a position · out by 11:30 AM ET")); // both cards
   expect(planPosts).toEqual([expect.objectContaining({ max_usd: 500, exit_by: "11:30" })]);
   await card.screenshot({ path: test.info().outputPath("day-plan-saved-1440.png") });
   // The brief opens in place, as the left column shows it; the goals line is the desk's own.
