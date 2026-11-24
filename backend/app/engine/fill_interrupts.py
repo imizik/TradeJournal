@@ -47,8 +47,8 @@ trade being judged (matched by its first entry fill's source identity, so a rebu
 - ``large_size``: the size against the median, and the window's past positions at or above the multiple, their
   count, share won and P&L;
 - ``size_by_adding``: the position's premium against the median, and the window's past positions with at most
-  ``BUILT_DAYS`` days to expiry at their first entry that were added to below cost and reached the multiple, their
-  count, share won and P&L;
+  ``BUILT_DAYS`` days to expiry at an add below cost that took the premium paid in to the multiple (the same test,
+  at each past add), their count, share won and P&L;
 - ``quick_reentry``: long options first bought within ``REENTRY_MINUTES`` of a losing close, their count, share won
   and P&L.
 
@@ -192,10 +192,14 @@ def size_by_adding(fill: dict, prior: list[dict], usual: float | None) -> bool:
 
 
 def last_close(closes: list[tuple[datetime, float]], at: datetime) -> tuple[datetime, float] | None:
-    """The latest of the ``(closed_at, pnl)`` closes on ``at``'s New York day at or before ``at`` (fill times carry
-    minutes only, so a close and an entry in the same minute count as close then entry)."""
+    """The latest minute with a close among the ``(closed_at, pnl)`` closes on ``at``'s New York day at or before
+    ``at``, and that minute's total P&L (fill times carry minutes only, so a close and an entry in the same minute
+    count as close then entry, and several closes in one minute are read together, whatever order they come in)."""
     same_day = [c for c in closes if c[0].date() == at.date() and c[0] <= at]
-    return max(same_day, key=lambda c: c[0]) if same_day else None
+    if not same_day:
+        return None
+    latest = max(c[0] for c in same_day)
+    return latest, sum(c[1] for c in same_day if c[0] == latest)
 
 
 def quick_reentry(fill: dict, last: tuple[datetime, float] | None) -> bool:
@@ -268,9 +272,11 @@ def history_rows(trades: list[dict], fills_of: dict) -> list[dict]:
                                                   if f["role"] == "entry" and f is not first),
             "opened_green": opened_green(day_pnl_before(closes[t["account_id"]], first["executed_at"])),
             "late_short_dated": long_option and late_short_dated({**first, **option}),
-            "total": sum(premium(f) for f in entries),
-            "short_dated": (long_option and t["expiration"] is not None
-                            and 0 <= (t["expiration"] - first["executed_at"].date()).days <= BUILT_DAYS),
+            # The most paid into the position at an add the size-by-adding rule could fire on (below cost, short-dated).
+            "built": max((position_premium(f, fills[:i]) for i, f in enumerate(fills)
+                          if long_option and f["role"] == "entry" and f is not first and t["expiration"] is not None
+                          and 0 <= (t["expiration"] - f["executed_at"].date()).days <= BUILT_DAYS
+                          and adds_to_loser({**f, **option}, fills[:i])), default=0.0),
             "quick_reentry": long_option and quick_reentry({**first, **option}, last_close(before, first["executed_at"])),
         })
     return rows
@@ -292,8 +298,8 @@ def record(rows: list[dict], kind: str, exclude: str | None = None, *, ticker: s
                 "median": usual, "entries": len(window)}
     if kind == "size_by_adding":
         usual = record(rows, "large_size", day=day)["median"]
-        hit = [r for r in rows if usual is not None and r["short_dated"] and r["added_to_loser"]
-               and day - timedelta(days=LARGE_LOOKBACK_DAYS) <= r["entered"] <= day and r["total"] >= LARGE_MULTIPLE * usual - EPS]
+        hit = [r for r in rows if usual is not None and r["built"] > 0
+               and day - timedelta(days=LARGE_LOOKBACK_DAYS) <= r["entered"] <= day and r["built"] >= LARGE_MULTIPLE * usual - EPS]
         return {"n": len(hit), "pnl": round(sum(r["pnl"] for r in hit), 2), "green": sum(1 for r in hit if r["pnl"] > 0), "median": usual}
     if kind == "put_entry":
         puts = [r for r in rows if r["long_option"] and r["option_type"] == "put"]
@@ -426,8 +432,9 @@ class FillInterrupts:
             if not fresh:
                 return
             rows = self.history(db, moment.date())
-            drafts = [self._judge(db, fill, rows, now) for fill in fresh]
-        for draft in drafts:
+        for fill in fresh:  # one at a time: a fill judged after another in this pass sees what that one already said
+            with Session(self.engine) as db:
+                draft = self._judge(db, fill, rows, now)
             self._record(draft)
 
     def _new_fills(self, db: Session, now: float) -> list[dict]:

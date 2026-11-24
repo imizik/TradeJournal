@@ -223,7 +223,7 @@ def test_records_lines_and_the_too_few_rule():
 def past(key, ticker="SNDK", pnl=-100.0, premium=1000.0, entered=date(2026, 9, 1), long_option=True):
     return {"key": key, "pnl": pnl, "ticker": ticker, "entered": entered, "premium": premium, "long_option": long_option,
             "option_type": "call" if long_option else None, "expired_worthless": False, "added_to_loser": False,
-            "opened_green": False, "late_short_dated": False, "total": premium, "short_dated": False, "quick_reentry": False}
+            "opened_green": False, "late_short_dated": False, "built": 0.0, "quick_reentry": False}
 
 
 def test_ticker_record_fires_only_on_a_losing_record_of_five_or_more():
@@ -315,11 +315,10 @@ def test_size_by_adding_is_an_add_below_cost_that_takes_a_short_dated_position_t
     assert fill_interrupts.size_by_adding(add, [lot("buy_to_open", 800, "10:00", qty=2), lot("sell_to_close", 750, "10:10")], 1500.0)
     day = date(2026, 10, 21)
     usual = [past(f"u{i}", premium=1000.0, pnl=50.0) for i in range(20)]
-    built = [{**past(f"b{i}", premium=900.0, pnl=-600.0 if i else 200.0), "total": 2400.0, "short_dated": True, "added_to_loser": True}
-             for i in range(5)]
-    other = [{**past("long", premium=900.0), "total": 2400.0, "added_to_loser": True},  # not short-dated
-             {**past("clean", premium=2400.0), "short_dated": True},  # large in one entry
-             {**past("small", premium=900.0), "total": 1900.0, "short_dated": True, "added_to_loser": True}]
+    built = [{**past(f"b{i}", premium=900.0, pnl=-600.0 if i else 200.0), "built": 2400.0, "added_to_loser": True} for i in range(5)]
+    other = [{**past("long", premium=900.0), "added_to_loser": True},  # its add below cost was not short-dated: nothing built
+             past("clean", premium=2400.0),  # large in one entry
+             {**past("small", premium=900.0), "built": 1900.0, "added_to_loser": True}]  # under twice the median at the add
     rec = fill_interrupts.record(usual + built + other, "size_by_adding", day=day)
     assert rec == {"n": 5, "pnl": -2200, "green": 1, "median": 1000.0}
     assert fill_interrupts.record(usual + built + other, "size_by_adding", "b0", day=day)["n"] == 4  # never the judged position
@@ -334,6 +333,10 @@ def test_quick_reentry_is_an_option_bought_within_five_minutes_of_a_losing_close
     assert fill_interrupts.last_close(closes, ny("10:14")) == (ny("10:10"), -80.0)  # the latest that day, not after the fill
     assert fill_interrupts.last_close(closes, ny("09:40")) is None
     assert fill_interrupts.last_close(closes, ny("10:10")) == (ny("10:10"), -80.0)  # the same minute counts as close, then entry
+    # Two closes in one minute are read together, whichever comes first: a -$80 and a +$100 are a +$20 minute, not a loss.
+    tied = [(ny("10:10"), -80.0), (ny("10:10"), 100.0)]
+    assert fill_interrupts.last_close(tied, ny("10:12")) == fill_interrupts.last_close(tied[::-1], ny("10:12")) == (ny("10:10"), 20.0)
+    assert not fill_interrupts.quick_reentry(buy, fill_interrupts.last_close(tied, ny("10:12")))
     assert fill_interrupts.quick_reentry(buy, (ny("10:10"), -80.0))
     assert not fill_interrupts.quick_reentry(buy, (ny("10:09"), -80.0))  # five minutes is not within five
     assert not fill_interrupts.quick_reentry(buy, (ny("10:12"), 80.0)) and not fill_interrupts.quick_reentry(buy, (ny("10:12"), 0.0))
@@ -642,3 +645,33 @@ def test_buying_within_five_minutes_of_a_losing_close_is_one_message_with_the_re
     assert [(t, b) for t, b, _ in sent] == [("Pattern: CRWV 120C", "Back in 3 min after a −$120 close: 5 past entries within 5 min of a "
                                              "losing close, 0% won, −$150\nYour record, not advice.")]
     assert sent[0][2]["priority"] <= 2  # silent
+
+
+def test_the_size_record_counts_a_past_position_only_when_an_add_below_cost_took_it_to_the_multiple():
+    """The record's test is the live rule's, at each past add: a later add above cost does not make an earlier one count."""
+    exp, day = date(2026, 9, 3), date(2026, 9, 1)
+
+    def entry(key, price, hhmm, role="entry", side="buy_to_open"):
+        return {"id": key, "key": key, "role": role, "side": side, "contracts": 1, "price": price, "executed_at": ny(hhmm, day)}
+    trade = {"id": "t", "account_id": ROTH, "ticker": "AMD", "status": "closed", "instrument_type": "option", "option_type": "call",
+             "expiration": exp, "realized_pnl": -500.0, "expired_worthless": False, "closed_at": ny("15:00", day)}
+    sold = entry("x", 600, "15:00", role="exit", side="sell_to_close")
+    # $900, an $800 add below cost ($1,700 in), then a $1,000 add above cost ($2,700 in): no add below cost reached $2,000.
+    [row] = fill_interrupts.history_rows([trade], {"t": [entry("a", 900, "10:00"), entry("b", 800, "10:30"), entry("c", 1000, "11:00"), sold]})
+    assert row["added_to_loser"] and row["built"] == 1700
+    # $900, $1,000 above cost, then an $800 add below cost: that add took it to $2,700.
+    [row] = fill_interrupts.history_rows([trade], {"t": [entry("a", 900, "10:00"), entry("b", 1000, "10:30"), entry("c", 800, "11:00"), sold]})
+    assert row["built"] == 2700
+    # The same adds on a contract with four days left: the rule would not have fired, so nothing was built.
+    [row] = fill_interrupts.history_rows([{**trade, "expiration": date(2026, 9, 5)}],
+                                         {"t": [entry("a", 900, "10:00"), entry("b", 1000, "10:30"), entry("c", 800, "11:00"), sold]})
+    assert row["built"] == 0
+
+
+def test_two_fills_judged_in_one_pass_say_a_once_per_position_line_once(engine, world, sent):
+    clock, interrupts = world
+    fill(engine, ny("10:05"), qty=1, price=310, rebuild=False)
+    fill(engine, ny("10:06"), qty=1, price=320)  # both emails arrive before the next pass
+    tick(clock, interrupts, "10:07")
+    assert [r.kinds for r in rows(engine)] == ["put_entry", ""]
+    assert len(sent) == 1

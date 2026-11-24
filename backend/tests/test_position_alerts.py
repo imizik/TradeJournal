@@ -1359,7 +1359,10 @@ def test_a_short_dated_option_down_thirty_percent_at_the_hour_gets_its_own_words
         assert body == ("Open 60 min, now -$240 (-30%) at a $2.80 mid, bid $2.78, best seen by the alert watch -$240 (-30%). "
                         "Expires in 2 days. 2 contracts open. Your options with 3 days or less to expiry: closed within the hour, "
                         "5 won 80% (+$320); held 2 h or more, 5 won 20% (-$1,140). "
-                        "This is the state your record says to cut: close or trim.") + OFF_CONTEXT
+                        "Re-decide: close, trim, or set your exit.") + OFF_CONTEXT
+        alert.gain_pct = (7.07 - 10.10) / 10.10  # exactly 30% down, a hair above -0.30 as a float
+        assert alert.gain_pct > -0.30 and position_alerts.hold_facts(db, alert, at(WED, "11:00"))["days"] == 2
+        alert.gain_pct = -0.30
         # Down 29%, a longer-dated contract, or no quote to judge: the hour alert's usual words.
         alert.gain_pct = -0.29
         assert position_alerts.hold_facts(db, alert, at(WED, "11:00")) == {"days": None, "record": None}
@@ -1382,7 +1385,7 @@ def test_the_deep_red_hour_alert_is_sent_with_its_title_and_expiry_day_says_toda
     watcher.deliver()
     [(title, body)] = sent
     assert title == "SNDK 10/21/26 230C: down 50% an hour in"
-    assert "Expires today. 1 contract open. This is the state your record says to cut: close or trim." in body  # no record yet: no line
+    assert "Expires today. 1 contract open. Re-decide: close, trim, or set your exit." in body  # no record yet: no line
 
 
 def test_a_morning_same_day_option_still_open_at_one_gets_one_alert_with_the_record(engine, world, monkeypatch):
@@ -1418,6 +1421,10 @@ def test_a_morning_same_day_option_still_open_at_one_gets_one_alert_with_the_rec
                            "worth $0 at expiry if it stays here. Your same-day options bought before noon: closed by 1 PM, "
                            "5 won 60% (+$240); still open after 1 PM, 5 won 0% (-$750). Re-decide: close, trim, or set your exit.")
     assert position_alerts.ask_context(alert).endswith("1 PM same-day alert at 1:00 PM: now -$120.")
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 160, "2026-10-21T09:50", expiration=WED)  # an earlier entry's email arrives late: a new anchor
+    run_at(clock, watcher, WED, "13:05")
+    assert kinds(engine) == ["same_day_1pm"]  # still one for the contract
     with Session(engine) as db:
         from app.models import PhonePing
         ping = db.exec(select(PhonePing)).one()
@@ -1470,3 +1477,24 @@ def test_the_day_before_expiry_alert_adds_the_carry_record_only_when_red(engine,
     assert "Your record" not in position_alerts.message(eve, facts=facts)[1]  # green: the record stays out
     eve.mark = eve.gain = eve.gain_pct = None
     assert "Your record carrying" in position_alerts.message(eve, facts=facts)[1]  # no price to judge: it is said
+
+
+def test_the_records_count_long_options_only_never_the_alerts_own_trade_and_a_one_pm_close_is_out_by_one(engine):
+    with Session(engine) as db:
+        # First, before the hand-made rows a rebuild would replace: a short that expired worthless (it kept its premium),
+        # and a long that stands for the alert's own position, closed between the alert and its send.
+        fill(db, "sell_to_open", 1, 200, "2026-09-08T10:00", expiration=date(2026, 9, 8))
+        fill(db, "buy_to_open", 1, 300, "2026-09-09T10:00", expiration=date(2026, 9, 9))
+        short = db.exec(select(Trade).where(Trade.opened_at == datetime.fromisoformat("2026-09-08T10:00"))).one()
+        own = db.exec(select(Trade).where(Trade.opened_at == datetime.fromisoformat("2026-09-09T10:00"))).one()
+        assert (short.status, float(short.realized_pnl), own.status, float(own.realized_pnl)) == ("expired", 200.0, "expired", -300.0)
+        for i in range(5):
+            day = f"2026-09-0{i + 1}"
+            ended(db, f"{day}T09:50", f"{day}T13:00", date(2026, 9, i + 1), 100.0)                   # closed in the 1 PM minute
+            ended(db, f"{day}T10:10", f"{day}T16:00", date(2026, 9, i + 1), -150.0, worthless=True)
+        db.commit()
+        # The short is in neither group; the 13:00 closes are out by one.
+        assert position_alerts.morning_record(db) == ("Your same-day options bought before noon: closed by 1 PM, 5 won 100% (+$500); "
+                                                      "still open after 1 PM, 6 won 0% (-$1,050).")
+        assert position_alerts.morning_record(db, own.id) == ("Your same-day options bought before noon: closed by 1 PM, 5 won 100% "
+                                                              "(+$500); still open after 1 PM, 5 won 0% (-$750).")
