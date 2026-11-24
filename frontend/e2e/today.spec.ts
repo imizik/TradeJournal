@@ -37,18 +37,18 @@ test("while the lab is on the desk is home: Desk leads the tabs and the menu, an
   await page.goto("/dashboard?account=all"); // a parameter keeps the page (bare /dashboard opens the desk once the server gate is on)
   await expect(page.getByTestId("owner-dashboard")).toBeVisible();
   // Every other page: the app's bar, Desk first, the Dashboard not on it.
-  await expect(tabs.getByRole("link")).toHaveText(["Desk", "Charts", /Plan/, "Trades"]);
+  await expect(tabs.getByRole("link")).toHaveText(["Desk", "Proof", "Charts", /Plan/, "Trades"]);
   await expect(tabs.getByRole("link", { name: "Desk" })).toHaveAttribute("href", "/copilot-lab");
 });
 
-test("while the lab is on the sidebar leads with Desk, then Charts; Journal summary heads Journal and the Dashboard is gone from the menu", async ({ page }) => {
+test("while the lab is on the sidebar leads with Desk, then Proof; Journal summary heads Journal and the Dashboard is gone from the menu", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.goto("/dashboard?account=all");
   const sidebar = page.getByRole("navigation").filter({ has: page.getByRole("button", { name: "Journal", exact: true }) });
   await expect(sidebar.getByRole("link", { name: "Desk", exact: true })).toBeVisible();
   const primary = sidebar.getByRole("list").first().getByRole("link");
-  await expect(primary).toHaveText(["Desk", "Charts"]);
+  await expect(primary).toHaveText(["Desk", "Proof", "Charts", "Trades"]);
   await expect(sidebar.getByRole("link", { name: "Today", exact: true })).toHaveCount(0);
   await sidebar.getByRole("button", { name: "Journal", exact: true }).click();
   await expect(sidebar.getByRole("link", { name: "Dashboard", exact: true })).toHaveCount(0);

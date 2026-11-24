@@ -136,11 +136,10 @@ test.describe("trades", () => {
     await expect(table.getByRole("row").filter({ has: page.getByRole("link", { name: "NVDA", exact: true }) })).toContainText("5 contracts");
     await expect(table.getByRole("row").filter({ has: page.getByRole("link", { name: "RCAT", exact: true }) })).toContainText("9.5 shares");
     await expect(table.getByRole("link", { name: "AAPL", exact: true }).first().locator("..")).toContainText(/AAPL 230C · [A-Z][a-z]{2} \d{1,2} '\d{2}/);
-    // The sidebar: two primary links (Today is retired), then the groups, with this page's group open.
+    // The sidebar: four primary links (Trades among them, Today is retired), then the groups, folded: none holds this page.
     const nav = page.getByRole("navigation").filter({ has: page.getByRole("button", { name: "Journal", exact: true }) });
-    expect((await nav.getByRole("link").allTextContents()).slice(0, 6)).toEqual(["Dashboard", "Charts", "Trades", "Fills", "Daily Review", "Analytics"]);
-    await expect(nav.getByRole("button", { name: "Journal", exact: true })).toHaveAttribute("aria-expanded", "true");
-    for (const name of ["Market", "Practice", "Research"]) await expect(nav.getByRole("button", { name, exact: true })).toHaveAttribute("aria-expanded", "false");
+    expect((await nav.getByRole("link").allTextContents()).slice(0, 4)).toEqual(["Dashboard", "Proof", "Charts", "Trades"]);
+    for (const name of ["Journal", "More pages"]) await expect(nav.getByRole("button", { name, exact: true })).toHaveAttribute("aria-expanded", "false");
     await page.screenshot({ path: test.info().outputPath("trades-desktop.png") });
     // Seed dates move with the run date, so the check is on the form, not a fixed day.
     await expect(table.getByRole("cell", { name: /^[A-Z][a-z]{2} \d{1,2}(, \d{4})?$/ }).first()).toBeVisible();

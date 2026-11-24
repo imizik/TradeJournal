@@ -50,7 +50,7 @@ test("the sidebar is replaced by a menu that navigates", async ({ page }) => {
   await page.getByRole("button", { name: "Open menu" }).click();
   const menu = page.getByRole("dialog", { name: "Menu" });
   expect((await menu.getByRole("link").allTextContents()).filter((text) => ["Today", "Dashboard", "Charts"].includes(text)).slice(0, 2)).toEqual(["Dashboard", "Charts"]);
-  for (const group of ["Market", "Practice", "Research", "Journal"]) await menu.getByRole("button", { name: group, exact: true }).click();
+  for (const group of ["More pages", "Journal"]) await menu.getByRole("button", { name: group, exact: true }).click();
   for (const name of ["Fills", "Signals", "Scanner", "Advisor review", "Strategy Lab", "Research Studio", "Level 2 lab", "AI Buildout"]) {
     await menu.getByRole("link", { name, exact: true }).scrollIntoViewIfNeeded();
     await expect(menu.getByRole("link", { name, exact: true })).toBeInViewport();
