@@ -44,6 +44,7 @@ KIND = "day_plan"  # the day-journal entry
 SIZE, EXIT, LATE = "plan_size", "plan_exit", "plan_late"
 RUN_SECONDS = 30
 MAX_USD = 1_000_000.0
+OPEN, CLOSE = 9 * 60 + 30, 16 * 60  # the pings run in the regular session, so an exit time must fall inside it
 HHMM = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 
@@ -81,6 +82,8 @@ def check(max_usd: float | None, exit_by: str | None) -> tuple[float | None, str
         raise PlanError(f"max size must be above $0 and at most ${MAX_USD:,.0f}")
     if exit_by is not None and not HHMM.fullmatch(exit_by):
         raise PlanError("exit time must be HH:MM, 24-hour New York time")
+    if exit_by is not None and not OPEN < _minutes(exit_by) < CLOSE:
+        raise PlanError("exit time must be during the session, after 9:30 AM and before 4:00 PM ET")
     if max_usd is None and exit_by is None:
         raise PlanError("set a max size, an exit time or both")
     return (round(float(max_usd), 2) if max_usd is not None else None), exit_by

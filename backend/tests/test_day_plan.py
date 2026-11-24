@@ -67,7 +67,8 @@ def test_a_plan_is_saved_as_a_day_journal_entry_and_the_newest_wins(engine):
         assert (row.kind, row.text) == ("day_plan", "Day plan: max $500 a position, out of today's options by 11:30 AM ET")
 
 
-@pytest.mark.parametrize("max_usd, exit_by", [(None, None), (0, None), (-5, None), (None, "9:30"), (None, "24:00"), (2_000_000, None)])
+@pytest.mark.parametrize("max_usd, exit_by", [(None, None), (0, None), (-5, None), (None, "9:30"), (None, "24:00"), (2_000_000, None),
+                                             (None, "09:30"), (None, "16:00"), (None, "17:15")])
 def test_a_plan_needs_a_positive_size_or_a_24_hour_time(engine, max_usd, exit_by):
     with Session(engine) as db, pytest.raises(day_plan.PlanError):
         day_plan.save(db, DAY, max_usd, exit_by, "op")
@@ -104,7 +105,7 @@ def test_no_plan_no_pings_and_nothing_outside_the_session(engine, sent):
         option(db, "NVDA", 30, 250, 9, 45)
     day_plan.DayPlanPings(engine, clock=lambda: at(10)).run()
     with Session(engine) as db:
-        day_plan.save(db, DAY, 100, "09:00", "op")
+        day_plan.save(db, DAY, 100, "09:45", "op")
     day_plan.DayPlanPings(engine, clock=lambda: at(8)).run()  # before the open
     assert sent == []
 

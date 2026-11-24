@@ -75,7 +75,7 @@ export default function DayPlanCard({ className = "", bare = false }: { classNam
               <input aria-label="Max size in dollars" inputMode="decimal" value={size} onChange={e => setSize(e.target.value)} placeholder="500" className={input} />
             </label>
             <label className="space-y-1 text-xs text-muted-foreground">Out by (ET)
-              <input aria-label="Hard exit time" type="time" value={exit} onChange={e => setExit(e.target.value)} className={input} />
+              <input aria-label="Hard exit time" type="time" min="09:31" max="15:59" value={exit} onChange={e => setExit(e.target.value)} className={input} />
             </label>
           </div>
           {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
