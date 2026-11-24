@@ -1524,6 +1524,25 @@ def test_a_one_pm_alert_whose_position_closed_before_the_send_is_not_sent_and_an
         ("expired", "The position was no longer a morning entry still open when this was sent, so it was not sent.")]
 
 
+def test_a_one_pm_alert_links_the_trade_as_it_is_at_the_send(engine, world, monkeypatch):
+    clock, quotes, watcher = world
+    monkeypatch.setenv("POSITION_ALERTS_ENABLED", "true")
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 150, "2026-10-21T10:15", expiration=WED)
+    quotes.set(0.88)
+    run_at(clock, watcher, WED, "13:00")
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 160, "2026-10-21T09:50", expiration=WED)  # an earlier entry arrives: the trade gets a new id
+        [now] = db.exec(select(Trade)).all()
+    sent = []
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: sent.append(kw["path"]))
+    clock.now = at(WED, "13:02")
+    watcher.deliver()
+    [alert] = alerts(engine)
+    assert alert.delivery == "sent" and sent == [f"/trades/{now.id}?alert={alert.id}"]
+
+
 def test_the_deep_red_hour_words_survive_a_new_trade_id(engine, world, hold_on):
     clock, quotes, watcher = world
     with Session(engine) as db:

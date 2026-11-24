@@ -1024,13 +1024,15 @@ class PositionAlerts:
                 # Its words are "bought this morning, still open at 1 PM": a fill that arrived since the alert was written
                 # (an exit, an earlier entry on another day, a correction) can take them back.
                 today = datetime.fromtimestamp(_epoch(alert.detected_at), ET).date()
-                held = db.exec(select(Trade.opened_at, Trade.expiration).where(Trade.id.in_(own_trades(db, alert)), Trade.status == "open")).all()
-                if not any(t.expiration == today and t.opened_at.date() == today and t.opened_at.hour * 60 + t.opened_at.minute < MORNING_END
-                           for t in held):
+                held = [t for t in db.exec(select(Trade.id, Trade.opened_at, Trade.expiration).where(
+                            Trade.id.in_(own_trades(db, alert)), Trade.status == "open")).all()
+                        if t.expiration == today and t.opened_at.date() == today and t.opened_at.hour * 60 + t.opened_at.minute < MORNING_END]
+                if not held:
                     alert.delivery = "expired"
                     alert.last_error = "The position was no longer a morning entry still open when this was sent, so it was not sent."
                     db.commit()
                     return
+                alert.trade_id = held[0].id  # the trade as it is now, so the message's link opens it
             facts = (wrong_way_facts(db, alert) if alert.kind == "wrong_way" else self._eve_facts(db, alert, now) if alert.kind == "expiry_eve"
                      else giveback_facts(db) if alert.kind == "giveback"
                      else hold_facts(db, alert, _epoch(alert.detected_at)) if alert.kind == "hold_hour"
