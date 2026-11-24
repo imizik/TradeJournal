@@ -8,14 +8,15 @@ import ModeMark, { MODE_FRAME } from "./ModeMark";
 /**
  * The paper proving ground (backend app/engine/proving_ground.py): every idea source (Radar setups, Jo's morning picks,
  * the 9:45 MU/NBIS rule) paper traded on one bracket, ranked by net dollars. A source graduates to unlabeled phone pings
- * after enough closed trades net positive; until then its pings say PAPER. Read-only.
+ * when its record is too good to be luck (the backend's judge: a score over sessions, reviewed every tenth session);
+ * until then its pings say PAPER. Read-only.
  */
 
 type Row = { source: string; name: string; closed: number; green: number; pnl: number; pnl_2x: number; avg: number | null;
-  open: number; unresolved: number; exits: Record<string, number>; graduated: boolean };
+  open: number; unresolved: number; exits: Record<string, number>; graduated: boolean; status: string };
 type Recent = { source: string; day: string; symbol: string; direction: string; state: string; entry: number | null; exit: number | null;
   reason: string | null; pnl: number | null; note: string | null; contract: string | null };
-export type ProvingGround = { enabled: boolean; graduate_trades: number;
+export type ProvingGround = { enabled: boolean; graduate_trades: number; graduate_days: number; graduate_score: number; review_days: number;
   bracket: { take_profit: number; stop: number; hold_minutes: number; flat_minutes: number }; board: Row[]; recent: Recent[] };
 
 const usd = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
@@ -45,7 +46,7 @@ export function provingWords(ground: ProvingGround | null, failed: boolean): str
   if (!ground) return "· reading…";
   const lead = ground.board.find(r => r.closed > 0);
   if (!lead) return ground.enabled ? "· no closed paper trades yet" : "· off";
-  return `· ${lead.name} ${usd(lead.pnl)} (${lead.closed}/${ground.graduate_trades})`;
+  return `· ${lead.name} ${usd(lead.pnl)} (${lead.graduated ? "graduated" : "not proven"})`;
 }
 
 export default function DeskProving({ ground, failed }: { ground: ProvingGround | null; failed: boolean }) {
@@ -58,7 +59,8 @@ export default function DeskProving({ ground, failed }: { ground: ProvingGround 
       <p className="flex flex-wrap items-center gap-2"><span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Proving ground</span><ModeMark mode="paper" /></p>
       <p className="mt-1 text-xs text-muted-foreground">
         Every idea on paper, one contract: +{pct(b.take_profit)} target, −{pct(b.stop)} stop, out after {b.hold_minutes} min or {b.flat_minutes} min before the close.
-        A source graduates to real pings at {ground.graduate_trades} closed trades net positive; until then its pings say PAPER.
+        A source graduates to real pings when its record is too good to be luck: at least {ground.graduate_days} days and {ground.graduate_trades} closed
+        trades, and an average day {ground.graduate_score} standard errors above zero, looked at every {ground.review_days} days. Until then its pings say PAPER.
         {!ground.enabled && " Off: nothing new is entered until it is switched on."}
       </p>
       <table className="mt-2 w-full text-xs tabular-nums" data-testid="desk-proving-board">
@@ -72,7 +74,7 @@ export default function DeskProving({ ground, failed }: { ground: ProvingGround 
             <td className="py-1 pr-2">{r.closed}{r.open > 0 && <span className="text-muted-foreground"> +{r.open} open</span>}</td>
             <td className="py-1 pr-2">{r.closed ? `${r.green} of ${r.closed}` : "—"}</td>
             <td className="py-1 pr-2" title={`At twice the spread: ${usd(r.pnl_2x)}`}><span className={tone(r.closed ? r.pnl : null)}>{r.closed ? usd(r.pnl) : "—"}</span></td>
-            <td className="py-1">{r.graduated ? <span className="text-emerald-300">Graduated</span> : <span className="text-muted-foreground">PAPER {Math.min(r.closed, ground.graduate_trades)}/{ground.graduate_trades}</span>}</td>
+            <td className="py-1"><span className={r.graduated ? "text-emerald-300" : "text-muted-foreground"}>{r.status}</span></td>
           </tr>
         ))}</tbody>
       </table>
@@ -88,7 +90,7 @@ export default function DeskProving({ ground, failed }: { ground: ProvingGround 
           ))}
         </ul>
       )}
-      <p className="mt-1 text-[11px] text-muted-foreground">Ask in, bid out, $0.65 a side, checked once a minute. Paper results are a record, not proof of an edge.</p>
+      <p className="mt-1 text-[11px] text-muted-foreground">Ask in, bid out, $0.65 a side, checked once a minute. A green total alone is not proof of an edge.</p>
     </section>
   );
 }

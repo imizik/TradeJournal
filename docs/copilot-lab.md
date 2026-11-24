@@ -2905,14 +2905,33 @@ Entries are the ask of the first quote whose bid and ask both updated after the 
 unresolved); exits the bid of the first fresh quote at or after the condition; $0.65 a side; the bracket is checked once
 a minute, so it fills at that minute's bid, never at the bracket price. A pessimistic result at twice the spread is kept
 beside it. A trade that got in but never saw a fresh exit quote is closed after its session at the last bid
-seen (zero if none), so it still counts. A source **graduates** at 40 closed trades with net dollars above zero; until then its phone pings are titled
-`PAPER · …` (`proving_ground.label`). Only Radar setup pings exist today; Jo's brief and the 9:45 rule send no trade
-pings, so for them graduation shows on the board only.
+seen (zero if none), so it still counts.
+
+A source **graduates** when its record is too good to be luck (`proving_ground.judge`); until then its phone pings are
+titled `PAPER · …` (`proving_ground.label`). Only Radar setup pings exist today; Jo's brief and the 9:45 rule send no
+trade pings, so for them graduation shows on the board only. The rule:
+
+- Each trade counts as its return on the premium paid, and one session's trades are added into one number, because
+  trades taken the same morning move together and are not separate evidence.
+- The score is the average session over its standard error. It must reach 3.0 on at least 20 sessions and 40 closed
+  trades, and the dollars at twice the spread must be above zero too.
+- The record is judged at every tenth session only, on the sessions up to that one, and a session counts from the day
+  after it, so watching the board gives luck no extra chances. A graduated source whose score falls under 3.0 at a later review says `PAPER` again.
+
+The bar covers all the sources at once: if every source only broke even after costs, the chance that any one of them
+graduates within a year of sessions is about 5% (simulated in `tests/test_proving_ground.py`, which fails if a source is
+added without raising the bar). The earlier rule, 40 closed trades net above zero, passed a break-even source about
+half the time at trade 40 and about nine times in ten within a year. The price is time. At two trades a session, a
+source with about 65% of its trades green typically needs about 40 sessions, one at 60% about 80, and one at 55% is as
+likely as not still unproven after a year (break-even is about 49%). Known limits: a source whose rule changes should
+get a new key, since the record does not restart by itself; Jo's picks are entered at 9:45 whatever their stated trigger,
+so that row tests the symbol and direction, not the trigger; and ideas with no fresh option quote within 2 minutes are
+left out (`unresolved`), which leans the record toward contracts that were moving.
 
 Its own SQLite file (`PROVING_GROUND_PATH`), no migration, nothing placed or sent. Runs on its own minute loop in the API
 process when `PROVING_GROUND_ENABLED=true` (the owner's switch; off by default). The desk shows it as a Practice line
 (`frontend/components/copilot/DeskProving.tsx`, `GET /copilot/desk/proving-ground`): the leading source in the line, and
-opened, the board (closed, green, net, PAPER n/40 or Graduated) and the last ten trades.
+opened, the board (closed, green, net, and the judge's status: progress, score or Graduated) and the last ten trades.
 
 ### Switching chatter on
 

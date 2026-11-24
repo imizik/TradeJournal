@@ -23,10 +23,27 @@ Sources (``SOURCES``):
 - ``open_window``: the 9:45-10:00 window of the October 21 behavior audit, as a rule: at 9:45 MU and NBIS each go in
   the direction of their move from the day's open, on ``pick_contract``'s contract.
 
-A source **graduates** (``GRADUATE_TRADES`` closed trades, 40, and net dollars above zero after the ask-in, bid-out
-fills and commissions) before its pings may go out unlabeled; until then ``label`` prefixes them ``PAPER``. Only
+A source **graduates** before its pings may go out unlabeled; until then ``label`` prefixes them ``PAPER``. Only
 Radar setup pings exist today; Jo's brief and the 9:45 rule send no trade pings, so for them graduation shows on the
-board only.
+board only. The rule (``judge``) asks whether the record could be luck, not only whether it is green:
+
+- each trade counts as its return on the premium paid, so a dear contract weighs no more than a cheap one;
+- one session's trades are added into one number, because trades taken the same morning rise and fall together and
+  are not separate evidence;
+- the score is the average session over its standard error (a t statistic), and it must reach ``GRADUATE_SCORE``
+  (3.0) on at least ``GRADUATE_DAYS`` (20) sessions and ``GRADUATE_TRADES`` (40) closed trades, with the
+  twice-the-spread dollars above zero as well;
+- the record is judged only at every ``REVIEW_DAYS``th (10th) session, on the sessions up to that one, and a session
+  counts from the day after it (never while its trades are still closing), so looking at the board every minute
+  gives luck no extra chances and the label does not flicker in between. A graduated source
+  whose score falls back under the bar at a later review is labeled ``PAPER`` again.
+
+The bar is set for all of ``SOURCES`` at once: with every source at break-even after costs, the chance that any one
+graduates within a year of sessions is about 5% (``tests/test_proving_ground.py`` simulates it, and fails if a
+source is added without raising the bar). The rule it replaced, 40 closed trades net above zero, passed a break-even
+source about half the time at trade 40 and nine times in ten within a year. The cost is time: at two trades a
+session, a source with about 65% of its trades green typically needs about 40 sessions, one at 60% about 80, and
+one at 55% is as likely as not still unproven after a year (break-even is about 49%). A changed rule is a new source: give it a new key rather than carrying the record on.
 
 Paper only: quotes and option chains are read, nothing is placed, sized or sent. Storage is a SQLite file of its own
 (``PROVING_GROUND_PATH``), no migration. Off unless ``PROVING_GROUND_ENABLED=true`` (the owner's switch); it runs on
@@ -41,9 +58,11 @@ from datetime import UTC, date, datetime
 import json
 import logging
 import os
+import math
 from pathlib import Path
 import re
 import sqlite3
+import statistics
 import time
 from typing import Callable
 
@@ -63,6 +82,9 @@ WINDOW = (585, 600)  # 9:45 to 10:00 New York, in minutes
 OPEN_WINDOW_SYMBOLS = ("MU", "NBIS")
 MAX_PICKS = 2  # contracts picked a minute: two option reads each, out of the shared budget
 GRADUATE_TRADES = 40
+GRADUATE_DAYS = 20  # sessions with a closed trade
+REVIEW_DAYS = 10  # the record is judged at every tenth session, on the sessions up to it
+GRADUATE_SCORE = 3.0  # the average session over its standard error
 RUN_SECONDS = 60
 RECENT = 10
 _PLAN = {"instrument": "calls", "direction": "long"}  # buy to open, sell to close: ask in, bid out
@@ -181,9 +203,52 @@ def bracket(row: dict, quote, now: float, close_at: float | None) -> str | None:
     return None
 
 
-def board(trades: list[dict]) -> list[dict]:
+def _return(trade: dict) -> float | None:
+    """A closed trade's net dollars over the premium paid with its commission; None when it has no entry price."""
+    if not trade["entry"] or trade["pnl"] is None:
+        return None
+    return trade["pnl"] / (trade["entry"] * int((trade["contract"] or {}).get("multiplier") or 100) + scanner_rules.COMMISSION_PER_SIDE)
+
+
+def judge(closed: list[dict], today: str | None = None) -> dict:
+    """Whether one source's closed trades could be luck (the module docstring has the rule and why). Sessions from
+    ``today`` (an ISO date) on are not counted yet.
+
+    ``days`` and ``reviewed_days`` count sessions with a closed trade, all of them and those up to the last review;
+    ``score`` is the average reviewed session's summed return over its standard error, None before two sessions."""
+    by_day: dict[str, list[dict]] = {}
+    for t in closed:
+        if _return(t) is not None and (today is None or t["day"] < today):
+            by_day.setdefault(t["day"], []).append(t)
+    days = sorted(by_day)
+    reviewed = days[:len(days) // REVIEW_DAYS * REVIEW_DAYS]
+    seen = [t for d in reviewed for t in by_day[d]]
+    counted = sum(len(v) for v in by_day.values())
+    sums = [sum(_return(t) for t in by_day[d]) for d in reviewed]
+    score = None
+    if len(sums) >= 2:
+        spread = statistics.stdev(sums)
+        mean = statistics.fmean(sums)  # every session the same: no spread to measure against, so the cap either way
+        score = round(mean / (spread / math.sqrt(len(sums))), 2) if spread > 0 else math.copysign(99.0, mean) if mean else 0.0
+    proven = score is not None and score >= GRADUATE_SCORE
+    wide = sum(t["pnl_2x"] or 0 for t in seen) > 0
+    enough = len(reviewed) >= GRADUATE_DAYS and len(seen) >= GRADUATE_TRADES
+    if enough and proven and wide:
+        status = "Graduated"
+    elif len(days) < GRADUATE_DAYS or counted < GRADUATE_TRADES:
+        status = f"PAPER · {len(days)} of {GRADUATE_DAYS} days, {counted} of {GRADUATE_TRADES} trades"
+    elif enough and proven:
+        status = "PAPER · in the red at twice the spread"
+    else:
+        status = f"PAPER · score {score or 0:.1f} of {GRADUATE_SCORE:.1f}, next look at day {len(reviewed) + REVIEW_DAYS}"
+    return {"days": len(days), "reviewed_days": len(reviewed), "score": score, "graduated": enough and proven and wide,
+            "status": status}
+
+
+def board(trades: list[dict], today: str | None = None) -> list[dict]:
     """One row per source, best net first: closed trades, green, net dollars (base and at twice the spread), exits,
-    and whether it has graduated."""
+    and ``judge``'s verdict on the sessions before ``today`` (New York's date unless given)."""
+    today = today or datetime.now(ET).date().isoformat()
     out = []
     for source, name in SOURCES.items():
         mine = [t for t in trades if t["source"] == source]
@@ -196,7 +261,7 @@ def board(trades: list[dict]) -> list[dict]:
             "open": sum(t["state"] in ("pending", "open") for t in mine),
             "unresolved": sum(t["state"] == "unresolved" for t in mine),
             "exits": {r: sum(t["reason"] == r for t in closed) for r in ("take_profit", "stop", "time_stop", "session_close", "no_exit")},
-            "graduated": len(closed) >= GRADUATE_TRADES and pnl > 0,
+            **judge(closed, today),
         })
     return sorted(out, key=lambda r: (r["closed"] == 0, -r["pnl"]))
 
@@ -222,7 +287,8 @@ def read(path: Path | None = None) -> dict:
     """The desk's view: the switch, the bracket, the board and the latest trades. No provider call."""
     path = path or store_path()
     trades = Store(path).trades() if path.exists() else []
-    return {"enabled": enabled(), "graduate_trades": GRADUATE_TRADES,
+    return {"enabled": enabled(), "graduate_trades": GRADUATE_TRADES, "graduate_days": GRADUATE_DAYS,
+            "graduate_score": GRADUATE_SCORE, "review_days": REVIEW_DAYS,
             "bracket": {"take_profit": TAKE_PROFIT, "stop": STOP, "hold_minutes": HOLD_MINUTES, "flat_minutes": FLAT_MINUTES},
             "board": board(trades),
             "recent": [{k: t[k] for k in ("source", "day", "symbol", "direction", "state", "entry", "exit", "reason", "pnl", "note")}
