@@ -226,3 +226,76 @@ def cost_line(cost: dict) -> str | None:
     if cost["open"]:
         head += f" {cost['open']} still open."
     return head
+
+
+ACT_MINUTES = 15  # a sell of the pinged contract this soon after the ping counts as acting on it
+
+
+def week_by_kind(db: Session, start_utc: datetime, end_utc: datetime) -> list[dict]:
+    """The weekly ping scorecard: per ping type, the positions it pinged in the window (naive UTC), how many he acted on
+    and what ignoring the rest did. Each position is counted once per type, from that type's first ping in the window.
+
+    Acted: a closing fill of the position within ``ACT_MINUTES`` of the ping (fills carry minutes only), or an Exiting
+    decision logged after it that New York day. Ignored: neither. For the ignored ones that have closed,
+    ``ignored_vs_alert_usd`` is what they fetched against selling at the ping (``_outcome``): negative means ignoring
+    the ping cost that much. The no-exit-order ping asks for an exit order, not a sale, so it is left out (``NOT_SCORED``).
+    Types with no ping in the window are left out; the rest come in ``KIND`` order."""
+    alerts = db.exec(select(PositionAlert).where(PositionAlert.detected_at >= start_utc, PositionAlert.detected_at < end_utc,
+                                                 PositionAlert.delivery.in_(SENT), PositionAlert.kind.not_in(NOT_SCORED))
+                     .order_by(PositionAlert.detected_at)).all()
+    first: dict = {}
+    for alert in alerts:
+        first.setdefault((alert.kind, alert.account_id, alert.source_key), alert)
+    symbols = {(a.contract or "").split(" ")[0] for a in first.values()}
+    exiting = [d for d in db.exec(select(DayJournalEntry).where(DayJournalEntry.kind == "decision", DayJournalEntry.symbol.in_(symbols),
+                                                                 DayJournalEntry.created_at >= start_utc)).all()
+               if _choice(d) == "exiting"] if symbols else []
+    found: dict = {}
+    tally: dict[str, dict] = {}
+    for (kind, _, _), alert in first.items():
+        row = tally.setdefault(kind, {"kind": kind, "kind_label": KIND.get(kind, "Position alert"), "pings": 0, "acted": 0, "ignored": 0,
+                                      "ignored_closed": 0, "ignored_open": 0, "ignored_better": 0, "ignored_worse": 0,
+                                      "ignored_vs_alert_usd": 0.0})
+        row["pings"] += 1
+        trade = _trade(db, alert, found)
+        symbol = (alert.contract or "").split(" ")[0]
+        day = _ny(alert.detected_at).date()
+        decided = any(d.symbol == symbol and d.created_at >= alert.detected_at and _ny(d.created_at).date() == day for d in exiting)
+        sold = False
+        if trade is not None:
+            after = _ny(alert.detected_at).replace(second=0, microsecond=0)
+            sold = any(after <= f.executed_at <= after + timedelta(minutes=ACT_MINUTES) for f in _fills(db, trade.id, "exit"))
+        if decided or sold:
+            row["acted"] += 1
+            continue
+        row["ignored"] += 1
+        outcome = _outcome(db, alert, trade)
+        if outcome["state"] == "closed":
+            row["ignored_closed"] += 1
+            row["ignored_vs_alert_usd"] += outcome["vs_alert_usd"]
+            row["ignored_better"] += outcome["vs_alert_usd"] > 0
+            row["ignored_worse"] += outcome["vs_alert_usd"] < 0
+        elif outcome["state"] == "open":
+            row["ignored_open"] += 1
+    order = list(KIND)
+    out = sorted(tally.values(), key=lambda r: order.index(r["kind"]) if r["kind"] in order else len(order))
+    for row in out:
+        row["ignored_vs_alert_usd"] = round(row["ignored_vs_alert_usd"], 2)
+    return out
+
+
+def kind_lines(rows: list[dict]) -> list[str]:
+    """The Sunday digest's lines for ``week_by_kind``, one per ping type:
+    "Give-back: acted on 1 of 3. Ignoring 2 cost $180 (1 still open)." """
+    lines = []
+    for r in rows:
+        line = f"{r['kind_label']}: acted on {r['acted']} of {r['pings']}."
+        if r["ignored_closed"]:
+            n, total = r["ignored_closed"], r["ignored_vs_alert_usd"]
+            what = f"cost ${-total:,.0f}" if total < 0 else f"paid ${total:,.0f}" if total > 0 else "came out even"
+            line += f" Ignoring {n} {what}"
+            line += f" ({r['ignored_open']} still open)." if r["ignored_open"] else "."
+        elif r["ignored_open"]:
+            line += f" {r['ignored_open']} ignored, still open."
+        lines.append(line)
+    return lines

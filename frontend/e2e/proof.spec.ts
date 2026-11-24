@@ -177,3 +177,21 @@ for (const [size, width, height, symbol] of [["desktop", 1440, 1000, "AAPL"], ["
     expect(errors).toEqual([]);
   });
 }
+
+test("the ping scorecard says per ping type what he acted on and what ignoring cost", async ({ page }) => {
+  const kind = (k: string, label: string, pings: number, acted: number, closed: number, open: number, usd: number) => ({
+    kind: k, kind_label: label, pings, acted, ignored: pings - acted, ignored_closed: closed, ignored_open: open,
+    ignored_better: usd > 0 ? 1 : 0, ignored_worse: usd < 0 ? 1 : 0, ignored_vs_alert_usd: usd });
+  await page.route("**/copilot/desk/ping-week", route => route.fulfill({ json: { act_minutes: 15,
+    last_week: { ended: "2026-11-22", kinds: [kind("giveback", "Give-back", 3, 1, 1, 1, 100), kind("expiry_first", "Expires today", 2, 1, 1, 0, -450)] },
+    this_week: { since: "2026-11-22", kinds: [] } } }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/proof");
+  const last = page.getByTestId("ping-week-last");
+  await expect(last).toContainText("Week ending Nov 22");
+  await expect(last.getByTestId("ping-week-kind").first()).toContainText("Give-backacted on 1 of 3Ignoring 1 paid $100 (1 still open).");
+  await expect(page.getByRole("region", { name: "Which pings you acted on" })).toContainText("sold within 15 minutes of the ping");
+  await expect(last.getByTestId("ping-week-kind").nth(1)).toContainText("Ignoring 1 cost $450.");
+  await expect(page.getByTestId("ping-week-this")).toContainText("No position pings.");
+  await page.getByRole("region", { name: "Which pings you acted on" }).screenshot({ path: test.info().outputPath("proof-ping-week-phone.png") });
+});

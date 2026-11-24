@@ -270,8 +270,47 @@ function OutcomesCard() {
   </DashboardCard>;
 }
 
+type PingKind = { kind: string; kind_label: string; pings: number; acted: number; ignored: number; ignored_closed: number;
+  ignored_open: number; ignored_better: number; ignored_worse: number; ignored_vs_alert_usd: number };
+type PingWeek = { act_minutes: number; last_week: { ended: string; kinds: PingKind[] }; this_week: { since: string; kinds: PingKind[] } };
+
+/** "Ignoring 2 cost $450 (1 still open)": what the ignored pings of one type did against selling at the ping. */
+export function ignoredLine(k: PingKind): string {
+  if (!k.ignored) return "Acted on every one.";
+  const open = k.ignored_open ? `${k.ignored_open} still open` : "";
+  if (!k.ignored_closed) return `${k.ignored} ignored${open ? `, ${open}` : ""}.`;
+  const v = k.ignored_vs_alert_usd;
+  const what = v < 0 ? `cost $${Math.round(-v).toLocaleString("en-US")}` : v > 0 ? `paid $${Math.round(v).toLocaleString("en-US")}` : "came out even";
+  return `Ignoring ${k.ignored_closed} ${what}${open ? ` (${open})` : ""}.`;
+}
+
+function PingWeekList({ title, kinds, testId }: { title: string; kinds: PingKind[]; testId: string }) {
+  return <div className="space-y-1" data-testid={testId}>
+    <h3 className="text-[13.5px] font-semibold tracking-tight">{title}</h3>
+    {kinds.length ? <ul className="space-y-0.5 text-sm">{kinds.map(k => <li key={k.kind} data-testid="ping-week-kind" className="flex flex-wrap gap-x-2">
+      <span className="font-medium">{k.kind_label}</span>
+      <span>acted on <span className="tabular-nums">{k.acted}</span> of <span className="tabular-nums">{k.pings}</span></span>
+      <span className={k.ignored_vs_alert_usd < 0 ? "text-red-400" : "text-muted-foreground"}>{ignoredLine(k)}</span>
+    </li>)}</ul> : <p className="text-sm text-muted-foreground">No position pings.</p>}
+  </div>;
+}
+
+// The weekly ping scorecard (alert_scorecard.week_by_kind): per ping type, acted on or ignored, and what ignoring cost.
+function PingWeekCard() {
+  const { body, error } = useJson<PingWeek>("/copilot/desk/ping-week");
+  return <DashboardCard title="Which pings you acted on">
+    {body ? <div className="space-y-3">
+      <PingWeekList title={`Week ending ${weekDay(body.last_week.ended)}`} kinds={body.last_week.kinds} testId="ping-week-last" />
+      <PingWeekList title="This week so far" kinds={body.this_week.kinds} testId="ping-week-this" />
+      <p className="text-xs text-muted-foreground">{`Acted: sold within ${body.act_minutes} minutes of the ping`} or logged Exiting. Each position
+        counts once per ping type. Cost is what the ignored ones fetched against selling at the ping&apos;s bid, closed positions only.
+        No-exit-order pings ask for an order, not a sale, so they are left out. Weeks run Sunday 6 PM to Sunday 6 PM New York.</p>
+    </div> : <Status error={error} what="Ping scorecard" />}
+  </DashboardCard>;
+}
+
 export default function ProofView() {
   const habits = useJson<ExitHabitsBody>("/analytics/exit-habits");
   return <div className="space-y-4">{habits.body?.leak && <LeakHeadline leak={habits.body.leak} />}
-    <AlertsProof body={habits.body} error={habits.error} /><RadarProofCard /><PlanningProofCard /><OutcomesCard /></div>;
+    <PingWeekCard /><AlertsProof body={habits.body} error={habits.error} /><RadarProofCard /><PlanningProofCard /><OutcomesCard /></div>;
 }
