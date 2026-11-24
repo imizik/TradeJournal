@@ -4377,9 +4377,9 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   hold is recorded `held` and counts toward neither sender's own caps.
 - **Two tiers: only position risk makes a sound.** `phone.loud(kind, …)` (`phone.LOUD`) keeps the
   sound for the pings about money at risk in a position he holds: give-back, held an hour, the expiry
-  countdown (expires today, the last-day 90 and 30 minutes), wrong way, no exit order, the day's loss
+  countdown (expires today, the last-day 90 and 30 minutes, a morning same-day option at 1 PM), wrong way, no exit order, the day's loss
   and green-day locks, a Keep holding check-in, a plan's invalidation, target, time stop and level alerts, and the fill-time
-  interrupts for oversized and late short-dated buys (`fill_interrupts.LOUD_KINDS`). Every other ping
+  interrupt for size built by adding below cost (`fill_interrupts.LOUD_KINDS`). Every other ping
   (Radar, briefs and prep, plan nudges and entry levels, paper, reviews, digests, the companion, research
   results, other interrupts) is sent silent: ntfy priority 2 (no sound) and Telegram
   `disable_notification`. The message, its budget and its links are unchanged.
@@ -4631,31 +4631,47 @@ When an entry fill repeats one of the owner's own costly habits from the
 [October 21 behavior audit](../backend/reports/behavior_audit_2026-10-21.md), the
 phone gets one message carrying the owner's own record for that habit: no
 advice, no model call, nothing ordered (`backend/app/engine/fill_interrupts.py`).
-Six rules judge each new entry fill:
+Eight rules judge each new entry fill; six of them send (the November 25, 2026
+edge audit replayed every rule over the closed long option trades, and two
+flagged trades that made money):
 
 - **Adding to a loser:** a second or later `buy_to_open` into a long option
   position still open, below the open lots' average cost (first in, first out).
 - **Put entry:** a `buy_to_open` of a put.
 - **Day already green:** the account's realized P&L for the New York day is
   already above zero at the fill (the rule the exit-habit `opened_green` reads).
-- **Late short-dated buy:** a `buy_to_open` of an option with 0 to 2 trading
-  days to expiry (weekdays) at or after 14:00 New York.
+- **Late short-dated buy (desk only, no message):** a `buy_to_open` of an option
+  with 0 to 2 trading days to expiry (weekdays) at or after 14:00 New York. The
+  audit found these buys made money overall, so the phone no longer
+  says it (`fill_interrupts.NOT_SENT`); the desk's play check still shows the
+  record.
 - **Ticker record:** the owner has at least 5 closed trades in the fill's ticker
   and their realized total is below zero (the audit's SNDK, −$5,410 over 48). A
   positive or too-small record stays quiet, so familiar names do not spend the
   budget.
-- **Large size:** an option bought to open whose premium paid (contracts ×
+- **Large size (desk only, no message):** an option bought to open whose premium paid (contracts ×
   price, option prices being stored per contract) is at least 2× the
   median of the owner's closed long option positions entered in the last 12
   months (each position's largest entry fill), needing at least 20 of them, else
   it never fires (the audit: since July "the same mistakes now cost more per
   trade because sizes are larger"). The 2×, 12 months and 20 are module
-  constants.
+  constants. The audit found a large size taken in one clean entry was the
+  owner's best money, so this too is left to the desk's
+  play check.
+- **Size by adding:** an add below cost (the first rule) to a long option with
+  at most 3 calendar days to expiry that takes the premium paid into the
+  position, every entry fill so far, to 2× that same median or more. Positions
+  that became large this way lost the most in the audit. Its record is the
+  past short-dated positions built the same way. The only interrupt that makes
+  a sound.
+- **Back in after a loss:** a position's first `buy_to_open` of an option within 5 minutes of the
+  account's latest close that New York day, when that close was a loss (a
+  close and an entry in the same minute count). Its record is the past entries made that way.
 
 A stock, or a short, can fire only the green-day and ticker rules: a stock's
 dollars are not an option premium, and a short receives premium rather than
-paying it. The put, green-day, late-buy, ticker-record and
-large-size rules describe the position, so each fires once per position; adding
+paying it. The put, green-day, ticker-record, size-by-adding and
+back-in rules describe the position, so each fires once per position; adding
 to a loser fires on every such add. A fill that fires several sends one
 message, one line per rule in that order, ending "Your record, not advice."
 (when the green-day rule fired and the [practice goal](#the-practice-goal) is
@@ -4666,9 +4682,9 @@ Pattern: NBIS 160P
 Adding to a loser: 12 past adds, 3 ended green, −$2,140
 Put entry: puts −$6,480 over 210 trades; calls +$8,710 over 1,120
 Day already green (+$420 today): 85 past trades opened green, −$9,050
-Late short-dated buy: 64 past buys after 2 PM with 0–2 days left, 48% expired worthless, −$5,210
 Your record in NBIS: 48 trades, 35% won, −$5,410
-Size: $4,200 is 2.3× your median ($1,800); your 31 past entries above 2×: 39% won, −$6,100
+Size by adding: $4,200 in this position is 2.3× your median ($1,800) after an add below cost; your 14 past short-dated positions built this way: 29% won, −$3,900
+Back in 3 min after a −$240 close: 41 past entries within 5 min of a losing close, 37% won, −$2,750
 Your record, not advice.
 ```
 

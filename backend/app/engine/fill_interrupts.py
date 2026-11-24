@@ -3,7 +3,7 @@ with the owner's own numbers for that habit. No advice, no model call; nothing h
 
 The October 21, 2026 behavior audit (``backend/reports/behavior_audit_2026-10-21.md``) found the money leaking at
 exits and in a few repeated entry habits, and that since July the same mistakes cost more per trade because sizes
-are larger. Six pure rules judge each new **entry** fill, newest-first order:
+are larger. Eight pure rules judge each new **entry** fill, newest-first order:
 
 - ``add_to_loser``: a second or later ``buy_to_open`` into a long option position still open, below the open lots'
   average cost (first in, first out, as ``chart_journal.open_lots`` replays it);
@@ -17,10 +17,22 @@ are larger. Six pure rules judge each new **entry** fill, newest-first order:
 - ``large_size``: a ``buy_to_open`` of an option whose premium paid (contracts × price, fills storing option prices
   as dollars per contract) is at least ``LARGE_MULTIPLE`` times the median of the owner's closed long
   option positions entered in the last ``LARGE_LOOKBACK_DAYS`` (each position's largest entry fill), needing
-  ``LARGE_MIN_ENTRIES`` of them, else it never fires.
+  ``LARGE_MIN_ENTRIES`` of them, else it never fires;
+- ``size_by_adding``: an add below cost (``add_to_loser``) to a long option with at most ``BUILT_DAYS`` calendar days to
+  expiry that takes the premium paid into the position (every entry fill so far) to ``LARGE_MULTIPLE`` times that same
+  median or more;
+- ``quick_reentry``: a position's first ``buy_to_open`` of an option within ``REENTRY_MINUTES`` of the account's latest
+  close that New York day, when that minute's closes lost money together (an add to an open position is not a
+  re-entry).
+
+The November 25, 2026 edge audit replayed these rules over every closed long option trade. A large first entry and a
+late short-dated buy both flagged trades that, taken together, made money, while short-dated positions that became
+large by adding below cost, and entries inside five minutes of a losing close, lost it. So the phone message leaves out ``large_size`` and ``late_short_dated`` (``NOT_SENT``); both
+still judge an order on the desk's play check (``play_check.habits``), which shows the record either way.
 
 A stock entry, and a short (``sell_to_open``), can fire only ``opened_green`` and ``ticker_record``: a stock's dollars
-are not an option premium, and a short receives premium rather than paying it. The put, green-day, late-buy, ticker and size rules describe the position,
+are not an option premium, and a short receives premium rather than paying it. The put, green-day, late-buy, ticker, size and
+re-entry rules describe the position,
 so each fires once per position (``ONCE_PER_POSITION``); adding to a loser fires on every such add. A fill whose
 email arrives after a later entry's keeps the position's recorded anchor. Known limit, as for position alerts: a
 message sent before an earlier entry fill arrived links the trade id of that moment, which the rebuild replaces, so
@@ -34,7 +46,12 @@ trade being judged (matched by its first entry fill's source identity, so a rebu
 - ``late_short_dated``: long options first bought that way, their count, expired-worthless share and P&L;
 - ``ticker_record``: closed trades in the ticker, their count, share won and P&L;
 - ``large_size``: the size against the median, and the window's past positions at or above the multiple, their
-  count, share won and P&L.
+  count, share won and P&L;
+- ``size_by_adding``: the position's premium against the median, and the window's past positions with at most
+  ``BUILT_DAYS`` days to expiry at an add below cost that took the premium paid in to the multiple (the same test,
+  at each past add), their count, share won and P&L;
+- ``quick_reentry``: long options first bought within ``REENTRY_MINUTES`` of a losing close, their count, share won
+  and P&L.
 
 A record under ``MIN_SAMPLE`` (5) says "too few to read" instead of its share. The records are built once from
 the journal and kept in memory for the New York day, rebuilt only when the closed trades change (their count or
@@ -88,10 +105,14 @@ SHORT_DATED_DAYS = 2
 LARGE_MULTIPLE = 2.0
 LARGE_LOOKBACK_DAYS = 365
 LARGE_MIN_ENTRIES = 20
+BUILT_DAYS = 3  # calendar days to expiry: the audit's short-dated group, where averaging down into size lost the money
+REENTRY_MINUTES = 5
 EPS = 1e-9
-LOUD_KINDS = frozenset({"large_size", "late_short_dated"})  # position risk: these make a sound (phone.LOUD); the rest arrive silently
-KINDS = ("add_to_loser", "put_entry", "opened_green", "late_short_dated", "ticker_record", "large_size")
-ONCE_PER_POSITION = ("put_entry", "opened_green", "late_short_dated", "ticker_record", "large_size")
+LOUD_KINDS = frozenset({"size_by_adding"})  # position risk: these make a sound (phone.LOUD); the rest arrive silently
+KINDS = ("add_to_loser", "put_entry", "opened_green", "late_short_dated", "ticker_record", "large_size", "size_by_adding",
+         "quick_reentry")
+ONCE_PER_POSITION = ("put_entry", "opened_green", "late_short_dated", "ticker_record", "large_size", "size_by_adding", "quick_reentry")
+NOT_SENT = frozenset({"large_size", "late_short_dated"})  # judged for the desk's play check, never a phone message
 FOOTER = "Your record, not advice."
 
 
@@ -156,10 +177,47 @@ def large_size(fill: dict, usual: float | None) -> bool:
             and premium(fill) >= LARGE_MULTIPLE * usual - EPS)
 
 
+def position_premium(fill: dict, prior: list[dict]) -> float:
+    """Dollars paid into the position by every entry so far, this fill included (sales do not reduce it)."""
+    return premium(fill) + sum(premium(f) for f in prior if f["side"] == "buy_to_open")
+
+
+def size_by_adding(fill: dict, prior: list[dict], usual: float | None) -> bool:
+    """An add below cost to a long option with at most ``BUILT_DAYS`` calendar days to expiry that takes the premium
+    paid into the position to ``LARGE_MULTIPLE`` times ``usual`` or more (None: the history is too short to say)."""
+    expiration = fill.get("expiration")
+    if usual is None or expiration is None or not adds_to_loser(fill, prior):
+        return False
+    return (0 <= (expiration - fill["executed_at"].date()).days <= BUILT_DAYS
+            and position_premium(fill, prior) >= LARGE_MULTIPLE * usual - EPS)
+
+
+def last_close(closes: list[tuple[datetime, float]], at: datetime) -> tuple[datetime, float] | None:
+    """The latest minute with a close among the ``(closed_at, pnl)`` closes on ``at``'s New York day at or before
+    ``at``, and that minute's total P&L (fill times carry minutes only, so a close and an entry in the same minute
+    count as close then entry, and several closes in one minute are read together, whatever order they come in)."""
+    def minute(moment: datetime) -> datetime:
+        return moment.replace(second=0, microsecond=0)  # a manual fill can carry seconds
+    same_day = [(minute(c[0]), c[1]) for c in closes if c[0].date() == at.date() and minute(c[0]) <= minute(at)]
+    if not same_day:
+        return None
+    latest = max(c[0] for c in same_day)
+    return latest, round(sum(c[1] for c in same_day if c[0] == latest), 2)  # to the cent: a flat minute is not a loss
+
+
+def quick_reentry(fill: dict, last: tuple[datetime, float] | None) -> bool:
+    """A ``buy_to_open`` of an option within ``REENTRY_MINUTES`` of ``last``, the account's latest close that day
+    (``last_close``, a whole minute), when that close lost money."""
+    if fill["side"] != "buy_to_open" or fill.get("instrument_type") != "option" or last is None:
+        return False
+    return last[1] < 0 and fill["executed_at"].replace(second=0, microsecond=0) - last[0] < timedelta(minutes=REENTRY_MINUTES)
+
+
 def fired(fill: dict, prior: list[dict], day_pnl_before: float | None, ticker_rec: dict | None = None,
-          size_rec: dict | None = None) -> list[str]:
-    """The rules this entry fill fires, in ``KINDS`` order. ``ticker_rec`` and ``size_rec`` are the fill's ticker and
-    size records (``record``); without them those two rules do not fire."""
+          size_rec: dict | None = None, built_rec: dict | None = None, last: tuple[datetime, float] | None = None) -> list[str]:
+    """The rules this entry fill fires, in ``KINDS`` order. ``ticker_rec``, ``size_rec`` and ``built_rec`` are the
+    fill's ticker, size and size-by-adding records (``record``), ``last`` the account's latest close that day
+    (``last_close``); without them those rules do not fire."""
     out = []
     if adds_to_loser(fill, prior):
         out.append("add_to_loser")
@@ -173,6 +231,10 @@ def fired(fill: dict, prior: list[dict], day_pnl_before: float | None, ticker_re
         out.append("ticker_record")
     if large_size(fill, (size_rec or {}).get("median")):
         out.append("large_size")
+    if size_by_adding(fill, prior, (built_rec or {}).get("median")):
+        out.append("size_by_adding")
+    if quick_reentry(fill, last) and not any(f["side"] == "buy_to_open" for f in prior):  # a position's first entry, as its record counts
+        out.append("quick_reentry")
     return out
 
 
@@ -191,6 +253,9 @@ def history_rows(trades: list[dict], fills_of: dict) -> list[dict]:
     closes: dict = defaultdict(list)
     for t in closed:
         closes[t["account_id"]].append((t["closed_at"], t["realized_pnl"] or 0.0))
+    day_closes: dict = defaultdict(list)  # the re-entry rule never counts a trade's own close
+    for t in closed:
+        day_closes[t["account_id"], t["closed_at"].date()].append((t["closed_at"], t["realized_pnl"] or 0.0, t["id"]))
     rows = []
     for t in closed:
         fills = sorted(fills_of.get(t["id"], ()), key=_order)
@@ -200,6 +265,7 @@ def history_rows(trades: list[dict], fills_of: dict) -> list[dict]:
         first = entries[0]
         long_option = t["instrument_type"] == "option" and all(f["side"] == "buy_to_open" for f in entries)
         option = {"instrument_type": "option", "expiration": t["expiration"]}
+        before = [c[:2] for c in day_closes[t["account_id"], first["executed_at"].date()] if c[2] != t["id"]]
         rows.append({
             "key": first.get("key") or str(first["id"]), "pnl": t["realized_pnl"] or 0.0, "ticker": t["ticker"],
             "entered": first["executed_at"].date(), "premium": max(premium(f) for f in entries),
@@ -209,6 +275,12 @@ def history_rows(trades: list[dict], fills_of: dict) -> list[dict]:
                                                   if f["role"] == "entry" and f is not first),
             "opened_green": opened_green(day_pnl_before(closes[t["account_id"]], first["executed_at"])),
             "late_short_dated": long_option and late_short_dated({**first, **option}),
+            # The most paid into the position at an add the size-by-adding rule could fire on (below cost, short-dated).
+            "built": max((position_premium(f, fills[:i]) for i, f in enumerate(fills)
+                          if long_option and f["role"] == "entry" and f is not first and t["expiration"] is not None
+                          and 0 <= (t["expiration"] - f["executed_at"].date()).days <= BUILT_DAYS
+                          and adds_to_loser({**f, **option}, fills[:i])), default=0.0),
+            "quick_reentry": long_option and quick_reentry({**first, **option}, last_close(before, first["executed_at"])),
         })
     return rows
 
@@ -227,12 +299,18 @@ def record(rows: list[dict], kind: str, exclude: str | None = None, *, ticker: s
         hit = [r for r in window if usual is not None and r["premium"] >= LARGE_MULTIPLE * usual - EPS]
         return {"n": len(hit), "pnl": round(sum(r["pnl"] for r in hit), 2), "green": sum(1 for r in hit if r["pnl"] > 0),
                 "median": usual, "entries": len(window)}
+    if kind == "size_by_adding":
+        usual = record(rows, "large_size", day=day)["median"]
+        hit = [r for r in rows if usual is not None and r["built"] > 0
+               and day - timedelta(days=LARGE_LOOKBACK_DAYS) <= r["entered"] <= day and r["built"] >= LARGE_MULTIPLE * usual - EPS]
+        return {"n": len(hit), "pnl": round(sum(r["pnl"] for r in hit), 2), "green": sum(1 for r in hit if r["pnl"] > 0), "median": usual}
     if kind == "put_entry":
         puts = [r for r in rows if r["long_option"] and r["option_type"] == "put"]
         calls = [r for r in rows if r["long_option"] and r["option_type"] == "call"]
         return {"n": len(puts), "pnl": round(sum(r["pnl"] for r in puts), 2),
                 "calls": len(calls), "calls_pnl": round(sum(r["pnl"] for r in calls), 2)}
-    flag = {"add_to_loser": "added_to_loser", "opened_green": "opened_green", "late_short_dated": "late_short_dated"}[kind]
+    flag = {"add_to_loser": "added_to_loser", "opened_green": "opened_green", "late_short_dated": "late_short_dated",
+            "quick_reentry": "quick_reentry"}[kind]
     hit = [r for r in rows if r[flag]]
     return {"n": len(hit), "pnl": round(sum(r["pnl"] for r in hit), 2), "green": sum(1 for r in hit if r["pnl"] > 0),
             "expired": sum(1 for r in hit if r["expired_worthless"])}
@@ -249,9 +327,21 @@ def _plural(n: int, word: str) -> str:
     return f"{n:,} {word}{'' if n == 1 else 's'}"
 
 
-def line(kind: str, rec: dict, day_pnl: float | None = None, paid: float | None = None) -> str:
-    """One rule's line with the owner's numbers and the sample; ``paid`` is the fill's premium, for the size line."""
+def line(kind: str, rec: dict, day_pnl: float | None = None, paid: float | None = None, last: tuple[datetime, float] | None = None,
+         at: datetime | None = None) -> str:
+    """One rule's line with the owner's numbers and the sample; ``paid`` is the fill's premium for the size line and the
+    position's for the size-by-adding line; ``last`` and ``at`` are the losing close and the fill's time for the
+    re-entry line."""
     n = rec["n"]
+    if kind == "size_by_adding":
+        paid, usual = paid or 0.0, rec["median"]
+        head = f"Size by adding: ${paid:,.0f} in this position is {paid / usual:.1f}× your median (${usual:,.0f}) after an add below cost"
+        tail = f"your {_plural(n, 'past short-dated position')} built this way"
+        return f"{head}; {tail}, too few to read" if n < MIN_SAMPLE else f"{head}; {tail}: {round(100 * rec['green'] / n)}% won, {money(rec['pnl'])}"
+    if kind == "quick_reentry":
+        gap = "" if last is None or at is None else f" {int((at - last[0]).total_seconds() // 60)} min after a {money(last[1])} close"
+        head = f"Back in{gap}: {n:,} past {'entry' if n == 1 else 'entries'} within {REENTRY_MINUTES} min of a losing close"
+        return f"{head}, too few to read" if n < MIN_SAMPLE else f"{head}, {round(100 * rec['green'] / n)}% won, {money(rec['pnl'])}"
     if kind == "ticker_record":
         head = f"Your record in {rec['ticker']}: {_plural(n, 'trade')}"
         return f"{head}, too few to read" if n < MIN_SAMPLE else f"{head}, {round(100 * rec['green'] / n)}% won, {money(rec['pnl'])}"
@@ -345,8 +435,9 @@ class FillInterrupts:
             if not fresh:
                 return
             rows = self.history(db, moment.date())
-            drafts = [self._judge(db, fill, rows, now) for fill in fresh]
-        for draft in drafts:
+        for fill in fresh:  # one at a time: a fill judged after another in this pass sees what that one already said
+            with Session(self.engine) as db:
+                draft = self._judge(db, fill, rows, now)
             self._record(draft)
 
     def _new_fills(self, db: Session, now: float) -> list[dict]:
@@ -392,16 +483,24 @@ class FillInterrupts:
             Trade.account_id == fill["account_id"], Trade.id != trade.id, Trade.status.in_(("closed", "expired")),
             Trade.closed_at >= start, Trade.closed_at < fill["executed_at"])).all()
         day = day_pnl_before([(wall_time(c), _num(p) or 0.0) for c, p in closes], fill["executed_at"])
+        minute = fill["executed_at"].replace(second=0, microsecond=0)
+        same_minute = db.exec(select(Trade.closed_at, Trade.realized_pnl).where(
+            Trade.account_id == fill["account_id"], Trade.id != trade.id, Trade.status.in_(("closed", "expired")),
+            Trade.closed_at >= fill["executed_at"], Trade.closed_at < minute + timedelta(minutes=1))).all()
+        last = last_close([(wall_time(c), _num(p) or 0.0) for c, p in [*closes, *same_minute]], fill["executed_at"])
         # The put, green-day and late-buy rules describe the position: once each, so scaling in does not repeat them.
         said = {k for kinds in db.exec(select(FillInterrupt.kinds).where(
             FillInterrupt.account_id == fill["account_id"], FillInterrupt.position_key == position)) for k in kinds.split(",")}
         key = anchor(entries)
         recs = {"ticker_record": record(rows, "ticker_record", key, ticker=trade.ticker),
-                "large_size": record(rows, "large_size", key, day=fill["executed_at"].date())}
-        kinds = [k for k in fired(fill, prior, day, recs["ticker_record"], recs["large_size"])
-                 if k not in said or k not in ONCE_PER_POSITION]
+                "large_size": record(rows, "large_size", key, day=fill["executed_at"].date()),
+                "size_by_adding": record(rows, "size_by_adding", key, day=fill["executed_at"].date())}
+        kinds = [k for k in fired(fill, prior, day, recs["ticker_record"], recs["large_size"], recs["size_by_adding"], last)
+                 if k not in NOT_SENT and (k not in said or k not in ONCE_PER_POSITION)]
         label = short_label(trade.ticker, trade.instrument_type, trade.option_type, trade.strike)
-        title, body = message(label, [line(k, recs.get(k) or record(rows, k, key), day, premium(fill)) for k in kinds],
+        paid = {"size_by_adding": position_premium(fill, prior)}
+        title, body = message(label, [line(k, recs.get(k) or record(rows, k, key), day, paid.get(k, premium(fill)), last, fill["executed_at"])
+                                      for k in kinds],
                               practice_line(db, kinds, fill["executed_at"].date()))
         return FillInterrupt(
             account_id=fill["account_id"], fill_key=fill["key"], position_key=position, trade_id=trade.id, ticker=trade.ticker,
