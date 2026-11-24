@@ -59,21 +59,24 @@ def _trade(db: Session, alert: PositionAlert, found: dict) -> Trade | None:
     """The alert's position as a trade now. Trades are rebuilt with new ids, so the alert's own id is checked against the
     position's identity (its first entry fill) and, failing that, the account's trades in the symbol are searched."""
     key = (alert.account_id, alert.source_key)
-    if key in found:
-        return found[key]
-    trade = db.get(Trade, alert.trade_id)
+    if key not in found:
+        found[key] = position_trade(db, alert.account_id, (alert.contract or "").split(" ")[0], alert.source_key, alert.trade_id)
+    return found[key]
+
+
+def position_trade(db: Session, account_id, symbol: str, source_key: str, trade_id) -> Trade | None:
+    """The trade now holding the position whose first entry fill anchors as ``source_key`` (``trade_id`` first: it was
+    that trade when the ping fired), or None when no trade of the account's options in ``symbol`` is that position."""
+    trade = db.get(Trade, trade_id)
     entries = _fills(db, trade.id, "entry") if trade is not None else []
-    if not entries or anchor(entries) != alert.source_key:
-        trade = None
-        symbol = (alert.contract or "").split(" ")[0]
-        for candidate in db.exec(select(Trade).where(Trade.account_id == alert.account_id, Trade.ticker == symbol,
-                                                     Trade.instrument_type == "option")).all():
-            entries = _fills(db, candidate.id, "entry")
-            if entries and anchor(entries) == alert.source_key:
-                trade = candidate
-                break
-    found[key] = trade
-    return trade
+    if entries and anchor(entries) == source_key:
+        return trade
+    for candidate in db.exec(select(Trade).where(Trade.account_id == account_id, Trade.ticker == symbol,
+                                                 Trade.instrument_type == "option")).all():
+        entries = _fills(db, candidate.id, "entry")
+        if entries and anchor(entries) == source_key:
+            return candidate
+    return None
 
 
 def _choice(entry: DayJournalEntry) -> str | None:

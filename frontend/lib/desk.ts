@@ -163,6 +163,8 @@ export type DeskLive = {
   as_of?: number; issue?: string | null; joined?: boolean; accounts?: DeskLiveAccount[];
   /** Orders with no followed book row to sit on (no position yet, or the fill closed it): the book's "Orders" group. */
   orders?: DeskOrder[];
+  /** Every working order was read whole just now, so a row with none has no exit order (not a missing read). */
+  orders_read?: boolean;
   /** The day's account value line, from the readings the feed already took (kept when the feed is signed out or stale). */
   day_line?: DeskDayLine;
 };

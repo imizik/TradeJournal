@@ -103,6 +103,7 @@ const CARD = {
   alert: { id: ALERT_ID, kind: "giveback", kind_label: "Give-back", at: epoch("2026-11-13T15:57:00Z"), contract: "ORCL 11/20/26 250C",
     contracts: 2, bid: 395, mark: 405, gain: -430, gain_pct: -0.35, avg_cost: 620, quoted_at: epoch("2026-11-13T15:57:00Z") },
   habit: { kind: "giveback", kind_label: "Give-back", window_days: 30, held: 6, closed: 5, better: 1, worse: 4, vs_alert_usd: -1240 },
+  position: { trade_id: ORCL_ID, open: true },
 };
 const card = (page: Page) => page.getByRole("region", { name: "Ping" });
 const posted = (writes: Request[]) => writes.filter(w => w.url().endsWith("/entries")).map(w => w.postDataJSON().text);
@@ -154,4 +155,16 @@ test("a stale bid prices at the mid and says so; the card puts away to the chart
   await expect(card(page).getByTestId("ping-card-close")).toHaveText("Copy Close all 2 @ mid 4.10");
   await card(page).getByRole("button", { name: "Put the card away" }).click();
   await expect(card(page)).toHaveCount(0);
+});
+
+test("a ping on a position that has since closed offers no copy buttons", async ({ page }) => {
+  await open(page, { card: { ...CARD, position: { trade_id: ORCL_ID, open: false } } });
+  await expect(card(page).getByTestId("ping-card-closed")).toHaveText("This ORCL position is closed.");
+  await expect(card(page).getByTestId("ping-card-close")).toHaveCount(0);
+});
+
+test("a ping names its own position: another ORCL row on the desk is not it", async ({ page }) => {
+  await open(page, { card: { ...CARD, position: { trade_id: "99999999-9999-4999-8999-999999999999", open: true } } });
+  await expect(card(page).getByTestId("ping-card-closed")).toContainText("not on the desk now");
+  await expect(card(page).getByTestId("ping-card-close")).toHaveCount(0);
 });

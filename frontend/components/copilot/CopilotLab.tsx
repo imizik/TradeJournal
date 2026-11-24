@@ -1289,7 +1289,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 is not here: it sits beside the copilot, so the chart stays while he reads it. A phone's Chain view puts
                 the tickers it can open above the Chain, as chips. */}
             {/* A position ping lands here: what fired and Close / Trim / Set stop, over the ticker's chart. */}
-            {card && <PingCard card={card} rows={rows} ordersLive={liveOn(booked.live)} onSymbol={cardSymbol} onAsk={fill} onPlan={planWatched} onDismiss={() => setCard(null)} />}
+            {card && <PingCard card={card} rows={rows} ordersLive={liveOn(booked.live) && booked.live?.orders_read === true} onSymbol={cardSymbol} onAsk={fill} onPlan={planWatched} onDismiss={() => setCard(null)} />}
             {phone && <div className={styles.chainPick}><ChainPicker held={gridHeld} watched={watched.filter(s => !gridHidden.has(s))} selected={centreSymbol} onPick={pickChain} /></div>}
             {grid ? (
               <div data-testid="desk-grid-view" className={styles.gridView}>

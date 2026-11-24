@@ -34,7 +34,21 @@ type PingAlert = { id: string; kind: string; kind_label: string; at: number; con
 type PingInterrupt = { id: string; trade_id: string; contract: string; title: string; lines: string[]; noted_at: number | null };
 type Habit = { kind_label: string; window_days: number; held: number; closed: number; better: number; worse: number; vs_alert_usd: number };
 export type PingCardBody = { symbol: string | null; alert: PingAlert | null; interrupt: PingInterrupt | null; habit: Habit | null;
-  broker: { label: string; url: string } | null };
+  broker: { label: string; url: string } | null;
+  /** The trade now holding the pinged position, and whether it is still open (absent from an older backend). */
+  position?: { trade_id: string | null; open: boolean } | null };
+
+/** The pinged position's book row: by its trade (trades are rebuilt, so the server resolves the current one), else a
+ * Robinhood-only row of the same contract; never another strike, expiry or account in the ticker. Null when it is closed. */
+export function pingRow(body: PingCardBody, rows: readonly DeskThread[]): DeskThread | null {
+  if (!body.symbol || body.position?.open === false) return null;
+  const mine = rows.filter(r => r.symbol === body.symbol && r.book);
+  const id = body.position?.trade_id;
+  if (id) { const hit = mine.find(r => r.tradeId === id); if (hit) return hit; }
+  const contract = body.alert?.contract ?? body.interrupt?.contract;
+  const same = contract ? mine.filter(r => !r.tradeId && `${r.symbol} ${r.instrument}` === contract) : [];
+  return same.length === 1 ? same[0] : null;
+}
 
 /** A bid older than this is not "the bid": the card prices at the mid now instead and says so. */
 const FRESH_BID_SECONDS = 10 * 60;
@@ -79,7 +93,7 @@ export default function PingCard({ card, rows, ordersLive, onSymbol, onAsk, onPl
       .catch(e => { if (!controller.signal.aborted) setFailed(e instanceof Error ? e.message : "Could not read the ping."); });
     return () => controller.abort();
   }, [card, onSymbol]);
-  const row = body?.symbol ? rows.find(r => r.symbol === body.symbol && r.book) ?? null : null;
+  const row = body ? pingRow(body, rows) : null;
   return (
     <section aria-label="Ping" data-testid="ping-card" className="relative m-2 space-y-3 rounded-xl border-2 border-primary/60 bg-card p-3 sm:m-3">
       <button type="button" onClick={onDismiss} aria-label="Put the card away"
@@ -92,7 +106,8 @@ export default function PingCard({ card, rows, ordersLive, onSymbol, onAsk, onPl
           <Trigger body={body} />
           {row ? <Act key={row.key} body={body} row={row} rows={rows} ordersLive={ordersLive} onAsk={onAsk} onPlan={onPlan} />
             : <p data-testid="ping-card-closed" className="text-sm text-muted-foreground">
-                {rows.length ? `No open ${body.symbol ?? ""} position on the desk now: it may already be closed.` : "Reading your positions…"}
+                {body.position?.open === false ? `This ${body.symbol ?? ""} position is closed.`
+                  : rows.length ? `This ${body.symbol ?? ""} position is not on the desk now: it may already be closed.` : "Reading your positions…"}
               </p>}
         </>}
     </section>
@@ -147,7 +162,9 @@ function Act({ body, row, rows, ordersLive, onAsk, onPlan }: {
   const freshBid = alert?.bid != null && bidAt !== null && now - bidAt <= FRESH_BID_SECONDS ? alert.bid / 100 : null;
   const sellAt = freshBid ?? mark?.share ?? null;
   const basis = freshBid !== null ? "bid" : "mid";
-  const copyable = !!option && option.direction === "long" && (option.side === "call" || option.side === "put") && option.strike != null && option.expiry
+  // Only a lone long call or put (``useStanding`` reads a spread's leg as unknown): selling one leg of a structure alone
+  // could leave its short leg naked, so the Position panel's own guard holds here too.
+  const copyable = !!standing && !!option && option.direction === "long" && (option.side === "call" || option.side === "put") && option.strike != null && option.expiry
     && held != null && Number.isInteger(held) && held >= 1 && sellAt !== null && sellAt > 0;
   const half = held && held >= 2 ? trimCount(held, { half: true }) : null;
   const working = ordersLive ? (book.orders ?? []).filter(o => o.working) : null;

@@ -755,6 +755,8 @@ def threads(db: Session, now: float) -> dict:
         lines = today._section(db, "desk robinhood orders", lambda: {"state": "ok", "rows": _order_lines(found, act + watch, now, hidden)})
         if lines.get("rows"):
             live["view"]["orders"] = lines["rows"]
+        # Whether every working order was read just now, so "no exit order" is a fact and not a missing read.
+        live["view"]["orders_read"] = lines["state"] == "ok" and _orders_read(now)
     if _after_close(now):
         touched = today._section(db, "desk touched", lambda: _touched(db, now, day))
         happened = None
@@ -960,6 +962,12 @@ def day_provisional(now: float, hidden: set[str]) -> list[dict]:
         out.append({"contract": contract, "action": robinhood_fills.OPTION_ACTIONS.get(o["action"], o["action"]),
                     "filled": o["filled"], "avg": o["avg"], "at": o["filled_at"], "account": o["account"]})
     return out
+
+
+def _orders_read(now: float) -> bool:
+    """The order-history pass read every account whole and recently (``Poller.working``, as the no-exit alert asks)."""
+    from app.engine import robinhood_fills
+    return robinhood_fills.poller.working(now) is not None
 
 
 def _order_lines(found: dict, rows: list[dict], now: float, hidden: set[str] = frozenset()) -> list[dict]:
@@ -1583,9 +1591,15 @@ def desk_ping_card(symbol: str = Query("", max_length=12), alert: uuid.UUID | No
         found = db.exec(select(PositionAlert).where(PositionAlert.detected_at >= since, col(PositionAlert.contract).startswith(f"{symbol} "),
                                                     PositionAlert.delivery.in_(alert_scorecard.SENT))
                         .order_by(PositionAlert.detected_at.desc())).first()
-    body: dict = {"symbol": symbol or None, "alert": None, "interrupt": None, "habit": None, "broker": None}
+    # ``position``: the trade now holding the pinged position (trades are rebuilt with new ids) and whether it is still
+    # open, so the card acts on that position and no other contract or account in the ticker.
+    body: dict = {"symbol": symbol or None, "alert": None, "interrupt": None, "habit": None, "broker": None, "position": None}
+
+    def held(trade) -> dict | None:
+        return {"trade_id": str(trade.id), "open": trade.status == "open"} if trade is not None else {"trade_id": None, "open": False}
     if found is not None:
         body["symbol"] = (found.contract or "").split(" ")[0] or body["symbol"]
+        body["position"] = held(alert_scorecard.position_trade(db, found.account_id, body["symbol"], found.source_key, found.trade_id))
         body["alert"] = {"id": str(found.id), "kind": found.kind, "kind_label": alert_scorecard.KIND.get(found.kind, "Position alert"),
                          "at": int(found.detected_at.replace(tzinfo=UTC).timestamp()), "contract": found.contract,
                          "contracts": found.contracts, "bid": found.bid, "mark": found.mark, "gain": found.gain,
@@ -1600,6 +1614,7 @@ def desk_ping_card(symbol: str = Query("", max_length=12), alert: uuid.UUID | No
         if row is not None:
             body["symbol"] = row.ticker
             body["interrupt"] = {**fill_interrupts.shape(row), "trade_id": str(row.trade_id)}
+            body["position"] = held(alert_scorecard.position_trade(db, row.account_id, row.ticker, row.position_key, row.trade_id))
     if body["alert"] is None and body["interrupt"] is None and not body["symbol"]:
         raise HTTPException(404, "No such ping.")
     return body

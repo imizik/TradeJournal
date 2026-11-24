@@ -4466,12 +4466,12 @@ amber edge and scrolled into view. A link with `symbol` opens a phone on the tic
 (the morning brief); `feed` wins on a phone. Watch your day (`/replay/<day>`, a video) and the Daily Practice decision
 ping (`/?decision=`, not a desk item) keep their own pages. Ratings (ntfy's Useful / Not useful) open `/radar?event=…&rate=…` and land in the desk's Radar log drawer while the lab is on.
 
-**The ping card** (`components/copilot/PingCard.tsx`, read from `GET /copilot/desk/ping-card`). `card=alert:<id>` or
+**The ping card** (`components/copilot/PingCard.tsx`, read from `GET /copilot/desk/ping-card`). The card acts only on the pinged position: the body names its trade (`position.trade_id`, `open`) and the card matches that desk row, never just the first row in the ticker; a closed or missing position shows no copy buttons, and a mixed structure keeps the desk's no-copy guard. `card=alert:<id>` or
 `card=interrupt:<id>` opens the desk on that ticker with the card above its chart and the copilot's sheet closed (a
 phone lands on the ticker view, not the conversation). Action first: what fired and, for an open-trade alert, what
 holding past that kind of alert did over the scorecard's 30 days (`alert_scorecard.habit`: alerts with no Exiting
 logged after them, closed ones measured against selling at the alert's bid); then P&L, bid (the alert's, while it is
-under 10 minutes old) and mid, contracts, whether an exit order is working (only while the Robinhood feed is live) and
+under 10 minutes old) and mid, contracts, whether an exit order is working ("unknown" unless the Robinhood feed is live and its order read is whole and current) and
 the value at expiry if the stock stays where it is. **Copy Close all @ bid** is the primary button (the mid when the bid
 is stale, and it says so), then **Copy Trim half** and **Set stop** (the plan's stop editor, or Plan it with no plan).
 **Keep holding** is not one tap: it asks for +15m, +30m or a price stop first. Each copy puts Robinhood's order lines on
