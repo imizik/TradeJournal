@@ -379,7 +379,8 @@ def _label(kind: str) -> str:
             "no_plan": "plan nudge", "link": "plan link", "prep": "pre-market prep", "week_review": "week review", "day_replay": "Watch your day",
             "evening_review": "evening review", "expiry_eve": "day-before-expiry", "radar_digest": "Radar digest",
             "radar_setup": "Radar setup", "radar_event": "Radar", "thesis_watch": "thesis watch", "research": "research", "companion_adopt": "adopted position",
-            "companion_update": "companion update", "paper": "paper", "paper_review": "paper review"}.get(kind, kind)
+            "companion_update": "companion update", "paper": "paper", "paper_review": "paper review",
+            "day_loss": "daily loss lock", "day_green": "green-day walk-away"}.get(kind, kind)
 
 
 def delivered(db: Session, ticket: Ticket, now: float) -> None:

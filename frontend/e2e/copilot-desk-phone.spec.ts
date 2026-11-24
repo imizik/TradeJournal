@@ -185,3 +185,14 @@ test("a ticket link from a phone ping lands on the Ticket", async ({ page }) => 
   expect(await centreTop(page)).toBeLessThan(250);
   await expect(page.getByTestId("desk-ticket")).toBeInViewport();
 });
+
+test("a phone row is about 50 px, so eight positions fit a screen", async ({ page }) => {
+  await open(page, { width: 393 });
+  const rows = page.getByTestId("desk-book").locator("li.group\\/row");
+  const heights = await rows.evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
+  console.log("row heights", heights);
+  expect(heights.length).toBe(12);
+  expect(Math.max(...heights)).toBeLessThanOrEqual(56);
+  // The "not in the journal yet" chip folds to an icon that still says so.
+  await expect(rows.first().getByTestId("book-state")).toHaveAttribute("aria-label", "New · not in the journal yet");
+});

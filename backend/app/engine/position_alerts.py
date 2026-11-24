@@ -640,6 +640,23 @@ def _links(db: Session, alert: PositionAlert) -> tuple[str, tuple[tuple[str, str
         return trade, answers
 
 
+TICKER = re.compile(r"[A-Z]{1,5}(\.[A-Z])?")
+
+
+def robinhood_link(db: Session, alert: PositionAlert) -> tuple[str, str] | None:
+    """One tap from the ping to the position in Robinhood: its stock's page (``robinhood.com/stocks/<ticker>``, a link
+    the Robinhood app opens when installed), where the option position is listed. Only for a Robinhood account (its
+    ``broker`` is empty or ``robinhood``) and a plain ticker; an index option (SPXW) has no stock page. Robinhood's own
+    option id would open the contract itself, but the feed's ids never leave the server
+    (docs/robinhood-read-feed.md)."""
+    from app.models import Account
+    ticker = (alert.contract or "").split(" ")[0]
+    account = db.get(Account, alert.account_id)
+    if account is None or (account.broker or "robinhood") != "robinhood" or ticker in INDEX_UNDERLYING or not TICKER.fullmatch(ticker):
+        return None
+    return "Robinhood", f"https://robinhood.com/stocks/{ticker}"
+
+
 def _minute_of(stamp: float) -> int:
     moment = datetime.fromtimestamp(stamp, ET)
     return moment.hour * 60 + moment.minute
@@ -770,7 +787,7 @@ class PositionAlerts:
         orders, read_at = read
         from app.models import Account
         last4 = {a.id: a.last4 for a in db.exec(select(Account).where(Account.id.in_({p["account_id"] for p in due}))).all()
-                 if a.broker == "robinhood"}  # the order history is Robinhood's: another broker's positions cannot be judged
+                 if (a.broker or "robinhood") == "robinhood"}  # Robinhood's order history (its accounts leave broker empty)
         found = []
         for position in due:
             deadline = datetime.combine(today, datetime.min.time(), ET).timestamp() + no_exit_due(position["opened_at"], today, regular) * 60
@@ -875,7 +892,7 @@ class PositionAlerts:
             alert.attempts += 1
             try:
                 _, image_state = phone.send(title, body + ticket.append, kind=alert.kind, image=image, priority=priority, tags=("warning",),
-                                            path=path, direct_click=True, more=more,
+                                            path=path, direct_click=True, more=more, broker_link=robinhood_link(db, alert),
                                             buttons=telegram_replies.feedback_buttons(alert.id))  # all four answers; ntfy keeps ANSWER_ACTIONS
             except phone.SendError as exc:
                 if not _surely_unsent(exc):

@@ -30,7 +30,7 @@ Accounts shown: those named in `ROBINHOOD_ACCOUNTS` (default `Roth IRA,MCP`; a l
 last four digits), plus any other account only while it holds something.
 
 Refresh: about once a minute in market hours (9:25 to 16:15 New York on weekdays), every 15 minutes otherwise, only
-when the desk's thread read asks (an open desk, or the evening review's one read of it), one read at a time and at most 40 calls each. The read itself never waits for Robinhood: it returns the last snapshot
+when the desk's thread read asks (an open desk, or the evening review's one read of it) or, with `DAY_LOCK_ALERTS=true`, the [day lock](agent/feature-map.md)'s pass in the regular session, one read at a time and at most 40 calls each. The read itself never waits for Robinhood: it returns the last snapshot
 with its own as-of and, when that is due, starts the refresh on a background thread; the first read after a start,
 with no snapshot yet, shows the journal's rows and "reading Robinhood…". The calls inside a refresh go one after
 another: the read-only client keeps one session and one call count, not built for calls in parallel, and it is not

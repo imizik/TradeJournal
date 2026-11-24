@@ -96,7 +96,7 @@ def engine():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(Account(id=ROTH, name="Roth", type="roth_ira", last4="8267", broker="robinhood"))
+        db.add(Account(id=ROTH, name="Roth", type="roth_ira", last4="8267"))  # Robinhood accounts leave broker empty
         db.commit()
     yield engine
     engine.dispose()
@@ -328,7 +328,7 @@ def test_on_telegram_the_answers_and_why_are_reply_buttons_not_links(engine, wor
     # All four answers on Telegram (ntfy keeps two links, below), and Why?
     assert kw["buttons"] == (("Prompted review", f"fb:{alert.id}:prompted_review"), ("Already aware", f"fb:{alert.id}:already_aware"),
                              ("Too late", f"fb:{alert.id}:too_late"), ("Not useful", f"fb:{alert.id}:not_useful"),
-                             ("Why?", f"why:{alert.id}")) and kw["links"] == ()
+                             ("Why?", f"why:{alert.id}")) and kw["links"] == (("Robinhood", "https://robinhood.com/stocks/SNDK"),)  # the one-tap link beside Open
     assert alerts(engine)[0].delivery == "sent"
 
 
@@ -1289,3 +1289,21 @@ def test_the_order_read_is_none_when_a_tried_page_was_not_read_whole():
     assert poller.working(1_000.0) == ([line], 1_000.0)
     poller._desk["whole"] = False
     assert poller.working(1_000.0) is None
+
+
+def test_robinhood_link_opens_the_stock_page_for_robinhood_positions_only(engine):
+    from app.engine import telegram
+    alert = PositionAlert(account_id=ROTH, source_key="k", kind="giveback", generation=0, trade_id=__import__("uuid").uuid4(),
+                          contract="SNDK 10/23/26 230C", contracts=1, avg_cost=100)
+    with Session(engine) as db:
+        assert position_alerts.robinhood_link(db, alert) == ("Robinhood", "https://robinhood.com/stocks/SNDK")
+        alert.contract = "SPXW 10/23/26 6800C"
+        assert position_alerts.robinhood_link(db, alert) is None  # an index has no stock page
+        webull = __import__("uuid").uuid4()
+        db.add(Account(id=webull, name="Webull", type="individual", last4="wb02", broker="webull"))
+        db.commit()
+        alert.contract, alert.account_id = "SNDK 10/23/26 230C", webull
+        assert position_alerts.robinhood_link(db, alert) is None
+    # On Telegram it sits beside Open, whole, even beside the answer buttons.
+    rows = telegram.keyboard("/x", (("Why?", "why:a"),), (("Robinhood", "https://robinhood.com/stocks/SNDK"),))["inline_keyboard"]
+    assert rows[-1] == [{"text": "Robinhood", "url": "https://robinhood.com/stocks/SNDK"}]  # no ALERT_APP_URL: Open is left out

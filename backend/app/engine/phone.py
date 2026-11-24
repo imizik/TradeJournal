@@ -10,7 +10,8 @@ stay on ntfy and never come here.
 ``send`` returns ``(receipt, image state)`` as ``ping_images.publish`` does, and raises ``SendError`` (ntfy's error,
 which Telegram's extends) with the same at-most-once meaning on either transport. On Telegram ``more`` becomes extra
 link buttons beside Open, unless the ping has reply ``buttons``: then ``more`` holds ntfy's answer links for the same
-answers, and the buttons replace them. A picture whose text is too long for a photo caption goes as text alone.
+answers, and the buttons replace them. ``broker_link`` (an open-trade alert's Robinhood button) is a whole URL, not an
+app path. A picture whose text is too long for a photo caption goes as text alone.
 
 On Telegram every factual ping also gets a Why? button (``ask:<kind>``): a tap asks copilot about that ping's own text
 (``telegram_replies``). The AI-written summaries and the companion, which answer or ask for themselves, do not, and a
@@ -57,13 +58,17 @@ def transport() -> str | None:
 
 
 def send(title: str, message: str, *, kind: str, path: str = "", buttons: tuple[tuple[str, str], ...] = (), image: bytes | None = None,
-         priority: int | None = None, reply_to: str | None = None, open_label: str = "Open", **ntfy_options) -> tuple[str | None, str]:
+         priority: int | None = None, reply_to: str | None = None, open_label: str = "Open",
+         broker_link: tuple[str, str] | None = None, **ntfy_options) -> tuple[str | None, str]:
     """Send one ping of ``kind`` (the policy's kind, for the log); see the module docstring. ``reply_to`` (a Telegram
-    message id) and ``open_label`` are Telegram's only: ntfy has no threads, and its Open is its own."""
+    message id) and ``open_label`` are Telegram's only: ntfy has no threads, and its Open is its own. ``broker_link`` is
+    (label, whole https URL), a button beside Open on Telegram; on ntfy only while its three actions have room."""
+    external = (broker_link,) if broker_link else ()
     if telegram.configured():
         # The ping's own answer buttons replace its answer links; the added Why? does not.
         options = {"path": path, "buttons": with_why(kind, tuple(buttons)), "priority": 4 if priority is None else priority,
-                   "links": () if buttons else tuple(ntfy_options.get("more", ())), "reply_to": reply_to, "open_label": open_label}
+                   "links": (() if buttons else tuple(ntfy_options.get("more", ()))) + external, "reply_to": reply_to,
+                   "open_label": open_label}
         if image is not None and telegram.caption_fits(title, message):
             try:
                 return telegram.publish(title, message, image=image, **options), "attached"
@@ -72,4 +77,6 @@ def send(title: str, message: str, *, kind: str, path: str = "", buttons: tuple[
         return telegram.publish(title, message, **options), "none" if ping_images.enabled() else "off"
     if priority is not None:
         ntfy_options["priority"] = priority
+    if external and len(ntfy_options.get("more", ())) < 2:  # ntfy shows three actions, Open app first
+        ntfy_options["more"] = (*ntfy_options.get("more", ()), *external)
     return ping_images.publish(title, message, image, path=path, **ntfy_options)
