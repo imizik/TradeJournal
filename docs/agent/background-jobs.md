@@ -72,6 +72,9 @@ if needed, then explicitly **Rebuild trades / FIFO matching** before enrichment:
 fills may have committed before the interrupted pipeline reached its rebuild.
 An ordinary pipeline skips rebuilding when its own import saves no new fills
 and no open option is past its expiration.
+The API's level alert monitor also queues a `trade_rebuild` by itself, at most
+one at a time, when an open option is past its expiration (from 16:30 New York
+on its last day).
 Existing fill dedupe keys and FIFO rules are unchanged. A destructive resync
 requires a new confirmed request; it is not a generic retry operation. Daily
 reviews may already have incurred provider charges before an interruption.

@@ -46,6 +46,7 @@ EXPIRE_SECONDS = 6 * 3600
 BACKOFF = (30, 60, 120, 300, 900)
 UNCONFIGURED_RETRY = 300
 STREAM_HOURS = (4 * 60 - 5, 20 * 60 + 5)  # New York minutes when trades can print, with a margin
+EXPIRY_REBUILD_SECONDS = 5 * 60  # how often an option left open past its expiration is looked for
 
 
 def _utc(stamp: float) -> datetime:
@@ -124,6 +125,7 @@ class LevelAlertMonitor:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._wake: asyncio.Event | None = None
         self._task: asyncio.Task | None = None
+        self._expiry_checked = 0.0
 
     # ------------------------------------------------------------ lifecycle
 
@@ -255,6 +257,24 @@ class LevelAlertMonitor:
                                                             await asyncio.to_thread(self.check_ins.run)  # never raises
                                                         if self.follow_ups is not None:
                                                             await asyncio.to_thread(self.follow_ups.run)
+                                                        await asyncio.to_thread(self.settle_expired)  # never raises
+
+    def settle_expired(self) -> None:
+        """Every ``EXPIRY_REBUILD_SECONDS``: when an option is still open past its expiration (from 16:30 New York on
+        its last day, ``reconstructor.expiry_cutoff``), queue the trade rebuild that writes it off
+        (``sync.queue_expiry_rebuild``). Without it the journal shows the position as held, with no loss, until the
+        next fill or scheduled sync, which the Friday week review (16:45) and that evening's reads come before."""
+        now = self.clock()
+        if now - self._expiry_checked < EXPIRY_REBUILD_SECONDS:
+            return
+        self._expiry_checked = now
+        try:
+            from app.routers import sync  # the job queue lives with the Sync Center's routes
+            with Session(self.engine) as db:
+                if sync.queue_expiry_rebuild(db) is not None:
+                    log.info("Queued a trade rebuild to write off expired options")
+        except Exception:  # noqa: BLE001 - one bad pass never stops the monitor
+            log.exception("Expired-option rebuild check failed")
 
     async def _run_alerts(self) -> None:
         await self._record_found()

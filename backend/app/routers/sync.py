@@ -285,12 +285,25 @@ def _wait_for_job(job_id: uuid.UUID) -> JobRun:
 PIPELINE_STEPS = 7
 
 
-def _expired_still_open() -> bool:
+def _expired_still_open(session: Session | None = None) -> bool:
     """An option trade still open after its expiration (``reconstructor.expiry_cutoff``): the journal shows it as
     held, with no loss, until a rebuild writes it off."""
-    with Session(engine) as session:
-        return session.exec(select(Trade.id).where(Trade.status == "open", Trade.instrument_type == "option",
-                                                   Trade.expiration < expiry_cutoff()).limit(1)).first() is not None
+    if session is None:
+        with Session(engine) as own:
+            return _expired_still_open(own)
+    return session.exec(select(Trade.id).where(Trade.status == "open", Trade.instrument_type == "option",
+                                               Trade.expiration < expiry_cutoff()).limit(1)).first() is not None
+
+
+def queue_expiry_rebuild(session: Session) -> JobRun | None:
+    """Queue one trade rebuild when an open option is past its expiration, so it is written off soon after its last
+    session settles instead of at the next fill or scheduled sync. Nothing is queued while another sync or enrichment
+    job is queued or running (that includes a rebuild this already asked for); the caller asks again later."""
+    if not _expired_still_open(session) or _active_job(session):
+        return None
+    job = _create_run(session, JOB_TRADE_REBUILD, "Queued to write off expired options")
+    submit_job(job.id)
+    return job
 
 
 def _run_pipeline(pipeline_id: uuid.UUID) -> None:
