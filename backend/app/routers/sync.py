@@ -30,7 +30,8 @@ from app.engine.job_runtime import execute_job, in_sync_worker, submit_job
 from app.engine.enricher import polygon_calls_per_minute
 from app.engine.options_recorder import record as record_option_snapshots
 from app.engine.rvol_history import store as store_rvol_history
-from app.models import Fill, JobRun
+from app.engine.reconstructor import expiry_cutoff
+from app.models import Fill, JobRun, Trade
 from app.environment import require_destructive_confirmation
 from app.routers.fills import (
     DestructiveConfirmation,
@@ -284,6 +285,14 @@ def _wait_for_job(job_id: uuid.UUID) -> JobRun:
 PIPELINE_STEPS = 7
 
 
+def _expired_still_open() -> bool:
+    """An option trade still open after its expiration (``reconstructor.expiry_cutoff``): the journal shows it as
+    held, with no loss, until a rebuild writes it off."""
+    with Session(engine) as session:
+        return session.exec(select(Trade.id).where(Trade.status == "open", Trade.instrument_type == "option",
+                                                   Trade.expiration < expiry_cutoff()).limit(1)).first() is not None
+
+
 def _run_pipeline(pipeline_id: uuid.UUID) -> None:
     try:
         _set_job(pipeline_id, status="running", phase="starting", started_at=_now(), current="Starting full sync pipeline")
@@ -320,11 +329,13 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
 
         _run_step(1, JOB_GMAIL_SYNC, _gmail_step)
         _run_step(2, JOB_FILL_CHECK, _run_fill_check)
-        if import_result.get("saved", 0) > 0:
+        if import_result.get("saved", 0) > 0 or _expired_still_open():
             _run_step(3, JOB_TRADE_REBUILD, _run_trade_rebuild)
-        # No new fills → derived trades already match the fill history, so the
-        # full clear+rebuild is skipped. Fill edits rebuild inline in their own
-        # endpoint, and the Sync Center still offers rebuild as a manual job.
+        # No new fills and no option past its expiration → derived trades already
+        # match the fill history, so the full clear+rebuild is skipped. An expired
+        # option is only written off by a rebuild, and a quiet day (a weekend most
+        # of all) brings no new fill to start one. Fill edits rebuild inline in their
+        # own endpoint, and the Sync Center still offers rebuild as a manual job.
         # Enrichment steps below always run: they self-select missing work
         # (e.g. yesterday's fills whose bars only became available today) and
         # no-op instantly when there is nothing to do.

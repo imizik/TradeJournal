@@ -100,6 +100,10 @@ patterns that can create N+1 calls.
   `(executed_at, opens-before-closes, str(fill.id))`. Opens must sort before
   closes at equal timestamps, or a close is orphaned and its entry lots get
   written off as expired worthless.
+- An open option is written off as expired worthless by the first rebuild at
+  or after 16:30 New York on its expiration day (`reconstructor.expiry_cutoff`,
+  read from the New York clock, never the server's date). Until that rebuild
+  runs it stays open with no loss.
 
 ### Known: same-timestamp ordering is arbitrary
 
@@ -376,7 +380,9 @@ on ([operator note](../robinhood-order-fills.md)).
 ## Sync pipeline
 
 - The full pipeline runs Gmail sync, fill check, rebuild, Polygon, Alpaca and
-  trade-path work. It skips the rebuild step when Gmail saves 0 new fills.
+  trade-path work. It skips the rebuild step when Gmail saves 0 new fills and
+  no open option is past its expiration (only a rebuild writes an expired
+  option off, and a quiet day or a weekend brings no new fill to start one).
 - Polygon enrichment is launched in the background: pipeline success does
   **not** mean Polygon finished. Check `GET /fills/enrich/status` separately.
   Path metrics computed before it finishes lack greeks attribution; the next

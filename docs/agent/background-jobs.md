@@ -70,7 +70,8 @@ On worker startup and each idle poll:
 After an interrupted import or pipeline, inspect the failed run. Import again
 if needed, then explicitly **Rebuild trades / FIFO matching** before enrichment:
 fills may have committed before the interrupted pipeline reached its rebuild.
-An ordinary pipeline skips rebuilding when its own import saves no new fills.
+An ordinary pipeline skips rebuilding when its own import saves no new fills
+and no open option is past its expiration.
 Existing fill dedupe keys and FIFO rules are unchanged. A destructive resync
 requires a new confirmed request; it is not a generic retry operation. Daily
 reviews may already have incurred provider charges before an interruption.
