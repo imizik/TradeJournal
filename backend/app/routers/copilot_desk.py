@@ -1603,6 +1603,39 @@ def desk_ping_week(db: Session = Depends(get_session)):
             "this_week": {"since": sunday.isoformat(), "kinds": alert_scorecard.week_by_kind(db, end, current + timedelta(seconds=1))}}
 
 
+# --------------------------------------------------------------------------- the day plan
+
+class DayPlanBody(BaseModel):
+    operation_id: str = PydField(min_length=1, max_length=100)
+    max_usd: float | None = None
+    exit_by: str | None = PydField(default=None, max_length=5)
+
+
+def _today_ny() -> date:
+    return datetime.fromtimestamp(today._now(), ET).date()
+
+
+@router.get("/desk/day-plan")
+def desk_day_plan(db: Session = Depends(get_session)):
+    """Today's pre-market plan (``app/engine/day_plan.py``): its max size and exit time, or ``plan`` None; ``pings``
+    says whether ``DAY_PLAN_ALERTS`` is on. Database reads only."""
+    from app.engine import day_plan
+    return {"day": _today_ny().isoformat(), "plan": day_plan.plan_for(db, _today_ny()), "pings": day_plan.enabled()}
+
+
+@router.post("/desk/day-plan")
+def desk_day_plan_save(body: DayPlanBody, db: Session = Depends(get_session)):
+    """Save today's plan as a ``day_plan`` day-journal entry (the day's newest wins); never an order, never Robinhood."""
+    from app.engine import day_journal, day_plan
+    try:
+        plan = day_plan.save(db, _today_ny(), body.max_usd, body.exit_by, body.operation_id)
+    except day_journal.EntryConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except (day_plan.PlanError, day_journal.EntryError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"day": plan["day"], "plan": plan, "pings": day_plan.enabled()}
+
+
 # --------------------------------------------------------------------------- the ping card
 
 PING_CARD_HOURS = 16  # "the latest alert" without an id: one from today's session, never yesterday's

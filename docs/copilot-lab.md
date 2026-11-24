@@ -2280,6 +2280,18 @@ measures it. No-exit-order pings are left out (they ask for an order, not a sale
 digest ("Expires today: acted on 1 of 2. Ignoring 1 cost $450.") and the "Which pings you acted on" card on /proof
 (`GET /copilot/desk/ping-week`: the last full digest week and the week so far; read-only, served while the lab is off).
 
+### The day plan
+
+Before the open, the desk's left column leads with **Today's plan** (`DayPlanCard.tsx`; also step 2 of Start the day):
+a max size (dollars of premium in one option position) and a hard exit time (New York), either may be left out. Saving
+is a `day_plan` day-journal entry (the day's newest wins; numbers in its `context_json`), through `GET`/`POST
+/copilot/desk/day-plan`; nothing is sized or ordered. With `DAY_PLAN_ALERTS=true` (off by default; the owner's switch),
+`app/engine/day_plan.py` runs on the level-alert monitor's loop in the regular session and sends three loud pings, each
+at most once: **over size** (`plan_size`, an option position opened today whose premium paid is over the max, one a
+position), **exit time** (`plan_exit`, at the exit time with options opened before it still open, one a day, naming
+them) and **opened late** (`plan_late`, an option position opened after the exit time). Judged from the journal's
+trades (Webull left out), so a fill is judged once it lands there.
+
 ### The desk read
 
 When the owner selects a ticker on the desk (a book row, a Watching row, a strip tile) and no conversation about it is

@@ -34,6 +34,7 @@ import { planContext } from "@/components/copilot/PlanATrade";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import ArmChecklist from "@/components/copilot/ArmChecklist";
 import DayChecklist from "@/components/copilot/DayChecklist";
+import DayPlanCard from "@/components/copilot/DayPlanCard";
 import DeskFeed, { feedQuestion, useDeskFeed, useFeedNew, type FeedItem } from "@/components/copilot/DeskFeed";
 import { useDeskUnusual } from "@/components/copilot/DeskUnusual";
 import { scannerGuides, useDeskScanner, type DeskScannerRow } from "@/components/copilot/DeskScanner";
@@ -1119,7 +1120,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // it is written), the day report after the close, else what changed since the owner last looked. Arm today's plans and Close
   // the day are not repeated here: Close the day is one quiet link under the day report (and in ⌘K), never the strip.
   const booked = forAccount(rows, live, account);
-  const lower = dayPhase === "pre" ? <MorningBrief prep={session.data?.prep} fill={fill} max={3} />
+  const lower = dayPhase === "pre" ? <><DayPlanCard className="mb-3" /><MorningBrief prep={session.data?.prep} fill={fill} max={3} /></>
     : dayPhase === "close" ? (
       <section aria-label="Day report" data-testid="day-report" className="space-y-1.5">
         <DayReport rows={rows} rowsRead={rowsRead} onOpen={select} />

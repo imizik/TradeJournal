@@ -1018,3 +1018,25 @@ export async function getHealth(signal?: AbortSignal): Promise<DeskHealth> {
   if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
   return body as DeskHealth;
 }
+
+// --------------------------------------------------------------------------- the pre-market day plan
+
+/** Today's plan (``GET /copilot/desk/day-plan``): max dollars of premium in one option position and the exit time
+ * (``HH:MM`` New York), either null; ``pings`` is whether the server's DAY_PLAN_ALERTS is on. */
+export type DayPlan = { day: string; max_usd: number | null; exit_by: string | null; text: string; saved_at: number };
+export type DayPlanBody = { day: string; plan: DayPlan | null; pings: boolean };
+
+async function dayPlanJson(response: Response): Promise<DayPlanBody> {
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  return body as DayPlanBody;
+}
+
+export async function getDayPlan(signal?: AbortSignal): Promise<DayPlanBody> {
+  return dayPlanJson(await fetch(apiUrl("/copilot/desk/day-plan"), { cache: "no-store", signal }));
+}
+
+export async function saveDayPlan(max_usd: number | null, exit_by: string | null): Promise<DayPlanBody> {
+  return dayPlanJson(await fetch(apiUrl("/copilot/desk/day-plan"), { method: "POST", cache: "no-store",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operation_id: `day-plan-${uid()}`, max_usd, exit_by }) }));
+}
