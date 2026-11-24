@@ -2841,6 +2841,31 @@ lettered M (`frontend/lib/deskMomentumBand.ts`). One chip, "Momentum band · pap
 choice for both timeframes, kept in the browser) and shows the band at the crosshair. Nothing, chip included, when the
 book is off, has no check today, the read fails or its day is not the chart's latest day.
 
+### Paper proving ground
+
+Every candidate idea source paper traded on one fixed bracket, with a leaderboard by source
+(`backend/app/engine/proving_ground.py`, Isaac's ask of November 24, 2026). Sources: Radar setup cards with a candidate
+contract (needs `RADAR_SETUP_CARDS`), the `conditional` opportunities of the day's newest Jo morning brief (entered from
+9:45; the brief has no direction field, so a trigger or reason saying put, short, fade, bearish or breakdown is a put
+and anything else a call), and the 9:45-10:00 window of the [October 21 audit](../backend/reports/behavior_audit_2026-10-21.md)
+as a rule: at 9:45 MU and NBIS each in the direction of their move from the open. Jo picks and the rule take
+`radar_setup.pick_contract`'s contract (nearest expiration 3-10 days out, about 0.35 delta, liquid), at most two picks a
+minute.
+
+The bracket, the same for every source: out when the contract's bid is +20% over the ask paid, or 15% under it, 60
+minutes after the entry, or 5 minutes before the close, whichever comes first; nothing is held overnight or into expiry.
+Entries are the ask of the first quote whose bid and ask both updated after the idea (none within 2 minutes:
+unresolved); exits the bid of the first fresh quote at or after the condition; $0.65 a side; the bracket is checked once
+a minute, so it fills at that minute's bid, never at the bracket price. A pessimistic result at twice the spread is kept
+beside it. A source **graduates** at 40 closed trades with net dollars above zero; until then its phone pings are titled
+`PAPER · …` (`proving_ground.label`). Only Radar setup pings exist today; Jo's brief and the 9:45 rule send no trade
+pings, so for them graduation shows on the board only.
+
+Its own SQLite file (`PROVING_GROUND_PATH`), no migration, nothing placed or sent. Runs on its own minute loop in the API
+process when `PROVING_GROUND_ENABLED=true` (the owner's switch; off by default). The desk shows it as a Practice line
+(`frontend/components/copilot/DeskProving.tsx`, `GET /copilot/desk/proving-ground`): the leading source in the line, and
+opened, the board (closed, green, net, PAPER n/40 or Graduated) and the last ten trades.
+
 ### Switching chatter on
 
 Both are off until set up; while off nothing is read and nothing is spent. Setting these on the server is Isaac's call.

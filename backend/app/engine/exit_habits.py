@@ -46,6 +46,12 @@ is every listed alert of that kind whose position has settled (still-open,
 rolled and unmatched ones are left out and counted). Descriptive only: no
 verdict reads it and it does not show that an alert caused a change.
 
+**Weekly leak** (``weekly_leak``, the /proof page's headline): per New York week (Monday to Sunday, by close
+date), the realized dollars of closed long-option trades that expired worthless or gave back their gain
+(``green_to_red``), each trade counted once (an expired trade that had been up counts as expired). The two leaks
+of the October 21 audit. A trade without path metrics cannot be called a give-back and is counted apart, never as
+a zero.
+
 **Verdict** (the /proof page): ``helping``, ``not_helping`` or, by default,
 ``not_enough_data``, with the rule and sample stated; see ``verdict``.
 """
@@ -272,6 +278,45 @@ def verdict(card: dict) -> dict:
     return {**out, "verdict": "not_helping", "reason": "No habit is clearly less frequent than before alerts."}
 
 
+LEAK_WEEKS = 12
+
+
+def weekly_leak(trades: list[dict], today: date, weeks: int = LEAK_WEEKS) -> dict:
+    """Dollars lost each week to expiries and give-backs, oldest week first, the current (partial) week last.
+    ``trades`` are ``long_rows`` rows with ``flags`` (``scorecard`` adds them)."""
+    monday = today - timedelta(days=today.weekday())
+    starts = [monday - timedelta(weeks=i) for i in range(weeks - 1, -1, -1)]
+    rows = {s: {"week": s.isoformat(), "expired": 0.0, "giveback": 0.0, "total": 0.0, "trades": 0, "no_path": 0}
+            for s in starts}
+    for t in trades:
+        closed = t.get("closed_at")
+        if closed is None:
+            continue
+        start = closed.date() - timedelta(days=closed.date().weekday())
+        row = rows.get(start)
+        if row is None:
+            continue
+        flags = t.get("flags") or habit_flags(t)
+        pnl = t["realized_pnl"] or 0.0
+        if flags["expired_worthless"]:
+            key = "expired"
+        elif flags["green_to_red"]:
+            key = "giveback"
+        else:
+            row["no_path"] += flags["green_to_red"] is None and pnl < 0
+            continue
+        row[key] = round(row[key] + pnl, 2)
+        row["total"] = round(row["total"] + pnl, 2)
+        row["trades"] += 1
+    out = [rows[s] for s in starts]
+    full = out[:-1]  # finished weeks only: the current one is partial
+
+    def average(span: list[dict]) -> float | None:
+        return round(sum(r["total"] for r in span) / len(span), 2) if span else None
+    return {"weeks": out, "this_week": out[-1], "last_4_avg": average(full[-4:]),
+            "prior_4_avg": average(full[-8:-4]) if len(full) >= 8 else None}
+
+
 # ------------------------------------------------------------------ database
 
 def _epoch(moment: datetime | None) -> int | None:
@@ -326,7 +371,9 @@ def build(db: Session, go_live: date = GO_LIVE) -> dict:
         trade_of_source[(row.account_id, row.raw_email_id)] = row.trade_id
         trade_of_source[(row.account_id, str(row.id))] = row.trade_id
 
-    out = scorecard(long_rows(db, trades, fills_of), go_live)
+    rows = long_rows(db, trades, fills_of)
+    out = scorecard(rows, go_live)
+    out["leak"] = weekly_leak(rows, datetime.now(ET).date())
 
     out["verdict"] = verdict(out)
     # Every sent alert counts toward the follow-up tally; only the newest ALERTS_SHOWN are listed.

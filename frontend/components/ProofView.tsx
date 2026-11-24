@@ -6,7 +6,7 @@ import { apiUrl } from "@/lib/api";
 import { money } from "@/lib/format";
 import { ALERT_FEEDBACK_LABELS } from "@/lib/alertFeedback";
 import { DashboardCard, dashboardLink } from "./dashboard/DashboardCard";
-import { ExitHabitsView, EXIT_HABIT_VERDICT, EXIT_HABIT_CAVEAT, RESPONSE, type ExitHabitsBody } from "./dashboard/ExitHabits";
+import { ExitHabitsView, EXIT_HABIT_VERDICT, EXIT_HABIT_CAVEAT, RESPONSE, type ExitHabitsBody, type LeakBody } from "./dashboard/ExitHabits";
 
 // The two proofs from the October 22 end goal, read from /analytics/exit-habits and /radar/proof, and a secondary read
 // (not a third proof), planned against unplanned trades, from /analytics/plan-proof.
@@ -121,8 +121,35 @@ function Status({ error, what }: { error: boolean; what: string }) {
   return <p role="status" className={`text-sm ${error ? "text-red-400" : "text-muted-foreground"}`}>{error ? `${what} could not load.` : `Loading ${what.toLowerCase()}…`}</p>;
 }
 
-function AlertsProof() {
-  const { body, error } = useJson<ExitHabitsBody>("/analytics/exit-habits");
+const weekDay = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const lost = (v: number) => v < 0 ? `−$${Math.round(-v).toLocaleString("en-US")}` : "$0";
+
+// The page's one number: dollars lost this week to options left to expire and to gains given back, with twelve weeks
+// of the same number behind it (exit_habits.weekly_leak). Lower is better; nothing here is a verdict.
+export function LeakHeadline({ leak }: { leak: LeakBody }) {
+  const w = leak.this_week;
+  const worst = Math.max(1, ...leak.weeks.map(x => -x.total));
+  const trend = leak.last_4_avg != null && leak.prior_4_avg != null
+    ? ` Last 4 weeks ${lost(leak.last_4_avg)} a week, the 4 before ${lost(leak.prior_4_avg)}.`
+    : leak.last_4_avg != null ? ` Last 4 weeks ${lost(leak.last_4_avg)} a week.` : "";
+  return <section aria-label="Lost to expiries and give-backs" data-testid="proof-leak" className="rounded-lg border bg-card p-4">
+    <p className="text-xs text-muted-foreground">Lost to expiries and give-backs, week of {weekDay(w.week)}</p>
+    <p data-testid="proof-leak-number" className={`mt-1 text-4xl font-semibold tabular-nums ${w.total < 0 ? "text-red-400" : "text-foreground"}`}>{lost(w.total)}</p>
+    <p className="mt-1 text-sm text-muted-foreground">
+      Expired worthless {lost(w.expired)} · gave back a gain {lost(w.giveback)}.{trend}
+    </p>
+    <div className="mt-3 flex h-16 items-end gap-1" data-testid="proof-leak-weeks" aria-hidden="true">
+      {leak.weeks.map((x, i) => <div key={x.week} title={`Week of ${weekDay(x.week)}: ${lost(x.total)}`}
+        className={`flex-1 rounded-sm ${x.total < 0 ? (i === leak.weeks.length - 1 ? "bg-red-400" : "bg-red-400/50") : "bg-border"}`}
+        style={{ height: `${Math.max(4, Math.round(-x.total / worst * 100))}%` }} />)}
+    </div>
+    <div className="mt-1 flex justify-between text-[11px] text-muted-foreground"><span>{weekDay(leak.weeks[0].week)}</span><span>this week</span></div>
+    <p className="mt-2 text-xs text-muted-foreground">Realized dollars of closed long options that expired worthless, or were up 10% and $50 then closed red,
+      each trade once, by the week it closed. The current week is partial.{w.no_path > 0 && ` ${w.no_path} red trade${w.no_path === 1 ? "" : "s"} this week had no price path, so could not be checked for a give-back.`}</p>
+  </section>;
+}
+
+function AlertsProof({ body, error }: { body: ExitHabitsBody | null; error: boolean }) {
   return <DashboardCard title="Exit habits and alert follow-up" action={<Link href="/analytics" className={dashboardLink}>Analytics →</Link>}>
     {body ? <div className="space-y-4">
       <VerdictBlock testId="proof-alerts-verdict" label={EXIT_HABIT_VERDICT[body.verdict.verdict].label} verdict={body.verdict.verdict} reason={body.verdict.reason} rule={body.verdict.rule}
@@ -244,5 +271,7 @@ function OutcomesCard() {
 }
 
 export default function ProofView() {
-  return <div className="space-y-4"><AlertsProof /><RadarProofCard /><PlanningProofCard /><OutcomesCard /></div>;
+  const habits = useJson<ExitHabitsBody>("/analytics/exit-habits");
+  return <div className="space-y-4">{habits.body?.leak && <LeakHeadline leak={habits.body.leak} />}
+    <AlertsProof body={habits.body} error={habits.error} /><RadarProofCard /><PlanningProofCard /><OutcomesCard /></div>;
 }

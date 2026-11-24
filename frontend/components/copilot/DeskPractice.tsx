@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import DeskMomentum, { momentumShown, useMomentumBook } from "./DeskMomentum";
 import DeskOvernight, { overnightShown, useOvernightBook } from "./DeskOvernight";
 import DeskPaper from "./DeskPaper";
+import DeskProving, { provingWords, useProvingGround } from "./DeskProving";
 import { ReplayPractice, useReplayPractice } from "./DeskReplay";
 import { GoalsLine } from "./DeskGoals";
 import { RulesEditor, RulesSplitLine } from "./DeskRules";
@@ -251,6 +252,7 @@ export function Practice({ on, paper, symbol, review, onReplay, onPick }: {
   const [practiceRunFocus, setPracticeRunFocus] = useState<string | undefined>(urlPracticeRun);
   const overnight = useOvernightBook(on);
   const momentum = useMomentumBook(on);
+  const proving = useProvingGround(on);
   const replay = useReplayPractice();
   const [kept, set, openAll] = useKeptOpen();
   useEffect(() => {
@@ -341,6 +343,10 @@ export function Practice({ on, paper, symbol, review, onReplay, onPick }: {
           </Line>
         )}
       </Fold>
+      <Line id="proving" mode="paper" name="Proving ground" open={isOpen("proving")} onToggle={() => set("proving", !isOpen("proving"))}
+        section={<DeskProving {...proving} />}>
+        <span data-testid="practice-proving-words">{provingWords(proving.ground, proving.failed)}</span>
+      </Line>
       <Fold id="replay.practice">
         <Line id="replay" mode="replay" name={replayed ? plural(card!.score.trades, "trade") : "Past days"} open={isOpen("replay")}
           onToggle={replayed ? () => set("replay", !isOpen("replay")) : undefined} section={<ReplayPractice card={card} />}

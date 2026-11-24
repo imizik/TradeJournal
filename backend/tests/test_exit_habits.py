@@ -327,3 +327,22 @@ def test_journal_readers_are_denied(boundary):  # noqa: F811
 def test_a_rolled_close_is_not_read_as_a_sale_at_the_alert():
     out = follow_up(alert(), BUY + [{**f("sell_to_close", 2, 100.0, "2026-10-21T10:40"), "derived": True}], "closed")
     assert out["response"] == "rolled" and out["vs_alert"] is None and "rolled" in out["note"]
+
+
+def test_weekly_leak_counts_expiries_and_give_backs_once_by_close_week():
+    today = date(2026, 11, 25)  # a Wednesday: the week of Nov 23 is partial
+    rows = [
+        trade(1, -500, closed="2026-11-23T16:00", expired=True, peak_pct=40, peak_dollars=300),  # expired and gave back: expired
+        trade(2, -200, closed="2026-11-24T11:00", peak_pct=15, peak_dollars=80),  # gave back
+        trade(3, -100, closed="2026-11-24T11:00"),  # red with no path metrics: counted apart
+        trade(4, 300, closed="2026-11-24T11:00", peak_pct=50, peak_dollars=400),  # green: not a leak
+        trade(5, -50, closed="2026-11-20T15:00", expired=True),  # last week (Mon Nov 16)
+        trade(6, -999, closed="2026-08-03T15:00", expired=True),  # older than 12 weeks: left out
+    ]
+    for r in rows:
+        r["flags"] = habit_flags(r)
+    out = exit_habits.weekly_leak(rows, today)
+    assert len(out["weeks"]) == 12 and out["weeks"][0]["week"] == "2026-09-07"
+    assert out["this_week"] == {"week": "2026-11-23", "expired": -500.0, "giveback": -200.0, "total": -700.0, "trades": 2, "no_path": 1}
+    assert out["weeks"][-2]["total"] == -50.0
+    assert out["last_4_avg"] == -12.5 and out["prior_4_avg"] == 0.0

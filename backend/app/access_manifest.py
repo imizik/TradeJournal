@@ -129,6 +129,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /copilot/desk/feed',
     'GET /copilot/desk/momentum',  # the QQQ intraday momentum paper book: its own SQLite file only; no provider or Robinhood call, never an order
     'GET /copilot/desk/overnight',  # the QQQ overnight paper book: its own SQLite file only; no provider or Robinhood call, never an order
+    'GET /copilot/desk/proving-ground',  # the paper proving ground: its own SQLite file only; no provider or Robinhood call, never an order
     'GET /copilot/desk/health',  # is each source behind the desk live: in-memory states, saved files and database reads; no provider or Robinhood call
     'GET /copilot/paper',  # his own paper book and scorecard, and his weekly goals' progress: database reads, the desk's kept prices, the fill feed's local state; settles an expired paper option at its close; no Robinhood
     'GET /copilot/paper/equity',  # his paper account's value over time for the Paper home's graph: paper_equity rows only; no quote, no Robinhood

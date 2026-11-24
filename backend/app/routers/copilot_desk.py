@@ -1809,6 +1809,17 @@ def desk_momentum():
     return intraday_momentum_book.read(today._now())
 
 
+@router.get("/desk/proving-ground")
+def desk_proving_ground():
+    """The paper proving ground (``app/engine/proving_ground.py``): every idea source on one bracket, ranked, with
+    each source's way to graduation. Read from its own file; no provider call, never an order. Read-only, owner-only,
+    refused while the lab is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import proving_ground
+    return proving_ground.read()
+
+
 @router.get("/desk/overnight")
 def desk_overnight():
     """The QQQ overnight paper book (``app/engine/overnight_book.py``): its state, recorded nights and running result
