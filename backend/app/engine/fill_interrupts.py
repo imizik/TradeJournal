@@ -68,8 +68,8 @@ Right before the send ``notification_policy.decide`` may hold it (kind ``interru
 ``hold_hour``, its own daily budget ``PING_BUDGET_INTERRUPT``, default 4; the quiet window is per position). A message
 with a loud line (``size_by_adding``) goes as kind ``interrupt_size``, ranked with ``hold_hour``: a silent pattern line
 sent for the same position minutes earlier does not hold it, and it does not spend the silent lines' budget or wait on
-it. A once-per-position line counts as said only when its message reached the phone or is on its way (``SAID``): one
-the policy held, or that expired, is judged again at the position's next fill.
+it. A once-per-position line counts as said only when its message reached the phone or is on its way (``SAID``), or the policy merged it into another ping still being sent: one the policy
+otherwise held, or that expired, is judged again at the position's next fill.
 
 While Copilot Lab is on the message opens the desk's ping card on the interrupt (``card=interrupt:<id>``: Close,
 Trim and Set stop first; any of them records the acknowledgement), else the trade page on it. Its Noted button opens
@@ -96,7 +96,7 @@ from app.engine.analytics import wall_time
 from app.engine.chart_journal import OPEN_SIDES, contract_label, open_lots, stamp
 from app.engine.chart_math import ET, session_windows
 from app.engine.position_alerts import BACKOFF, CLAIM_SECONDS, _epoch, _surely_unsent, _utc, anchor
-from app.models import Account, Fill, FillInterrupt, Trade, TradeFill
+from app.models import Account, Fill, FillInterrupt, PhonePing, Trade, TradeFill
 
 log = logging.getLogger(__name__)
 
@@ -495,9 +495,13 @@ class FillInterrupts:
             Trade.closed_at >= fill["executed_at"], Trade.closed_at < minute + timedelta(minutes=1))).all()
         last = last_close([(wall_time(c), _num(p) or 0.0) for c, p in [*closes, *same_minute]], fill["executed_at"])
         # The put, green-day and late-buy rules describe the position: once each, so scaling in does not repeat them.
-        said = {k for kinds in db.exec(select(FillInterrupt.kinds).where(
-            FillInterrupt.account_id == fill["account_id"], FillInterrupt.position_key == position,
-            FillInterrupt.delivery.in_(SAID))) for k in kinds.split(",")}
+        earlier = db.exec(select(FillInterrupt.id, FillInterrupt.kinds, FillInterrupt.delivery).where(
+            FillInterrupt.account_id == fill["account_id"], FillInterrupt.position_key == position)).all()
+        # A held row the policy merged into another ping still being sent was said there.
+        merged = set(db.exec(select(PhonePing.source_id).where(
+            PhonePing.sender == "fill_interrupts", PhonePing.decision == "merged",
+            PhonePing.source_id.in_([str(r.id) for r in earlier if r.delivery == "held"]))).all())
+        said = {k for r in earlier if r.delivery in SAID or str(r.id) in merged for k in r.kinds.split(",")}
         key = anchor(entries)
         recs = {"ticker_record": record(rows, "ticker_record", key, ticker=trade.ticker),
                 "large_size": record(rows, "large_size", key, day=fill["executed_at"].date()),
