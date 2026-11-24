@@ -359,6 +359,9 @@ def test_an_earlier_fill_whose_email_comes_late_stays_on_the_same_position(engin
     with Session(engine) as db:
         trade = db.get(Trade, earlier.trade_id)
         assert [r["id"] for r in fill_interrupts.for_trade(db, trade)] == [str(later.id)]  # still listed on the rebuilt trade
+        from app.routers import copilot_desk
+        held = copilot_desk._interrupt_trade(db, db.get(type(later), later.id))  # the ping card still finds the position
+        assert held is not None and held.status == "open"
 
 
 def test_scaling_in_repeats_only_adding_to_a_loser(engine, world, sent):

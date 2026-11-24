@@ -1614,10 +1614,27 @@ def desk_ping_card(symbol: str = Query("", max_length=12), alert: uuid.UUID | No
         if row is not None:
             body["symbol"] = row.ticker
             body["interrupt"] = {**fill_interrupts.shape(row), "trade_id": str(row.trade_id)}
-            body["position"] = held(alert_scorecard.position_trade(db, row.account_id, row.ticker, row.position_key, row.trade_id))
+            body["position"] = held(_interrupt_trade(db, row))
     if body["alert"] is None and body["interrupt"] is None and not body["symbol"]:
         raise HTTPException(404, "No such ping.")
     return body
+
+
+def _interrupt_trade(db: Session, row):
+    """The trade whose entry fills include the interrupt's own fill (as ``fill_interrupts.for_trade`` reads it), so a
+    late earlier fill that moves the position's anchor does not lose it; None when no trade holds that fill now."""
+    from app.models import Fill, Trade, TradeFill
+
+    def holds(trade) -> bool:
+        entries = db.exec(select(Fill).join(TradeFill, TradeFill.fill_id == Fill.id)
+                          .where(TradeFill.trade_id == trade.id, TradeFill.role == "entry")).all()
+        return any((f.raw_email_id or str(f.id)) == row.fill_key for f in entries)
+    first = db.get(Trade, row.trade_id)
+    if first is not None and holds(first):
+        return first
+    candidates = db.exec(select(Trade).where(Trade.account_id == row.account_id, Trade.ticker == row.ticker,
+                                             Trade.instrument_type == "option")).all()
+    return next((t for t in candidates if t.id != row.trade_id and holds(t)), None)
 
 
 # --------------------------------------------------------------------------- the retired Rate yesterday card's read
