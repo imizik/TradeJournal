@@ -1318,7 +1318,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const messageBox = (
     <textarea ref={box} value={draft} onChange={e => { edits.current++; typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={small ? 1 : 3} wrap={small ? "off" : undefined} disabled={!enabled || openingMain || current?.main_at_capacity}
       onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft); } }}
-      placeholder={!enabled ? "Copilot Lab is off" : openingMain ? "Opening conversation…" : current?.main_day ? "Message Main chat…" : "Ask, challenge, or ask for a plan…"} aria-label="Message"
+      placeholder={!status ? "" : !enabled ? "Copilot Lab is off" : openingMain ? "Opening conversation…" : current?.main_day ? "Message Main chat…" : "Ask, challenge, or ask for a plan…"} aria-label="Message"
       className={cn("block w-full resize-none bg-transparent px-3 text-base", small ? "min-h-[2.625rem] min-w-0 flex-1 py-2" : "min-h-[4.75rem] pb-1 pt-2.5", " leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 sm:text-sm")} />
   );
   const sendButton = busy
