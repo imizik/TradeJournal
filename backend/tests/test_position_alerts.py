@@ -1292,7 +1292,7 @@ def test_the_order_read_is_none_when_a_tried_page_was_not_read_whole():
     assert poller.working(1_000.0) is None
 
 
-def test_robinhood_link_opens_the_stock_page_for_robinhood_positions_only(engine):
+def test_robinhood_link_opens_the_contract_or_the_stock_page_for_robinhood_positions_only(engine, monkeypatch):
     from app.engine import telegram
     alert = PositionAlert(account_id=ROTH, source_key="k", kind="giveback", generation=0, trade_id=__import__("uuid").uuid4(),
                           contract="SNDK 10/23/26 230C", contracts=1, avg_cost=100)
@@ -1305,6 +1305,21 @@ def test_robinhood_link_opens_the_stock_page_for_robinhood_positions_only(engine
         db.commit()
         alert.contract, alert.account_id = "SNDK 10/23/26 230C", webull
         assert position_alerts.robinhood_link(db, alert) is None
+    # With the Robinhood feed holding the contract in this account, the button opens the contract itself.
+    from app.engine import robinhood_book
+    with Session(engine) as db:
+        trade = Trade(account_id=ROTH, ticker="SPXW", instrument_type="option", contracts=1, option_type="call", strike=6800,
+                      expiration=date(2026, 10, 23), avg_entry_premium=100, total_premium_paid=100, opened_at=datetime(2026, 10, 23, 10),
+                      status="open")
+        db.add(trade)
+        db.commit()
+        alert.account_id, alert.trade_id, alert.contract = ROTH, trade.id, "SPXW 10/23/26 6800C"
+        seen = []
+        monkeypatch.setattr(robinhood_book, "option_link", lambda *a: seen.append(a) or "https://robinhood.com/options/abc")
+        assert position_alerts.robinhood_link(db, alert) == ("Robinhood", "https://robinhood.com/options/abc")
+        assert seen == [("8267", "SPXW", "call", 6800, "2026-10-23")]
+        monkeypatch.setattr(robinhood_book, "option_link", lambda *a: None)
+        assert position_alerts.robinhood_link(db, alert) is None  # not in the feed: an index still has no stock page
     # On Telegram it sits beside Open, whole, even beside the answer buttons.
     rows = telegram.keyboard("/x", (("Why?", "why:a"),), (("Robinhood", "https://robinhood.com/stocks/SNDK"),))["inline_keyboard"]
     assert rows[-1] == [{"text": "Robinhood", "url": "https://robinhood.com/stocks/SNDK"}]  # no ALERT_APP_URL: Open is left out

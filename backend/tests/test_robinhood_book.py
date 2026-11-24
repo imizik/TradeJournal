@@ -706,3 +706,25 @@ def test_a_rows_move_today_shows_only_while_its_accounts_change_is_known(desk, e
     monkeypatch.setattr(copilot_desk, "_robinhood", unsure)
     [row] = [r for r in read(desk)["threads"] if r["key"] == f"trade:{trade}"]
     assert row["book"]["live"] == "matched" and row["book"]["usd"] == 220.0 and row["book"]["day_change"] is None
+
+
+def test_the_option_link_finds_the_contract_by_account_and_never_rides_on_a_row(tmp_path, fake, monkeypatch):
+    rid = "6f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f"
+    fake.options["333338267"] = [option_position(rid.upper(), "NBIS")]
+    fake.instruments = {rid.upper(): instrument(rid.upper(), "NBIS")}
+    feed, _ = make_feed(tmp_path)
+    feed.refresh()
+    view, snapshot = feed.snapshot(kick=False)
+    assert rid not in json.dumps(view).lower() and all(rid not in json.dumps(p).lower() for p in snapshot["positions"])
+    monkeypatch.setattr(rb, "feed", feed)
+    assert rb.option_link("8267", "nbis", "call", 100, "2026-10-23") == f"https://robinhood.com/options/{rid}"
+    assert rb.option_link("7884", "NBIS", "call", 100, "2026-10-23") is None  # another account
+    assert rb.option_link("8267", "NBIS", "put", 100, "2026-10-23") is None
+    assert rb.option_link("8267", "NBIS", "call", 105, "2026-10-23") is None
+
+
+def test_an_option_id_that_is_not_robinhoods_shape_gets_no_link(tmp_path, fake, monkeypatch):
+    feed, _ = make_feed(tmp_path)  # the fake's own id is "opt-nbis"
+    feed.refresh()
+    monkeypatch.setattr(rb, "feed", feed)
+    assert rb.option_link("8267", "NBIS", "call", 100, "2026-10-23") is None
