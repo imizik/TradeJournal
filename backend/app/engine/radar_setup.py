@@ -38,6 +38,13 @@ MINUS = "−"
 # A card's expiration: the nearest 3 to 10 calendar days out, never same-day (the owner's audit flagged options left
 # to expire). Cards only: the setup scanner keeps scanner_rules.pick_expiration for its frozen S1 rules.
 CARD_DTE = (3, 10)
+# The proving ground's cheaper contract (``pick_far_contract``): three to six weeks out and nearer the money, where the
+# spread is a smaller share of the price. The November 25, 2026 Radar audit found the round trip on the card contract
+# cost more than the lean it was testing. Tighter on the spread than the card (5% of the mid, not 10%); looser on the
+# day's volume, which is thin this far out even where the open interest is deep.
+FAR_DTE = (21, 45)
+FAR_LIMITS = {"delta_min": 0.50, "delta_max": 0.70, "delta_target": 0.60, "min_open_interest": 500, "min_volume": 10,
+              "max_spread_of_mid": 0.05}
 
 
 def is_setup(event: dict) -> bool:
@@ -81,27 +88,34 @@ def levels(event: dict) -> dict | None:
 # ------------------------------------------------------------------ the contract
 
 
-def card_expiration(expirations, today: date) -> date | None:
-    """The nearest listed expiration ``CARD_DTE`` calendar days out; None when none is listed."""
-    later = sorted(e for e in expirations if CARD_DTE[0] <= (e - today).days <= CARD_DTE[1])
+def card_expiration(expirations, today: date, dte: tuple[int, int] = CARD_DTE) -> date | None:
+    """The nearest listed expiration ``dte`` (``CARD_DTE``) calendar days out; None when none is listed."""
+    later = sorted(e for e in expirations if dte[0] <= (e - today).days <= dte[1])
     return later[0] if later else None
 
 
-def pick_contract(symbol: str, direction: str, today: date, *, options=None) -> dict | None:
+def pick_far_contract(symbol: str, direction: str, today: date, *, options=None) -> dict | None:
+    """``pick_contract`` on the cheaper contract: the nearest expiration ``FAR_DTE`` days out, by ``FAR_LIMITS``."""
+    return pick_contract(symbol, direction, today, options=options, dte=FAR_DTE, limits=FAR_LIMITS)
+
+
+def pick_contract(symbol: str, direction: str, today: date, *, options=None, dte: tuple[int, int] = CARD_DTE,
+                  limits: dict | None = None) -> dict | None:
     """One liquid contract, a call for up and a put for down, by the setup scanner's liquidity limits on the nearest
-    expiration 3 to 10 days out (``card_expiration``); None when none qualifies.
+    expiration 3 to 10 days out (``card_expiration``); None when none qualifies. ``dte`` and ``limits`` are for
+    ``pick_far_contract``.
 
     Two reads at most (the expiration list, then one chain) on the shared options budget, never waiting for a slot.
     Never raises."""
     try:
         if options is None:
             from app.engine.options_chain import options_chain as options
-        expiration = card_expiration(options.expirations(symbol, timeout=READ_TIMEOUT_SECONDS), today)
+        expiration = card_expiration(options.expirations(symbol, timeout=READ_TIMEOUT_SECONDS), today, dte)
         if expiration is None:
-            log.info("Radar setup %s: no expiration 3-10 days out", symbol)
+            log.info("Radar setup %s: no expiration %d-%d days out", symbol, *dte)
             return None
         chosen = scanner_rules.choose_contract(options.chain(symbol, expiration, timeout=READ_TIMEOUT_SECONDS).contracts,
-                                               "long" if direction == "up" else "short")
+                                               "long" if direction == "up" else "short", limits)
         if chosen is None:
             log.info("Radar setup %s: no contract met the delta and liquidity limits", symbol)
             return None

@@ -170,21 +170,24 @@ def pick_expiration(expirations: list[date], today: date) -> date | None:
     return later[0] if later else None
 
 
-def choose_contract(contracts, direction: str) -> dict | None:
-    """The listed contract closest to 0.35 delta that meets every liquidity limit; None when none does."""
+def choose_contract(contracts, direction: str, limits: dict | None = None) -> dict | None:
+    """The listed contract closest to the target delta (0.35) that meets every liquidity limit; None when none does.
+
+    ``limits`` replaces ``CONTRACT``'s delta and liquidity numbers for a caller with its own (the scanner passes none)."""
+    rules = limits or CONTRACT
     wanted = "call" if direction == "long" else "put"
     best = None
     for c in contracts:
         if c.option_type != wanted or c.delta is None or c.bid is None or c.ask is None or not c.multiplier:
             continue
         delta, mid = abs(c.delta), (c.bid + c.ask) / 2
-        if not (CONTRACT["delta_min"] <= delta <= CONTRACT["delta_max"]) or c.bid <= 0 or c.ask < c.bid:
+        if not (rules["delta_min"] <= delta <= rules["delta_max"]) or c.bid <= 0 or c.ask < c.bid:
             continue
-        if (c.open_interest or 0) < CONTRACT["min_open_interest"] or (c.volume or 0) < CONTRACT["min_volume"]:
+        if (c.open_interest or 0) < rules["min_open_interest"] or (c.volume or 0) < rules["min_volume"]:
             continue
-        if c.ask - c.bid > CONTRACT["max_spread_of_mid"] * mid:
+        if c.ask - c.bid > rules["max_spread_of_mid"] * mid:
             continue
-        rank = (abs(delta - CONTRACT["delta_target"]), c.ask - c.bid, c.strike)
+        rank = (abs(delta - rules["delta_target"]), c.ask - c.bid, c.strike)
         if best is None or rank < best[0]:
             best = (rank, c)
     if best is None:

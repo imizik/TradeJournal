@@ -2899,6 +2899,17 @@ as a rule: at 9:45 MU and NBIS each in the direction of their move from the open
 `radar_setup.pick_contract`'s contract (nearest expiration 3-10 days out, about 0.35 delta, liquid), at most two picks a
 minute.
 
+Two more sources test what the November 25, 2026 Radar audit left open: on the stock a Radar flag is a coin flip, the
+option round trip cost more than the small lean in following a flag, and nobody had split the flags by whether the move
+had a reason. Both follow a Radar stock flag (ahead of or behind SPY or its sector), the first per stock a day, and
+only within 3 minutes of it; a flag not taken by then is written down as unresolved, never entered late.
+`radar_flag_news` takes the flags whose first headline check (`radar_news`, the 24 hours before the flag) found a
+headline, on the usual contract. `radar_flag_far` takes every flag on `radar_setup.pick_far_contract`'s contract: the
+nearest expiration 21-45 days out, about 0.60 delta, spread at most 5% of the mid, open interest at least 500. Its
+note keeps the headline status, so the with and without halves can be compared later. The flags stay silent on the
+phone and neither source sends a ping. They need Radar recording (`RADAR_ENABLED`, `RADAR_STORE`); the Radar file is
+read read-only.
+
 The bracket, the same for every source: out when the contract's bid is +20% over the ask paid, or 15% under it, 60
 minutes after the entry, or 5 minutes before the close, whichever comes first; nothing is held overnight or into expiry.
 Entries are the ask of the first quote whose bid and ask both updated after the idea (none within 2 minutes:
@@ -2913,16 +2924,16 @@ trade pings, so for them graduation shows on the board only. The rule:
 
 - Each trade counts as its return on the premium paid, and one session's trades are added into one number, because
   trades taken the same morning move together and are not separate evidence.
-- The score is the average session over its standard error. It must reach 3.0 on at least 20 sessions and 40 closed
+- The score is the average session over its standard error. It must reach 3.2 on at least 20 sessions and 40 closed
   trades, and the dollars at twice the spread must be above zero too.
 - The record is judged at every tenth session only, on the sessions up to that one, and a session counts from the day
-  after it, so watching the board gives luck no extra chances. A graduated source whose score falls under 3.0 at a later review says `PAPER` again.
+  after it, so watching the board gives luck no extra chances. A graduated source whose score falls under 3.2 at a later review says `PAPER` again.
 
 The bar covers all the sources at once: if every source only broke even after costs, the chance that any one of them
 graduates within a year of sessions is about 5% (simulated in `tests/test_proving_ground.py`, which fails if a source is
-added without raising the bar). The earlier rule, 40 closed trades net above zero, passed a break-even source about
+added without raising the bar; it rose from 3.0 to 3.2 when the two Radar flag sources made five). The earlier rule, 40 closed trades net above zero, passed a break-even source about
 half the time at trade 40 and about nine times in ten within a year. The price is time. At two trades a session, a
-source with about 65% of its trades green typically needs about 40 sessions, one at 60% about 80, and one at 55% is as
+source with about 65% of its trades green typically needs about 50 sessions, one at 60% about 90, and one at 55% is as
 likely as not still unproven after a year (break-even is about 49%). Known limits: a source whose rule changes should
 get a new key, since the record does not restart by itself; Jo's picks are entered at 9:45 whatever their stated trigger,
 so that row tests the symbol and direction, not the trigger; and ideas with no fresh option quote within 2 minutes are
