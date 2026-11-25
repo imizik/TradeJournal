@@ -57,6 +57,16 @@ A record under ``MIN_SAMPLE`` (5) says "too few to read" instead of its share. T
 the journal and kept in memory for the New York day, rebuilt only when the closed trades change (their count or
 realized total, which a rebuild or a new close moves), so a fill never waits on a heavy query.
 
+**Cut line (the owner's own rule, not a record).** The November 25, 2026 edge audit found the money lost holding options
+with ``BUILT_DAYS`` (3) calendar days or less to expiry once they were deep red. So a long option position's first
+``buy_to_open`` with that little time left also says, once per position and only while ``CUT_LINE_PINGS=true`` (a second
+switch, off by default), the contract price ``CUT_PCT`` (30%) under that entry and what it costs there; bought on its
+expiration day before ``FLAT_BY`` (13:00 New York), also to be flat by then. The line is fixed at the first entry: an add
+never moves it. It leads the message and titles it (``Cut line $2.17: NBIS 160P``), makes a sound, and goes to the policy
+as its own kind (``cut_line``, just below ``interrupt``, no daily budget), so it never waits on the pattern lines' budget
+and a later pattern, no-exit or one-hour ping for the position is not held by it. It is not judged on the desk's play
+check.
+
 Off unless ``FILL_INTERRUPTS_ENABLED=true`` (the owner's switch). It runs on the level alert monitor's loop, at
 most every ``RUN_SECONDS``, in the regular session only. Only fills since this process started, and in the last
 ``STALE_SECONDS``, count, so switching it on (or a restart, or a late backfill) never interrupts old fills. Webull
@@ -112,7 +122,9 @@ LARGE_MIN_ENTRIES = 20
 BUILT_DAYS = 3  # calendar days to expiry: the audit's short-dated group, where averaging down into size lost the money
 REENTRY_MINUTES = 5
 EPS = 1e-9
-LOUD_KINDS = frozenset({"size_by_adding"})  # position risk: these make a sound (phone.LOUD); the rest arrive silently
+CUT_PCT = 0.30  # the cut line: this far under a short-dated option's first entry price
+FLAT_BY = clock_time(13, 0)  # a same-day option bought before this is told to be flat by it
+LOUD_KINDS = frozenset({"size_by_adding", "cut_line"})  # position risk: these make a sound (phone.LOUD); the rest arrive silently
 KINDS = ("add_to_loser", "put_entry", "opened_green", "late_short_dated", "ticker_record", "large_size", "size_by_adding",
          "quick_reentry")
 ONCE_PER_POSITION = ("put_entry", "opened_green", "late_short_dated", "ticker_record", "large_size", "size_by_adding", "quick_reentry")
@@ -121,12 +133,22 @@ ONCE_PER_POSITION = ("put_entry", "opened_green", "late_short_dated", "ticker_re
 # (``day_lock``) says the green-day record once, before the entry, instead of after each one.
 NOT_SENT = frozenset({"large_size", "late_short_dated", "ticker_record", "put_entry", "opened_green"})
 SAID = ("pending", "sending", "sent", "unknown")  # a line held by the policy or expired never reached the phone: not said
-LOUD_POLICY_KIND = "interrupt_size"  # the policy's kind for a message with a loud line; the rest go as "interrupt"
+LOUD_POLICY_KIND = "interrupt_size"  # the policy's kind for a message with the size-by-adding line
+CUT_POLICY_KIND = "cut_line"  # ...and for one with the cut line; the rest go as "interrupt"
 FOOTER = "Your record, not advice."
 
 
 def enabled() -> bool:
     return os.environ.get("FILL_INTERRUPTS_ENABLED", "").lower() == "true"
+
+
+def cut_line_enabled() -> bool:
+    return enabled() and os.environ.get("CUT_LINE_PINGS", "").lower() == "true"
+
+
+def policy_kind(kinds: set[str]) -> str:
+    """The notification policy's kind for a message with these lines."""
+    return LOUD_POLICY_KIND if "size_by_adding" in kinds else CUT_POLICY_KIND if "cut_line" in kinds else "interrupt"
 
 
 # ------------------------------------------------------------------ the rules (pure)
@@ -199,6 +221,18 @@ def size_by_adding(fill: dict, prior: list[dict], usual: float | None) -> bool:
         return False
     return (0 <= (expiration - fill["executed_at"].date()).days <= BUILT_DAYS
             and position_premium(fill, prior) >= LARGE_MULTIPLE * usual - EPS)
+
+
+def cut_line(fill: dict, prior: list[dict]) -> float | None:
+    """The cut-line price (per contract, as fills store it) for a long option position's first ``buy_to_open`` with at
+    most ``BUILT_DAYS`` calendar days to expiry: ``CUT_PCT`` under that fill's price. None for any other fill."""
+    expiration = fill.get("expiration")
+    if (fill["side"] != "buy_to_open" or fill.get("instrument_type") != "option" or expiration is None
+            or any(f["side"] == "buy_to_open" for f in prior)):
+        return None
+    if not 0 <= (expiration - fill["executed_at"].date()).days <= BUILT_DAYS:
+        return None
+    return fill["price"] * (1 - CUT_PCT)
 
 
 def last_close(closes: list[tuple[datetime, float]], at: datetime) -> tuple[datetime, float] | None:
@@ -375,6 +409,22 @@ def line(kind: str, rec: dict, day_pnl: float | None = None, paid: float | None 
     return f"{head}, {round(100 * rec['expired'] / n)}% expired worthless, {money(rec['pnl'])}"
 
 
+def quoted(per_contract: float) -> str:
+    """'$1.05': an option price as the broker quotes it (fills store dollars per contract)."""
+    return f"${per_contract / 100:,.2f}"
+
+
+def cut_lines(fill: dict, cut: float) -> list[str]:
+    """The cut line's own lines: the price and what the fill loses there; for a same-day option bought before
+    ``FLAT_BY``, the time to be flat by."""
+    count = fill["contracts"]
+    out = [f"Cut line {quoted(cut)}: {CUT_PCT:.0%} under your {quoted(fill['price'])} entry, "
+           f"{money((cut - fill['price']) * count)} on {count:g} contract{'' if count == 1 else 's'}"]
+    if fill["expiration"] == fill["executed_at"].date() and fill["executed_at"].time() < FLAT_BY:
+        out.append("Expires today: flat by 1 PM New York")
+    return out
+
+
 def size_tail(rec: dict) -> str:
     """The size line's record half (after the paid-versus-median half), which does not depend on the size paid."""
     n = rec["n"]
@@ -516,6 +566,10 @@ class FillInterrupts:
         title, body = message(label, [line(k, recs.get(k) or record(rows, k, key), day, paid.get(k, premium(fill)), last, fill["executed_at"])
                                       for k in kinds],
                               practice_line(db, kinds, fill["executed_at"].date()))
+        cut = cut_line(fill, prior) if cut_line_enabled() and "cut_line" not in said else None
+        if cut is not None:  # the owner's rule leads and titles the message; the footer follows record lines only
+            title, body = f"Cut line {quoted(cut)}: {label}", "\n".join(cut_lines(fill, cut) + ([body] if kinds else []))
+            kinds = ["cut_line", *kinds]
         return FillInterrupt(
             account_id=fill["account_id"], fill_key=fill["key"], position_key=position, trade_id=trade.id, ticker=trade.ticker,
             contract=contract_label(trade.ticker, trade.instrument_type, trade.option_type, trade.strike, trade.expiration),
@@ -571,7 +625,7 @@ class FillInterrupts:
                 return
             ticket = notification_policy.decide(
                 db, sender="fill_interrupts", source_id=str(row.id), title=row.title, body=row.body, now=now,
-                kind=LOUD_POLICY_KIND if LOUD_KINDS & set(row.kinds.split(",")) else "interrupt",
+                kind=policy_kind(set(row.kinds.split(","))),
                 anchor=notification_policy.anchor(row.account_id, row.position_key), symbol=row.ticker, trade_id=row.trade_id)
             if ticket.held:
                 row.delivery, row.last_error = "held", ticket.reason

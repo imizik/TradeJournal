@@ -773,7 +773,7 @@ class FillInterrupt(SQLModel, table=True):
     trade_id: uuid.UUID  # the trade when it fired (trades are rebuilt; read by position_key)
     ticker: str
     contract: str  # e.g. "NBIS 11/21/26 160C"
-    kinds: str  # comma-separated rules fired, newest-first order (fill_interrupts.KINDS); empty when none
+    kinds: str  # comma-separated rules fired, newest-first order (fill_interrupts.KINDS, after ``cut_line`` when it has the cut line); empty when none
     title: str
     body: str = Field(sa_column=Column(Text, nullable=False))
     executed_at: datetime  # the fill, a New York wall clock

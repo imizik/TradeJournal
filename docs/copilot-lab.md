@@ -4769,6 +4769,30 @@ entry's stays on the same position; known limit, as for position alerts: a
 message sent before that earlier fill arrived links the trade id of that
 moment, which the rebuild replaces, so that link no longer opens.
 
+**Cut line (the owner's rule, set at the buy).** The November 25, 2026 edge
+audit found the money lost holding options with 3 days or less to expiry once
+they were deep red; the one-hour alert already says so at −30%, an hour in.
+This says it at the entry instead. A long option position's first
+`buy_to_open` with at most 3 calendar days to expiry gets, once per position,
+the contract price 30% under that entry and the dollars the fill loses there;
+bought on its expiration day before 13:00 New York, also to be flat by 1 PM.
+The line is fixed at the first entry: an add never moves it. It leads the
+message and titles it, so the price shows on the lock screen, and any pattern
+lines the fill fired follow it:
+
+```
+Cut line $2.17: NBIS 160P
+Cut line $2.17: 30% under your $3.10 entry, −$186 on 2 contracts
+Expires today: flat by 1 PM New York
+```
+
+It makes a sound and goes to the notification policy as its own kind
+(`cut_line`, just below `interrupt`, no daily budget): the pattern lines' budget
+never holds it, and a pattern, no-exit or one-hour ping for the position
+minutes later is not held by it (a plan nudge or companion update inside the
+quiet window is). It is not shown on the desk's play check. Its own switch on
+top of the interrupts': `CUT_LINE_PINGS=true`, off by default.
+
 **Switch on (the owner's switch):** `FILL_INTERRUPTS_ENABLED=true` in the API's
 environment (needs `NTFY_URL` or Telegram), restart the API. Off by default.
 Tests: `backend/tests/test_fill_interrupts.py`.
