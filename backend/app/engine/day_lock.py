@@ -1,6 +1,6 @@
 """Real-money day lock: at most two phone pings a New York day, about the day as a whole rather than one position.
 
-- **Daily loss lock** (kind ``day_loss``). The paper challenge's daily limit (``paper_challenge.DAILY_PCT``, 3%) on
+- **Daily loss lock** (kind ``day_loss``). Not sent since the November 25, 2026 ping review (``LOSS_PING``). The paper challenge's daily limit (``paper_challenge.DAILY_PCT``, 3%) on
   his real accounts: once the day's P&L is at or below minus that share of the start-of-day value, one ping says he is
   done for the day. Nothing is locked or canceled here: the real accounts are Robinhood's, and this only tells the phone.
 - **Green, walk away** (kind ``day_green``). The October 21, 2026 behavior audit found trades opened with the day
@@ -49,6 +49,9 @@ LOSS, GREEN = "day_loss", "day_green"
 RUN_SECONDS = 30
 GREEN_MIN_DOLLARS = 50.0
 GREEN_FRESH_MINUTES = 20  # a close older than this is not the moment he went flat (fill emails can lag)
+# The loss lock is not sent since the November 25, 2026 edge audit: trades opened after the lock point made money
+# (+$8.0k at -$1,000 on the day, 17 days up and 4 down), so it would have stopped his recoveries. True restores it (tests).
+LOSS_PING = False
 MIN_SAMPLE = 5
 
 
@@ -178,12 +181,12 @@ class DayLock:
         if regular is None or not regular[1] <= minute < regular[2]:
             return
         day = today.isoformat()
-        if f"{LOSS}:{day}" in self._done and f"{GREEN}:{day}" in self._done:
+        if (not LOSS_PING or f"{LOSS}:{day}" in self._done) and f"{GREEN}:{day}" in self._done:
             return
         with Session(self.engine) as db:
             realized, last_close, open_today = journal_today(db, today)
             figures = day_figures(realized, self.accounts())
-            if f"{LOSS}:{day}" not in self._done and loss_due(figures):
+            if LOSS_PING and f"{LOSS}:{day}" not in self._done and loss_due(figures):
                 self._ping(db, LOSS, day, *loss_message(figures), priority=5, now=now)
             if f"{GREEN}:{day}" not in self._done and green_due(realized, figures, open_today, last_close, moment.replace(tzinfo=None)):
                 self._ping(db, GREEN, day, *green_message(realized, green_record(db)), priority=4, now=now)

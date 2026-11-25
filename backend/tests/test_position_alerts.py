@@ -801,14 +801,14 @@ def test_hold_alert_delivery_is_at_most_once(engine, world, hold_on, monkeypatch
     clock, quotes, watcher = world
     with Session(engine) as db:
         fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
-    quotes.set(4.00)
+    quotes.set(2.38)
     run_at(clock, watcher, WED, "11:00")
     alert = alerts(engine)[0]
     sent = []
     sent_to(monkeypatch, sent)
     watcher.deliver()
     watcher.deliver()
-    assert sent == [("SNDK 10/23/26 230C: open an hour, re-decide", f"/trades/{alert.trade_id}?alert={alert.id}")]
+    assert sent == [("SNDK 10/23/26 230C: down 40% an hour in", f"/trades/{alert.trade_id}?alert={alert.id}")]
     with Session(engine) as db:
         row = db.get(PositionAlert, alert.id)
         row.delivery, row.claimed_at = "sending", datetime.fromtimestamp(clock.now - 200, UTC).replace(tzinfo=None)
@@ -940,6 +940,40 @@ def test_the_wrong_way_alert_is_off_without_both_switches(engine, world, monkeyp
     assert alerts(engine) == [] and seen == []
 
 
+@pytest.mark.parametrize("mark,expiration", [(3.60, FRI), (4.40, FRI), (2.38, date(2026, 11, 20))])
+def test_the_one_hour_alert_is_recorded_but_not_sent_unless_short_dated_and_deep_red(engine, world, hold_on, monkeypatch, mark, expiration):
+    """Small red, green, or deep red with weeks left: on the trade page with the reason, never on the phone."""
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00", expiration=expiration)
+    quotes.set(mark)
+    run_at(clock, watcher, WED, "11:00")
+    sent = []
+    sent_to(monkeypatch, sent)
+    watcher.deliver()
+    [alert] = alerts(engine)
+    assert sent == [] and (alert.kind, alert.delivery, alert.last_error) == ("hold_hour", "held", position_alerts.HOUR_NOT_SENT)
+    with Session(engine) as db:
+        from app.models import PhonePing
+        assert db.exec(select(PhonePing)).all() == []  # never offered to the policy: no quiet window, nothing counted
+
+
+def test_the_ninety_minute_last_day_alert_is_recorded_but_not_sent_and_the_final_still_is(engine, world, monkeypatch):
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 3, 150, "2026-10-21T10:00", expiration=WED)
+    quotes.set(0.40)
+    sent = []
+    sent_to(monkeypatch, sent)
+    for hhmm in ("14:30", "15:30"):
+        clock.now, watcher._last_run = at(WED, hhmm), 0
+        watcher.run()
+        watcher.deliver()
+    assert [(a.kind, a.delivery) for a in alerts(engine)] == [("expiry_first", "held"), ("expiry_final", "sent")]
+    assert alerts(engine)[0].last_error == position_alerts.NOT_SENT["expiry_first"]
+    assert [t for t, _ in sent] == ["SNDK 10/21/26 230C: 30 minutes left, expires today"]
+
+
 def closed(db, opened, minutes, pnl, instrument="option"):
     db.add(Trade(account_id=ROTH, ticker="NBIS", instrument_type=instrument, contracts=1, avg_entry_premium=1,
                  total_premium_paid=100, realized_pnl=pnl, hold_duration_mins=minutes, opened_at=datetime.fromisoformat(opened),
@@ -973,10 +1007,15 @@ def test_the_message_carries_the_owners_opening_record_and_is_sent_once(engine, 
     monkeypatch.setattr(ntfy, "publish", publish)
     watcher.deliver()
     watcher.deliver()
-    assert [(t, p) for t, _, p in sent] == [("SNDK 10/23/26 230C: wrong way at 30 min", f"/trades/{UUID(int=9)}?alert={alert.id}")]
-    assert sent[0][1].startswith("SNDK down 0.60% in the 30 min after your entry, against your call. Option now -$24 (-6%)")
+    assert sent == []  # recorded for the trade page, not sent since the November 25, 2026 ping review
+    with Session(engine) as db:
+        row = db.get(PositionAlert, alert.id)
+        assert (row.delivery, row.last_error) == ("held", position_alerts.NOT_SENT["wrong_way"])
+        title, body, _ = position_alerts.message(row, facts=position_alerts.wrong_way_facts(db, row))
+    assert title == "SNDK 10/23/26 230C: wrong way at 30 min"
+    assert body.startswith("SNDK down 0.60% in the 30 min after your entry, against your call. Option now -$24 (-6%)")
     assert ("1 contract open. Your past opening option trades: closed within 30 min, 5 won 60% (+$200); held 2 h or more, "
-            "5 won 20% (-$1,450). Re-decide: close, trim, or set your exit.") in sent[0][1]
+            "5 won 20% (-$1,450). Re-decide: close, trim, or set your exit.") in body
     assert position_alerts.ask_context(alert).endswith("Wrong-way alert at 10:31 AM: now -$24.")
 
 
@@ -1014,7 +1053,7 @@ def test_the_trading_day_before_expiry_gets_one_alert_with_this_weeks_premium_at
     clock.now = at(THU, "15:41")
     watcher.deliver()
     [(title, body, priority)] = sent
-    assert (title, priority) == ("SNDK 10/23/26 230C expires tomorrow, still open", 4)
+    assert (title, priority) == ("SNDK 10/23/26 230C expires tomorrow, still open", 2)  # green: a reminder, no sound
     assert body.startswith("Mark $4.52 vs cost $4.00: +$104 (+13%). 2 contracts open. Expiring this week: 3 contracts, $1,100 "
                            "premium at risk.\n\nSince-entry context unavailable")  # an overnight position has no since-entry context
     with Session(engine) as db:
@@ -1151,7 +1190,7 @@ def test_the_one_hour_alert_ends_with_the_practice_goal_it_tests(engine, world, 
     clock, quotes, watcher = world
     with Session(engine) as db:
         fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
-    quotes.set(4.00)
+    quotes.set(2.38)
     run_at(clock, watcher, WED, "11:00")
     sent = giveback_sent(world, monkeypatch)
     assert alerts(engine)[0].delivery == "sent" and "Re-decide: close, trim, or set your exit." in sent[0]
@@ -1468,8 +1507,10 @@ def test_the_day_before_expiry_alert_adds_the_carry_record_only_when_red(engine,
     [eve] = alerts(engine)
     sent = []
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
-    monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: sent.append(body))
+    priorities = []
+    monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: (sent.append(body), priorities.append(kw["priority"])))
     watcher.deliver()
+    assert priorities == [4]  # red: it makes a sound (a green one is sent silently)
     assert sent[0].startswith("Mark $3.02 vs cost $4.00: -$196 (-24%). 2 contracts open. Expiring this week: 2 contracts, $800 premium "
                               "at risk. Your record carrying an option into its expiration day: 5 trades, 4 expired worthless, -$650.")
     facts = {"record": "Your record carrying an option into its expiration day: 5 trades, 4 expired worthless, -$650."}

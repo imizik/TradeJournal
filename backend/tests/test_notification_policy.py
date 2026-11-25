@@ -387,7 +387,7 @@ def test_position_alerts_ignore_the_removed_shared_cap_and_send_once(engine, pho
     monkeypatch.setenv("PING_DAILY_CAP", "0")
     clock = Clock(at("10:01"))
     watcher = PositionAlerts(engine, Calendar(), clock=clock, quotes=lambda symbols: {})
-    hold = position_alert(engine, "hold_hour")
+    hold = position_alert(engine, "no_exit")
     give = position_alert(engine, "giveback", when="10:00", source_key="gmail:2")
     watcher.deliver()
     with Session(engine) as db:
@@ -416,16 +416,16 @@ def test_a_failed_send_keeps_its_decision_and_carries_a_merged_ping_on_the_retry
     watcher = PositionAlerts(engine, Calendar(), clock=clock, quotes=lambda symbols: {})
     give = position_alert(engine, "giveback", when="10:00")
     watcher.deliver()
-    hold = position_alert(engine, "hold_hour", when="10:01")
+    hold = position_alert(engine, "no_exit", when="10:01")
     clock.now = at("10:01") + 10
-    watcher.deliver()  # the give-back waits on its 30-second backoff; the one-hour alert merges into it
+    watcher.deliver()  # the give-back waits on its 30-second backoff; the no-exit alert merges into it
     with Session(engine) as db:
         assert db.get(PositionAlert, give).delivery == "pending" and db.get(PositionAlert, hold).delivery == "held"
         assert "Merged into the give-back ping" in db.get(PositionAlert, hold).last_error
     clock.now = at("10:03")
     watcher.deliver()
     assert len(calls) == 2 and calls[1][0] == "SNDK 10/23/26 230C: give-back triggered"
-    assert "\n\nAlso: SNDK 10/23/26 230C: open an hour, re-decide. Open 60 min" in calls[1][1]
+    assert "\n\nAlso: SNDK 10/23/26 230C: no exit order set. Bought 5 min ago" in calls[1][1]
     with Session(engine) as db:
         assert db.get(PositionAlert, give).delivery == "sent"
         assert [p.decision for p in db.exec(select(PhonePing).order_by(PhonePing.decided_at)).all()] == ["sent", "merged"]
@@ -883,7 +883,7 @@ def test_position_alerts_on_a_ticker_not_followed_are_written_and_held_and_the_s
         before = alert_scorecard.scorecard(db, at("10:30"))
     follow(engine, "SNDK", False)
     hidden = {kind: position_alert(engine, kind, when="10:05", source_key=f"gmail:h-{kind}")
-              for kind in ("expiry_final", "expiry_first", "expiry_eve", "hold_hour", "wrong_way")}
+              for kind in ("expiry_final", "expiry_eve", "no_exit")}
     clock.now = at("10:06")
     watcher.deliver()
     assert len(phone) == 1  # only the give-back sent before the ticker was hidden

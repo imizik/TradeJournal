@@ -86,7 +86,16 @@ def test_day_figures_and_the_three_percent_line():
     assert not day_lock.loss_due(day_lock.day_figures(-900, None))
 
 
-def test_loss_lock_pings_once_a_day(engine, sent):
+def test_the_loss_lock_is_not_sent_since_the_ping_review(engine, sent):
+    trade(engine, "09:40", "10:10", -250)
+    lock(engine, "10:30", [{"total_value": 9700, "day_change": -50}]).run()
+    assert sent == []
+    with Session(engine) as db:
+        assert db.exec(select(PhonePing)).all() == []
+
+
+def test_loss_lock_pings_once_a_day(engine, sent, monkeypatch):
+    monkeypatch.setattr(day_lock, "LOSS_PING", True)
     trade(engine, "09:40", "10:10", -250)
     trade(engine, "09:40", "10:20", -5000, account=WEBULL)  # Webull is left out
     accounts = [{"total_value": 9700, "day_change": -50}]

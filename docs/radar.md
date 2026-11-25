@@ -963,6 +963,8 @@ separate decision.
 
 Since `radar-rules-20261121-v1` the rule flags never ping (see [Silent rule flags](#silent-rule-flags)); the strong-event singles and digest lines below apply to setup events only, unless `PING_RULE_FLAGS` in `radar_alerts.py` is switched back on.
 
+Since the November 25, 2026 ping review no Radar ping, single or digest, reaches the phone until Radar setups graduate on the paper proving ground (`radar_alerts.proven`, which reads `proving_ground.graduated("radar_setup")`): the Radar audit of that day found no edge to trade, and 5 of 29 live setup cards were green. Each row is still written, then `held` with that reason, without asking the notification policy. What follows describes the pings once that source has graduated.
+
 Off unless `RADAR_ALERTS_ENABLED=true` in the VPS `backend.env`; switching it
 on is Isaac's call (a new phone alert is an activation). It has been on on the
 VPS since October 25, 2026 (undo copy `backend.env.before-four-pings`). With it on, the

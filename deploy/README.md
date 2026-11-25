@@ -524,8 +524,13 @@ morning brief until it is decided while `PREMARKET_PREP_ENABLED=true`) and
 `PING_QUIET_MINUTES` (default 10, per position). Each sender's own switch below still decides whether it runs
 at all; Jo's senders are not gated. Held pings are recorded, never lost silently.
 Only pings about money at risk in a held position make a sound (give-back,
-expiry countdown, wrong way, no exit order, the day locks, plan stops and
-levels); every other ping arrives silent (ntfy priority 2).
+a short-dated option deep red an hour in, the expiry countdown, no exit order,
+the green-day walk-away, plan stops and levels); every other ping arrives
+silent (ntfy priority 2). Since the November 25, 2026 ping review some rules are
+recorded but never sent, whatever their switch says: the one-hour alert outside
+that case, the 90-minute last-day alert, the wrong-way alert, the daily loss
+lock, and every Radar ping until Radar setups graduate on the paper proving
+ground ([the list](../docs/copilot-lab.md#phone-ping-policy)).
 
 Level alerts set on the charts (Charts C5.1) go to the same topic: the API
 service reads `alerts.env` too (optional, as above) and sends each firing

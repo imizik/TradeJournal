@@ -567,6 +567,7 @@ def radar_alert(engine):
 
 def test_a_radar_alert_carries_the_stock_against_its_benchmark(engine, monkeypatch):
     phone = Phone(monkeypatch)
+    monkeypatch.setattr("app.engine.radar_alerts.proven", lambda: True)  # a Radar ping is sent only once setups graduated
     radar_alert(engine)
     built = []
     real = ping_images.radar
@@ -580,6 +581,7 @@ def test_a_radar_alert_carries_the_stock_against_its_benchmark(engine, monkeypat
 
 def test_a_radar_alert_without_the_store_is_text(engine, monkeypatch):
     phone = Phone(monkeypatch)
+    monkeypatch.setattr("app.engine.radar_alerts.proven", lambda: True)  # a Radar ping is sent only once setups graduated
     radar_alert(engine)
     RadarAlerts(engine, clock=lambda: at("10:21")).deliver()
     assert phone.sent[0]["image"] is None and image_states(engine) == {"radar_alerts": "none"}

@@ -6,6 +6,11 @@ The rules' own flags (``radar_rules.silent``: vs SPY, vs sector, group) are sile
 line (``PING_RULE_FLAGS``). What follows about strong events describes them only when that is switched back on;
 setup events ping as described.
 
+Since the November 25, 2026 ping review nothing here reaches the phone until Radar setups graduate on the paper
+proving ground (``proven``): every row is still written, then ``held`` with ``UNPROVEN`` right before it would have
+been offered to the notification policy. The Radar audit of that day found no edge to trade. What follows describes
+the pings once that source has graduated.
+
 The end goal's first step is timely, factual alerts without waiting for AI analysis. Every new Radar event
 gets one outbox row. A **strong** event (``strong``: a stock at least ``RADAR_SINGLE_MIN_RELATIVE_PCT``,
 default 7.0, against SPY, or a group with every member moving the same way and a median at least
@@ -90,6 +95,8 @@ SINGLE_MIN_RELATIVE_PCT = 7.0
 SINGLE_MIN_GROUP_PCT = 3.0
 ALSO_ON_MOVERS = "Also on Movers: "
 SILENT = "A Radar rule flag: stored for scoring, not pinged (study radar-rules-20261121-v1)."
+UNPROVEN = ("Not sent: Radar pings reach the phone once Radar setups graduate on the paper proving ground "
+            "(the November 25, 2026 Radar audit found no edge to trade).")
 PING_RULE_FLAGS = False  # the rule flags (radar_rules.silent) are written skipped; True restores their pings (tests)
 # Singles that count toward the hourly rule: waiting to be tried, or tried. A held or skipped single and an event that
 # rode a digest were never tried (attempts 0).
@@ -98,6 +105,11 @@ SINGLE = (RadarAlert.kind != DIGEST) & or_(RadarAlert.delivery.in_(("pending", "
 
 def enabled() -> bool:
     return os.environ.get("RADAR_ALERTS_ENABLED", "").lower() == "true"
+
+
+def proven() -> bool:
+    """Whether Radar pings reach the phone: only once its setups graduated on the paper proving ground (``UNPROVEN``)."""
+    return proving_ground.graduated("radar_setup")
 
 
 def setup_sides() -> str:
@@ -471,6 +483,11 @@ class RadarAlerts:
             if not phone.configured():
                 alert.delivery, alert.next_attempt_at = "pending", _utc(now + BACKOFF[-1])
                 alert.last_error = "Phone alerts are not set up on this server (NTFY_URL is not set)."
+                db.commit()
+                return
+            if not proven():
+                alert.delivery, alert.last_error = "held", UNPROVEN
+                self._settle(db, alert)
                 db.commit()
                 return
             digest = alert.kind == DIGEST
