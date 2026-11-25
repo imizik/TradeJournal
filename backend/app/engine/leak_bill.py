@@ -16,7 +16,8 @@ prices what each rule would have done instead:
 
 A trade is cut once, at whichever of the last two comes first (a minute that meets both reads ``deep_red``). The cut's
 cost is that minute's price times the contracts open then, minus what those contracts later sold for. Contracts from an
-``add`` are billed as the add only, so no dollar is counted twice, and a buy after the cut is left as it happened.
+``add`` are billed as the add only, so no dollar is counted twice, and a buy after the cut is left as it happened
+(by the rules nothing is held then, so it is no add).
 A positive bill means the rules would have kept that much more; a week where the breaks paid says so.
 
 The price is the minute bar's last trade (``alpaca.fetch_option_bars``, the window the path metrics cache), not a
@@ -106,7 +107,8 @@ def bill_trade(expiration: date, expired: bool, fills: list[dict], bars: list[di
         qty, price = float(fill["contracts"]), float(fill["price"])
         if fill["role"] == "entry":
             held = sum(lot[0] for lot in lots)
-            below = held > EPS and price < sum(lot[0] * lot[1] for lot in lots) / held - EPS
+            # After the cut the rules hold nothing, so a later buy averages nothing down: it is left as it happened.
+            below = out["cut"] is None and held > EPS and price < sum(lot[0] * lot[1] for lot in lots) / held - EPS
             lots.append([qty, price, below and 0 <= (expiration - fill["executed_at"].date()).days <= BUILT_DAYS, False])
             return
         while qty > EPS and lots:

@@ -50,6 +50,9 @@ def test_an_add_below_cost_is_billed_what_it_lost_and_never_twice():
     # Expired: the add lost its $100; the first contract is cut at $80, an hour in and 47% down on both.
     found = leak_bill.bill_trade(WED, True, quick[:2], [bar(11, 10, 0.80)])
     assert dict(found["saved"]) == {"add": 100.0, "deep_red": 80.0}  # ended -300; by the rules, -120
+    # A buy below cost after the cut is no add: by the rules nothing is held then.
+    late = [buy(1, 200, ny(10)), buy(1, 100, ny(11, 30)), sell(2, 50, ny(14))]
+    assert dict(leak_bill.bill_trade(WED, False, late, [bar(11, 6, 1.30)])["saved"]) == {"deep_red": 80.0}
     # First in, first out: the first sale is the first contract's, the add's is the second.
     split = [buy(1, 200, ny(10)), buy(1, 100, ny(10, 20)), sell(1, 150, ny(10, 30)), sell(1, 120, ny(10, 40))]
     assert dict(leak_bill.bill_trade(WED, False, split, None)["saved"]) == {"add": -20.0}  # the add paid
