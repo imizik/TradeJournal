@@ -108,6 +108,7 @@ PAYLOADS = {
     "review_checks": [{}, {"day": "2026-10-20"}, {"day": None}],
     "grade_checks": [{}, {"days": 30}, {"days": None}],
     "position_check": [{}, {"ticker": "nbis"}, {"ticker": "APLD", "stop": 13.85}],
+    "add_check": [{}, {"ticker": "nbis"}, {"ticker": None}],
     "preopen_watchlist": [{}, {"tickers": ["SPY", "qqq", "BRK.B"]}],
     "get_notes": [{}, {"ticker": "APLD"}],
     "candles": [{"symbol": "spy", "interval": "1m"}, {"symbol": "NBIS", "interval": "5m", "bars": 120}],

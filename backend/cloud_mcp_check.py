@@ -89,17 +89,19 @@ TOOL_ARGUMENTS = {
     "attach_model_verdict": ({"check_id", "verdict", "summary"}, set()),
     "review_checks": (set(), {"day"}),
     "position_check": (set(), {"ticker", "stop"}),
+    "add_check": (set(), {"ticker"}),
     "get_notes": (set(), {"ticker"}),
     "preopen_watchlist": (set(), {"tickers"}),
     "grade_checks": (set(), {"days"}),
 }
-READ_ONLY_TOOLS = ("candles", "review_checks", "position_check", "get_notes", "preopen_watchlist", "grade_checks")
+READ_ONLY_TOOLS = ("candles", "review_checks", "position_check", "add_check", "get_notes", "preopen_watchlist", "grade_checks")
 POSITION_LIMIT = 5
 PREOPEN_LIMIT = 8
 PREOPEN_BUDGET = 20.0  # Seconds for the whole pass; tickers left over are named, not guessed.
 SETTLE_BUDGET = 20.0  # Seconds of minute-bar reads per review/grade call; the rest stay unmeasured until next time.
 GRADE_LIMIT = 1000
 CONTEXT_MAX_AGE = 30 * 60  # Positions change during a session; older than this is labelled stale.
+ADDS_MAX_AGE = 24 * 60 * 60  # Closed positions only; a day-old record still answers, labelled stale.
 MARKET_MAX_AGE = 60 * 60  # The publisher runs every 10 minutes; past an hour the snapshot itself is stale.
 
 
@@ -426,6 +428,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
     bind_provider(provider, feed=config.provider_feed, cache_dir=cache_dir)
     from app.engine.alpaca import ET
     from app.engine.alpaca import fetch_minute_bars_live
+    from app.engine.add_check import add_view
     from app.engine.pretrade_check import (check_outcome, grade_results, macro_context, market_facts, position_view,
         preopen_tickers, preopen_view,
         price_after, result_final, run_check)
@@ -453,6 +456,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         "attach_model_verdict before you answer, so it can be graded later. Free text is stored as "
         "data and never changes the computation. When relevant, use preopen_watchlist for pre-open facts, "
         "position_check for published holdings, get_notes for selected captures, or review_checks for saved advice. "
+        "When he asks whether to add to a position he holds, call add_check and lead with its answer and dollar record. "
         "Discussion never establishes an actual position. Advice only: nothing places, sizes or arms an "
         "order. Reuse the same operation_id only to recover an uncertain call; it returns the saved answer. "
         "For a fresh read (for example after insufficient_data from a data outage) use a new operation_id. "
@@ -1030,6 +1034,18 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
 
     read_hints = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True, idempotentHint=True)
 
+    async def live_position(position, rows, now, stop=None):
+        """One open position with its live read (position_view); a provider timeout leaves the clock only."""
+        put = position.get("option_type") == "put"
+        idea = {"ticker": position["ticker"].upper(), "side": "short" if put else "long",
+            "instrument": position["instrument_type"], "option_type": position.get("option_type"),
+            "expiration": position.get("expiration"), "strike": position.get("strike"), "horizon": "intraday"}
+        try:
+            analysis, _ = await asyncio.wait_for(asyncio.to_thread(live_context, idea, now), CONTEXT_TIMEOUT)
+        except asyncio.TimeoutError:
+            analysis = clock_only_analysis(now, ["live market data timed out"])
+        return position_view(position, rows, analysis, now, stop)
+
     @server.tool(title="Check open positions", annotations=read_hints, structured_output=True,
         meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("position_check")}]})
     async def position_check(ticker: Annotated[Optional[str], Field(pattern=r"^[A-Za-z]{1,6}(\.[A-Za-z])?$")] = None,
@@ -1052,15 +1068,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         stop_applies = stop is not None and len(positions) == 1
 
         async def one(position):
-            put = position.get("option_type") == "put"
-            idea = {"ticker": position["ticker"].upper(), "side": "short" if put else "long",
-                "instrument": position["instrument_type"], "option_type": position.get("option_type"),
-                "expiration": position.get("expiration"), "strike": position.get("strike"), "horizon": "intraday"}
-            try:
-                analysis, _ = await asyncio.wait_for(asyncio.to_thread(live_context, idea, now), CONTEXT_TIMEOUT)
-            except asyncio.TimeoutError:
-                analysis = clock_only_analysis(now, ["live market data timed out"])
-            view = position_view(position, features["rows"] or [], analysis, now, stop if stop_applies else None)
+            view = await live_position(position, features["rows"] or [], now, stop if stop_applies else None)
             view["market"], notes = market_facts(position["ticker"], market, now, "swing", position.get("expiration"))
             view["caveats"] = [*notes, *view["caveats"]]
             return view
@@ -1075,6 +1083,36 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
             "history": {key: features[key] for key in ("state", "generated_at")},
             "note": "Decision support only; nothing here places, sizes or closes a position."
                 + ("" if stop is None or stop_applies else " A stop applies only when exactly one position matches; it was ignored.")}
+
+    @server.tool(title="Should I add?", annotations=read_hints, structured_output=True,
+        meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("add_check")}]})
+    async def add_check(ticker: Annotated[Optional[str], Field(pattern=r"^[A-Za-z]{1,6}(\.[A-Za-z])?$")] = None) -> dict[str, Any]:
+        """Should Isaac add to an open option position (optionally one ticker)? For each: days to expiry, percent
+        against his average entry at the live mid, time held, whether it is his known leak spot (3 or fewer days
+        to expiry, down 20% or more, held over an hour), and his own closed positions where he bought more below
+        cost in the same kind of spot: how many, how many ended green, their P&L and what the added contracts
+        themselves made or lost. answer is no (those adds lost money), no_clear_record (they did not, or too few),
+        not_below_cost, not_covered (shares) or insufficient_data. Lead with headline. Advice only; places nothing.
+        """
+        await authenticated("add_check")
+        now = clock()
+        held = await asyncio.to_thread(context, now)
+        if held["positions"] is None:
+            return {"schema_version": SCHEMA, "state": "missing", "positions": [],
+                "note": "Open positions are not published yet; nothing was invented."}
+        positions = [p for p in held["positions"] if ticker is None or p["ticker"].upper() == ticker.upper()]
+        adds = await asyncio.to_thread(pretrade_features.read_adds, Path(config.features_pointer).parent / "adds.json",
+            max_age_seconds=ADDS_MAX_AGE, now=now)
+        if slots.locked():
+            raise ToolError("Check service busy; retry shortly")
+        async with slots:  # Same bound as pre_trade_check; lookups run one at a time.
+            views = [add_view(await live_position(p, [], now), adds["rows"], now.astimezone(ET).replace(tzinfo=None))
+                for p in positions[:POSITION_LIMIT]]
+        return {"schema_version": SCHEMA, "state": held["state"], "positions_as_of": held["generated_at"],
+            "open_positions": len(positions), "shown": len(views), "positions": views,
+            "record": {key: adds[key] for key in ("state", "generated_at")},
+            "note": "His own record, not a forecast, and decision support only: nothing here places, sizes or closes "
+                "a position. A position bought in the last 10 minutes may not be published yet."}
 
     @server.tool(title="Pre-open watchlist pass", annotations=read_hints, structured_output=True,
         meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("preopen_watchlist")}]})

@@ -296,12 +296,19 @@ def test_upgrade_adds_context_views_only_with_their_own_approval(staged, host, m
     monkeypatch.setattr(control, "psql", fake_psql)
     sql_digest = control.digest(staged / "config/context-views.sql")
     market_digest = control.digest(staged / "config/market-view.sql")
+    add_digest = control.digest(staged / "config/add-view.sql")
     with pytest.raises(ValueError, match="approve-sql"):
         control.upgrade(staged, approved)
     with pytest.raises(ValueError, match="market-view.sql"):
         control.upgrade(staged, approved, (sql_digest,))  # Each additive file needs its own approval.
+    with pytest.raises(ValueError, match="add-view.sql"):
+        control.upgrade(staged, approved, (sql_digest, market_digest))
     assert statements == []
-    upgraded = control.upgrade(staged, approved, (sql_digest, market_digest))
+    upgraded = control.upgrade(staged, approved, (sql_digest, market_digest, add_digest))
+    added = next(s for s in statements if "CREATE VIEW public.pretrade_add_source" in s)
+    assert "GRANT SELECT ON public.pretrade_add_source TO tj_check_features" in added and "'webull'" in added
+    assert "raw_email_id, 'UTF8')), 'hex')" in added and "t.id AS" not in added and "f.id AS" not in added
+    assert upgraded["settings"]["add-view.sql"] == add_digest == control.digest(control.CONFIG / "add-view.sql")
     assert any("CREATE VIEW public.pretrade_position_source" in s for s in statements)
     assert any("CREATE VIEW public.pretrade_market_source" in s and "m.id" not in s for s in statements)
     assert upgraded["settings"]["context-views.sql"] == sql_digest == control.digest(control.CONFIG / "context-views.sql")

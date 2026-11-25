@@ -13,6 +13,7 @@ VIEW = "pretrade_feature_source"
 POSITION_VIEW = "pretrade_position_source"
 CAPTURE_VIEW = "pretrade_capture_source"
 MARKET_VIEW = "pretrade_market_source"
+ADD_VIEW = "pretrade_add_source"
 CAPTURE_LIMIT = 200
 ROLE = "tj_check_features"
 EXCLUDED_BROKERS = ("webull",)  # Matches app.engine.pretrade_check.EXCLUDED_BROKERS.
@@ -99,6 +100,40 @@ def market_view_sql() -> str:
 CREATE VIEW public.{MARKET_VIEW} WITH (security_barrier=true) AS
 {MARKET};
 GRANT SELECT ON public.{MARKET_VIEW} TO {ROLE};
+COMMIT;
+"""
+
+
+# Every fill of closed option positions entered more than once, for the "should I add?" record
+# (backend/app/engine/add_check.py). The position is named by the SHA-256 of its first entry fill key and fills
+# by their replay order (the reconstructor's: time, opens before closes, fill id); no IDs or raw keys.
+ADDS = """SELECT {trade_key} AS trade_key,
+       row_number() OVER (PARTITION BY t.id ORDER BY f.executed_at,
+           CASE WHEN tf.role = 'entry' THEN 0 ELSE 1 END, f.id) AS seq,
+       tf.role, f.side, f.contracts, f.price, f.executed_at,
+       t.ticker, t.option_type, t.expiration, t.status, t.realized_pnl, t.closed_at
+FROM trade t
+JOIN account a ON a.id = t.account_id
+JOIN tradefill tf ON tf.trade_id = t.id
+JOIN fill f ON f.id = tf.fill_id
+WHERE t.status IN ('closed', 'expired') AND t.closed_at IS NOT NULL AND t.instrument_type = 'option'
+  AND lower(coalesce(a.broker, '')) NOT IN ({excluded})
+  AND (SELECT count(*) FROM tradefill e WHERE e.trade_id = t.id AND e.role = 'entry') > 1"""
+POSTGRES_TRADE_KEY = "encode(sha256(convert_to(f1.raw_email_id, 'UTF8')), 'hex')"
+
+
+def add_sql(trade_key: str = POSTGRES_TRADE_KEY) -> str:
+    first = (f"(SELECT {trade_key} FROM tradefill tf1 JOIN fill f1 ON f1.id = tf1.fill_id "
+             "WHERE tf1.trade_id = t.id AND tf1.role = 'entry' ORDER BY f1.executed_at, f1.raw_email_id LIMIT 1)")
+    return ADDS.format(trade_key=first, excluded=", ".join(f"'{name}'" for name in EXCLUDED_BROKERS))
+
+
+def add_view_sql() -> str:
+    """Fills of closed multi-entry option positions for the same read-only role; a no-clobber view."""
+    return f"""BEGIN;
+CREATE VIEW public.{ADD_VIEW} WITH (security_barrier=true) AS
+{add_sql()};
+GRANT SELECT ON public.{ADD_VIEW} TO {ROLE};
 COMMIT;
 """
 
