@@ -38,7 +38,8 @@ The policy, in the order it is applied:
   (each sender already writes one row per firing, and two plans' invalidations
   in one symbol are two messages): a last-day final after a one-hour alert
   still goes out, and so does an invalidation after a last-day final.
-- **Budgets.** Every kind at or below ``interrupt`` in the priority order has a
+- **Budgets.** Every kind at or below ``interrupt`` in the priority order, but
+  ``cut_line`` (a short-dated buy's cut line, said once per position), has a
   budget of its own a New York day (``PING_BUDGET_<KIND>``): ``interrupt`` 4
   (fill-time pattern interrupts), ``companion_update`` 12 (the position companion's
   updates and close notes), ``nudge`` 2 (link pings and the companion's adopt pings
@@ -64,7 +65,7 @@ The policy, in the order it is applied:
 
   ``expiry_final`` > ``invalidation`` > ``giveback`` > ``time_stop`` (the
   90-minute last-day and the day-before-expiry alerts ranked with it) > ``entry``
-  > ``hold_hour`` > ``interrupt`` > ``companion_update`` > ``nudge`` / ``link`` / ``companion_adopt`` > ``prep`` (and ``week_review``,
+  > ``hold_hour`` > ``interrupt`` > ``cut_line`` > ``companion_update`` > ``nudge`` / ``link`` / ``companion_adopt`` > ``prep`` (and ``week_review``,
   ``day_replay``) > ``evening_review`` > ``radar_setup`` > ``radar_event`` > ``radar_digest`` >
   ``thesis_watch`` > ``research`` > ``paper`` > ``paper_review`` > ``self_check`` > ``note_digest``.
 
@@ -110,7 +111,7 @@ from app.models import CaptureLink, Fill, PhonePing, Trade, TradeFill
 
 log = logging.getLogger(__name__)
 
-PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "interrupt", "companion_update", "nudge", "prep", "evening_review",
+PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "interrupt", "cut_line", "companion_update", "nudge", "prep", "evening_review",
             "radar_setup", "radar_event", "radar_digest", "thesis_watch", "research", "paper", "paper_review", "self_check", "note_digest")
 ALIASES = {"expiry_first": "time_stop", "expiry_eve": "time_stop", "same_day_1pm": "time_stop", "wrong_way": "hold_hour", "no_exit": "hold_hour", "hold_check_in": "hold_hour", "interrupt_size": "hold_hour", "link": "nudge", "no_plan": "nudge",
            "companion_adopt": "nudge",
@@ -375,7 +376,7 @@ def _appended(db: Session, into: PhonePing) -> str:
 
 def _label(kind: str) -> str:
     return {"expiry_final": "last-day final", "expiry_first": "expires-today", "giveback": "give-back", "hold_hour": "one-hour", "wrong_way": "wrong-way", "no_exit": "no-exit-order", "same_day_1pm": "same-day 1 PM",
-            "time_stop": "time stop", "entry": "entry trigger", "interrupt": "pattern", "interrupt_size": "size-by-adding pattern", "invalidation": "invalidation", "nudge": "plan nudge",
+            "time_stop": "time stop", "entry": "entry trigger", "interrupt": "pattern", "interrupt_size": "size-by-adding pattern", "cut_line": "cut-line", "invalidation": "invalidation", "nudge": "plan nudge",
             "no_plan": "plan nudge", "link": "plan link", "prep": "pre-market prep", "week_review": "week review", "day_replay": "Watch your day",
             "evening_review": "evening review", "expiry_eve": "day-before-expiry", "radar_digest": "Radar digest",
             "radar_setup": "Radar setup", "radar_event": "Radar", "thesis_watch": "thesis watch", "research": "research", "companion_adopt": "adopted position",
