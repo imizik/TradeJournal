@@ -2902,11 +2902,12 @@ minute.
 Two more sources test what the November 25, 2026 Radar audit left open: on the stock a Radar flag is a coin flip, the
 option round trip cost more than the small lean in following a flag, and nobody had split the flags by whether the move
 had a reason. Both follow a Radar stock flag (ahead of or behind SPY or its sector), the first per stock a day, and
-only within 3 minutes of it; a flag not taken by then is written down as unresolved, never entered late.
+only within 3 minutes of it: an idea not picked and entered by then is written down as unresolved, never entered late.
 `radar_flag_news` takes the flags whose first headline check (`radar_news`, the 24 hours before the flag) found a
 headline, on the usual contract. `radar_flag_far` takes every flag on `radar_setup.pick_far_contract`'s contract: the
 nearest expiration 21-45 days out, about 0.60 delta, spread at most 5% of the mid, open interest at least 500. Its
-note keeps the headline status, so the with and without halves can be compared later. The flags stay silent on the
+note keeps the headline status (filled in afterwards when the trade was taken before the check), so the with and
+without halves can be compared later. The flags stay silent on the
 phone and neither source sends a ping. They need Radar recording (`RADAR_ENABLED`, `RADAR_STORE`); the Radar file is
 read read-only.
 

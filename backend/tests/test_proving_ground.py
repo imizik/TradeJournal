@@ -292,6 +292,39 @@ def test_a_flag_is_never_entered_late(tmp_path):
     assert w.picked == []
 
 
+def test_a_picked_flag_must_also_enter_inside_the_flags_window(tmp_path):
+    w = World(tmp_path)
+    w.ground.flags = lambda day: [_flag("AMD", "10:30", "found")]
+    w.ground.pick_far = lambda symbol, direction, today: contract(f"{symbol}261218C00090000")
+    rows = w.at("10:33")  # picked at the edge of the window, no fresh quote yet
+    assert rows[("radar_flag_far", "AMD")]["state"] == rows[("radar_flag_news", "AMD")]["state"] == "pending"
+    rows = w.at("10:34", AMD261218C00090000=quote("AMD261218C00090000", 7.9, 8.1, et("10:34")))  # a fresh quote, a minute late
+    assert rows[("radar_flag_far", "AMD")]["state"] == "unresolved" and rows[("radar_flag_far", "AMD")]["entry"] is None
+    assert rows[("radar_flag_far", "AMD")]["note"] == "headline check: found · no fresh option quote within 3 minutes of the flag"
+
+    early = World(tmp_path / "early")
+    early.ground.flags = lambda day: [_flag("AMD", "10:30", "found")]
+    early.ground.pick_far = lambda symbol, direction, today: contract(f"{symbol}261218C00090000")
+    early.at("10:31")
+    rows = early.at("10:32", AMD261218C00090000=quote("AMD261218C00090000", 7.9, 8.1, et("10:32")))
+    assert rows[("radar_flag_far", "AMD")]["state"] == "open" and rows[("radar_flag_far", "AMD")]["entry"] == 8.1
+
+
+def test_a_trade_taken_before_the_headline_check_learns_the_answer(tmp_path):
+    w = World(tmp_path)
+    flags = [_flag("AMD", "10:30", None)]
+    w.ground.flags = lambda day: flags
+    w.ground.pick_far = lambda symbol, direction, today: contract(f"{symbol}261218C00090000")
+    assert w.at("10:31")[("radar_flag_far", "AMD")]["note"] == "headline check: not checked"
+    flags[0]["news"] = "none_found"
+    rows = w.at("10:32", AMD261218C00090000=quote("AMD261218C00090000", 7.9, 8.1, et("10:32")))
+    assert rows[("radar_flag_far", "AMD")]["state"] == "open" and rows[("radar_flag_far", "AMD")]["note"] == "headline check: none_found"
+    assert w.picked == [] and len(rows) == 1  # not repicked, and still not the headline source's idea
+    flags[0]["news"] = "found"  # only the first answer is kept
+    rows = w.at("11:40", AMD261218C00090000=quote("AMD261218C00090000", 8.0, 8.2, et("11:40")))
+    assert rows[("radar_flag_far", "AMD")]["reason"] == "time_stop" and rows[("radar_flag_far", "AMD")]["note"] == "headline check: none_found"
+
+
 def test_radar_flags_are_read_from_the_radar_file(tmp_path, monkeypatch):
     from app.engine.radar_store import RadarStore
     path = tmp_path / "radar.sqlite"
