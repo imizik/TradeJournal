@@ -523,6 +523,17 @@ async def _maybe_start_note_digest(_app: FastAPI):
     return asyncio.create_task(note_digest.NoteDigest(engine).loop())
 
 
+async def _maybe_start_leak_bill(_app: FastAPI):
+    """The Sunday leak bill (app/engine/leak_bill.py): what breaking the leak rules cost that week, in one ping. Off
+    unless LEAK_BILL_ENABLED=true."""
+    if os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    from app.engine import leak_bill
+    if not leak_bill.enabled():
+        return None
+    return asyncio.create_task(leak_bill.LeakBill(engine).loop())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Alembic owns the schema. The app used to call create_all() here, which
@@ -567,6 +578,7 @@ async def lifespan(_app: FastAPI):
     paper_runner = await _maybe_start_paper_runner(_app)
     self_check = await _maybe_start_self_check(_app)
     note_digest = await _maybe_start_note_digest(_app)
+    leak_bill = await _maybe_start_leak_bill(_app)
     from app.routers.copilot_desk import warm_at_start
     warm_at_start()  # the desk's market calendar, on its own thread
     try:
@@ -576,6 +588,8 @@ async def lifespan(_app: FastAPI):
             self_check.cancel()
         if note_digest is not None:
             note_digest.cancel()
+        if leak_bill is not None:
+            leak_bill.cancel()
         if paper_runner is not None:
             paper_runner.cancel()
         if robinhood_fills is not None:

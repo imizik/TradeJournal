@@ -70,6 +70,9 @@ def traffic():
     # The Sunday notes digest has its own budget of one: a second one that day is held, nothing else is spent.
     for i, hhmm in enumerate(("18:00", "18:05")):
         add(hhmm, "note_digest", f"note-digest-{i}")
+    # The Sunday leak bill has its own budget of one too.
+    for i, hhmm in enumerate(("18:00", "18:05")):
+        add(hhmm, "leak_bill", f"leak-bill-{i}")
     return sorted(events, key=lambda event: event["now"])
 
 

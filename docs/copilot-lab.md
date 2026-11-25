@@ -2289,6 +2289,20 @@ measures it. No-exit-order pings are left out (they ask for an order, not a sale
 digest ("Expires today: acted on 1 of 2. Ignoring 1 cost $450.") and the "Which pings you acted on" card on /proof
 (`GET /copilot/desk/ping-week`: the last full digest week and the week so far; read-only, served while the lab is off).
 
+**Sunday leak bill** (`backend/app/engine/leak_bill.py`, off unless `LEAK_BILL_ENABLED=true`; the owner's switch): on
+Sunday at or after 18:00 New York, one ping whose title is one dollar number, "LEAK BILL · $1,240": what breaking the
+November 24, 2026 edge audit's leak rules cost over the long option trades that closed that New York week (Monday to
+Sunday, Webull left out). Each trade's fills are replayed first in, first out against the contract's minute bars: a buy
+below cost with 3 days or less to expiry is billed what those contracts lost (the rule: do not buy it); the open
+contracts are otherwise cut once, at the first regular-session minute an hour or more after the first entry where an
+option with 3 days or less to expiry is down 30% or more, or at 13:00 for a same-day option bought before noon, and
+billed that minute's last trade against what they later sold for (nothing if they expired). Contracts from an add are
+billed as the add only, so no dollar is counted twice. The body says how many trades broke a rule, what they ended at
+against following the rules, and one line per rule. The price is a last trade, not a quote; a short-dated trade held
+past the hour with no minute bar where a rule could have fired is counted apart and named, never billed as zero. A week where the breaks paid says
+so under a $0 title; a week with no closed long option trade sends nothing. Its own ping kind, `leak_bill`, one a day,
+claimed once a week through the policy (`new_only`). Its tap opens `/proof`. No page, route or stored value.
+
 ### The day plan
 
 Before the open, the desk's left column leads with **Today's plan** (`DayPlanCard.tsx`; also step 2 of Start the day):
@@ -4475,7 +4489,7 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   ranked just above `radar_event`), `radar_event` 4 (Radar's other single
   pings), `radar_digest` 2, `thesis_watch` 2, `research` 1, `paper` 6 (his
   [paper book](#paper)'s PAPER pings), `paper_review` 1 (the Friday [paper review](#paper)), `self_check` 1 (the
-  [open self-check](#open-self-check)'s line) and `note_digest` 1 (the [Sunday digest](#notes-on-telegram)), ranked last. Before 09:30
+  [open self-check](#open-self-check)'s line) `note_digest` 1 (the [Sunday digest](#notes-on-telegram)) and `leak_bill` 1 (the Sunday leak bill, same section), ranked last. Before 09:30
   New York these kinds together also have `PING_PREOPEN_ALLOWANCE` (default 2)
   pings, so pre-open headlines cannot spend the day. While the
   [morning brief](#pre-market-prep) is on and not yet decided today, one of them
