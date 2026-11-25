@@ -116,7 +116,10 @@ LOUD_KINDS = frozenset({"size_by_adding"})  # position risk: these make a sound 
 KINDS = ("add_to_loser", "put_entry", "opened_green", "late_short_dated", "ticker_record", "large_size", "size_by_adding",
          "quick_reentry")
 ONCE_PER_POSITION = ("put_entry", "opened_green", "late_short_dated", "ticker_record", "large_size", "size_by_adding", "quick_reentry")
-NOT_SENT = frozenset({"large_size", "late_short_dated"})  # judged for the desk's play check, never a phone message
+# Judged for the desk's play check, never a phone message. The last three since the November 25, 2026 ping review: the
+# audit found ticker carries little, the October audit's put gap was not reliable, and the green-day walk-away ping
+# (``day_lock``) says the green-day record once, before the entry, instead of after each one.
+NOT_SENT = frozenset({"large_size", "late_short_dated", "ticker_record", "put_entry", "opened_green"})
 SAID = ("pending", "sending", "sent", "unknown")  # a line held by the policy or expired never reached the phone: not said
 LOUD_POLICY_KIND = "interrupt_size"  # the policy's kind for a message with a loud line; the rest go as "interrupt"
 FOOTER = "Your record, not advice."

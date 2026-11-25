@@ -2921,7 +2921,8 @@ beside it. A trade that got in but never saw a fresh exit quote is closed after 
 seen (zero if none), so it still counts.
 
 A source **graduates** when its record is too good to be luck (`proving_ground.judge`); until then its phone pings are
-titled `PAPER · …` (`proving_ground.label`). Only Radar setup pings exist today; Jo's brief and the 9:45 rule send no
+not sent (`radar_alerts.proven`, since the November 25, 2026 ping review; before it they went out titled `PAPER · …`,
+`proving_ground.label`). Only Radar setup pings exist today; Jo's brief and the 9:45 rule send no
 trade pings, so for them graduation shows on the board only. The rule:
 
 - Each trade counts as its return on the premium paid, and one session's trades are added into one number, because
@@ -4410,10 +4411,23 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   Radar alerts and thesis watch are anchored per symbol (the symbol's open
   position when there is one; a Radar group event to its group); a ping they
   hold is recorded `held` and counts toward neither sender's own caps.
+- **What no longer reaches the phone (the November 25, 2026 ping review).** Each ping was held against
+  the edge audit's replay of its rule and the Radar audit, and these are recorded but never sent, at their
+  senders, before the policy (so they start no quiet window and spend no budget):
+  the **one-hour alert** unless the option has 3 days or less to expiry and is down 30% or more (small red
+  at the hour recovered, and it fired the same on both; `position_alerts.not_sent`); the **90-minute
+  last-day alert** (positions carried into expiry day had lost nearly all they would by 11:00; the 1 PM
+  and 30-minute alerts remain); the **wrong-way alert** (selling at it would have cost more than holding);
+  the **daily loss lock** (trades opened after the lock point made money; `day_lock.LOSS_PING`); the
+  pattern lines for a put entry, a green day and a ticker record (§ Pattern interrupts); and **every Radar
+  ping** until Radar setups graduate on the paper proving ground (`radar_alerts.proven`; § Paper proving
+  ground). A held position alert shows on its trade page as `held` with the reason. Their switches still
+  decide whether the rule is judged and recorded. A day-before-expiry alert on a green position is sent
+  silent.
 - **Two tiers: only position risk makes a sound.** `phone.loud(kind, …)` (`phone.LOUD`) keeps the
-  sound for the pings about money at risk in a position he holds: give-back, held an hour, the expiry
-  countdown (expires today, the last-day 90 and 30 minutes, a morning same-day option at 1 PM), wrong way, no exit order, the day's loss
-  and green-day locks, a Keep holding check-in, a plan's invalidation, target, time stop and level alerts, and the fill-time
+  sound for the pings about money at risk in a position he holds: give-back, a short-dated option deep red an hour in, the expiry
+  countdown (the day before when red, the last 30 minutes, a morning same-day option at 1 PM), no exit order, the
+  green-day walk-away, a Keep holding check-in, a plan's invalidation, target, time stop and level alerts, and the fill-time
   interrupt for size built by adding below cost (`fill_interrupts.LOUD_KINDS`). Every other ping
   (Radar, briefs and prep, plan nudges and entry levels, paper, reviews, digests, the companion, research
   results, other interrupts) is sent silent: ntfy priority 2 (no sound) and Telegram
@@ -4666,24 +4680,29 @@ When an entry fill repeats one of the owner's own costly habits from the
 [October 21 behavior audit](../backend/reports/behavior_audit_2026-10-21.md), the
 phone gets one message carrying the owner's own record for that habit: no
 advice, no model call, nothing ordered (`backend/app/engine/fill_interrupts.py`).
-Eight rules judge each new entry fill; six of them send (the November 25, 2026
-edge audit replayed every rule over the closed long option trades, and two
-flagged trades that made money):
+Eight rules judge each new entry fill; three of them send: adding to a loser,
+size by adding and back in after a loss. The November 25, 2026 edge audit
+replayed every rule over the closed long option trades and two flagged trades
+that made money; the ping review of the same day took three more off the phone
+(put entry, day already green, ticker record: `fill_interrupts.NOT_SENT`). All
+eight still judge an order on the desk's play check.
 
 - **Adding to a loser:** a second or later `buy_to_open` into a long option
   position still open, below the open lots' average cost (first in, first out).
-- **Put entry:** a `buy_to_open` of a put.
-- **Day already green:** the account's realized P&L for the New York day is
+- **Put entry (desk only, no message):** a `buy_to_open` of a put. The October
+  audit's gap between calls and puts was not reliable.
+- **Day already green (desk only, no message):** the account's realized P&L for the New York day is
   already above zero at the fill (the rule the exit-habit `opened_green` reads).
+  The green-day walk-away ping (`day_lock`) says this record once, before the
+  next entry, instead of after each one.
 - **Late short-dated buy (desk only, no message):** a `buy_to_open` of an option
   with 0 to 2 trading days to expiry (weekdays) at or after 14:00 New York. The
   audit found these buys made money overall, so the phone no longer
   says it (`fill_interrupts.NOT_SENT`); the desk's play check still shows the
   record.
-- **Ticker record:** the owner has at least 5 closed trades in the fill's ticker
-  and their realized total is below zero (the audit's SNDK, −$5,410 over 48). A
-  positive or too-small record stays quiet, so familiar names do not spend the
-  budget.
+- **Ticker record (desk only, no message):** the owner has at least 5 closed trades in the fill's ticker
+  and their realized total is below zero (the audit's SNDK, −$5,410 over 48).
+  The November audit found ticker carries little: three trades were most of SNDK's loss.
 - **Large size (desk only, no message):** an option bought to open whose premium paid (contracts ×
   price, option prices being stored per contract) is at least 2× the
   median of the owner's closed long option positions entered in the last 12

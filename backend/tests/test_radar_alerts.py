@@ -48,6 +48,33 @@ def env(monkeypatch):
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
     # Most tests here drive the outbox, digests and policy with rule flags; the silent default has its own tests below.
     monkeypatch.setattr(radar_alerts, "PING_RULE_FLAGS", True)
+    # ...and with Radar setups graduated on the proving ground; until then no Radar ping is sent, which has its own test.
+    monkeypatch.setattr(radar_alerts, "proven", lambda: True)
+
+
+SHIPPED_PROVEN = radar_alerts.proven
+
+
+def test_until_radar_setups_graduate_no_radar_ping_reaches_the_phone(engine, monkeypatch, tmp_path):
+    monkeypatch.setattr(radar_alerts, "proven", SHIPPED_PROVEN)
+    monkeypatch.setenv("PROVING_GROUND_PATH", str(tmp_path / "proving.sqlite"))  # a book that never ran: nothing graduated
+    sent = []
+    sent_to(monkeypatch, sent)
+    clock = Clock(at(20))
+    alerts = RadarAlerts(engine, clock=clock)
+    [single] = alerts.record([_event("e1", "AAA", 20)])
+    waiting = alerts.record([_event("e2", "BBB", 21, relative=4.6)])
+    assert single.delivery == "pending" and [r.delivery for r in waiting] == [radar_alerts.DIGEST]
+    alerts.deliver()
+    clock.now = at(30)  # 10:00: the digest is built, and held the same way with its event
+    alerts.deliver()
+    assert sent == []
+    found = {r.event_id: (r.delivery, r.last_error) for r in rows(engine)}
+    assert found["e1"] == ("held", radar_alerts.UNPROVEN)
+    assert found["e2"][0] == "held" and found["e2"][1].endswith(radar_alerts.UNPROVEN)
+    assert [(d.delivery, d.last_error) for d in digests(engine)] == [("held", radar_alerts.UNPROVEN)]
+    with Session(engine) as db:
+        assert db.exec(select(PhonePing)).all() == []  # never offered to the policy: it spends no budget
 
 
 def sent_to(monkeypatch, record):

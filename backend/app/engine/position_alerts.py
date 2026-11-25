@@ -8,6 +8,10 @@ hour to the close, and options left to expire, are where the journal's money
 goes. These alerts only tell the phone;
 nothing here places, changes or suggests an order.
 
+Since the November 25, 2026 ping review three of the rules below are recorded but not sent (``not_sent``): the
+one-hour alert outside its short-dated, 30%-down case, the 90-minute last-day alert and the wrong-way alert. Each
+row is written as before and ends ``held`` with the reason.
+
 Off unless ``POSITION_ALERTS_ENABLED=true``. It runs on the level alert
 monitor's loop (``level_alert_monitor.py``), at most every ``RUN_SECONDS``:
 
@@ -171,6 +175,13 @@ MORNING_END = 12 * 60  # a same-day option first bought before noon New York...
 AFTERNOON_MINUTE = 13 * 60  # ...and still open at 13:00 gets the 1 PM alert
 INDEX_UNDERLYING = {"SPXW": "SPY", "SPX": "SPY", "XSP": "SPY", "NDX": "QQQ", "NDXP": "QQQ"}
 KINDS = ("giveback", "expiry_first", "expiry_final", "expiry_eve", "hold_hour", "wrong_way", "no_exit", "same_day_1pm")
+# Recorded for the trade page, never sent (the November 25, 2026 ping review, from the edge audit's replay of each rule):
+# positions carried into expiry day had lost nearly all they would by 11:00, and the 30-minute final still goes out;
+# selling at the wrong-way alert would have cost more than holding.
+NOT_SENT = {"expiry_first": "Not sent: the 90-minute last-day alert was retired; the 1 PM and 30-minute alerts cover the day.",
+            "wrong_way": "Not sent: the wrong-way alert was retired; selling at it would have cost more than holding."}
+HOUR_NOT_SENT = ("Not sent: the one-hour alert goes out only for an option with 3 days or less to expiry that is down 30% or "
+                 "more. Small red at the hour recovered; that did not.")
 
 
 def enabled() -> bool:
@@ -426,9 +437,17 @@ def carry_record(db: Session, exclude=()) -> str | None:
             f"{sum(1 for r in rows if r.expired_worthless)} expired worthless, {_money(sum(float(r.realized_pnl) for r in rows))}.")
 
 
+def not_sent(alert: PositionAlert, facts: dict | None) -> str | None:
+    """Why this alert stays off the phone, or None when it goes out. The one-hour alert is sent only with its
+    short-dated, deep-red words (``hold_facts`` found the days to expiry)."""
+    if alert.kind == "hold_hour" and (facts or {}).get("days") is None:
+        return HOUR_NOT_SENT
+    return NOT_SENT.get(alert.kind)
+
+
 def hold_facts(db: Session, alert: PositionAlert, now: float) -> dict:
     """What a one-hour message says when the position is short-dated and deep red: the calendar days to expiry and the
-    owner's record. Empty for any other position; a failure never holds the alert back."""
+    owner's record. Empty for any other position, and then the alert is not sent (``not_sent``); a failure reads as empty."""
     facts = {"days": None, "record": None}
     try:
         if alert.gain_pct is None or alert.gain_pct > DEEP_RED_PCT + 1e-9:  # exactly 30% down counts, whatever the float says
@@ -1037,7 +1056,11 @@ class PositionAlerts:
                      else giveback_facts(db) if alert.kind == "giveback"
                      else hold_facts(db, alert, _epoch(alert.detected_at)) if alert.kind == "hold_hour"
                      else morning_facts(db, alert) if alert.kind == "same_day_1pm" else None)
-            if alert.kind in ("expiry_eve", "expiry_first", "expiry_final", "same_day_1pm"):
+            if (reason := not_sent(alert, facts)) is not None:
+                alert.delivery, alert.last_error = "held", reason
+                db.commit()
+                return
+            if alert.kind in ("expiry_eve", "expiry_final", "same_day_1pm"):
                 facts = {**(facts or {}), "underlying": self._underlying_last(alert)}
             title, body, priority = message(alert, _clock_label(_minute_of(close)) if close else None,
                                             max(1, int((close - now) // 60)) if close else None, facts,
@@ -1057,6 +1080,8 @@ class PositionAlerts:
             try:
                 _, image_state = phone.send(title, body + ticket.append, kind=alert.kind, image=image, priority=priority, tags=("warning",),
                                             path=path, direct_click=True, more=more, broker_link=robinhood_link(db, alert),
+                                            # A day-before-expiry alert on a green position is a reminder, not a risk: no sound.
+                                            sound=False if alert.kind == "expiry_eve" and alert.gain is not None and alert.gain >= 0 else None,
                                             # With the desk on: Close and Trim links, and Why? alone as a reply button.
                                             # Without it: the four answers (ntfy keeps ANSWER_ACTIONS).
                                             **({"buttons": (("Why?", f"why:{alert.id}"),), "keep_links": True} if path.startswith("/copilot-lab")

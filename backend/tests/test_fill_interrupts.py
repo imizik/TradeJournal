@@ -61,6 +61,9 @@ def on_wednesday(monkeypatch):
                  "ALERT_APP_URL"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("PING_IMAGES_ENABLED", "false")
+    # Most tests here drive the message, the outbox and the policy with every pattern line on; the lines the November 25,
+    # 2026 ping review took off the phone have their own test below.
+    monkeypatch.setattr(fill_interrupts, "NOT_SENT", frozenset({"large_size", "late_short_dated"}))
 
 
 @pytest.fixture
@@ -435,6 +438,21 @@ def test_an_earlier_fill_whose_email_comes_late_stays_on_the_same_position(engin
         held = copilot_desk._interrupt_trade(db, db.get(type(later), later.id))  # the ping card still finds the position
         assert held is not None and held.status == "open"
         assert fill_interrupts.note(db, held, later.id, 0) is not None  # its Noted lands on the trade the card names
+
+
+SHIPPED_NOT_SENT = fill_interrupts.NOT_SENT
+
+
+def test_the_put_green_day_and_ticker_lines_are_not_sent_and_adding_to_a_loser_still_is(engine, world, sent, monkeypatch):
+    monkeypatch.setattr(fill_interrupts, "NOT_SENT", SHIPPED_NOT_SENT)
+    assert SHIPPED_NOT_SENT == {"large_size", "late_short_dated", "ticker_record", "put_entry", "opened_green"}
+    clock, interrupts = world
+    fill(engine, ny("10:05"), qty=1, price=310)  # a put: judged, nothing to say on the phone
+    tick(clock, interrupts, "10:06")
+    fill(engine, ny("10:40"), qty=1, price=250)  # below cost
+    tick(clock, interrupts, "10:41")
+    assert [(r.kinds, r.delivery) for r in rows(engine)] == [("", "none"), ("add_to_loser", "sent")]
+    assert [t for t, _, _ in sent] == ["Pattern: NBIS 160P"]
 
 
 def test_scaling_in_repeats_only_adding_to_a_loser(engine, world, sent):

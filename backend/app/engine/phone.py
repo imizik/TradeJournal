@@ -29,7 +29,9 @@ log = logging.getLogger(__name__)
 # Two tiers (docs/phone-pings.md § Two tiers): only a ping about risk on an open position makes a sound. Everything else
 # (Radar, briefs, paper, plan nudges, reviews, the companion, digests) arrives silently: Telegram's
 # ``disable_notification``, ntfy's low priority. A fill-time pattern interrupt is loud only for its size-by-adding
-# rule (the sender says, with ``loud``).
+# rule, and a day-before-expiry alert is silent on a green position (the sender says, with ``sound``).
+# The November 25, 2026 ping review retired some of these kinds at their senders (``expiry_first``, ``wrong_way``, the
+# one-hour alert outside its deep-red short-dated case, ``day_loss``): they are recorded and never sent.
 LOUD = frozenset({"giveback", "hold_hour", "expiry_first", "expiry_final", "expiry_eve", "wrong_way", "no_exit", "same_day_1pm",
                   "day_loss", "day_green", "plan_size", "plan_exit", "plan_late", "hold_check_in", "invalidation", "target", "time_stop", "level_alert"})
 SILENT = 2  # Telegram sends priority 2 or lower without a sound; ntfy's 2 is "low": no sound or vibration
