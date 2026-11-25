@@ -6,7 +6,8 @@ long option contract (a call for up, a put for down) with the same bracket for e
 - take profit when the contract's bid is at least ``TAKE_PROFIT`` (+20%) over the price paid;
 - stop when its bid is ``STOP`` (15%) or more under it;
 - a time stop ``HOLD_MINUTES`` (60) after the entry;
-- flat ``FLAT_MINUTES`` before the regular close, so nothing is held overnight or into expiry.
+- flat ``FLAT_MINUTES`` before the regular close, so nothing is held overnight or into expiry; nothing is entered in
+  those minutes either.
 
 Fills are the shadow book's and the setup scanner's: the ask of the first quote whose bid and ask both updated after
 the idea (``shadow_book.entry_fill``), the bid of the first fresh quote at or after the exit condition, $0.65 a side
@@ -390,6 +391,8 @@ class ProvingGround:
             for intake in (self._radar, self._flags, self._open_window, self._jo):
                 if intake in (self._open_window, self._jo) and not WINDOW[0] <= minute < WINDOW[1]:
                     continue
+                if intake == self._flags and now >= close_at - FLAT_MINUTES * 60:  # ==: a bound method is a new object each time
+                    continue  # nothing new in the minutes the bracket is flat; a flag this late is not an idea
                 try:  # one source failing never stops the others or the exits
                     intake(today, now, picks)
                 except Exception:
@@ -506,6 +509,10 @@ class ProvingGround:
                                   note=_note(row, f"session {row['day']} ended with the trade still {row['state']}; nothing is carried overnight"))
             elif not inside:
                 continue
+            elif row["state"] == "pending" and close_at is not None and now >= close_at - FLAT_MINUTES * 60:
+                # the bracket is flat from here: an entry now could not be closed in this session
+                self.store.update(row["id"], "pending", state="unresolved",
+                                  note=_note(row, f"no fresh option quote before the last {FLAT_MINUTES} minutes of the session"))
             elif row["state"] == "pending" and now - row["created_at"] > ENTRY_WINDOW_SECONDS:
                 self.store.update(row["id"], "pending", state="unresolved", note=_note(row, "no fresh option quote within 2 minutes"))
             elif (row["state"] == "pending" and row["source"] in FLAG_SOURCES

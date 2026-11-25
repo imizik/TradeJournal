@@ -119,6 +119,17 @@ def test_radar_cards_and_jo_picks_are_entered_once(tmp_path):
     assert w.picked.count(("AMD", "down")) == 1
 
 
+def test_radar_cards_are_taken_all_session_not_only_in_the_open_window(tmp_path):
+    w = World(tmp_path)
+    with Session(w.engine) as db:
+        db.add(RadarSetup(event_id="rev-1", session_date=DAY.isoformat(), rule_version="v1", kind="gap_reversal", symbol="COIN",
+                          direction="down", entry=10, invalidation=10.5, contract_json=json.dumps(contract("COIN1")),
+                          created_at=datetime.fromtimestamp(et("11:30"), UTC).replace(tzinfo=None)))
+        db.commit()
+    assert w.at("11:30")[("radar_setup", "COIN")]["state"] == "pending"
+    assert w.picked == []  # the 9:45 rule and Jo's picks stay inside their window
+
+
 def test_anything_left_after_its_session_is_unresolved(tmp_path):
     w = World(tmp_path)
     w.store.add("open_window", "2026-11-23:MU", "2026-11-23", "MU", "up", contract("MU1"), et("09:45") - 86400)
@@ -308,6 +319,19 @@ def test_a_picked_flag_must_also_enter_inside_the_flags_window(tmp_path):
     early.at("10:31")
     rows = early.at("10:32", AMD261218C00090000=quote("AMD261218C00090000", 7.9, 8.1, et("10:32")))
     assert rows[("radar_flag_far", "AMD")]["state"] == "open" and rows[("radar_flag_far", "AMD")]["entry"] == 8.1
+
+
+def test_nothing_is_entered_once_the_bracket_is_flat(tmp_path):
+    w = World(tmp_path)
+    flags = [_flag("AMD", "15:53", "found")]
+    w.ground.flags = lambda day: flags
+    w.ground.pick_far = lambda symbol, direction, today: contract(f"{symbol}261218C00090000")
+    assert w.at("15:54")[("radar_flag_far", "AMD")]["state"] == "pending"
+    flags.append(_flag("COIN", "15:56", "found"))
+    rows = w.at("15:56", AMD261218C00090000=quote("AMD261218C00090000", 7.9, 8.1, et("15:56")))  # a fresh quote, too late to get out
+    assert rows[("radar_flag_far", "AMD")]["state"] == "unresolved" and rows[("radar_flag_far", "AMD")]["entry"] is None
+    assert rows[("radar_flag_far", "AMD")]["note"] == "headline check: found · no fresh option quote before the last 5 minutes of the session"
+    assert ("radar_flag_far", "COIN") not in rows and ("radar_flag_news", "COIN") not in rows  # a flag this late is not an idea
 
 
 def test_a_trade_taken_before_the_headline_check_learns_the_answer(tmp_path):

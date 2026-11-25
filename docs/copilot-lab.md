@@ -2912,7 +2912,8 @@ phone and neither source sends a ping. They need Radar recording (`RADAR_ENABLED
 read read-only.
 
 The bracket, the same for every source: out when the contract's bid is +20% over the ask paid, or 15% under it, 60
-minutes after the entry, or 5 minutes before the close, whichever comes first; nothing is held overnight or into expiry.
+minutes after the entry, or 5 minutes before the close, whichever comes first; nothing is held overnight or into expiry,
+and nothing is entered in those last 5 minutes.
 Entries are the ask of the first quote whose bid and ask both updated after the idea (none within 2 minutes:
 unresolved); exits the bid of the first fresh quote at or after the condition; $0.65 a side; the bracket is checked once
 a minute, so it fills at that minute's bid, never at the bracket price. A pessimistic result at twice the spread is kept
