@@ -1203,6 +1203,35 @@ class TradeCaptureNote(SQLModel, table=True):
     source_key: Optional[str] = Field(default=None, index=True)  # Fill.raw_email_id of the trade's first entry
 
 
+class TradeAiTag(SQLModel, table=True):
+    """One model-written review tag per closed long option trade: its setup, its mistakes and whether it broke the cut
+    rule (held a 0-3 DTE option down 20%+ past an hour, or added below cost). Written by a one-off batch
+    (``scripts/load_trade_ai_tags.py``), read by ``engine/trade_ai_tags.py``. Anchored like a desk note, in the
+    account and the ``raw_email_id`` of the trade's first entry fill, so a trade rebuild keeps its tag. Never changes a
+    trade, fill or money value. ``rule_broken_computed`` is the deterministic check from fills and minute bars;
+    ``broke_cut_rule`` is the model's reading of the same rule."""
+
+    __tablename__ = "trade_ai_tag"
+    __table_args__ = (UniqueConstraint("account_id", "source_key", name="uq_trade_ai_tag_anchor"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    account_id: uuid.UUID = Field(index=True)
+    source_key: str = Field(index=True)  # Fill.raw_email_id of the trade's first entry
+    trade_id_at_tagging: Optional[uuid.UUID] = None  # informational: trade ids change on rebuild
+    setup: str
+    mistakes_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    primary_mistake: str = "none"
+    broke_cut_rule: bool = False
+    rule_broken_computed: bool = False
+    grade: Optional[str] = None
+    confidence: Optional[float] = None
+    rationale: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    facts_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    model: str
+    batch_id: Optional[str] = None
+    tagged_at: datetime = Field(default_factory=datetime.utcnow)  # UTC
+
+
 class StrategyDefinition(SQLModel, table=True):
     """Named Pine strategy whose code and assumptions evolve through versions."""
 
