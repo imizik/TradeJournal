@@ -57,7 +57,7 @@ class _Wednesday(date):
 @pytest.fixture(autouse=True)
 def on_wednesday(monkeypatch):
     monkeypatch.setattr(reconstructor, "expiry_cutoff", lambda now=None: _Wednesday.today())
-    for name in ("FILL_INTERRUPTS_ENABLED", "PING_BUDGET_INTERRUPT", "PING_QUIET_MINUTES", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+    for name in ("FILL_INTERRUPTS_ENABLED", "CUT_LINE_PINGS", "PING_BUDGET_INTERRUPT", "PING_QUIET_MINUTES", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
                  "ALERT_APP_URL"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("PING_IMAGES_ENABLED", "false")
@@ -743,3 +743,61 @@ def test_a_line_the_policy_merged_into_another_ping_was_said_there(engine, world
     fill(engine, ny("10:20"), qty=1, price=320)
     tick(clock, interrupts, "10:21")
     assert [(r.kinds, r.delivery) for r in rows(engine)] == [("put_entry", "held"), ("", "none")]
+
+
+# ------------------------------------------------------------------ the cut line
+
+def test_the_cut_line_is_thirty_percent_under_a_short_dated_position_s_first_buy():
+    first = option_fill(price=310, hhmm="10:00", expiration=FRI)  # bought Wednesday: two calendar days left
+    assert fill_interrupts.cut_line(first, []) == pytest.approx(217.0)
+    assert fill_interrupts.cut_line(option_fill(expiration=date(2026, 10, 24)), []) is not None  # three days: the last one in
+    assert fill_interrupts.cut_line(option_fill(expiration=date(2026, 10, 25)), []) is None
+    assert fill_interrupts.cut_line(option_fill(expiration=date(2026, 10, 20)), []) is None  # already expired
+    assert fill_interrupts.cut_line(option_fill(price=250), [first]) is None  # an add never moves the line
+    assert fill_interrupts.cut_line(option_fill(side="sell_to_open"), []) is None
+    assert fill_interrupts.cut_line({**lot("buy", 120), "instrument_type": "stock"}, []) is None
+    assert fill_interrupts.cut_lines({**first, "contracts": 2}, 217.0) == ["Cut line $2.17: 30% under your $3.10 entry, −$186 on 2 contracts"]
+    same_day = option_fill(price=150, hhmm="12:59", expiration=WED)
+    assert fill_interrupts.cut_lines(same_day, 105.0) == ["Cut line $1.05: 30% under your $1.50 entry, −$45 on 1 contract",
+                                                          "Expires today: flat by 1 PM New York"]
+    assert len(fill_interrupts.cut_lines(option_fill(price=150, hhmm="13:00", expiration=WED), 105.0)) == 1  # 1 PM has passed
+
+
+def test_the_cut_line_needs_its_own_switch_and_the_interrupts(engine, world, sent, monkeypatch):
+    clock, interrupts = world
+    monkeypatch.setenv("CUT_LINE_PINGS", "true")  # without FILL_INTERRUPTS_ENABLED nothing runs it
+    assert not fill_interrupts.cut_line_enabled()
+    monkeypatch.setenv("FILL_INTERRUPTS_ENABLED", "true")
+    monkeypatch.delenv("CUT_LINE_PINGS")
+    fill(engine, ny("10:00"), "AMD", option_type="call", strike=210, price=150)
+    tick(clock, interrupts, "10:01")
+    assert [(r.kinds, r.delivery) for r in rows(engine)] == [("", "none")] and not sent
+
+
+def test_a_short_dated_buy_gets_its_cut_line_once_ahead_of_the_pattern_lines(engine, world, sent, monkeypatch):
+    monkeypatch.setenv("FILL_INTERRUPTS_ENABLED", "true")
+    monkeypatch.setenv("CUT_LINE_PINGS", "true")
+    monkeypatch.setenv("PING_BUDGET_INTERRUPT", "1")
+    clock, interrupts = world
+    fill(engine, ny("10:00"), "AMD", option_type="call", strike=210, qty=2, price=150, expiration=WED)  # same-day, no pattern
+    fill(engine, ny("10:00"), "PLTR", option_type="call", strike=110, price=150, expiration=date(2026, 10, 30))  # nine days: no line
+    tick(clock, interrupts, "10:01")
+    fill(engine, ny("10:02"), qty=2, price=310)  # a put with two days left: the cut line, then the put record
+    tick(clock, interrupts, "10:03")
+    fill(engine, ny("10:05"), qty=1, price=250)  # an add below cost three minutes on
+    tick(clock, interrupts, "10:06")
+    found = rows(engine)
+    assert [(r.ticker, r.kinds, r.delivery) for r in found] == [
+        ("AMD", "cut_line", "sent"), ("PLTR", "", "none"), ("NBIS", "cut_line,put_entry", "sent"), ("NBIS", "add_to_loser", "sent")]
+    assert [(t, b) for t, b, _ in sent] == [
+        ("Cut line $1.05: AMD 210C", "Cut line $1.05: 30% under your $1.50 entry, −$90 on 2 contracts\nExpires today: flat by 1 PM New York"),
+        ("Cut line $2.17: NBIS 160P", "Cut line $2.17: 30% under your $3.10 entry, −$186 on 2 contracts\n"
+                                      "Put entry: puts −$350 over 6 trades; calls 4, too few to read\nYour record, not advice."),
+        ("Pattern: NBIS 160P", "Adding to a loser: 1 past add, too few to read\nYour record, not advice."),
+    ]
+    assert [kw["priority"] for _, _, kw in sent] == [4, 4, 2]  # the cut line makes a sound; a pattern line alone does not
+    with Session(engine) as db:
+        pings = db.exec(select(PhonePing).order_by(PhonePing.decided_at)).all()
+        # Its own kind: no budget (the pattern lines' one message is the add's), and the add is not held by the quiet window.
+        assert [(p.kind, p.decision) for p in pings] == [("cut_line", "sent"), ("cut_line", "sent"), ("interrupt", "sent")]
+        assert pings[1].anchor == pings[2].anchor
