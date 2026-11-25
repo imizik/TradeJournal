@@ -6,7 +6,8 @@ long option contract (a call for up, a put for down) with the same bracket for e
 - take profit when the contract's bid is at least ``TAKE_PROFIT`` (+20%) over the price paid;
 - stop when its bid is ``STOP`` (15%) or more under it;
 - a time stop ``HOLD_MINUTES`` (60) after the entry;
-- flat ``FLAT_MINUTES`` before the regular close, so nothing is held overnight or into expiry.
+- flat ``FLAT_MINUTES`` before the regular close, so nothing is held overnight or into expiry; nothing is entered in
+  those minutes either.
 
 Fills are the shadow book's and the setup scanner's: the ask of the first quote whose bid and ask both updated after
 the idea (``shadow_book.entry_fill``), the bid of the first fresh quote at or after the exit condition, $0.65 a side
@@ -22,6 +23,14 @@ Sources (``SOURCES``):
   says put, short, fade, bearish or breakdown is down and anything else is up (``jo_direction``).
 - ``open_window``: the 9:45-10:00 window of the October 21 behavior audit, as a rule: at 9:45 MU and NBIS each go in
   the direction of their move from the day's open, on ``pick_contract``'s contract.
+- ``radar_flag_news`` and ``radar_flag_far``: the two ideas the November 25, 2026 Radar audit left open. A Radar stock
+  flag (a stock ahead of or behind SPY or its sector; ``FLAG_KINDS``) is followed, the first one per stock a day, and
+  only while it is at most ``FLAG_WINDOW_SECONDS`` old: picked and entered inside that window, or unresolved.
+  ``radar_flag_news`` takes the flags whose first headline check (``radar_news``) found a headline, on
+  ``pick_contract``'s contract: a move with a reason. ``radar_flag_far`` takes
+  every flag on ``radar_setup.pick_far_contract``'s contract (three to six weeks out, about 0.60 delta, spread at most
+  5% of the mid), where the round trip costs less; its note keeps the headline status, so the two halves can be told
+  apart later. The flags themselves stay silent on the phone; neither source sends a ping.
 
 A source **graduates** before its pings may go out unlabeled; until then ``label`` prefixes them ``PAPER``. Only
 Radar setup pings exist today; Jo's brief and the 9:45 rule send no trade pings, so for them graduation shows on the
@@ -31,7 +40,7 @@ board only. The rule (``judge``) asks whether the record could be luck, not only
 - one session's trades are added into one number, because trades taken the same morning rise and fall together and
   are not separate evidence;
 - the score is the average session over its standard error (a t statistic), and it must reach ``GRADUATE_SCORE``
-  (3.0) on at least ``GRADUATE_DAYS`` (20) sessions and ``GRADUATE_TRADES`` (40) closed trades, with the
+  (3.2) on at least ``GRADUATE_DAYS`` (20) sessions and ``GRADUATE_TRADES`` (40) closed trades, with the
   twice-the-spread dollars above zero as well;
 - the record is judged only at every ``REVIEW_DAYS``th (10th) session, on the sessions up to that one, and a session
   counts from the day after it (never while its trades are still closing), so looking at the board every minute
@@ -40,9 +49,10 @@ board only. The rule (``judge``) asks whether the record could be luck, not only
 
 The bar is set for all of ``SOURCES`` at once: with every source at break-even after costs, the chance that any one
 graduates within a year of sessions is about 5% (``tests/test_proving_ground.py`` simulates it, and fails if a
-source is added without raising the bar). The rule it replaced, 40 closed trades net above zero, passed a break-even
+source is added without raising the bar; it went from 3.0 to 3.2 when the two Radar flag sources joined the first
+three). The rule it replaced, 40 closed trades net above zero, passed a break-even
 source about half the time at trade 40 and nine times in ten within a year. The cost is time: at two trades a
-session, a source with about 65% of its trades green typically needs about 40 sessions, one at 60% about 80, and
+session, a source with about 65% of its trades green typically needs about 50 sessions, one at 60% about 90, and
 one at 55% is as likely as not still unproven after a year (break-even is about 49%). A changed rule is a new source: give it a new key rather than carrying the record on.
 
 Paper only: quotes and option chains are read, nothing is placed, sized or sent. Storage is a SQLite file of its own
@@ -72,7 +82,12 @@ from app.engine.shadow_book import entry_fill
 
 log = logging.getLogger(__name__)
 
-SOURCES = {"radar_setup": "Radar setups", "jo_morning": "Jo's morning picks", "open_window": "9:45 MU/NBIS rule"}
+SOURCES = {"radar_setup": "Radar setups", "jo_morning": "Jo's morning picks", "open_window": "9:45 MU/NBIS rule",
+           "radar_flag_news": "Radar flags with a headline", "radar_flag_far": "Radar flags, 3-6 week contract"}
+FLAG_KINDS = ("relative_to_spy", "relative_to_sector")
+FLAG_SOURCES = ("radar_flag_news", "radar_flag_far")
+FLAG_WINDOW_SECONDS = 180  # a flag older than this is never picked or entered: the idea is the move as it was flagged
+TAG = "headline check: "  # a flag trade's note starts with its flag's first headline check and keeps it
 TAKE_PROFIT = 0.20
 STOP = 0.15
 HOLD_MINUTES = 60
@@ -84,7 +99,7 @@ MAX_PICKS = 2  # contracts picked a minute: two option reads each, out of the sh
 GRADUATE_TRADES = 40
 GRADUATE_DAYS = 20  # sessions with a closed trade
 REVIEW_DAYS = 10  # the record is judged at every tenth session, on the sessions up to it
-GRADUATE_SCORE = 3.0  # the average session over its standard error
+GRADUATE_SCORE = 3.2  # the average session over its standard error; set for five sources (3.0 for the first three)
 RUN_SECONDS = 60
 RECENT = 10
 _PLAN = {"instrument": "calls", "direction": "long"}  # buy to open, sell to close: ask in, bid out
@@ -126,15 +141,23 @@ class Store:
         return db
 
     def add(self, source: str, ref: str, day: str, symbol: str, direction: str, contract: dict | None,
-            created_at: float, note: str | None = None) -> bool:
-        """One idea, once: False when (source, ref) is already there. No contract means unresolved at once."""
+            created_at: float, note: str | None = None, tag: str | None = None) -> bool:
+        """One idea, once: False when (source, ref) is already there. No contract means unresolved at once, with
+        ``note`` as the reason; ``tag`` is a note kept either way (a later state change may replace it)."""
         state = "pending" if contract else "unresolved"
+        note = " · ".join(n for n in (tag, note if contract is None else None) if n) or None
         with closing(self._connect()) as db, db:
             cur = db.execute("INSERT OR IGNORE INTO trade (source, ref, day, symbol, direction, contract, created_at, state, note) "
                              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                              (source, ref, day, symbol, direction, json.dumps(contract, sort_keys=True) if contract else None,
-                              created_at, state, note if contract is None else None))
+                              created_at, state, note))
             return cur.rowcount == 1
+
+    def retag(self, source: str, ref: str, old: str, new: str) -> None:
+        """Swap ``old`` for ``new`` at the start of one idea's note; nothing else about the row changes."""
+        with closing(self._connect()) as db, db:
+            db.execute("UPDATE trade SET note = ? || substr(note, ?) WHERE source = ? AND ref = ? AND substr(note, 1, ?) = ?",
+                       (new, len(old) + 1, source, ref, len(old), old))
 
     def has(self, source: str, ref: str) -> bool:
         with closing(self._connect()) as db:
@@ -165,6 +188,33 @@ def _read_only(path: Path) -> list[dict]:
     with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)) as db:
         db.row_factory = sqlite3.Row
         return [_row(r) for r in db.execute("SELECT * FROM trade ORDER BY id")]
+
+
+def radar_flags(day: date) -> list[dict]:
+    """The day's Radar stock flags, oldest first: {event_id, symbol, direction, first_seen (epoch), news}. ``news`` is
+    the status of the flag's first headline check (found, none_found, unavailable), or None before any check. Reads the
+    Radar file read-only; an unset or unreadable file is no flags."""
+    path = os.environ.get("RADAR_STORE", "").strip()
+    if not path or not os.path.isabs(path) or not Path(path).exists():
+        return []
+    from app.engine.radar_store import RadarStore
+    store = RadarStore(path, read_only=True)
+    out = []
+    for event in store.events(day.isoformat()):
+        symbols = event.get("symbols") or []
+        if event.get("kind") not in FLAG_KINDS or len(symbols) != 1 or event.get("direction") not in ("up", "down"):
+            continue
+        checks = store.news_checks(event["event_id"])
+        out.append({"event_id": event["event_id"], "symbol": symbols[0], "direction": event["direction"],
+                    "first_seen": datetime.fromisoformat(event["first_seen_at"].replace("Z", "+00:00")).timestamp(),
+                    "news": checks[0]["status"] if checks else None})
+    return sorted(out, key=lambda f: f["first_seen"])
+
+
+def _note(row: dict, note: str) -> str:
+    """``note`` for a row, behind the row's headline tag when it has one."""
+    tag = (row.get("note") or "").split(" · ")[0]
+    return f"{tag} · {note}" if tag.startswith(TAG) else note
 
 
 def _row(r: sqlite3.Row) -> dict:
@@ -304,12 +354,16 @@ def _epoch(value: datetime) -> float:
 
 class ProvingGround:
     def __init__(self, engine, calendar, *, store: Store | None = None, quotes=tradier.get_quotes_once,
-                 pick: Callable | None = None, clock: Callable[[], float] = time.time):
+                 pick: Callable | None = None, pick_far: Callable | None = None, flags: Callable[[date], list[dict]] = radar_flags,
+                 clock: Callable[[], float] = time.time):
         self.engine, self.calendar, self.quotes, self.clock = engine, calendar, quotes, clock
         self.store = store or Store(store_path())
         if pick is None:
             from app.engine.radar_setup import pick_contract as pick
-        self.pick = pick
+        if pick_far is None:
+            from app.engine.radar_setup import pick_far_contract as pick_far
+        self.pick, self.pick_far, self.flags = pick, pick_far, flags
+        self._flag_seen: dict[str, float] = {}  # ref -> when its flag was first seen, re-read every pass
         self._last_run = 0.0
         self.last_error: str | None = None
 
@@ -334,9 +388,11 @@ class ProvingGround:
                     if inside else None)
         if inside:
             picks = [MAX_PICKS]
-            for intake in (self._radar, self._open_window, self._jo):
-                if intake is not self._radar and not WINDOW[0] <= minute < WINDOW[1]:
+            for intake in (self._radar, self._flags, self._open_window, self._jo):
+                if intake in (self._open_window, self._jo) and not WINDOW[0] <= minute < WINDOW[1]:
                     continue
+                if intake == self._flags and now >= close_at - FLAT_MINUTES * 60:  # ==: a bound method is a new object each time
+                    continue  # nothing new in the minutes the bracket is flat; a flag this late is not an idea
                 try:  # one source failing never stops the others or the exits
                     intake(today, now, picks)
                 except Exception:
@@ -354,6 +410,38 @@ class ProvingGround:
         for card in cards:
             self.store.add("radar_setup", card.event_id, card.session_date, card.symbol, card.direction,
                            json.loads(card.contract_json), _epoch(card.created_at))
+
+    def _flags(self, today: date, now: float, picks: list[int]) -> None:
+        """Radar stock flags, the first per stock a day, into the two flag sources (the module docstring has the rule).
+
+        A flag is one idea per source by (day, symbol). The headline source waits for the flag's first headline check
+        and takes the flag only when that found one. An idea older than ``FLAG_WINDOW_SECONDS`` and still untaken (the
+        pick budget ran out, the loop was down, or the headline check came late) is written down as unresolved, never
+        entered late; ``_step`` holds a picked idea that is still waiting for its fresh quote to the same window. A
+        trade picked before its flag's first headline check has its note corrected when the check lands."""
+        day, first = today.isoformat(), {}
+        for flag in self.flags(today):
+            first.setdefault(flag["symbol"], flag)
+        self._flag_seen = {f"{day}:{symbol}": flag["first_seen"] for symbol, flag in first.items()}
+        for symbol, flag in first.items():
+            ref, late = f"{day}:{symbol}", now - flag["first_seen"] > FLAG_WINDOW_SECONDS
+            news = flag["news"] or "not checked"
+            for source, chooser in (("radar_flag_far", self.pick_far), ("radar_flag_news", self.pick)):
+                if self.store.has(source, ref):
+                    if flag["news"]:  # a trade taken before its flag's first headline check learns the answer
+                        self.store.retag(source, ref, f"{TAG}not checked", f"{TAG}{news}")
+                    continue
+                if source == "radar_flag_news" and flag["news"] != "found":
+                    continue  # no headline (yet): not this source's idea, and no row
+                if late:
+                    self.store.add(source, ref, day, symbol, flag["direction"], None, now,
+                                   note="not picked within 3 minutes of the flag", tag=f"{TAG}{news}")
+                    continue
+                if picks[0] <= 0:
+                    continue  # the next minute tries again, inside the window
+                picks[0] -= 1
+                self.store.add(source, ref, day, symbol, flag["direction"], chooser(symbol, flag["direction"], today), now,
+                               note="no liquid contract", tag=f"{TAG}{news}")
 
     def _open_window(self, today: date, now: float, picks: list[int]) -> None:
         day = today.isoformat()
@@ -415,14 +503,23 @@ class ProvingGround:
                                               {"bid": mark, "ask": row["mark_ask"] or mark}, int(row["contract"].get("multiplier") or 100))
                 self.store.update(row["id"], "open", state="closed", exit=mark, reason="no_exit", pnl=scored["pnl"],
                                   pnl_2x=scored["pnl_2x_spread"],
-                                  note=f"no fresh exit quote in session {row['day']}; closed at the last bid seen")
+                                  note=_note(row, f"no fresh exit quote in session {row['day']}; closed at the last bid seen"))
             elif row["day"] != today.isoformat():
                 self.store.update(row["id"], row["state"], state="unresolved",
-                                  note=f"session {row['day']} ended with the trade still {row['state']}; nothing is carried overnight")
+                                  note=_note(row, f"session {row['day']} ended with the trade still {row['state']}; nothing is carried overnight"))
             elif not inside:
                 continue
+            elif row["state"] == "pending" and close_at is not None and now >= close_at - FLAT_MINUTES * 60:
+                # the bracket is flat from here: an entry now could not be closed in this session
+                self.store.update(row["id"], "pending", state="unresolved",
+                                  note=_note(row, f"no fresh option quote before the last {FLAT_MINUTES} minutes of the session"))
             elif row["state"] == "pending" and now - row["created_at"] > ENTRY_WINDOW_SECONDS:
-                self.store.update(row["id"], "pending", state="unresolved", note="no fresh option quote within 2 minutes")
+                self.store.update(row["id"], "pending", state="unresolved", note=_note(row, "no fresh option quote within 2 minutes"))
+            elif (row["state"] == "pending" and row["source"] in FLAG_SOURCES
+                  and now - self._flag_seen.get(row["ref"], now) > FLAG_WINDOW_SECONDS):
+                # picked late in the flag's window and still no fresh quote: the window is for the entry too
+                self.store.update(row["id"], "pending", state="unresolved",
+                                  note=_note(row, "no fresh option quote within 3 minutes of the flag"))
             else:
                 wanted.append(row)
         if not wanted:

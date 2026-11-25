@@ -119,6 +119,17 @@ def test_radar_cards_and_jo_picks_are_entered_once(tmp_path):
     assert w.picked.count(("AMD", "down")) == 1
 
 
+def test_radar_cards_are_taken_all_session_not_only_in_the_open_window(tmp_path):
+    w = World(tmp_path)
+    with Session(w.engine) as db:
+        db.add(RadarSetup(event_id="rev-1", session_date=DAY.isoformat(), rule_version="v1", kind="gap_reversal", symbol="COIN",
+                          direction="down", entry=10, invalidation=10.5, contract_json=json.dumps(contract("COIN1")),
+                          created_at=datetime.fromtimestamp(et("11:30"), UTC).replace(tzinfo=None)))
+        db.commit()
+    assert w.at("11:30")[("radar_setup", "COIN")]["state"] == "pending"
+    assert w.picked == []  # the 9:45 rule and Jo's picks stay inside their window
+
+
 def test_anything_left_after_its_session_is_unresolved(tmp_path):
     w = World(tmp_path)
     w.store.add("open_window", "2026-11-23:MU", "2026-11-23", "MU", "up", contract("MU1"), et("09:45") - 86400)
@@ -160,7 +171,7 @@ def test_a_green_record_is_not_enough_to_graduate():
     # The rule this replaced: 40 trades, net above zero. Green by a little on wide swings is what luck looks like.
     noisy = pg.judge(closed("x", [[40.0, 40.0], [-38.0, -38.0]] * 10))
     assert sum(t["pnl"] for t in closed("x", [[40.0, 40.0], [-38.0, -38.0]] * 10)) > 0
-    assert not noisy["graduated"] and noisy["status"] == f"PAPER · score {noisy['score']:.1f} of 3.0, next look at day 30"
+    assert not noisy["graduated"] and noisy["status"] == f"PAPER · score {noisy['score']:.1f} of {pg.GRADUATE_SCORE:.1f}, next look at day 30"
     # Forty trades in one morning are one session's evidence, not forty.
     assert not pg.judge(closed("x", [[30.0] * 40]))["graduated"]
     # Green ask in, bid out but red at twice the spread: not yet.
@@ -249,3 +260,123 @@ def test_an_entered_trade_with_no_exit_quote_closes_at_its_last_bid_next_session
     row = next(t for t in w.store.trades() if t["symbol"] == "MU" and t["source"] == "open_window" and t["day"] == DAY.isoformat())
     assert (row["state"], row["reason"], row["exit"]) == ("closed", "no_exit", 1.8)
     assert row["pnl"] == round((1.8 - 2.0) * 100 - 1.3, 2)
+
+
+def _flag(symbol, at, news, direction="up", event_id=None):
+    return {"event_id": event_id or f"rv0-{symbol}", "symbol": symbol, "direction": direction, "first_seen": et(at), "news": news}
+
+
+def test_radar_flags_feed_the_headline_and_the_far_contract_sources(tmp_path):
+    w = World(tmp_path)
+    flags, far = [], []
+    w.ground.flags = lambda day: flags
+    w.ground.pick_far = lambda symbol, direction, today: far.append(symbol) or contract(f"{symbol}261218C00090000")
+    flags += [_flag("AMD", "10:30", "found"), _flag("COIN", "10:30", "none_found", "down"),
+              _flag("AMD", "10:31", "found", event_id="rv0-AMD-2")]  # a second flag in AMD the same day: not a second idea
+    rows = w.at("10:31")
+    assert rows[("radar_flag_far", "AMD")]["state"] == "pending" and rows[("radar_flag_news", "AMD")]["state"] == "pending"
+    assert rows[("radar_flag_far", "AMD")]["note"] == "headline check: found"
+    assert ("radar_flag_far", "COIN") not in rows  # two picks a minute: AMD's two contracts took them
+    rows = w.at("10:32")
+    assert rows[("radar_flag_far", "COIN")]["direction"] == "down" and rows[("radar_flag_far", "COIN")]["note"] == "headline check: none_found"
+    assert ("radar_flag_news", "COIN") not in rows  # no headline: not the headline source's idea
+    assert far == ["AMD", "COIN"] and w.picked == [("AMD", "up")]
+    w.at("10:33")
+    assert far == ["AMD", "COIN"] and w.picked == [("AMD", "up")] and len(w.store.trades()) == 3  # once each
+
+
+def test_a_flag_is_never_entered_late(tmp_path):
+    w = World(tmp_path)
+    flags = [_flag("MU", "10:30", None)]
+    w.ground.flags = lambda day: flags
+    w.ground.pick_far = lambda symbol, direction, today: None
+    rows = w.at("10:31")
+    assert rows[("radar_flag_far", "MU")]["state"] == "unresolved"  # no liquid far contract
+    assert rows[("radar_flag_far", "MU")]["note"] == "headline check: not checked · no liquid contract"
+    assert ("radar_flag_news", "MU") not in rows  # its headline check has not come yet
+    flags[0]["news"] = "found"
+    rows = w.at("10:40")  # the check came, but the flag is ten minutes old
+    assert rows[("radar_flag_news", "MU")]["state"] == "unresolved" and "not picked within 3 minutes" in rows[("radar_flag_news", "MU")]["note"]
+    flags.append(_flag("NBIS", "11:00", "found"))
+    rows = w.at("11:10")  # the loop was away when NBIS flagged
+    assert rows[("radar_flag_far", "NBIS")]["state"] == rows[("radar_flag_news", "NBIS")]["state"] == "unresolved"
+    assert w.picked == []
+
+
+def test_a_picked_flag_must_also_enter_inside_the_flags_window(tmp_path):
+    w = World(tmp_path)
+    w.ground.flags = lambda day: [_flag("AMD", "10:30", "found")]
+    w.ground.pick_far = lambda symbol, direction, today: contract(f"{symbol}261218C00090000")
+    rows = w.at("10:33")  # picked at the edge of the window, no fresh quote yet
+    assert rows[("radar_flag_far", "AMD")]["state"] == rows[("radar_flag_news", "AMD")]["state"] == "pending"
+    rows = w.at("10:34", AMD261218C00090000=quote("AMD261218C00090000", 7.9, 8.1, et("10:34")))  # a fresh quote, a minute late
+    assert rows[("radar_flag_far", "AMD")]["state"] == "unresolved" and rows[("radar_flag_far", "AMD")]["entry"] is None
+    assert rows[("radar_flag_far", "AMD")]["note"] == "headline check: found · no fresh option quote within 3 minutes of the flag"
+
+    early = World(tmp_path / "early")
+    early.ground.flags = lambda day: [_flag("AMD", "10:30", "found")]
+    early.ground.pick_far = lambda symbol, direction, today: contract(f"{symbol}261218C00090000")
+    early.at("10:31")
+    rows = early.at("10:32", AMD261218C00090000=quote("AMD261218C00090000", 7.9, 8.1, et("10:32")))
+    assert rows[("radar_flag_far", "AMD")]["state"] == "open" and rows[("radar_flag_far", "AMD")]["entry"] == 8.1
+
+
+def test_nothing_is_entered_once_the_bracket_is_flat(tmp_path):
+    w = World(tmp_path)
+    flags = [_flag("AMD", "15:53", "found")]
+    w.ground.flags = lambda day: flags
+    w.ground.pick_far = lambda symbol, direction, today: contract(f"{symbol}261218C00090000")
+    assert w.at("15:54")[("radar_flag_far", "AMD")]["state"] == "pending"
+    flags.append(_flag("COIN", "15:56", "found"))
+    rows = w.at("15:56", AMD261218C00090000=quote("AMD261218C00090000", 7.9, 8.1, et("15:56")))  # a fresh quote, too late to get out
+    assert rows[("radar_flag_far", "AMD")]["state"] == "unresolved" and rows[("radar_flag_far", "AMD")]["entry"] is None
+    assert rows[("radar_flag_far", "AMD")]["note"] == "headline check: found · no fresh option quote before the last 5 minutes of the session"
+    assert ("radar_flag_far", "COIN") not in rows and ("radar_flag_news", "COIN") not in rows  # a flag this late is not an idea
+
+
+def test_a_trade_taken_before_the_headline_check_learns_the_answer(tmp_path):
+    w = World(tmp_path)
+    flags = [_flag("AMD", "10:30", None)]
+    w.ground.flags = lambda day: flags
+    w.ground.pick_far = lambda symbol, direction, today: contract(f"{symbol}261218C00090000")
+    assert w.at("10:31")[("radar_flag_far", "AMD")]["note"] == "headline check: not checked"
+    flags[0]["news"] = "none_found"
+    rows = w.at("10:32", AMD261218C00090000=quote("AMD261218C00090000", 7.9, 8.1, et("10:32")))
+    assert rows[("radar_flag_far", "AMD")]["state"] == "open" and rows[("radar_flag_far", "AMD")]["note"] == "headline check: none_found"
+    assert w.picked == [] and len(rows) == 1  # not repicked, and still not the headline source's idea
+    flags[0]["news"] = "found"  # only the first answer is kept
+    rows = w.at("11:40", AMD261218C00090000=quote("AMD261218C00090000", 8.0, 8.2, et("11:40")))
+    assert rows[("radar_flag_far", "AMD")]["reason"] == "time_stop" and rows[("radar_flag_far", "AMD")]["note"] == "headline check: none_found"
+
+
+def test_radar_flags_are_read_from_the_radar_file(tmp_path, monkeypatch):
+    from app.engine.radar_store import RadarStore
+    path = tmp_path / "radar.sqlite"
+    store = RadarStore(path)
+    seen = datetime.fromtimestamp(et("10:30"), UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    for event_id, kind, symbols in (("a", "relative_to_spy", ["AMD"]), ("b", "group_move", ["AMD", "NVDA"]), ("c", "relative_to_sector", ["COIN"])):
+        with store._db() as db:
+            db.execute("INSERT INTO event(event_id, session_date, rule_version, universe_version, kind, first_seen_at, payload) VALUES(?,?,?,?,?,?,?)",
+                       (event_id, DAY.isoformat(), "radar-rules-v0", "u", kind, seen,
+                        json.dumps({"event_id": event_id, "kind": kind, "direction": "up", "symbols": symbols, "first_seen_at": seen})))
+    store.append_news({"event_id": "a", "checked_at": seen, "status": "none_found", "headlines": []})
+    store.append_news({"event_id": "a", "checked_at": seen, "status": "found", "headlines": []})  # the recheck is not read
+    assert pg.radar_flags(DAY) == []  # no Radar file configured
+    monkeypatch.setenv("RADAR_STORE", str(path))
+    assert [(f["symbol"], f["news"], f["first_seen"]) for f in pg.radar_flags(DAY)] == [("AMD", "none_found", et("10:30")), ("COIN", None, et("10:30"))]
+
+
+def test_the_far_contract_is_weeks_out_and_nearer_the_money():
+    from app.engine import radar_setup
+
+    def listed(symbol, days, delta, bid, ask, volume=50):
+        return SimpleNamespace(symbol=symbol, expiration=date.fromordinal(DAY.toordinal() + days), option_type="call", strike=100.0,
+                               multiplier=100, bid=bid, ask=ask, delta=delta, open_interest=900, volume=volume, bid_time=None, ask_time=None)
+
+    chains = {7: [listed("NEAR", 7, 0.35, 1.9, 2.0, 500)],
+              28: [listed("FAR60", 28, 0.61, 7.9, 8.1), listed("FAR35", 28, 0.35, 3.0, 3.1), listed("WIDE", 28, 0.60, 7.0, 8.0)]}
+    options = SimpleNamespace(expirations=lambda symbol, timeout=None: [date.fromordinal(DAY.toordinal() + d) for d in chains],
+                              chain=lambda symbol, expiration, timeout=None: SimpleNamespace(contracts=chains[(expiration - DAY).days]))
+    assert radar_setup.pick_contract("AMD", "up", DAY, options=options)["symbol"] == "NEAR"
+    far = radar_setup.pick_far_contract("AMD", "up", DAY, options=options)
+    assert far["symbol"] == "FAR60" and far["spread_pct"] < 5
