@@ -46,7 +46,8 @@ from sqlmodel import Session, select
 from app.engine import note_digest
 from app.engine.analytics import wall_time
 from app.engine.chart_math import ET
-from app.engine.fill_interrupts import BUILT_DAYS, _order
+from app.engine.chart_journal import OPEN_SIDES
+from app.engine.fill_interrupts import BUILT_DAYS
 from app.engine.position_alerts import AFTERNOON_MINUTE, DEEP_RED_PCT, HOLD_MINUTES, MORNING_END, SHORT_DATED_DAYS
 
 log = logging.getLogger(__name__)
@@ -85,8 +86,9 @@ def marks(bars: list[dict] | None) -> list[tuple[datetime, float]]:
 def bill_trade(expiration: date, expired: bool, fills: list[dict], bars: list[dict] | None) -> dict:
     """One long option trade against the rules: ``saved`` per rule (dollars the rule would have kept; negative when
     breaking it paid) and ``cut``, the rule and minute a hold rule fired at, if any. ``fills`` hold role, side,
-    contracts, price (dollars per contract), executed_at (naive New York) and key or id."""
-    ordered = sorted(fills, key=_order)
+    contracts, price (dollars per contract), executed_at (naive New York) and id."""
+    # The reconstructor's own order (time, opens before closes, fill id), so the lots here are the journal's lots.
+    ordered = sorted(fills, key=lambda f: (f["executed_at"], 0 if f["side"] in OPEN_SIDES else 1, str(f["id"])))
     entries = [f for f in ordered if f["role"] == "entry"]
     saved: dict[str, float] = defaultdict(float)
     out = {"saved": saved, "cut": None}
@@ -177,10 +179,10 @@ def week_bill(db: Session, monday: date, sunday: date, bars_for: Callable = _bar
     trades = [t for t in trades if monday <= wall_time(t.closed_at).date() <= sunday]
     fills_of: dict = defaultdict(list)
     if trades:
-        for f in db.exec(select(TradeFill.trade_id, TradeFill.role, Fill.id, Fill.raw_email_id, Fill.side, Fill.contracts, Fill.price,
+        for f in db.exec(select(TradeFill.trade_id, TradeFill.role, Fill.id, Fill.side, Fill.contracts, Fill.price,
                                 Fill.executed_at).join(Fill, Fill.id == TradeFill.fill_id)
                          .where(TradeFill.trade_id.in_([t.id for t in trades]))).all():
-            fills_of[f.trade_id].append({"id": f.id, "key": f.raw_email_id or str(f.id), "role": f.role, "side": f.side,
+            fills_of[f.trade_id].append({"id": f.id, "role": f.role, "side": f.side,
                                          "contracts": float(f.contracts), "price": float(f.price), "executed_at": wall_time(f.executed_at)})
     out = {"trades": 0, "broke": 0, "broke_pnl": 0.0, "saved": 0.0, "unpriced": 0,
            "by_rule": {rule: {"trades": 0, "saved": 0.0} for rule, _ in RULES}}
