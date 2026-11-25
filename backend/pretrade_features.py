@@ -37,6 +37,7 @@ MARKET_FORMAT = "pretrade-market-v1"
 MARKET_KEYS = frozenset({
     "kind", "symbol", "event_date", "status", "label", "value", "change_pct", "observed_at", "fetched_at", "source",
 })
+ADDS_FORMAT = "pretrade-adds-v1"
 CAPTURE_KEYS = frozenset({
     "received_at", "underlying", "side", "instrument", "mode", "setup_label", "wording", "note", "strike",
     "expiration", "quantity", "transcript_text", "not_taken_at", "account_name", "account_type", "latest_note",
@@ -237,6 +238,36 @@ def read_market(pointer_file, *, max_age_seconds: int, now: datetime | None = No
     except _UNREADABLE:
         return {"state": "missing", "items": None, "generated_at": None, "age_seconds": None}
     return {"state": "stale" if age > max_age_seconds else "fresh", "items": document["items"],
+        "generated_at": document["generated_at"], "age_seconds": max(0, int(age))}
+
+
+def _add_rows_valid(rows) -> bool:
+    from app.engine.add_check import ADD_KEYS, ADD_ROW_KEYS
+
+    return isinstance(rows, list) and all(
+        isinstance(row, dict) and set(row) == ADD_ROW_KEYS and isinstance(row["adds"], list) and row["adds"]
+        and all(isinstance(add, dict) and set(add) == ADD_KEYS for add in row["adds"]) for row in rows)
+
+
+def publish_adds(rows: list[dict], pointer_file, *, now: datetime | None = None) -> dict:
+    """Closed positions with a buy below cost (add_check.add_history_rows): adds-<sha>.json, then repoint adds.json."""
+    if not _add_rows_valid(rows):
+        raise ValueError("Add rows must have the exact approved fields")
+    payload = json.dumps({"format": ADDS_FORMAT, "generated_at": (now or datetime.now(timezone.utc)).astimezone(
+        timezone.utc).isoformat(), "rows": rows}, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    return {"adds_sha256": _publish_addressed(pointer_file, "adds", payload, CONTEXT_MAX), "rows": len(rows)}
+
+
+def read_adds(pointer_file, *, max_age_seconds: int, now: datetime | None = None) -> dict:
+    """Return {state, rows, generated_at, age_seconds}; missing means none, never invented."""
+    now = now or datetime.now(timezone.utc)
+    try:
+        document, age = _read_addressed(pointer_file, "adds", CONTEXT_MAX, {"format", "generated_at", "rows"}, now)
+        if document["format"] != ADDS_FORMAT or not _add_rows_valid(document["rows"]):
+            raise ValueError("Invalid add file")
+    except _UNREADABLE:
+        return {"state": "missing", "rows": None, "generated_at": None, "age_seconds": None}
+    return {"state": "stale" if age > max_age_seconds else "fresh", "rows": document["rows"],
         "generated_at": document["generated_at"], "age_seconds": max(0, int(age))}
 
 

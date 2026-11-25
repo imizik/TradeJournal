@@ -203,7 +203,7 @@ def exercise(archive, scratch):
     assert listing.status_code == 200, (listing.status_code, listing.headers.get("www-authenticate"))
     tools = listing.json()["result"]["tools"]
     assert rpc("pre_trade_check", {}, token(azp="other-client")).status_code == 401
-    assert {t["name"] for t in tools} == {"pre_trade_check", "attach_model_verdict", "review_checks", "position_check", "get_notes",
+    assert {t["name"] for t in tools} == {"pre_trade_check", "attach_model_verdict", "review_checks", "position_check", "add_check", "get_notes",
         "preopen_watchlist", "grade_checks", "shadow_setup", "shadow_decide", "candles"}
     candle_tool = next(t for t in tools if t["name"] == "candles")
     assert candle_tool["securitySchemes"] == [{"type": "oauth2", "scopes": ["check:read"]}]

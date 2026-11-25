@@ -216,6 +216,25 @@ publish and read as stale after 30 minutes; a stop applies only when one
 position matches; positions are treated as bought (sold options would read
 inverted).
 
+Should I add (owner decision November 24, 2026: answers come to chat, no new page). The
+November 24 edge audit found the money leaking in short-dated options held while down and
+added to below cost. `add_check(ticker?)` (`check:read`, read-only, saves nothing) reads each
+open bought option at the live mid against its average entry, its days to expiry and time
+held, flags the audit's spot (3 or fewer days, down 20% or more, held over an hour) and
+returns his closed positions with a buy below cost in the same kind of spot (same
+short/longer-dated group, then the same under/over-20% depth): how many, how many ended
+green, their P&L and the first-in-first-out P&L of the added contracts alone. `answer` is
+`no` only when at least 8 such positions exist and their added contracts lost money;
+otherwise `no_clear_record`, `not_below_cost`, `not_covered` (shares) or
+`insufficient_data`. It never says go. The record comes from one more additive view in
+[check_scope.py](../../deploy/check_scope.py) (`pretrade_add_source`: every fill of closed
+non-Webull option positions entered more than once, named by the hash of the first entry
+fill key and a replay order, no IDs), which the publisher reduces with
+[add_check.py](../../backend/app/engine/add_check.py) to an adds file beside the history
+file. Rollout is a Check upgrade with `--approve-sql <sha of add-view.sql>`; until then the
+tool answers `insufficient_data` and invents nothing. Positions bought since the last
+10-minute publish are not seen yet.
+
 Options (advisor step 6): option checks now return the contract the scalper
 resolved (given strike/expiration, else nearest expiration at the money) with
 live bid/ask, spread, IV, delta, gamma, theta, cost and time decay per
