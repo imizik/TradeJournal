@@ -46,6 +46,7 @@ def upsert(db: Session, rows: list[dict], *, model: str, batch_id: str | None) -
         row = existing.get((account, key))
         if row is None:
             row = TradeAiTag(account_id=account, source_key=key, setup="unclear", model=model)
+            existing[(account, key)] = row  # a repeated anchor later in the same load updates this row
             added += 1
         else:
             updated += 1

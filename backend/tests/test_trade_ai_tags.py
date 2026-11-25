@@ -39,14 +39,21 @@ def test_a_tag_follows_its_trade_through_a_rebuild_and_a_reload_replaces_it(db):
     assert only.grade == "C" and only.batch_id == "b2"
     assert trade_ai_tags.for_trades(db, []) == {}
 
+    # The same new anchor twice in one load: one row, the later tag wins, no unique-constraint rollback.
+    other = fill(db, "NVDA", "buy_to_open", 1, 200, "2026-09-16T09:44", **CALL)
+    key2 = db.get(Fill, other).raw_email_id
+    twice = [{**row, "source_key": key2, "tag": {**TAG, "grade": g}} for g in ("B", "A")]
+    assert trade_ai_tags.upsert(db, twice, model="claude-opus-5-5", batch_id="b3") == (1, 1)
+    assert db.exec(select(TradeAiTag).where(TradeAiTag.source_key == key2)).one().grade == "A"
+
 
 def test_the_migration_only_adds_the_tag_table(tmp_path):
     path = tmp_path / "tags.sqlite"
     _alembic(path, "upgrade", "a3c7e1f9b2d4")
-    db = sa_create_engine(f"sqlite:///{path}")
-    tables = set(inspect(db).get_table_names())
+    engine = sa_create_engine(f"sqlite:///{path}")
+    tables = set(inspect(engine).get_table_names())
     assert "trade_ai_tag" not in tables
     _alembic(path, "upgrade", "b7d2f4a9c1e3")
-    assert set(inspect(db).get_table_names()) == tables | {"trade_ai_tag"}
+    assert set(inspect(engine).get_table_names()) == tables | {"trade_ai_tag"}
     _alembic(path, "downgrade", "a3c7e1f9b2d4")
-    assert set(inspect(db).get_table_names()) == tables
+    assert set(inspect(engine).get_table_names()) == tables
