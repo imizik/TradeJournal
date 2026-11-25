@@ -2299,7 +2299,7 @@ option with 3 days or less to expiry is down 30% or more, or at 13:00 for a same
 billed that minute's last trade against what they later sold for (nothing if they expired). Contracts from an add are
 billed as the add only, so no dollar is counted twice. The body says how many trades broke a rule, what they ended at
 against following the rules, and one line per rule. The price is a last trade, not a quote; a short-dated trade held
-past the hour with no minute bars is counted apart and named, never billed as zero. A week where the breaks paid says
+past the hour with no minute bar where a rule could have fired is counted apart and named, never billed as zero. A week where the breaks paid says
 so under a $0 title; a week with no closed long option trade sends nothing. Its own ping kind, `leak_bill`, one a day,
 claimed once a week through the policy (`new_only`). Its tap opens `/proof`. No page, route or stored value.
 

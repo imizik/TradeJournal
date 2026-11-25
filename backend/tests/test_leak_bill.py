@@ -74,6 +74,16 @@ def test_a_same_day_option_bought_before_noon_is_cut_at_1_pm():
     assert leak_bill.bill_trade(TUE, False, busy, [bar(9, 0, 0.1), bar(13, 0, 0.95), bar(13, 1, 0.60)])["cut"]["at"] == ny(13, 1)
 
 
+def test_a_trade_with_no_price_where_a_rule_could_fire_is_unpriced():
+    held = [buy(1, 100, ny(10)), sell(1, 150, ny(15))]
+    assert leak_bill.unpriced(TUE, held, ny(15), None)
+    assert leak_bill.unpriced(TUE, held, ny(15), [bar(10, 30, 0.9)])  # only a bar before the hour
+    assert leak_bill.unpriced(TUE, held, ny(15), [bar(11, 30, 0.9)])  # past the hour, but nothing from 1 PM: that rule broke unpriced
+    assert not leak_bill.unpriced(TUE, held, ny(15), [bar(13, 30, 0.9)])
+    assert not leak_bill.unpriced(WED, held, ny(15), [bar(11, 30, 0.9)])  # expires tomorrow: the hour rule was judged, and held
+    assert leak_bill.unpriced(WED, held, ny(15), [bar(15, 0, 0.9)])  # only its own closing minute
+
+
 @pytest.fixture
 def engine():
     found = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -106,12 +116,12 @@ def week(db):
     trade(db, "MU", [buy(2, 200, ny(10)), sell(2, 60, ny(14))], pnl=-280)  # deep red: cut at 130
     trade(db, "NBIS", [buy(1, 200, ny(10)), buy(1, 100, ny(10, 20))], status="expired", pnl=-300, closed_at=ny(16, day=18))
     trade(db, "AMD", [buy(1, 100, ny(10)), sell(1, 140, ny(10, 30))], pnl=40)  # clean, under the hour: no bars asked
-    trade(db, "SNDK", [buy(1, 100, ny(10)), sell(1, 20, ny(15))], pnl=-80)  # short-dated, past the hour, no bars
+    trade(db, "SNDK", [buy(1, 100, ny(10)), sell(1, 20, ny(15))], pnl=-80)  # short-dated, past the hour, one bar before the hour
     trade(db, "OLD", [buy(1, 100, ny(10, day=10)), sell(1, 20, ny(15, day=10))], expiration=date(2026, 11, 11), pnl=-80)  # last week
     webull = uuid.uuid4()
     db.add(Account(id=webull, name="Webull", type="individual", last4="0001", broker="webull"))
     trade(db, "WB", [buy(1, 200, ny(10)), buy(1, 100, ny(10, 20)), sell(2, 50, ny(10, 40))], pnl=-200, account=webull)
-    return {"MU": [bar(11, 6, 1.30)], "NBIS": [bar(11, 10, 0.80)]}
+    return {"MU": [bar(11, 6, 1.30)], "NBIS": [bar(11, 10, 0.80)], "SNDK": [bar(10, 30, 0.90)]}
 
 
 def test_the_week_adds_up_once_and_names_what_it_could_not_price(engine):

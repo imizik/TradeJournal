@@ -22,7 +22,8 @@ A positive bill means the rules would have kept that much more; a week where the
 
 The price is the minute bar's last trade (``alpaca.fetch_option_bars``, the window the path metrics cache), not a
 quote that could surely have been sold at. A minute holding one of the trade's own fills is not judged, as the path
-metrics read it. A short-dated trade held past the hour with no bars cannot be priced: it is counted apart
+metrics read it. A short-dated trade held past the hour that no rule cut, with no bar where one could have (none
+past the hour, or none from 13:00 for a same-day option still open then), cannot be priced: it is counted apart
 (``unpriced``) and named in the message, never billed as zero.
 
 Off unless ``LEAK_BILL_ENABLED=true`` (the owner's switch). Sunday at or after ``note_digest.AT`` (18:00 New York), at
@@ -149,6 +150,18 @@ def bill_trade(expiration: date, expired: bool, fills: list[dict], bars: list[di
     return out
 
 
+def unpriced(expiration: date, fills: list[dict], closed: datetime, bars: list[dict] | None) -> bool:
+    """Whether a trade no hold rule cut had no price where one could have: no judged minute (regular session, not one
+    of its own fills) while it was short-dated and past the hour, or, for a same-day option bought before noon and
+    still open after 13:00 (which broke that rule whatever the price), none from 13:00 on."""
+    first = min(f["executed_at"] for f in fills if f["role"] == "entry")
+    busy = {f["executed_at"].replace(second=0, microsecond=0) for f in fills}
+    usable = [at for at, _ in marks(bars) if first + timedelta(minutes=HOLD_MINUTES) <= at < closed and at not in busy
+              and 0 <= (expiration - at.date()).days <= SHORT_DATED_DAYS]
+    past_one = expiration == first.date() == closed.date() and _minute(first) < MORNING_END and _minute(closed) > AFTERNOON_MINUTE
+    return not usable or (past_one and not any(_minute(at) >= AFTERNOON_MINUTE for at in usable))
+
+
 def _bars(trade) -> list[dict] | None:
     """The contract's minute bars over the trade (the window the path metrics fetch, so their cache serves it); None
     when it has no contract symbol, runs too long, or the read fails."""
@@ -171,7 +184,7 @@ def _bars(trade) -> list[dict] | None:
 def week_bill(db: Session, monday: date, sunday: date, bars_for: Callable = _bars) -> dict:
     """The week's bill over the long option trades closed ``monday`` to ``sunday`` (New York dates, Webull left out):
     ``trades`` judged, ``broke`` (at least one rule), their realized ``broke_pnl``, ``saved`` (the number), per-rule
-    trades and dollars in ``by_rule``, and ``unpriced`` short-dated trades held past the hour with no bars."""
+    trades and dollars in ``by_rule``, and ``unpriced`` short-dated trades held past the hour with no usable bar."""
     from app.models import Account, Fill, Trade, TradeFill
     trades = db.exec(select(Trade).join(Account, Account.id == Trade.account_id).where(
         Trade.instrument_type == "option", Trade.status.in_(("closed", "expired")), Trade.closed_at.is_not(None),
@@ -193,11 +206,10 @@ def week_bill(db: Session, monday: date, sunday: date, bars_for: Callable = _bar
             continue
         out["trades"] += 1
         first, closed = min(f["executed_at"] for f in entries), wall_time(trade.closed_at)
-        bars = None
-        if 0 <= (trade.expiration - closed.date()).days <= SHORT_DATED_DAYS and closed >= first + timedelta(minutes=HOLD_MINUTES):
-            bars = bars_for(trade)
-            out["unpriced"] += not marks(bars)
+        held = 0 <= (trade.expiration - closed.date()).days <= SHORT_DATED_DAYS and closed >= first + timedelta(minutes=HOLD_MINUTES)
+        bars = bars_for(trade) if held else None
         found = bill_trade(trade.expiration, trade.status == "expired", fills, bars)
+        out["unpriced"] += held and found["cut"] is None and unpriced(trade.expiration, fills, closed, bars)
         if not found["saved"]:
             continue
         out["broke"] += 1
