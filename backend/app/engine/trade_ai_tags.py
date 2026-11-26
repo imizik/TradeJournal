@@ -179,7 +179,11 @@ def pretrade_setup_record(idea: dict, analysis: dict, rows: Iterable[dict], tags
             record = _record(none)
             reads.append({"read": "no_setup_named", **record})
             lines.append(f"No setup named. Your {_said('no clear setup', record)}; name the setup or skip it.")
-    intraday = (analysis.get("data") or {}).get("intraday") or {}
+    data = analysis.get("data") or {}
+    market_state = (analysis.get("assessment") or {}).get("market_state") or data.get("market_state") or "closed"
+    # The live reads describe the tape now, so only in the regular session on fresh data (as rules_verdict).
+    live_ok = market_state == "rth" and not (data.get("staleness") or {}).get("is_stale")
+    intraday = (data.get("intraday") or {}) if live_ok else {}
     long = idea["side"] != "short"
     vs_vwap, price, vwap, prev = (intraday.get(k) for k in ("price_vs_vwap_pct", "price", "vwap", "prev_bar_close"))
     if vs_vwap is not None and (vs_vwap if long else -vs_vwap) >= EXTENDED_PCT:

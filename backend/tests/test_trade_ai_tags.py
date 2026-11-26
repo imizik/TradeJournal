@@ -82,7 +82,8 @@ def test_extended_entry_shows_the_chase_record_and_a_fresh_reclaim_shows_the_rec
     rows.append(_hist(99, -5000.0, closed="2026-10-10T11:00:00"))  # closed after the check: never counted
     tags = ([_tag(i, "momentum_chase") for i in range(5)] + [_tag(5 + i, "breakout", mistakes=["chased_extended_entry"])
             for i in range(5)] + [_tag(10 + i, "vwap_reclaim") for i in range(9)] + [_tag(99, "momentum_chase")])
-    extended = {"data": {"intraday": {"price_vs_vwap_pct": 3.1, "price": 103.1, "vwap": 100.0, "prev_bar_close": 103.0}}}
+    extended = {"data": {"market_state": "rth", "intraday": {"price_vs_vwap_pct": 3.1, "price": 103.1, "vwap": 100.0,
+                                                           "prev_bar_close": 103.0}}}
     card = trade_ai_tags.pretrade_setup_record(IDEA, extended, rows, tags, CUTOFF, [f"{i:064x}" for i in range(3)], "momentum")
     assert card["matched_setup"] == "momentum_chase" and card["stated_record"]["trades"] == 5
     assert card["lines"][0] == "You called this momentum_chase: your 5 trades tagged momentum_chase lost $1,500 (0 won)."
@@ -93,10 +94,14 @@ def test_extended_entry_shows_the_chase_record_and_a_fresh_reclaim_shows_the_rec
     assert [item["setup"] for item in card["setups"]] == ["breakout", "momentum_chase", "vwap_reclaim"]
     assert card["tagged_trades"] == 19
 
-    reclaim = {"data": {"intraday": {"price_vs_vwap_pct": 0.2, "price": 100.2, "vwap": 100.0, "prev_bar_close": 99.9}}}
+    reclaim = {"data": {"market_state": "rth", "intraday": {"price_vs_vwap_pct": 0.2, "price": 100.2, "vwap": 100.0,
+                                                          "prev_bar_close": 99.9}}}
     card = trade_ai_tags.pretrade_setup_record(IDEA, reclaim, rows, tags, CUTOFF, [], None)
     assert [read["read"] for read in card["reads"]] == ["fresh_vwap_reclaim"]  # no no-setup tags in this history
     assert card["headline"] == "This is a fresh VWAP reclaim: your 9 trades tagged VWAP reclaim made $1,800 (9 won)."
+    # Closed or stale tape: the historical records stay, the live reads are not claimed.
+    for off in ({**reclaim["data"], "market_state": "closed"}, {**reclaim["data"], "staleness": {"is_stale": True}}):
+        assert trade_ai_tags.pretrade_setup_record(IDEA, {"data": off}, rows, tags, CUTOFF, [], None)["reads"] == []
     # A put idea reads the mirror: below VWAP is "extended" for a short.
     card = trade_ai_tags.pretrade_setup_record({"side": "short"}, extended, rows, tags, CUTOFF, [], None)
     assert card["reads"] == []
