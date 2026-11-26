@@ -73,7 +73,7 @@ def test_the_card_says_the_close_the_cut_pings_and_what_expires_next_session(eng
     assert card["next_day"] == "2026-10-23"  # Thursday is a holiday
     assert card["expiring"] == [{"contract": "NBIS 10/23/26 100C", "contracts": 2, "cut": 217.0}]
     assert day_card.card_lines(card) == ("Today -$120", "1 trade closed, -$120 realized.\nCut pings: acted on 2 of 2.\n"
-                                                         "Expires tomorrow: NBIS 10/23/26 100C ×2, cut $2.17.")
+                                                         "Expires Fri: NBIS 10/23/26 100C ×2, cut $2.17.")  # Thursday shut: not "tomorrow"
 
 
 def test_a_quiet_day_has_no_card(engine):  # noqa: F811

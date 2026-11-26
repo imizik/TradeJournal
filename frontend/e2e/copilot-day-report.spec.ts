@@ -140,7 +140,7 @@ test("the headline card leads: P&L, cut pings followed and what expires tomorrow
   const report = page.getByTestId("day-report-card");
   await expect(report.getByTestId("day-card-pnl")).toHaveText("−$412");
   await expect(report.getByTestId("day-card-cut")).toHaveText("Cut pings: acted on 1 of 2");
-  await expect(report.getByTestId("day-card-expiring")).toHaveText("Expires tomorrow: NBIS 10/26/26 100C ×2, cut $2.17");
+  await expect(report.getByTestId("day-card-expiring")).toHaveText("Expires Mon: NBIS 10/26/26 100C ×2, cut $2.17"); // a Friday card names Monday, never "tomorrow"
   await expect(report.locator(`${LINES} > summary`).first()).toBeHidden(); // behind Details
   await report.getByTestId("day-report-details").locator(":scope > summary").click();
   await expect(report.locator(`${LINES} > summary`)).toHaveCount(4);

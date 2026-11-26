@@ -112,6 +112,13 @@ def _count(n: float) -> str:
     return f"×{n:g}"
 
 
+def next_label(day: str, next_day: str | None) -> str:
+    """"tomorrow" only when the next session is the next calendar day; else its weekday (a Friday card says Mon)."""
+    if next_day is None or date.fromisoformat(next_day) == date.fromisoformat(day) + timedelta(days=1):
+        return "tomorrow"
+    return date.fromisoformat(next_day).strftime("%a")
+
+
 def card_lines(c: dict) -> tuple[str, str] | None:
     """The evening ping's (title, body) for a card; None when the day has nothing to say (no close, no cut ping, nothing
     expiring next session)."""
@@ -124,7 +131,7 @@ def card_lines(c: dict) -> tuple[str, str] | None:
     if c["cut"]["pings"]:
         lines.append(f"Cut pings: acted on {c['cut']['acted']} of {c['cut']['pings']}.")
     if c["expiring"]:
-        lines.append("Expires tomorrow: " + "; ".join(
+        lines.append(f"Expires {next_label(c['day'], c['next_day'])}: " + "; ".join(
             f"{e['contract']} {_count(e['contracts'])}" + (f", cut {_premium(e['cut'])}" if e["cut"] is not None else "")
             for e in c["expiring"]) + ".")
     return title, "\n".join(lines)

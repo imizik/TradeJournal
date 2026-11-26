@@ -141,7 +141,7 @@ for (const [width, height] of [[360, 780], [375, 812], [390, 844]] as const) {
     expect(await sideways(page)).toBeLessThanOrEqual(0);
     await accounts.nth(1).click();
     await expect(accounts.nth(1)).toHaveAttribute("aria-pressed", "true");
-    await expect(value.getByTestId("value-who")).toHaveCount(0); // one account: its total says enough
+    await expect(value.getByTestId("value-who")).toHaveText("MCP ••7884"); // a picked account names itself beside its total
     await expect(value.getByTestId("value-total")).toContainText("$2,410");
     await expect(value.getByTestId("value-read")).toHaveText(/^4 open/); // CRWV, IREN, TSLA, HOOD
     await page.screenshot({ path: test.info().outputPath(`phone-value-${width}.png`) });

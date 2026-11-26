@@ -192,7 +192,7 @@ def test_the_counts_are_the_desks_own_and_the_card_is_the_day_cards(desk, engine
     (sent,) = phone.sent
     with Session(engine) as db:
         title, body = day_card.card_lines(day_card.card(db, WED_CLOSE, Calendar()))
-    assert (sent["title"], sent["body"]) == (title, body) and "Expires tomorrow" in body
+    assert (sent["title"], sent["body"]) == (title, body) and "Expires " in body
     (row,) = rows(engine)
     assert (row.review, row.fills) == (2, 1)
 

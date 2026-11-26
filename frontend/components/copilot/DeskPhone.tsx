@@ -109,7 +109,7 @@ export function PhoneValue({ live, rows, booked, active, onPick, day, aside = nu
           <span data-testid="value-today" className={cn("tabular-nums", tone(change), stale && "opacity-50")}>
             {change == null ? "—" : money(change)}{pct != null && ` ${signedPct(pct, 1)}`} today
           </span>
-          {who && accounts.length > 1 && <span data-testid="value-who" className="text-muted-foreground">{who}</span>}
+          {who && (accounts.length > 1 || active) && <span data-testid="value-who" className="text-muted-foreground">{who}</span>}
         </> : quiet ? <span data-testid="value-off" className="text-muted-foreground">{quiet}</span> : null}
         <span data-testid="value-read" className="ml-auto flex items-baseline gap-x-1.5 whitespace-nowrap text-muted-foreground">
           <span className="tabular-nums text-foreground">{read.open} open</span>

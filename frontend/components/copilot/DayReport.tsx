@@ -166,6 +166,13 @@ export default function DayReport({ rows = [], rowsRead = true, onOpen }: { rows
 
 const usd0 = (v: number) => `${v > 0.005 ? "+" : v < -0.005 ? "−" : ""}$${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 const premium = (perContract: number) => `$${(perContract / 100).toFixed(2)}`;
+/** "tomorrow" only when the next session is the next calendar day; a Friday card names Monday (as the 4:30 ping does). */
+function nextLabel(day: string, next: string | null) {
+  if (!next) return "tomorrow";
+  const d = new Date(`${next}T12:00:00Z`);
+  return d.getTime() - new Date(`${day}T12:00:00Z`).getTime() === 86_400_000 ? "tomorrow"
+    : d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+}
 
 /** The day in three lines, the same card the 4:30 ping sends (``app/engine/day_card.py``): realized P&L over the trades
  * closed today, the cut pings acted on, and what expires next session with its cut line. A line with nothing is absent. */
@@ -187,7 +194,7 @@ function Headline({ card }: { card: NonNullable<Report["card"]> }) {
       )}
       {card.expiring.length > 0 && (
         <p data-testid="day-card-expiring" className="text-sm">
-          <span className="text-muted-foreground">Expires tomorrow: </span>
+          <span className="text-muted-foreground">Expires {nextLabel(card.day, card.next_day)}: </span>
           {card.expiring.map((e, i) => (
             <span key={e.contract}>{i > 0 && "; "}<span className="font-medium text-foreground">{e.contract}</span> ×{e.contracts}
               {e.cut != null && <span className="text-muted-foreground">, cut {premium(e.cut)}</span>}</span>
