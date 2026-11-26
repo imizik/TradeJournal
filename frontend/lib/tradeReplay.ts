@@ -52,8 +52,8 @@ export function barIndexAt(bars: { time: number }[], time: number): number {
   return found;
 }
 
-/** The bar a fill counts on, as the backend's position path counts it: the bar holding its minute, else the next bar
- * (a minute with no candle), else the last (after the last candle). */
+/** The bar a moment counts on, as the backend counts fills and option minutes: the bar holding its minute, else the
+ * next bar (a minute with no candle), else the last (after the last candle). Every event is placed this way. */
 export function fillIndexAt(bars: { time: number }[], time: number, intervalSeconds: number): number {
   const minute = Math.floor(time / 60) * 60;
   const index = barIndexAt(bars, minute);
@@ -78,22 +78,24 @@ export function replayEvents(replay: TradeReplay): ReplayEvent[] {
   const bars = replay.bars ?? [];
   if (!bars.length) return [];
   const multiplier = replay.multiplier ?? 1;
+  const width = (replay.interval_minutes ?? 1) * 60;
+  const place = (time: number) => fillIndexAt(bars, time, width);
   const out: ReplayEvent[] = [];
   for (const fill of replay.fills ?? []) {
-    out.push({ index: fillIndexAt(bars, fill.time, (replay.interval_minutes ?? 1) * 60), time: fill.time, kind: "fill", tone: fill.entry ? "buy" : "sell", label: fill.label });
+    out.push({ index: place(fill.time), time: fill.time, kind: "fill", tone: fill.entry ? "buy" : "sell", label: fill.label });
   }
   for (const ping of replay.pings ?? []) {
     const name = ping.title ?? PING_LABEL[ping.kind] ?? words(ping.kind);
-    out.push({ index: barIndexAt(bars, ping.time), time: ping.time, kind: "ping", tone: ping.sent ? "ping" : "muted", label: ping.sent ? name : `${name} (not sent)` });
+    out.push({ index: place(ping.time), time: ping.time, kind: "ping", tone: ping.sent ? "ping" : "muted", label: ping.sent ? name : `${name} (not sent)` });
   }
   if (replay.cut) {
-    out.push({ index: barIndexAt(bars, replay.cut.time), time: replay.cut.time, kind: "cut", tone: "rule",
+    out.push({ index: place(replay.cut.time), time: replay.cut.time, kind: "cut", tone: "rule",
       label: `${CUT_RULE[replay.cut.rule] ?? "Cut rule"} at ${quoted(replay.cut.price, multiplier)}` });
   }
   const crossed = replay.cut_line?.crossed;
   if (replay.cut_line && crossed) {
     const cost = crossed.state === "ignored" && crossed.cost != null && crossed.cost > 0 ? `; holding on cost ${money(-crossed.cost)}` : "";
-    out.push({ index: barIndexAt(bars, crossed.time), time: crossed.time, kind: "cut_line", tone: "rule",
+    out.push({ index: place(crossed.time), time: crossed.time, kind: "cut_line", tone: "rule",
       label: `Cut line ${quoted(replay.cut_line.price, multiplier)} hit with ${crossed.held} open${crossed.state === "acted" ? ", sold in time" : cost}` });
   }
   return out.sort((a, b) => a.time - b.time);

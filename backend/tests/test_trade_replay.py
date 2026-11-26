@@ -187,3 +187,17 @@ def test_an_option_trade_in_a_minute_with_no_stock_candle_still_counts(db):
     assert body["cut_line"]["crossed"]["time"] == epoch(10, 1)  # the $1.30 trade crossed the $1.40 line
     assert body["option_bars"][1] == {"time": epoch(10, 2), "open": 1.30, "high": 1.60, "low": 1.25, "close": 1.60}
     assert len(body["option_bars"]) == 2
+
+
+def test_a_cross_before_the_cut_ping_went_out_is_not_judged(db):
+    from datetime import UTC
+    from app.models import FillInterrupt
+    trade = make_trade(db, [("entry", "buy_to_open", 1, 200, ny(10)), ("exit", "sell_to_close", 1, 100, ny(12))], pnl=-100.0)
+    delivered = datetime(2026, 11, 17, 15, 20, tzinfo=UTC).replace(tzinfo=None)  # 10:20 New York, stored UTC
+    db.add(FillInterrupt(account_id=ROTH, fill_key=f"nbis-{trade.id}-0", position_key=f"nbis-{trade.id}-0", trade_id=trade.id,
+                         ticker="NBIS", contract="NBIS 11/18/26 100C", kinds="cut_line", title="Cut line $1.40", body="",
+                         executed_at=ny(10), detected_at=delivered, delivered_at=delivered, delivery="sent"))
+    db.commit()
+    option = [bar(10, 5, 1.30), bar(10, 30, 1.35)]  # crossed at 10:05, before the ping; again at 10:30, after it
+    body = trade_replay.build(db, trade, lambda *a: minutes((9, 30), 390, 50), lambda *a: option)
+    assert body["cut_line"]["crossed"]["time"] == epoch(10, 30)

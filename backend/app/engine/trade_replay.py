@@ -103,6 +103,22 @@ def _pings(db: Session, trade: Trade) -> list[dict]:
     return sorted(out, key=lambda p: p["time"])
 
 
+def _cut_ping_sent(db: Session, trade: Trade, fills: list[dict]) -> datetime | None:
+    """When the first buy's cut-line ping went out (delivered, else claimed, else detected), as the naive New York
+    minute: a cross before it is not judged, as the Sunday bill judges it (``leak_bill.week_bill``). None without one."""
+    from app.engine.alert_scorecard import SENT
+    from app.models import FillInterrupt
+    entries = [f for f in fills if f["role"] == "entry"]
+    if not entries:
+        return None
+    first = min(entries, key=lambda f: (f["executed_at"], f["key"]))
+    row = db.exec(select(FillInterrupt).where(FillInterrupt.account_id == trade.account_id,
+                                              FillInterrupt.fill_key == first["key"])).first()
+    if row is None or "cut_line" not in row.kinds.split(",") or row.delivery not in SENT:
+        return None
+    return wall_time((row.delivered_at or row.claimed_at or row.detected_at).replace(tzinfo=UTC)).replace(second=0, microsecond=0)
+
+
 def pnl_path(fills: list[dict], minutes: list[datetime], marks: dict[datetime, float], sign: int,
              expired: bool = False) -> list[dict]:
     """Each minute's position: contracts ``held``, ``avg_cost`` per contract, ``realized`` and ``pnl`` (realized plus
@@ -160,6 +176,7 @@ def build(db: Session, trade: Trade, stock_bars: Callable = _stock_bars, option_
                      "executed_at": wall_time(r.executed_at), "key": r.raw_email_id or str(r.id)} for r in rows),
                    key=lambda f: (f["executed_at"], 0 if f["side"] in OPEN_SIDES else 1, str(f["id"])))
     pings = _pings(db, trade)
+    cut_sent = _cut_ping_sent(db, trade, fills)
     tag = trade_ai_tags.for_trades(db, [trade.id]).get(str(trade.id))
     option = trade.instrument_type == "option"
     entries = [f for f in fills if f["role"] == "entry"]
@@ -240,7 +257,7 @@ def build(db: Session, trade: Trade, stock_bars: Callable = _stock_bars, option_
             crossed = None
             if option_all:
                 raw = [{"t": at.replace(tzinfo=ET).isoformat(), "c": row["close"]} for at, row in option_all]
-                seen = leak_bill.follow(status == "expired", fills, raw)
+                seen = leak_bill.follow(status == "expired", fills, raw, cut_sent)
                 if seen.get("at") is not None:
                     crossed = {"time": _epoch(seen["at"]), "state": seen["state"], "held": seen["held"], "cost": seen["cost"]}
             cut_line = {"price": round(line, 2), "crossed": crossed}

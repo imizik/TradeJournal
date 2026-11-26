@@ -113,3 +113,12 @@ test("a fill in a minute with no candle sits on the next bar, where the position
   expect(fillIndexAt(bars, at(-5), 60)).toBe(0);
   expect(fillIndexAt([{ time: at(0) }, { time: at(5) }], at(3), 300)).toBe(0); // inside a five-minute candle
 });
+
+test("a cut-line cross in a minute with no candle is placed on the next bar, as its option price is", async () => {
+  const { replayEvents } = await import("../lib/tradeReplay");
+  const bar = (minute: number) => ({ time: at(minute), open: 50, high: 50, low: 50, close: 50, volume: 1, vwap: 50, held: 1, avg_cost: 200, realized: 0, pnl: 0 });
+  const events = replayEvents({ trade_id: "t", ticker: "NBIS", instrument_type: "option", state: "ok", reason: null, interval_minutes: 1,
+    multiplier: 100, bars: [bar(0), bar(2)], cut: { rule: "deep_red", time: at(1), price: 120 },
+    cut_line: { price: 140, crossed: { time: at(1), state: "ignored", held: 1, cost: 10 } }, pings: [{ time: at(1) + 20, kind: "hold_hour", title: null, sent: true }] });
+  expect(events.map(e => e.index)).toEqual([1, 1, 1]);
+});
