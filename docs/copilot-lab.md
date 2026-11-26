@@ -4453,6 +4453,14 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   (Radar, briefs and prep, plan nudges and entry levels, paper, reviews, digests, the companion, research
   results, other interrupts) is sent silent: ntfy priority 2 (no sound) and Telegram
   `disable_notification`. The message, its budget and its links are unchanged.
+- **Written for the lock screen.** Telegram's notification shows the bot's name as its title and then
+  roughly the first 80–160 characters of the text, so an open-trade alert's first line
+  (`position_alerts._base_message`, Nov 26, 2026) is the short contract (`SPY 590C`, no date), the money
+  (`-$335 (-35%)`, a 🔴/🟢 lead when there is a mark) and the decision (`Cut?`, `Sell?`, `Take it?`);
+  the body's first line is the one fact that makes the case (worth at expiry, or contracts and bid
+  against cost), then his record. The Cut it / Holding buttons are the call to action, so no line says
+  "Re-decide". A "Since you entered" line goes only when it carries a saved plan, and the since-entry peer
+  context goes last, below a blank line.
 - **Not followed:** a ping whose ticker the owner set to not followed on the desk
   (§ The desk, **Not following**) is held, decision `not_followed`, reason "Not sent:
   you don't follow SLS on the desk (Show again there to hear about it).", before the

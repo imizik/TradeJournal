@@ -597,12 +597,6 @@ def _bid_text(alert: PositionAlert) -> str:
     return f"bid {_premium(alert.bid)}, too thin to price at a midpoint"
 
 
-def _thin(alert: PositionAlert) -> str:
-    if alert.bid is not None and alert.bid <= 0:
-        return "no bids: worth $0 to sell now"
-    return "no reliable quote" + (f", bid {_premium(alert.bid)}" if alert.bid is not None else "")
-
-
 STRIKE = re.compile(r"\s(\d+(?:\.\d+)?)([CP])$")
 
 
@@ -635,92 +629,94 @@ def read_underlying(symbols: list[str]) -> dict[str, float]:
     return {r["symbol"]: r["last"] for r in rows if isinstance(r.get("last"), (int, float)) and r["last"] > 0}
 
 
+def _short(contract: str | None) -> str:
+    """'SPY 590C' from 'SPY 11/26/26 590C': the lock screen has room for about 50 characters, and the alert says the
+    days left in words, so the date is left out of the title."""
+    parts = (contract or "").split(" ")
+    return f"{parts[0]} {parts[-1]}" if len(parts) >= 3 else (contract or "")
+
+
+def _pnl(alert: PositionAlert) -> str:
+    """'-$335 (-35%)', or what stands in for it without a midpoint."""
+    if alert.mark is None:
+        return "no bids" if alert.bid is not None and alert.bid <= 0 else "no quote"
+    return f"{_money(alert.gain)} ({_pct(alert.gain_pct)})"
+
+
+def _held(alert: PositionAlert) -> str:
+    """'5 contracts, bid $1.20 vs your $1.90': what he would sell into, against what he paid."""
+    if alert.mark is None:
+        return f"{_count(alert.contracts)}, {_bid_text(alert)}"
+    cost = f" vs your {_premium(alert.avg_cost)}" if alert.avg_cost is not None else ""
+    return f"{_count(alert.contracts)}, bid {_premium(alert.bid)}{cost}"
+
+
+def _lines(*parts: str | None) -> str:
+    return "\n".join(p.strip() for p in parts if p and p.strip())
+
+
 def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_left: int | None = None,
                   facts: dict | None = None) -> tuple[str, str, int]:
-    """Title, body and ntfy priority for one alert."""
-    if alert.mark is not None:
-        now_part = f"now {_money(alert.gain)} ({_pct(alert.gain_pct)}) at a {_premium(alert.mark)} mid, bid {_premium(alert.bid)}"
-    else:
-        now_part = _bid_text(alert)
+    """Title, body and ntfy priority for one alert. Written for the lock screen (Nov 26, 2026): Telegram shows the bot's
+    name as the notification's title and then about 80-160 characters of the text, so the title (the text's first line)
+    carries the contract, the money and the decision, and the body's first line the one fact that makes the case. The
+    reply buttons (Cut it, Holding) are the call to action, so no line repeats it."""
     facts = facts or {}
+    name, pnl, held = _short(alert.contract), _pnl(alert), _held(alert)
+    record = facts.get("record")
+    expiry = at_expiry(alert, facts.get("underlying"))
     if alert.kind == "wrong_way":
-        facts = facts or {}
         side = "put" if (alert.contract or "").endswith("P") else "call"
         ticker = (alert.contract or "").split(" ")[0]
         symbol = f"{INDEX_UNDERLYING[ticker]} (for {ticker})" if ticker in INDEX_UNDERLYING else ticker
         move = facts.get("move")
         moved = (f"{symbol} {'down' if move < 0 else 'up'} {abs(move) * 100:.2f}% in the {WRONG_WAY_MINUTES} min after "
-                 f"your entry, against your {side}" if move is not None
-                 else f"{symbol} moved against your {side} in the {WRONG_WAY_MINUTES} min after your entry")
-        if alert.mark is None:
-            now_part = _thin(alert)
-        record = f" {facts['record']}" if facts.get("record") else ""
-        return (f"{alert.contract}: wrong way at {WRONG_WAY_MINUTES} min",
-                f"{moved}. Option {now_part}. {_count(alert.contracts)} open.{record} "
-                f"Re-decide: close, trim, or set your exit.", 4)
+                 f"your entry, against your {side}." if move is not None
+                 else f"{symbol} moved against your {side} in the {WRONG_WAY_MINUTES} min after your entry.")
+        return f"{name} {pnl}, going the wrong way. Cut?", _lines(moved, held + ".", record), 4
     if alert.kind == "expiry_eve":
-        facts = facts or {}
         when = facts.get("expires") or "tomorrow"
-        if alert.mark is not None:
-            vs = f"Mark {_premium(alert.mark)} vs cost {_premium(alert.avg_cost)}: {_money(alert.gain)} ({_pct(alert.gain_pct)})"
-        else:
-            vs = f"Cost {_premium(alert.avg_cost)}, {_thin(alert)}"
-        week = facts.get("week")
-        risk = (f" Expiring this week: {_count(week['contracts'])}, ${week['premium']:,.0f} premium at risk." if week and week["contracts"]
-                else "")
-        record = f" {facts['record']}" if facts.get("record") and (alert.gain is None or alert.gain < 0) else ""
-        return (f"{alert.contract} expires {when}, still open",
-                f"{vs}.{at_expiry(alert, facts.get('underlying'), f'at expiry {when}')} {_count(alert.contracts)} open.{risk}{record}", 4)
+        risk = facts.get("week")
+        risk = (f"Expiring this week: {_count(risk['contracts'])}, ${risk['premium']:,.0f} premium at risk."
+                if risk and risk["contracts"] else "")
+        mine = record if record and (alert.gain is None or alert.gain < 0) else None
+        return (f"{name} {pnl}, expires {when}",
+                _lines(at_expiry(alert, facts.get("underlying"), f"at expiry {when}"), held + ".", risk, mine), 4)
     if alert.kind == "same_day_1pm":
-        if alert.mark is None:
-            now_part = _thin(alert)
-        record = f" {facts['record']}" if facts.get("record") else ""
-        return (f"{alert.contract}: bought this morning, expires today, still open at 1 PM",
-                f"{_count(alert.contracts)} open, {now_part}.{at_expiry(alert, facts.get('underlying'))}{record} "
-                f"Re-decide: close, trim, or set your exit.", 4)
+        return f"{name} {pnl} at 1 PM, expires today. Cut?", _lines(expiry, held + ". Bought this morning.", record), 4
     if alert.kind == "no_exit":
-        if alert.mark is None:
-            now_part = _thin(alert)
-        return (f"{alert.contract}: no exit order set",
-                f"Bought {NO_EXIT_MINUTES} min ago, {now_part}. {_count(alert.contracts)} open and no sell order working "
-                f"on Robinhood for it. Set your stop and your target now, while it is calm.", 4)
+        return (f"{name}: no sell order set, {pnl}",
+                _lines(f"Bought {NO_EXIT_MINUTES} min ago, {held}. Nothing working on Robinhood: set your stop and target "
+                       f"now, while it is calm."), 4)
     if alert.kind == "hold_hour":
-        if alert.mark is None:
-            now_part = _thin(alert)
-        peak = "" if alert.peak_gain is None else f", best seen by the alert watch {_money(alert.peak_gain)} ({_pct(alert.peak_gain_pct)})"
         if facts.get("days") is not None and alert.gain_pct is not None:
             days = facts["days"]
-            left = "Expires today" if days == 0 else "Expires tomorrow" if days == 1 else f"Expires in {days} days"
-            record = f" {facts['record']}" if facts.get("record") else ""
-            return (f"{alert.contract}: down {abs(alert.gain_pct) * 100:.0f}% an hour in",
-                    f"Open {HOLD_MINUTES} min, {now_part}{peak}. {left}. {_count(alert.contracts)} open.{record} "
-                    f"Re-decide: close, trim, or set your exit.", 4)
-        return (f"{alert.contract}: open an hour, re-decide",
-                f"Open {HOLD_MINUTES} min, {now_part}{peak}. {_count(alert.contracts)} open. "
-                f"Re-decide: close, trim, or set your exit.", 4)
+            left = "expires today" if days == 0 else "expires tomorrow" if days == 1 else f"expires in {days} days"
+            return f"{name} {pnl} an hour in, {left}. Cut?", _lines(held + ".", record), 4
+        return f"{name} {pnl}, open an hour", _lines(held + "."), 4
     if alert.kind == "giveback":
-        record = (facts or {}).get("record")
-        return (f"{alert.contract}: give-back triggered",
-                f"Peak {_money(alert.peak_gain)} ({_pct(alert.peak_gain_pct)}), {now_part}. "
-                f"Gain reached the +3% give-back threshold or below. {_count(alert.contracts)} open.{f' {record}' if record else ''} "
-                f"Review your exit plan.", 4)
-    when = f" The market closes at {close_label}." if close_label else ""
+        return (f"{name} gave back: {_money(alert.peak_gain)} → {_money(alert.gain)}. Take it?",
+                _lines(f"Peak {_money(alert.peak_gain)} ({_pct(alert.peak_gain_pct)}), now {pnl}. {held}.", record), 4)
+    when = f"The market closes at {close_label}." if close_label else ""
     if alert.kind == "expiry_first":
-        return (f"{alert.contract} expires today and is still open",
-                f"{_count(alert.contracts)} open, {now_part}.{at_expiry(alert, facts.get('underlying'))}{when}", 4)
-    left = f"{minutes_left} minute{'' if minutes_left == 1 else 's'}" if minutes_left is not None else "Under 30 minutes"
-    return (f"{alert.contract}: {left} left, expires today",
-            f"Still open: {_count(alert.contracts)}, {now_part}.{at_expiry(alert, facts.get('underlying'))}{when}", 5)
+        return f"{name} {pnl}, expires today", _lines(expiry, held + ".", when), 4
+    left = f"{minutes_left} min" if minutes_left is not None else "Under 30 min"
+    return f"{name}: {left} left, {pnl}. Sell?", _lines(expiry, held + ".", when), 5
 
 
 def message(alert: PositionAlert, close_label: str | None = None, minutes_left: int | None = None,
             facts: dict | None = None, since: str | None = None, practice: str | None = None) -> tuple[str, str, int]:
-    """``since`` is the position's "Since you entered: …" line from its thesis object (``trader_context.phone_line``);
-    ``practice`` the week's practice-goal sentence (``practice_line``), last."""
+    """``since`` is the position's "Since you entered: …" line from its thesis object (``trader_context.phone_line``),
+    kept only when it carries a saved plan (without one it says nothing he acts on); ``practice`` the week's
+    practice-goal sentence (``practice_line``). The since-entry peer context goes last, below a blank line, where only
+    an opened message shows it."""
     title, body, priority = _base_message(alert, close_label, minutes_left, facts)
+    if alert.gain is not None:  # red or green at a glance in a stack of notifications
+        title = ("🔴 " if alert.gain < 0 else "🟢 ") + title
     context = position_alert_context.phone_text(alert.context_snapshot_json)
-    return (title, body + ("\n\n" + context if context else "") + ("\n" + since if since else "")
-            + ("\n" + practice if practice else ""), priority)
+    plan = since if since and "plan: " in since else None
+    return (title, body + ("\n" + plan if plan else "") + ("\n" + practice if practice else "")
+            + ("\n\n" + context if context else ""), priority)
 
 
 def since_line(db: Session, alert: PositionAlert, now: float) -> str | None:

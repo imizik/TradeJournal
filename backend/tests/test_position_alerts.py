@@ -138,8 +138,8 @@ def test_a_gain_given_back_sends_one_alert(engine, world):
     a = found[0]
     assert (a.contracts, a.avg_cost, a.mark, a.bid, a.gain, a.peak_gain) == (2, 400, 412, 410, 24, 204)
     title, body, _ = position_alerts.message(a)
-    assert title == "SNDK 10/23/26 230C: give-back triggered"
-    assert body == "Peak +$204 (+26%), now +$24 (+3%) at a $4.12 mid, bid $4.10. Gain reached the +3% give-back threshold or below. 2 contracts open. Review your exit plan." + OFF_CONTEXT
+    assert title == "🟢 SNDK 230C gave back: +$204 → +$24. Take it?"
+    assert body == "Peak +$204 (+26%), now +$24 (+3%). 2 contracts, bid $4.10 vs your $4.00." + OFF_CONTEXT
 
 
 def test_a_small_position_never_arms_on_percent_alone(engine, world):
@@ -255,8 +255,8 @@ def test_last_day_alerts_at_ninety_and_thirty_minutes_before_the_close(engine, w
     assert [a.kind for a in found] == ["expiry_first", "expiry_final"]
     assert [datetime.fromtimestamp(a.detected_at.replace(tzinfo=UTC).timestamp(), ET).strftime("%H:%M") for a in found] == ["14:30", "15:30"]
     title, body, priority = position_alerts.message(found[1], "4:00 PM", 30)
-    assert title == "SNDK 10/21/26 230C: 30 minutes left, expires today"
-    assert body == "Still open: 3 contracts, now -$324 (-72%) at a $0.42 mid, bid $0.40. The market closes at 4:00 PM." + OFF_CONTEXT
+    assert title == "🔴 SNDK 230C: 30 min left, -$324 (-72%). Sell?"
+    assert body == "3 contracts, bid $0.40 vs your $1.50.\nThe market closes at 4:00 PM." + OFF_CONTEXT
     assert priority == 5
 
 
@@ -309,7 +309,7 @@ def test_delivery_sends_once_with_a_link_to_the_trade(engine, world, monkeypatch
     sent_to(monkeypatch, sent)
     watcher.deliver()
     watcher.deliver()
-    assert sent == [("SNDK 10/23/26 230C: give-back triggered", f"/trades/{alert.trade_id}?alert={alert.id}")]
+    assert sent == [("🟢 SNDK 230C gave back: +$124 → +$4. Take it?", f"/trades/{alert.trade_id}?alert={alert.id}")]
     assert alerts(engine)[0].delivery == "sent"
 
 
@@ -324,7 +324,7 @@ def test_on_telegram_the_answers_and_why_are_reply_buttons_not_links(engine, wor
     monkeypatch.setattr(telegram, "publish", lambda title, body, **kw: sent.append((title, kw)) or "9")
     watcher.deliver()
     [(title, kw)] = sent
-    assert title == "SNDK 10/23/26 230C: give-back triggered" and kw["path"] == f"/trades/{alert.trade_id}?alert={alert.id}"
+    assert title == "🟢 SNDK 230C gave back: +$124 → +$4. Take it?" and kw["path"] == f"/trades/{alert.trade_id}?alert={alert.id}"
     # All four answers on Telegram (ntfy keeps two links, below), and Why?
     assert kw["buttons"] == (("Prompted review", f"fb:{alert.id}:prompted_review"), ("Already aware", f"fb:{alert.id}:already_aware"),
                              ("Too late", f"fb:{alert.id}:too_late"), ("Not useful", f"fb:{alert.id}:not_useful"),
@@ -531,7 +531,7 @@ def test_a_contract_too_thin_to_price_shows_its_bid_not_no_quote(engine, world):
     watcher.run()
     alert = alerts(engine)[0]
     assert (alert.mark, alert.bid) == (None, 5)
-    assert position_alerts.message(alert, "4:00 PM")[1] == "3 contracts open, bid $0.05, too thin to price at a midpoint. The market closes at 4:00 PM." + OFF_CONTEXT
+    assert position_alerts.message(alert, "4:00 PM")[1] == "3 contracts, bid $0.05, too thin to price at a midpoint.\nThe market closes at 4:00 PM." + OFF_CONTEXT
 
 
 def test_an_expiry_alert_is_never_sent_after_the_close_and_states_the_minutes_left(engine, world, monkeypatch):
@@ -544,7 +544,7 @@ def test_an_expiry_alert_is_never_sent_after_the_close_and_states_the_minutes_le
     sent_to(monkeypatch, sent)
     clock.now = at(WED, "15:52")
     watcher.deliver()
-    assert sent[0][0] == "SNDK 10/21/26 230C: 8 minutes left, expires today"
+    assert sent[0][0] == "SNDK 230C: 8 min left, no quote. Sell?"
     with Session(engine) as db:
         db.exec(PositionAlert.__table__.update().values(delivery="pending"))
         db.commit()
@@ -576,9 +576,9 @@ def test_a_zero_bid_however_old_is_kept_and_the_last_day_alert_says_what_the_con
     clock.now = at(WED, "15:51")
     watcher.deliver()
     [(title, body)] = sent
-    assert title == "SNDK 10/21/26 230C: 9 minutes left, expires today"
-    assert body.startswith("Still open: 2 contracts, no bids: worth $0 to sell now. "
-                           "SNDK 200.00 is 30.00 below the 230 strike: worth $0 at expiry if it stays here. The market closes at")
+    assert title == "SNDK 230C: 9 min left, no bids. Sell?"
+    assert body.startswith("SNDK 200.00 is 30.00 below the 230 strike: worth $0 at expiry if it stays here.\n"
+                           "2 contracts, no bids: worth $0 to sell now.\nThe market closes at")
 
 
 def test_an_in_the_money_last_day_alert_says_what_it_is_worth_at_expiry_and_an_unread_underlying_adds_nothing(engine, world, monkeypatch):
@@ -594,7 +594,7 @@ def test_an_in_the_money_last_day_alert_says_what_it_is_worth_at_expiry_and_an_u
     clock.now = at(WED, "15:51")
     watcher.deliver()
     [(_, body)] = sent
-    assert "at a $3.00 mid, bid $2.90. SNDK 233.00 is 3.00 above the 230 strike: worth about $300 at expiry if it stays here." in body
+    assert body.startswith("SNDK 233.00 is 3.00 above the 230 strike: worth about $300 at expiry if it stays here.\n1 contract, bid $2.90")
     # Without an underlying price (a feed outage, or an index option) the message is as before.
     assert position_alerts.at_expiry(alerts(engine)[0], None) == ""
     position_alerts.PositionAlerts(engine, Calendar(), clock=clock, quotes=quotes, underlying=lambda symbols: 1 / 0)
@@ -701,9 +701,8 @@ def test_a_position_held_sixty_minutes_gets_one_re_decide_alert(engine, world, h
     found = alerts(engine)
     assert kinds(engine) == ["hold_hour"]
     title, body, _ = position_alerts.message(found[0])
-    assert title == "SNDK 10/23/26 230C: open an hour, re-decide"
-    assert body == ("Open 60 min, now -$24 (-6%) at a $3.76 mid, bid $3.74, best seen by the alert watch +$48 (+12%). "
-                    "1 contract open. Re-decide: close, trim, or set your exit.") + OFF_CONTEXT
+    assert title == "🔴 SNDK 230C -$24 (-6%), open an hour"
+    assert body == "1 contract, bid $3.74 vs your $4.00." + OFF_CONTEXT
 
 
 def test_an_entry_before_the_open_counts_from_nine_thirty(engine, world, hold_on):
@@ -790,10 +789,10 @@ def test_a_quote_that_cannot_be_judged_still_sends_saying_so(engine, world, hold
     run_at(clock, watcher, WED, "11:00")
     found = alerts(engine)
     assert (found[0].kind, found[0].mark, found[0].bid) == ("hold_hour", None, 200)
-    assert position_alerts.message(found[0])[1] == ("Open 60 min, no reliable quote, bid $2.00. 1 contract open. "
-                                                    "Re-decide: close, trim, or set your exit.") + OFF_CONTEXT
+    assert position_alerts.message(found[0]) == ("SNDK 230C no quote, open an hour",
+                                                 "1 contract, bid $2.00, too thin to price at a midpoint." + OFF_CONTEXT, 4)
     found[0].bid = None
-    assert position_alerts.message(found[0])[1].startswith("Open 60 min, no reliable quote. 1 contract open.")
+    assert position_alerts.message(found[0])[1].startswith("1 contract, no live quote right now.")
 
 
 def test_hold_alert_delivery_is_at_most_once(engine, world, hold_on, monkeypatch):
@@ -807,7 +806,7 @@ def test_hold_alert_delivery_is_at_most_once(engine, world, hold_on, monkeypatch
     sent_to(monkeypatch, sent)
     watcher.deliver()
     watcher.deliver()
-    assert sent == [("SNDK 10/23/26 230C: down 40% an hour in", f"/trades/{alert.trade_id}?alert={alert.id}")]
+    assert sent == [("🔴 SNDK 230C -$160 (-40%) an hour in, expires in 2 days. Cut?", f"/trades/{alert.trade_id}?alert={alert.id}")]
     with Session(engine) as db:
         row = db.get(PositionAlert, alert.id)
         row.delivery, row.claimed_at = "sending", datetime.fromtimestamp(clock.now - 200, UTC).replace(tzinfo=None)
@@ -859,10 +858,9 @@ def test_a_call_whose_underlying_fell_30_minutes_in_gets_one_wrong_way_alert(eng
         facts = position_alerts.wrong_way_facts(db, found[0])
     assert facts == {"move": pytest.approx(98.78 / 99.38 - 1), "record": None}
     title, body, _ = position_alerts.message(found[0], facts=facts)
-    assert title == "SNDK 10/23/26 230C: wrong way at 30 min"
-    assert body == ("SNDK down 0.60% in the 30 min after your entry, against your call. "
-                    "Option now -$24 (-6%) at a $3.76 mid, bid $3.74. 1 contract open. "
-                    "Re-decide: close, trim, or set your exit.") + OFF_CONTEXT
+    assert title == "🔴 SNDK 230C -$24 (-6%), going the wrong way. Cut?"
+    assert body == ("SNDK down 0.60% in the 30 min after your entry, against your call.\n"
+                    "1 contract, bid $3.74 vs your $4.00.") + OFF_CONTEXT
 
 
 def test_the_right_way_sends_nothing_and_a_put_is_judged_the_other_way(engine, world, wrong_way_on, monkeypatch):
@@ -880,7 +878,7 @@ def test_the_right_way_sends_nothing_and_a_put_is_judged_the_other_way(engine, w
     found = alerts(engine)
     assert [(a.kind, a.contract) for a in found] == [("wrong_way", "SNDK 10/30/26 230P")]
     assert position_alerts.message(found[0], facts={"move": 0.0061, "record": None})[1].startswith(
-        "SNDK up 0.61% in the 30 min after your entry, against your put. ")
+        "SNDK up 0.61% in the 30 min after your entry, against your put.\n")
 
 
 def test_only_opening_entries_on_time_are_checked_and_index_options_read_spy(engine, world, wrong_way_on, monkeypatch):
@@ -904,7 +902,7 @@ def test_only_opening_entries_on_time_are_checked_and_index_options_read_spy(eng
     assert seen == ["SPY"]
     spx = PositionAlert(kind="wrong_way", contract="SPXW 10/21/26 6800P", contracts=1, mark=None, bid=None)
     assert position_alerts.message(spx, facts={"move": 0.0018, "record": None})[1].startswith(
-        "SPY (for SPXW) up 0.18% in the 30 min after your entry, against your put. Option no reliable quote. ")
+        "SPY (for SPXW) up 0.18% in the 30 min after your entry, against your put.\n1 contract, no live quote right now.")
 
 
 def test_no_bars_means_no_alert(engine, world, wrong_way_on, monkeypatch):
@@ -970,7 +968,7 @@ def test_the_ninety_minute_last_day_alert_is_recorded_but_not_sent_and_the_final
         watcher.deliver()
     assert [(a.kind, a.delivery) for a in alerts(engine)] == [("expiry_first", "held"), ("expiry_final", "sent")]
     assert alerts(engine)[0].last_error == position_alerts.NOT_SENT["expiry_first"]
-    assert [t for t, _ in sent] == ["SNDK 10/21/26 230C: 30 minutes left, expires today"]
+    assert [t.split(",")[0] for t, _ in sent] == ["🔴 SNDK 230C: 30 min left"]
 
 
 def closed(db, opened, minutes, pnl, instrument="option"):
@@ -1011,10 +1009,10 @@ def test_the_message_carries_the_owners_opening_record_and_is_sent_once(engine, 
         row = db.get(PositionAlert, alert.id)
         assert (row.delivery, row.last_error) == ("held", position_alerts.NOT_SENT["wrong_way"])
         title, body, _ = position_alerts.message(row, facts=position_alerts.wrong_way_facts(db, row))
-    assert title == "SNDK 10/23/26 230C: wrong way at 30 min"
-    assert body.startswith("SNDK down 0.60% in the 30 min after your entry, against your call. Option now -$24 (-6%)")
-    assert ("1 contract open. Your past opening option trades: closed within 30 min, 5 won 60% (+$200); held 2 h or more, "
-            "5 won 20% (-$1,450). Re-decide: close, trim, or set your exit.") in body
+    assert title == "🔴 SNDK 230C -$24 (-6%), going the wrong way. Cut?"
+    assert body.startswith("SNDK down 0.60% in the 30 min after your entry, against your call.\n1 contract, bid $3.74")
+    assert ("\nYour past opening option trades: closed within 30 min, 5 won 60% (+$200); held 2 h or more, "
+            "5 won 20% (-$1,450).") in body
     assert position_alerts.ask_context(alert).endswith("Wrong-way alert at 10:31 AM: now -$24.")
 
 
@@ -1052,8 +1050,8 @@ def test_the_trading_day_before_expiry_gets_one_alert_with_this_weeks_premium_at
     clock.now = at(THU, "15:41")
     watcher.deliver()
     [(title, body, priority)] = sent
-    assert (title, priority) == ("SNDK 10/23/26 230C expires tomorrow, still open", 2)  # green: a reminder, no sound
-    assert body.startswith("Mark $4.52 vs cost $4.00: +$104 (+13%). 2 contracts open. Expiring this week: 3 contracts, $1,100 "
+    assert (title, priority) == ("🟢 SNDK 230C +$104 (+13%), expires tomorrow", 2)  # green: a reminder, no sound
+    assert body.startswith("2 contracts, bid $4.50 vs your $4.00.\nExpiring this week: 3 contracts, $1,100 "
                            "premium at risk.\n\nSince-entry context unavailable")  # an overnight position has no since-entry context
     with Session(engine) as db:
         from app.models import PhonePing
@@ -1081,8 +1079,8 @@ def test_a_monday_expiry_is_alerted_friday_and_a_half_day_moves_it_before_the_cl
     [eve] = alerts(engine)
     assert eve.kind == "expiry_eve" and eve.mark is None
     title, body, _ = position_alerts.message(eve, facts={"expires": "Monday", "week": {"contracts": 1, "premium": 150.0}})
-    assert title == "SNDK 10/26/26 230C expires Monday, still open"
-    assert body.startswith("Cost $1.50, no reliable quote. 1 contract open. Expiring this week: 1 contract, $150 premium at risk.")
+    assert title == "SNDK 230C no quote, expires Monday"
+    assert body.startswith("1 contract, no live quote right now.\nExpiring this week: 1 contract, $150 premium at risk.")
     assert position_alerts.trading_days_after(Weekdays(), friday, 2) == [monday, date(2026, 10, 27)]
 
 
@@ -1134,8 +1132,7 @@ def test_the_give_back_alert_carries_the_owners_record_from_a_green_peak(engine,
     assert len(line) < 150
     sent = giveback_sent(world, monkeypatch)
     assert alerts(engine)[0].delivery == "sent"
-    assert ("2 contracts open. Your record from a green peak: closed green 5 of 11 (+$510), closed red 6 (-$1,200). "
-            "Review your exit plan.") in sent[0]
+    assert ("vs your $4.00.\nYour record from a green peak: closed green 5 of 11 (+$510), closed red 6 (-$1,200).") in sent[0]
 
 
 @pytest.mark.parametrize("greens,reds,pathless", [(4, 6, False), (6, 4, False), (5, 5, True)])
@@ -1149,7 +1146,7 @@ def test_no_record_line_under_five_a_side_or_without_path_data(engine, world, mo
         db.commit()
         assert position_alerts.giveback_record(db) is None
     sent = giveback_sent(world, monkeypatch)
-    assert "Your record" not in sent[0] and "2 contracts open. Review your exit plan." in sent[0]
+    assert "Your record" not in sent[0] and "2 contracts, bid" in sent[0]
 
 
 def test_a_record_failure_never_holds_the_give_back_alert(engine, world, monkeypatch):
@@ -1158,7 +1155,7 @@ def test_a_record_failure_never_holds_the_give_back_alert(engine, world, monkeyp
     monkeypatch.setattr(position_alerts, "giveback_record", broken)
     fired(engine, world)
     sent = giveback_sent(world, monkeypatch)
-    assert alerts(engine)[0].delivery == "sent" and "2 contracts open. Review your exit plan." in sent[0]
+    assert alerts(engine)[0].delivery == "sent" and "2 contracts, bid" in sent[0]
 
 
 def practice_stub(monkeypatch, goal):
@@ -1178,9 +1175,9 @@ def test_the_give_back_alert_ends_with_the_practice_goal_it_tests(engine, world,
     sent = giveback_sent(world, monkeypatch)
     assert alerts(engine)[0].delivery == "sent"
     if goal == "respond_to_giveback_15m":
-        assert sent[0].endswith("\nPractice this week: respond_to_giveback_15m · kept 2 of 3 so far")
+        assert "\nPractice this week: respond_to_giveback_15m · kept 2 of 3 so far\n\n" in sent[0]
     else:
-        assert "Practice" not in sent[0] and "2 contracts open. Review your exit plan." in sent[0]
+        assert "Practice" not in sent[0] and "2 contracts, bid" in sent[0]
 
 
 @pytest.mark.parametrize("goal", ["no_trade_after_hour_red", "respond_to_giveback_15m", "raises"])
@@ -1192,8 +1189,8 @@ def test_the_one_hour_alert_ends_with_the_practice_goal_it_tests(engine, world, 
     quotes.set(2.38)
     run_at(clock, watcher, WED, "11:00")
     sent = giveback_sent(world, monkeypatch)
-    assert alerts(engine)[0].delivery == "sent" and "Re-decide: close, trim, or set your exit." in sent[0]
-    assert sent[0].endswith("\nPractice this week: no_trade_after_hour_red · kept 2 of 3 so far") == (goal == "no_trade_after_hour_red")
+    assert alerts(engine)[0].delivery == "sent" and "contract, bid" in sent[0]
+    assert ("\nPractice this week: no_trade_after_hour_red · kept 2 of 3 so far\n\n" in sent[0]) == (goal == "no_trade_after_hour_red")
     assert ("Practice" in sent[0]) == (goal == "no_trade_after_hour_red")
 
 
@@ -1239,9 +1236,9 @@ def test_no_sell_order_five_minutes_after_the_buy_sends_one_alert(engine, exits,
     run_at(clock, watcher, WED, "10:05", "10:06", "10:12")
     assert kinds(engine) == ["no_exit"]
     title, body, _ = position_alerts.message(alerts(engine)[0])
-    assert title == "SNDK 10/23/26 230C: no exit order set"
-    assert body == ("Bought 5 min ago, now -$16 (-2%) at a $3.92 mid, bid $3.90. 2 contracts open and no sell order working on "
-                    "Robinhood for it. Set your stop and your target now, while it is calm.") + OFF_CONTEXT
+    assert title == "🔴 SNDK 230C: no sell order set, -$16 (-2%)"
+    assert body == ("Bought 5 min ago, 2 contracts, bid $3.90 vs your $4.00. Nothing working on Robinhood: set your stop and "
+                    "target now, while it is calm.") + OFF_CONTEXT
 
 
 def test_a_working_sell_order_for_that_contract_and_account_keeps_it_quiet(engine, exits, no_exit_on):
@@ -1393,18 +1390,16 @@ def test_a_short_dated_option_down_thirty_percent_at_the_hour_gets_its_own_words
         facts = position_alerts.hold_facts(db, alert, at(WED, "11:00"))
         assert facts["days"] == 2
         title, body, priority = position_alerts.message(alert, facts=facts)
-        assert (title, priority) == ("SNDK 10/23/26 230C: down 30% an hour in", 4)
-        assert body == ("Open 60 min, now -$240 (-30%) at a $2.80 mid, bid $2.78, best seen by the alert watch -$240 (-30%). "
-                        "Expires in 2 days. 2 contracts open. Your options with 3 days or less to expiry: closed within the hour, "
-                        "5 won 80% (+$320); held 2 h or more, 5 won 20% (-$1,140). "
-                        "Re-decide: close, trim, or set your exit.") + OFF_CONTEXT
+        assert (title, priority) == ("🔴 SNDK 230C -$240 (-30%) an hour in, expires in 2 days. Cut?", 4)
+        assert body == ("2 contracts, bid $2.78 vs your $4.00.\nYour options with 3 days or less to expiry: closed within the hour, "
+                        "5 won 80% (+$320); held 2 h or more, 5 won 20% (-$1,140).") + OFF_CONTEXT
         alert.gain_pct = (7.07 - 10.10) / 10.10  # exactly 30% down, a hair above -0.30 as a float
         assert alert.gain_pct > -0.30 and position_alerts.hold_facts(db, alert, at(WED, "11:00"))["days"] == 2
         alert.gain_pct = -0.30
         # Down 29%, a longer-dated contract, or no quote to judge: the hour alert's usual words.
         alert.gain_pct = -0.29
         assert position_alerts.hold_facts(db, alert, at(WED, "11:00")) == {"days": None, "record": None}
-        assert position_alerts.message(alert, facts={"days": None, "record": None})[0] == "SNDK 10/23/26 230C: open an hour, re-decide"
+        assert position_alerts.message(alert, facts={"days": None, "record": None})[0] == "🔴 SNDK 230C -$240 (-29%), open an hour"
         alert.gain_pct = -0.50
         assert position_alerts.hold_facts(db, alert, at(date(2026, 10, 19), "11:00"))["days"] is None  # four days left
         alert.gain_pct = None
@@ -1422,8 +1417,8 @@ def test_the_deep_red_hour_alert_is_sent_with_its_title_and_expiry_day_says_toda
     monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: sent.append((title, body)))
     watcher.deliver()
     [(title, body)] = sent
-    assert title == "SNDK 10/21/26 230C: down 50% an hour in"
-    assert "Expires today. 1 contract open. Re-decide: close, trim, or set your exit." in body  # no record yet: no line
+    assert title.startswith("🔴 SNDK 230C -$") and title.endswith("(-50%) an hour in, expires today. Cut?")
+    assert body.split("\n\n")[0].count("\n") == 0  # no record yet: no line
 
 
 def test_a_morning_same_day_option_still_open_at_one_gets_one_alert_with_the_record(engine, world, monkeypatch):
@@ -1454,10 +1449,10 @@ def test_a_morning_same_day_option_still_open_at_one_gets_one_alert_with_the_rec
     watcher.deliver()
     watcher.deliver()
     [(title, body, priority)] = sent
-    assert (title, priority) == ("SNDK 10/21/26 230C: bought this morning, expires today, still open at 1 PM", 4)
-    assert body.startswith("2 contracts open, now -$120 (-40%) at a $0.90 mid, bid $0.88. SNDK 228.00 is 2.00 below the 230 strike: "
-                           "worth $0 at expiry if it stays here. Your same-day options bought before noon: closed by 1 PM, "
-                           "5 won 60% (+$240); still open after 1 PM, 5 won 0% (-$750). Re-decide: close, trim, or set your exit.")
+    assert (title, priority) == ("🔴 SNDK 230C -$120 (-40%) at 1 PM, expires today. Cut?", 4)
+    assert body.startswith("SNDK 228.00 is 2.00 below the 230 strike: worth $0 at expiry if it stays here.\n"
+                           "2 contracts, bid $0.88 vs your $1.50. Bought this morning.\nYour same-day options bought before noon: closed by 1 PM, "
+                           "5 won 60% (+$240); still open after 1 PM, 5 won 0% (-$750).")
     assert position_alerts.ask_context(alert).endswith("1 PM same-day alert at 1:00 PM: now -$120.")
     with Session(engine) as db:
         fill(db, "buy_to_open", 1, 160, "2026-10-21T09:50", expiration=WED)  # an earlier entry's email arrives late: a new anchor
@@ -1510,8 +1505,8 @@ def test_the_day_before_expiry_alert_adds_the_carry_record_only_when_red(engine,
     monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: (sent.append(body), priorities.append(kw["priority"])))
     watcher.deliver()
     assert priorities == [4]  # red: it makes a sound (a green one is sent silently)
-    assert sent[0].startswith("Mark $3.02 vs cost $4.00: -$196 (-24%). 2 contracts open. Expiring this week: 2 contracts, $800 premium "
-                              "at risk. Your record carrying an option into its expiration day: 5 trades, 4 expired worthless, -$650.")
+    assert sent[0].startswith("2 contracts, bid $3.00 vs your $4.00.\nExpiring this week: 2 contracts, $800 premium "
+                              "at risk.\nYour record carrying an option into its expiration day: 5 trades, 4 expired worthless, -$650.")
     facts = {"record": "Your record carrying an option into its expiration day: 5 trades, 4 expired worthless, -$650."}
     eve.gain, eve.gain_pct = 104.0, 0.13
     assert "Your record" not in position_alerts.message(eve, facts=facts)[1]  # green: the record stays out

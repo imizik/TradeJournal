@@ -400,7 +400,7 @@ def test_position_alerts_ignore_the_removed_shared_cap_and_send_once(engine, pho
         assert pings[str(give)].sender == "position_alerts" and pings[str(give)].symbol == "SNDK"
     watcher.deliver()
     assert len(phone) == 2
-    assert "SNDK 10/23/26 230C: give-back triggered" in [title for title, _, _ in phone]
+    assert "🟢 SNDK 230C gave back: +$124 → +$20. Take it?" in [title for title, _, _ in phone]
 
 
 def test_a_failed_send_keeps_its_decision_and_carries_a_merged_ping_on_the_retry(engine, monkeypatch):
@@ -424,8 +424,8 @@ def test_a_failed_send_keeps_its_decision_and_carries_a_merged_ping_on_the_retry
         assert "Merged into the give-back ping" in db.get(PositionAlert, hold).last_error
     clock.now = at("10:03")
     watcher.deliver()
-    assert len(calls) == 2 and calls[1][0] == "SNDK 10/23/26 230C: give-back triggered"
-    assert "\n\nAlso: SNDK 10/23/26 230C: no exit order set. Bought 5 min ago" in calls[1][1]
+    assert len(calls) == 2 and calls[1][0] == "🟢 SNDK 230C gave back: +$124 → +$20. Take it?"
+    assert "\n\nAlso: 🟢 SNDK 230C: no sell order set, +$20 (+3%). Bought 5 min ago" in calls[1][1]
     with Session(engine) as db:
         assert db.get(PositionAlert, give).delivery == "sent"
         assert [p.decision for p in db.exec(select(PhonePing).order_by(PhonePing.decided_at)).all()] == ["sent", "merged"]
