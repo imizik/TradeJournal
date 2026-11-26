@@ -4612,7 +4612,7 @@ the clipboard and logs an `Exiting. …` decision; a hold logs `Holding. …` wi
 that check-in on the entry (`check_in` on `POST /day-journal/{day}/entries`, kept in its `context_json`). With
 `HOLD_CHECK_IN_PINGS=true` (off by default; the card's body says which, `check_in_pings`) the card says "I'll ping you at
 …" and `engine/hold_check_ins.py` sends one loud ping at that time, in the regular session, if the pinged position is
-still open: "Check-in: <contract> still open", opening this same card (with the alert's Cut it / Holding reply buttons while the desk is on). A newer
+still open: "Check-in: <contract> still open", opening this same card (no answer links while the desk is on: the card's Cut it and Holding answer it). A newer
 hold on the same ping replaces it, an `Exiting` decision on the symbol after it cancels it, a check-in more than 10
 minutes late is dropped, and it is claimed once through the notification policy (sender `hold_check_in`, ranked with
 the one-hour alert, anchored to the position). Off, the hold is logged as before and nothing pings. On an interrupt's card any choice also records its Noted. Nothing is sent to Robinhood. The decision bar's

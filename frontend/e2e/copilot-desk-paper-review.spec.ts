@@ -48,6 +48,10 @@ async function open(page: Page, width: number, book: object = BOOK) {
   await page.route("**/copilot/chat", route => { chats.push(route.request().postDataJSON()); return route.abort(); });
   await page.goto("/copilot-lab");
   if (width < 768) await page.getByTestId("desk-view-book").click();
+  if (width < 768) { // a phone keeps Practice, paper, rules and the scorecard under More (November 26, 2026)
+    await page.getByTestId("desk-top-more").click();
+    await page.getByTestId("desk-top-practice").click();
+  }
   await page.getByTestId("practice-line-paper").click(); // nothing open on paper: Practice's paper line waits closed
   const paper = page.getByTestId("desk-paper");
   await expect(paper).toBeVisible();

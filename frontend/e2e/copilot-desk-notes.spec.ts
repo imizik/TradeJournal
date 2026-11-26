@@ -93,7 +93,12 @@ for (const width of [1440, 375]) {
     await expect(lines.nth(1)).toContainText("10:58");
     await expect(lines.nth(1)).toContainText("Trim jk at 4.40");
     // The Orders group: the closing fill takes a note on its trade; a working order and a fill not in the journal take none.
+    // A phone's home is positions first: its orders are the Orders tab's (November 26, 2026).
     const group = shelf.getByTestId("book-orders");
+    if (width < 768) {
+      await expect(group).toBeHidden();
+      return;
+    }
     await expect(group.getByTestId("desk-note-button")).toHaveCount(1);
     await group.getByRole("listitem").filter({ hasText: "MU 11/13/26 835C" }).getByRole("button", { name: "Note on this fill" }).click();
     await group.getByTestId("desk-note-input").fill("Why I left: lost VWAP");

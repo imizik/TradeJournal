@@ -107,6 +107,10 @@ async function open(page: Page, width: number, held = false, preview: "ok" | key
   });
   await page.goto("/copilot-lab");
   if (width < 768) await page.getByTestId("desk-view-book").click();
+  if (width < 768) { // a phone keeps Practice, paper, rules and the scorecard under More (November 26, 2026)
+    await page.getByTestId("desk-top-more").click();
+    await page.getByTestId("desk-top-practice").click();
+  }
   const paper = page.getByTestId("desk-paper");
   await expect(paper).toBeVisible();
   return { paper, posts, other, reads: () => reads };

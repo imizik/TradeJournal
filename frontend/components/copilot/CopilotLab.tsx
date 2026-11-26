@@ -711,6 +711,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // folded away shows for now, and the place scrolls into view, opened (``click``) when it is a fold or an editor. A
   // place inside a line under the book (``place``: a Practice line, My rules) opens that line first.
   const reveal = useCallback((pieces: string[], where: string | string[], click = false, place?: DeskPlace) => {
+    // A phone keeps Practice, paper, the scorecard and rules under More: asking for one (⌘K, a key) opens them.
+    if (typeof where === "string" && /^(desk-paper|rules-toggle|goals-set|whats-working-toggle|practice-line-)/.test(where)) setPhoneExtras(true);
     for (const piece of pieces) showNow(piece);
     if (place) openDeskPlace(place);
     showBook();

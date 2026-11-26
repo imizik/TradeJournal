@@ -121,10 +121,9 @@ def test_opens_the_ping_card_while_the_desk_is_on(engine, sent, monkeypatch):
     run(engine, "10:48")
     kw = sent[0][2]
     assert f"card=alert%3A{alert.id}" in kw["path"]
-    assert kw["more"] == ()  # no Close/Trim answer links since 2026-11-26: the alert's reply buttons instead
-    # Telegram gets the alert's own Cut it / Holding / Why? (ntfy cannot carry reply buttons).
-    assert [label for label, _ in calls[0]["buttons"]] == ["Cut it", "Holding", "Why?"]
-    assert calls[0]["buttons"][0][1] == f"cx:{alert.id}:c"
+    assert kw["more"] == ()  # no Close/Trim answer links since 2026-11-26: the card's Cut it / Holding answer it
+    # Not the alert's own reply buttons: those answer once per alert, and a check-in may follow a Holding.
+    assert "buttons" not in calls[0]
 
 
 def test_closed_position_sends_nothing(engine, sent):

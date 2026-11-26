@@ -163,7 +163,11 @@ for (const width of [1440, 375]) {
     await expect.poll(() => steps.some(s => s.postDataJSON().end === true)).toBe(true);
     await expect(page.getByTestId("desk-replay")).toHaveCount(0);
     await expect(page.locator("#desk-cockpit")).toBeVisible();
-    if (width < 768) await page.getByTestId("desk-view-book").click();
+    if (width < 768) {
+      await page.getByTestId("desk-view-book").click();
+      await page.getByTestId("desk-top-more").click(); // a phone's Practice is under More (November 26, 2026)
+      await page.getByTestId("desk-top-practice").click();
+    }
     await page.getByTestId("practice-line-replay").click(); // Practice's Replay line opens the section in place
     const practice = page.getByTestId("replay-practice");
     await expect(practice).toContainText("Replay practice");
