@@ -294,7 +294,7 @@ def test_anthropic_adapter_streams_bounded_tools_and_reports_cost(monkeypatch):
     assert "sk-test" not in json.dumps(calls, default=str) + json.dumps(events)
     metrics = events[-1]["metrics"]
     assert metrics["usage"] == {"input_tokens": 2000, "output_tokens": 1000, "cache_read_input_tokens": 4000, "cache_creation_input_tokens": 0}
-    assert metrics["cost_usd"] == pytest.approx((2000 * 2 + 1000 * 10 + 4000 * 0.2) / 1e6)
+    assert metrics["cost_usd"] == pytest.approx((2000 * 2 + 1000 * 10 + 4000 * 0.10) / 1e6)
     assert metrics["first_text_ms"] is not None and [t["name"] for t in metrics["tool_calls"]] == ["owner_context", "get_group_comparison"]
     # The pack's row is the first thing the trader sees, then the progress note, then text: equal only when both land
     # in the same millisecond (as they did on #470's CI run), so order, not equality.

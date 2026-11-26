@@ -22,10 +22,14 @@ from typing import AsyncIterator, Iterable, Sequence
 log = logging.getLogger(__name__)
 
 # "plan" only labels turns recorded before everything moved to the API.
-BILLING = {"anthropic": "api", "shadow": "api_background", "plan": "claude_plan", "fake": "none"}
+BILLING = {"anthropic": "api", "shadow": "api_background", "api_background": "api_background",
+           "plan": "claude_plan", "fake": "none"}
 KINDS = frozenset({"ask", "briefing", "plan", "review", "week_review", "moment", "changes", "compare", "pushback", "prep",
-                   "companion", "shadow", "check_call", "desk_read", "day_read", "paper_review"})
-SOURCES = frozenset({"desk", "charts", "radar", "panel", "telegram", "prep", "week_review", "companion", "shadow", "eval"})
+                   "companion", "shadow", "check_call", "desk_read", "day_read", "paper_review", "research",
+                   "strategy_factory", "agent"})
+SOURCES = frozenset({"desk", "charts", "radar", "panel", "telegram", "prep", "week_review", "companion", "shadow", "eval",
+                     "api_runner", "research_job", "strategy_factory"})
+DEFAULT_MONTHLY_BUDGET_USD = 100.0
 PUSHBACK = re.compile(r"^\s*push back on\b", re.I)
 COMPARE_LINE = re.compile(r"^\**compare\**\s*:", re.I | re.M)
 WHAT_MATTERS = "What matters right now across my open positions"  # frontend/lib/copilot.ts WHAT_MATTERS_PROMPT
@@ -37,6 +41,22 @@ def _day_start_utc() -> datetime:
     from app.engine.chart_math import ET
     start = datetime.now(ET).replace(hour=0, minute=0, second=0, microsecond=0)
     return start.astimezone(UTC).replace(tzinfo=None)
+
+
+def _month_start_utc() -> datetime:
+    from app.engine.chart_math import ET
+    start = datetime.now(ET).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return start.astimezone(UTC).replace(tzinfo=None)
+
+
+def _naive_utc(value) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
 
 
 def record(metrics: dict, symbol: str | None = None, session=None, *, turn_id: uuid.UUID | None = None, kind: str | None = None,
@@ -209,6 +229,58 @@ def spent_today(session=None) -> float:
         rows = db.exec(select(CopilotTurn.cost_usd).where(CopilotTurn.billing == "api",
                                                           col(CopilotTurn.started_at) >= _day_start_utc())).all()
     return round(sum(float(c or 0) for c in rows), 6)
+
+
+def monthly_budget_usd() -> float:
+    """Configured ``AI_MONTHLY_BUDGET_USD`` (default 100), validated as a positive finite number."""
+    from app.ai import copilot
+    return copilot._float_env("AI_MONTHLY_BUDGET_USD", DEFAULT_MONTHLY_BUDGET_USD)
+
+
+def _research_job_spend_since(job, start: datetime) -> float:
+    """Spend recorded on one ResearchJob from attempts at or after ``start`` (matches ``research_queue``)."""
+    try:
+        entries = json.loads(job.spend_json or "[]")
+    except ValueError:
+        entries = []
+    if isinstance(entries, list) and entries:
+        return sum(float(e.get("usd") or 0) for e in entries
+                   if isinstance(e, dict) and (at := _naive_utc(e.get("at"))) is not None and at >= start)
+    return float(job.cost_usd or 0)
+
+
+def spent_this_month(session=None) -> float:
+    """Month-to-date estimated API dollars across all AI call records (New York calendar month)."""
+    from sqlmodel import Session, col, select
+    from app.database import engine
+    from app.models import CopilotTurn, PracticeAgentCall, ResearchJob
+    start = _month_start_utc()
+    with (Session(engine) if session is None else nullcontext(session)) as db:
+        turn_rows = db.exec(
+            select(CopilotTurn.cost_usd).where(col(CopilotTurn.billing).in_(("api", "api_background")),
+                                               col(CopilotTurn.started_at) >= start)
+        ).all()
+        job_rows = db.exec(select(ResearchJob).where(col(ResearchJob.started_at) >= start)).all()
+        practice_rows = db.exec(
+            select(PracticeAgentCall.cost_usd).where(col(PracticeAgentCall.started_at) >= start)
+        ).all()
+    total = (
+        sum(float(c or 0) for c in turn_rows)
+        + sum(_research_job_spend_since(job, start) for job in job_rows)
+        + sum(float(c or 0) for c in practice_rows)
+    )
+    return round(total, 6)
+
+
+def monthly_status(session=None) -> tuple[bool, float, float]:
+    """Return ``(exhausted, spent_this_month_usd, monthly_budget_usd)``."""
+    cap = monthly_budget_usd()
+    spent = spent_this_month(session=session)
+    return spent >= cap, spent, cap
+
+
+def monthly_budget_message(spent: float, cap: float) -> str:
+    return f"This month's AI budget (${cap:.2f}) is spent: ${spent:.2f} so far."
 
 
 def kind_today(kind: str, session=None) -> dict:

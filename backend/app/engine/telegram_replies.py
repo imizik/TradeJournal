@@ -710,6 +710,11 @@ class Replies:
         from app.engine.chart_math import ET
         cfg = copilot.settings()
         if cfg.backend == "anthropic":
+            exceeded, monthly_spent, monthly_cap = await asyncio.to_thread(copilot_spend.monthly_status)
+            if exceeded:
+                await asyncio.to_thread(copilot_spend.record_refused, kind="ask", source="telegram", backend=cfg.backend,
+                                        code="monthly_budget", symbol=symbol)
+                return copilot_spend.monthly_budget_message(monthly_spent, monthly_cap)
             spent = await asyncio.to_thread(copilot_spend.spent_today)
             if spent >= cfg.daily_budget_usd:
                 await asyncio.to_thread(copilot_spend.record_refused, kind="ask", source="telegram", backend=cfg.backend,

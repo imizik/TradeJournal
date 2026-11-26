@@ -273,10 +273,12 @@ def spent_today(session: Session | None = None) -> float:
 
 
 def claim_next(job_budget_usd: float, daily_budget_usd: float, session: Session | None = None) -> dict | None:
-    """Start the next due attempt if the day's cap allows, charging its budget as an estimate. The view's
-    ``budget_usd`` is that attempt's budget (the per-job budget, capped by what is left of the day)."""
+    """Start the next due attempt if the day's and month's caps allow, charging its budget as an estimate. The view's
+    ``budget_usd`` is that attempt's budget (the per-job budget, capped by what is left of the day and month)."""
+    from app.ai import copilot_spend
     with _session(session) as db:
-        remaining = daily_budget_usd - spent_today(db)
+        monthly_remaining = copilot_spend.monthly_budget_usd() - copilot_spend.spent_this_month(db)
+        remaining = min(daily_budget_usd - spent_today(db), monthly_remaining)
         if remaining < MIN_JOB_BUDGET_USD:
             return None
         now = _utcnow()
@@ -615,8 +617,9 @@ class QueueRunner:
                                        error={"code": "input_error", "message": f"{type(exc).__name__}: {exc}"[:300]})
         from app.engine.chart_math import ET
         run = self._run_job or research_job.run_job
+        extra = {"check_monthly": False, "record_spend": False} if self._run_job is None else {}
         task = asyncio.create_task(run(question, symbols, evidence, now=datetime.now(ET), title=title,
-                                       lim=research_job.JobLimits(budget_usd=job["budget_usd"])))
+                                       lim=research_job.JobLimits(budget_usd=job["budget_usd"]), **extra))
         try:
             while not task.done():
                 await asyncio.wait({task}, timeout=self.cancel_poll_s)

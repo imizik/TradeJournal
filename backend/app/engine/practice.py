@@ -276,9 +276,12 @@ def run_agent(db, run, *, adapter=practice_agent.invoke):
     except IntegrityError:
         db.rollback()
         raise decisions.DecisionError("Daily paid attempt already reserved; no silent retry")
-    if input_bound > limits["input_tokens"] or maximum_cost > limits["daily_usd"]:
+    from app.ai import copilot_spend
+    exceeded, monthly_spent, monthly_cap = copilot_spend.monthly_status(db)
+    if input_bound > limits["input_tokens"] or maximum_cost > limits["daily_usd"] or exceeded:
         call.status = "budget_exhausted"
-        call.error = "Agent hard input/spending limit exhausted before call"
+        call.error = (copilot_spend.monthly_budget_message(monthly_spent, monthly_cap)
+                      if exceeded else "Agent hard input/spending limit exhausted before call")
         call.finished_at = now_utc()
         db.add(call)
         db.commit()

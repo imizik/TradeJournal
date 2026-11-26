@@ -60,6 +60,11 @@ def status():
         out["spend_today_usd"] = copilot_spend.spent_today()
     except Exception:  # noqa: BLE001 - the status read must not fail on bookkeeping
         out["spend_today_usd"] = None
+    out["monthly_budget_usd"] = copilot_spend.monthly_budget_usd()
+    try:
+        out["spend_this_month_usd"] = copilot_spend.spent_this_month()
+    except Exception:  # noqa: BLE001 - the status read must not fail on bookkeeping
+        out["spend_this_month_usd"] = None
     out["capabilities"] = {"copilot_alerts": copilot_alerts_supported(),
                            "transcriber": {"configured": speech.configured, "provider": speech.provider}}
     if cfg.evidence == "replay":
@@ -159,6 +164,12 @@ async def chat(body: ChatBody):
     except copilot.CopilotError as exc:
         raise HTTPException(422, exc.message)
     if cfg.backend == "anthropic":
+        exceeded, monthly_spent, monthly_cap = copilot_spend.monthly_status()
+        if exceeded:
+            copilot_spend.record_refused(kind="ask", source=body.source or "desk", backend=cfg.backend,
+                                         code="monthly_budget", symbol=body.symbol)
+            raise HTTPException(429, f"{copilot_spend.monthly_budget_message(monthly_spent, monthly_cap)} "
+                                     "Raise AI_MONTHLY_BUDGET_USD to keep going.")
         spent = copilot_spend.spent_today()
         if spent >= cfg.daily_budget_usd:
             copilot_spend.record_refused(kind="ask", source=body.source or "desk", backend=cfg.backend, code="daily_budget", symbol=body.symbol)

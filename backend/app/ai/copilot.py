@@ -56,7 +56,7 @@ BACKENDS = ("anthropic",)  # what a turn may pick; `fake` is only ever the defau
 PROGRESS_BETA = "thinking-display-updates-2026-08-18"
 # USD per million tokens: input, output, cache read, 5-minute cache write. Haiku 5.5 is its rate for prompts of
 # 100K tokens or fewer (a copilot turn's prompt stays well under that); longer prompts bill at 5x.
-PRICES = {"claude-sonnet-5-5": (2.00, 10.00, 0.20, 2.50), "claude-opus-5-5": (4.00, 20.00, 0.20, 5.00),
+PRICES = {"claude-sonnet-5-5": (2.00, 10.00, 0.10, 2.50), "claude-opus-5-5": (4.00, 20.00, 0.20, 5.00),
           "claude-haiku-5-5": (0.10, 0.50, 0.01, 0.125),
           "claude-fable-5-2": (8.00, 40.00, 0.20, 10.00), "claude-fable-5-1": (10.00, 50.00, 0.25, 12.50)}
 
@@ -1896,6 +1896,19 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
     reminder and whether the owner context block is read."""
     system, job_tools, shape = copilot_prompt.PROMPTS[job], copilot_prompt.TOOLS[job], copilot_prompt.shape(job)
     owner_block = job in copilot_prompt.OWNER_BLOCK
+    if cfg.backend == "anthropic":
+        from app.ai import copilot_spend
+        exceeded, spent_m, cap_m = await asyncio.to_thread(copilot_spend.monthly_status)
+        if exceeded:
+            refused_metrics: dict[str, Any] = live if live is not None else {}
+            refused_metrics.update({"job": job, "backend": cfg.backend, "evidence": cfg.evidence, "effort": cfg.effort,
+                                    "model": getattr(adapter, "model", None) or cfg.model,
+                                    "first_feedback_ms": None, "first_progress_ms": None, "first_text_ms": None,
+                                    "max_silence_ms": 0, "rounds": 0, "tool_calls": [], "usage": _zero_usage(),
+                                    "cost_usd": 0.0, "rounds_ms": [], "prefetch": [], "total_ms": 0})
+            yield {"type": "error", "code": "monthly_budget", "message": copilot_spend.monthly_budget_message(spent_m, cap_m)}
+            yield {"type": "done", "metrics": refused_metrics, "carry_id": None}
+            return
     started = time.monotonic()
     messages = [dict(m) for m in history]
     replay = getattr(evidence, "label", "") == "replay"
