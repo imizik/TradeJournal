@@ -17,8 +17,9 @@ const price = (value: number) => value.toLocaleString("en-US", { minimumFraction
 
 function breakLine(row: ThesisRow) {
   if (row.break_below == null) return { text: "No break level", tone: "text-muted-foreground" };
-  if (row.break_distance_pct == null) return { text: `Breaks under ${price(row.break_below)}`, tone: "text-muted-foreground" };
-  if (row.break_distance_pct <= 0) return { text: `Under break ${price(row.break_below)}`, tone: "text-red-400" };
+  if (row.last == null || row.break_distance_pct == null) return { text: `Breaks under ${price(row.break_below)}`, tone: "text-muted-foreground" };
+  // Breached by the prices themselves (as thesis watch decides), not the rounded percentage.
+  if (row.last <= row.break_below) return { text: `Under break ${price(row.break_below)}`, tone: "text-red-400" };
   return { text: `${row.break_distance_pct.toFixed(1)}% above break ${price(row.break_below)}`, tone: row.break_distance_pct <= 5 ? "text-amber-300" : "text-muted-foreground" };
 }
 

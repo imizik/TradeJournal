@@ -702,6 +702,23 @@ def test_the_board_shows_each_thesis_with_price_vs_break_earnings_review_and_rec
     assert out["issues"] == []
 
 
+def test_a_busy_ticker_never_crowds_out_a_quiet_one_s_pings(engine, world):
+    _, readers, _, _ = world
+    thesis(engine, "NBIS")
+    thesis(engine, "CRWV")
+    with Session(engine) as db:
+        db.add(ThesisWatchTrigger(symbol="CRWV", kind="news", dedupe_key="news:CRWV:old", day="2026-10-20",
+                                  fired_at=datetime(2026, 10, 20, 14, 0), text="older CRWV", path="/x", delivery="sent"))
+        for i in range(50):
+            db.add(ThesisWatchTrigger(symbol="NBIS", kind="news", dedupe_key=f"news:NBIS:{i}", day="2026-10-21",
+                                      fired_at=datetime(2026, 10, 21, 14, i), text=f"headline {i}", path="/x", delivery="sent"))
+        db.commit()
+    with Session(engine) as db:
+        rows = {r["symbol"]: r for r in thesis_watch.board(db, quotes=readers.quote, earnings=readers.earning, today=WED)["items"]}
+    assert [p["text"] for p in rows["CRWV"]["pings"]] == ["older CRWV"]
+    assert len(rows["NBIS"]["pings"]) == 5
+
+
 def test_the_board_says_a_quote_outage_instead_of_guessing(engine, world):
     _, readers, _, _ = world
     thesis(engine, "NBIS", break_below=72)

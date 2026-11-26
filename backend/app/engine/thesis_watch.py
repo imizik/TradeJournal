@@ -650,12 +650,10 @@ def board(db: Session, *, quotes: QuoteReader | None = None, earnings: EarningsR
         except Exception as exc:  # noqa: BLE001
             issues.append(f"earnings unavailable: {type(exc).__name__}")
     recent: dict[str, list[dict]] = {}
-    if symbols:
-        for trigger in db.exec(select(ThesisWatchTrigger).where(col(ThesisWatchTrigger.symbol).in_(symbols))
-                               .order_by(col(ThesisWatchTrigger.fired_at).desc()).limit(pings * len(symbols) * 4)):
-            bucket = recent.setdefault(trigger.symbol, [])
-            if len(bucket) < pings:
-                bucket.append({k: v for k, v in view(trigger).items() if k in ("kind", "text", "fired_at", "delivery", "reason", "path")})
+    for symbol in symbols:  # per symbol, so a busy ticker never crowds out a quiet one's history
+        recent[symbol] = [{k: v for k, v in view(trigger).items() if k in ("kind", "text", "fired_at", "delivery", "reason", "path")}
+                          for trigger in db.exec(select(ThesisWatchTrigger).where(ThesisWatchTrigger.symbol == symbol)
+                                                 .order_by(col(ThesisWatchTrigger.fired_at).desc()).limit(pings))]
     items = []
     for memory in theses:
         body, symbol = memory["body"], memory["symbol"]
