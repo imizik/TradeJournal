@@ -2301,7 +2301,12 @@ billed as the add only, so no dollar is counted twice. The body says how many tr
 against following the rules, and one line per rule. The price is a last trade, not a quote; a short-dated trade held
 past the hour with no minute bar where a rule could have fired is counted apart and named, never billed as zero. A week where the breaks paid says
 so under a $0 title; a week with no closed long option trade sends nothing. Its own ping kind, `leak_bill`, one a day,
-claimed once a week through the policy (`new_only`). Its tap opens `/proof`. No page, route or stored value.
+claimed once a week through the policy (`new_only`). Its tap opens `/proof`. It ends with "Did you follow the cut pings?" (`leak_bill.follow`):
+for each of the week's trades whose first buy sent a cut-line ping, the first minute the contract traded at or under that
+line, whether he sold within 15 minutes of it, and what holding past it cost against selling at that minute (nothing
+for contracts that expired); then the deep-red held-an-hour and 1 PM same-day pings acted on against ignored, from the
+weekly ping scorecard. This is the evidence for or against an automatic exit: following pings needs no auto exit. No
+page, route or stored value.
 
 ### The day plan
 

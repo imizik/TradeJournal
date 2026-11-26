@@ -20,6 +20,17 @@ cost is that minute's price times the contracts open then, minus what those cont
 (by the rules nothing is held then, so it is no add).
 A positive bill means the rules would have kept that much more; a week where the breaks paid says so.
 
+Did the cut pings get followed (``follow``). The bill above prices the rules whether or not a ping fired; this part asks
+whether he acted when one did. Each week's trade whose first buy sent a cut-line ping (``FillInterrupt`` with kind
+``cut_line``, reached the phone or may have) is replayed on the same minute bars: the first regular-session minute the
+contract traded at or under the line (``fill_interrupts.CUT_PCT`` under that first buy, the line the ping named) is the
+cross. Sold within ``alert_scorecard.ACT_MINUTES`` of it is ``acted``; otherwise ``ignored``, and what the contracts held
+at the cross fetched (first in, first out, nothing for any that expired) against selling them at that minute's price is
+the cost of ignoring it. A line never traded through is ``not_hit``; no bars, ``unpriced``. The held-an-hour (the
+short-dated, deep-red case is the only one sent) and 1 PM same-day pings come from ``alert_scorecard.week_by_kind``:
+acted is a sale within the same minutes or an Exiting decision logged after it. Together they read how often the cut
+pings change an exit, the evidence for or against an automatic exit.
+
 The price is the minute bar's last trade (``alpaca.fetch_option_bars``, the window the path metrics cache), not a
 quote that could surely have been sold at. A minute holding one of the trade's own fills is not judged, as the path
 metrics read it. A short-dated trade held past the hour that no rule cut, with no bar where one could have (none
@@ -48,7 +59,8 @@ from app.engine import note_digest
 from app.engine.analytics import wall_time
 from app.engine.chart_math import ET
 from app.engine.chart_journal import OPEN_SIDES
-from app.engine.fill_interrupts import BUILT_DAYS
+from app.engine.alert_scorecard import ACT_MINUTES
+from app.engine.fill_interrupts import BUILT_DAYS, CUT_PCT
 from app.engine.position_alerts import AFTERNOON_MINUTE, DEEP_RED_PCT, HOLD_MINUTES, MORNING_END, SHORT_DATED_DAYS
 
 log = logging.getLogger(__name__)
@@ -59,6 +71,8 @@ OPEN_MINUTE, CLOSE_MINUTE = 9 * 60 + 30, 16 * 60
 EPS = 1e-9
 RULES = (("deep_red", f"Held short-dated down {-DEEP_RED_PCT:.0%}+ past an hour"), ("add", "Added below cost"),
          ("past_1pm", "Same-day option held past 1 PM"))
+
+PING_KINDS = ("hold_hour", "same_day_1pm")  # the position alerts that ask for the cut (the hour one is sent only deep red)
 
 
 def enabled() -> bool:
@@ -162,6 +176,37 @@ def unpriced(expiration: date, fills: list[dict], closed: datetime, bars: list[d
     return not usable or (past_one and not any(_minute(at) >= AFTERNOON_MINUTE for at in usable))
 
 
+def follow(expired: bool, fills: list[dict], bars: list[dict] | None) -> dict:
+    """What he did once the contract traded at or under the cut line his first buy was pinged: ``state`` (``acted``,
+    ``ignored``, ``not_hit`` or ``unpriced``), and for a cross the minute (``at``), the contracts open then (``held``) and
+    ``cost``, selling them at that minute's price minus what they fetched (positive: holding past the line cost that much)."""
+    ordered = sorted(fills, key=lambda f: (f["executed_at"], 0 if f["side"] in OPEN_SIDES else 1, str(f["id"])))
+    entries = [f for f in ordered if f["role"] == "entry"]
+    found = marks(bars)
+    if not entries or not found:
+        return {"state": "unpriced"}
+    line = entries[0]["price"] * (1 - CUT_PCT)
+    for at, price in found:
+        # Fills carry minutes only: one in the cross's own minute is counted after it, so a sale then is acting on it.
+        before = [f for f in ordered if f["executed_at"].replace(second=0, microsecond=0) < at]
+        held = sum(f["contracts"] * (1 if f["role"] == "entry" else -1) for f in before)
+        if at < entries[0]["executed_at"] or held <= EPS or price > line + EPS:
+            continue
+        exits = [f for f in ordered if f["role"] == "exit" and f not in before]
+        taken = proceeds = 0.0
+        for fill in exits:  # first in, first out: the contracts open at the cross close first
+            used = min(float(fill["contracts"]), held - taken)
+            if used <= EPS:
+                break
+            proceeds += used * float(fill["price"])
+            taken += used
+        acted = any(f["executed_at"] < at + timedelta(minutes=ACT_MINUTES + 1) for f in exits)
+        cost = price * held - proceeds if taken >= held - EPS or expired else None
+        return {"state": "acted" if acted else "ignored", "at": at, "held": held,
+                "cost": None if cost is None else round(cost, 2)}
+    return {"state": "not_hit"}
+
+
 def _bars(trade) -> list[dict] | None:
     """The contract's minute bars over the trade (the window the path metrics fetch, so their cache serves it); None
     when it has no contract symbol, runs too long, or the read fails."""
@@ -185,7 +230,8 @@ def week_bill(db: Session, monday: date, sunday: date, bars_for: Callable = _bar
     """The week's bill over the long option trades closed ``monday`` to ``sunday`` (New York dates, Webull left out):
     ``trades`` judged, ``broke`` (at least one rule), their realized ``broke_pnl``, ``saved`` (the number), per-rule
     trades and dollars in ``by_rule``, and ``unpriced`` short-dated trades held past the hour with no usable bar."""
-    from app.models import Account, Fill, Trade, TradeFill
+    from app.engine import alert_scorecard
+    from app.models import Account, Fill, FillInterrupt, Trade, TradeFill
     trades = db.exec(select(Trade).join(Account, Account.id == Trade.account_id).where(
         Trade.instrument_type == "option", Trade.status.in_(("closed", "expired")), Trade.closed_at.is_not(None),
         Trade.expiration.is_not(None), or_(Account.broker.is_(None), Account.broker != "webull"))).all()
@@ -193,12 +239,17 @@ def week_bill(db: Session, monday: date, sunday: date, bars_for: Callable = _bar
     fills_of: dict = defaultdict(list)
     if trades:
         for f in db.exec(select(TradeFill.trade_id, TradeFill.role, Fill.id, Fill.side, Fill.contracts, Fill.price,
-                                Fill.executed_at).join(Fill, Fill.id == TradeFill.fill_id)
+                                Fill.executed_at, Fill.raw_email_id).join(Fill, Fill.id == TradeFill.fill_id)
                          .where(TradeFill.trade_id.in_([t.id for t in trades]))).all():
             fills_of[f.trade_id].append({"id": f.id, "role": f.role, "side": f.side,
-                                         "contracts": float(f.contracts), "price": float(f.price), "executed_at": wall_time(f.executed_at)})
+                                         "contracts": float(f.contracts), "price": float(f.price), "executed_at": wall_time(f.executed_at),
+                                         "key": f.raw_email_id or str(f.id)})
+    pinged = {(r.account_id, r.fill_key) for r in db.exec(select(FillInterrupt).where(
+        FillInterrupt.kinds.contains("cut_line"), FillInterrupt.delivery.in_(alert_scorecard.SENT))).all()
+        if "cut_line" in r.kinds.split(",")} if trades else set()
     out = {"trades": 0, "broke": 0, "broke_pnl": 0.0, "saved": 0.0, "unpriced": 0,
-           "by_rule": {rule: {"trades": 0, "saved": 0.0} for rule, _ in RULES}}
+           "by_rule": {rule: {"trades": 0, "saved": 0.0} for rule, _ in RULES},
+           "cut_line": {"pings": 0, "acted": 0, "ignored": 0, "not_hit": 0, "unpriced": 0, "ignored_cost": 0.0, "ignored_priced": 0}}
     for trade in trades:
         fills = fills_of[trade.id]
         entries = [f for f in fills if f["role"] == "entry"]
@@ -207,7 +258,17 @@ def week_bill(db: Session, monday: date, sunday: date, bars_for: Callable = _bar
         out["trades"] += 1
         first, closed = min(f["executed_at"] for f in entries), wall_time(trade.closed_at)
         held = 0 <= (trade.expiration - closed.date()).days <= SHORT_DATED_DAYS and closed >= first + timedelta(minutes=HOLD_MINUTES)
-        bars = bars_for(trade) if held else None
+        ordered = sorted(entries, key=lambda f: (f["executed_at"], f["key"]))
+        cut_pinged = (trade.account_id, ordered[0]["key"]) in pinged
+        bars = bars_for(trade) if held or cut_pinged else None
+        if cut_pinged:
+            row = out["cut_line"]
+            seen = follow(trade.status == "expired", fills, bars)
+            row["pings"] += 1
+            row[seen["state"]] += 1
+            if seen["state"] == "ignored" and seen["cost"] is not None:
+                row["ignored_priced"] += 1
+                row["ignored_cost"] += seen["cost"]
         found = bill_trade(trade.expiration, trade.status == "expired", fills, bars)
         out["unpriced"] += held and found["cut"] is None and unpriced(trade.expiration, fills, closed, bars)
         if not found["saved"]:
@@ -221,6 +282,10 @@ def week_bill(db: Session, monday: date, sunday: date, bars_for: Callable = _bar
     for row in (out, *out["by_rule"].values()):
         row["saved"] = round(row["saved"], 2)
     out["broke_pnl"] = round(out["broke_pnl"], 2)
+    out["cut_line"]["ignored_cost"] = round(out["cut_line"]["ignored_cost"], 2)
+    start = datetime.combine(monday, datetime.min.time(), ET).astimezone(UTC).replace(tzinfo=None)
+    end = datetime.combine(sunday + timedelta(days=1), datetime.min.time(), ET).astimezone(UTC).replace(tzinfo=None)
+    out["pings"] = [r for r in alert_scorecard.week_by_kind(db, start, end) if r["kind"] in PING_KINDS]
     return out
 
 
@@ -256,7 +321,37 @@ def render(bill: dict, week_of: str) -> tuple[str, str]:
             lines.append("Priced at that minute's last trade, not a quote.")
     if bill["unpriced"]:
         lines.append(f"{_trades(bill['unpriced'])} held short-dated past an hour had no minute prices: not in the number.")
+    lines += follow_lines(bill)
     return title, "\n".join(lines)
+
+
+def follow_lines(bill: dict) -> list[str]:
+    """The bill's "did you follow the cut pings" lines: the cut line, then the deep-red hour and 1 PM pings."""
+    out = []
+    cut = bill.get("cut_line") or {}
+    if cut.get("pings"):
+        crossed = cut["acted"] + cut["ignored"]
+        line = f"Cut line: {cut['pings']} pinged, {crossed} traded through it"
+        if crossed:
+            line += f", you sold within {ACT_MINUTES} min on {cut['acted']}"
+        line += "."
+        if cut["ignored_priced"]:
+            total = cut["ignored_cost"]
+            what = f"cost ${total:,.0f}" if total > 0.5 else f"paid ${-total:,.0f}" if total < -0.5 else "came out even"
+            line += f" Holding past it {what}."
+        if cut["unpriced"]:
+            line += f" {cut['unpriced']} had no minute prices."
+        out.append(line)
+    for r in bill.get("pings") or ():
+        line = f"{r['kind_label']} ping: acted on {r['acted']} of {r['pings']}."
+        if r["ignored_closed"]:
+            total = -r["ignored_vs_alert_usd"]
+            what = f"cost ${total:,.0f}" if total > 0.5 else f"paid ${-total:,.0f}" if total < -0.5 else "came out even"
+            line += f" Ignoring {r['ignored_closed']} {what}."
+        out.append(line)
+    if out:
+        out.insert(0, "Did you follow the cut pings?")
+    return out
 
 
 def build(db: Session, now: float, bars_for: Callable = _bars) -> tuple[str, str, str] | None:
