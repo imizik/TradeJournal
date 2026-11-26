@@ -242,7 +242,7 @@ test("closing the last paper position keeps the open paper line open", async ({ 
 
 test("on the laptop Practice is one folded line until opened; the paper key still opens it", async ({ page }) => {
   await page.addInitScript(() => { if (!window.sessionStorage.getItem("desk.practice.v1")) window.sessionStorage.setItem("desk.practice.v1", "{}"); }); // as a new tab: nothing kept open
-  await open(page, 1440);
+  const reads = await open(page, 1440);
   const toggle = page.getByTestId("practice-toggle");
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByTestId("practice-line-paper")).toHaveCount(0);
@@ -254,6 +254,12 @@ test("on the laptop Practice is one folded line until opened; the paper key stil
   await expect(page.getByTestId("practice-toggle")).toHaveAttribute("aria-expanded", "false");
   await page.keyboard.press("p"); // the paper key opens the block and its paper line
   await expect(page.getByTestId("practice-line-paper")).toHaveAttribute("aria-expanded", "true");
+  // Folded again on a quiet book, a paper position opened later still shows: that choice was for a book with no risk.
+  await page.getByTestId("practice-toggle").click();
+  await expect(page.getByTestId("practice-line-paper")).toHaveCount(0);
+  reads["/copilot/paper"] = { ...BOOK, positions: [OPEN] };
+  await page.evaluate(() => window.dispatchEvent(new Event("tradejournal:paper-changed")));
+  await expect(page.getByTestId("practice-line-paper")).toBeVisible();
 });
 
 test("with nothing open the paper line waits closed and opens on a tap", async ({ page }) => {

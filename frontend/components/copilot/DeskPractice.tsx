@@ -257,19 +257,20 @@ export function Practice({ on, paper, symbol, review, onReplay, onPick, startOpe
   const replay = useReplayPractice();
   const [kept, set, openAll] = useKeptOpen();
   useEffect(() => {
+    // A link into a line opens the block too, whatever he last chose for it.
     if (urlDecision) {
       setDecisionFocus(urlDecision); // eslint-disable-line react-hooks/set-state-in-effect -- preserve focus if CopilotLab updates query params
-      set("saved-decisions", true);
+      openAll(["practice", "practice.risk", "saved-decisions"]);
     }
     if (urlPracticeRun) {
       setPracticeRunFocus(urlPracticeRun);
-      set("daily", true);
+      openAll(["practice", "practice.risk", "daily"]);
     }
     if (window.location.hash === "#scalp-shortlist") {
-      set("scalp", true);
+      openAll(["practice", "practice.risk", "scalp"]);
       requestAnimationFrame(() => document.getElementById("scalp-shortlist")?.scrollIntoView({ block: "nearest" }));
     }
-  }, [urlDecision, urlPracticeRun, set]);
+  }, [urlDecision, urlPracticeRun, openAll]);
   const book = paper.book;
   const positions = book?.positions ?? [];
   const orders = book?.orders ?? [];
@@ -286,12 +287,15 @@ export function Practice({ on, paper, symbol, review, onReplay, onPick, startOpe
     if (riskWas && !risk && isOpen("paper.risk", true)) set("paper", true);
   }
   useOpenPlace(useCallback((place: DeskPlace) => {
-    if (place === "paper") openAll(["practice", "paper", "paper.risk"]);
-    else if (place !== "rules") openAll(["practice", place]);
+    if (place === "paper") openAll(["practice", "practice.risk", "paper", "paper.risk"]);
+    else if (place !== "rules") openAll(["practice", "practice.risk", place]);
   }, [openAll]));
   // On the laptop the whole block is one line until he opens it (November 27, 2026: it took more of the left column
   // than his real book). Open paper risk, a line he left open, or a link into one shows it without asking.
-  const shown = kept.practice ?? (startOpen || risk || !!urlDecision || !!urlPracticeRun || Object.entries(kept).some(([key, open]) => key !== "practice" && open));
+  // As the paper line does, his choice while paper risk is open is kept apart from his choice while none is, so folding
+  // it on a quiet day never hides tomorrow's open position.
+  const practiceKey = risk ? "practice.risk" : "practice";
+  const shown = kept[practiceKey] ?? (startOpen || risk || !!urlDecision || !!urlPracticeRun || Object.entries(kept).some(([key, open]) => !key.startsWith("practice") && open));
   const ticks = useDeskTicks(paperSymbols(book?.positions)); // the same prices the paper section asks for: no read of its own
 
   const pnls = positions.map(p => paperPnl(p, ticks)).filter(p => p !== null);
@@ -317,7 +321,7 @@ export function Practice({ on, paper, symbol, review, onReplay, onPick, startOpe
   return (
     <section aria-label="Practice" data-testid="desk-practice" className="rounded-lg border bg-card">
       <h2 className={LABEL}>
-        <button type="button" data-testid="practice-toggle" aria-expanded={shown} onClick={() => set("practice", !shown)}
+        <button type="button" data-testid="practice-toggle" aria-expanded={shown} onClick={() => set(practiceKey, !shown)}
           className="flex min-h-11 w-full items-center px-3 text-left uppercase tracking-wide hover:bg-secondary sm:min-h-8">
           Practice<span className="font-normal normal-case tracking-normal">&nbsp;· not real money</span>
           <span aria-hidden className="ml-auto pl-1">{shown ? "▾" : "▸"}</span>

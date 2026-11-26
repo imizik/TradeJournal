@@ -713,7 +713,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   `ReplayPractice`); which are open is kept for the browser tab (`sessionStorage` `desk.practice.v1`). The paper line
   opens by itself while a paper position or working paper order exists, and closing it then is kept apart from closing
   it on a quiet day, so open paper risk never starts hidden. On the laptop (since 2026-11-27) the whole block is one
-  folded line, "Practice · not real money ▸", until he opens it (`practice-toggle`, kept for the tab under `practice`
+  folded line, "Practice · not real money ▸", until he opens it (`practice-toggle`, kept for the tab under `practice`, or `practice.risk` while paper risk is open,
   in the same store), so the real book leads the column; open paper risk, a line left open, a link into a line and
   ⌘K's places open it without asking, and a phone, which already keeps it under More, starts it open. Each line keeps its fold id (`paper`,
   `strategy.overnight`, `strategy.momentum`, `replay.practice`); the rules checklist at entry stays on the paper
