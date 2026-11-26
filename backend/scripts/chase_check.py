@@ -47,7 +47,7 @@ def rows(db: Session) -> list[dict]:
         days = (trade.expiration - entries[0].executed_at.date()).days if trade.expiration else None
         range_used = context.entry_day_range_used_pct if context else None
         out.append({
-            "pnl": float(trade.realized_pnl), "pct": float(trade.pnl_pct) if trade.pnl_pct is not None else None,
+            "pnl": float(trade.realized_pnl), "pct": float(trade.pnl_pct) * 100 if trade.pnl_pct is not None else None,  # stored as a ratio
             "past": sign * context.entry_vs_vwap_pct if context and context.entry_vs_vwap_pct is not None else None,
             # Where in the day's range so far, toward the trade's side: 100 is buying a call at the high of day.
             "range": None if range_used is None else (range_used if sign > 0 else 100 - range_used),
