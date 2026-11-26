@@ -190,11 +190,15 @@ def follow(expired: bool, fills: list[dict], bars: list[dict] | None, sent: date
     # The pinged buy: the first entry as the ping chose it (time, then source identity, never the fill UUID).
     first = min(entries, key=lambda f: (f["executed_at"], f.get("key") or str(f["id"])))
     line = first["price"] * (1 - CUT_PCT)
+    judged = False
     for at, price in found:
         # Fills carry minutes only: one in the cross's own minute is counted after it, so a sale then is acting on it.
         before = [f for f in ordered if f["executed_at"].replace(second=0, microsecond=0) < at]
         held = sum(f["contracts"] * (1 if f["role"] == "entry" else -1) for f in before)
-        if at < first["executed_at"] or (sent is not None and at < sent) or held <= EPS or price > line + EPS:
+        if at < first["executed_at"] or (sent is not None and at < sent) or held <= EPS:
+            continue
+        judged = True  # a price while he held it and knew the line
+        if price > line + EPS:
             continue
         exits = [f for f in ordered if f["role"] == "exit" and f not in before]
         taken = proceeds = 0.0
@@ -210,7 +214,7 @@ def follow(expired: bool, fills: list[dict], bars: list[dict] | None, sent: date
         cost = price * held - proceeds if not rolled and (taken >= held - EPS or expired) else None
         return {"state": "acted" if acted else "ignored", "at": at, "held": held,
                 "cost": None if cost is None else round(cost, 2)}
-    return {"state": "not_hit"}
+    return {"state": "not_hit" if judged else "unpriced"}
 
 
 def _bars(trade) -> list[dict] | None:

@@ -237,3 +237,4 @@ def test_a_cross_before_the_ping_went_out_is_not_judged():
     # Crossed at 10:01, the ping went out at 10:14: the cross he could act on is 10:15, and he sold five minutes later.
     assert leak_bill.follow(False, late, bars, ny(10, 14)) == {"state": "acted", "at": ny(10, 15), "held": 1, "cost": 20.0}
     assert leak_bill.follow(False, late, bars)["at"] == ny(10, 1)
+    assert leak_bill.follow(False, late, bars[:1], ny(10, 14)) == {"state": "unpriced"}  # no price after the ping
