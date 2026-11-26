@@ -149,3 +149,31 @@ def test_the_pings_that_fired_are_placed_at_their_minute(db):
     db.commit()
     body = trade_replay.build(db, trade, lambda *a: minutes((9, 30), 390, 50), lambda *a: [])
     assert [(p["kind"], p["time"], p["sent"]) for p in body["pings"]] == [("hold_hour", epoch(11), True), ("no_exit", epoch(11), False)]
+
+
+def test_an_expired_option_settles_at_zero_on_the_last_bar(db):
+    trade = make_trade(db, [("entry", "buy_to_open", 1, 200, ny(10))], status="expired", pnl=-200.0, expiration=TUE)
+    trade.closed_at = ny(16)
+    db.add(trade)
+    db.commit()
+    body = trade_replay.build(db, trade, lambda *a: minutes((9, 30), 390, 50), lambda *a: [bar(15, 59, 0.10)])
+    assert body["bars"][-2]["held"] == 1
+    assert body["bars"][-1]["held"] == 0 and body["bars"][-1]["pnl"] == -200.0  # not -190 at the last trade
+    assert body["fills"][-1]["label"] == "Expired worthless: 1 left" and body["fills"][-1]["time"] == epoch(15, 59)
+
+
+def test_a_fill_in_a_minute_with_no_bar_counts_at_the_next_and_one_after_the_last_at_the_last(db):
+    trade = make_trade(db, [("entry", "buy", 10, 50, ny(10, 1)), ("exit", "sell", 10, 52, ny(16, 30))],
+                       instrument="stock", pnl=20.0)
+    stock = [bar(10, 0, 50), bar(10, 2, 51), bar(15, 59, 52)]
+    body = trade_replay.build(db, trade, lambda *a: stock, lambda *a: [])
+    held = [b["held"] for b in body["bars"]]
+    assert held == [0, 10, 0] and body["bars"][-1]["pnl"] == 20.0
+
+
+def test_the_cut_line_and_its_cross_anchor_on_the_same_first_buy(db):
+    # Two buys in one minute: the pinged one is first by source identity ("…-0", $1.00), whatever the fill UUIDs say.
+    trade = make_trade(db, [("entry", "buy_to_open", 1, 100, ny(10)), ("entry", "buy_to_open", 1, 200, ny(10)),
+                            ("exit", "sell_to_close", 2, 60, ny(11))])
+    body = trade_replay.build(db, trade, lambda *a: minutes((9, 30), 390, 50), lambda *a: [bar(10, 30, 0.65)])
+    assert body["cut_line"]["price"] == 70.0 and body["cut_line"]["crossed"]["time"] == epoch(10, 30)

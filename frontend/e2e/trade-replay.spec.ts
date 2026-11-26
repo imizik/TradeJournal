@@ -103,3 +103,13 @@ test("an open trade shows no replay, and a trade the feed has no bars for says s
   await page.goto(`/trades/${closed.id}`);
   await expect(page.getByRole("region", { name: "Replay" })).toContainText("No minute bars for this trade's days yet.");
 });
+
+test("a fill in a minute with no candle sits on the next bar, where the position counts it", async () => {
+  const { fillIndexAt } = await import("../lib/tradeReplay");
+  const bars = [{ time: at(0) }, { time: at(2) }, { time: at(5) }];
+  expect(fillIndexAt(bars, at(0) + 30, 60)).toBe(0);
+  expect(fillIndexAt(bars, at(1) + 10, 60)).toBe(1); // no 9:31 candle: the 9:32 bar
+  expect(fillIndexAt(bars, at(9), 60)).toBe(2); // after the last candle: the last
+  expect(fillIndexAt(bars, at(-5), 60)).toBe(0);
+  expect(fillIndexAt([{ time: at(0) }, { time: at(5) }], at(3), 300)).toBe(0); // inside a five-minute candle
+});

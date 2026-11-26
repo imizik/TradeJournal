@@ -102,16 +102,20 @@ def _pings(db: Session, trade: Trade) -> list[dict]:
     return sorted(out, key=lambda p: p["time"])
 
 
-def pnl_path(fills: list[dict], minutes: list[datetime], marks: dict[datetime, float], sign: int) -> list[dict]:
+def pnl_path(fills: list[dict], minutes: list[datetime], marks: dict[datetime, float], sign: int,
+             expired: bool = False) -> list[dict]:
     """Each minute's position: contracts ``held``, ``avg_cost`` per contract, ``realized`` and ``pnl`` (realized plus
     the open contracts at ``marks``, carried forward; null while anything is open with no mark yet). First in, first
-    out over the fills whose minute is at or before the minute."""
+    out over the fills whose minute is at or before the minute; a fill in a minute with no bar counts at the next bar,
+    and any after the last bar at the last. ``expired``: what is still open at the last bar settles at $0, as the
+    reconstructor books a worthless expiration with no exit fill."""
     ordered = sorted(fills, key=lambda f: (f["executed_at"], 0 if f["side"] in OPEN_SIDES else 1, str(f["id"])))
     lots: deque[list[float]] = deque()
     realized, pointer, mark = 0.0, 0, None
     out = []
-    for at in minutes:
-        while pointer < len(ordered) and ordered[pointer]["executed_at"].replace(second=0, microsecond=0) <= at:
+    for index, at in enumerate(minutes):
+        final = index == len(minutes) - 1
+        while pointer < len(ordered) and (final or ordered[pointer]["executed_at"].replace(second=0, microsecond=0) <= at):
             fill = ordered[pointer]
             qty, price = float(fill["contracts"]), float(fill["price"])
             if fill["side"] in OPEN_SIDES:
@@ -125,6 +129,9 @@ def pnl_path(fills: list[dict], minutes: list[datetime], marks: dict[datetime, f
                     if lots[0][0] <= EPS:
                         lots.popleft()
             pointer += 1
+        if final and expired and lots:
+            realized += sign * (0 - sum(lot[0] * lot[1] for lot in lots))
+            lots.clear()
         mark = marks.get(at, mark)
         held = sum(lot[0] for lot in lots)
         cost = sum(lot[0] * lot[1] for lot in lots)
@@ -208,7 +215,7 @@ def build(db: Session, trade: Trade, stock_bars: Callable = _stock_bars, option_
             option_note = "The feed has no minute trades for this contract, so P&L shows only once it is closed."
     marks = {at: row["close"] * 100 for at, row in option_rows.items()} if option \
         else {at: row["close"] for at, row in minutes.items()}
-    path = pnl_path(fills, stamps, marks, sign)
+    path = pnl_path(fills, stamps, marks, sign, expired=status == "expired")
 
     # Rules: only for a long option (every entry a buy to open), as the leak bill judges.
     cut = cut_line = None
@@ -219,7 +226,7 @@ def build(db: Session, trade: Trade, stock_bars: Callable = _stock_bars, option_
         if found_cut:
             cut = {"rule": found_cut["rule"], "time": _epoch(found_cut["at"]), "price": round(found_cut["price"], 2)}
     if long_option:
-        first = entries[0]
+        first = min(entries, key=lambda f: (f["executed_at"], f["key"]))  # the pinged buy, as leak_bill.follow picks it
         line = fill_interrupts.cut_line({**first, "instrument_type": "option", "expiration": expiration}, [])
         if line is not None:
             crossed = None
@@ -230,6 +237,7 @@ def build(db: Session, trade: Trade, stock_bars: Callable = _stock_bars, option_
                     crossed = {"time": _epoch(seen["at"]), "state": seen["state"], "held": seen["held"], "cost": seen["cost"]}
             cut_line = {"price": round(line, 2), "crossed": crossed}
 
+    left = sum(f["contracts"] * (1 if f["side"] in OPEN_SIDES else -1) for f in fills)
     width = 1 if len({at.date() for at in stamps}) <= ONE_MINUTE_DAYS else WIDE_MINUTES
     bars, options_out = [], []
     for index, at in enumerate(stamps):
@@ -254,6 +262,8 @@ def build(db: Session, trade: Trade, stock_bars: Callable = _stock_bars, option_
         "realized_pnl": realized_pnl,
         "bars": bars, "option_bars": options_out, "option_note": option_note,
         "fills": [{"id": str(f["id"]), "time": _epoch(f["executed_at"]), "entry": f["side"] in OPEN_SIDES,
-                   "side": f["side"], "contracts": f["contracts"], "price": f["price"], "label": _label(f, option)} for f in fills],
+                   "side": f["side"], "contracts": f["contracts"], "price": f["price"], "label": _label(f, option)} for f in fills]
+        + ([{"id": "expired", "time": _epoch(stamps[-1]), "entry": False, "side": "expired", "contracts": left, "price": 0.0,
+             "label": f"Expired worthless: {left:g} left"}] if status == "expired" and left > EPS else []),
         "pings": pings, "cut": cut, "cut_line": cut_line, "tag": tag,
     }

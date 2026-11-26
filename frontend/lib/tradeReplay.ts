@@ -1,4 +1,4 @@
-import { apiUrl } from "@/lib/api";
+import { apiUrl } from "./api";
 
 /** One closed trade replayed bar by bar: GET /trades/{id}/replay (backend app/engine/trade_replay.py). */
 
@@ -52,6 +52,15 @@ export function barIndexAt(bars: { time: number }[], time: number): number {
   return found;
 }
 
+/** The bar a fill counts on, as the backend's position path counts it: the bar holding its minute, else the next bar
+ * (a minute with no candle), else the last (after the last candle). */
+export function fillIndexAt(bars: { time: number }[], time: number, intervalSeconds: number): number {
+  const minute = Math.floor(time / 60) * 60;
+  const index = barIndexAt(bars, minute);
+  if (minute < bars[0].time) return 0;
+  return bars[index].time + intervalSeconds > minute ? index : Math.min(index + 1, bars.length - 1);
+}
+
 const PING_LABEL: Record<string, string> = {
   giveback: "Give-back ping", expiry_first: "Expires-today ping", expiry_final: "30 minutes to the close ping",
   expiry_eve: "Expires-next-session ping", hold_hour: "Held an hour: re-decide ping", wrong_way: "Wrong way at 30 min ping",
@@ -71,7 +80,7 @@ export function replayEvents(replay: TradeReplay): ReplayEvent[] {
   const multiplier = replay.multiplier ?? 1;
   const out: ReplayEvent[] = [];
   for (const fill of replay.fills ?? []) {
-    out.push({ index: barIndexAt(bars, fill.time), time: fill.time, kind: "fill", tone: fill.entry ? "buy" : "sell", label: fill.label });
+    out.push({ index: fillIndexAt(bars, fill.time, (replay.interval_minutes ?? 1) * 60), time: fill.time, kind: "fill", tone: fill.entry ? "buy" : "sell", label: fill.label });
   }
   for (const ping of replay.pings ?? []) {
     const name = ping.title ?? PING_LABEL[ping.kind] ?? words(ping.kind);
