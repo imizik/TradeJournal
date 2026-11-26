@@ -285,6 +285,7 @@ export function Practice({ on, paper, symbol, review, onReplay, onPick, startOpe
   if (riskWas !== risk) {
     setRiskWas(risk);
     if (riskWas && !risk && isOpen("paper.risk", true)) set("paper", true);
+    if (riskWas && !risk && isOpen("practice.risk", true)) set("practice", true); // and the block around it stays open with it
   }
   useOpenPlace(useCallback((place: DeskPlace) => {
     if (place === "paper") openAll(["practice", "practice.risk", "paper", "paper.risk"]);

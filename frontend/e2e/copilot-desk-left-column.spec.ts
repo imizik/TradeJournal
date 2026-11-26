@@ -260,6 +260,11 @@ test("on the laptop Practice is one folded line until opened; the paper key stil
   reads["/copilot/paper"] = { ...BOOK, positions: [OPEN] };
   await page.evaluate(() => window.dispatchEvent(new Event("tradejournal:paper-changed")));
   await expect(page.getByTestId("practice-line-paper")).toBeVisible();
+  // ...and when that position closes, the block stays open with the paper line, so the result stays on screen.
+  reads["/copilot/paper"] = BOOK;
+  await page.evaluate(() => window.dispatchEvent(new Event("tradejournal:paper-changed")));
+  await expect(page.getByTestId("practice-line-paper")).toContainText("nothing open or working");
+  await expect(page.getByTestId("practice-line-paper")).toHaveAttribute("aria-expanded", "true");
 });
 
 test("with nothing open the paper line waits closed and opens on a tap", async ({ page }) => {
