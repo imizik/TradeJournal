@@ -235,6 +235,23 @@ file. Rollout is a Check upgrade with `--approve-sql <sha of add-view.sql>`; unt
 tool answers `insufficient_data` and invents nothing. Positions bought since the last
 10-minute publish are not seen yet.
 
+Trade tags (owner choice November 26, 2026: use the Opus review tags in the checks he
+already uses, no new page). The publisher reads one more additive view from
+[check_scope.py](../../deploy/check_scope.py) (`pretrade_tag_source`: each non-Webull
+`trade_ai_tag` row's setup, mistakes, cut-rule flags and grade, named by the hash of its
+first entry fill key like the history and add rows; never the rationale, IDs or raw keys)
+and writes a tags file beside the history file; add rows now carry the same hashed key.
+Both tools take an optional `setup` (Isaac's own name for it, matched to a tag name only
+when exactly one fits) and return `setup_record` beside the answer: in `pre_trade_check`
+the record of the named setup, or of trades tagged no clear setup when he names none,
+the chase-tagged record when price is 2.5% or more past VWAP in the trade's direction,
+the VWAP-reclaim record on a fresh reclaim, and how his similar entries were tagged; in
+`add_check` the named setup's record, his adds below cost on it, and how many tagged
+positions where he added below cost in the same short/longer-dated group broke the cut
+rule. The tags were written with each outcome visible, so this is history by setup, never
+a live classifier; it never changes the verdict or `answer`. Rollout is a Check upgrade
+with `--approve-sql <sha of tag-view.sql>`; until then `setup_record.available` is false.
+
 Options (advisor step 6): option checks now return the contract the scalper
 resolved (given strike/expiration, else nearest expiration at the money) with
 live bid/ask, spread, IV, delta, gamma, theta, cost and time decay per

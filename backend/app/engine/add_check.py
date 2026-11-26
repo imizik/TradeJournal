@@ -20,7 +20,7 @@ LONG_HOLD_MINUTES = 60
 MIN_POSITIONS = 8  # below this a group is "not enough history" (pretrade_check.MIN_TRADES)
 RECENT = 5
 EPS = 1e-9
-ADD_ROW_KEYS = frozenset({"closed_at", "underlying", "side", "realized_pnl", "adds"})
+ADD_ROW_KEYS = frozenset({"closed_at", "underlying", "side", "realized_pnl", "adds", "source_fill_key"})
 ADD_KEYS = frozenset({"dte", "below_cost_pct", "minutes_held", "premium", "pnl"})
 
 
@@ -82,6 +82,7 @@ def add_history_rows(records: Iterable[dict]) -> list[dict]:
             continue  # closed with contracts unmatched: the fills do not explain the P&L, so it is not counted
         side = trade["option_type"] if trade["option_type"] in ("call", "put") else None
         rows.append({"closed_at": _when(trade["closed_at"]).isoformat(), "underlying": trade["ticker"].upper(),
+                     "source_fill_key": trade["trade_key"],  # the view's hash of the first entry fill key
                      "side": side, "realized_pnl": round(float(trade["realized_pnl"]), 2),
                      "adds": [{**add, "pnl": round(add["pnl"], 2)} for add in adds]})
     return sorted(rows, key=lambda row: (row["closed_at"], row["underlying"], row["realized_pnl"]))

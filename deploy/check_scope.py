@@ -14,6 +14,7 @@ POSITION_VIEW = "pretrade_position_source"
 CAPTURE_VIEW = "pretrade_capture_source"
 MARKET_VIEW = "pretrade_market_source"
 ADD_VIEW = "pretrade_add_source"
+TAG_VIEW = "pretrade_tag_source"
 CAPTURE_LIMIT = 200
 ROLE = "tj_check_features"
 EXCLUDED_BROKERS = ("webull",)  # Matches app.engine.pretrade_check.EXCLUDED_BROKERS.
@@ -134,6 +135,30 @@ def add_view_sql() -> str:
 CREATE VIEW public.{ADD_VIEW} WITH (security_barrier=true) AS
 {add_sql()};
 GRANT SELECT ON public.{ADD_VIEW} TO {ROLE};
+COMMIT;
+"""
+
+
+# Model-written review tags on closed trades (backend/app/engine/trade_ai_tags.py), named like the history rows by the
+# SHA-256 of the trade's first entry fill key. No IDs, raw keys or the model's free-text rationale.
+TAGS = """SELECT {fill_key} AS source_fill_key, g.setup, g.primary_mistake, g.mistakes_json, g.broke_cut_rule,
+       g.rule_broken_computed, g.grade
+FROM trade_ai_tag g
+JOIN account a ON a.id = g.account_id
+WHERE lower(coalesce(a.broker, '')) NOT IN ({excluded})"""
+POSTGRES_TAG_KEY = "encode(sha256(convert_to(g.source_key, 'UTF8')), 'hex')"
+
+
+def tag_sql(fill_key: str = POSTGRES_TAG_KEY) -> str:
+    return TAGS.format(fill_key=fill_key, excluded=", ".join(f"'{name}'" for name in EXCLUDED_BROKERS))
+
+
+def tag_view_sql() -> str:
+    """Trade review tags for the same read-only role; a no-clobber view."""
+    return f"""BEGIN;
+CREATE VIEW public.{TAG_VIEW} WITH (security_barrier=true) AS
+{tag_sql()};
+GRANT SELECT ON public.{TAG_VIEW} TO {ROLE};
 COMMIT;
 """
 

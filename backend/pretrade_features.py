@@ -245,7 +245,8 @@ def _add_rows_valid(rows) -> bool:
     from app.engine.add_check import ADD_KEYS, ADD_ROW_KEYS
 
     return isinstance(rows, list) and all(
-        isinstance(row, dict) and set(row) == ADD_ROW_KEYS and isinstance(row["adds"], list) and row["adds"]
+        isinstance(row, dict) and set(row) == ADD_ROW_KEYS and _HEX.fullmatch(str(row["source_fill_key"]))
+        and isinstance(row["adds"], list) and row["adds"]
         and all(isinstance(add, dict) and set(add) == ADD_KEYS for add in row["adds"]) for row in rows)
 
 
@@ -265,6 +266,39 @@ def read_adds(pointer_file, *, max_age_seconds: int, now: datetime | None = None
         document, age = _read_addressed(pointer_file, "adds", CONTEXT_MAX, {"format", "generated_at", "rows"}, now)
         if document["format"] != ADDS_FORMAT or not _add_rows_valid(document["rows"]):
             raise ValueError("Invalid add file")
+    except _UNREADABLE:
+        return {"state": "missing", "rows": None, "generated_at": None, "age_seconds": None}
+    return {"state": "stale" if age > max_age_seconds else "fresh", "rows": document["rows"],
+        "generated_at": document["generated_at"], "age_seconds": max(0, int(age))}
+
+
+TAGS_FORMAT = "pretrade-tags-v1"
+
+
+def _tag_rows_valid(rows) -> bool:
+    from app.engine.trade_ai_tags import TAG_ROW_KEYS
+
+    return isinstance(rows, list) and all(
+        isinstance(row, dict) and set(row) == TAG_ROW_KEYS and _HEX.fullmatch(str(row["source_fill_key"]))
+        and isinstance(row["setup"], str) and isinstance(row["mistakes"], list) for row in rows)
+
+
+def publish_tags(rows: list[dict], pointer_file, *, now: datetime | None = None) -> dict:
+    """Trade review tags (trade_ai_tags.tag_rows): tags-<sha>.json, then repoint tags.json."""
+    if not _tag_rows_valid(rows):
+        raise ValueError("Tag rows must have the exact approved fields and hashed fill keys")
+    payload = json.dumps({"format": TAGS_FORMAT, "generated_at": (now or datetime.now(timezone.utc)).astimezone(
+        timezone.utc).isoformat(), "rows": rows}, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    return {"tags_sha256": _publish_addressed(pointer_file, "tags", payload, CONTEXT_MAX), "rows": len(rows)}
+
+
+def read_tags(pointer_file, *, max_age_seconds: int, now: datetime | None = None) -> dict:
+    """Return {state, rows, generated_at, age_seconds}; missing means none, never invented."""
+    now = now or datetime.now(timezone.utc)
+    try:
+        document, age = _read_addressed(pointer_file, "tags", CONTEXT_MAX, {"format", "generated_at", "rows"}, now)
+        if document["format"] != TAGS_FORMAT or not _tag_rows_valid(document["rows"]):
+            raise ValueError("Invalid tag file")
     except _UNREADABLE:
         return {"state": "missing", "rows": None, "generated_at": None, "age_seconds": None}
     return {"state": "stale" if age > max_age_seconds else "fresh", "rows": document["rows"],

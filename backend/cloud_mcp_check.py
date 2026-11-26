@@ -85,11 +85,11 @@ TOOL_ARGUMENTS = {
     "shadow_setup": ({"candidate_id"}, set()),
     "shadow_decide": ({"candidate_id", "decision", "reason"}, set()),
     "pre_trade_check": ({"ticker", "side", "instrument", "horizon"},
-        {"entry", "stop", "option_type", "expiration", "strike", "free_text", "operation_id"}),
+        {"entry", "stop", "option_type", "expiration", "strike", "setup", "free_text", "operation_id"}),
     "attach_model_verdict": ({"check_id", "verdict", "summary"}, set()),
     "review_checks": (set(), {"day"}),
     "position_check": (set(), {"ticker", "stop"}),
-    "add_check": (set(), {"ticker"}),
+    "add_check": (set(), {"ticker", "setup"}),
     "get_notes": (set(), {"ticker"}),
     "preopen_watchlist": (set(), {"tickers"}),
     "grade_checks": (set(), {"days"}),
@@ -102,6 +102,8 @@ SETTLE_BUDGET = 20.0  # Seconds of minute-bar reads per review/grade call; the r
 GRADE_LIMIT = 1000
 CONTEXT_MAX_AGE = 30 * 60  # Positions change during a session; older than this is labelled stale.
 ADDS_MAX_AGE = 24 * 60 * 60  # Closed positions only; a day-old record still answers, labelled stale.
+TAGS_MAX_AGE = ADDS_MAX_AGE  # Tags change only when a batch is loaded.
+SETUP = r"^[A-Za-z][A-Za-z_ -]{0,39}$"  # The owner's own name for the setup, matched to the trade tags.
 MARKET_MAX_AGE = 60 * 60  # The publisher runs every 10 minutes; past an hour the snapshot itself is stale.
 
 
@@ -237,7 +239,7 @@ def jo_view(record, *, replayed):
         "idea": record["idea"], "verdict": answer["verdict"], "wait_for": answer["wait_for"],
         "reasons": answer["reasons"], "would_change": answer["would_change"], "risk_check": answer["risk_check"],
         "history": history, "live": answer["live"], "option": answer.get("option"), "macro": answer.get("macro"),
-        "market": answer.get("market"),
+        "market": answer.get("market"), "setup_record": answer.get("setup_record"),
         "caveats": answer["caveats"],
         "timings_ms": record["timings_ms"],
         "advice_only": "Rules verdict for one idea. Nothing places, sizes or arms an order.",
@@ -429,6 +431,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
     from app.engine.alpaca import ET
     from app.engine.alpaca import fetch_minute_bars_live
     from app.engine.add_check import add_view
+    from app.engine.trade_ai_tags import add_setup_record
     from app.engine.pretrade_check import (check_outcome, grade_results, macro_context, market_facts, position_view,
         preopen_tickers, preopen_view,
         price_after, result_final, run_check)
@@ -699,7 +702,13 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         return pretrade_features.read_current(config.features_pointer,
             max_age_seconds=config.max_feature_age_seconds, now=receipt)
 
-    async def compute(actor, profile_id, operation_id, idea, free_text, request_sha256):
+    def tag_rows(now):
+        """Published trade review tags, or None when missing (a stale file still reads: tags change rarely)."""
+        held = pretrade_features.read_tags(Path(config.features_pointer).parent / "tags.json",
+            max_age_seconds=TAGS_MAX_AGE, now=now)
+        return held["rows"]
+
+    async def compute(actor, profile_id, operation_id, idea, free_text, request_sha256, setup=None):
         started = time.perf_counter()
         receipt = clock()
         try:
@@ -710,8 +719,9 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         context_done = time.perf_counter()
         features = await asyncio.to_thread(history, receipt)
         market = await asyncio.to_thread(market_items, receipt)
+        tags = await asyncio.to_thread(tag_rows, receipt)
         history_done = time.perf_counter()
-        answer = run_check(idea, analysis, features["rows"] or [], receipt, market)
+        answer = run_check(idea, analysis, features["rows"] or [], receipt, market, tags, setup)
         if features["state"] == "missing":
             answer["history"]["available"] = False
             answer["caveats"].append("own-trade history file is missing or unreadable; no history was used")
@@ -838,9 +848,15 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
             option_type: Optional[Literal["call", "put"]] = None,
             expiration: Annotated[Optional[str], Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
             strike: Annotated[Optional[float], Field(gt=0, lt=1_000_000)] = None,
+            setup: Annotated[Optional[str], Field(pattern=SETUP)] = None,
             free_text: Annotated[Optional[str], Field(max_length=500)] = None,
             operation_id: Annotated[Optional[str], Field(pattern=r"^[0-9a-f-]{36}$")] = None) -> dict[str, Any]:
         """Check one trade idea now: rules verdict, reasons, stop check, live context and own similar trades.
+
+        setup: Isaac's own name for the setup when he gives one (e.g. vwap reclaim, trend pullback, momentum chase);
+        setup_record then shows his tagged record on it, or on trades with no clear setup when he names none, and
+        on chases when price is extended past VWAP. Lead with setup_record.headline when it warns. It never changes
+        the verdict, and the tags carry hindsight. Never invent a setup he did not state.
 
         Same operation_id + same idea returns the original saved check (never recomputed); a different idea under
         that ID conflicts. Use a new operation_id to re-check after a data outage. After every check, save
@@ -866,7 +882,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
             raise ToolError("operation_id must be a canonical lowercase UUID")
         idea = {"ticker": ticker.upper(), "side": side, "instrument": instrument, "horizon": horizon,
             "entry": entry, "stop": stop, "option_type": option_type, "expiration": expiration, "strike": strike}
-        request_sha256 = digest({"idea": idea, "free_text": free_text})
+        request_sha256 = digest({"idea": idea, "free_text": free_text, **({"setup": setup} if setup else {})})
         operation_id = operation_id or str(uuid.uuid4())
         try:
             original = await asyncio.to_thread(ledger.find, checked.claims["actor"], operation_id, request_sha256)
@@ -875,7 +891,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
             if slots.locked():
                 raise ToolError("Check service busy; retry with the same operation_id")
             async with slots:
-                record = await compute(checked.claims["actor"], checked.claims["profile_id"], operation_id, idea, free_text, request_sha256)
+                record = await compute(checked.claims["actor"], checked.claims["profile_id"], operation_id, idea, free_text,
+                    request_sha256, setup)
                 stored = await asyncio.to_thread(ledger.insert, record)
         except Conflict:
             raise ToolError("This operation_id already holds a different idea; use a new operation_id") from None
@@ -1086,13 +1103,17 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
 
     @server.tool(title="Should I add?", annotations=read_hints, structured_output=True,
         meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("add_check")}]})
-    async def add_check(ticker: Annotated[Optional[str], Field(pattern=r"^[A-Za-z]{1,6}(\.[A-Za-z])?$")] = None) -> dict[str, Any]:
+    async def add_check(ticker: Annotated[Optional[str], Field(pattern=r"^[A-Za-z]{1,6}(\.[A-Za-z])?$")] = None,
+            setup: Annotated[Optional[str], Field(pattern=SETUP)] = None) -> dict[str, Any]:
         """Should Isaac add to an open option position (optionally one ticker)? For each: days to expiry, percent
         against his average entry at the live mid, time held, whether it is his known leak spot (3 or fewer days
         to expiry, down 20% or more, held over an hour), and his own closed positions where he bought more below
         cost in the same kind of spot: how many, how many ended green, their P&L and what the added contracts
         themselves made or lost. answer is no (those adds lost money), no_clear_record (they did not, or too few),
         not_below_cost, not_covered (shares) or insufficient_data. Lead with headline. Advice only; places nothing.
+        setup_record adds his trade-tag history: the setup he names (its record and his adds below cost on it) and
+        how many of the positions where he added below cost in this spot broke the cut rule. Pass setup only when
+        he names it; tags carry hindsight and never change answer.
         """
         await authenticated("add_check")
         now = clock()
@@ -1103,14 +1124,24 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         positions = [p for p in held["positions"] if ticker is None or p["ticker"].upper() == ticker.upper()]
         adds = await asyncio.to_thread(pretrade_features.read_adds, Path(config.features_pointer).parent / "adds.json",
             max_age_seconds=ADDS_MAX_AGE, now=now)
+        tags = await asyncio.to_thread(tag_rows, now)
+        features = await asyncio.to_thread(history, now) if tags is not None else {"rows": []}
+        cutoff = now.astimezone(ET).replace(tzinfo=None)
+
+        def with_tags(answer):
+            if answer["answer"] == "not_covered":
+                return answer
+            return {**answer, "setup_record": add_setup_record(answer, adds["rows"], features["rows"] or [], tags,
+                cutoff, setup)}
         if slots.locked():
             raise ToolError("Check service busy; retry shortly")
         async with slots:  # Same bound as pre_trade_check; lookups run one at a time.
-            views = [add_view(await live_position(p, [], now), adds["rows"], now.astimezone(ET).replace(tzinfo=None))
+            views = [with_tags(add_view(await live_position(p, [], now), adds["rows"], cutoff))
                 for p in positions[:POSITION_LIMIT]]
         return {"schema_version": SCHEMA, "state": held["state"], "positions_as_of": held["generated_at"],
             "open_positions": len(positions), "shown": len(views), "positions": views,
             "record": {key: adds[key] for key in ("state", "generated_at")},
+            "tags": {"state": "fresh" if tags is not None else "missing"},
             "note": "His own record, not a forecast, and decision support only: nothing here places, sizes or closes "
                 "a position. A position bought in the last 10 minutes may not be published yet."}
 

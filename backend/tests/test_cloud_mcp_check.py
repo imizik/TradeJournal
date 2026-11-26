@@ -18,7 +18,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.engine import pretrade_check, scalper
-from app.models import Account, Fill, MarketContextItem, TradeCapture, TradeCaptureNote, TradeFill
+from app.models import Account, Fill, MarketContextItem, TradeAiTag, TradeCapture, TradeCaptureNote, TradeFill
 import cloud_mcp_check as service
 from cloud_mcp_check_ledger import Conflict, Ledger
 import pretrade_features
@@ -349,6 +349,32 @@ def test_free_text_never_changes_the_computation(harness):
         assert plain[key] == noisy[key]
 
 
+def test_trade_tags_add_a_setup_record_and_never_change_the_verdict(harness):
+    rows = [{**feature_row("2026-10-0%dT11:00:00" % (1 + i % 5), (-200.0 if i < 8 else 150.0), f"t{i}"),
+        "opened_at": "2026-10-0%dT10:30:00" % (1 + i % 5)} for i in range(16)]
+    pretrade_features.publish(rows, harness.pointer, now=RECEIPT)
+    tags = [{"source_fill_key": row["source_fill_key"], "setup": "no_clear_setup" if i < 8 else "vwap_reclaim",
+        "primary_mistake": "none", "mistakes": [], "broke_cut_rule": False, "rule_broken_computed": False, "grade": "C"}
+        for i, row in enumerate(rows)]
+    with TestClient(harness.server().streamable_http_app()) as client:
+        before = call(client, "pre_trade_check", IDEA, harness.token())["structuredContent"]
+        pretrade_features.publish_tags(tags, harness.pointer.parent / "tags.json", now=RECEIPT)
+        unnamed = call(client, "pre_trade_check", IDEA, harness.token())["structuredContent"]
+        named = call(client, "pre_trade_check", {**IDEA, "setup": "VWAP reclaim"}, harness.token())["structuredContent"]
+        replay = call(client, "pre_trade_check", {**IDEA, "setup": "vwap reclaim", "operation_id": named["operation_id"]},
+            harness.token())
+    assert before["setup_record"]["available"] is False
+    for result in (unnamed, named):
+        for key in ("verdict", "reasons", "would_change", "risk_check", "history", "live"):
+            assert result[key] == before[key]
+    assert unnamed["setup_record"]["headline"] == ("No setup named. Your 8 trades tagged no clear setup lost $1,600 "
+        "(0 won); name the setup or skip it.")
+    assert named["setup_record"]["matched_setup"] == "vwap_reclaim"
+    assert named["setup_record"]["headline"] == "You called this vwap_reclaim: your 8 trades tagged vwap_reclaim made $1,200 (8 won)."
+    assert named["setup_record"]["note"].startswith("Opus tagged each closed trade after the fact")
+    assert replay["isError"] is True  # the same operation_id with a different setup is a different request
+
+
 def test_provider_failure_is_insufficient_data_without_invented_prices(harness):
     with TestClient(harness.server(fail=True).streamable_http_app()) as client:
         result = call(client, "pre_trade_check", IDEA, harness.token())["structuredContent"]
@@ -467,6 +493,9 @@ def test_publisher_view_rows_match_engine_rows_with_hashed_keys(tmp_path, monkey
             label="Q3 2026", fetched_at=datetime(2026, 10, 9, 13), source="Tradier"))
         db.add_all([TradeCaptureNote(capture_id=capture.id, kind="note", text="first", created_at=datetime(2026, 10, 9, 15)),
             TradeCaptureNote(capture_id=capture.id, kind="note", text="sized down", created_at=datetime(2026, 10, 9, 16))])
+        db.add_all([TradeAiTag(account_id=account.id, source_key=key, setup="momentum_chase", model="m",
+            mistakes_json='["chased_extended_entry"]', primary_mistake="chased_extended_entry", rule_broken_computed=True,
+            rationale="secret reasoning") for account, key in ((robinhood, "rh-1"), (webull, "wb-1"))])
         db.commit()
         expected = pretrade_check.build_feature_rows(db)
     engine.dispose()
@@ -482,6 +511,8 @@ def test_publisher_view_rows_match_engine_rows_with_hashed_keys(tmp_path, monkey
     raw.execute("CREATE TABLE pretrade_position_source AS " + position_sql())
     raw.execute("CREATE TABLE pretrade_capture_source AS " + capture_sql())
     raw.execute("CREATE TABLE pretrade_market_source AS " + MARKET)
+    from check_scope import tag_sql
+    raw.execute("CREATE TABLE pretrade_tag_source AS " + tag_sql("tj_sha256(g.source_key)"))
     raw.commit()
     raw.close()
     credential = tmp_path / "database-url"
@@ -506,10 +537,19 @@ def test_publisher_view_rows_match_engine_rows_with_hashed_keys(tmp_path, monkey
     assert published["rows"] == sorted(expected, key=lambda r: (r["closed_at"], r["source_fill_key"]))
     adds = pretrade_features.read_adds(pointer.parent / "adds.json", max_age_seconds=3600)
     # Only the Robinhood position: bought at $1.00 and $1.10, added at $0.50 (below the $1.05 cost), sold at $0.90.
+    rh1 = hashlib.sha256(b"rh-1").hexdigest()
     assert result["adds"]["rows"] == 1 and adds["state"] == "fresh" and adds["rows"] == [{
         "closed_at": "2026-10-09T10:45:00", "underlying": "SPY", "side": "call", "realized_pnl": 30.0,
+        "source_fill_key": rh1,
         "adds": [{"dte": 0, "below_cost_pct": 52.38, "minutes_held": 15, "premium": 0.5, "pnl": 0.4}]}]
     assert "rh-1" not in json.dumps(adds) and "trade_key" not in json.dumps(adds)
+    # Tags: hashed like the history rows (so they join), Webull excluded, never the rationale or a raw key.
+    tags = pretrade_features.read_tags(pointer.parent / "tags.json", max_age_seconds=3600)
+    assert result["tags"]["rows"] == 1 and tags["rows"] == [{"source_fill_key": rh1, "setup": "momentum_chase",
+        "primary_mistake": "chased_extended_entry", "mistakes": ["chased_extended_entry"], "broke_cut_rule": False,
+        "rule_broken_computed": True, "grade": None}]
+    assert rh1 in {row["source_fill_key"] for row in published["rows"]}
+    assert "secret" not in json.dumps(tags) and "rh-1" not in json.dumps(tags)
     text = json.dumps(published["rows"])
     assert "rh-1" not in text and "wb-1" not in text and "account" not in text
     # Each publication is a new content-addressed file; the pointer moves atomically.
@@ -594,6 +634,7 @@ def test_add_check_answers_from_the_live_position_and_the_published_add_record(h
         "opened_at": "2026-10-09T09:15:00", "entry_time_bucket": "open", "account_name": "Roth", "account_type": "roth_ira"}
     shares = {**position, "ticker": "QQQ", "instrument_type": "stock", "option_type": None, "strike": None, "expiration": None}
     past = [{"closed_at": "2026-10-0%dT15:00:00" % (1 + i % 8), "underlying": "SPY", "side": "call", "realized_pnl": -150.0,
+        "source_fill_key": hashlib.sha256(f"a{i}".encode()).hexdigest(),
         "adds": [{"dte": 0, "below_cost_pct": 30.0, "minutes_held": 75, "premium": 100.0, "pnl": -80.0}]} for i in range(8)]
     monkeypatch.setattr(pretrade_check, "option_summary", lambda *args: {"mid": 1.5})  # $150 a contract: 25% below cost.
     with TestClient(harness.server().streamable_http_app()) as client:
@@ -610,8 +651,28 @@ def test_add_check_answers_from_the_live_position_and_the_published_add_record(h
     assert spy["answer"] == "no" and spy["now"] == {**spy["now"], "days_to_expiration": 0, "pct_vs_cost": -25.0, "held_minutes": 65}
     assert spy["leak_pattern"]["all_three"] is True and spy["record"]["cohorts"][0]["added_contracts_pnl"] == -640.0
     assert qqq["answer"] == "not_covered" and refused.status_code == 403
+    assert spy["setup_record"]["available"] is False and "setup_record" not in qqq
     with pytest.raises(ValueError):
         pretrade_features.publish_adds([{**past[0], "account_id": "1"}], harness.pointer.parent / "adds.json")
+    with pytest.raises(ValueError):  # a raw fill key never reaches the adds file
+        pretrade_features.publish_adds([{**past[0], "source_fill_key": "raw-key"}], harness.pointer.parent / "adds.json")
+
+    # With trade tags published, the answer stays the same and the tagged record is added beside it.
+    history = [{**feature_row(row["closed_at"], row["realized_pnl"], f"a{i}"), "side": "call"} for i, row in enumerate(past)]
+    pretrade_features.publish(history, harness.pointer, now=RECEIPT)
+    tags = [{"source_fill_key": row["source_fill_key"], "setup": "dip_buy_reversal", "primary_mistake": "averaged_down",
+        "mistakes": ["averaged_down"], "broke_cut_rule": True, "rule_broken_computed": i < 6, "grade": "D"}
+        for i, row in enumerate(past)]
+    pretrade_features.publish_tags(tags, harness.pointer.parent / "tags.json", now=RECEIPT)
+    with TestClient(harness.server().streamable_http_app()) as client:
+        tagged = call(client, "add_check", {"ticker": "SPY", "setup": "dip buy"}, harness.token())["structuredContent"]
+        bad = rpc(client, "add_check", {"setup": "x; drop"}, harness.token()).json()["result"]
+    record = tagged["positions"][0]["setup_record"]
+    assert tagged["positions"][0]["answer"] == "no" and tagged["tags"]["state"] == "fresh" and bad.get("isError")
+    assert record["matched_setup"] == "dip_buy_reversal" and record["stated_record"]["total_pnl"] == -1200.0
+    assert record["stated_adds"] == {"positions": 8, "ended_green": 0, "position_pnl": -1200.0, "added_contracts_pnl": -640.0}
+    assert record["same_spot"]["broke_cut_rule"] == 6 and record["same_spot"]["broke_cut_rule_pnl"] == -900.0
+    assert record["headline"] == "Your 8 trades tagged dip_buy_reversal lost $1,200 (0 won)."
 
 
 def test_preopen_watchlist_defaults_to_held_then_recent_tickers(harness):

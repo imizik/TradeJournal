@@ -57,3 +57,55 @@ def test_the_migration_only_adds_the_tag_table(tmp_path):
     assert set(inspect(engine).get_table_names()) == tables | {"trade_ai_tag"}
     _alembic(path, "downgrade", "a3c7e1f9b2d4")
     assert set(inspect(engine).get_table_names()) == tables
+
+
+# --- The tag record the check service shows (pure) ---
+
+from datetime import datetime  # noqa: E402
+
+
+def _hist(i, pnl, closed="2026-10-01T11:00:00"):
+    return {"source_fill_key": f"{i:064x}", "closed_at": closed, "realized_pnl": pnl}
+
+
+def _tag(i, setup, *, mistakes=(), cut=False):
+    return {"source_fill_key": f"{i:064x}", "setup": setup, "primary_mistake": mistakes[0] if mistakes else "none",
+            "mistakes": list(mistakes), "broke_cut_rule": cut, "rule_broken_computed": cut, "grade": "C"}
+
+
+CUTOFF = datetime(2026, 10, 9, 10, 20)
+IDEA = {"ticker": "SPY", "side": "long"}
+
+
+def test_extended_entry_shows_the_chase_record_and_a_fresh_reclaim_shows_the_reclaim_record():
+    rows = [_hist(i, -300.0) for i in range(10)] + [_hist(10 + i, 200.0) for i in range(9)]
+    rows.append(_hist(99, -5000.0, closed="2026-10-10T11:00:00"))  # closed after the check: never counted
+    tags = ([_tag(i, "momentum_chase") for i in range(5)] + [_tag(5 + i, "breakout", mistakes=["chased_extended_entry"])
+            for i in range(5)] + [_tag(10 + i, "vwap_reclaim") for i in range(9)] + [_tag(99, "momentum_chase")])
+    extended = {"data": {"market_state": "rth", "intraday": {"price_vs_vwap_pct": 3.1, "price": 103.1, "vwap": 100.0,
+                                                           "prev_bar_close": 103.0}}}
+    card = trade_ai_tags.pretrade_setup_record(IDEA, extended, rows, tags, CUTOFF, [f"{i:064x}" for i in range(3)], "momentum")
+    assert card["matched_setup"] == "momentum_chase" and card["stated_record"]["trades"] == 5
+    assert card["lines"][0] == "You called this momentum_chase: your 5 trades tagged momentum_chase lost $1,500 (0 won)."
+    chase = next(read for read in card["reads"] if read["read"] == "extended_like_a_chase")
+    assert chase["trades"] == 10 and chase["total_pnl"] == -3000.0 and chase["enough"] is True
+    assert card["lines"][1].startswith("Price is 3.1% past VWAP, the shape of a chase: your 10 trades tagged as a chase lost $3,000")
+    assert card["similar"][0]["setup"] == "momentum_chase" and card["similar"][0]["trades"] == 3
+    assert [item["setup"] for item in card["setups"]] == ["breakout", "momentum_chase", "vwap_reclaim"]
+    assert card["tagged_trades"] == 19
+
+    reclaim = {"data": {"market_state": "rth", "intraday": {"price_vs_vwap_pct": 0.2, "price": 100.2, "vwap": 100.0,
+                                                          "prev_bar_close": 99.9}}}
+    card = trade_ai_tags.pretrade_setup_record(IDEA, reclaim, rows, tags, CUTOFF, [], None)
+    assert [read["read"] for read in card["reads"]] == ["fresh_vwap_reclaim"]  # no no-setup tags in this history
+    assert card["headline"] == "This is a fresh VWAP reclaim: your 9 trades tagged VWAP reclaim made $1,800 (9 won)."
+    # Closed or stale tape: the historical records stay, the live reads are not claimed.
+    for off in ({**reclaim["data"], "market_state": "closed"}, {**reclaim["data"], "staleness": {"is_stale": True}}):
+        assert trade_ai_tags.pretrade_setup_record(IDEA, {"data": off}, rows, tags, CUTOFF, [], None)["reads"] == []
+    # A put idea reads the mirror: below VWAP is "extended" for a short.
+    card = trade_ai_tags.pretrade_setup_record({"side": "short"}, extended, rows, tags, CUTOFF, [], None)
+    assert card["reads"] == []
+    # An unknown or ambiguous name never guesses.
+    assert trade_ai_tags.match_setup("chase", ["momentum_chase", "gap_chase"]) is None
+    assert trade_ai_tags.pretrade_setup_record(IDEA, {}, rows, tags, CUTOFF, [], "orb")["matched_setup"] is None
+    assert trade_ai_tags.pretrade_setup_record(IDEA, {}, rows, None, CUTOFF, [], "orb")["available"] is False

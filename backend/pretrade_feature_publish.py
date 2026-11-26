@@ -30,6 +30,7 @@ POSITION_VIEW = "pretrade_position_source"
 CAPTURE_VIEW = "pretrade_capture_source"
 MARKET_VIEW = "pretrade_market_source"
 ADD_VIEW = "pretrade_add_source"
+TAG_VIEW = "pretrade_tag_source"
 
 
 def read_view(database_url: str, view: str = VIEW) -> list[dict]:
@@ -74,6 +75,13 @@ def run(pointer_file: Path, database_url_file: Path) -> dict:
         result["adds"] = publish_adds(add_history_rows(read_view(url, ADD_VIEW)), pointer_file.parent / "adds.json")
     except Exception:
         result["adds"] = "unavailable"  # Applied separately like the context views.
+    try:
+        from app.engine.trade_ai_tags import tag_rows
+        from pretrade_features import publish_tags
+
+        result["tags"] = publish_tags(tag_rows(read_view(url, TAG_VIEW)), pointer_file.parent / "tags.json")
+    except Exception:
+        result["tags"] = "unavailable"  # Applied separately like the context views.
     return result
 
 
