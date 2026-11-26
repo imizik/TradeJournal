@@ -133,7 +133,8 @@ def read_quotes(symbols: list[str]) -> dict[str, dict]:
         raise RuntimeError(str(exc)) from exc
     if issue and not rows:
         raise RuntimeError(issue)
-    return {r["symbol"]: {"last": r.get("last"), "previous_close": r.get("previous_close")} for r in rows}
+    # ``stale``: the feed handed back its cached fallback after a failed read; a break never fires on it.
+    return {r["symbol"]: {"last": r.get("last"), "previous_close": r.get("previous_close"), "stale": bool(issue)} for r in rows}
 
 
 def read_bars(symbol: str, day: date) -> list[dict] | None:
@@ -427,7 +428,8 @@ class ThesisWatch:
         does not."""
         found: list[Candidate] = []
         for row in rows:
-            last = (quotes.get(row.symbol) or {}).get("last")
+            quote = quotes.get(row.symbol) or {}
+            last = None if quote.get("stale") else quote.get("last")  # a break needs a fresh price
             for memory_id, level, review in row.tripwires:
                 if level and isinstance(last, (int, float)) and 0 < last <= level:
                     text = f"{row.symbol} {float(last):g} is at or under your thesis break level {level:g}"

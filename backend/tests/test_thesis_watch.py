@@ -644,6 +644,19 @@ def test_above_the_break_level_or_with_no_quote_there_is_no_break(engine, world,
     clock.now = at("10:15")
     result = watch.run_once()
     assert result["fired"] == [] and result["issues"] == ["quotes unavailable: RuntimeError"]
+    readers.fail.clear()
+    readers.quotes = {"NBIS": {"last": 79, "previous_close": 80.5, "stale": True}}  # the feed's cached fallback
+    clock.now = at("10:30")
+    assert watch.run_once()["fired"] == [] and triggers(engine) == []  # no break, and its key is not used up
+
+
+def test_read_quotes_marks_the_feed_s_stale_fallback(monkeypatch):
+    from app.engine import chart_feed
+    rows = [{"symbol": "NBIS", "last": 79.0, "previous_close": 80.0}]
+    monkeypatch.setattr(chart_feed.chart_feed, "quote_rows", lambda symbols: (rows, 1.0, "provider timed out; cached"))
+    assert thesis_watch.read_quotes(["NBIS"])["NBIS"]["stale"] is True
+    monkeypatch.setattr(chart_feed.chart_feed, "quote_rows", lambda symbols: (rows, 1.0, None))
+    assert thesis_watch.read_quotes(["NBIS"])["NBIS"]["stale"] is False
 
 
 def test_the_review_date_pings_once_when_it_comes_with_the_question_prepared(engine, world, monkeypatch):
