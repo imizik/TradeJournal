@@ -4,7 +4,7 @@ import uuid
 
 import pytest
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.engine import leak_bill, notification_policy
 from app.engine.chart_math import ET
@@ -173,3 +173,68 @@ def test_it_is_sent_once_on_sunday_evening_and_is_off_by_default(engine, monkeyp
     assert sent == [("LEAK BILL · $320", "/proof")]
     assert leak_bill.LeakBill(engine, clock=lambda: SUNDAY, send=send, bars_for=lambda t: bars.get(t.ticker)).run().startswith("held")
     assert len(sent) == 1  # once a week, across restarts
+
+
+def test_a_cut_line_cross_is_acted_on_ignored_or_never_reached():
+    # First buy at $2.00: the line is $1.40.
+    sold = [buy(2, 200, ny(10)), sell(2, 135, ny(10, 20))]
+    bars = [bar(10, 5, 1.60), bar(10, 10, 1.38), bar(10, 30, 1.00)]
+    assert leak_bill.follow(False, sold, bars) == {"state": "acted", "at": ny(10, 10), "held": 2, "cost": 6.0}
+    held = [buy(2, 200, ny(10)), sell(2, 60, ny(14))]  # sold well past the cross
+    assert leak_bill.follow(False, held, bars) == {"state": "ignored", "at": ny(10, 10), "held": 2, "cost": 156.0}
+    # Expired: the contracts open at the cross fetched nothing; an add after the cross is not counted with them.
+    gone = [buy(1, 200, ny(10)), buy(1, 100, ny(10, 40))]
+    assert leak_bill.follow(True, gone, bars) == {"state": "ignored", "at": ny(10, 10), "held": 1, "cost": 138.0}
+    assert leak_bill.follow(False, held, [bar(10, 5, 1.60), bar(11, 0, 1.45)]) == {"state": "not_hit"}
+    assert leak_bill.follow(False, held, None) == {"state": "unpriced"}
+    # A sale in the cross's own minute is acting on it.
+    same = [buy(1, 200, ny(10)), sell(1, 139, ny(10, 10))]
+    assert leak_bill.follow(False, same, bars)["state"] == "acted"
+
+
+def test_the_bill_says_whether_the_cut_pings_were_followed(engine):
+    from app.models import FillInterrupt, PositionAlert
+    with Session(engine) as db:
+        bars = week(db)
+        cut = trade(db, "CRWV", [buy(1, 200, ny(10)), sell(1, 60, ny(10, 45))], expiration=TUE, pnl=-140)  # through $1.40, held
+        bars["CRWV"] = [bar(10, 10, 1.30), bar(10, 40, 0.70)]
+        for ticker, row in (("CRWV", cut), ("AMD", None)):
+            db.add(FillInterrupt(account_id=ROTH, fill_key=f"{ticker}-0", position_key=f"{ticker}-0", trade_id=uuid.uuid4(),
+                                 ticker=ticker, contract=ticker, kinds="cut_line", title="Cut line", body="", executed_at=ny(10),
+                                 detected_at=datetime(2026, 11, 17, 15, 0), delivery="sent"))  # 10:00 New York
+        mu = next(t for t in db.exec(select(Trade).where(Trade.ticker == "MU")))
+        db.add(PositionAlert(account_id=ROTH, source_key="MU-0", kind="hold_hour", generation=0, trade_id=mu.id,
+                             contract="MU 11/18/26 100C", contracts=2, avg_cost=200, bid=130, mark=130,
+                             detected_at=datetime(2026, 11, 17, 16, 0), delivery="sent"))
+        db.commit()
+        bill = leak_bill.week_bill(db, date(2026, 11, 16), date(2026, 11, 22), lambda t: bars.get(t.ticker))
+        assert bill["cut_line"] == {"pings": 2, "acted": 0, "ignored": 1, "not_hit": 0, "unpriced": 1, "ignored_cost": 70.0,
+                                    "ignored_priced": 1}
+        assert [(r["kind"], r["acted"], r["ignored_vs_alert_usd"]) for r in bill["pings"]] == [("hold_hour", 0, -140.0)]
+        _, body = leak_bill.render(bill, "Nov 16")
+    assert body.splitlines()[-3:] == [
+        "Did you follow the cut pings?",
+        "Cut line: 2 pinged, 1 traded through it, you sold within 15 min on 0. Holding past it cost $70. 1 had no minute prices.",
+        "Held an hour ping: acted on 0 of 1. Ignoring 1 cost $140.",
+    ]
+
+
+def test_the_cut_line_is_the_pinged_buys_and_a_roll_close_is_not_priced():
+    bars = [bar(10, 5, 1.60), bar(10, 10, 1.30)]
+    # Two buys in one minute: the ping chose the first by source identity, not fill UUID.
+    a = {**buy(1, 200, ny(10)), "id": uuid.UUID(int=2), "key": "a"}
+    b = {**buy(1, 100, ny(10)), "id": uuid.UUID(int=1), "key": "b"}
+    out = sell(2, 60, ny(14))
+    assert leak_bill.follow(False, [a, b, out], bars)["state"] == "ignored"  # $1.40 line, not $0.70
+    rolled = {**sell(1, 200, ny(14)), "key": "roll:x"}
+    found = leak_bill.follow(False, [buy(1, 200, ny(10)), rolled], bars)
+    assert found["state"] == "ignored" and found["cost"] is None
+
+
+def test_a_cross_before_the_ping_went_out_is_not_judged():
+    late = [buy(1, 200, ny(10)), sell(1, 100, ny(10, 20))]
+    bars = [bar(10, 1, 1.30), bar(10, 15, 1.20)]
+    # Crossed at 10:01, the ping went out at 10:14: the cross he could act on is 10:15, and he sold five minutes later.
+    assert leak_bill.follow(False, late, bars, ny(10, 14)) == {"state": "acted", "at": ny(10, 15), "held": 1, "cost": 20.0}
+    assert leak_bill.follow(False, late, bars)["at"] == ny(10, 1)
+    assert leak_bill.follow(False, late, bars[:1], ny(10, 14)) == {"state": "unpriced"}  # no price after the ping
