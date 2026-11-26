@@ -113,6 +113,10 @@ class ReplayEvidence:
     def get_trades(self, symbol: str, limit: int = 5) -> dict:
         return {"symbol": symbol, "state": "unavailable", "reason": "The owner's trades are unavailable in replay."}
 
+    def get_my_record(self, symbol: str | None = None, setup: str | None = None, dte_bucket: str | None = None) -> dict:
+        return {"filters": {"symbol": symbol, "setup": setup, "dte_bucket": dte_bucket}, "state": "unavailable",
+                "reason": "The owner's trade record is unavailable in replay."}
+
     def owner_context(self, symbol: str | None, bounded: bool = True) -> dict:
         return {"state": "unavailable", "reason": "The owner's book, memories and notes are unavailable in replay "
                                                   "(they would show today's holdings, not the frozen moment's)."}

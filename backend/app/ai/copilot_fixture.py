@@ -155,6 +155,18 @@ class FixtureEvidence:
                  "hold_minutes": 35, "status": "closed", "expired_worthless": False, "tags": ["chased"]}]
         return {"symbol": symbol, "state": "ok", "as_of": AT, "simulated": True, "trades": rows[:limit]}
 
+    def get_my_record(self, symbol: str | None = None, setup: str | None = None, dte_bucket: str | None = None) -> dict:
+        return {
+            "state": "ok", "as_of": AT, "simulated": True,
+            "filters": {"symbol": symbol, "setup": setup, "dte_bucket": dte_bucket},
+            "trades": 14, "tagged_trades": 14, "wins": 9, "losses": 5, "win_rate": 0.643,
+            "total_pnl": 1840.0, "median_pnl": 145.0, "broke_cut_rule": 2, "small_sample": False,
+            "top_mistakes": [{"mistake": "chased_extended", "trades": 3, "total_pnl": -420.0},
+                             {"mistake": "held_past_cut", "trades": 2, "total_pnl": -310.0}],
+            "setups": [{"setup": setup or "vwap_reclaim", "trades": 9, "wins": 7, "total_pnl": 1420.0}],
+            "setups_total": 1,
+        }
+
     def get_call_facts(self, symbol: str, **reading) -> dict:
         from app.engine import call_check
         return call_check.simulated_facts(symbol, **reading)

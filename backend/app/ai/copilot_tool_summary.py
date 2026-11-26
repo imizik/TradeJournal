@@ -270,12 +270,30 @@ def web_search(d: dict) -> str | None:
     return f"Web: {count:g} result{'s' if count != 1 else ''}" if _is_num(count) else None
 
 
+def my_record(d: dict) -> str | None:
+    if d.get("state") != "ok":
+        return None
+    filters = d.get("filters") or {}
+    label = " ".join(str(filters[k]) for k in ("symbol", "setup", "dte_bucket") if filters.get(k)) or "all closed"
+    trades = d.get("trades")
+    if not _is_num(trades):
+        return None
+    if trades == 0:
+        return f"Record ({label}): 0 trades"
+    parts = [f"{trades:g} trade{'s' if trades != 1 else ''}"]
+    if _is_num(d.get("win_rate")):
+        parts.append(f"{round(d['win_rate'] * 100):g}% win")
+    if _is_num(d.get("total_pnl")):
+        parts.append(_usd(round(d["total_pnl"], 2)))
+    return f"Record ({label}): " + ", ".join(parts)
+
+
 SUMMARISERS: dict[str, Callable[[dict], str | None]] = {
     "get_group_comparison": group_comparison, "get_peer_moves": peer_moves, "get_symbol_news": symbol_news,
     "get_quotes": quotes, "get_option_candidates": option_candidates, "get_market_regime": market_regime,
     "get_radar_today": radar_today, "get_breadth": breadth, "get_positioning": positioning, "get_macro": macro,
     "get_base_rates": base_rates, "get_trade_review": trade_review, "get_symbol_profile": symbol_profile,
-    "get_symbol_events": symbol_events, "web_search": web_search,
+    "get_symbol_events": symbol_events, "get_my_record": my_record, "web_search": web_search,
 }
 
 _UNSAFE = re.compile(r"\s+")
