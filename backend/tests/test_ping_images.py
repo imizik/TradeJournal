@@ -347,7 +347,7 @@ def test_a_give_back_carries_entry_peak_and_now_and_names_no_account_or_id(engin
     real = ping_images.position
     monkeypatch.setattr(ping_images, "position", lambda *a, **k: built.append(real(*a, **k)) or built[-1])
     PositionAlerts(engine, Calendar(), clock=lambda: at("11:01"), quotes=lambda s: {}).deliver()
-    assert phone.sent[0]["title"] == "SNDK 10/23/26 230C: give-back triggered" and phone.sent[0]["image"][:4] == b"\x89PNG"
+    assert phone.sent[0]["title"] == "🟢 SNDK 230C gave back: +$124 → +$20. Take it?" and phone.sent[0]["image"][:4] == b"\x89PNG"
     assert bars == ["SNDK"] and image_states(engine) == {"position_alerts": "attached"}
     with Session(engine) as db:
         assert db.get(PositionAlert, alert_id).delivery == "sent"
@@ -433,7 +433,7 @@ def test_a_picture_that_failed_with_a_5xx_is_retried_as_text(engine, bars, monke
     watcher.deliver()
     with Session(engine) as db:
         assert db.get(PositionAlert, alert_id).delivery == "sent"
-    assert texts == ["SNDK 10/23/26 230C: give-back triggered"] and image_states(engine) == {"position_alerts": "none"}
+    assert texts == ["🟢 SNDK 230C gave back: +$124 → +$20. Take it?"] and image_states(engine) == {"position_alerts": "none"}
 
 
 def test_pictures_off_sends_text_and_never_reads_bars(engine, bars, monkeypatch):
