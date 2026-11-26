@@ -487,17 +487,13 @@ def _trade_dte_bucket(trade, entry_exp, entry_at, ctx_bucket: str | None) -> str
     return "22+dte"
 
 
-def _trade_mistakes(tag) -> list[str]:
-    import json
-    try:
-        items = json.loads(tag.mistakes_json or "[]")
-    except ValueError:
-        items = []
+def _trade_mistakes(tag: dict) -> list[str]:
+    items = tag.get("mistakes")
     if not isinstance(items, list):
         items = []
     raw = [str(m) for m in items if isinstance(m, str)]
-    if tag.primary_mistake:
-        raw.append(str(tag.primary_mistake))
+    if tag.get("primary_mistake"):
+        raw.append(str(tag["primary_mistake"]))
     seen: dict[str, str] = {}
     for item in raw:
         norm = _norm_tag(item)
@@ -524,6 +520,7 @@ def my_record(symbol: str | None = None, setup: str | None = None, dte_bucket: s
     import statistics
     from sqlmodel import Session, col, select
     from app.database import engine
+    from app.engine import trade_ai_tags
     from app.models import Account, Fill, FillMarketContext, Trade, TradeAiTag, TradeFill
 
     with (Session(engine) if session is None else nullcontext(session)) as db:
@@ -535,54 +532,42 @@ def my_record(symbol: str | None = None, setup: str | None = None, dte_bucket: s
         candidates = db.exec(query.order_by(col(Trade.closed_at).desc(), col(Trade.id).asc())).all()
 
         entry_meta: dict = {}
-        tag_by_trade: dict = {}
+        tag_by_trade: dict[str, dict] = {}
         if candidates:
             trade_ids = [t.id for t in candidates]
-            fill_rows = db.exec(
-                select(TradeFill.trade_id, TradeFill.role, Fill.account_id, Fill.raw_email_id,
-                       Fill.executed_at, Fill.expiration, FillMarketContext.dte_bucket)
-                .join(Fill, Fill.id == TradeFill.fill_id)
-                .outerjoin(FillMarketContext, FillMarketContext.fill_id == Fill.id)
-                .where(col(TradeFill.trade_id).in_(trade_ids))
-                .order_by(col(Fill.executed_at).asc(), col(Fill.raw_email_id).asc(), col(Fill.id).asc())
-            ).all()
-            anchors_by_trade: dict = {}
-            raw_keys: set[str] = set()
-            fallback_meta: dict = {}
-            for trade_id, role, acct_id, raw_id, exec_at, exp, ctx_dte in fill_rows:
-                fallback_meta.setdefault(trade_id, (exp, exec_at, ctx_dte))
-                if role == "entry" and trade_id not in entry_meta:
-                    entry_meta[trade_id] = (exp, exec_at, ctx_dte)
-                if raw_id:
-                    raw_keys.add(raw_id)
-                    anchors_by_trade.setdefault(trade_id, []).append((role == "entry", acct_id, raw_id))
-            for trade_id, meta in fallback_meta.items():
-                entry_meta.setdefault(trade_id, meta)
-            if raw_keys:
-                tags = db.exec(select(TradeAiTag).where(col(TradeAiTag.source_key).in_(raw_keys))).all()
-                by_anchor = {(tag.account_id, tag.source_key): tag for tag in tags}
-                for trade_id, anchors in anchors_by_trade.items():
-                    anchors.sort(key=lambda item: not item[0])  # prefer entry fill anchor
-                    for _, acct_id, raw_id in anchors:
-                        if (acct_id, raw_id) in by_anchor:
-                            tag_by_trade[trade_id] = by_anchor[(acct_id, raw_id)]
-                            break
+            tag_by_trade = trade_ai_tags.for_trades(db, trade_ids)
+            if dte_bucket is not None:
+                fill_rows = db.exec(
+                    select(TradeFill.trade_id, TradeFill.role, Fill.executed_at, Fill.expiration, FillMarketContext.dte_bucket)
+                    .join(Fill, Fill.id == TradeFill.fill_id)
+                    .outerjoin(FillMarketContext, FillMarketContext.fill_id == Fill.id)
+                    .where(col(TradeFill.trade_id).in_(trade_ids))
+                    .order_by(col(Fill.executed_at).asc(), col(Fill.id).asc())
+                ).all()
+                fallback_meta: dict = {}
+                for trade_id, role, exec_at, exp, ctx_dte in fill_rows:
+                    fallback_meta.setdefault(trade_id, (exp, exec_at, ctx_dte))
+                    if role == "entry" and trade_id not in entry_meta:
+                        entry_meta[trade_id] = (exp, exec_at, ctx_dte)
+                for trade_id, meta in fallback_meta.items():
+                    entry_meta.setdefault(trade_id, meta)
 
         scoped = []
         for t in candidates:
-            exp, exec_at, ctx_dte = entry_meta.get(t.id, (None, None, None))
-            if dte_bucket is not None and _trade_dte_bucket(t, exp, exec_at, ctx_dte) != dte_bucket:
-                continue
-            scoped.append((t, tag_by_trade.get(t.id)))
+            if dte_bucket is not None:
+                exp, exec_at, ctx_dte = entry_meta.get(t.id, (None, None, None))
+                if _trade_dte_bucket(t, exp, exec_at, ctx_dte) != dte_bucket:
+                    continue
+            scoped.append((t, tag_by_trade.get(str(t.id))))
 
         wanted_setup = _norm_tag(setup) if setup else ""
         known_setups: list[str] = []
         if wanted_setup:
             tagged_in_scope = [(t, tag) for t, tag in scoped if tag is not None]
-            exact = [(t, tag) for t, tag in tagged_in_scope if _norm_tag(tag.setup) == wanted_setup]
-            matched = exact or [(t, tag) for t, tag in tagged_in_scope if wanted_setup in _norm_tag(tag.setup)]
+            exact = [(t, tag) for t, tag in tagged_in_scope if _norm_tag(tag.get("setup")) == wanted_setup]
+            matched = exact or [(t, tag) for t, tag in tagged_in_scope if wanted_setup in _norm_tag(tag.get("setup"))]
             if not matched:
-                pool = [tag.setup for _, tag in tagged_in_scope]
+                pool = [tag.get("setup") for _, tag in tagged_in_scope]
                 if not pool:
                     pool = list(db.exec(select(TradeAiTag.setup).join(Account, Account.id == TradeAiTag.account_id)
                                        .where(_not_webull())).all())
@@ -600,7 +585,7 @@ def my_record(symbol: str | None = None, setup: str | None = None, dte_bucket: s
     wins = sum(1 for p in pnls if p > 0)
     losses = sum(1 for p in pnls if p < 0)
     tagged = [(t, tag) for t, tag in matched if tag is not None]
-    broke_cut = sum(1 for _, tag in tagged if tag.broke_cut_rule or tag.rule_broken_computed)
+    broke_cut = sum(1 for _, tag in tagged if tag.get("broke_cut_rule") or tag.get("rule_broken_computed"))
 
     mistake_counts: dict[str, int] = {}
     mistake_pnl: dict[str, float] = {}
@@ -610,7 +595,7 @@ def my_record(symbol: str | None = None, setup: str | None = None, dte_bucket: s
         for m in _trade_mistakes(tag):
             mistake_counts[m] = mistake_counts.get(m, 0) + 1
             mistake_pnl[m] = mistake_pnl.get(m, 0.0) + pnl
-        s_label = _short_label(tag.setup) or "unclear"
+        s_label = _short_label(tag.get("setup")) or "unclear"
         entry = setup_stats.setdefault(s_label, [0, 0, 0.0])
         entry[0] += 1
         entry[1] += 1 if pnl > 0 else 0
