@@ -563,6 +563,8 @@ def open_positions(db: Session) -> list[dict]:
             "contract": contract_label(trade.ticker, "option", trade.option_type, trade.strike, trade.expiration),
             "occ": occ_symbol(trade.ticker, trade.expiration, trade.option_type or "", float(trade.strike)),
             "contracts": lots["open"], "avg_cost": lots["avg_cost"], "expiration": trade.expiration,
+            # The first buy, for the cut line (``fill_interrupts.cut_line``) the morning glance names; no alert reads it.
+            "first_entry": {"side": entries[0].side, "price": float(entries[0].price), "executed_at": entries[0].executed_at},
         })
     return out
 
@@ -772,8 +774,8 @@ def answer_path(alert: PositionAlert, rating: str) -> str:
 
 
 def _links(db: Session, alert: PositionAlert) -> tuple[str, tuple[tuple[str, str], ...]]:
-    """Where the ping opens, and its two action links. While Copilot Lab is on the tap (and ntfy's Open app) opens the
-    desk's ping card for the position, and the two links are Close and Trim (the same card, that button marked). With
+    """Where the ping opens, and its action links. While Copilot Lab is on the tap (and ntfy's Open app) opens the
+    desk's ping card for the position, with no links of its own (the Robinhood link follows, ``robinhood_link``). With
     the lab off the tap opens the trade page and the two links are the answer buttons, which open the trade page on
     the alert with the feedback saved (ntfy shows three actions: Open app and these two). A desk link that cannot be
     built falls back to the trade page and the answers, so it never holds back the alert."""
@@ -784,9 +786,10 @@ def _links(db: Session, alert: PositionAlert) -> tuple[str, tuple[tuple[str, str
     try:
         with Session(db.get_bind()) as own:  # its own session: a failed read cannot abort the alert's transaction
             card = desk_path(own, alert)
-            # Close and Trim instead of the survey: each opens the ping card on that button. What he did is measured
-            # from his fills (the alert scorecard), not from an answer.
-            return card, (("Close", f"{card}&do=close"), ("Trim", f"{card}&do=trim"))
+            # No survey links: the ping's Robinhood link (``robinhood_link``) is where he acts, and on Telegram Cut it /
+            # Holding answer it without opening anything (``telegram_replies.cut_buttons``). What he did is still
+            # measured from his fills (the alert scorecard).
+            return card, ()
     except Exception:  # noqa: BLE001 - the alert matters more than where it opens
         log.warning("Desk link skipped for a position alert", exc_info=True)
         return trade, answers
@@ -1082,9 +1085,9 @@ class PositionAlerts:
                                             path=path, direct_click=True, more=more, broker_link=robinhood_link(db, alert),
                                             # A day-before-expiry alert on a green position is a reminder, not a risk: no sound.
                                             sound=False if alert.kind == "expiry_eve" and alert.gain is not None and alert.gain >= 0 else None,
-                                            # With the desk on: Close and Trim links, and Why? alone as a reply button.
-                                            # Without it: the four answers (ntfy keeps ANSWER_ACTIONS).
-                                            **({"buttons": (("Why?", f"why:{alert.id}"),), "keep_links": True} if path.startswith("/copilot-lab")
+                                            # With the desk on: Cut it, Holding and Why? as reply buttons, then Open and
+                                            # Robinhood. Without it: the four answers (ntfy keeps ANSWER_ACTIONS).
+                                            **({"buttons": telegram_replies.cut_buttons(alert.id)} if path.startswith("/copilot-lab")
                                                else {"buttons": telegram_replies.feedback_buttons(alert.id)}))
             except phone.SendError as exc:
                 if not _surely_unsent(exc):

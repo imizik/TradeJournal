@@ -123,6 +123,9 @@ export type DeskBook = {
   plan_levels?: { stop: number | null; target: number | null };
   /** A long option's premium paid over his median long option position, when at least 2× (``_size_x`` in copilot_desk.py). */
   size_x?: number;
+  /** His cut line on a short-dated long option (``day_card.holdings``): 30% under the first buy, dollars a contract as
+   * fills store them; null where the rule does not apply, absent from an older backend. */
+  cut_line?: number | null;
 };
 
 /** One Robinhood order on the desk (docs/robinhood-order-fills.md § On the desk): still working (``working``, with what
@@ -765,6 +768,11 @@ export type DayReport = {
     /** ``notes``: his notes on the trade (``trade_notes``), oldest first; absent from an older backend. */
     rows: { contract: string; state: "planned" | "late" | "unplanned" | "pending"; at: number; notes?: string[] }[] } | null;
   checks: { rows: CheckedCallRow[]; today: CheckTally; window: CheckTally & { days: number }; capped: boolean } | null;
+  /** The headline (``app/engine/day_card.py``), the same card the 4:30 ping sends: realized P&L over the trades closed
+   * today, the cut pings acted on today, and the holdings that expire the next trading day (``cut`` in dollars a
+   * contract). Null when it could not be read; absent from an older backend. */
+  card?: { day: string; pnl: number; closed: number; cut: { pings: number; acted: number };
+    expiring: { contract: string; contracts: number; cut: number | null }[]; next_day: string | null } | null;
   sections: Record<string, "ok" | "unavailable">;
 };
 

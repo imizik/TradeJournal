@@ -332,7 +332,7 @@ def test_on_telegram_the_answers_and_why_are_reply_buttons_not_links(engine, wor
     assert alerts(engine)[0].delivery == "sent"
 
 
-def test_a_ping_carries_close_and_trim_into_its_card_while_the_lab_is_on_and_the_answers_while_it_is_off(engine, world, monkeypatch):
+def test_a_ping_opens_its_card_with_robinhood_beside_it_while_the_lab_is_on_and_the_answers_while_it_is_off(engine, world, monkeypatch):
     from urllib.parse import parse_qs, urlsplit
     clock, _, watcher = world
     alert = fired(engine, world)
@@ -355,7 +355,7 @@ def test_a_ping_carries_close_and_trim_into_its_card_while_the_lab_is_on_and_the
     watcher.deliver()
     assert sent[1][1] == f"/copilot-lab?symbol=SNDK&card=alert%3A{alert.id}"  # no plan card saved this position: the desk opens on the symbol
     card = f"/copilot-lab?symbol=SNDK&card=alert%3A{alert.id}"
-    assert buttons[1] == (("Close", f"{card}&do=close"), ("Trim", f"{card}&do=trim"))  # the desk on: Close and Trim, not the survey
+    assert buttons[1] == (("Robinhood", "https://robinhood.com/stocks/SNDK"),)  # the desk on: Robinhood beside Open, not the survey
 
     with Session(engine) as db:
         db.get(PositionAlert, alert.id).delivery = "pending"

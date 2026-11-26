@@ -1,7 +1,7 @@
 """The evening review ping (engine/evening_review.py): once a trading day at 16:30 New York, off by default, one ping
-through the notification policy saying what the desk has waiting and opening Close the day; nothing waiting, a
-weekend or a holiday sends nothing; at most once, a send that may have arrived is never resent. The counts are the
-desk's own (copilot_desk.waiting). No network."""
+through the notification policy that is the day card itself (engine/day_card.py) and opens the desk; a day with
+nothing to say, a weekend or a holiday sends nothing; at most once, a send that may have arrived is never resent. The
+counts stored on the row are the desk's own (copilot_desk.waiting). No network."""
 
 from datetime import date, datetime
 
@@ -11,7 +11,8 @@ from sqlmodel import Session, select
 
 from app.engine import ntfy
 from app.engine.chart_math import ET
-from app.engine.evening_review import EveningReviews, at_minute, message
+from app.engine import day_card
+from app.engine.evening_review import EveningReviews, at_minute
 from app.models import EveningReview, PhonePing
 from app.routers import copilot_desk
 from tests.test_copilot_desk import WED_CLOSE, desk  # noqa: F401  (the desk app over the shared fixtures)
@@ -21,6 +22,7 @@ from tests.test_today import buy, clock, marks  # noqa: F401  (fixtures)
 
 WED, THU = date(2026, 10, 21), date(2026, 10, 22)
 WAITING = {"review": 2, "fills": 1}
+CARD = ("Today -$412", "2 trades closed, -$412 realized.\nCut pings: acted on 1 of 2.")
 
 
 def at(hhmm: str, day: date = WED) -> float:
@@ -42,9 +44,10 @@ def settings(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-def job(engine, clock, counts=WAITING):  # noqa: F811
+def job(engine, clock, counts=WAITING, card=CARD):  # noqa: F811
     seen = []
-    reviews = EveningReviews(engine, Calendar(), clock=clock, counts=lambda db, now: seen.append(now) or counts)
+    reviews = EveningReviews(engine, Calendar(), clock=clock, counts=lambda db, now: seen.append(now) or counts,
+                             card=lambda db, now: card)
     reviews.seen = seen
     return reviews
 
@@ -54,7 +57,7 @@ def rows(engine):  # noqa: F811
         return db.exec(select(EveningReview)).all()
 
 
-def test_at_1630_one_ping_says_what_waits_and_opens_close_the_day_once(engine, monkeypatch):  # noqa: F811
+def test_at_1630_one_ping_is_the_day_card_and_opens_the_desk_once(engine, monkeypatch):  # noqa: F811
     monkeypatch.setenv("EVENING_REVIEW_PING_ENABLED", "true")
     phone = Phone(monkeypatch)
     now = Clock(at("16:29"))
@@ -71,8 +74,8 @@ def test_at_1630_one_ping_says_what_waits_and_opens_close_the_day_once(engine, m
     (row,) = rows(engine)
     assert (row.day, row.delivery, row.review, row.alerts, row.radar, row.fills) == (WED, "sent", 2, 0, 0, 1)
     (sent,) = phone.sent
-    assert sent["title"] == "Close the day" and sent["body"] == "To review: 2 threads · 1 fill to link"
-    assert sent["path"] == "/copilot-lab?close=1" and sent["direct_click"] is True and sent["image"] is None
+    assert (sent["title"], sent["body"]) == CARD  # the card, not a to-do list
+    assert sent["path"] == "/copilot-lab" and sent["direct_click"] is True and sent["image"] is None
     with Session(engine) as db:
         record = db.exec(select(PhonePing).where(PhonePing.sender == "evening_review")).one()
         assert (record.decision, record.kind, record.body) == ("sent", "evening_review", sent["body"])
@@ -87,12 +90,13 @@ def test_at_1630_one_ping_says_what_waits_and_opens_close_the_day_once(engine, m
     assert len(rows(engine)) == 1 and len(phone.sent) == 1 and len(reviews.seen) == 1
 
 
-def test_nothing_waiting_is_recorded_skipped_and_sends_nothing(engine, monkeypatch):  # noqa: F811
+def test_a_day_with_nothing_to_say_is_recorded_skipped_and_sends_nothing(engine, monkeypatch):  # noqa: F811
     monkeypatch.setenv("EVENING_REVIEW_PING_ENABLED", "true")
     phone = Phone(monkeypatch)
-    job(engine, Clock(at("16:30")), counts={"review": 0, "fills": 0}).run()
+    job(engine, Clock(at("16:30")), card=None).run()
     (row,) = rows(engine)
-    assert (row.delivery, row.body, row.last_error) == ("skipped", None, "Nothing was waiting for review, so nothing was sent.")
+    assert (row.delivery, row.body, row.last_error) == (
+        "skipped", None, "Nothing closed, no cut ping and nothing expiring tomorrow, so nothing was sent.")
     assert phone.sent == []
     reviews = job(engine, Clock(at("17:00")))  # something arrives later: the day was already counted
     reviews.run()
@@ -120,7 +124,7 @@ def test_the_lab_off_is_skipped_with_why(engine, monkeypatch):  # noqa: F811
     assert row.delivery == "skipped" and "Copilot Lab is off" in row.last_error and phone.sent == []
 
 
-def test_the_daily_cap_never_holds_it_and_it_reports_what_was_held(engine, monkeypatch):  # noqa: F811
+def test_the_daily_cap_never_holds_it(engine, monkeypatch):  # noqa: F811
     monkeypatch.setenv("EVENING_REVIEW_PING_ENABLED", "true")
     monkeypatch.setenv("PING_DAILY_CAP", "0")
     phone = Phone(monkeypatch)
@@ -135,13 +139,9 @@ def test_the_daily_cap_never_holds_it_and_it_reports_what_was_held(engine, monke
         db.commit()
     job(engine, Clock(at("16:30"))).run()
     (row,) = rows(engine)
-    assert row.delivery == "sent" and phone.sent[0]["body"] == (
-        "To review: 2 threads · 1 fill to link · 12 pings held today (Radar 11, thesis watch 1)")
+    assert row.delivery == "sent" and phone.sent[0]["body"] == CARD[1]  # no held-ping tally: a card, not a to-do list
     with Session(engine) as db:
         assert db.exec(select(PhonePing.decision).where(PhonePing.sender == "evening_review")).one() == "sent"
-    # Held pings alone are worth the evening ping.
-    assert message({"review": 0, "fills": 0}, "1 ping held today (research 1)") == (
-        "To review: 1 ping held today (research 1)")
 
 
 def test_a_send_that_may_have_arrived_is_unknown_and_never_resent(engine, monkeypatch):  # noqa: F811
@@ -169,12 +169,10 @@ def test_the_time_is_configurable_but_never_before_the_close(monkeypatch):
     for bad in ("15:30", "25:00", "evening", "17"):
         monkeypatch.setenv("EVENING_REVIEW_PING_AT", bad)
         assert at_minute() == 16 * 60 + 30
-    assert message({"review": 1, "fills": 2}) == "To review: 1 thread · 2 fills to link"
-    assert message({"review": 0, "fills": 0}) is None
 
 
-def test_the_counts_are_the_desks_own(desk, engine, clock, monkeypatch):  # noqa: F811
-    """At 16:30 the desk asks its close questions (one per symbol) and has one fill to link."""
+def test_the_counts_are_the_desks_own_and_the_card_is_the_day_cards(desk, engine, clock, monkeypatch):  # noqa: F811
+    """At 16:30 the desk asks its close questions (one per symbol) and has one fill to link; the ping is the real card."""
     capture(engine, "NBIS", minute=5)  # unlinked: the linker suggests it for the 10:05 fill
     time_stop(engine, NBIS, "NBIS")
     alert(engine, NBIS, "NBIS", "entry", 95.9)
@@ -190,12 +188,16 @@ def test_the_counts_are_the_desks_own(desk, engine, clock, monkeypatch):  # noqa
     assert (counts["review"], counts["fills"]) == (2, 1)
     monkeypatch.setenv("EVENING_REVIEW_PING_ENABLED", "true")
     phone = Phone(monkeypatch)
-    EveningReviews(engine, Calendar(), clock=Clock(WED_CLOSE)).run()  # the real count, through the lab's switch
+    EveningReviews(engine, Calendar(), clock=Clock(WED_CLOSE)).run()  # the real count and card, through the lab's switch
     (sent,) = phone.sent
-    assert sent["body"] == message(counts)
+    with Session(engine) as db:
+        title, body = day_card.card_lines(day_card.card(db, WED_CLOSE, Calendar()))
+    assert (sent["title"], sent["body"]) == (title, body) and "Expires tomorrow" in body
+    (row,) = rows(engine)
+    assert (row.review, row.fills) == (2, 1)
 
 
-def test_a_desk_source_that_cannot_be_read_is_a_skip_with_why_not_nothing_waiting(desk, engine, clock, monkeypatch):  # noqa: F811
+def test_a_source_that_cannot_be_read_is_a_skip_with_why_not_nothing_to_say(desk, engine, clock, monkeypatch):  # noqa: F811
     buy(engine, 700, "CRWV")
     clock["t"] = WED_CLOSE
 
@@ -208,7 +210,7 @@ def test_a_desk_source_that_cannot_be_read_is_a_skip_with_why_not_nothing_waitin
     phone = Phone(monkeypatch)
     EveningReviews(engine, Calendar(), clock=Clock(WED_CLOSE)).run()
     (row,) = rows(engine)
-    assert row.delivery == "skipped" and row.last_error == "The desk's counts could not be read (RuntimeError), so nothing was sent."
+    assert row.delivery == "skipped" and row.last_error == "The day card could not be read (RuntimeError), so nothing was sent."
     assert phone.sent == []
 
 

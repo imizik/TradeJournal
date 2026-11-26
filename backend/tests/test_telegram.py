@@ -346,6 +346,35 @@ def test_feedback_tap_saves_once_answers_and_marks_the_keyboard(case):
         assert db.exec(select(PositionAlertFeedback.rating)).all() == ["prompted_review"]
 
 
+def test_cut_it_saves_an_exiting_decision_once_that_the_scorecard_reads_as_acted(case):
+    from datetime import timedelta
+    from app.engine import alert_scorecard
+    from app.models import DayJournalEntry
+    db_engine, alert = case
+    keyboard = rows(telegram_replies.cut_buttons(alert)) + [[{"text": "Open", "url": "https://journal.example/x"}]]
+    assert [b["text"] for b in keyboard[0]] == ["Cut it", "Holding", "Why?"]  # one row: three answers
+    bot = Bot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+    with Session(db_engine) as db:  # the alert fired just now, so today's decision follows it
+        db.get(PositionAlert, alert).detected_at = datetime.utcnow() - timedelta(minutes=1)
+        db.commit()
+    assert run(replies.handle(tap(f"cx:{alert}:c", keyboard=keyboard))) == "cx"
+    assert bot.named("answerCallbackQuery")[0]["text"] == "Saved: Cut it."
+    assert bot.named("editMessageReplyMarkup")[0]["reply_markup"]["inline_keyboard"][0] == [
+        {"text": "✓ Cut it", "callback_data": f"done:{alert}"}, {"text": "Why?", "callback_data": f"why:{alert}"}]
+    # Holding tapped later cannot overwrite it.
+    assert run(replies.handle(tap(f"cx:{alert}:h", update_id=2, keyboard=keyboard))) == "cx"
+    assert bot.named("answerCallbackQuery")[-1]["text"] == "Already answered: Cut it."
+    with Session(db_engine) as db:
+        [entry] = db.exec(select(DayJournalEntry)).all()
+        assert entry.kind == "decision" and entry.text.startswith("Exiting. ") and "tapped Cut it on the phone" in entry.text
+        assert alert_scorecard._choice(entry) == "exiting"
+        pinged = db.get(PositionAlert, alert)
+        assert entry.symbol == pinged.contract.split(" ")[0]
+    assert run(replies.handle(tap(f"cx:{alert}:x", update_id=3))) == "cx"
+    assert bot.named("answerCallbackQuery")[-1]["text"] == "That button is not one the app knows."
+
+
 def test_feedback_finds_the_current_trade_after_a_rebuild(case):
     db_engine, alert = case
     with Session(db_engine) as db:

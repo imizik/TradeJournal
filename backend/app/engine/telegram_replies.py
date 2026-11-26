@@ -155,7 +155,7 @@ NOTE = re.compile(r"^(note|idea)(?=$|[\s:,.;!–—])[\s:,.;!–—]*", re.I)  #
 NOTE_SAVED = "Saved."
 NOTE_EMPTY = "Say the thought after note or idea, in the same message."
 # The kind of ping a note replied to, from its buttons when it has no ``ask:<kind>``.
-PING_VERBS = {"fb": "position_alert", "why": "position_alert", "rr": "radar", "rp": "radar_setup", "pc": "companion",
+PING_VERBS = {"fb": "position_alert", "cx": "position_alert", "why": "position_alert", "rr": "radar", "rp": "radar_setup", "pc": "companion",
               "pu": "companion", "pl": "plan", "hd": "copilot_answer", "cc": "call_check", "pp": "paper"}
 
 
@@ -163,6 +163,15 @@ def note_words(text: str) -> tuple[str, str] | None:
     """``(word, the rest)`` when ``text`` starts with note or idea (any case), else None."""
     found = NOTE.match(text.strip())
     return (found.group(1).lower(), text.strip()[found.end():].strip()) if found else None
+
+
+CUT_LABELS = {"c": "Cut it", "h": "Holding"}  # ``cx:`` answers on an open-trade alert, saved as the desk's decision entry
+CUT_WORDS = {"c": "Exiting", "h": "Holding"}  # the decision's first word, which the alert scorecard reads (``_choice``)
+
+
+def cut_buttons(alert_id) -> tuple[tuple[str, str], ...]:
+    """Reply buttons for an open-trade alert while the desk is on: Cut it, Holding and Why?"""
+    return tuple((label, f"cx:{alert_id}:{code}") for code, label in CUT_LABELS.items()) + (("Why?", f"why:{alert_id}"),)
 
 
 def feedback_buttons(alert_id, ratings: tuple[str, ...] = tuple(FEEDBACK_LABELS)) -> tuple[tuple[str, str], ...]:
@@ -239,6 +248,8 @@ class Replies:
         verb, _, rest = str(query.get("data") or "").partition(":")
         if verb == "fb":
             reply, chosen = await asyncio.to_thread(self._feedback, *rest.partition(":")[::2])
+        elif verb == "cx":
+            reply, chosen = await asyncio.to_thread(self._cut, *rest.partition(":")[::2])
         elif verb == "rr":
             reply, chosen = await asyncio.to_thread(self._rating, *rest.partition(":")[::2])
         elif verb == "pc":
@@ -375,6 +386,36 @@ class Replies:
                         return f"Already answered: {label}.", label
                 return str(exc.detail), None
         return f"Saved: {FEEDBACK_LABELS[rating]}.", FEEDBACK_LABELS[rating]
+
+    def _cut(self, alert_id: str, code: str) -> tuple[str, str | None]:
+        """Cut it or Holding on an open-trade alert: one ``decision`` day-journal entry ("Exiting. …" / "Holding. …"),
+        as the desk's ping card writes, so the alert scorecard and the leak bill's "did you follow the cut pings" count
+        it (an Exiting decision after the ping is acted on, as there). One answer per alert: a second tap says the first."""
+        from sqlmodel import select
+        from app.engine import day_journal
+        from app.engine.chart_math import ET
+        from app.engine.position_alerts import ASK_KIND, _clock_label, _epoch, _minute_of
+        from app.models import DayJournalEntry, PositionAlert
+        alert_uuid = _uuid(alert_id)
+        if alert_uuid is None or code not in CUT_LABELS:
+            return "That button is not one the app knows.", None
+        operation = f"telegram-cut-{alert_uuid}"
+        with Session(self.engine) as db:
+            alert = db.get(PositionAlert, alert_uuid)
+            if alert is None:
+                return "That alert is no longer in the journal.", None
+            saved = db.exec(select(DayJournalEntry).where(DayJournalEntry.operation_id == operation)).first()
+            if saved is not None:
+                first = next((c for c, word in CUT_WORDS.items() if saved.text.startswith(word)), code)
+                return f"Already answered: {CUT_LABELS[first]}.", CUT_LABELS[first]
+            fired = f"{ASK_KIND.get(alert.kind, 'Position alert')} at {_clock_label(_minute_of(_epoch(alert.detected_at)))}"
+            try:
+                day_journal.append(db, day=datetime.now(ET).date(), operation_id=operation, kind="decision",
+                                   text=f"{CUT_WORDS[code]}. {fired}; tapped {CUT_LABELS[code]} on the phone.",
+                                   symbol=(alert.contract or "").split(" ")[0] or None)
+            except day_journal.EntryError as exc:
+                return f"Not saved: {exc}", None
+        return f"Saved: {CUT_LABELS[code]}.", CUT_LABELS[code]
 
     def _rating(self, radar_alert_id: str, rating: str) -> tuple[str, str | None]:
         from app.models import RadarAlert
