@@ -4448,8 +4448,9 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
 - **Two tiers: only position risk makes a sound.** `phone.loud(kind, …)` (`phone.LOUD`) keeps the
   sound for the pings about money at risk in a position he holds: give-back, a short-dated option deep red an hour in, the expiry
   countdown (the day before when red, the last 30 minutes, a morning same-day option at 1 PM), no exit order, the
-  green-day walk-away, a Keep holding check-in, a plan's invalidation, target, time stop and level alerts, and the fill-time
-  interrupt for size built by adding below cost (`fill_interrupts.LOUD_KINDS`). Every other ping
+  green-day walk-away, a Keep holding check-in, the day plan's max size, exit time and late pings, a plan's invalidation,
+  target, time stop and level alerts, and the fill-time interrupts for size built by adding below cost and the cut line
+  (`fill_interrupts.LOUD_KINDS`). Every other ping
   (Radar, briefs and prep, plan nudges and entry levels, paper, reviews, digests, the companion, research
   results, other interrupts) is sent silent: ntfy priority 2 (no sound) and Telegram
   `disable_notification`. The message, its budget and its links are unchanged.
