@@ -277,6 +277,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /trades/fills/bulk',
     'GET /trades/{trade_id}',
     'GET /trades/{trade_id}/fills',
+    'GET /trades/{trade_id}/replay',
     'GET /trades/{trade_id}/phone-alerts',
     'PUT /trades/{trade_id}/phone-alerts/{alert_id}/feedback',
     'GET /trades/{trade_id}/plan-link',
