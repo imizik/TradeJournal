@@ -80,3 +80,16 @@ export async function saveMemory(body: MemorySave): Promise<BriefMemory> {
     : `Not saved (error ${response.status}).`;
   throw new MemorySaveError(message, response.status);
 }
+
+/** One recent thesis-watch ping for the thesis's ticker. ``delivery`` other than sent means it was not told (with ``reason``). */
+export type ThesisPing = { kind: string; text: string; fired_at: string; delivery: string; reason: string | null; path: string };
+/** An active thesis with its live tripwires, for /theses. A missing price or earnings date stays null, never guessed. */
+export type ThesisRow = Pick<BriefMemory, "memory_id" | "revision" | "received_at" | "body"> & { symbol: string; last: number | null; stale: boolean; break_below: number | null; break_distance_pct: number | null;
+  earnings_on: string | null; review_on: string | null; pings: ThesisPing[] };
+export type ThesisBoard = { items: ThesisRow[]; today: string; issues: string[]; pings_on: boolean; watch_on: boolean };
+
+export async function listTheses(signal?: AbortSignal): Promise<ThesisBoard> {
+  const response = await fetch(apiUrl("/jo/theses"), { cache: "no-store", signal });
+  if (!response.ok) throw new Error("Theses could not load. Nothing was changed.");
+  return response.json();
+}

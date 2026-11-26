@@ -39,6 +39,13 @@ def list_memories(status: Literal["active", "proposed", "retired", "redacted"] =
     return {"items": store.memories(session, status, symbol, limit), "limit": limit}
 
 
+@router.get("/theses")
+def theses(session: Session = Depends(get_session)):
+    """Active theses with price vs break level, next earnings, review date and recent pings (the /theses page)."""
+    from app.engine import thesis_watch
+    return thesis_watch.board(session)
+
+
 @router.get("/memories/{memory_id}")
 def memory_history(memory_id: UUID, before_revision: int | None = Query(None, ge=1),
                    limit: int = Query(50, ge=1, le=100), session: Session = Depends(get_session)):
