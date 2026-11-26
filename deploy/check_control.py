@@ -30,8 +30,8 @@ import time
 import advisor_mcp_control as old
 from advisor_mcp_stage import SOURCE, digest, exact, inventory, reviewed_git
 from check_network import check_policy
-from check_scope import (ADD_VIEW, CAPTURE_VIEW, MARKET_VIEW, POSITION_VIEW, add_view_sql, context_view_sql,
-    market_view_sql, view_sql)
+from check_scope import (ADD_VIEW, CAPTURE_VIEW, MARKET_VIEW, POSITION_VIEW, TAG_VIEW, add_view_sql, context_view_sql,
+    market_view_sql, tag_view_sql, view_sql)
 
 FORMAT = "check-disabled-bundle-v1"
 ROOT = Path("/opt/tradejournal-check")
@@ -64,10 +64,11 @@ RUNTIME_FILES = ("followup_common.py", "followup_ledger.py", "followup_tools.py"
 SETTINGS = ("config.json", "refresh-keys.json", "network.nft", "feature-view.sql", "owner", "journal")
 # Activation edits config.json and refresh-keys.json (real issuer, grant,
 # client) and enables owner/config.json; the network policy and view SQL stay pinned.
-PINNED_SETTINGS = ("network.nft", "feature-view.sql", "context-views.sql", "market-view.sql", "add-view.sql")
+PINNED_SETTINGS = ("network.nft", "feature-view.sql", "context-views.sql", "market-view.sql", "add-view.sql",
+    "tag-view.sql")
 # Database changes an upgrade may add, each applied only under its own SHA-256 approval.
 ADDITIVE_SQL = {"context-views.sql": (POSITION_VIEW, CAPTURE_VIEW), "market-view.sql": (MARKET_VIEW,),
-    "add-view.sql": (ADD_VIEW,)}
+    "add-view.sql": (ADD_VIEW,), "tag-view.sql": (TAG_VIEW,)}
 
 
 def stage(destination, *, wheels):
@@ -102,7 +103,8 @@ def stage(destination, *, wheels):
             target.write_bytes(source.read_bytes())
         generated = {"config/config.json": json.dumps(config, indent=2) + "\n",
             "config/feature-view.sql": view_sql(), "config/context-views.sql": context_view_sql(),
-            "config/market-view.sql": market_view_sql(), "config/add-view.sql": add_view_sql()}
+            "config/market-view.sql": market_view_sql(), "config/add-view.sql": add_view_sql(),
+            "config/tag-view.sql": tag_view_sql()}
         for relative, body in generated.items():
             target = destination / relative
             target.parent.mkdir(parents=True, exist_ok=True)

@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from sqlmodel import Session, select
 
 from app.engine.market_context import NO_EARNINGS
+from app.engine.trade_ai_tags import pretrade_setup_record
 from app.models import Account, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
 
 RULES_VERSION = "pretrade-rules-v1"
@@ -454,8 +455,10 @@ def market_facts(ticker: str, items: Optional[list[dict]], receipt_utc: datetime
 
 
 def run_check(idea: dict, analysis: dict, rows: Iterable[dict], receipt_utc: datetime,
-              market: Optional[list[dict]] = None) -> dict:
-    """The answer contract for one idea. Same inputs, same answer."""
+              market: Optional[list[dict]] = None, tags: Optional[list[dict]] = None,
+              setup: Optional[str] = None) -> dict:
+    """The answer contract for one idea. Same inputs, same answer. ``tags`` (published trade review tags) and the
+    owner's stated ``setup`` only add ``setup_record`` beside the verdict; they never change it."""
     for key in ("ticker", "side", "instrument", "horizon"):
         if not idea.get(key):
             raise ValueError(f"{key} is required")
@@ -494,7 +497,9 @@ def run_check(idea: dict, analysis: dict, rows: Iterable[dict], receipt_utc: dat
     caveats = _macro_caveats(macro, receipt_utc, swing) + market_caveats + caveats
     answer = {"rules_version": SWING_RULES_VERSION if swing else RULES_VERSION, "receipt_utc": receipt_utc.astimezone(timezone.utc).isoformat(),
               "idea": idea, **rules, "would_change": would_change, "history": history, "live": live, "option": option,
-              "macro": macro, "market": external, "caveats": caveats}
+              "macro": macro, "market": external, "caveats": caveats,
+              "setup_record": pretrade_setup_record(idea, analysis, rows, tags, _ny_wall(receipt_utc),
+                                                    history["source_fill_keys"], setup)}
     answer["live_context_sha256"] = hashlib.sha256(
         json.dumps({"request": analysis.get("request"), "data": data}, sort_keys=True, default=str).encode()).hexdigest()
     return answer
