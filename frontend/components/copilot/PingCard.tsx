@@ -3,7 +3,7 @@
 /**
  * The ping card (docs/copilot-lab.md § Where a ping opens): where a position ping lands, ahead of the copilot's sheet.
  * It leads with what fired and what holding past that kind of ping has done for him in dollars, then the position as it
- * stands (P&L, bid and mid, contracts, whether an exit order is working, what it is worth at expiry if the stock stays
+ * stands (P&L, bid and mid, contracts, whether an exit order is working (left out when the feed cannot say), what it is worth at expiry if the stock stays
  * flat), then thumb-sized actions: Open in Robinhood (primary, where he sells), Cut it and Holding…, with Set stop
  * under them; with no Robinhood link, Copy Close all at the bid, Copy Trim half and Set stop as before. Holding is not
  * one tap: it asks for a check-in time (+15m or +30m) or a price stop first. A check-in time rides on the hold's journal
@@ -237,11 +237,10 @@ function Act({ act, body, row, rows, ordersLive, onAsk, onPlan }: {
         <Figure label="Bid / mid">
           {freshBid !== null ? priceText(freshBid) : "—"} / {mark ? <span className={cn(!mark.live && "opacity-60")}>{priceText(mark.share)}</span> : "—"}
         </Figure>
-        <Figure label="Exit order">
-          {working === null ? <span className="text-muted-foreground">unknown</span>
-            : working.length ? <span className="text-emerald-300">{working.map(o => `${o.action} ${o.quantity ?? ""}${o.limit != null ? ` @ ${priceText(o.limit)}` : ""}`).join(", ")}</span>
+        {working !== null && <Figure label="Exit order">
+          {working.length ? <span className="text-emerald-300">{working.map(o => `${o.action} ${o.quantity ?? ""}${o.limit != null ? ` @ ${priceText(o.limit)}` : ""}`).join(", ")}</span>
             : <span data-testid="ping-card-no-exit" className="font-medium text-amber-300">None working</span>}
-        </Figure>
+        </Figure>}
         {atExpiry !== null && stockNow !== null && (
           <Figure label={`At expiry if ${symbol} stays ${priceText(stockNow)}`} wide>
             <span className={atExpiry <= 0 ? "font-medium text-rose-300" : ""}>{usd0(atExpiry).replace("+", "")}</span>
