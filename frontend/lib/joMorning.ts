@@ -3,12 +3,13 @@ import { apiUrl } from "./api";
 export type BriefEvidence = { id: string; kind: "fact" | "belief" | "estimate"; text: string; source: string; observed_at: string | null; retrieved_at: string };
 /** An exact saved memory revision a packet referenced; later corrections do not replace it. */
 export type BriefMemory = { id: string; memory_id: string; revision: number; status: string; symbol: string | null; received_at: string; redacted_at: string | null;
-  body: { kind?: MemoryKind; original_text?: string; interpretation?: string | null; source?: MemorySource; source_reference?: string | null } };
+  body: { kind?: MemoryKind; original_text?: string; interpretation?: string | null; source?: MemorySource; source_reference?: string | null; break_below?: number | null; review_on?: string | null } };
 export type MemoryKind = "statement" | "thesis" | "preference" | "lesson";
 export type MemorySource = "owner_statement" | "owner_import" | "jo_proposal";
 export type MemoryStatus = "proposed" | "active" | "retired";
 export type MemorySave = { operation_id: string; memory_id?: string; base_revision?: number; kind: MemoryKind; symbol: string | null; original_text: string;
-  interpretation: string | null; source: MemorySource; source_reference?: string | null; status: MemoryStatus; owner_confirmed: boolean };
+  interpretation: string | null; source: MemorySource; source_reference?: string | null; status: MemoryStatus; owner_confirmed: boolean;
+  break_below?: number | null; review_on?: string | null };
 export type BriefItem = { symbol: string | null; what_matters: string; why_personal: string; what_changed: string; contrary_evidence: string; watch_out: string; evidence_ids: string[] };
 export type BriefOpportunity = BriefItem & { status: "conditional" | "research_only"; entry_trigger: string; invalidation: string; timeframe: string };
 export type WatchdogNotice = { kind: string; title: string; recovered: boolean; outcome: "sent" | "failed" | "unknown"; at: string; attempts?: number };
