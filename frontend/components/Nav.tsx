@@ -9,7 +9,7 @@ import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import PlanATrade from "@/components/copilot/PlanATrade";
 import PlanStreakChip from "@/components/PlanStreak";
 import { openJournal } from "@/components/copilot/DeskJournal";
-import { Bot, Crosshair, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Rocket, Scale, SlidersHorizontal, Target, Telescope, ChevronRight, ClipboardCheck, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { Bot, Crosshair, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Rocket, Scale, SlidersHorizontal, Target, Telescope, ChevronRight, ClipboardCheck, Lightbulb, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
 import { useGmailHealth } from "@/lib/useGmailHealth";
@@ -79,6 +79,7 @@ const GROUPS: { name: string; items: NavItem[] }[] = [
     { href: "/scanner", label: "Scanner", icon: Radar },
     { href: "/signals", label: "Signals", icon: Radio },
     { href: "/morning", label: "Jo", icon: Bot },
+    { href: "/theses", label: "Theses", icon: Lightbulb },
     { href: "/practice", label: "Daily Practice", icon: Target },
     { href: "/experiments", label: "Experiments", icon: FlaskConical },
     { href: "/advisor-review", label: "Advisor review", icon: Scale },

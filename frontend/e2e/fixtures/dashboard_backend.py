@@ -218,6 +218,11 @@ def option_quotes(requests):
 
 
 quotes.get_stock_quotes = stock_quotes
+
+# The thesis page's quote and earnings reads: fixed, so no provider is called.
+from app.engine import thesis_watch  # noqa: E402
+thesis_watch.read_quotes = lambda symbols: {s: {"last": 80.0, "previous_close": 79.0, "stale": False} for s in symbols if s == "NBIS"}
+thesis_watch.read_earnings = lambda symbols, today: {s: ("2026-12-10" if s == "NBIS" else None) for s in symbols}
 quotes.get_option_quotes = option_quotes
 
 # Loaded only behind the disposable database guard above, never by app.main.

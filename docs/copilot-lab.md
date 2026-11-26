@@ -6056,9 +6056,18 @@ day, and nothing runs when the flag is off.
   `review` trigger once the date comes (`Time to review your NBIS thesis`,
   once per memory and date). They come ahead of the other triggers, so they
   win the symbol's one ping that day, and share every cap and the policy gate.
+- **The thesis page (`/theses`, under More pages):** one row per active thesis
+  with a ticker, read from `GET /jo/theses` (`thesis_watch.board`): the last
+  price against `break_below` (distance in percent), the next earnings date
+  from the events cache, `review_on` and the why. A tap opens the full thesis,
+  the symbol's last five thesis-watch triggers, and an edit of the break level
+  and review date or Archive (status `retired`), each saved as a new memory
+  revision through `POST /jo/memories`. One batched quote read; a quote or
+  earnings outage shows as no price, never a guess. Adding a thesis stays in
+  chat and the memory review.
 
 Tests: `backend/tests/test_thesis_watch.py` (seeded journal; stubbed news,
-quotes, bars and earnings).
+quotes, bars and earnings) and `frontend/e2e/theses.spec.ts`.
 
 ## Before a live API test
 

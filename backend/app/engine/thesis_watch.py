@@ -622,3 +622,52 @@ def watch_from_env(engine) -> ThesisWatch | None:
         return None
     from app.engine.chart_calendar import chart_calendar
     return ThesisWatch(engine, chart_calendar)
+
+
+# --------------------------------------------------------------------------- the thesis page
+
+def board(db: Session, *, quotes: QuoteReader | None = None, earnings: EarningsReader | None = None,
+          today: date | None = None, pings: int = 5) -> dict:
+    """Every active thesis with a ticker, for the /theses page: the last price against its break level, the next
+    earnings date from the events cache, its review date and the symbol's recent thesis-watch triggers. One batched
+    quote read; a quote or earnings outage leaves those fields empty and says so, never a guess."""
+    from app.engine import jo_briefing
+    quotes, earnings = quotes or read_quotes, earnings or read_earnings
+    today = today or datetime.now(UTC).astimezone(ET).date()
+    theses = [m for m in jo_briefing.memories(db, status="active", limit=200)
+              if (m.get("body") or {}).get("kind") == "thesis" and m.get("symbol")]
+    symbols = sorted({m["symbol"] for m in theses})
+    issues: list[str] = []
+    found_quotes: dict[str, dict] = {}
+    found_earnings: dict[str, str | None] = {}
+    if symbols:
+        try:
+            found_quotes = quotes(symbols)
+        except Exception as exc:  # noqa: BLE001 - no price is shown as no price
+            issues.append(f"quotes unavailable: {type(exc).__name__}")
+        try:
+            found_earnings = earnings(symbols, today)
+        except Exception as exc:  # noqa: BLE001
+            issues.append(f"earnings unavailable: {type(exc).__name__}")
+    recent: dict[str, list[dict]] = {}
+    for symbol in symbols:  # per symbol, so a busy ticker never crowds out a quiet one's history
+        recent[symbol] = [{k: v for k, v in view(trigger).items() if k in ("kind", "text", "fired_at", "delivery", "reason", "path")}
+                          for trigger in db.exec(select(ThesisWatchTrigger).where(ThesisWatchTrigger.symbol == symbol)
+                                                 .order_by(col(ThesisWatchTrigger.fired_at).desc()).limit(pings))]
+    items = []
+    for memory in theses:
+        body, symbol = memory["body"], memory["symbol"]
+        quote = found_quotes.get(symbol) or {}
+        last = quote.get("last") if isinstance(quote.get("last"), (int, float)) and quote["last"] > 0 else None
+        level = body.get("break_below")
+        level = float(level) if isinstance(level, (int, float)) and level > 0 else None
+        items.append({
+            "memory_id": memory["memory_id"], "revision": memory["revision"], "symbol": symbol,
+            "received_at": memory["received_at"], "body": body,
+            "last": float(last) if last is not None else None, "stale": bool(quote.get("stale")),
+            "break_below": level,
+            "break_distance_pct": round(100.0 * (float(last) - level) / float(last), 1) if last and level else None,
+            "earnings_on": found_earnings.get(symbol), "review_on": body.get("review_on"),
+            "pings": recent.get(symbol, []),
+        })
+    return {"items": items, "today": today.isoformat(), "issues": issues, "pings_on": thesis_pings(), "watch_on": enabled()}

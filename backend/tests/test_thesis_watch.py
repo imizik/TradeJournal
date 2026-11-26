@@ -672,3 +672,58 @@ def test_the_review_date_pings_once_when_it_comes_with_the_question_prepared(eng
     assert query["symbol"] == "NBIS" and query["context"].endswith("Does it still hold?")
     clock.now = at("08:00", date(2026, 10, 26))
     assert watch.run_once()["fired"] == [] and len(phone.sent) == 1
+
+
+# --------------------------------------------------------------------------- the thesis page
+
+def test_the_board_shows_each_thesis_with_price_vs_break_earnings_review_and_recent_pings(engine, world):
+    _, readers, _, _ = world
+    nbis = thesis(engine, "NBIS", "AI capex keeps compounding.", break_below=72, review_on=date(2027, 2, 15))
+    thesis(engine, "CRWV")
+    with Session(engine) as db:
+        jo_briefing.save_memory(db, jo_briefing.MemorySave(operation_id="op-pref", kind="preference", symbol="NBIS",
+                                original_text="Not a thesis.", source="owner_statement", status="active", owner_confirmed=True))
+        for i in range(7):
+            db.add(ThesisWatchTrigger(symbol="NBIS", kind="news", dedupe_key=f"news:NBIS:{i}", day="2026-10-21",
+                                      fired_at=datetime(2026, 10, 21, 14, i), text=f"headline {i}", path="/x", delivery="sent"))
+        db.commit()
+    readers.quotes = {"NBIS": {"last": 80.0, "previous_close": 79.0}}
+    readers.earnings = {"NBIS": "2026-11-12"}
+    with Session(engine) as db:
+        out = thesis_watch.board(db, quotes=readers.quote, earnings=readers.earning, today=WED)
+    assert readers.calls["quotes"] == [["CRWV", "NBIS"]]
+    rows = {r["symbol"]: r for r in out["items"]}
+    assert set(rows) == {"NBIS", "CRWV"}
+    nb = rows["NBIS"]
+    assert (nb["memory_id"], nb["last"], nb["break_below"], nb["break_distance_pct"]) == (nbis, 80.0, 72.0, 10.0)
+    assert (nb["earnings_on"], nb["review_on"], nb["body"]["original_text"]) == ("2026-11-12", "2027-02-15", "AI capex keeps compounding.")
+    assert [p["text"] for p in nb["pings"]] == [f"headline {i}" for i in (6, 5, 4, 3, 2)]
+    assert (rows["CRWV"]["last"], rows["CRWV"]["break_distance_pct"], rows["CRWV"]["pings"]) == (None, None, [])
+    assert out["issues"] == []
+
+
+def test_a_busy_ticker_never_crowds_out_a_quiet_one_s_pings(engine, world):
+    _, readers, _, _ = world
+    thesis(engine, "NBIS")
+    thesis(engine, "CRWV")
+    with Session(engine) as db:
+        db.add(ThesisWatchTrigger(symbol="CRWV", kind="news", dedupe_key="news:CRWV:old", day="2026-10-20",
+                                  fired_at=datetime(2026, 10, 20, 14, 0), text="older CRWV", path="/x", delivery="sent"))
+        for i in range(50):
+            db.add(ThesisWatchTrigger(symbol="NBIS", kind="news", dedupe_key=f"news:NBIS:{i}", day="2026-10-21",
+                                      fired_at=datetime(2026, 10, 21, 14, i), text=f"headline {i}", path="/x", delivery="sent"))
+        db.commit()
+    with Session(engine) as db:
+        rows = {r["symbol"]: r for r in thesis_watch.board(db, quotes=readers.quote, earnings=readers.earning, today=WED)["items"]}
+    assert [p["text"] for p in rows["CRWV"]["pings"]] == ["older CRWV"]
+    assert len(rows["NBIS"]["pings"]) == 5
+
+
+def test_the_board_says_a_quote_outage_instead_of_guessing(engine, world):
+    _, readers, _, _ = world
+    thesis(engine, "NBIS", break_below=72)
+    readers.fail.add("quotes")
+    with Session(engine) as db:
+        out = thesis_watch.board(db, quotes=readers.quote, earnings=readers.earning, today=WED)
+    assert out["issues"] == ["quotes unavailable: RuntimeError"]
+    assert (out["items"][0]["last"], out["items"][0]["break_distance_pct"]) == (None, None)
