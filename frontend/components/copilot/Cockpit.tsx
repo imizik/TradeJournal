@@ -9,7 +9,7 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { CircleDashed, EyeOff, RefreshCw } from "lucide-react";
+import { EyeOff, RefreshCw } from "lucide-react";
 import { useKeptState } from "@/components/copilot/DeskMemory";
 import { NotFollowed } from "@/components/copilot/SessionTape";
 import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
@@ -433,9 +433,11 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                       </span>
                     )}
                     <span data-testid="book-meta" className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground [&>*]:max-w-full [&>*]:truncate [&>*]:whitespace-nowrap">
-                      {book && <span data-testid="book-now" className={cn("tabular-nums md:hidden", now.stale && "opacity-50")}>
-                        <span data-testid="book-price">{now.price == null ? "—" : premium(now.price)}</span> · today{" "}
-                        <span data-testid="book-today" className={tone(now.today)}>{now.today == null ? "—" : money(now.today)}</span>
+                      {/* Only what is known: no dash stands in for a missing price or move. */}
+                      {book && (now.price != null || now.today != null) && <span data-testid="book-now" className={cn("tabular-nums md:hidden", now.stale && "opacity-50")}>
+                        {now.price != null && <span data-testid="book-price">{premium(now.price)}</span>}
+                        {now.price != null && now.today != null && " · "}
+                        {now.today != null && <>today <span data-testid="book-today" className={tone(now.today)}>{money(now.today)}</span></>}
                       </span>}
                       {mixed && book?.account && <span data-testid="book-account" title={`${book.account.label} ${book.account.masked}`}>{book.account.label}</span>}
                       {book?.stop_pct != null && <span className="tabular-nums">{Math.abs(book.stop_pct).toFixed(1)}% to stop</span>}
@@ -447,14 +449,14 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                         className="rounded border border-amber-400/60 px-1 font-medium tabular-nums text-amber-300">{book.size_x.toFixed(1)}× usual size</span>}
                       {book?.live === "new" ? <span data-testid="book-state" aria-label="New · not in the journal yet" title="New · not in the journal yet"
                         className="inline-flex items-center rounded text-sky-300 md:border md:border-sky-300/40 md:px-1">
-                        <CircleDashed size={12} aria-hidden className="md:hidden" /><span className="max-md:hidden">New · not in the journal yet</span></span>
+                        <span className="md:hidden">New</span><span className="max-md:hidden">New · not in the journal yet</span></span>
                         : state && state !== EXPIRES_TODAY && <span data-testid="book-state" className={cn("rounded border px-1", state.className)}>{state.label}</span>}
                       <EarningsTag tag={row.symbol ? earnings?.rows[row.symbol] : undefined} day={day} />
                       {book?.live === "not_on_robinhood" && <span data-testid="book-not-live" className="rounded border px-1">Not on Robinhood</span>}
                     </span>
                     {isLive && <OrderLines orders={book?.orders} />}
                   </span>
-                  <span data-testid="book-pnl" className={cn("whitespace-nowrap text-right text-sm tabular-nums", tone(pnl.usd), (updating || pnl.stale) && "opacity-50")}>
+                  <span data-testid="book-pnl" className={cn("whitespace-nowrap text-right text-sm tabular-nums", !rowTrade(row) && "max-sm:pr-3", tone(pnl.usd), (updating || pnl.stale) && "opacity-50")}>
                     <Flash value={pnl.usd}>{pnl.usd != null ? money(pnl.usd) : row.value?.text ?? "—"}</Flash>
                     {pnl.pct != null && <span className="block text-[11px]">{signedPct(pnl.pct)}</span>}
                   </span>

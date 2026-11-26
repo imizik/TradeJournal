@@ -165,12 +165,13 @@ def note_words(text: str) -> tuple[str, str] | None:
     return (found.group(1).lower(), text.strip()[found.end():].strip()) if found else None
 
 
-CUT_LABELS = {"c": "Cut it", "h": "Holding"}  # ``cx:`` answers on an open-trade alert, saved as the desk's decision entry
+CUT_LABELS = {"c": "I cut it", "h": "Still holding"}  # ``cx:`` answers on an open-trade alert: they record, they do not sell
+CUT_SAID = {"c": "Cut it", "h": "Holding"}  # the saved decision entry's words, unchanged so older entries read the same
 CUT_WORDS = {"c": "Exiting", "h": "Holding"}  # the decision's first word, which the alert scorecard reads (``_choice``)
 
 
 def cut_buttons(alert_id) -> tuple[tuple[str, str], ...]:
-    """Reply buttons for an open-trade alert while the desk is on: Cut it, Holding and Why?"""
+    """Reply buttons for an open-trade alert while the desk is on: I cut it, Still holding and Why?"""
     return tuple((label, f"cx:{alert_id}:{code}") for code, label in CUT_LABELS.items()) + (("Why?", f"why:{alert_id}"),)
 
 
@@ -411,7 +412,7 @@ class Replies:
             fired = f"{ASK_KIND.get(alert.kind, 'Position alert')} at {_clock_label(_minute_of(_epoch(alert.detected_at)))}"
             try:
                 day_journal.append(db, day=datetime.now(ET).date(), operation_id=operation, kind="decision",
-                                   text=f"{CUT_WORDS[code]}. {fired}; tapped {CUT_LABELS[code]} on the phone.",
+                                   text=f"{CUT_WORDS[code]}. {fired}; tapped {CUT_SAID[code]} on the phone.",
                                    symbol=(alert.contract or "").split(" ")[0] or None)
             except day_journal.EntryError as exc:
                 return f"Not saved: {exc}", None

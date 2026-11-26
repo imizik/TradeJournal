@@ -352,19 +352,19 @@ def test_cut_it_saves_an_exiting_decision_once_that_the_scorecard_reads_as_acted
     from app.models import DayJournalEntry
     db_engine, alert = case
     keyboard = rows(telegram_replies.cut_buttons(alert)) + [[{"text": "Open", "url": "https://journal.example/x"}]]
-    assert [b["text"] for b in keyboard[0]] == ["Cut it", "Holding", "Why?"]  # one row: three answers
+    assert [b["text"] for b in keyboard[0]] == ["I cut it", "Still holding", "Why?"]  # one row: three answers
     bot = Bot()
     replies = telegram_replies.Replies(db_engine, call=bot)
     with Session(db_engine) as db:  # the alert fired just now, so today's decision follows it
         db.get(PositionAlert, alert).detected_at = datetime.utcnow() - timedelta(minutes=1)
         db.commit()
     assert run(replies.handle(tap(f"cx:{alert}:c", keyboard=keyboard))) == "cx"
-    assert bot.named("answerCallbackQuery")[0]["text"] == "Saved: Cut it."
+    assert bot.named("answerCallbackQuery")[0]["text"] == "Saved: I cut it."
     assert bot.named("editMessageReplyMarkup")[0]["reply_markup"]["inline_keyboard"][0] == [
-        {"text": "✓ Cut it", "callback_data": f"done:{alert}"}, {"text": "Why?", "callback_data": f"why:{alert}"}]
+        {"text": "✓ I cut it", "callback_data": f"done:{alert}"}, {"text": "Why?", "callback_data": f"why:{alert}"}]
     # Holding tapped later cannot overwrite it.
     assert run(replies.handle(tap(f"cx:{alert}:h", update_id=2, keyboard=keyboard))) == "cx"
-    assert bot.named("answerCallbackQuery")[-1]["text"] == "Already answered: Cut it."
+    assert bot.named("answerCallbackQuery")[-1]["text"] == "Already answered: I cut it."
     with Session(db_engine) as db:
         [entry] = db.exec(select(DayJournalEntry)).all()
         assert entry.kind == "decision" and entry.text.startswith("Exiting. ") and "tapped Cut it on the phone" in entry.text

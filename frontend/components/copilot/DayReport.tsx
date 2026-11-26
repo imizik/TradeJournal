@@ -142,7 +142,9 @@ export default function DayReport({ rows = [], rowsRead = true, onOpen }: { rows
             : <p className="text-xs text-muted-foreground">No call checked today could be scored yet.</p>}
         </Line>
       )}
+      {/* The laptop's line only: a phone's card is the day at a glance, and planning is not asked of it there. */}
       {bySymbol.length > 0 && (
+        <div className="max-md:hidden">
         <Line label="Open without a plan" testId="report-noplan" summary={<span data-testid="noplan-verdict">{bySymbol.join(", ")}</span>}>
           <ul className="space-y-1.5 text-xs">
             {unplanned.map(r => (
@@ -156,6 +158,7 @@ export default function DayReport({ rows = [], rowsRead = true, onOpen }: { rows
             ))}
           </ul>
         </Line>
+        </div>
       )}
           </div>
         </details>
@@ -180,7 +183,7 @@ function Headline({ card }: { card: NonNullable<Report["card"]> }) {
   return (
     <div data-testid="day-card" className="space-y-1.5 px-3 py-3">
       <p className="flex items-baseline gap-2">
-        <span className="text-sm text-muted-foreground">Today</span>
+        <span className="text-sm text-muted-foreground">Realized today</span>
         {card.closed > 0
           ? <span data-testid="day-card-pnl" className={cn("text-2xl font-semibold tabular-nums", tone(card.pnl))}>{usd0(card.pnl)}</span>
           : <span data-testid="day-card-pnl" className="text-sm text-muted-foreground">nothing closed</span>}
@@ -197,7 +200,7 @@ function Headline({ card }: { card: NonNullable<Report["card"]> }) {
           <span className="text-muted-foreground">Expires {nextLabel(card.day, card.next_day)}: </span>
           {card.expiring.map((e, i) => (
             <span key={e.contract}>{i > 0 && "; "}<span className="font-medium text-foreground">{e.contract}</span> ×{e.contracts}
-              {e.cut != null && <span className="text-muted-foreground">, cut {premium(e.cut)}</span>}</span>
+              {e.cut != null && <span className="text-muted-foreground">, cut line {premium(e.cut)}</span>}</span>
           ))}
         </p>
       )}

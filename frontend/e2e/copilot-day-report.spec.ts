@@ -110,7 +110,9 @@ for (const width of [1440, 375]) {
     expect(pingUrls.every(url => url.includes("day_only=true"))).toBe(true); // today's pings only
     await card.screenshot({ path: test.info().outputPath(`day-report-collapsed-${width}.png`) });
 
-    for (const line of await card.locator(`${LINES} > summary`).all()) await line.click();
+    // A phone's card leaves the plan line out (still in the page for the laptop): planning is not asked of the glance.
+    if (width === 375) await expect(card.getByTestId("report-noplan")).toBeHidden(); else await expect(card.getByTestId("report-noplan")).toBeVisible();
+    for (const line of await card.locator(`${LINES} > summary`).all()) if (await line.isVisible()) await line.click();
     await expect(card.getByTestId("report-entry")).toHaveText([/NBIS 100C.*plan saved first/, /MU 90P.*plan saved first/, /APLD 30C.*no plan/]);
     await expect(card.getByTestId("report-entry-note")).toHaveText(["“Why I'm in: broke the morning high”"]); // his note beside its trade
     await expect(card.getByTestId("pings-alert").first()).toContainText("Sold for $420 vs $600 at the alert's bid: −$180");
@@ -140,7 +142,7 @@ test("the headline card leads: P&L, cut pings followed and what expires tomorrow
   const report = page.getByTestId("day-report-card");
   await expect(report.getByTestId("day-card-pnl")).toHaveText("−$412");
   await expect(report.getByTestId("day-card-cut")).toHaveText("Cut pings: acted on 1 of 2");
-  await expect(report.getByTestId("day-card-expiring")).toHaveText("Expires Mon: NBIS 10/26/26 100C ×2, cut $2.17"); // a Friday card names Monday, never "tomorrow"
+  await expect(report.getByTestId("day-card-expiring")).toHaveText("Expires Mon: NBIS 10/26/26 100C ×2, cut line $2.17"); // a Friday card names Monday, never "tomorrow"
   await expect(report.locator(`${LINES} > summary`).first()).toBeHidden(); // behind Details
   await report.getByTestId("day-report-details").locator(":scope > summary").click();
   await expect(report.locator(`${LINES} > summary`)).toHaveCount(4);

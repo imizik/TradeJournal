@@ -1130,7 +1130,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
       <section aria-label="Day report" data-testid="day-report" className="space-y-1.5">
         <DayReport rows={rows} rowsRead={rowsRead} onOpen={select} />
         <button type="button" onClick={closeDay} data-testid="close-the-day"
-          className="inline-flex min-h-11 items-center px-1 text-xs text-muted-foreground hover:text-foreground sm:min-h-0">Close the day{tally.total > tally.done ? ` · ${tally.total - tally.done} to review` : ""} →</button>
+          className="inline-flex min-h-11 items-center px-1 text-xs text-muted-foreground hover:text-foreground max-md:hidden sm:min-h-0">Close the day{tally.total > tally.done ? ` · ${tally.total - tally.done} to review` : ""} →</button>
         {/* Watch your day's replay of today, only once one was kept: the day's one way back to it from the desk. */}
         <WatchDayLink from={today} className="inline-flex min-h-11 items-center gap-1.5 px-1 text-xs text-muted-foreground hover:text-foreground sm:min-h-0" />
       </section>

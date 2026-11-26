@@ -121,12 +121,12 @@ test("a give-back ping on a phone lands on its card, not the copilot's sheet", a
   await expect(figures).toContainText("−$420"); // 2 × (410 − 620)
   await expect(figures).toContainText("3.95 / 4.10"); // the ping's bid a share, the mid now
   await expect(figures).not.toContainText("Exit order"); // the Robinhood feed is off: no claim about exit orders, not even "unknown"
-  await expect(figures).toContainText("At expiry if ORCL stays 247.00");
+  await expect(figures).not.toContainText("At expiry"); // worth $0 if the stock stays: the line is left out, it says nothing new
   // Robinhood is where he sells: the main button opens the position there; Cut it and Holding record the choice.
   await expect(c.getByTestId("ping-card-robinhood")).toHaveText("Open ORCL in Robinhood");
   await expect(c.getByTestId("ping-card-robinhood")).toHaveAttribute("href", "https://robinhood.com/stocks/ORCL");
-  await expect(c.getByTestId("ping-card-cut")).toHaveText("Cut it");
-  await expect(c.getByTestId("ping-card-holding")).toHaveText("Holding…");
+  await expect(c.getByTestId("ping-card-cut")).toHaveText("I cut it");
+  await expect(c.getByTestId("ping-card-holding")).toHaveText("Still holding…");
   await expect(c.getByTestId("ping-card-close")).toHaveCount(0);
   await expect(page.getByLabel("Message")).not.toBeInViewport(); // the sheet waits behind Ask
   const box = (await c.getByTestId("ping-card-robinhood").boundingBox())!;
