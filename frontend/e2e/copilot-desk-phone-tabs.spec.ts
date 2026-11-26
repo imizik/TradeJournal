@@ -125,7 +125,7 @@ for (const [width, height] of [[360, 780], [375, 812], [390, 844]] as const) {
     const nbis = book.getByRole("listitem").filter({ has: page.getByRole("button", { name: /^NBIS/ }) });
     await expect(nbis.getByTestId("book-now")).toHaveText("$3.00 · today +$40");
     const crwv = book.getByRole("listitem").filter({ has: page.getByRole("button", { name: /^CRWV/ }) });
-    await expect(crwv.getByTestId("book-now")).toHaveText("— · today —");
+    await expect(crwv.getByTestId("book-now")).toHaveCount(0); // no price and no move: no dashes stand in
     // A tap on the value: each account as its own row (masked), never a strip that swipes; a tap on one narrows the book.
     await value.getByTestId("value-open").click();
     const accounts = value.getByTestId("value-account");

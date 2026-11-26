@@ -926,7 +926,7 @@ more than the session mode does.
 opening its rows on tap, in this order. The app scores everything itself; nothing asks him to rate a ping, a Radar hit
 or a call. Facts and counts only (no line tells him to buy, sell or hold, and none says money was missed); a ticker
 marked **Not following** is left out of every line; realized P&L is the top bar's, so the card does not repeat it; the
-last line, **Open without a plan**, names the followed options with no invalidation or time stop (each opens on tap),
+last line, **Open without a plan** (the laptop only; a phone leaves it and the Close the day link out), names the followed options with no invalidation or time stop (each opens on tap),
 the one place the desk names them (the book shows no tag for it and the strip never asks); a line with nothing in
 it is absent, and a day with nothing at all says so in one sentence ("Nothing to report today: …").
 
@@ -3648,7 +3648,7 @@ tap opens the desk on that position's decision (`position_alerts.desk_path`:
 the plan's conversation when a plan card saved the position's plan, else
 `/copilot-lab?symbol=…`, which opens on the decision bar); with the lab off the
 tap opens the trade page as before. With the lab on (since 2026-11-26), a position alert
-carries no answer links: on Telegram its reply buttons are **Cut it**, **Holding** and Why?
+carries no answer links: on Telegram its reply buttons are **I cut it**, **Still holding** and Why? (they record the choice; neither sells)
 (`telegram_replies.cut_buttons`), each saving one `decision` day-journal entry ("Exiting. …" / "Holding. …")
 that the alert scorecard reads as the desk's; ntfy keeps Open and Robinhood. The ping card's `&do=close|trim`
 still rings that button when an address carries it. With the lab
@@ -4476,7 +4476,7 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   (`position_alerts._base_message`, Nov 26, 2026) is the short contract (`SPY 590C`, no date), the money
   (`-$335 (-35%)`, a 🔴/🟢 lead when there is a mark) and the decision (`Cut?`, `Sell?`, `Take it?`);
   the body's first line is the one fact that makes the case (worth at expiry, or contracts and bid
-  against cost), then his record. The Cut it / Holding buttons are the call to action, so no line says
+  against cost), then his record. The I cut it / Still holding buttons are the call to action, so no line says
   "Re-decide". A "Since you entered" line goes only when it carries a saved plan, and the since-entry peer
   context goes last, below a blank line.
 - **Not followed:** a ping whose ticker the owner set to not followed on the desk
@@ -4547,7 +4547,7 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   16:00 keeps the default), `app/engine/evening_review.py` sends the **day card**
   itself (since 2026-11-26, `app/engine/day_card.py`): "Today −$412 / 2 trades
   closed, −$412 realized. / Cut pings: acted on 1 of 2. / Expires tomorrow: NBIS
-  10/23/26 100C ×2, cut $2.17." (realized P&L over today's closed trades; the cut
+  10/23/26 100C ×2, cut line $2.17." (realized P&L over today's closed trades; the cut
   pings, `leak_bill.PING_KINDS`, acted on as the alert scorecard counts it; the long
   options expiring the next trading day with their cut line). No to-do list and no
   held-ping tally. It opens `/copilot-lab`, whose after-close day report leads with
@@ -4629,8 +4629,8 @@ phone lands on the ticker view, not the conversation). Action first: what fired 
 holding past that kind of alert did over the scorecard's 30 days (`alert_scorecard.habit`: alerts with no Exiting
 logged after them, closed ones measured against selling at the alert's bid); then P&L, bid (the alert's, while it is
 under 10 minutes old) and mid, contracts, whether an exit order is working ("unknown" unless the Robinhood feed is live and its order read is whole and current) and
-the value at expiry if the stock stays where it is. With a Robinhood link (`broker`, since 2026-11-26) **Open <ticker>
-in Robinhood** is the primary button, then **Cut it** (logs `Exiting. …; said Cut it on the card`) and **Holding…**, with
+the value at expiry if the stock stays where it is (left out when that is $0). With a Robinhood link (`broker`, since 2026-11-26) **Open <ticker>
+in Robinhood** is the primary button, then **I cut it** (logs `Exiting. …; said Cut it on the card`) and **Still holding…**, with
 Set stop under them. Without one, **Copy Close all @ bid** is the primary button (the mid when the bid
 is stale, and it says so), then **Copy Trim half** and **Set stop** (the plan's stop editor, or Plan it with no plan).
 **Keep holding** (Holding…) is not one tap: it asks for +15m, +30m or a price stop first. Each copy puts Robinhood's order lines on
@@ -4638,7 +4638,7 @@ the clipboard and logs an `Exiting. …` decision; a hold logs `Holding. …` wi
 that check-in on the entry (`check_in` on `POST /day-journal/{day}/entries`, kept in its `context_json`). With
 `HOLD_CHECK_IN_PINGS=true` (off by default; the card's body says which, `check_in_pings`) the card says "I'll ping you at
 …" and `engine/hold_check_ins.py` sends one loud ping at that time, in the regular session, if the pinged position is
-still open: "Check-in: <contract> still open", opening this same card (no answer links while the desk is on: the card's Cut it and Holding answer it). A newer
+still open: "Check-in: <contract> still open", opening this same card (no answer links while the desk is on: the card's I cut it and Still holding answer it). A newer
 hold on the same ping replaces it, an `Exiting` decision on the symbol after it cancels it, a check-in more than 10
 minutes late is dropped, and it is claimed once through the notification policy (sender `hold_check_in`, ranked with
 the one-hour alert, anchored to the position). Off, the hold is logged as before and nothing pings. On an interrupt's card any choice also records its Noted. Nothing is sent to Robinhood. The decision bar's

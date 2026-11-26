@@ -132,7 +132,7 @@ def card_lines(c: dict) -> tuple[str, str] | None:
         lines.append(f"Cut pings: acted on {c['cut']['acted']} of {c['cut']['pings']}.")
     if c["expiring"]:
         lines.append(f"Expires {next_label(c['day'], c['next_day'])}: " + "; ".join(
-            f"{e['contract']} {_count(e['contracts'])}" + (f", cut {_premium(e['cut'])}" if e["cut"] is not None else "")
+            f"{e['contract']} {_count(e['contracts'])}" + (f", cut line {_premium(e['cut'])}" if e["cut"] is not None else "")
             for e in c["expiring"]) + ".")
     return title, "\n".join(lines)
 
@@ -143,7 +143,7 @@ def glance_lines(held: list[dict], today: date) -> tuple[str, str] | None:
         return None
     title = f"You hold {len(held)}"
     lines = [f"{h['contract']} {_count(h['contracts'])} · {_short(h['expiration'], today)}"
-             + (f" · cut {_premium(h['cut'])}" if h["cut"] is not None else "") for h in held]
+             + (f" · cut line {_premium(h['cut'])}" if h["cut"] is not None else "") for h in held]
     return title, "\n".join(lines)
 
 

@@ -47,7 +47,7 @@ def test_holdings_name_the_cut_line_only_where_the_rule_applies(engine):  # noqa
         held = day_card.holdings(db)
     assert [(h["contract"], h["contracts"], h["expiration"], h["cut"]) for h in held] == [
         ("NBIS 10/23/26 100C", 2, FRI, 217.0), ("CRWV 11/20/26 100C", 2, date(2026, 11, 20), None)]
-    assert day_card.glance_lines(held, WED) == ("You hold 2", "NBIS 10/23/26 100C ×2 · expires Fri · cut $2.17\n"
+    assert day_card.glance_lines(held, WED) == ("You hold 2", "NBIS 10/23/26 100C ×2 · expires Fri · cut line $2.17\n"
                                                               "CRWV 11/20/26 100C ×2 · expires Nov 20")
     assert day_card.glance_lines([], WED) is None
 
@@ -73,7 +73,7 @@ def test_the_card_says_the_close_the_cut_pings_and_what_expires_next_session(eng
     assert card["next_day"] == "2026-10-23"  # Thursday is a holiday
     assert card["expiring"] == [{"contract": "NBIS 10/23/26 100C", "contracts": 2, "cut": 217.0}]
     assert day_card.card_lines(card) == ("Today -$120", "1 trade closed, -$120 realized.\nCut pings: acted on 2 of 2.\n"
-                                                         "Expires Fri: NBIS 10/23/26 100C ×2, cut $2.17.")  # Thursday shut: not "tomorrow"
+                                                         "Expires Fri: NBIS 10/23/26 100C ×2, cut line $2.17.")  # Thursday shut: not "tomorrow"
 
 
 def test_a_quiet_day_has_no_card(engine):  # noqa: F811
@@ -100,7 +100,7 @@ def test_the_morning_glance_is_off_by_default_once_a_day_and_only_while_somethin
     fresh = day_card.MorningGlance(engine, Calendar(), clock=Clock(at("09:26")))
     assert fresh.run() == "sent"
     (sent,) = phone.sent
-    assert (sent["title"], sent["body"]) == ("You hold 1", "NBIS 10/23/26 100C ×2 · expires Fri · cut $2.17")
+    assert (sent["title"], sent["body"]) == ("You hold 1", "NBIS 10/23/26 100C ×2 · expires Fri · cut line $2.17")
     assert sent["path"] == "/copilot-lab" and sent["priority"] <= 2  # silent: a reminder, not a risk
     # A second process (a restart) never sends the day again; the holiday and a later minute are not due.
     assert day_card.MorningGlance(engine, Calendar(), clock=Clock(at("09:30"))).run().startswith("held")

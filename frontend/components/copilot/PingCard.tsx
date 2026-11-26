@@ -241,9 +241,10 @@ function Act({ act, body, row, rows, ordersLive, onAsk, onPlan }: {
           {working.length ? <span className="text-emerald-300">{working.map(o => `${o.action} ${o.quantity ?? ""}${o.limit != null ? ` @ ${priceText(o.limit)}` : ""}`).join(", ")}</span>
             : <span data-testid="ping-card-no-exit" className="font-medium text-amber-300">None working</span>}
         </Figure>}
-        {atExpiry !== null && stockNow !== null && (
+        {/* Only when it would still be worth something: "$0 if it stays here" says nothing he does not know. */}
+        {atExpiry !== null && atExpiry > 0 && stockNow !== null && (
           <Figure label={`At expiry if ${symbol} stays ${priceText(stockNow)}`} wide>
-            <span className={atExpiry <= 0 ? "font-medium text-rose-300" : ""}>{usd0(atExpiry).replace("+", "")}</span>
+            <span>{usd0(atExpiry).replace("+", "")}</span>
           </Figure>
         )}
       </dl>
@@ -254,8 +255,8 @@ function Act({ act, body, row, rows, ordersLive, onAsk, onPlan }: {
           <a href={body.broker.url} target="_blank" rel="noreferrer" data-testid="ping-card-robinhood"
             className={cn(BIG, "bg-primary text-primary-foreground", act && ASKED)}>Open {symbol} in {body.broker.label}</a>
           <div className="grid grid-cols-2 gap-2">
-            <button type="button" data-testid="ping-card-cut" onClick={() => void cutIt()} className={cn(BIG, "border text-foreground hover:bg-secondary")}>Cut it</button>
-            <button type="button" data-testid="ping-card-holding" onClick={() => setHolding(true)} className={cn(BIG, "border text-foreground hover:bg-secondary")}>Holding…</button>
+            <button type="button" data-testid="ping-card-cut" onClick={() => void cutIt()} className={cn(BIG, "border text-foreground hover:bg-secondary")}>I cut it</button>
+            <button type="button" data-testid="ping-card-holding" onClick={() => setHolding(true)} className={cn(BIG, "border text-foreground hover:bg-secondary")}>Still holding…</button>
           </div>
         </> : copyable ? <>
           <button type="button" data-testid="ping-card-close" data-asked={act === "close" || undefined} autoFocus={act === "close"}
