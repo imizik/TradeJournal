@@ -220,8 +220,9 @@ test("a phone: one view at a time from the desk's tab bar, the strip on Position
   await expect(feedPane(page)).toBeHidden();
   expect((await page.getByTestId("needs-you").boundingBox())!.y).toBeLessThan((await page.getByTestId("desk-book").boundingBox())!.y);
 
-  // The Feed: one tap, and the Book's button carries the amber count of what needs him.
-  await views.nth(2).click();
+  // The Feed from More, and the Book's button carries the amber count of what needs him.
+  await expect(views.nth(2)).toBeHidden(); // positions first: the chip shows only on the Feed (November 26, 2026)
+  await page.getByTestId("desk-top-more").click(); await page.getByTestId("desk-top-feed").click(); // a phone's Feed is under More
   await expect(feedPane(page)).toBeVisible();
   await expect(page.getByTestId("desk-book")).toBeHidden();
   await expect(page.getByTestId("needs-you")).toBeHidden();
@@ -255,7 +256,7 @@ test("a phone: one view at a time from the desk's tab bar, the strip on Position
 
 test("a phone turned on its side keeps the Feed on show, as the drawer, and back as its view", async ({ page }) => {
   await open(page, { width: 390, height: 844 });
-  await page.getByTestId("desk-view-feed").click();
+  await page.getByTestId("desk-top-more").click(); await page.getByTestId("desk-top-feed").click(); // a phone's Feed is under More
   await expect(feedPane(page)).toBeVisible();
   await page.setViewportSize({ width: 844, height: 390 });
   await expect(feedPane(page)).toBeVisible();

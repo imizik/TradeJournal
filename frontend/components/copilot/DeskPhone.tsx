@@ -8,10 +8,9 @@
  */
 
 import { useState, useSyncExternalStore, type ReactNode } from "react";
-import { LABEL, LIVE_WORDS, bookTag, positionRows, tone } from "@/components/copilot/Cockpit";
+import { LABEL, LIVE_WORDS, bookTag, pastCut, positionRows, tone } from "@/components/copilot/Cockpit";
 import { tickedAccount } from "@/components/copilot/DeskAccounts";
 import { Line } from "@/components/copilot/DeskOrders";
-import { DeskValueLine } from "@/components/copilot/DeskValueLine";
 import ModeMark from "@/components/copilot/ModeMark";
 import { liveOn, money, signedPct, type DeskLive, type DeskOrder, type DeskThread } from "@/lib/desk";
 import { tickedBook, useDeskTicks } from "@/lib/deskTicks";
@@ -50,6 +49,7 @@ export function bookRead(rows: DeskThread[], live: DeskLive | null, ticks: Retur
     open: open.length,
     pnl: pnl.length ? Math.round(pnl.reduce((a, b) => a + b, 0) * 100) / 100 : null,
     flags: [
+      [open.filter(r => pastCut(r.book, ticks)).length, "past cut line", "past cut line", true],
       [count("Past stop"), "past stop", "past stop", true],
       [count("Near stop"), "near stop", "near stop", true],
       [count("Giving back"), "giving back", "giving back", false],
@@ -66,13 +66,13 @@ export function bookRead(rows: DeskThread[], live: DeskLive | null, ticks: Retur
  * bar's account line does wider. Not live, it says so in grey with its time and shows no money, never a zero. ``aside``
  * (the desk's mode switch) sits at the right of the total, where it takes no height of its own.
  */
-export function PhoneValue({ live, rows, booked, active, onPick, day, realized, aside = null }: {
+export function PhoneValue({ live, rows, booked, active, onPick, day, aside = null }: {
   /** The feed (null until this mount's read) and every row: the accounts' figures move with all their positions. */
   live: DeskLive | null; rows: DeskThread[];
   /** The book as shown (narrowed to the picked account): the one-line read counts these. */
   booked: { rows: DeskThread[]; live: DeskLive | null };
   active: string | null; onPick(masked: string | null): void; day: string;
-  /** Realized today (the session read's), shown beside today's change when a trade closed today. */
+  /** Realized today: no longer shown here (the after-close day card has it); kept for the caller. */
   realized?: number | null;
   aside?: ReactNode;
 }) {
@@ -94,48 +94,35 @@ export function PhoneValue({ live, rows, booked, active, onPick, day, realized, 
   const quiet = !live || live.state === "off" ? null : isLive ? null
     : live.state === "stale" && live.as_of ? `${LIVE_WORDS.stale} · as of ${clock(live.as_of)}`
       : live.state === "ok" ? LIVE_WORDS.unavailable : LIVE_WORDS[live.state] ?? LIVE_WORDS.unavailable;
+  // One line (November 26, 2026): the accounts' total and today's move, then the book's count and P&L; a tap opens each
+  // account. The flags under it are the only words in red: what makes a position need him. Positions come right after.
+  const risks = read.flags.filter(([, , , risk]) => risk);
   return (
-    <section aria-label="Account value" data-testid="desk-value" className="rounded-lg border bg-card px-3 pb-2 pt-2.5">
-      <p className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+    <section aria-label="Account value" data-testid="desk-value" className="rounded-lg border bg-card px-3 py-1.5">
+      <button type="button" aria-expanded={open} onClick={() => isLive && setOpen(o => !o)} data-testid="value-open" disabled={!isLive}
+        title={isLive ? (open ? "Hide each account's figures" : "Each account: options, cash, buying power") : undefined}
+        className="flex min-h-11 w-full min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-md text-left text-xs hover:bg-secondary/60 disabled:hover:bg-transparent">
         <ModeMark mode="real" />
-        {who && <span data-testid="value-who" className="min-w-0 truncate tabular-nums">{who}</span>}
-        {isLive && live?.as_of && <span className="ml-auto shrink-0 tabular-nums">live · {clock(live.as_of)}</span>}
-      </p>
-      {isLive ? (
-        // Wraps: the mode switch (aside) moves under the total when both cannot fit on one line, never over it.
-        <div className="mt-1 flex flex-wrap items-center justify-end gap-2">
-        <button type="button" aria-expanded={open} onClick={() => setOpen(o => !o)} data-testid="value-open"
-          title={open ? "Hide each account's figures" : "Each account: options, cash, buying power"}
-          className="flex min-h-11 min-w-0 flex-auto flex-col items-start rounded-md text-left hover:bg-secondary/60">
-          <span data-testid="value-total" className={cn("text-[28px] font-semibold leading-8 tabular-nums tracking-tight text-foreground", stale && "opacity-50")}>
-            {or(total, whole)}<span aria-hidden className="ml-1.5 align-middle text-xs font-normal text-muted-foreground">{open ? "▴" : "▾"}</span>
+        {isLive ? <>
+          <span data-testid="value-total" className={cn("text-base font-semibold tabular-nums text-foreground", stale && "opacity-50")}>{or(total, whole)}</span>
+          {/* Today's change only when every position in it had yesterday's close: never a guessed zero. */}
+          <span data-testid="value-today" className={cn("tabular-nums", tone(change), stale && "opacity-50")}>
+            {change == null ? "—" : money(change)}{pct != null && ` ${signedPct(pct, 1)}`} today
           </span>
-          <span className="flex flex-wrap items-baseline gap-x-2 text-xs">
-            {/* Today's change only when every position in it had yesterday's close: never a guessed zero. */}
-            <span data-testid="value-today" className={cn("tabular-nums", tone(change), stale && "opacity-50")}>
-              {change == null ? "—" : money(change)}{pct != null && ` ${signedPct(pct, 1)}`}
-            </span>
-            <span className="text-muted-foreground">today</span>
-          </span>
-        </button>
-        {aside}
-        </div>
-      ) : <>
-        {quiet && <p data-testid="value-off" className="mt-1 text-xs text-muted-foreground">{quiet}</p>}
-        {aside && <div className="mt-1.5 flex">{aside}</div>}
-      </>}
-      {/* The day's account value line (kept while the feed is stale or signed out), as the top bar has it wider. */}
-      {live && live.state !== "off" && <div className="-ml-1 mt-0.5"><DeskValueLine line={live.day_line} active={active} /></div>}
-      {/* Realized today (the journal's closed trades), live or not. */}
-      {realized ? <p data-testid="value-realized" className="text-xs text-muted-foreground">Realized today <span className={cn("tabular-nums", tone(realized))}>{money(realized)}</span></p> : null}
-      {/* How they are doing, in one line: the book's own rows and tags. */}
-      <p data-testid="value-read" className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5 text-xs text-muted-foreground">
-        <span className="tabular-nums text-foreground">{read.open} open</span>
-        {read.pnl != null && <><span aria-hidden>·</span><span className={cn("tabular-nums", tone(read.pnl))}>{money(read.pnl)}</span></>}
-        {read.flags.map(([n, oneWord, many, risk]) => (
-          <span key={oneWord} className="contents"><span aria-hidden>·</span><span className={cn("tabular-nums", risk ? "text-rose-300" : "text-foreground")}>{n} {n === 1 ? oneWord : many}</span></span>
-        ))}
-      </p>
+          {who && accounts.length > 1 && <span data-testid="value-who" className="text-muted-foreground">{who}</span>}
+        </> : quiet ? <span data-testid="value-off" className="text-muted-foreground">{quiet}</span> : null}
+        <span data-testid="value-read" className="ml-auto flex items-baseline gap-x-1.5 whitespace-nowrap text-muted-foreground">
+          <span className="tabular-nums text-foreground">{read.open} open</span>
+          {read.pnl != null && <span className={cn("tabular-nums", tone(read.pnl))}>{money(read.pnl)}</span>}
+          {isLive && <span aria-hidden>{open ? "▴" : "▾"}</span>}
+        </span>
+      </button>
+      {risks.length > 0 && (
+        <p data-testid="value-flags" className="pb-1 text-xs font-medium text-rose-300">
+          {risks.map(([n, oneWord, many]) => `${n} ${n === 1 ? oneWord : many}`).join(" · ")}
+        </p>
+      )}
+      {aside}
       {open && isLive && <p data-testid="value-accounts-hint" className="mt-2 text-[11px] text-muted-foreground">
         {active ? "Tap the account again to show every position" : "Tap an account to show only its positions in the book"}</p>}
       {open && isLive && (

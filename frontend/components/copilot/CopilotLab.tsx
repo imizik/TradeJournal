@@ -236,7 +236,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   }, [on, liveState, liveAsOf]);
   const [saved, setSaved] = useState<InvestigationSummary[]>([]);
   const [palette, setPalette] = useState(false);
-  const [topMore, setTopMore] = useState(false); // a phone's top row More (Threads)
+  const [topMore, setTopMore] = useState(false); // a phone's top row More (Threads, Feed, the mode, Practice)
+  // A phone's home is positions and the day's card: Practice, the week's scorecard and rules wait under More until opened.
+  const [phoneExtras, setPhoneExtras] = useState(false);
   // Replay (DeskReplay): paper trading on a past day. While it runs the live desk stays mounted but hidden, so leaving
   // puts it back exactly as it was; of its live pieces only the REAL line in Replay's header shows beside a replayed price.
   const [replay, setReplay] = useState(false);
@@ -389,6 +391,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const jumpKey = useJumpKey();
   const tabSlot = useDeskTabSlot(); // the phone tab bar's slot while it is the desk's (Nav.tsx)
   const phone = usePhone();
+  const phoneLean = phone && !phoneExtras; // a phone's home without Practice, the scorecard and rules (under More)
   const hydrated = useSyncExternalStore(noSubscribe, () => true, () => false); // the first render cannot know it is a phone
   // A phone draws the chart (and loads its library and first read) only once its ticker or Chain view is shown; after
   // that it stays, so going back to it is instant.
@@ -1120,7 +1123,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // it is written), the day report after the close, else what changed since the owner last looked. Arm today's plans and Close
   // the day are not repeated here: Close the day is one quiet link under the day report (and in ⌘K), never the strip.
   const booked = forAccount(rows, live, account);
-  const lower = dayPhase === "pre" ? <><DayPlanCard className="mb-3" /><MorningBrief prep={session.data?.prep} fill={fill} max={3} /></>
+  const lower = dayPhase === "pre" ? <>{!phoneLean && <DayPlanCard className="mb-3" />}<MorningBrief prep={session.data?.prep} fill={fill} max={3} /></>
     : dayPhase === "close" ? (
       <section aria-label="Day report" data-testid="day-report" className="space-y-1.5">
         <DayReport rows={rows} rowsRead={rowsRead} onOpen={select} />
@@ -1152,7 +1155,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
         <div className={styles.topRow}>
           {/* A phone's Feed: a chip in the row that stays put, so it is one tap from every view and its count is never
               cut short. Wider, the Feed is the side's tab or a drawer. */}
-          <div data-testid="desk-views" className={styles.views}>
+          <div data-testid="desk-views" className={cn(styles.views, phone && phoneView !== "feed" && "invisible")}>
             <button type="button" aria-pressed={phoneView === "feed"} data-testid="desk-view-feed" data-use="view.feed"
               onClick={() => phoneView === "feed" ? showBook() : showFeed()} title="Yours, ideas and the market today ( F )"
               className={cn("inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border px-3 text-sm max-[369px]:px-2",
@@ -1207,6 +1210,17 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                       className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm hover:bg-secondary">
                       <PanelLeft size={15} aria-hidden />Threads and previous days
                     </button>
+                    {/* Off the phone's home (November 26, 2026): the Feed, Practice and the mode switch live here. */}
+                    <button type="button" role="menuitem" data-testid="desk-top-feed" onClick={() => { setTopMore(false); showFeed(); }}
+                      className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm hover:bg-secondary">
+                      Feed{feedNew.count > 0 && <span className="text-xs tabular-nums text-muted-foreground">{feedNew.count} new</span>}
+                    </button>
+                    <button type="button" role="menuitem" data-testid="desk-top-practice"
+                      onClick={() => { setTopMore(false); setPhoneExtras(was => !was); showBook(); }}
+                      className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm hover:bg-secondary">
+                      {phoneExtras ? "Hide practice and scorecards" : "Practice, plan and scorecards"}
+                    </button>
+                    <div className="px-1.5 py-1"><ModeSwitch mode={mode} onPick={next => { setTopMore(false); pickMode(next); }} /></div>
                   </div>
                 )}
               </div>
@@ -1246,10 +1260,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 adds the paper value under it. */}
             <PhoneValue live={rowsFresh ? live : null} rows={rows} booked={booked} active={account} onPick={setAccount} day={today}
               realized={session.data?.realized_today ?? null} aside={
-                <div className="flex shrink-0 flex-col items-end gap-1">
-                  <ModeSwitch mode={mode} onPick={pickMode} />
-                  {viewMode === "paper" && <PaperValue book={paper.book} failed={paper.failed} onOpen={openPaper} />}
-                </div>} />
+                viewMode === "paper" ? <div className="flex justify-end pb-1"><PaperValue book={paper.book} failed={paper.failed} onOpen={openPaper} /></div> : null} />
           </div>
         )}
         {/* A phone's Orders: Robinhood's working orders, then today's fills. Read only. */}
@@ -1290,18 +1301,18 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               filter={account ? { label: live?.accounts?.find(a => a.masked === account)?.label ?? account, onShowAll: () => setAccount(null) } : null}
               live={booked.live} onRefreshLive={() => { refreshRobinhood().catch(() => { /* the line says so on the next read */ }).finally(() => setRefresh(n => n + 1)); }} /></div>
             {/* After 14 days of desk use: one quiet card offering to fold what he never opens. Never folds unasked. */}
-            <FoldSuggestion />
+            {!phoneLean && <FoldSuggestion />}
             <Fold id="watching"><Watching data={rowsRead ? watching.data : null} failed={watching.failed} sparks={sparks} earnings={events} held={held} selected={centreSymbol}
               onSelect={selectWatched} onAsk={askWatched} onPlan={planWatched} onChange={watching.set} /></Fold>
             {/* The day's block (the brief, Since you looked, the day report) and the practice goal under it. */}
             <div data-use="dayblock" className="contents">{lower}<DayFacts /></div>
             {/* How I'm doing this week: real beside paper, outside the paper frame (replay keeps its own score in Practice). */}
-            <Fold id="scorecard"><HowImDoing book={paper.book} /></Fold>
+            {!phoneLean && <Fold id="scorecard"><HowImDoing book={paper.book} /></Fold>}
             {/* His rules and goals: one neutral line, outside the paper frame, since they cover real trades too. */}
-            <RulesAndGoals book={paper.book} />
+            {!phoneLean && <RulesAndGoals book={paper.book} />}
             {/* Practice: his paper book, the QQQ overnight and momentum paper books and Replay, one line each. Never real money. */}
-            <Practice on={on} paper={paper} symbol={centreSymbol} review={<PaperReviewCard review={paper.book?.review} onAsk={actions.ask} />} onReplay={() => setReplay(true)}
-              onPick={selectWatched} />
+            {!phoneLean && <Practice on={on} paper={paper} symbol={centreSymbol} review={<PaperReviewCard review={paper.book?.review} onAsk={actions.ask} />} onReplay={() => setReplay(true)}
+              onPick={selectWatched} />}
           </div>
         )}
         {on && (

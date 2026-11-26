@@ -107,6 +107,8 @@ const CARD = {
   position: { trade_id: ORCL_ID, open: true },
 };
 const card = (page: Page) => page.getByRole("region", { name: "Ping" });
+// Without a Robinhood link the card copies the order lines as before; with one, Robinhood is the main button.
+const COPY = { ...CARD, broker: null };
 const posted = (writes: Request[]) => writes.filter(w => w.url().endsWith("/entries")).map(w => w.postDataJSON().text);
 
 test("a give-back ping on a phone lands on its card, not the copilot's sheet", async ({ page }) => {
@@ -120,28 +122,38 @@ test("a give-back ping on a phone lands on its card, not the copilot's sheet", a
   await expect(figures).toContainText("3.95 / 4.10"); // the ping's bid a share, the mid now
   await expect(figures).toContainText("unknown"); // the Robinhood feed is off: no claim about exit orders
   await expect(figures).toContainText("At expiry if ORCL stays 247.00");
-  await expect(c.getByTestId("ping-card-close")).toHaveText("Copy Close all 2 @ bid 3.95");
-  await expect(c.getByTestId("ping-card-trim")).toHaveText("Copy Trim 1");
+  // Robinhood is where he sells: the main button opens the position there; Cut it and Holding record the choice.
+  await expect(c.getByTestId("ping-card-robinhood")).toHaveText("Open ORCL in Robinhood");
+  await expect(c.getByTestId("ping-card-robinhood")).toHaveAttribute("href", "https://robinhood.com/stocks/ORCL");
+  await expect(c.getByTestId("ping-card-cut")).toHaveText("Cut it");
+  await expect(c.getByTestId("ping-card-holding")).toHaveText("Holding…");
+  await expect(c.getByTestId("ping-card-close")).toHaveCount(0);
   await expect(page.getByLabel("Message")).not.toBeInViewport(); // the sheet waits behind Ask
-  const box = (await c.getByTestId("ping-card-close").boundingBox())!;
+  const box = (await c.getByTestId("ping-card-robinhood").boundingBox())!;
   expect(box.height).toBeGreaterThanOrEqual(48);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await c.screenshot({ path: test.info().outputPath("ping-card-phone.png") });
 });
 
-test("Copy Close all copies Robinhood's order lines and logs one exiting decision", async ({ page, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+test("Cut it logs one exiting decision and points at Robinhood", async ({ page }) => {
   const writes = await open(page);
+  await card(page).getByTestId("ping-card-cut").click();
+  await expect(card(page).getByTestId("ping-card-done")).toHaveText("Saved: cutting it. Sell it in Robinhood.");
+  await expect.poll(() => posted(writes)).toEqual(["Exiting. Give-back ping at 10:57 AM; said Cut it on the card."]);
+});
+
+test("with no Robinhood link, Copy Close all copies the order lines and logs one exiting decision", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const writes = await open(page, { card: COPY });
   await card(page).getByTestId("ping-card-close").click();
   await expect(card(page).getByTestId("ping-card-done")).toContainText("Copied: sell 2 at 3.95. Paste it in Robinhood.");
-  await expect(card(page).getByRole("link", { name: "Open Robinhood" })).toHaveAttribute("href", "https://robinhood.com/stocks/ORCL");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("ORCL\nSell · Call\nExpiration 11/20/26\nStrike $250\nLimit price 3.95\nContracts 2");
   await expect.poll(() => posted(writes)).toEqual(["Exiting. Give-back ping at 10:57 AM; copied close all 2 at bid 3.95."]);
 });
 
 test("Keep holding is not one tap: it asks for a check-in time or a price stop first", async ({ page }) => {
   const writes = await open(page);
-  await card(page).getByTestId("ping-card-hold").click();
+  await card(page).getByTestId("ping-card-holding").click();
   expect(posted(writes)).toEqual([]);
   const pick = card(page).getByTestId("ping-card-hold-pick");
   await expect(pick.getByRole("button")).toHaveText(["+15m", "+30m", "Price stop", "Cancel"]);
@@ -154,7 +166,7 @@ test("Keep holding is not one tap: it asks for a check-in time or a price stop f
 
 test("with check-in pings on, Keep holding says it will ping at that time", async ({ page }) => {
   const writes = await open(page, { card: { ...CARD, check_in_pings: true } });
-  await card(page).getByTestId("ping-card-hold").click();
+  await card(page).getByTestId("ping-card-holding").click();
   await card(page).getByTestId("ping-card-hold-pick").getByRole("button", { name: "+30m" }).click();
   await expect(card(page).getByTestId("ping-card-done")).toHaveText("Holding. I'll ping you at 11:30 AM if it's still open.");
   await expect.poll(() => writes.filter(w => w.url().endsWith("/entries")).map(w => w.postDataJSON().check_in))
@@ -162,7 +174,7 @@ test("with check-in pings on, Keep holding says it will ping at that time", asyn
 });
 
 test("a stale bid prices at the mid and says so; the card puts away to the chart", async ({ page }) => {
-  await open(page, { card: { ...CARD, alert: { ...CARD.alert, at: epoch("2026-11-13T15:30:00Z"), quoted_at: epoch("2026-11-13T15:30:00Z") } } });
+  await open(page, { card: { ...COPY, alert: { ...CARD.alert, at: epoch("2026-11-13T15:30:00Z"), quoted_at: epoch("2026-11-13T15:30:00Z") } } });
   await page.clock.runFor(6_000);
   await expect(card(page).getByTestId("ping-card-close")).toHaveText("Copy Close all 2 @ mid 4.10");
   await card(page).getByRole("button", { name: "Put the card away" }).click();
@@ -192,7 +204,7 @@ test("only a working closing order counts as the exit: a working buy to open is 
 
 test("a risk ping's Trim button lands on the card pointing at Trim, without copying anything by itself", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  const writes = await open(page, { path: `${LINK}&do=trim` });
+  const writes = await open(page, { path: `${LINK}&do=trim`, card: COPY });
   const trim = card(page).getByTestId("ping-card-trim");
   await expect(trim).toHaveAttribute("data-asked", "true");
   await expect(trim).toBeFocused();

@@ -80,7 +80,7 @@ export default function PingsRows({ data }: { data: DeskPings }) {
                 <span className="font-medium text-foreground">{row.symbol} {row.direction}</span>
                 <span className="text-muted-foreground">{row.setup ? `Setup · ${row.kind_label}` : row.kind_label} · {when(row.at, data.day)}</span>
               </p>
-              <p><RadarAfter row={row} /><Paper row={row} /></p>
+              <p>{(row.after.hour_pct !== null || row.after.close_pct !== null) && <RadarAfter row={row} />}<Paper row={row} /></p>
             </li>
           ))}
         </ul>

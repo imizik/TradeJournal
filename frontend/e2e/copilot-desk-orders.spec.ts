@@ -68,6 +68,11 @@ for (const width of [1440, 375]) {
     await expect(lines.nth(1)).toContainText("Filled: Buy 1 @ 3.08, 10:42");
     await expect(lines.nth(1).getByTestId("book-order-mark")).toHaveText("provisional");
     const group = shelf.getByTestId("book-orders");
+    if (width < 768) {
+      // A phone's home is positions first: the other orders are the Orders tab's (November 26, 2026).
+      await expect(group).toBeHidden();
+      return;
+    }
     await expect(group.getByRole("heading")).toHaveText("Orders");
     await expect(group.getByTestId("book-order")).toHaveCount(2);
     await expect(group.getByTestId("book-order").nth(0)).toContainText("APLD 11/27/26 30P");
