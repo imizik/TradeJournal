@@ -173,28 +173,29 @@ test("the status line names a source behind in words, red where it moves positio
   await expect(list.getByTestId("health-chatter")).toHaveAttribute("data-tone", "amber");
 });
 
-test("a phone: no status line; the switch sits at the top of Positions", async ({ page }) => {
+test("a phone: no status line; the switch is under the top row's More, off the home screen", async ({ page }) => {
   await open(page, { width: 375 });
   await expect(page.getByTestId("desk-status-line")).toHaveCount(0);
   await expect(page.getByTestId("desk-health")).toBeVisible(); // the dot stays its health view
-  const modes = page.getByTestId("mode-switch").filter({ visible: true });
-  await expect(modes).toHaveCount(1);
+  await expect(page.getByTestId("mode-switch").filter({ visible: true })).toHaveCount(0); // positions first (November 26, 2026)
+  await page.getByTestId("desk-top-more").click();
+  const modes = page.getByTestId("desk-top-menu").getByTestId("mode-switch");
   await expect(modes).toBeInViewport();
   await modes.getByRole("radio", { name: "Paper" }).click();
-  await expect(modes).toHaveAttribute("data-mode", "paper");
+  await expect(page.getByTestId("mode-switch").first()).toHaveAttribute("data-mode", "paper");
   await expect(page.getByTestId("desk-paper-value").filter({ visible: true })).toContainText("$10,234.50");
   // Nothing in the top row overflows the screen.
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
 
-test("a phone in Paper with a six-figure account: the total, the switch and the paper value never overlap", async ({ page }) => {
+test("a phone in Paper with a six-figure account: the total and the paper value never overlap", async ({ page }) => {
   await open(page, { width: 375 });
   const big = { ...LIVE, accounts: [{ ...LIVE.accounts[0], total_value: 184321.55 }] };
   await page.route("**/copilot/desk/threads", route => route.fulfill({ json: { ...THREADS, robinhood: big } }));
   await page.reload();
-  const modes = page.getByTestId("mode-switch").filter({ visible: true });
-  await modes.getByRole("radio", { name: "Paper" }).click();
+  await page.getByTestId("desk-top-more").click();
+  await page.getByTestId("desk-top-menu").getByTestId("mode-switch").getByRole("radio", { name: "Paper" }).click();
   const total = page.getByTestId("value-total");
   await expect(total).toContainText("$184,32");
   const paperValue = page.getByTestId("desk-paper-value").filter({ visible: true });
@@ -202,7 +203,7 @@ test("a phone in Paper with a six-figure account: the total, the switch and the 
   // The total is never cut short, and nothing sits on top of it.
   expect(await total.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   const t = (await total.boundingBox())!;
-  for (const other of [modes, paperValue]) {
+  for (const other of [paperValue]) {
     const o = (await other.boundingBox())!;
     const apart = o.x >= t.x + t.width - 1 || o.y >= t.y + t.height - 1 || o.x + o.width <= t.x + 1 || o.y + o.height <= t.y + 1;
     expect(apart).toBe(true);
@@ -243,6 +244,7 @@ for (const width of [1440, 375]) {
   test(`replay keeps one REAL line of the live book; a tap lists the positions and working orders, read only, at ${width}px`, async ({ page }) => {
     const { sent } = await open(page, { width, threads: HELD, session: ALERTED });
     await replayStubs(page);
+    if (width < 768) await page.getByTestId("desk-top-more").click(); // a phone's switch is under More
     await page.getByTestId("mode-switch").filter({ visible: true }).getByRole("radio", { name: "Replay" }).click();
     const replay = page.getByTestId("desk-replay");
     await expect(replay).toBeVisible();

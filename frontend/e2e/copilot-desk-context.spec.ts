@@ -219,7 +219,7 @@ test("on a 375 px phone the centre is the ticker's view and the copilot is a she
   await pane.getByRole("button", { name: "Timeline ▾" }).click();
   await expect(pane.getByRole("list", { name: "Timeline" }).getByRole("listitem")).toHaveCount(4);
   expect((await pane.getByRole("tab", { name: "Chain" }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
-  expect((await page.getByTestId("desk-view-feed").boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect((await page.getByTestId("desk-top-more").boundingBox())!.height).toBeGreaterThanOrEqual(44); // the Feed is under More
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await page.screenshot({ path: test.info().outputPath("desk-centre-375.png"), fullPage: true });
 });

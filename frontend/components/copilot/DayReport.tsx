@@ -12,11 +12,10 @@ const price = (value: number) => value.toLocaleString("en-US", { minimumFraction
 const ENTRY_WORDS = { planned: "plan saved first", late: "plan saved after the fill", unplanned: "no plan", pending: "plan being linked" } as const;
 const DECISION_WORDS = { planned: "you planned it", passed: "you passed", neither: "no plan, not passed" } as const;
 
-/** "5 up, 7 down, 2 not measured": only the parts that happened, each counted from the price when he checked (the label
- * says so once). Counts, never advice. */
+/** "5 up, 7 down": only the parts that happened, each counted from the price when he checked (the label says so once).
+ * Calls with no price to score them by are in the count but never spelled out. Counts, never advice. */
 export function checkedParts(t: CheckTally): string {
-  return [t.up && `${t.up} up`, t.down && `${t.down} down`, t.flat && `${t.flat} flat`,
-    t.not_measured && `${t.not_measured} not measured`].filter(Boolean).join(", ");
+  return [t.up && `${t.up} up`, t.down && `${t.down} down`, t.flat && `${t.flat} flat`].filter(Boolean).join(", ");
 }
 
 /** The calls line after its label: the last 30 days first ("14 · 5 up, 7 down, 2 not measured"), then today's. Null when
@@ -93,15 +92,28 @@ export default function DayReport({ rows = [], rowsRead = true, onOpen }: { rows
   const alerts = pings?.alerts.rows ?? [], hits = pings?.radar.rows ?? [];
   const pingParts = [alertsVerdict(alerts), radarVerdict(hits)].filter(Boolean);
   const calls = report?.checks ? callsLine(report.checks) : null;
+  const measuredChecks = report?.checks?.rows.filter(r => r.state === "measured") ?? [];
+  const card = report?.card ?? null;
   const unplanned = rows.filter(r => (r.key.startsWith("trade:") || r.key.startsWith("robinhood:")) && r.symbol && !r.hidden && r.book
     && r.instrument !== "stock" && !(r.book.planned ?? r.book.state !== "no_plan"));
   const bySymbol = [...new Set(unplanned.map(r => r.symbol!))];
-  if (!showToday && !pingParts.length && !calls && !bySymbol.length) {
+  const details = showToday || pingParts.length > 0 || !!calls || bySymbol.length > 0;
+  if (!details && !card) {
     if (!rowsRead) return null; // the positions are not read yet: not yet "nothing"
     return <p data-testid="day-report-card" className="rounded-lg border bg-card px-3 py-2.5 text-xs text-muted-foreground">Nothing to report today: no entries, pings, checked calls or open options without a plan.</p>;
   }
   return (
-    <div data-testid="day-report-card" className="divide-y overflow-hidden rounded-lg border bg-card">
+    <div data-testid="day-report-card" className="overflow-hidden rounded-lg border bg-card">
+      {card && <Headline card={card} />}
+      {details && (
+        // With the headline, the rows sit behind one Details tap; an older backend without it shows them as before.
+        <details data-testid="day-report-details" className={cn("group/details", card && "border-t")} open={!card || undefined}>
+          {card && (
+            <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+              <span className="flex-1">Details</span><span aria-hidden className="group-open/details:rotate-180">▾</span>
+            </summary>
+          )}
+          <div className={cn("divide-y", card && "border-t")}>
       {showToday && (
         <Line label="Today" testId="report-today" summary={
           entries && <span data-testid="report-today-line">{/* only the figures in the mono face */}<span className="tabular-nums">{entries.entries}</span> {entries.entries === 1 ? "entry" : "entries"}, <span className="tabular-nums">{entries.planned}</span> with a plan saved before the fill</span>}>
@@ -125,13 +137,9 @@ export default function DayReport({ rows = [], rowsRead = true, onOpen }: { rows
       )}
       {calls && report?.checks && (
         <Line label={callsLabel(report.checks.window.days)} sep=": " testId="report-calls" summary={<span data-testid="calls-verdict">{calls}</span>}>
-          {report.checks.rows.length > 0
-            ? <ul className="space-y-2.5">{report.checks.rows.map(row => <CheckRow key={row.id} row={row} />)}</ul>
-            : <p className="text-xs text-muted-foreground">No call checked today.</p>}
-          <p className="mt-2.5 text-xs text-muted-foreground">
-            Up and down are the contract&apos;s move when both its prices are known, otherwise the stock&apos;s (reversed for a put), from the
-            price when you checked to the close; never the price in the post. Nothing here needs an answer.
-          </p>
+          {measuredChecks.length > 0
+            ? <ul className="space-y-2.5">{measuredChecks.map(row => <CheckRow key={row.id} row={row} />)}</ul>
+            : <p className="text-xs text-muted-foreground">No call checked today could be scored yet.</p>}
         </Line>
       )}
       {bySymbol.length > 0 && (
@@ -148,6 +156,50 @@ export default function DayReport({ rows = [], rowsRead = true, onOpen }: { rows
             ))}
           </ul>
         </Line>
+      )}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+const usd0 = (v: number) => `${v > 0.005 ? "+" : v < -0.005 ? "−" : ""}$${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+const premium = (perContract: number) => `$${(perContract / 100).toFixed(2)}`;
+/** "tomorrow" only when the next session is the next calendar day; a Friday card names Monday (as the 4:30 ping does). */
+function nextLabel(day: string, next: string | null) {
+  if (!next) return "tomorrow";
+  const d = new Date(`${next}T12:00:00Z`);
+  return d.getTime() - new Date(`${day}T12:00:00Z`).getTime() === 86_400_000 ? "tomorrow"
+    : d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+}
+
+/** The day in three lines, the same card the 4:30 ping sends (``app/engine/day_card.py``): realized P&L over the trades
+ * closed today, the cut pings acted on, and what expires next session with its cut line. A line with nothing is absent. */
+function Headline({ card }: { card: NonNullable<Report["card"]> }) {
+  return (
+    <div data-testid="day-card" className="space-y-1.5 px-3 py-3">
+      <p className="flex items-baseline gap-2">
+        <span className="text-sm text-muted-foreground">Today</span>
+        {card.closed > 0
+          ? <span data-testid="day-card-pnl" className={cn("text-2xl font-semibold tabular-nums", tone(card.pnl))}>{usd0(card.pnl)}</span>
+          : <span data-testid="day-card-pnl" className="text-sm text-muted-foreground">nothing closed</span>}
+        {card.closed > 0 && <span className="text-xs text-muted-foreground">{card.closed} closed</span>}
+      </p>
+      {card.cut.pings > 0 && (
+        <p data-testid="day-card-cut" className="text-sm">
+          Cut pings: <span className={cn("font-semibold tabular-nums", card.cut.acted < card.cut.pings ? "text-amber-300" : "text-emerald-300")}>
+            acted on {card.cut.acted} of {card.cut.pings}</span>
+        </p>
+      )}
+      {card.expiring.length > 0 && (
+        <p data-testid="day-card-expiring" className="text-sm">
+          <span className="text-muted-foreground">Expires {nextLabel(card.day, card.next_day)}: </span>
+          {card.expiring.map((e, i) => (
+            <span key={e.contract}>{i > 0 && "; "}<span className="font-medium text-foreground">{e.contract}</span> ×{e.contracts}
+              {e.cut != null && <span className="text-muted-foreground">, cut {premium(e.cut)}</span>}</span>
+          ))}
+        </p>
       )}
     </div>
   );

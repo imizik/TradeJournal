@@ -88,6 +88,10 @@ async function open(page: Page, width: number, book: object = BOOK, folded: stri
   }) } }));
   await page.goto("/copilot-lab");
   if (width < 768) await page.getByTestId("desk-view-book").click();
+  if (width < 768) { // a phone keeps Practice, paper, rules and the scorecard under More (November 26, 2026)
+    await page.getByTestId("desk-top-more").click();
+    await page.getByTestId("desk-top-practice").click();
+  }
   return reads; // a test may change what the next read returns
 }
 

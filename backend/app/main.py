@@ -534,6 +534,18 @@ async def _maybe_start_leak_bill(_app: FastAPI):
     return asyncio.create_task(leak_bill.LeakBill(engine).loop())
 
 
+async def _maybe_start_morning_glance(_app: FastAPI):
+    """The 9:25 morning glance (app/engine/day_card.py): what he holds, with expiries and cut lines, on days he holds
+    something. Off unless MORNING_GLANCE_PINGS=true."""
+    if os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    from app.engine import day_card
+    if not day_card.glance_enabled():
+        return None
+    from app.engine.chart_calendar import chart_calendar
+    return asyncio.create_task(day_card.MorningGlance(engine, chart_calendar).loop())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Alembic owns the schema. The app used to call create_all() here, which
@@ -579,6 +591,7 @@ async def lifespan(_app: FastAPI):
     self_check = await _maybe_start_self_check(_app)
     note_digest = await _maybe_start_note_digest(_app)
     leak_bill = await _maybe_start_leak_bill(_app)
+    morning_glance = await _maybe_start_morning_glance(_app)
     from app.routers.copilot_desk import warm_at_start
     warm_at_start()  # the desk's market calendar, on its own thread
     try:
@@ -590,6 +603,8 @@ async def lifespan(_app: FastAPI):
             note_digest.cancel()
         if leak_bill is not None:
             leak_bill.cancel()
+        if morning_glance is not None:
+            morning_glance.cancel()
         if paper_runner is not None:
             paper_runner.cancel()
         if robinhood_fills is not None:

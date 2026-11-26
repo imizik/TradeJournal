@@ -196,21 +196,17 @@ test("the day's value line: change, fills as dots, a break with its times, and t
   await expect(line.getByTestId("value-change")).toHaveText("+$352 +3.5%");
 });
 
-test("the value line stays when the feed goes stale and says since when", async ({ page }) => {
+test("a phone's value block is one line: a stale feed says since when, with no value line under it", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   const quiet = { ...DAY_LINE, series: { all: series("All accounts", 10_000, 4, minute(89)) } };
   await open(page, desk({ state: "stale", as_of: minute(89), issue: null, day_line: quiet }));
-  // A phone's line sits in the value block at the top of Positions (the top bar's account line is the laptop's).
+  // Positions first (November 26, 2026): the day's value line is the laptop's; the phone's block keeps one line.
   const block = page.getByTestId("desk-value");
-  const line = block.getByTestId("desk-value-line");
-  await expect(line.getByTestId("value-quiet")).toHaveText("· last 10:59 AM");
+  await expect(block.getByTestId("desk-value-line")).toHaveCount(0);
   // Said once: the value block says how old the accounts are (no laptop account line underneath repeating it).
   await expect(page.getByTestId("desk-accounts")).toHaveCount(0);
   await expect(block.getByTestId("value-off")).toHaveText("Robinhood stale · from the journal · as of 10:59 AM");
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
-  await line.click(); // a phone's tap opens the detail
-  await expect(block.getByTestId("value-detail")).toContainText("No reading since 10:59 AM");
-  await page.screenshot({ path: test.info().outputPath("desk-value-line-375.png") });
 });
 
 test("before the day's first reading there is no value line", async ({ page }) => {

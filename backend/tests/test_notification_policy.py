@@ -131,12 +131,12 @@ def sell(engine, when, qty=2, ticker="SNDK", strike=230):
 
 def test_the_priority_order_and_what_the_cap_never_drops():
     assert [policy.rank(k) for k in ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "interrupt", "cut_line", "companion_update",
-                                     "nudge", "prep", "evening_review", "radar_setup", "radar_event", "radar_digest",
-                                     "thesis_watch", "research", "paper", "paper_review", "self_check", "note_digest", "leak_bill")] == list(range(22))
+                                     "nudge", "prep", "morning_glance", "evening_review", "radar_setup", "radar_event", "radar_digest",
+                                     "thesis_watch", "research", "paper", "paper_review", "self_check", "note_digest", "leak_bill")] == list(range(23))
     assert policy.rank("expiry_first") == policy.rank("expiry_eve") == policy.rank("time_stop") and policy.rank("link") == policy.rank("nudge")
     assert policy.rank("companion_adopt") == policy.rank("nudge")
     assert policy.rank("week_review") == policy.rank("day_replay") == policy.rank("prep")
-    assert policy.rank("radar_something") == 22  # an unknown kind goes last
+    assert policy.rank("radar_something") == 23  # an unknown kind goes last
     assert policy.budget("cut_line") is None  # said once per position: no daily budget
     assert policy.enabled() and policy.quiet_seconds() == 600 and policy.preopen_allowance() == 2
     assert {k: policy.budget(k) for k in policy.BUDGETS} == {"interrupt": 4, "companion_update": 12, "nudge": 2, "prep": 1, "radar_setup": 4,

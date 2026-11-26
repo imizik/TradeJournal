@@ -242,7 +242,9 @@ def test_the_route_reads_checks_and_entries_and_hides_a_ticker_he_does_not_follo
         db.commit()
     monkeypatch.setattr(day_report, "entries_today", lambda db, day, hidden: {"state": "ok", "entries": 2, "planned": 1, "late": 0, "pending": 0})
     body = desk.get("/copilot/desk/day-report").json()
-    assert body["day"] == "2026-11-11" and body["sections"] == {"entries": "ok", "checks": "ok"}
+    assert body["day"] == "2026-11-11" and body["sections"] == {"entries": "ok", "checks": "ok", "card": "ok"}
+    # The headline card (engine/day_card.py): nothing closed, no cut ping, nothing held in this fixture.
+    assert body["card"]["closed"] == 0 and body["card"]["cut"] == {"pings": 0, "acted": 0} and body["card"]["expiring"] == []
     assert [r["symbol"] for r in body["checks"]["rows"]] == ["NVDA"]
     assert body["checks"]["window"]["checked"] == 1
     assert body["entries"]["entries"] == 2 and body["entries"]["planned"] == 1

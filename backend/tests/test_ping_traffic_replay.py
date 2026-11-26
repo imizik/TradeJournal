@@ -36,6 +36,7 @@ def traffic():
     add("09:00", "prep", "morning-brief")
     for i in range(15):
         add(f"09:{i + 1:02d}", ("thesis_watch", "research", "nudge")[i % 3], f"preopen-{i}")
+    add("09:25", "morning_glance", "glance")  # once a day by its sender, never held: not spent by the pre-open traffic
     # Companion traffic must not consume another kind's ceiling allowance.
     for i in range(13):
         add("09:30", "companion_update", f"companion-{i}")
@@ -132,6 +133,7 @@ def test_gap_day_position_alerts_are_not_starved_by_other_kinds(replay):
 
 def test_gap_day_evening_review_is_immediate_even_after_the_cap(replay):
     rows, _, _ = replay
+    assert next(row for row in rows if row.kind == "morning_glance").decision == "sent"
     evening = next(row for row in rows if row.kind == "evening_review")
     assert sum(row.decision == "sent" and row.decided_at < evening.decided_at for row in rows) > 12
     assert evening.decision == "sent"
@@ -151,7 +153,7 @@ def test_gap_day_budgets_quiet_window_and_retry_ledger(replay):
     for kind in policy.BUDGETS:
         assert spent[kind] <= policy.budget(kind)
     preopen = [row for row in rows if row.decided_at < utc(at("09:30")) and row.decision == "sent"]
-    assert [row.kind for row in preopen] == ["thesis_watch", "prep"]
+    assert [row.kind for row in preopen if row.kind != "morning_glance"] == ["thesis_watch", "prep"]  # the glance spends no allowance
     duplicate = next(row for row in rows if row.source_id == "duplicate-giveback")
     assert duplicate.decision == "suppressed"
     assert duplicate.delivered_at is None

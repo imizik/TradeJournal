@@ -94,6 +94,8 @@ def _target(db: Session, found: dict):
         path, more = position_alerts._links(db, alert)
         if not path.startswith("/copilot-lab"):
             more = ()  # with the desk off the links are the alert's answers, which belong to the first ping
+        # With the desk on there are no answer links (since 2026-11-26): the tap opens the ping card, whose Cut it and
+        # Holding record a fresh decision. The alert's own Telegram buttons answer once per alert, so they stay off here.
         return (alert.contract, f"{alert_scorecard.KIND.get(alert.kind, 'position')} ping".lower(),
                 notification_policy.anchor(alert.account_id, alert.source_key), trade.id, path, more, symbol)
     row = db.get(FillInterrupt, uuid.UUID(found["interrupt"]))

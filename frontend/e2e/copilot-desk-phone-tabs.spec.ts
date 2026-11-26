@@ -109,12 +109,13 @@ for (const [width, height] of [[360, 780], [375, 812], [390, 844]] as const) {
     const value = page.getByTestId("desk-value");
     await expect(value.getByTestId("mode-mark")).toHaveAttribute("data-mode", "real");
     await expect(value.getByTestId("value-who")).toHaveText("3 accounts");
-    await expect(value).toContainText("live · 11:04 AM");
     await expect(value.getByTestId("value-total")).toContainText("$28,736");
-    // Today: +$120 − $36 + $0 on a $28,652 start; realized today beside it.
-    await expect(value.getByTestId("value-today")).toHaveText("+$84 +0.3%");
-    await expect(value.getByTestId("value-realized")).toHaveText("Realized today −$1,286");
-    await expect(value.getByTestId("value-read")).toHaveText("12 open·+$11,707·1 near stop·2 orders working");
+    // One line (November 26, 2026): today +$120 − $36 + $0 on a $28,652 start, then the book; realized is the day card's.
+    await expect(value.getByTestId("value-today")).toHaveText("+$84 +0.3% today");
+    await expect(value.getByTestId("value-realized")).toHaveCount(0);
+    await expect(value.getByTestId("value-read")).toHaveText("12 open+$11,707▾");
+    // Under it, in red, only what makes a position need him; the orders are the Orders tab's.
+    await expect(value.getByTestId("value-flags")).toHaveText("1 near stop");
     // Above the fold, with no page scrolled sideways (the old account strip was cut off at the right).
     const bar = await tabs(page).evaluate(el => el.getBoundingClientRect().top);
     expect(await value.evaluate(el => el.getBoundingClientRect().bottom)).toBeLessThan(bar);
@@ -140,9 +141,9 @@ for (const [width, height] of [[360, 780], [375, 812], [390, 844]] as const) {
     expect(await sideways(page)).toBeLessThanOrEqual(0);
     await accounts.nth(1).click();
     await expect(accounts.nth(1)).toHaveAttribute("aria-pressed", "true");
-    await expect(value.getByTestId("value-who")).toHaveText("MCP ••7884");
+    await expect(value.getByTestId("value-who")).toHaveText("MCP ••7884"); // a picked account names itself beside its total
     await expect(value.getByTestId("value-total")).toContainText("$2,410");
-    await expect(value.getByTestId("value-read")).toHaveText(/^4 open·/); // CRWV, IREN, TSLA, HOOD
+    await expect(value.getByTestId("value-read")).toHaveText(/^4 open/); // CRWV, IREN, TSLA, HOOD
     await page.screenshot({ path: test.info().outputPath(`phone-value-${width}.png`) });
   });
 }
@@ -153,9 +154,9 @@ test("not live: the block says so in grey with its time and shows no money", asy
   await expect(value.getByTestId("value-off")).toHaveText("Robinhood stale · from the journal · as of 10:40 AM");
   await expect(value.getByTestId("value-total")).toHaveCount(0);
   await expect(value).not.toContainText("$0");
-  await expect(value.getByTestId("value-realized")).toHaveText("Realized today −$1,286"); // the journal's, live or not
-  // The book's own rows are counted all the same; no orders while Robinhood is not live.
-  await expect(value.getByTestId("value-read")).toHaveText("12 open·+$11,707·1 near stop");
+  // The book's own rows are counted all the same.
+  await expect(value.getByTestId("value-read")).toHaveText("12 open+$11,707");
+  await expect(value.getByTestId("value-flags")).toHaveText("1 near stop");
   await page.getByTestId("desk-view-orders").click();
   await expect(page.getByTestId("phone-orders-quiet")).toContainText("Robinhood stale");
 });
@@ -169,10 +170,10 @@ test("the desk's tab bar: Positions, Chart, Chain, Orders and Ask, each thumb-si
     const box = (await b.boundingBox())!;
     expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
   }
-  // The top row keeps the health dot, Day and ⌘K, with the Feed chip; no view switch. Plan a trade is ⌘K's (the calm pass).
+  // The top row keeps the health dot, Day, ⌘K and More; the Feed is under More (November 26, 2026). No view switch.
   await expect(page.getByRole("navigation", { name: "Desk views" })).toHaveCount(0);
   for (const name of [/^Day|^Start|^Close/, /Jump to a thread or command/]) await expect(page.getByRole("button", { name }).first()).toBeVisible();
-  await expect(page.getByTestId("desk-view-feed")).toHaveText("Feed");
+  await expect(page.getByTestId("desk-view-feed")).toBeHidden();
   await expect(page.getByTestId("desk-view-book")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("desk-value")).toBeVisible();
 
@@ -202,8 +203,9 @@ test("the desk's tab bar: Positions, Chart, Chain, Orders and Ask, each thumb-si
   await expect(page.getByTestId("desk-book")).toBeHidden();
   expect(await sideways(page)).toBeLessThanOrEqual(0);
 
-  // The Feed chip, and back.
-  await page.getByTestId("desk-view-feed").click();
+  // The Feed from More, and back.
+  await page.getByTestId("desk-top-more").click();
+  await page.getByTestId("desk-top-feed").click();
   await expect(page.getByTestId("desk-feed")).toBeVisible();
   expect(await sideways(page)).toBeLessThanOrEqual(0);
 

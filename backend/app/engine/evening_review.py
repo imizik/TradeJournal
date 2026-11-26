@@ -1,20 +1,20 @@
-"""The evening review ping: once a trading day after the close, one phone ping saying what waits for review on the
-Copilot desk, opening Close the day.
+"""The evening review ping: once a trading day after the close, one phone ping that is the day's card itself (November
+26, 2026): today's realized P&L, whether the cut pings were followed, and what expires tomorrow
+(``engine/day_card.py``), readable on the lock screen. It asks nothing; a tap opens the desk, whose after-close day
+report leads with the same card.
 
 At ``EVENING_REVIEW_PING_AT`` New York (``16:30`` by default; a time before 16:00 or unreadable keeps the default) on a
-trading day (the market calendar: no weekend or holiday ping) the desk's counts are read once through
-``copilot_desk.waiting``, what the desk's Close the day pass walks: the symbols still asking their close question and the
-fills waiting to link, and the pings the notification policy held today (``notification_policy.held_text``). Alert and
-Radar ratings are optional and never counted (the desk's "How the pings did" card shows what followed instead). Nothing
-waiting, the lab off, or a desk source that could not be read is recorded ``skipped`` with the reason and nothing is
-sent. Otherwise one ping, "To review: 2 threads · 1 fill to link · 12 pings held today (Radar 11, evening 1)", goes through
-``notification_policy.decide`` (kind ``evening_review``, which the policy never holds: it is the ping that reports what
-was held) and opens ``/copilot-lab?close=1``, which starts the desk's Close the day pass.
+trading day (the market calendar: no weekend or holiday ping) the card is read once. A day with nothing closed, no cut
+ping and nothing expiring the next session, the lab off, or a source that could not be read is recorded ``skipped``
+with the reason and nothing is sent. The desk's to-review counts (``copilot_desk.waiting``) are still stored on the row
+(``review``, ``fills``) but no longer said: the ping is a card, not a to-do list. It goes through
+``notification_policy.decide`` (kind ``evening_review``, which the policy never holds) and opens ``/copilot-lab``.
 
 Off unless ``EVENING_REVIEW_PING_ENABLED=true``. On the level alert monitor's loop. The unique ``EveningReview.day`` is
 the once-a-day guard; a day not counted by ``WINDOW_MINUTES`` after its time waits for the next. Delivery is
 at-most-once, as Watch your day's: a send that may have reached ntfy is ``unknown`` and never resent, and one not sent
-within ``EXPIRE_SECONDS`` is dropped as ``expired``. No model call.
+within ``EXPIRE_SECONDS`` is dropped as ``expired``. ``EveningReview.body`` keeps the title as its first line. No model
+call.
 """
 
 from __future__ import annotations
@@ -43,8 +43,8 @@ AT = 16 * 60 + 30
 EARLIEST = 16 * 60  # the desk's close questions ask after 16:00
 WINDOW_MINUTES = 120  # a day not counted by then (the flag switched on, or the API down) waits for the next
 EXPIRE_SECONDS = 2 * 60 * 60
-TITLE = "Close the day"
-PATH = "/copilot-lab?close=1"
+TITLE = "Close the day"  # an older row's title, whose body has no title line
+PATH = "/copilot-lab"
 
 
 def enabled() -> bool:
@@ -63,14 +63,10 @@ def at_minute() -> int:
     return hour * 60 + minute
 
 
-def _part(count: int, one: str, many: str) -> str | None:
-    return f"{count} {one if count == 1 else many}" if count else None
-
-
-def message(counts: dict, held: str | None = None) -> str | None:
-    """"To review: 2 threads · 1 fill to link · 12 pings held today (Radar 11, evening 1)" or None when nothing waits."""
-    parts = [p for p in (_part(counts["review"], "thread", "threads"), _part(counts["fills"], "fill to link", "fills to link"), held) if p]
-    return f"To review: {' · '.join(parts)}" if parts else None
+def day_card(db: Session, now: float, calendar=None) -> tuple[str, str] | None:
+    """The day card's (title, body), or None when the day has nothing to say."""
+    from app.engine import day_card as card
+    return card.card_lines(card.card(db, now, calendar))
 
 
 def count(db: Session, now: float) -> dict | None:
@@ -84,8 +80,10 @@ def count(db: Session, now: float) -> dict | None:
 
 class EveningReviews:
     def __init__(self, engine, calendar=None, *, clock: Callable[[], float] = time.time,
-                 counts: Callable[[Session, float], dict | None] = count):
+                 counts: Callable[[Session, float], dict | None] = count,
+                 card: Callable[[Session, float], tuple[str, str] | None] | None = None):
         self.engine = engine
+        self.card = card if card is not None else (lambda db, now: day_card(db, now, calendar))
         self.calendar = calendar
         self.clock = clock
         self.counts = counts
@@ -109,18 +107,21 @@ class EveningReviews:
             row = EveningReview(day=moment.date(), detected_at=_utc(now))
             try:
                 counts = self.counts(db, now)
+                built = self.card(db, now) if counts is not None else None
             except Exception as exc:  # noqa: BLE001 - recorded once; the alert loop goes on
-                log.exception("Evening review counts failed")
+                log.exception("Evening review card failed")
                 db.rollback()
-                row.delivery, row.last_error = "skipped", f"The desk's counts could not be read ({type(exc).__name__}), so nothing was sent."
+                row.delivery, row.last_error = "skipped", f"The day card could not be read ({type(exc).__name__}), so nothing was sent."
                 counts = {}
+                built = None
             if counts is None:
                 row.delivery, row.last_error = "skipped", "The Copilot Lab is off, so there is no desk to open."
             elif counts:
                 row.review, row.fills = counts["review"], counts["fills"]  # ``alerts`` and ``radar`` stay 0: ratings are not asked for
-                row.body = message(counts, notification_policy.held_text(db, now))
-                if row.body is None:
-                    row.delivery, row.last_error = "skipped", "Nothing was waiting for review, so nothing was sent."
+                if built is None:
+                    row.delivery, row.last_error = "skipped", "Nothing closed, no cut ping and nothing expiring tomorrow, so nothing was sent."
+                else:
+                    row.body = "\n".join(built)
             db.add(row)
             try:
                 db.commit()
@@ -161,16 +162,18 @@ class EveningReviews:
                 row.last_error = "Phone alerts are not set up on this server (NTFY_URL is not set)."
                 db.commit()
                 return
-            body = row.body or ""
+            title, _, body = (row.body or "").partition("\n")
+            if not body:  # a row queued before the card: its body is the to-review line
+                title, body = TITLE, title
             ticket = notification_policy.decide(db, sender="evening_review", source_id=str(row.id), kind="evening_review",
-                                                title=TITLE, body=body, now=now)
+                                                title=title, body=body, now=now)
             if ticket.held:
                 row.delivery, row.last_error = "held", ticket.reason
                 db.commit()
                 return
             row.attempts += 1
             try:
-                _, state = phone.send(TITLE, body + ticket.append, kind="evening_review", priority=3, tags=("memo",), path=PATH,
+                _, state = phone.send(title, body + ticket.append, kind="evening_review", priority=3, tags=("memo",), path=PATH,
                                       direct_click=True)
             except phone.SendError as exc:
                 if not _surely_unsent(exc):

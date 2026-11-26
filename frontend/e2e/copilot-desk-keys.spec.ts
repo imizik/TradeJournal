@@ -114,7 +114,11 @@ async function lab(page: Page, { time = NOW, session = SESSION, threads = () => 
 
 const palette = (page: Page) => page.getByRole("dialog", { name: "Jump to" });
 /** The Feed: the tab beside the copilot, or a phone's third view. */
-const openFeed = (page: Page, width = 1280) => width < 768 ? page.getByTestId("desk-view-feed").click() : page.getByRole("tab", { name: "Feed" }).click();
+const openFeed = async (page: Page, width = 1280) => {
+  if (width >= 768) return page.getByRole("tab", { name: "Feed" }).click();
+  await page.getByTestId("desk-top-more").click(); // a phone's Feed is under More
+  await page.getByTestId("desk-top-feed").click();
+};
 const conversation = (page: Page) => page.getByRole("region", { name: "Conversation" });
 /** A command from Jump to (⌘K): the time of day's actions (Arm today's plans, Close the day) live there, not on the desk. */
 async function command(page: Page, name: string) {

@@ -88,6 +88,10 @@ async function open(page: Page, width: number, path = "/copilot-lab") {
     return route.fulfill({ json: { reads } });
   });
   await page.goto(path);
+  if (width < 768) { // a phone keeps Practice, paper, rules and the scorecard under More (November 26, 2026)
+    await page.getByTestId("desk-top-more").click();
+    await page.getByTestId("desk-top-practice").click();
+  }
   return asked;
 }
 

@@ -107,6 +107,10 @@ async function open(page: Page, width: number, path = "/copilot-lab") {
     return route.fulfill({ json: body.preview ? { preview: fill } : { filled: { ...fill, position_id: "p-new" } } });
   });
   await page.goto(path);
+  if (width < 768 && path === "/copilot-lab") { // a phone keeps Practice, paper, rules and the scorecard under More (November 26, 2026)
+    await page.getByTestId("desk-top-more").click();
+    await page.getByTestId("desk-top-practice").click();
+  }
   return seen;
 }
 

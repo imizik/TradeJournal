@@ -100,7 +100,7 @@ async function open(page: Page, width: number) {
     return route.fulfill({ json: body.preview ? { preview: fill } : { filled: { ...fill, position_id: "p-new" } } });
   });
   await page.goto("/copilot-lab");
-  if (width < 768) await page.getByTestId("desk-view-feed").click();
+  if (width < 768) { await page.getByTestId("desk-top-more").click(); await page.getByTestId("desk-top-feed").click(); } // a phone's Feed is under More
   else await page.getByRole("tab", { name: "Feed" }).click();
   const feed = page.getByTestId("desk-feed");
   await feed.getByRole("button", { name: "Ideas", exact: true }).click();
@@ -152,7 +152,11 @@ test("Paper it on a scanner pick carries the scanner's stop and target", async (
 for (const width of [1440, 375]) {
   test(`the Paper section tags a position by source and splits the closed score by source at ${width}px`, async ({ page }) => {
     await open(page, width);
-    if (width < 768) await page.getByTestId("desk-view-book").click();
+    if (width < 768) {
+      await page.getByTestId("desk-view-book").click();
+      await page.getByTestId("desk-top-more").click(); // a phone's Practice is under More (November 26, 2026)
+      await page.getByTestId("desk-top-practice").click();
+    }
     const paper = page.getByTestId("desk-paper");
     await expect(paper.getByTestId("paper-position").getByTestId("paper-source")).toHaveText("Radar");
     const split = paper.getByTestId("paper-by-source");

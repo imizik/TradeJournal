@@ -121,7 +121,7 @@ for (const width of [375, 393, 440]) {
     await expect(amd.getByRole("button", { name: /^Hide AMD/ })).toBeHidden();
     // The other two views, and the ticker's dock tabs under its chart (five and the Grid's button: they fit the width
     // without swiping).
-    await page.getByTestId("desk-view-feed").click();
+    await page.getByTestId("desk-top-more").click(); await page.getByTestId("desk-top-feed").click(); // a phone's Feed is under More
     await expect(page.getByTestId("desk-feed")).toBeVisible();
     expect(await sideways(page), `Feed at ${width} px`).toBeLessThanOrEqual(0);
     await page.getByTestId("desk-view-ticker").click();

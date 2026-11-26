@@ -83,8 +83,10 @@ async function now_(page: Page, pings: unknown = PINGS, report: unknown = REPORT
   return writes;
 }
 
-const PINGS_SUMMARY = "4 alerts · selling at the alert would have been better on 2, worse on 1 · 1 not measured · "
-  + "2 Radar hits · 1 kept going · 1 not measured · paper: 0 of 1 setup green";
+// Only what was measured is spelled out: no "not measured" counts (November 26, 2026).
+const PINGS_SUMMARY = "4 alerts · selling at the alert would have been better on 2, worse on 1 · "
+  + "2 Radar hits · 1 kept going · paper: 0 of 1 setup green";
+const LINES = "details[data-testid^=report-]";
 
 for (const width of [1440, 375]) {
   test(`the day report is one card of four lines that open their rows on tap, asking nothing (${width} px)`, async ({ page }) => {
@@ -92,12 +94,12 @@ for (const width of [1440, 375]) {
     const writes = await now_(page);
     const card = page.getByTestId("day-report-card");
     await expect(page.getByTestId("day-report-card")).toHaveCount(1); // one card, not ten
-    await expect(card.locator(":scope > details")).toHaveCount(4);
+    await expect(card.locator(LINES)).toHaveCount(4);
     // In this order, each a single line.
-    await expect(card.locator(":scope > details > summary")).toHaveText([
+    await expect(card.locator(`${LINES} > summary`)).toHaveText([
       /^Today · 3 entries, 2 with a plan saved before the fill/,
       new RegExp(`^How the pings did · ${PINGS_SUMMARY.replace(/[$.]/g, "\\$&")}`),
-      /^Calls checked, last 30 days, since you checked: 14 · 5 up, 7 down, 2 not measured · Today: 4 \(1 up, 1 down, 2 not measured\)/,
+      /^Calls checked, last 30 days, since you checked: 14 · 5 up, 7 down · Today: 4 \(1 up, 1 down\)/,
       /^Open without a plan · AAPL/, // the one place the desk names it: the book shows no tag and the strip never asks
     ]);
     // Realized P&L is the book heading's (its hover since the calm pass): not repeated in the card.
@@ -108,20 +110,20 @@ for (const width of [1440, 375]) {
     expect(pingUrls.every(url => url.includes("day_only=true"))).toBe(true); // today's pings only
     await card.screenshot({ path: test.info().outputPath(`day-report-collapsed-${width}.png`) });
 
-    for (const line of await card.locator(":scope > details > summary").all()) await line.click();
+    for (const line of await card.locator(`${LINES} > summary`).all()) await line.click();
     await expect(card.getByTestId("report-entry")).toHaveText([/NBIS 100C.*plan saved first/, /MU 90P.*plan saved first/, /APLD 30C.*no plan/]);
     await expect(card.getByTestId("report-entry-note")).toHaveText(["“Why I'm in: broke the morning high”"]); // his note beside its trade
     await expect(card.getByTestId("pings-alert").first()).toContainText("Sold for $420 vs $600 at the alert's bid: −$180");
-    await expect(card.getByTestId("pings-alert").filter({ hasText: "MU" })).toContainText("Not measured: no price at the alert");
+    await expect(card.getByTestId("pings-alert").filter({ hasText: "MU" })).toHaveCount(0); // no price at the alert: left out
     await expect(card.getByTestId("pings-hit").filter({ hasText: "NBIS up" })).toContainText("Paper −$42 a contract (invalidation)");
     const calls = card.getByTestId("checked-call");
-    await expect(calls).toHaveCount(4);
+    await expect(calls).toHaveCount(2); // the two with no price to score them by are left out
     await expect(calls.filter({ hasText: "NVDA 10/30 105C" })).toContainText("planned it");
     await expect(calls.filter({ hasText: "NVDA 10/30 105C" })).toContainText(/NVDA 100\.00 → 103\.00\s*\+3\.0% at the close · contract 3\.00 → 4\.50\s*\+50%/);
     // A passed call is reported the same flat way: the price move, never money missed.
     await expect(calls.filter({ hasText: "QQQ" })).toContainText("you passed");
     await expect(calls.filter({ hasText: "QQQ" })).toContainText(/QQQ 660\.00 → 665\.00\s*\+0\.8% at the close/);
-    await expect(calls.filter({ hasText: "AMD" })).toContainText("Not measured: no closing price stored yet");
+    await expect(card).not.toContainText(/not measured|never the price in the post|Nothing here needs an answer/i); // no footnotes
     await expect(card.getByRole("button", { name: /Useful|Prompted a review|Already|Helped|Rate/ })).toHaveCount(0); // nothing to answer
     await expect(card).not.toContainText(/\b(buy|sell|hold|take) (it|now|this)\b|\bmissed\b|\bleft on the table\b|\bshould\b/i); // counts, not advice
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
@@ -130,13 +132,28 @@ for (const width of [1440, 375]) {
   });
 }
 
+test("the headline card leads: P&L, cut pings followed and what expires tomorrow, the rows behind one Details tap", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const card = { day: DAY, pnl: -412, closed: 2, cut: { pings: 2, acted: 1 }, next_day: "2026-10-26",
+    expiring: [{ contract: "NBIS 10/26/26 100C", contracts: 2, cut: 217 }] };
+  await now_(page, PINGS, { ...REPORT, card, sections: { ...REPORT.sections, card: "ok" } });
+  const report = page.getByTestId("day-report-card");
+  await expect(report.getByTestId("day-card-pnl")).toHaveText("−$412");
+  await expect(report.getByTestId("day-card-cut")).toHaveText("Cut pings: acted on 1 of 2");
+  await expect(report.getByTestId("day-card-expiring")).toHaveText("Expires Mon: NBIS 10/26/26 100C ×2, cut $2.17"); // a Friday card names Monday, never "tomorrow"
+  await expect(report.locator(`${LINES} > summary`).first()).toBeHidden(); // behind Details
+  await report.getByTestId("day-report-details").locator(":scope > summary").click();
+  await expect(report.locator(`${LINES} > summary`)).toHaveCount(4);
+  await report.screenshot({ path: test.info().outputPath("day-card-375.png") });
+});
+
 test("a line with nothing in it is absent", async ({ page }) => {
   await now_(page, PINGS,
     { ...REPORT, entries: { entries: 0, planned: 0, late: 0, pending: 0, rows: [] }, checks: { ...REPORT.checks, window: { days: 30, checked: 0, up: 0, down: 0, flat: 0, not_measured: 0 }, today: { checked: 0, up: 0, down: 0, flat: 0, not_measured: 0 }, rows: [] } },
     []);
   // Only the pings remain of the four lines (no open position here). Close the day is one quiet link under the card
   // (and in ⌘K), never the strip.
-  await expect(page.getByTestId("day-report-card").locator(":scope > details > summary")).toHaveText([/^How the pings did/]);
+  await expect(page.getByTestId("day-report-card").locator(`${LINES} > summary`)).toHaveText([/^How the pings did/]);
   await expect(page.getByTestId("close-the-day")).toHaveText("Close the day →");
 });
 

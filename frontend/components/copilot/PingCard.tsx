@@ -3,8 +3,9 @@
 /**
  * The ping card (docs/copilot-lab.md § Where a ping opens): where a position ping lands, ahead of the copilot's sheet.
  * It leads with what fired and what holding past that kind of ping has done for him in dollars, then the position as it
- * stands (P&L, bid and mid, contracts, whether an exit order is working, what it is worth at expiry if the stock stays
- * flat), then thumb-sized actions: Copy Close all at the bid (primary), Copy Trim half, Set stop. Keep holding is not
+ * stands (P&L, bid and mid, contracts, whether an exit order is working (left out when the feed cannot say), what it is worth at expiry if the stock stays
+ * flat), then thumb-sized actions: Open in Robinhood (primary, where he sells), Cut it and Holding…, with Set stop
+ * under them; with no Robinhood link, Copy Close all at the bid, Copy Trim half and Set stop as before. Holding is not
  * one tap: it asks for a check-in time (+15m or +30m) or a price stop first. A check-in time rides on the hold's journal
  * entry, and with HOLD_CHECK_IN_PINGS on the server pings again then if the position is still open (engine/hold_check_ins.py).
  *
@@ -208,6 +209,13 @@ function Act({ act, body, row, rows, ordersLive, onAsk, onPlan }: {
     setDone({ text: `Copied: sell ${contracts} at ${limit}. Paste it in Robinhood.`, copied: true });
     log("Exiting", what).catch(() => setError("Copied, but the decision was not saved."));
   };
+  const cutIt = async () => {
+    setError(null);
+    try {
+      await log("Exiting", "said Cut it on the card");
+      setDone({ text: "Saved: cutting it. Sell it in Robinhood." });
+    } catch (e) { setError(e instanceof Error ? e.message : "Not saved."); }
+  };
   const keepFor = async (minutes: 15 | 30) => {
     const at = Date.now() / 1000 + minutes * 60;
     setHolding(false);
@@ -229,11 +237,10 @@ function Act({ act, body, row, rows, ordersLive, onAsk, onPlan }: {
         <Figure label="Bid / mid">
           {freshBid !== null ? priceText(freshBid) : "—"} / {mark ? <span className={cn(!mark.live && "opacity-60")}>{priceText(mark.share)}</span> : "—"}
         </Figure>
-        <Figure label="Exit order">
-          {working === null ? <span className="text-muted-foreground">unknown</span>
-            : working.length ? <span className="text-emerald-300">{working.map(o => `${o.action} ${o.quantity ?? ""}${o.limit != null ? ` @ ${priceText(o.limit)}` : ""}`).join(", ")}</span>
+        {working !== null && <Figure label="Exit order">
+          {working.length ? <span className="text-emerald-300">{working.map(o => `${o.action} ${o.quantity ?? ""}${o.limit != null ? ` @ ${priceText(o.limit)}` : ""}`).join(", ")}</span>
             : <span data-testid="ping-card-no-exit" className="font-medium text-amber-300">None working</span>}
-        </Figure>
+        </Figure>}
         {atExpiry !== null && stockNow !== null && (
           <Figure label={`At expiry if ${symbol} stays ${priceText(stockNow)}`} wide>
             <span className={atExpiry <= 0 ? "font-medium text-rose-300" : ""}>{usd0(atExpiry).replace("+", "")}</span>
@@ -242,7 +249,15 @@ function Act({ act, body, row, rows, ordersLive, onAsk, onPlan }: {
       </dl>
 
       <div role="group" aria-label="Act on this position" className="space-y-2">
-        {copyable ? <>
+        {/* Robinhood first: it is where he sells. Cut it records the choice (an Exiting decision, as a Telegram tap does). */}
+        {body.broker ? <>
+          <a href={body.broker.url} target="_blank" rel="noreferrer" data-testid="ping-card-robinhood"
+            className={cn(BIG, "bg-primary text-primary-foreground", act && ASKED)}>Open {symbol} in {body.broker.label}</a>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" data-testid="ping-card-cut" onClick={() => void cutIt()} className={cn(BIG, "border text-foreground hover:bg-secondary")}>Cut it</button>
+            <button type="button" data-testid="ping-card-holding" onClick={() => setHolding(true)} className={cn(BIG, "border text-foreground hover:bg-secondary")}>Holding…</button>
+          </div>
+        </> : copyable ? <>
           <button type="button" data-testid="ping-card-close" data-asked={act === "close" || undefined} autoFocus={act === "close"}
             onClick={() => void copyClose(held!)} className={cn(BIG, "bg-primary text-primary-foreground", act === "close" && ASKED)}>
             Copy Close all {held} @ {basis} {sellAt!.toFixed(2)}
@@ -279,8 +294,11 @@ function Act({ act, body, row, rows, ordersLive, onAsk, onPlan }: {
           </div>
         ) : (
           <div className="flex items-center gap-3 text-sm">
-            <button type="button" data-testid="ping-card-hold" onClick={() => setHolding(true)}
-              className="min-h-11 px-1 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Keep holding…</button>
+            {body.broker
+              ? <button type="button" data-testid="ping-card-stop" onClick={() => plan && side ? setStopping(stopping === "stop" ? null : "stop") : onPlan(symbol)}
+                  className="min-h-11 px-1 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Set stop</button>
+              : <button type="button" data-testid="ping-card-hold" onClick={() => setHolding(true)}
+                  className="min-h-11 px-1 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Keep holding…</button>}
             <button type="button" onClick={() => onAsk(`${fired} on ${symbol}. Should I close, trim or hold here, and why?`)}
               className="ml-auto min-h-11 px-1 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Ask copilot</button>
           </div>

@@ -551,7 +551,7 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   stays on the desk). Picking a book or Watching row while the Feed shows leaves the Feed up (the copilot opens that
   ticker behind its tab, which names it); anything that asks the copilot (a Feed row's Ask or Plan it, the strip's
   answers, the palette, the thread list) brings the copilot forward. From 768 to 1179 px the Feed is a drawer on the
-  right opened by the top bar's **Feed** button; a phone has it as a view, opened by the Feed chip in the top row (§ Phone). Every place has a key while not
+  right opened by the top bar's **Feed** button; a phone has it as a view, opened from the top row's **More** (§ Phone; since 2026-11-26 the Feed chip shows only while the Feed is open). Every place has a key while not
   typing and a ⌘K command (§ Keys and the palette). Nothing was removed: each piece is at most two taps from the desk.
 - **The calm pass (2026-11-16).** After the close the owner found the desk "still sooooo much going on": every fact
   showed in two or three places. The rule since: every fact is shown once, in one place; anything secondary is a hover,
@@ -676,8 +676,10 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   "in profit" is Robinhood's P&L. The row's facts wrap onto a second line rather than run under the P&L, at any
   width. Its pen (a note) and eye (Not following) show on the row's hover or keyboard focus with a mouse; a touch
   screen always shows them. A phone row keeps only a full-size pen: the eye beside it hid positions by mistake, so on
-  a phone a ticker is hidden from its thread's header. A phone's top row is the Feed chip, the data health dot, the Day, Jump to and one
-  **More** holding Threads. These come from each position row's `book` (`copilot_desk._book`). Selecting a row shows it in the centre at once and, where the copilot sits beside it, opens
+  a phone a ticker is hidden from its thread's header. A phone's top row is the data health dot, the Day, Jump to and one
+  **More** holding Threads, the Feed, Practice and the Real/Paper/Replay switch (since 2026-11-26 the phone's home is
+  positions first, sorted by which need action, with a plain flag on any past its cut line or expiring today; the account
+  table, orders, plan, plan streak and practice are off its first screen). These come from each position row's `book` (`copilot_desk._book`). Selecting a row shows it in the centre at once and, where the copilot sits beside it, opens
   its conversation (its own, else the ticker's newest open one, else its link; a position whose link leaves the desk
   opens the symbol's desk view). The desk never reloads for it: a symbol's desk view opens in place (see *The address*
   below), so the book, the top bar, the strip and the centre keep their data. Each row's eye sets its ticker to **Not following**; those sit behind "N not followed
@@ -1569,7 +1571,7 @@ drop counts on that visit, and the plan leaves the list on the next read).
 unsent (check each plan against the pre-market and propose what is missing).
 Opening a thread or Close leaves the checklist. Nothing in it arms, sizes or
 sends an order. On a
-phone Jump to or ask…, Threads and Plan a trade show as icons beside the Feed chip. One
+phone Jump to or ask…, Threads and Plan a trade show as icons in the top row. One
 read, `GET /copilot/desk/session` (owner only, refused while the lab is off),
 once a minute while the page is visible, read once by the desk
 (`useDeskSession`) for its top bar, strip and lower block, composed in `copilot_desk.py` from readers
@@ -3627,11 +3629,11 @@ otherwise. While the lab is on (`COPILOT_ENABLED=true`), a position alert's
 tap opens the desk on that position's decision (`position_alerts.desk_path`:
 the plan's conversation when a plan card saved the position's plan, else
 `/copilot-lab?symbol=…`, which opens on the decision bar); with the lab off the
-tap opens the trade page as before. With the lab on, a position alert
-carries **Close** and **Trim** instead of the survey answers: each opens the ping card
-(§ Where a ping opens) with `&do=close` or `&do=trim`, which rings and focuses that button;
-nothing is copied until he taps it, and on Telegram they ride beside Why? (`phone.send(keep_links=True)`).
-Whether he acted is still read from his fills and the alert scorecard, not from a tap. With the lab
+tap opens the trade page as before. With the lab on (since 2026-11-26), a position alert
+carries no answer links: on Telegram its reply buttons are **Cut it**, **Holding** and Why?
+(`telegram_replies.cut_buttons`), each saving one `decision` day-journal entry ("Exiting. …" / "Holding. …")
+that the alert scorecard reads as the desk's; ntfy keeps Open and Robinhood. The ping card's `&do=close|trim`
+still rings that button when an address carries it. With the lab
 off the push carries two answer
 actions next to Open app (ntfy shows three; all need `ALERT_APP_URL`):
 **Prompted review** and **Already aware** (`position_alerts.ANSWER_ACTIONS`)
@@ -4516,21 +4518,25 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   same symbol is its own message).
 - **Evening review:** once a trading day (the market calendar: no weekend or
   holiday) at `EVENING_REVIEW_PING_AT` (default `16:30` New York; a time before
-  16:00 keeps the default), `app/engine/evening_review.py` reads what the desk
-  has waiting through `copilot_desk.waiting`, what Close the day walks: the
-  followed symbols still asking their close question and the fills waiting to
-  link, and the pings the policy held today (`notification_policy.held_text`).
-  Alert and Radar ratings are never counted (since 2026-11-10; the row's
-  `alerts` and `radar` columns stay 0). When any is waiting it sends one ping,
-  "Close the day: To review: 2 threads · 1 fill to link · 12 pings held today
-  (Radar 11, evening 1)", that opens `/copilot-lab?close=1` on Close the day (kind
-  `evening_review`, never held by the policy). Nothing waiting, the lab off, or a
-  desk source (positions, plans) that cannot be read is recorded `skipped` with
-  why and sends nothing. One `evening_review` row a day (unique day, additive
+  16:00 keeps the default), `app/engine/evening_review.py` sends the **day card**
+  itself (since 2026-11-26, `app/engine/day_card.py`): "Today −$412 / 2 trades
+  closed, −$412 realized. / Cut pings: acted on 1 of 2. / Expires tomorrow: NBIS
+  10/23/26 100C ×2, cut $2.17." (realized P&L over today's closed trades; the cut
+  pings, `leak_bill.PING_KINDS`, acted on as the alert scorecard counts it; the long
+  options expiring the next trading day with their cut line). No to-do list and no
+  held-ping tally. It opens `/copilot-lab`, whose after-close day report leads with
+  the same card (kind `evening_review`, never held by the policy). The desk's
+  to-review counts (`copilot_desk.waiting`) are still stored on the row. A day with
+  nothing closed, no cut ping and nothing expiring tomorrow, the lab off, or a
+  source that cannot be read is recorded `skipped` with why and sends nothing. One `evening_review` row a day (unique day, additive
   migration `d2e7a4c9b1f6`): `skipped`, `held`, `sent`, `unknown` (may have
   reached the phone, never resent) or `expired`. A day not counted by two hours
   after its time waits for the next. A Skip or "No plan" kept only in a browser
-  is not seen by the count. **Switch on:** `EVENING_REVIEW_PING_ENABLED=true`
+  is not seen by the count. **Morning glance** (`day_card.MorningGlance`, off
+  unless `MORNING_GLANCE_PINGS=true`): at 09:25 New York on a trading day with a
+  long option open, one silent ping, "You hold 2" with each contract, its expiry
+  and its cut line where the rule applies (kind `morning_glance`, once a day by
+  `new_only`, never held). **Switch on:** `EVENING_REVIEW_PING_ENABLED=true`
   in the API's environment (needs `COPILOT_ENABLED=true` and `NTFY_URL`),
   restart the API; it runs on the level alert monitor's loop. Off by default.
   Tests: `backend/tests/test_evening_review.py`,
@@ -4597,14 +4603,16 @@ phone lands on the ticker view, not the conversation). Action first: what fired 
 holding past that kind of alert did over the scorecard's 30 days (`alert_scorecard.habit`: alerts with no Exiting
 logged after them, closed ones measured against selling at the alert's bid); then P&L, bid (the alert's, while it is
 under 10 minutes old) and mid, contracts, whether an exit order is working ("unknown" unless the Robinhood feed is live and its order read is whole and current) and
-the value at expiry if the stock stays where it is. **Copy Close all @ bid** is the primary button (the mid when the bid
+the value at expiry if the stock stays where it is. With a Robinhood link (`broker`, since 2026-11-26) **Open <ticker>
+in Robinhood** is the primary button, then **Cut it** (logs `Exiting. …; said Cut it on the card`) and **Holding…**, with
+Set stop under them. Without one, **Copy Close all @ bid** is the primary button (the mid when the bid
 is stale, and it says so), then **Copy Trim half** and **Set stop** (the plan's stop editor, or Plan it with no plan).
-**Keep holding** is not one tap: it asks for +15m, +30m or a price stop first. Each copy puts Robinhood's order lines on
+**Keep holding** (Holding…) is not one tap: it asks for +15m, +30m or a price stop first. Each copy puts Robinhood's order lines on
 the clipboard and logs an `Exiting. …` decision; a hold logs `Holding. …` with the check-in time, and +15m / +30m save
 that check-in on the entry (`check_in` on `POST /day-journal/{day}/entries`, kept in its `context_json`). With
 `HOLD_CHECK_IN_PINGS=true` (off by default; the card's body says which, `check_in_pings`) the card says "I'll ping you at
 …" and `engine/hold_check_ins.py` sends one loud ping at that time, in the regular session, if the pinged position is
-still open: "Check-in: <contract> still open", opening this same card (with Close and Trim while the desk is on). A newer
+still open: "Check-in: <contract> still open", opening this same card (no answer links while the desk is on: the card's Cut it and Holding answer it). A newer
 hold on the same ping replaces it, an `Exiting` decision on the symbol after it cancels it, a check-in more than 10
 minutes late is dropped, and it is claimed once through the notification policy (sender `hold_check_in`, ranked with
 the one-hour alert, anchored to the position). Off, the hold is logged as before and nothing pings. On an interrupt's card any choice also records its Noted. Nothing is sent to Robinhood. The decision bar's
@@ -5283,7 +5291,8 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `PING_QUIET_MINUTES` | `10` | A second ping for the same position inside this window is merged or suppressed. |
 | `PREMARKET_PREP_ENABLED` | unset (off) | `true` sends the [morning brief](#pre-market-prep) ping on trading mornings (needs `COPILOT_ENABLED` and `NTFY_URL`). `PREMARKET_PREP_AT` (`HH:MM` New York, default `09:00`) sets its time. |
 | `WEEK_REVIEW_AUTO_ENABLED` | unset (off) | `true` runs [Review my week](#review-my-week) by itself once a week and pings it (needs `COPILOT_ENABLED` and `NTFY_URL`). `WEEK_REVIEW_AUTO_AT` (`HH:MM` New York, default `16:45`) sets its time on the week's last trading day. |
-| `EVENING_REVIEW_PING_ENABLED` | unset (off) | `true` sends the [evening review ping](#phone-ping-policy) on a trading day when something waits for review (needs `COPILOT_ENABLED` and `NTFY_URL`). `EVENING_REVIEW_PING_AT` (`HH:MM` New York, default `16:30`, not before 16:00) sets its time. |
+| `EVENING_REVIEW_PING_ENABLED` | unset (off) | `true` sends the [evening review ping](#phone-ping-policy), the day card, on a trading day with something to say (needs `COPILOT_ENABLED` and `NTFY_URL`). `EVENING_REVIEW_PING_AT` (`HH:MM` New York, default `16:30`, not before 16:00) sets its time. |
+| `MORNING_GLANCE_PINGS` | unset (off) | `true` sends the 09:25 [morning glance](#phone-ping-policy) on a trading day with a long option open: each one's expiry and cut line. |
 | `POSITION_COMPANION_ENABLED` | unset (off) | `true` runs the [position companion](#position-companion): unplanned long options are adopted with a drafted plan, updated and closed in one Telegram thread (needs `COPILOT_ENABLED` and Telegram). `COMPANION_MODEL` (default: `COPILOT_MODEL`), `COMPANION_MOVE_PCT` (3), `COMPANION_MAX_UPDATES` (4 a position a day), `COMPANION_MAX_POSITIONS` (6 watched at once). |
 | `DAY_REPLAY_ENABLED` | unset (off) | `true` builds [Watch your day](#watch-your-day) at 16:20 New York on a trading day with a fill and pings it (needs `NTFY_URL`; not the lab). |
 | `ANTHROPIC_API_KEY` | none | Read only by the backend process for `anthropic`. It is never sent to the browser. |

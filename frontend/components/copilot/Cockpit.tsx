@@ -221,6 +221,24 @@ const STATE: Record<Exclude<DeskBookState, "no_plan">, { label: string; classNam
 };
 const EXPIRES_TODAY = { label: "Expires today", className: "border-foreground/30 text-foreground" };
 
+/** Whether a short-dated long option trades at or under his cut line (``book.cut_line``, dollars a contract: 30% under
+ * the first buy) at the price the row shows now; false without a line or a price. */
+export function pastCut(book: DeskThread["book"], ticks: ReturnType<typeof useDeskTicks>): boolean {
+  if (!book || book.cut_line == null) return false;
+  const now = rowNow(book, ticks).price;
+  return now != null && now * 100 <= book.cut_line + 1e-9;
+}
+
+/** How much a row needs him now, for the book's order: 0 past its stop or cut line, 1 near its stop or expiring today,
+ * 2 the rest. A stable sort keeps the read's order within each. */
+export function needRank(row: DeskThread, day: string, ticks: ReturnType<typeof useDeskTicks>): number {
+  const book = row.book;
+  if (!book) return 2;
+  if (book.state === "past_stop" || pastCut(book, ticks)) return 0;
+  if (book.state === "near_stop" || (book.expiry && row.instrument !== "stock" && daysTo(book.expiry, day) === 0)) return 1;
+  return 2;
+}
+
 /** The book row's tag, only when it tells the owner something: Past stop, Near stop and Giving back first, then
  * Expires today (an option), then On plan. A position with no plan has none: its missing plan bar and the day report's
  * "Open without a plan" line say so, and on four rows of five the tag said nothing. */
@@ -343,6 +361,8 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
   // One row is marked: the one tapped, else the first on the centre's ticker (two contracts can share a ticker).
   const marked = followed.find(r => r.key === selectedKey && r.symbol === selected)?.key ?? followed.find(r => r.symbol === selected)?.key;
   const ticks = useDeskTicks(followed.flatMap(r => [r.book?.tick?.quote, r.symbol]));
+  // What needs him first: past a stop or cut line, then near a stop or expiring today, then the rest in the read's order.
+  followed.sort((a, b) => needRank(a, day, ticks) - needRank(b, day, ticks));
   // His notes on each row's trade and on the Orders group's fills (DeskNotes.tsx).
   const notes = useDeskNotes(followed.flatMap(r => rowTrade(r) ?? []), isLive ? (live?.orders ?? []).filter(o => !o.working).map(fillKey) : []);
   const follow = (symbol: string, following: boolean) => {
@@ -377,7 +397,8 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
             className="inline-flex min-h-11 items-center text-foreground underline underline-offset-2 hover:text-foreground sm:min-h-0">Show all</button>
         </p>
       )}
-      {isLive && <OrdersGroup orders={live?.orders} notes={notes} />}
+      {/* A phone has its own Orders tab: positions come first on its home. */}
+      {isLive && <div className="max-md:hidden"><OrdersGroup orders={live?.orders} notes={notes} /></div>}
       {followed.length ? (
         <ul>
           {followed.map(row => {
@@ -403,6 +424,14 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                     {/* Wraps rather than spilling: a tag never runs under the sparkline or the P&L, at any width. On a phone the
                         price and today's move lead this line (as Robinhood's list does), so a row is two lines and about
                         eight positions fit a screen. */}
+                    {/* The plain flags first, in words: what makes this row need him now. */}
+                    {book && (pastCut(book, ticks) || state === EXPIRES_TODAY) && (
+                      <span data-testid="book-flags" className="mb-0.5 flex flex-wrap gap-1 text-[11px] font-semibold">
+                        {pastCut(book, ticks) && <span data-testid="book-past-cut" className="rounded bg-rose-500/20 px-1.5 py-px text-rose-200">
+                          Past cut line {premium(book.cut_line! / 100)}</span>}
+                        {state === EXPIRES_TODAY && <span data-testid="book-expires-today" className="rounded bg-amber-400/20 px-1.5 py-px text-amber-200">Expires today</span>}
+                      </span>
+                    )}
                     <span data-testid="book-meta" className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground [&>*]:max-w-full [&>*]:truncate [&>*]:whitespace-nowrap">
                       {book && <span data-testid="book-now" className={cn("tabular-nums md:hidden", now.stale && "opacity-50")}>
                         <span data-testid="book-price">{now.price == null ? "—" : premium(now.price)}</span> · today{" "}

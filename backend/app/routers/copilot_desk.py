@@ -711,6 +711,13 @@ def threads(db: Session, now: float) -> dict:
         adopted = today._section(db, "desk adopted", lambda: {"state": "ok", "map": _adopted(db)})
         act, watch, covered = _position_rows(found, links.get("map", {}), board if board["state"] == "ok" else {},
                                              decisions.get("symbols", {}), adopted.get("map", {}))
+        # The owner's cut line on each short-dated long option (``day_card.holdings``), for the phone's "Past cut line" flag.
+        from app.engine import day_card
+        cuts = today._section(db, "desk cut lines", lambda: {"state": "ok", "map": {
+            str(h["trade_id"]): h["cut"] for h in day_card.holdings(db) if h["cut"] is not None}})
+        for r in act + watch:
+            if r.get("book") is not None:
+                r["book"]["cut_line"] = cuts.get("map", {}).get(str(r.get("trade_id")))
     near = []
     if board["state"] == "ok":
         waiting = {}
@@ -1893,8 +1900,10 @@ def desk_day_report(db: Session = Depends(get_session)):
     """The cockpit's after-close day report, the parts the other reads do not hold (docs/copilot-lab.md § The desk;
     ``app/engine/day_report.py``): ``entries``, today's trades opened and how many had a plan saved before the fill;
     ``checks``, the calls he checked scored from the price when he checked to the close (today's, with the last 30 days'
-    tally). Facts and counts: "not measured" when a stored price is missing, never a provider fetch, nothing to answer.
-    Tickers he does not follow are left out. Each part fails on its own. Read-only, owner-only, refused while the lab is
+    tally); ``card``, the headline (``app/engine/day_card.py``: realized P&L, cut pings followed, what expires the next
+    session), the same card the 4:30 ping sends. Facts and counts: "not measured" when a stored price is missing, never a
+    provider fetch, nothing to answer. Tickers he does not follow are left out of entries and checks. Each part fails on
+    its own. Read-only, owner-only, refused while the lab is
     off."""
     if not copilot.settings().enabled:
         raise HTTPException(503, "Copilot Lab is off.")
@@ -1904,9 +1913,12 @@ def desk_day_report(db: Session = Depends(get_session)):
     hidden = day_report.not_followed(db)
     entries = today._section(db, "day report entries", lambda: day_report.entries_today(db, day, hidden))
     checks = today._section(db, "day report checks", lambda: day_report.checks_report(db, day, now, hidden))
+    from app.engine import day_card
+    card = today._section(db, "day report card", lambda: {**day_card.card(db, now), "state": "ok"})
     return {"day": day.isoformat(), "as_of": today._iso(now),
             "entries": entries if entries["state"] == "ok" else None, "checks": checks if checks["state"] == "ok" else None,
-            "sections": {"entries": entries["state"], "checks": checks["state"]}}
+            "card": {k: v for k, v in card.items() if k != "state"} if card["state"] == "ok" else None,
+            "sections": {"entries": entries["state"], "checks": checks["state"], "card": card["state"]}}
 
 
 class DeskNoteBody(BaseModel):

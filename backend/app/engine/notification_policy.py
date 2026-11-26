@@ -60,13 +60,14 @@ The policy, in the order it is applied:
   otherwise spend the allowance first.
 - **No shared daily ceiling.** Each budget is independent. Position alerts
   without a per-kind budget are governed by their senders and the quiet window.
-  ``evening_review`` is never held: it reports what was held. The former
+  ``evening_review`` is never held: it reports what was held. Nor is ``morning_glance`` (the 9:25 list of what he
+  holds, ``engine/day_card.py``), which its sender sends once a day. The former
   ``PING_DAILY_CAP`` setting is ignored.
 
   ``expiry_final`` > ``invalidation`` > ``giveback`` > ``time_stop`` (the
   90-minute last-day and the day-before-expiry alerts ranked with it) > ``entry``
   > ``hold_hour`` > ``interrupt`` > ``cut_line`` > ``companion_update`` > ``nudge`` / ``link`` / ``companion_adopt`` > ``prep`` (and ``week_review``,
-  ``day_replay``) > ``evening_review`` > ``radar_setup`` > ``radar_event`` > ``radar_digest`` >
+  ``day_replay``) > ``morning_glance`` > ``evening_review`` > ``radar_setup`` > ``radar_event`` > ``radar_digest`` >
   ``thesis_watch`` > ``research`` > ``paper`` > ``paper_review`` > ``self_check`` > ``note_digest`` > ``leak_bill``.
 
 Every decision is one ``PhonePing`` row (``sent``, ``merged``, ``suppressed``,
@@ -111,13 +112,13 @@ from app.models import CaptureLink, Fill, PhonePing, Trade, TradeFill
 
 log = logging.getLogger(__name__)
 
-PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "interrupt", "cut_line", "companion_update", "nudge", "prep", "evening_review",
+PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "interrupt", "cut_line", "companion_update", "nudge", "prep", "morning_glance", "evening_review",
             "radar_setup", "radar_event", "radar_digest", "thesis_watch", "research", "paper", "paper_review", "self_check", "note_digest", "leak_bill")
 ALIASES = {"expiry_first": "time_stop", "expiry_eve": "time_stop", "same_day_1pm": "time_stop", "wrong_way": "hold_hour", "no_exit": "hold_hour", "hold_check_in": "hold_hour", "interrupt_size": "hold_hour", "link": "nudge", "no_plan": "nudge",
            "companion_adopt": "nudge",
            "week_review": "prep", "day_replay": "prep"}
 NEVER_QUIET = 2  # ranks 0-1 (last-day final, invalidation) are never held by the quiet window
-NEVER_HELD = ("evening_review",)  # never held by the quiet window: it reports what was held
+NEVER_HELD = ("evening_review", "morning_glance")  # never held: the evening reports what was held; the 9:25 glance is once a day
 # Each kind's own daily budget (PING_BUDGET_<KIND>); before the open it also shares the
 # pre-open allowance. The noun names the budget in a held ping's reason.
 BUDGETS = {"interrupt": 4, "companion_update": 12, "nudge": 2, "prep": 1, "radar_setup": 4, "radar_event": 4, "radar_digest": 2, "thesis_watch": 2, "research": 1, "paper": 6,
@@ -379,7 +380,7 @@ def _label(kind: str) -> str:
     return {"expiry_final": "last-day final", "expiry_first": "expires-today", "giveback": "give-back", "hold_hour": "one-hour", "wrong_way": "wrong-way", "no_exit": "no-exit-order", "same_day_1pm": "same-day 1 PM",
             "time_stop": "time stop", "entry": "entry trigger", "interrupt": "pattern", "interrupt_size": "size-by-adding pattern", "cut_line": "cut-line", "invalidation": "invalidation", "nudge": "plan nudge",
             "no_plan": "plan nudge", "link": "plan link", "prep": "pre-market prep", "week_review": "week review", "day_replay": "Watch your day",
-            "evening_review": "evening review", "expiry_eve": "day-before-expiry", "radar_digest": "Radar digest",
+            "morning_glance": "morning glance", "evening_review": "evening review", "expiry_eve": "day-before-expiry", "radar_digest": "Radar digest",
             "radar_setup": "Radar setup", "radar_event": "Radar", "thesis_watch": "thesis watch", "research": "research", "companion_adopt": "adopted position",
             "companion_update": "companion update", "paper": "paper", "paper_review": "paper review",
             "day_loss": "daily loss lock", "day_green": "green-day walk-away", "plan_size": "over the day plan's size",
