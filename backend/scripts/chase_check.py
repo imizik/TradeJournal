@@ -3,7 +3,8 @@
 The pre-trade check says "Price is X% past VWAP, the shape of a chase" and quotes the record of trades a model tagged
 as chases after the fact (``trade_ai_tags.pretrade_setup_record``). That record is hindsight: a losing trade is easier
 to call a chase. This measures the same thing from prices instead. For each closed long option trade (entries all
-``buy_to_open``, Webull left out), the first entry fill's ``FillMarketContext`` (from minute bars at the fill) gives how
+``buy_to_open``, Webull left out), the first entry fill's ``FillMarketContext`` (from minute bars at the fill, current ``CONTEXT_VERSION`` only; older
+calculations are counted apart, never mixed in) gives how
 far the stock was past VWAP in the trade's direction (calls above, puts below) and where it sat in the day's range so
 far. Trades are grouped by that distance; each group's count, win rate, dollars and median return are printed, plus the
 gap between extended (``EXTENDED_PCT`` or more, the pre-trade check's own line) and the rest with a bootstrap interval,
@@ -22,6 +23,7 @@ from statistics import mean, median
 from sqlmodel import Session, select
 
 from app.database import engine
+from app.engine.metric_versions import CONTEXT_VERSION
 from app.engine.trade_ai_tags import EXTENDED_PCT, _is_chase
 from app.models import FILL_LIGHT, Account, Fill, FillMarketContext, Trade, TradeAiTag, TradeFill
 
@@ -42,6 +44,8 @@ def rows(db: Session) -> list[dict]:
         if not entries or any(f.side != "buy_to_open" for f in entries):
             continue
         context = db.get(FillMarketContext, entries[0].id)
+        stale = context is not None and context.calculation_version != CONTEXT_VERSION
+        context = None if stale else context  # an older calculation is not entry-time evidence: counted apart
         tag = tags.get((trade.account_id, entries[0].raw_email_id))
         sign = 1 if trade.option_type == "call" else -1
         days = (trade.expiration - entries[0].executed_at.date()).days if trade.expiration else None
@@ -51,7 +55,7 @@ def rows(db: Session) -> list[dict]:
             "past": sign * context.entry_vs_vwap_pct if context and context.entry_vs_vwap_pct is not None else None,
             # Where in the day's range so far, toward the trade's side: 100 is buying a call at the high of day.
             "range": None if range_used is None else (range_used if sign > 0 else 100 - range_used),
-            "short": days is not None and 0 <= days <= 3,
+            "stale_context": stale, "short": days is not None and 0 <= days <= 3,
             "tag_chase": None if tag is None else _is_chase({"setup": tag.setup, "primary_mistake": tag.primary_mistake,
                                                              "mistakes": json.loads(tag.mistakes_json or "[]")}),
         })
@@ -78,7 +82,8 @@ def gap(a: list[dict], b: list[dict]) -> dict | None:
 
 def report(found: list[dict]) -> dict:
     measured = [r for r in found if r["past"] is not None]
-    out = {"long_option_trades": len(found), "with_vwap_at_entry": len(measured), "by_distance_past_vwap": {}}
+    out = {"long_option_trades": len(found), "with_vwap_at_entry": len(measured),
+           "context_from_an_older_calculation": sum(r.get("stale_context", False) for r in found), "by_distance_past_vwap": {}}
     for low, high, label in BUCKETS:
         out["by_distance_past_vwap"][label] = record([r for r in measured if (low is None or r["past"] >= low)
                                                       and (high is None or r["past"] < high)])
