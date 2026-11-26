@@ -23,7 +23,7 @@ from sqlmodel import Session, select
 
 from app.database import engine
 from app.engine.trade_ai_tags import EXTENDED_PCT, _is_chase
-from app.models import Account, Fill, FillMarketContext, Trade, TradeAiTag, TradeFill
+from app.models import FILL_LIGHT, Account, Fill, FillMarketContext, Trade, TradeAiTag, TradeFill
 
 BUCKETS = ((None, 0.0, "against VWAP"), (0.0, 1.0, "0-1% past"), (1.0, EXTENDED_PCT, f"1-{EXTENDED_PCT:g}% past"),
            (EXTENDED_PCT, None, f"{EXTENDED_PCT:g}%+ past"))
@@ -37,7 +37,7 @@ def rows(db: Session) -> list[dict]:
             Trade.instrument_type == "option", Trade.status.in_(("closed", "expired")), Trade.realized_pnl.is_not(None))).all():
         if (account.broker or "").lower() == "webull" or trade.option_type not in ("call", "put"):
             continue
-        entries = db.exec(select(Fill).join(TradeFill, TradeFill.fill_id == Fill.id).where(
+        entries = db.exec(select(Fill).options(*FILL_LIGHT).join(TradeFill, TradeFill.fill_id == Fill.id).where(
             TradeFill.trade_id == trade.id, TradeFill.role == "entry").order_by(Fill.executed_at, Fill.raw_email_id)).all()
         if not entries or any(f.side != "buy_to_open" for f in entries):
             continue
