@@ -440,6 +440,11 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     `(symbol, minutes, lookback_days?)` replays the owner's own closed trades
     in the symbol at a level like the one being drafted (Your history at this
     level, below).
+  - `get_my_record(symbol?, setup?, dte_bucket?)` sums the owner's closed
+    trades (Webull left out) joined to their AI review tags: count, wins,
+    losses, win rate, total and median P&L, cut-rule breaks, top 5 mistakes
+    and top 8 setups, capped at about 5,500 characters. `dte_bucket` is one of
+    `0dte`, `1-3dte`, `4-7dte`, `8-21dte`, `22+dte`.
   - Journal times (`opened_at`, entry and exit) are New York wall-clock times,
     emitted with their offset (for example `-04:00` in summer, `-05:00` in
     winter), never as UTC. Days held count from that moment. Option marks
@@ -453,7 +458,7 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   - The fixture serves simulated versions. In replay, the chart is
     unavailable (the snapshot has no bars) and so is the book.
   - Research jobs never get `get_positions`, `get_trades`, `get_memories`,
-    `get_trade_review`, `get_week_review` or `get_level_history`: a job reads
+    `get_trade_review`, `get_week_review`, `get_level_history` or `get_my_record`: a job reads
     untrusted pages and can fetch URLs, which could carry the book out. Those
     aren't even registered for a job; `get_chart_context` is allowed.
     `get_option_candidates` and `get_moment` are kept out too: the job
@@ -5284,6 +5289,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `COPILOT_EFFORT` | `medium` | `low`, `medium` or `high`. |
 | `COPILOT_BACKENDS` | `anthropic` | The backends the panel's **Backend** picker offers, comma-separated; `COPILOT_BACKEND` is always offered first. `anthropic` is offered only when the API key is set. A turn sends its pick as `backend` in `POST /copilot/chat`; one not offered is refused (422). Remembered per browser. |
 | `COPILOT_DAILY_BUDGET_USD` | `4` | Estimated API spend (New York day, `anthropic` turns only) at which `POST /copilot/chat` refuses further API turns with a 429 until tomorrow. Every turn is recorded in `copilot_turn` (`app/ai/copilot_spend.py`: backend, model, rounds, tokens, estimated cost; no text), `GET /copilot/status` reports `spend_today_usd`, and the panel shows "API today $x of $y" while the API backend is picked. Turn metrics also reach the server journal at INFO. |
+| `AI_MONTHLY_BUDGET_USD` | `100` | Shared month-to-date AI spend ceiling (New York calendar month, USD) across every Anthropic call site (copilot turns, morning prep, week review, desk/day/paper reviews, companion, call check, Telegram, shadow book, research jobs, `api_runner` reviews/judge, `practice_agent`, `strategy_factory` and paid evals; the offline `research/opening_lab` harness is outside it), summing `copilot_turn` (`api` and `api_background`), `research_job.spend_json` and `practice_agent_call.cost_usd`. Every call site refuses before calling Anthropic when the month is spent; `GET /copilot/status` reports `spend_this_month_usd` and `monthly_budget_usd`. |
 | `COPILOT_TURN_BUDGET_USD` | `0.25` | Estimated API spend at which a turn stops between rounds (output is also capped at 4,000 tokens per round). A turn that may [search the web](#web-search) gets $0.15 more. A plan or review turn (a companion or week-review job, or any turn that has asked for `get_trade_review`, `get_week_review`, `get_level_history` or `get_option_candidates`) gets twice the budget, $0.50 by default (`copilot.DEEP_TURN_FACTOR`): on Opus 5.5 they measured $0.19-0.21 against the $0.25 an ordinary question gets, and one that still reaches its cap ends with the same budget error. The figure is set at Opus's price: a dearer model gets the same room in tokens (`copilot.turn_cap`), so a Fable 5.2 turn stops at $0.50 ($1.00 deep, $0.80 with search) and a Fable 5.1 turn at $0.62. The daily budget does not scale. |
 | `COPILOT_FALLBACKS` | on | Sends the server-side refusal fallback (`fallbacks: "default"`). `off` disables it. |
 | `ALERT_POLICY_ENABLED` | `true` | The [phone ping policy](#phone-ping-policy) for the app's own pings. `false` passes every ping through. |
@@ -5310,7 +5316,7 @@ on October 25, 2026: `PLAN_NUDGE_ENABLED` (undo copy `backend.env.before-plan-nu
 `PLAN_TIME_STOPS_ENABLED`, `PREMARKET_PREP_ENABLED`, `RADAR_ALERTS_ENABLED` and `THESIS_WATCH_ENABLED`
 (undo copy `backend.env.before-four-pings`). Every one passes through the [phone ping policy](#phone-ping-policy).
 Cost estimates use $2 / $10 per million input/output tokens for Sonnet 5.5
-($0.20 cache read, $2.50 cache write). These are estimates only; the Anthropic
+($0.10 cache read, $2.50 cache write). These are estimates only; the Anthropic
 Console is authoritative.
 
 ## API only (since 2026-10-31)
@@ -5320,8 +5326,9 @@ API: chat, research jobs, the shadow book and the reviews. The earlier plan
 backend and the Claude Agent SDK are gone. `copilot_turn` rows and saved answers
 from before the move still say `plan` / `claude_plan`, and their costs are API-price
 equivalents, not bills. Desk, companion, Telegram, prep and week-review turns are recorded and count toward
-`COPILOT_DAILY_BUDGET_USD` (prep and week review do not check it, so they always run);
-shadow-book turns are recorded as `api_background`, under `SHADOW_BOOK_MAX_TURNS` instead.
+`COPILOT_DAILY_BUDGET_USD` (week review skips the daily check, while both prep and week review enforce
+`AI_MONTHLY_BUDGET_USD`); shadow-book, `api_runner` and `strategy_factory` calls are recorded as `api_background`
+and count alongside `research_job` and `practice_agent_call` toward `AI_MONTHLY_BUDGET_USD`.
 
 ## Replay
 
@@ -5427,10 +5434,10 @@ now says what the turn was for and how it went:
 - `tool_names` (the owner-context read left out), `first_text_ms`,
   `max_silence_ms`, `cache_creation_input_tokens`, `effort`, `evidence`.
 - `error`: the turn's error code; `stopped` when the owner stopped the answer
-  mid-stream (its cost so far is kept, so the daily cap never undercounts);
-  `daily_budget` on a zero-cost row when the budget was already spent and no
-  model ran. The morning brief is refused past the cap like a desk turn; the
-  week review runs regardless.
+  mid-stream (its cost so far is kept, so the daily and monthly caps never undercount);
+  `daily_budget` or `monthly_budget` on a zero-cost row when the budget was already spent and no
+  model ran. The morning brief is refused past both the daily and monthly caps; the
+  week review is refused past `AI_MONTHLY_BUDGET_USD`.
 - `timings` (JSON, `copilot_spend.timings_json`): where the owner's wait went.
   `owner_context` and each entry of `tools` (the owner-context read and
   every tool call, as `metrics["tool_calls"]` keeps them) carry `ms` and its
@@ -5452,9 +5459,11 @@ now says what the turn was for and how it went:
   answer of a new thread links at its first save.
 
 Migration `backend/alembic/versions/b7c1d2e3f4a5_copilot_turn_measurement.py`
-(additive, nullable). Research jobs and the structured reviews keep their own
-accounting (`research_job.spend_json`, the review records) and are not in this
-table. Tests: `backend/tests/test_copilot_turn_record.py`.
+(additive, nullable). Research queue runs keep their own accounting
+(`research_job.spend_json`), while `api_runner.ask` (reviews and eval judge),
+standalone research jobs and `strategy_factory` reuse `copilot_turn` with
+`billing="api_background"`. Tests: `backend/tests/test_copilot_turn_record.py`,
+`backend/tests/test_ai_monthly_budget.py`.
 
 ### The answer scorecard
 
@@ -5899,7 +5908,7 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
 |---|---|---|
 | `RESEARCH_QUEUE_ENABLED` | unset (off) | `true` starts the runner in the API process. Jobs can be queued while it is off; they wait. |
 | `RESEARCH_BUDGET_USD` | `0.50` | Budget for each job. |
-| `RESEARCH_DAILY_BUDGET_USD` | `2` | Total spend for attempts started since midnight UTC. It is checked before every attempt. At the cap, queued jobs wait for the next day. |
+| `RESEARCH_DAILY_BUDGET_USD` | `2` | Total spend for attempts started since midnight UTC. It is checked before every attempt alongside `AI_MONTHLY_BUDGET_USD`. At either cap, queued jobs wait. |
 | `RESEARCH_RADAR_TRIGGER` | unset (off) | `true`: every 5 minutes, each new event in today's Radar session (read only from `RADAR_STORE`) gets one `radar_event` job. |
 | `RESEARCH_NOTIFY_ENABLED` | unset (off) | `true`: a job with a material result about an open investigation sends one phone ping (below). |
 | `RESEARCH_NOTIFY_DAILY_MAX` | `3` | Phone pings per New York day, all jobs together. |

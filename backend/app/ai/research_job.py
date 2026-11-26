@@ -308,11 +308,19 @@ def _checks(assessment: dict, rec: _Recorder, evidence) -> dict:
 
 
 async def run_job(question: str, symbols: list[str], evidence, *, now: datetime, client=None, model: str | None = None,
-                  lim: JobLimits | None = None, save: bool = True, title: str | None = None) -> dict:
+                  lim: JobLimits | None = None, save: bool = True, title: str | None = None,
+                  check_monthly: bool = True, record_spend: bool = True) -> dict:
     """Run one job to completion and return the result record (also on failure, with ``status: error``)."""
+    from app.ai import copilot_spend
     lim = lim or limits()
     if client is None and not api_runner.configured():
         raise ResearchError("api_not_configured", "Research jobs need ANTHROPIC_API_KEY on the private backend.")
+    if check_monthly:
+        exceeded, monthly_spent, monthly_cap = await asyncio.to_thread(copilot_spend.monthly_status)
+        if exceeded:
+            await asyncio.to_thread(copilot_spend.record_refused, kind="research", source="research_job",
+                                    backend="api_background", code="monthly_budget")
+            raise ResearchError("monthly_budget", copilot_spend.monthly_budget_message(monthly_spent, monthly_cap))
     model = copilot.model_id(model or os.environ.get("RESEARCH_MODEL") or copilot.DEFAULT_MODEL)
     cfg = copilot.Settings(enabled=True, backend="anthropic", evidence=getattr(evidence, "label", "live"), model=model,
                            effort="medium", fallbacks=False, key_configured=True)
@@ -331,7 +339,9 @@ async def run_job(question: str, symbols: list[str], evidence, *, now: datetime,
         with anyio.fail_after(lim.timeout_s):
             await api_runner.run_agent(run, SYSTEM_PROMPT, prompt_for(question, symbols, evidence, now), ASSESSMENT_SCHEMA,
                                        tools=lab_tools(JOB_TOOLS), execute=rec.execute, server_tools=web_tools(lim),
-                                       on_block=rec.see, max_turns=lim.max_turns, budget_usd=lim.budget_usd, client=client)
+                                       on_block=rec.see, max_turns=lim.max_turns, budget_usd=lim.budget_usd, client=client,
+                                       check_monthly=False, record_spend=record_spend,
+                                       spend_kind="research", spend_source="research_job")
     except TimeoutError:
         run.error = {"code": "timeout", "message": f"The job exceeded {lim.timeout_s:.0f} seconds."}
     except Exception as exc:  # noqa: BLE001 - a failed job is recorded, never raised past the caller

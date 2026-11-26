@@ -294,7 +294,7 @@ def test_anthropic_adapter_streams_bounded_tools_and_reports_cost(monkeypatch):
     assert "sk-test" not in json.dumps(calls, default=str) + json.dumps(events)
     metrics = events[-1]["metrics"]
     assert metrics["usage"] == {"input_tokens": 2000, "output_tokens": 1000, "cache_read_input_tokens": 4000, "cache_creation_input_tokens": 0}
-    assert metrics["cost_usd"] == pytest.approx((2000 * 2 + 1000 * 10 + 4000 * 0.2) / 1e6)
+    assert metrics["cost_usd"] == pytest.approx((2000 * 2 + 1000 * 10 + 4000 * 0.10) / 1e6)
     assert metrics["first_text_ms"] is not None and [t["name"] for t in metrics["tool_calls"]] == ["owner_context", "get_group_comparison"]
     # The pack's row is the first thing the trader sees, then the progress note, then text: equal only when both land
     # in the same millisecond (as they did on #470's CI run), so order, not equality.
@@ -474,6 +474,8 @@ def test_every_offered_model_has_its_own_price():
     usage = {"input_tokens": 10_000, "output_tokens": 1_000, "cache_read_input_tokens": 20_000, "cache_creation_input_tokens": 4_000}
     assert copilot.cost_usd("claude-fable-5-2", usage) == pytest.approx((10_000 * 8 + 1_000 * 40 + 20_000 * 0.20 + 4_000 * 10) / 1e6)
     assert copilot.cost_usd("claude-fable-5-1", usage) == pytest.approx((10_000 * 10 + 1_000 * 50 + 20_000 * 0.25 + 4_000 * 12.5) / 1e6)
+    # The strategy factory's default idea model; unpriced it would fall back to the dearest rate and double-count.
+    assert copilot.cost_usd("claude-opus-5", usage) == pytest.approx((10_000 * 5 + 1_000 * 25 + 20_000 * 0.50 + 4_000 * 6.25) / 1e6)
 
 
 def test_anthropic_backend_without_key_is_an_honest_unavailable_state(monkeypatch):

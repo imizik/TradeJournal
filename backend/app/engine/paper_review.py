@@ -286,6 +286,11 @@ async def write(now: float) -> dict:
         return {"state": "done", "message": "This week's review already ran (or its count could not be read)."}
     cfg = copilot.settings()
     if cfg.backend == "anthropic":
+        exceeded, monthly_spent, monthly_cap = await asyncio.to_thread(copilot_spend.monthly_status)
+        if exceeded:
+            await asyncio.to_thread(copilot_spend.record_refused, kind=KIND, source="desk", backend=cfg.backend, code="monthly_budget")
+            return {"state": "budget",
+                    "message": f"No paper review: {copilot_spend.monthly_budget_message(monthly_spent, monthly_cap)}"}
         spent = await asyncio.to_thread(copilot_spend.spent_today)
         if spent + day_read.HEADROOM * copilot.turn_cap(day_read.small(cfg), False) > cfg.daily_budget_usd:
             await asyncio.to_thread(copilot_spend.record_refused, kind=KIND, source="desk", backend=cfg.backend, code="daily_budget")

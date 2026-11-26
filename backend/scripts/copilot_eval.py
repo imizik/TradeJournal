@@ -210,6 +210,11 @@ def cmd_run(args) -> int:
         return _err("A paid run needs --max-cost-usd; nothing was sent.")
     if paid and not os.environ.get("ANTHROPIC_API_KEY"):
         return _err("ANTHROPIC_API_KEY is not set; nothing was sent.")
+    if paid:
+        from app.ai import copilot_spend
+        exceeded, monthly_spent, monthly_cap = copilot_spend.monthly_status()
+        if exceeded:
+            return _err(copilot_spend.monthly_budget_message(monthly_spent, monthly_cap))
     replay_at = None
     if args.evidence == "replay":
         from app.ai import copilot_replay

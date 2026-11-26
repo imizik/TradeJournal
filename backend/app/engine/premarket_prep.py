@@ -573,15 +573,20 @@ def fallback_lines(pack: dict) -> list[str]:
 def _turn(text: str, now: float, events: list | None = None, kind: str = "prep") -> tuple[str, str | None]:
     """One lab turn on the owner's prompt: ``(answer, error)``. An error means the answer cannot be used. ``events``, when
     given, collects every turn event (the week review reads its tool and proposal events, and the ``done`` event's
-    ``turn_id``). The morning brief (``kind="prep"``) is refused once the day's API budget is spent, so an automatic
-    turn never spends past the cap; the week review is left to the owner's call and runs regardless."""
+    ``turn_id``). Both prep and week review refuse once the monthly AI budget is spent; the morning brief (``kind="prep"``)
+    is also refused once the day's API budget is spent."""
     from app.ai import copilot, copilot_spend
     cfg = copilot.settings()
     now_et = datetime.fromtimestamp(now, ET)
     history = [{"role": "user", "content": text}]
-    if kind == "prep" and cfg.backend == "anthropic" and copilot_spend.spent_today() >= cfg.daily_budget_usd:
-        copilot_spend.record_refused(kind=kind, source=kind, backend=cfg.backend, code="daily_budget")
-        return "", f"Today's copilot API budget (${cfg.daily_budget_usd:.2f}) is spent."
+    if cfg.backend == "anthropic":
+        exceeded, monthly_spent, monthly_cap = copilot_spend.monthly_status()
+        if exceeded:
+            copilot_spend.record_refused(kind=kind, source=kind, backend=cfg.backend, code="monthly_budget")
+            return "", copilot_spend.monthly_budget_message(monthly_spent, monthly_cap)
+        if kind == "prep" and copilot_spend.spent_today() >= cfg.daily_budget_usd:
+            copilot_spend.record_refused(kind=kind, source=kind, backend=cfg.backend, code="daily_budget")
+            return "", f"Today's copilot API budget (${cfg.daily_budget_usd:.2f}) is spent."
 
     async def go() -> tuple[str, str | None]:
         adapter = await asyncio.to_thread(copilot.adapter_for, cfg)

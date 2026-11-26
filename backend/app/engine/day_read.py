@@ -362,6 +362,14 @@ async def read(*, refresh: bool = False, now: float | None = None) -> dict:
             return {"state": "none", "today": before, "message": "Today's read was written earlier. Refresh writes it again."}
         cfg = copilot.settings()
         if cfg.backend == "anthropic":
+            exceeded, monthly_spent, monthly_cap = await asyncio.to_thread(copilot_spend.monthly_status)
+            if exceeded:
+                await asyncio.to_thread(copilot_spend.record_refused, kind=KIND, source="desk", backend=cfg.backend, code="monthly_budget")
+                entry = {"state": "budget", "at": asked,
+                         "message": f"No read of your day: {copilot_spend.monthly_budget_message(monthly_spent, monthly_cap)}"}
+                if not _good(key):
+                    _kept[key] = entry
+                return {**entry, "today": await asyncio.to_thread(today)}
             spent = await asyncio.to_thread(copilot_spend.spent_today)
             if spent + HEADROOM * copilot.turn_cap(small(cfg), False) > cfg.daily_budget_usd:
                 await asyncio.to_thread(copilot_spend.record_refused, kind=KIND, source="desk", backend=cfg.backend, code="daily_budget")

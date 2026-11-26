@@ -85,6 +85,12 @@ async def decide(event: dict, book: dict, now: datetime, *, client=None, evidenc
     for a refusal or a failed turn; the caller records it."""
     if client is None and not api_runner.configured():
         return _refused("api_not_configured", "The shadow book needs ANTHROPIC_API_KEY on the private backend.")
+    symbol = (event.get("symbols") or [None])[0]
+    exceeded, monthly_spent, monthly_cap = await asyncio.to_thread(copilot_spend.monthly_status)
+    if exceeded:
+        await asyncio.to_thread(copilot_spend.record_refused, kind="shadow", source="shadow", backend="shadow",
+                                code="monthly_budget", symbol=symbol)
+        return _refused("monthly_budget", copilot_spend.monthly_budget_message(monthly_spent, monthly_cap))
     if evidence is None:
         from app.ai.copilot_tools import LiveEvidence
         evidence = LiveEvidence()
@@ -94,7 +100,6 @@ async def decide(event: dict, book: dict, now: datetime, *, client=None, evidenc
                            fallbacks=False, key_configured=True)
     rec = research_job._Recorder(LIMITS, evidence, cfg, SHADOW_TOOLS)
     started = time.monotonic()
-    symbol = (event.get("symbols") or [None])[0]
     chart = "unavailable"
     if symbol:
         result, _ = await copilot._run_tool(evidence, {"id": "shadow_chart", "name": "get_chart_context",
@@ -106,7 +111,8 @@ async def decide(event: dict, book: dict, now: datetime, *, client=None, evidenc
         with anyio.fail_after(LIMITS.timeout_s):
             await api_runner.run_agent(run, SYSTEM_PROMPT, prompt_for(event, chart, book, now, label == "fixture"), ANSWER_SCHEMA,
                                        tools=research_job.lab_tools(SHADOW_TOOLS), execute=rec.execute,
-                                       max_turns=LIMITS.max_turns, budget_usd=LIMITS.budget_usd, client=client)
+                                       max_turns=LIMITS.max_turns, budget_usd=LIMITS.budget_usd, client=client,
+                                       check_monthly=False, record_spend=False)
     except TimeoutError:
         run.error = {"code": "timeout", "message": f"The turn exceeded {LIMITS.timeout_s:.0f} seconds."}
     except Exception as exc:  # noqa: BLE001 - recorded on the decision, never raised past the worker

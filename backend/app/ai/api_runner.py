@@ -110,8 +110,13 @@ def _api_error(exc: Exception) -> tuple[str, str]:
 def ask(system: str, message: str, schema: dict, *, model: str | None = None, timeout: float | None = None,
         client=None) -> ApiAnswer:
     """One question, one structured answer. Raises ApiUnavailable or ApiCallFailed."""
+    from app.ai import copilot_spend
     if client is None and not configured():
         raise ApiUnavailable(f"No {KEY_ENV} on the private backend.")
+    exceeded, monthly_spent, monthly_cap = copilot_spend.monthly_status()
+    if exceeded:
+        copilot_spend.record_refused(kind="ask", source="api_runner", backend="api_background", code="monthly_budget")
+        raise ApiUnavailable(copilot_spend.monthly_budget_message(monthly_spent, monthly_cap))
     model = copilot.model_id(model or os.environ.get("TJ_PLAN_REVIEW_MODEL") or DEFAULT_MODEL)
     limit = timeout or float(os.environ.get("TJ_PLAN_REVIEW_TIMEOUT") or DEFAULT_TIMEOUT)
     client = client or anthropic.Anthropic(api_key=os.environ[KEY_ENV], base_url=BASE_URL, max_retries=1, timeout=limit)
@@ -126,6 +131,15 @@ def ask(system: str, message: str, schema: dict, *, model: str | None = None, ti
             final = stream.get_final_message()
     except anthropic.APIError as exc:
         raise ApiCallFailed(_api_error(exc)[1]) from exc
+    elapsed_s = round(time.monotonic() - started, 1)
+    usage = _usage_of(final)
+    used_model = final.model or model
+    usd = copilot.cost_usd(used_model, usage)
+    copilot_spend.record(
+        {"backend": "api_background", "model": used_model, "rounds": 1, "usage": usage, "cost_usd": usd,
+         "total_ms": round(elapsed_s * 1000)},
+        kind="ask", source="api_runner", error=(None if final.stop_reason == "end_turn" else final.stop_reason),
+    )
     if final.stop_reason != "end_turn":
         raise ApiCallFailed(f"Claude gave no answer (stopped: {final.stop_reason}).")
     text = next((b.text for b in final.content if b.type == "text"), "")
@@ -135,10 +149,9 @@ def ask(system: str, message: str, schema: dict, *, model: str | None = None, ti
         raise ApiCallFailed(f"Claude's answer was not JSON: {text[:300]!r}") from exc
     if not isinstance(data, dict):
         raise ApiCallFailed(f"Claude's answer was not an object: {text[:300]!r}")
-    usage = _usage_of(final)
-    return ApiAnswer(data=data, model=final.model, usd=copilot.cost_usd(final.model, usage),
+    return ApiAnswer(data=data, model=used_model, usd=usd,
                      input_tokens=usage["input_tokens"] + usage["cache_read_input_tokens"] + usage["cache_creation_input_tokens"],
-                     output_tokens=usage["output_tokens"], seconds=round(time.monotonic() - started, 1))
+                     output_tokens=usage["output_tokens"], seconds=elapsed_s)
 
 
 @dataclass
@@ -155,14 +168,26 @@ class AgentRun:
 async def run_agent(run: AgentRun, system: str, prompt: str, schema: dict, *, tools: list[dict],
                     execute: Callable[[dict], Awaitable[dict]], server_tools: tuple[dict, ...] = (),
                     on_block: Callable[[dict], None] | None = None, max_turns: int, budget_usd: float,
-                    effort: str = "medium", client=None) -> AgentRun:
+                    effort: str = "medium", client=None, check_monthly: bool = True, record_spend: bool = True,
+                    spend_kind: str = "agent", spend_source: str = "api_runner") -> AgentRun:
     """Loop until Claude calls the answer tool, updating ``run``. ``execute`` takes a tool_use block and returns
     ``{"content", "is_error"}``; ``on_block`` sees every block Claude's turn produced, server tool results included."""
+    from app.ai import copilot_spend
     owned = client is None
     if owned:
         if not configured():
             run.error = {"code": "api_not_configured", "message": f"No {KEY_ENV} on the private backend."}
             return run
+    if check_monthly:
+        exceeded, monthly_spent, monthly_cap = copilot_spend.monthly_status()
+        if exceeded:
+            if record_spend:
+                copilot_spend.record_refused(kind=spend_kind, source=spend_source, backend="api_background",
+                                             code="monthly_budget")
+            run.error = {"code": "monthly_budget",
+                         "message": copilot_spend.monthly_budget_message(monthly_spent, monthly_cap)}
+            return run
+    if owned:
         client = anthropic.AsyncAnthropic(api_key=os.environ[KEY_ENV], base_url=BASE_URL, max_retries=1, timeout=120.0)
     answer_tool = {"name": ANSWER_TOOL, "description": "Return your finished answer. Call this once, as your last step.",
                    "input_schema": api_schema(schema), "strict": True}
@@ -219,5 +244,11 @@ async def run_agent(run: AgentRun, system: str, prompt: str, schema: dict, *, to
         run.error = {"code": code, "message": message}
         return run
     finally:
+        if record_spend and (run.rounds > 0 or run.error):
+            copilot_spend.record(
+                {"backend": "api_background", "model": run.model, "rounds": run.rounds, "usage": run.usage,
+                 "cost_usd": run.cost_usd},
+                kind=spend_kind, source=spend_source, error=(run.error or {}).get("code") if run.error else None,
+            )
         if owned:
             await client.close()

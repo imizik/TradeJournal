@@ -139,6 +139,12 @@ async def read(symbol: str, *, refresh: bool = False, kept_only: bool = False, n
         if await asyncio.to_thread(_not_followed, symbol) is not False:
             return {"state": "hidden"}
         if cfg.backend == "anthropic":
+            exceeded, monthly_spent, monthly_cap = await asyncio.to_thread(copilot_spend.monthly_status)
+            if exceeded:
+                await asyncio.to_thread(copilot_spend.record_refused, kind=KIND, source="desk", backend=cfg.backend,
+                                        code="monthly_budget", symbol=symbol)
+                return {"state": "budget", "today": await asyncio.to_thread(today),
+                        "message": f"No automatic read: {copilot_spend.monthly_budget_message(monthly_spent, monthly_cap)}"}
             fresh = time.monotonic() - UNRECORDED_S
             _just_spent[:] = [(t, c) for t, c in _just_spent if t >= fresh]
             spent = await asyncio.to_thread(copilot_spend.spent_today) + sum(c for _, c in _just_spent)

@@ -327,6 +327,13 @@ def claude_proposer(system: str, text: str) -> tuple[dict[str, Any], str]:
     """Ask the idea model for this week's candidates through the Anthropic API,
     on API credits (`week --use-api`); returns its answer and a usage note."""
     import anthropic
+    from app.ai import copilot, copilot_spend
+
+    exceeded, monthly_spent, monthly_cap = copilot_spend.monthly_status()
+    if exceeded:
+        copilot_spend.record_refused(kind="strategy_factory", source="strategy_factory", backend="api_background",
+                                     code="monthly_budget")
+        raise SystemExit(copilot_spend.monthly_budget_message(monthly_spent, monthly_cap))
 
     model = os.environ.get("FACTORY_MODEL", IDEA_MODEL)
     client = anthropic.Anthropic(base_url="https://api.anthropic.com")
@@ -352,14 +359,23 @@ def claude_proposer(system: str, text: str) -> tuple[dict[str, Any], str]:
         raise SystemExit(f"The Anthropic API returned {exc.status_code}: {exc}") from exc
     except anthropic.APIConnectionError as exc:
         raise SystemExit(f"Could not reach the Anthropic API: {exc}") from exc
+    usage = message.usage
+    usage_dict = {key: int(getattr(usage, key, 0) or 0)
+                  for key in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}
+    used_model = message.model or model
+    copilot_spend.record(
+        {"backend": "api_background", "model": used_model, "rounds": 1, "usage": usage_dict,
+         "cost_usd": copilot.cost_usd(used_model, usage_dict)},
+        kind="strategy_factory", source="strategy_factory",
+        error=(None if message.stop_reason not in ("refusal", "max_tokens") else message.stop_reason),
+    )
     if message.stop_reason == "refusal":
         category = getattr(message.stop_details, "category", None) if message.stop_details else None
         raise SystemExit(f"The idea model declined this week's brief (category {category}); nothing was run.")
     if message.stop_reason == "max_tokens":
         raise SystemExit("The idea model ran out of room before answering; nothing was run.")
     answer = json.loads(next(block.text for block in message.content if block.type == "text"))
-    usage = message.usage
-    return answer, f"{message.model}, {usage.input_tokens:,} tokens in and {usage.output_tokens:,} out"
+    return answer, f"{used_model}, {usage.input_tokens:,} tokens in and {usage.output_tokens:,} out"
 
 
 def answer_file(path: Path, author: str) -> Proposer:

@@ -361,10 +361,16 @@ async def run_turn(question: str, symbol: str, now: float) -> tuple[str, str | N
     model = os.environ.get("COMPANION_MODEL", "").strip()
     if model and copilot.MODEL_ID.match(model):
         cfg = dataclasses.replace(cfg, model=model)
-    if cfg.backend == "anthropic" and await asyncio.to_thread(copilot_spend.spent_today) >= cfg.daily_budget_usd:
-        await asyncio.to_thread(copilot_spend.record_refused, kind="companion", source="companion", backend=cfg.backend,
-                                code="daily_budget", symbol=symbol)
-        return "", f"Today's copilot API budget (${cfg.daily_budget_usd:.2f}) is spent."
+    if cfg.backend == "anthropic":
+        exceeded, monthly_spent, monthly_cap = await asyncio.to_thread(copilot_spend.monthly_status)
+        if exceeded:
+            await asyncio.to_thread(copilot_spend.record_refused, kind="companion", source="companion", backend=cfg.backend,
+                                    code="monthly_budget", symbol=symbol)
+            return "", copilot_spend.monthly_budget_message(monthly_spent, monthly_cap)
+        if await asyncio.to_thread(copilot_spend.spent_today) >= cfg.daily_budget_usd:
+            await asyncio.to_thread(copilot_spend.record_refused, kind="companion", source="companion", backend=cfg.backend,
+                                    code="daily_budget", symbol=symbol)
+            return "", f"Today's copilot API budget (${cfg.daily_budget_usd:.2f}) is spent."
     try:
         adapter = await asyncio.to_thread(copilot.adapter_for, cfg)
         evidence = copilot.evidence_for(cfg)

@@ -446,6 +446,11 @@ async def run(raw: str, *, source: str, images: list[dict] | None = None, now: d
     if not raw and not images:
         raise CheckRefused("Paste the call's text first.")
     if cfg.backend == "anthropic":
+        exceeded, monthly_spent, monthly_cap = await asyncio.to_thread(copilot_spend.monthly_status)
+        if exceeded:
+            await asyncio.to_thread(copilot_spend.record_refused, kind="check_call", source=source, backend=cfg.backend,
+                                    code="monthly_budget")
+            raise CheckRefused(copilot_spend.monthly_budget_message(monthly_spent, monthly_cap))
         if await asyncio.to_thread(copilot_spend.spent_today) >= cfg.daily_budget_usd:
             await asyncio.to_thread(copilot_spend.record_refused, kind="check_call", source=source, backend=cfg.backend,
                                     code="daily_budget")
