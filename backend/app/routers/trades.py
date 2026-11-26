@@ -84,6 +84,16 @@ async def get_trade_fills(trade_id: uuid.UUID, session: Session = Depends(get_se
     return [FillOut.model_validate(f) for f in fills]
 
 
+@router.get("/{trade_id}/replay")
+def get_trade_replay(trade_id: uuid.UUID, session: Session = Depends(get_session)):
+    """A closed trade replayed bar by bar (engine/trade_replay.py). Sync on purpose: it may read minute bars."""
+    from app.engine import trade_replay
+    trade = session.get(Trade, trade_id)
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    return trade_replay.build(session, trade)
+
+
 class TagBody(BaseModel):
     name: str
     source: str = "manual"

@@ -16,6 +16,7 @@ import TradeAdvice from "@/components/TradeAdvice";
 import TradePhoneAlerts from "@/components/TradePhoneAlerts";
 import FillInterruptCard from "@/components/FillInterruptCard";
 import WatchDayLink from "@/components/replay/WatchDayLink";
+import TradeReplay from "@/components/replay/TradeReplay";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { copilotLabHref } from "@/lib/copilot";
 import { redoHref } from "@/lib/paperReplay";
@@ -186,6 +187,8 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
           </div>
         </div>
       </DashboardCard>
+
+      {trade.status !== "open" && <TradeReplay tradeId={id} />}
 
       {!alert && planSection}
 
