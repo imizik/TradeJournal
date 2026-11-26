@@ -57,6 +57,7 @@ PROGRESS_BETA = "thinking-display-updates-2026-08-18"
 # USD per million tokens: input, output, cache read, 5-minute cache write. Haiku 5.5 is its rate for prompts of
 # 100K tokens or fewer (a copilot turn's prompt stays well under that); longer prompts bill at 5x.
 PRICES = {"claude-sonnet-5-5": (2.00, 10.00, 0.10, 2.50), "claude-opus-5-5": (4.00, 20.00, 0.20, 5.00),
+          "claude-opus-5": (5.00, 25.00, 0.50, 6.25),
           "claude-haiku-5-5": (0.10, 0.50, 0.01, 0.125),
           "claude-fable-5-2": (8.00, 40.00, 0.20, 10.00), "claude-fable-5-1": (10.00, 50.00, 0.25, 12.50)}
 

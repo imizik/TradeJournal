@@ -51,6 +51,14 @@ def test_sonnet_cache_read_price_is_point_one_zero_and_opus_stays_point_two_zero
     assert copilot.cost_usd("claude-opus-5-5", usage) == pytest.approx(0.20)
 
 
+def test_opus_5_pricing_and_opus_5_5_prefix_match():
+    usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000, "cache_read_input_tokens": 1_000_000, "cache_creation_input_tokens": 1_000_000}
+    assert copilot.cost_usd("claude-opus-5", usage) == pytest.approx(36.75)
+    assert copilot.cost_usd("claude-opus-5-20261101", usage) == pytest.approx(36.75)
+    assert copilot.cost_usd("claude-opus-5-5", usage) == pytest.approx(29.20)
+    assert copilot.cost_usd("claude-opus-5-5-20260901", usage) == pytest.approx(29.20)
+
+
 def test_monthly_budget_env_default_and_validation(monkeypatch):
     monkeypatch.delenv("AI_MONTHLY_BUDGET_USD", raising=False)
     assert copilot_spend.monthly_budget_usd() == 100.0
