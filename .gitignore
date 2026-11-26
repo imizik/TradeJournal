@@ -63,3 +63,6 @@ backend/pubsub-subscriber.json
 # Installers
 *.exe
 frontend/sample-test-results/
+
+# Leak-moment replay manifests and results map answers back to trades (scripts/leak_replay.py).
+backend/reports/leak_replay/

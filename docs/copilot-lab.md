@@ -2315,6 +2315,19 @@ for contracts that expired); then the deep-red held-an-hour and 1 PM same-day pi
 weekly ping scorecard. This is the evidence for or against an automatic exit: following pings needs no auto exit. No
 page, route or stored value.
 
+**Leak-moment replay** (`backend/scripts/leak_replay.py`, an offline experiment, `tests/test_leak_replay.py`): would
+Claude have said cut at those minutes? Every long option trade's deep-red cut minute from `leak_bill.bill_trade` (all
+weeks, Webull left out) becomes one blinded question. The question has no ticker, no date and nothing after that minute.
+It gives the position's cost, mark, drawdown and best and worst point so far, the underlying's move, the time of day,
+and his record as it stood then: his closed short-dated trades and how his earlier moments like this one ended. The
+trade's own model tag is left out because it was written after the close. Claude (`claude-sonnet-5-5`, through the
+Message Batches API at half price) answers cut, hold or add. Scoring uses the bill's own dollars: a cut call is worth
+that moment's `saved` and anything else is worth nothing. It is set against always cut (the leak rule) and never cut,
+by days to expiry, with moments from 2026-06-01 on reported apart as the held-out set. The default is a dry run (count,
+estimate, two sample prompts, no API call). `--submit` refuses over `--max-usd` (default $20) or what is left of
+`AI_MONTHLY_BUDGET_USD`. `--collect` records the batch's cost as one `copilot_turn` row so the monthly cap counts it.
+The manifest and results go under `backend/reports/leak_replay/`, which git ignores.
+
 ### The day plan
 
 Before the open, the desk's left column leads with **Today's plan** (`DayPlanCard.tsx`; also step 2 of Start the day):
