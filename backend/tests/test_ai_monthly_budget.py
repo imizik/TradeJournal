@@ -204,3 +204,17 @@ def test_api_runner_shadow_research_practice_and_factory_refuse_when_month_is_sp
             assert "month's AI budget" in (call.error or "")
     finally:
         mem.dispose()
+
+
+def test_kind_today_counts_monthly_refusals_as_refused_not_as_runs():
+    now = datetime.now(UTC).replace(tzinfo=None)
+    with Session(engine) as db:
+        db.add_all([
+            CopilotTurn(backend="anthropic", billing="api", kind="desk_read", cost_usd=0.02, started_at=now),
+            CopilotTurn(backend="anthropic", billing="api", kind="desk_read", cost_usd=0.0, started_at=now,
+                        error="monthly_budget"),
+            CopilotTurn(backend="anthropic", billing="api", kind="desk_read", cost_usd=0.0, started_at=now,
+                        error="daily_budget"),
+        ])
+        db.commit()
+    assert copilot_spend.kind_today("desk_read") == {"count": 1, "refused": 2, "cost_usd": 0.02}

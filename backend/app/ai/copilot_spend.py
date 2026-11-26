@@ -284,7 +284,7 @@ def monthly_budget_message(spent: float, cap: float) -> str:
 
 
 def kind_today(kind: str, session=None) -> dict:
-    """Today's turns of one ``kind`` (New York day): how many ran, how many were refused for the daily budget, and their
+    """Today's turns of one ``kind`` (New York day): how many ran, how many were refused for the daily or monthly budget, and their
     estimated API dollars (``billing == "api"`` only, as ``spent_today`` counts them)."""
     from sqlmodel import Session, col, select
     from app.database import engine
@@ -292,6 +292,6 @@ def kind_today(kind: str, session=None) -> dict:
     with (Session(engine) if session is None else nullcontext(session)) as db:
         rows = db.exec(select(CopilotTurn.billing, CopilotTurn.cost_usd, CopilotTurn.error).where(
             CopilotTurn.kind == kind, col(CopilotTurn.started_at) >= _day_start_utc())).all()
-    refused = sum(1 for _, _, error in rows if error == "daily_budget")
+    refused = sum(1 for _, _, error in rows if error in ("daily_budget", "monthly_budget"))
     return {"count": len(rows) - refused, "refused": refused,
             "cost_usd": round(sum(float(cost or 0) for billing, cost, _ in rows if billing == "api"), 4)}

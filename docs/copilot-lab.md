@@ -440,6 +440,11 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     `(symbol, minutes, lookback_days?)` replays the owner's own closed trades
     in the symbol at a level like the one being drafted (Your history at this
     level, below).
+  - `get_my_record(symbol?, setup?, dte_bucket?)` sums the owner's closed
+    trades (Webull left out) joined to their AI review tags: count, wins,
+    losses, win rate, total and median P&L, cut-rule breaks, top 5 mistakes
+    and top 8 setups, capped at about 5,500 characters. `dte_bucket` is one of
+    `0dte`, `1-3dte`, `4-7dte`, `8-21dte`, `22+dte`.
   - Journal times (`opened_at`, entry and exit) are New York wall-clock times,
     emitted with their offset (for example `-04:00` in summer, `-05:00` in
     winter), never as UTC. Days held count from that moment. Option marks
@@ -453,7 +458,7 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   - The fixture serves simulated versions. In replay, the chart is
     unavailable (the snapshot has no bars) and so is the book.
   - Research jobs never get `get_positions`, `get_trades`, `get_memories`,
-    `get_trade_review`, `get_week_review` or `get_level_history`: a job reads
+    `get_trade_review`, `get_week_review`, `get_level_history` or `get_my_record`: a job reads
     untrusted pages and can fetch URLs, which could carry the book out. Those
     aren't even registered for a job; `get_chart_context` is allowed.
     `get_option_candidates` and `get_moment` are kept out too: the job
@@ -5284,7 +5289,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `COPILOT_EFFORT` | `medium` | `low`, `medium` or `high`. |
 | `COPILOT_BACKENDS` | `anthropic` | The backends the panel's **Backend** picker offers, comma-separated; `COPILOT_BACKEND` is always offered first. `anthropic` is offered only when the API key is set. A turn sends its pick as `backend` in `POST /copilot/chat`; one not offered is refused (422). Remembered per browser. |
 | `COPILOT_DAILY_BUDGET_USD` | `4` | Estimated API spend (New York day, `anthropic` turns only) at which `POST /copilot/chat` refuses further API turns with a 429 until tomorrow. Every turn is recorded in `copilot_turn` (`app/ai/copilot_spend.py`: backend, model, rounds, tokens, estimated cost; no text), `GET /copilot/status` reports `spend_today_usd`, and the panel shows "API today $x of $y" while the API backend is picked. Turn metrics also reach the server journal at INFO. |
-| `AI_MONTHLY_BUDGET_USD` | `100` | Shared month-to-date AI spend ceiling (New York calendar month, USD) across every Anthropic call site (copilot turns, morning prep, week review, desk/day/paper reviews, companion, call check, Telegram, shadow book, research jobs, `api_runner` reviews/judge, `practice_agent`, `strategy_factory` and paid evals), summing `copilot_turn` (`api` and `api_background`), `research_job.spend_json` and `practice_agent_call.cost_usd`. Every call site refuses before calling Anthropic when the month is spent; `GET /copilot/status` reports `spend_this_month_usd` and `monthly_budget_usd`. |
+| `AI_MONTHLY_BUDGET_USD` | `100` | Shared month-to-date AI spend ceiling (New York calendar month, USD) across every Anthropic call site (copilot turns, morning prep, week review, desk/day/paper reviews, companion, call check, Telegram, shadow book, research jobs, `api_runner` reviews/judge, `practice_agent`, `strategy_factory` and paid evals; the offline `research/opening_lab` harness is outside it), summing `copilot_turn` (`api` and `api_background`), `research_job.spend_json` and `practice_agent_call.cost_usd`. Every call site refuses before calling Anthropic when the month is spent; `GET /copilot/status` reports `spend_this_month_usd` and `monthly_budget_usd`. |
 | `COPILOT_TURN_BUDGET_USD` | `0.25` | Estimated API spend at which a turn stops between rounds (output is also capped at 4,000 tokens per round). A turn that may [search the web](#web-search) gets $0.15 more. A plan or review turn (a companion or week-review job, or any turn that has asked for `get_trade_review`, `get_week_review`, `get_level_history` or `get_option_candidates`) gets twice the budget, $0.50 by default (`copilot.DEEP_TURN_FACTOR`): on Opus 5.5 they measured $0.19-0.21 against the $0.25 an ordinary question gets, and one that still reaches its cap ends with the same budget error. The figure is set at Opus's price: a dearer model gets the same room in tokens (`copilot.turn_cap`), so a Fable 5.2 turn stops at $0.50 ($1.00 deep, $0.80 with search) and a Fable 5.1 turn at $0.62. The daily budget does not scale. |
 | `COPILOT_FALLBACKS` | on | Sends the server-side refusal fallback (`fallbacks: "default"`). `off` disables it. |
 | `ALERT_POLICY_ENABLED` | `true` | The [phone ping policy](#phone-ping-policy) for the app's own pings. `false` passes every ping through. |
