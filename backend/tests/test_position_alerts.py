@@ -354,7 +354,6 @@ def test_a_ping_opens_its_card_with_robinhood_beside_it_while_the_lab_is_on_and_
     monkeypatch.setenv("COPILOT_ENABLED", "true")
     watcher.deliver()
     assert sent[1][1] == f"/copilot-lab?symbol=SNDK&card=alert%3A{alert.id}"  # no plan card saved this position: the desk opens on the symbol
-    card = f"/copilot-lab?symbol=SNDK&card=alert%3A{alert.id}"
     assert buttons[1] == (("Robinhood", "https://robinhood.com/stocks/SNDK"),)  # the desk on: Robinhood beside Open, not the survey
 
     with Session(engine) as db:
