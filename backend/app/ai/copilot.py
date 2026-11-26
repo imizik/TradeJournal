@@ -1385,6 +1385,14 @@ def _summary(name: str, data: dict) -> str:
         movers = data.get("movers") or {}
         spy = f"SPY {movers['spy_day_pct']:+.2f}%" if movers.get("spy_day_pct") is not None else "no movers ranked"
         return f"{data.get('events_total', 0)} events ({len(data.get('events') or [])} shown) · {spy}"[:160]
+    if name == "get_my_record":
+        if data.get("state") != "ok":
+            return (data.get("reason") or "unavailable")[:160]
+        if not data.get("trades"):
+            return "0 matching closed trades"
+        win_pct = round(data["win_rate"] * 100) if data.get("win_rate") is not None else 0
+        return (f"{data['trades']} trades ({data.get('wins', 0)}W/{data.get('losses', 0)}L, {win_pct}% win) · "
+                f"total {data.get('total_pnl', 0):+,.2f} · median {data.get('median_pnl', 0):+,.2f}")[:160]
     return ""
 
 

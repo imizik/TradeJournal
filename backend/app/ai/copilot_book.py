@@ -448,6 +448,216 @@ def trades(symbol: str, limit: int = 5, session=None, exclude=None) -> dict:
                      "the premium paid. Times are New York."}
 
 
+DTE_BUCKETS = ("0dte", "1-3dte", "4-7dte", "8-21dte", "22+dte")
+_MIN_TAGGED_SAMPLE = 8
+_MAX_RECORD_MISTAKES = 5
+_MAX_RECORD_SETUPS = 8
+_MAX_KNOWN_SETUPS = 10
+_MAX_RECORD_LABEL = 60
+_MAX_RECORD_JSON_CHARS = 5500
+
+
+def _norm_tag(value: str | None) -> str:
+    return "_".join(str(value or "").lower().replace("-", " ").replace("_", " ").split())
+
+
+def _short_label(value: str | None) -> str:
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= _MAX_RECORD_LABEL else text[:_MAX_RECORD_LABEL - 1].rstrip() + "…"
+
+
+def _trade_dte_bucket(trade, entry_exp, entry_at, ctx_bucket: str | None) -> str | None:
+    if ctx_bucket in DTE_BUCKETS:
+        return ctx_bucket
+    if trade.instrument_type != "option":
+        return None
+    exp = trade.expiration or entry_exp
+    opened = trade.opened_at or entry_at
+    if exp is None or opened is None:
+        return None
+    dte = (exp - opened.date()).days
+    if dte <= 0:
+        return "0dte"
+    if dte <= 3:
+        return "1-3dte"
+    if dte <= 7:
+        return "4-7dte"
+    if dte <= 21:
+        return "8-21dte"
+    return "22+dte"
+
+
+def _trade_mistakes(tag) -> list[str]:
+    import json
+    try:
+        items = json.loads(tag.mistakes_json or "[]")
+    except ValueError:
+        items = []
+    if not isinstance(items, list):
+        items = []
+    raw = [str(m) for m in items if isinstance(m, str)]
+    if tag.primary_mistake:
+        raw.append(str(tag.primary_mistake))
+    seen: dict[str, str] = {}
+    for item in raw:
+        norm = _norm_tag(item)
+        if norm and norm != "none":
+            seen.setdefault(norm, _short_label(item))
+    return list(seen.values())
+
+
+def _trim_record(out: dict, budget: int = _MAX_RECORD_JSON_CHARS) -> dict:
+    import json
+    def fits() -> bool:
+        return len(json.dumps(out, default=str)) <= budget
+
+    for key in ("known_setups", "setups", "top_mistakes"):
+        while not fits() and isinstance(out.get(key), list) and out[key]:
+            out[key].pop()
+    if not fits():
+        out.pop("note", None)
+    return out
+
+
+def my_record(symbol: str | None = None, setup: str | None = None, dte_bucket: str | None = None, session=None) -> dict:
+    """Aggregated closed-trade stats joined to AI review tags (setup, mistakes, cut-rule breaks), Webull excluded."""
+    import statistics
+    from sqlmodel import Session, col, select
+    from app.database import engine
+    from app.models import Account, Fill, FillMarketContext, Trade, TradeAiTag, TradeFill
+
+    with (Session(engine) if session is None else nullcontext(session)) as db:
+        query = (select(Trade).join(Account, Account.id == Trade.account_id)
+                 .where(col(Trade.status).in_(("closed", "expired")), Trade.realized_pnl.is_not(None))
+                 .where(_not_webull()))
+        if symbol:
+            query = query.where(Trade.ticker == symbol)
+        candidates = db.exec(query.order_by(col(Trade.closed_at).desc(), col(Trade.id).asc())).all()
+
+        entry_meta: dict = {}
+        tag_by_trade: dict = {}
+        if candidates:
+            trade_ids = [t.id for t in candidates]
+            fill_rows = db.exec(
+                select(TradeFill.trade_id, TradeFill.role, Fill.account_id, Fill.raw_email_id,
+                       Fill.executed_at, Fill.expiration, FillMarketContext.dte_bucket)
+                .join(Fill, Fill.id == TradeFill.fill_id)
+                .outerjoin(FillMarketContext, FillMarketContext.fill_id == Fill.id)
+                .where(col(TradeFill.trade_id).in_(trade_ids))
+                .order_by(col(Fill.executed_at).asc(), col(Fill.raw_email_id).asc(), col(Fill.id).asc())
+            ).all()
+            anchors_by_trade: dict = {}
+            raw_keys: set[str] = set()
+            fallback_meta: dict = {}
+            for trade_id, role, acct_id, raw_id, exec_at, exp, ctx_dte in fill_rows:
+                fallback_meta.setdefault(trade_id, (exp, exec_at, ctx_dte))
+                if role == "entry" and trade_id not in entry_meta:
+                    entry_meta[trade_id] = (exp, exec_at, ctx_dte)
+                if raw_id:
+                    raw_keys.add(raw_id)
+                    anchors_by_trade.setdefault(trade_id, []).append((role == "entry", acct_id, raw_id))
+            for trade_id, meta in fallback_meta.items():
+                entry_meta.setdefault(trade_id, meta)
+            if raw_keys:
+                tags = db.exec(select(TradeAiTag).where(col(TradeAiTag.source_key).in_(raw_keys))).all()
+                by_anchor = {(tag.account_id, tag.source_key): tag for tag in tags}
+                for trade_id, anchors in anchors_by_trade.items():
+                    anchors.sort(key=lambda item: not item[0])  # prefer entry fill anchor
+                    for _, acct_id, raw_id in anchors:
+                        if (acct_id, raw_id) in by_anchor:
+                            tag_by_trade[trade_id] = by_anchor[(acct_id, raw_id)]
+                            break
+
+        scoped = []
+        for t in candidates:
+            exp, exec_at, ctx_dte = entry_meta.get(t.id, (None, None, None))
+            if dte_bucket is not None and _trade_dte_bucket(t, exp, exec_at, ctx_dte) != dte_bucket:
+                continue
+            scoped.append((t, tag_by_trade.get(t.id)))
+
+        wanted_setup = _norm_tag(setup) if setup else ""
+        known_setups: list[str] = []
+        if wanted_setup:
+            tagged_in_scope = [(t, tag) for t, tag in scoped if tag is not None]
+            exact = [(t, tag) for t, tag in tagged_in_scope if _norm_tag(tag.setup) == wanted_setup]
+            matched = exact or [(t, tag) for t, tag in tagged_in_scope if wanted_setup in _norm_tag(tag.setup)]
+            if not matched:
+                pool = [tag.setup for _, tag in tagged_in_scope]
+                if not pool:
+                    pool = list(db.exec(select(TradeAiTag.setup).join(Account, Account.id == TradeAiTag.account_id)
+                                       .where(_not_webull())).all())
+                counts: dict[str, int] = {}
+                for s in pool:
+                    label = _short_label(s)
+                    if label:
+                        counts[label] = counts.get(label, 0) + 1
+                known_setups = [name for name, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:_MAX_KNOWN_SETUPS]]
+        else:
+            matched = scoped
+
+    pnls = [float(t.realized_pnl) for t, _ in matched]
+    count = len(matched)
+    wins = sum(1 for p in pnls if p > 0)
+    losses = sum(1 for p in pnls if p < 0)
+    tagged = [(t, tag) for t, tag in matched if tag is not None]
+    broke_cut = sum(1 for _, tag in tagged if tag.broke_cut_rule or tag.rule_broken_computed)
+
+    mistake_counts: dict[str, int] = {}
+    mistake_pnl: dict[str, float] = {}
+    setup_stats: dict[str, list[float | int]] = {}
+    for trade, tag in tagged:
+        pnl = float(trade.realized_pnl)
+        for m in _trade_mistakes(tag):
+            mistake_counts[m] = mistake_counts.get(m, 0) + 1
+            mistake_pnl[m] = mistake_pnl.get(m, 0.0) + pnl
+        s_label = _short_label(tag.setup) or "unclear"
+        entry = setup_stats.setdefault(s_label, [0, 0, 0.0])
+        entry[0] += 1
+        entry[1] += 1 if pnl > 0 else 0
+        entry[2] += pnl
+
+    top_mistakes = [
+        {"mistake": name, "trades": c, "total_pnl": round(mistake_pnl[name], 2)}
+        for name, c in sorted(mistake_counts.items(), key=lambda kv: (-kv[1], mistake_pnl[kv[0]], kv[0]))[:_MAX_RECORD_MISTAKES]
+    ]
+    setups_list = [
+        {"setup": name, "trades": int(vals[0]), "wins": int(vals[1]), "total_pnl": round(float(vals[2]), 2)}
+        for name, vals in sorted(setup_stats.items(), key=lambda kv: (-int(kv[1][0]), -float(kv[1][2]), kv[0]))[:_MAX_RECORD_SETUPS]
+    ]
+
+    notes = []
+    if count == 0:
+        notes.append("No closed non-Webull trades matched these filters.")
+    else:
+        if count < _MIN_TAGGED_SAMPLE:
+            notes.append(f"Small sample ({count} trade{'s' if count != 1 else ''}); treat patterns cautiously.")
+        if len(tagged) < count:
+            notes.append(f"{count - len(tagged)} matching closed trade(s) have no AI tag; top_mistakes and broke_cut_rule cover tagged trades only.")
+
+    out: dict = {
+        "state": "ok",
+        "as_of": _now(),
+        "filters": {"symbol": symbol, "setup": _short_label(setup) if setup else None, "dte_bucket": dte_bucket},
+        "trades": count,
+        "tagged_trades": len(tagged),
+        "wins": wins,
+        "losses": losses,
+        "win_rate": round(wins / count, 3) if count else None,
+        "total_pnl": round(sum(pnls), 2) if pnls else 0.0,
+        "median_pnl": round(statistics.median(pnls), 2) if pnls else None,
+        "broke_cut_rule": broke_cut,
+        "small_sample": 0 < count < _MIN_TAGGED_SAMPLE,
+        "top_mistakes": top_mistakes,
+        "setups": setups_list,
+        "setups_total": len(setup_stats),
+    }
+    if known_setups:
+        out["known_setups"] = known_setups
+    if notes:
+        out["note"] = " ".join(notes)
+    return _trim_record(out)
+
+
 def memories(limit: int = 5, symbol: str | None = None, session=None) -> dict:
     """Approved memories, newest first; with ``symbol``, that symbol's first and then the general ones (no symbol)."""
     from sqlmodel import Session

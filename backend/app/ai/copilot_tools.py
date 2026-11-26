@@ -48,6 +48,7 @@ DESK_NOTE_MAX = 300  # app/engine/trade_notes.py MAX: one line
 DESK_DIRECTIONS = ("long", "short")
 DESK_ACTIONS_PER_ANSWER = 3
 MOMENT_TIMEFRAMES = ("1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D")  # every Charts interval but 1W
+DTE_BUCKETS = ("0dte", "1-3dte", "4-7dte", "8-21dte", "22+dte")
 
 TOOLS: list[dict] = [
     {
@@ -474,6 +475,23 @@ TOOLS: list[dict] = [
                                         "target": {"type": "number", "description": "open: his target, a stock price"},
                                         "idea": {"type": "string", "enum": ["mine", "copilot"]}}},
     },
+    {
+        "name": "get_my_record",
+        "description": "The owner's own closed-trade record (TradeJournal closed and expired trades joined to AI review tags): "
+                       "trade count, wins, losses, win rate, total and median P&L, cut-rule breaks, setup breakdown, and top "
+                       "mistake tags. Filter by optional `symbol`, `setup` (exact or partial tag name, e.g. vwap_reclaim), "
+                       "and/or `dte_bucket` (0dte, 1-3dte, 4-7dte, 8-21dte, 22+dte). Webull accounts stay excluded. "
+                       "Check `small_sample` and `tagged_trades` before generalising.",
+        "input_schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "symbol": {**_SYMBOL_SCHEMA, "description": "Optional US stock or ETF ticker, e.g. NBIS"},
+                "setup": {"type": "string", "description": "Optional setup tag name or substring, e.g. vwap_reclaim"},
+                "dte_bucket": {"type": "string", "enum": list(DTE_BUCKETS), "description": "Optional days-to-expiration bucket at entry"},
+            },
+        },
+    },
 ]
 TOOL_NAMES = frozenset(t["name"] for t in TOOLS)
 # The tools whose result is a card for the owner, not evidence: never carried, cited or counted as a read.
@@ -735,6 +753,17 @@ def validate(name: str, args: Any) -> dict:
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 10:
             raise ToolInputError("limit must be 1-10")
         return {"symbol": _symbol(args.get("symbol")), "limit": limit}
+    if name == "get_my_record":
+        out: dict[str, Any] = {}
+        if args.get("symbol") is not None:
+            out["symbol"] = _symbol(args["symbol"])
+        if args.get("setup") is not None:
+            out["setup"] = _text(args, "setup", 80)
+        if args.get("dte_bucket") is not None:
+            if args["dte_bucket"] not in DTE_BUCKETS:
+                raise ToolInputError("dte_bucket must be one of " + ", ".join(DTE_BUCKETS))
+            out["dte_bucket"] = args["dte_bucket"]
+        return out
     if name == "get_owner_context":
         return {"symbol": _symbol(args.get("symbol"))}
     if name == "get_chart_context":
@@ -952,7 +981,7 @@ CHANGE_EVIDENCE, CHANGE_ALERTS, CHANGE_JOBS, CHANGE_RESULTS = 12, 6, 5, 2  # one
 # The owner context rows and trade reviews are the owner's own book and words, not market evidence: "what changed"
 # leaves them out.
 BOOK_CONTEXT_TOOLS = frozenset({"owner_context", "get_owner_context", "get_trade_review", "get_week_review",
-                                "get_level_history", "get_proof", "get_paper_book"})
+                                "get_level_history", "get_proof", "get_paper_book", "get_my_record"})
 # A moment's as-of dates a past candle, not what the evidence says now: "what changed" leaves it out too.
 NOT_CURRENT_TOOLS = BOOK_CONTEXT_TOOLS | {"get_moment"}
 
@@ -1153,6 +1182,10 @@ class LiveEvidence:
         from app.ai import copilot_book
         return copilot_book.trades(symbol, limit)
 
+    def get_my_record(self, symbol: str | None = None, setup: str | None = None, dte_bucket: str | None = None) -> dict:
+        from app.ai import copilot_book
+        return copilot_book.my_record(symbol=symbol, setup=setup, dte_bucket=dte_bucket)
+
     def get_call_facts(self, symbol: str, **reading) -> dict:
         from app.engine import call_check
         return call_check.live_facts(symbol, **reading)
@@ -1253,6 +1286,7 @@ PROVENANCE = {
     "get_symbol_profile": ("Tradier fundamentals, calendar, dividends and corporate actions (cached a day) · FINRA short interest "
                            "and Tradier easy-to-borrow (Polygon, cached) · Yahoo / Webull analysts (unofficial, cached)", "cached"),
     "get_paper_book": ("His paper book (TradeJournal paper fills) · the desk's kept prices · journal closed trades", "saved"),
+    "get_my_record": ("His closed-trade record (TradeJournal closed and expired trades joined to AI review tags); Webull excluded", "saved"),
     "get_proof": ("Proof pages: exit habits and alert feedback, plan proof, outcomes, alert scorecard (TradeJournal)", "saved"),
     "web_search": ("Anthropic web search (third-party pages, untrusted)", "fetched"),
     "get_macro": ("FRED, Federal Reserve Bank of St. Louis (daily and weekly series, cached 6 h)", "fetched"),

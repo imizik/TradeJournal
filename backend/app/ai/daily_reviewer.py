@@ -231,7 +231,6 @@ def _assemble_daily_context(
 
     behavioral_flags = {
         "total_entry_fills_with_context": total_entries,
-        "chase_entry_count": _flag_count("is_chase_entry"),
         "trend_aligned_count": _flag_count("is_trend_aligned"),
         "late_move_count": _flag_count("is_late_move"),
         "vwap_reclaim_count": _flag_count("is_vwap_reclaim"),
@@ -300,7 +299,6 @@ def _fill_context(fill: Fill, role: str | None, alpaca: FillMarketContext | None
             "entry_time_bucket": alpaca.entry_time_bucket,
             "dte_bucket": alpaca.dte_bucket,
             # Behavioral flags (1=yes, 0=no, null=no data)
-            "is_chase_entry": alpaca.is_chase_entry,
             "is_trend_aligned": alpaca.is_trend_aligned,
             "is_late_move": alpaca.is_late_move,
             "is_vwap_reclaim": alpaca.is_vwap_reclaim,
@@ -506,7 +504,6 @@ moving averages (sma_20, sma_50, ema_9, ema_20, ema_9h), rsi_14, macd, macd_sign
 - entry_time_bucket / dte_bucket: time of day and days-to-expiry buckets
 
 **Behavioral flags** (1=yes, 0=no, null=no data):
-- is_chase_entry: entered significantly above VWAP on a buy, or below VWAP on a short
 - is_trend_aligned: entry direction matches daily trend (price above EMA-9 on call, below on put)
 - is_late_move: entered after >70% of the day's range was already consumed
 - is_vwap_reclaim: price was below VWAP but reclaimed it near entry
@@ -534,8 +531,7 @@ as a trade that immediately failed.
 ## summary_stats.behavioral_flags
 
 The summary_stats object includes aggregated flag counts across all entry fills that have Alpaca context.
-Cross-reference these with P&L outcomes. For example: if chase_entry_count is high and the day was a net loser,
-that is a key coaching point. If trend_aligned_count is high and winners outperformed, note the confirmation.
+Cross-reference these with P&L outcomes. For example: if trend_aligned_count is high and winners outperformed, note the confirmation.
 
 ## Answer
 
