@@ -474,6 +474,8 @@ def test_every_offered_model_has_its_own_price():
     usage = {"input_tokens": 10_000, "output_tokens": 1_000, "cache_read_input_tokens": 20_000, "cache_creation_input_tokens": 4_000}
     assert copilot.cost_usd("claude-fable-5-2", usage) == pytest.approx((10_000 * 8 + 1_000 * 40 + 20_000 * 0.20 + 4_000 * 10) / 1e6)
     assert copilot.cost_usd("claude-fable-5-1", usage) == pytest.approx((10_000 * 10 + 1_000 * 50 + 20_000 * 0.25 + 4_000 * 12.5) / 1e6)
+    # The strategy factory's default idea model; unpriced it would fall back to the dearest rate and double-count.
+    assert copilot.cost_usd("claude-opus-5", usage) == pytest.approx((10_000 * 5 + 1_000 * 25 + 20_000 * 0.50 + 4_000 * 6.25) / 1e6)
 
 
 def test_anthropic_backend_without_key_is_an_honest_unavailable_state(monkeypatch):

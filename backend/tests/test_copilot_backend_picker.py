@@ -93,7 +93,8 @@ def test_a_turn_runs_on_the_api_and_is_recorded_with_its_model_and_cost(monkeypa
 
 
 def test_turn_billing_labels_keep_old_plan_rows_readable_and_shadow_apart():
-    assert copilot_spend.BILLING == {"anthropic": "api", "shadow": "api_background", "plan": "claude_plan", "fake": "none"}
+    assert copilot_spend.BILLING == {"anthropic": "api", "shadow": "api_background", "api_background": "api_background",
+                                     "plan": "claude_plan", "fake": "none"}
 
 
 def test_api_turns_stop_for_the_day_at_the_budget_and_background_turns_do_not_count(monkeypatch):
