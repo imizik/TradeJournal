@@ -30,6 +30,10 @@ class MemorySave(Strict):
     source_reference: Text | None = None
     status: Literal["proposed", "active", "retired"] = "proposed"
     owner_confirmed: bool = False
+    # A thesis's own tripwires (thesis watch pings on them with THESIS_PINGS=true): the price that breaks it and
+    # the day to re-read it. Thesis only; absent when unset, so older saves hash as before.
+    break_below: float | None = Field(default=None, gt=0, lt=1_000_000)
+    review_on: date | None = None
 
     @model_validator(mode="after")
     def explicit_acceptance(self):
@@ -37,7 +41,18 @@ class MemorySave(Strict):
             raise ValueError("Activating or retiring a memory requires owner confirmation")
         if (self.memory_id is None) != (self.base_revision == 0):
             raise ValueError("New memories use revision 0; updates require a memory ID and base revision")
+        if (self.break_below is not None or self.review_on is not None) and (self.kind != "thesis" or not self.symbol):
+            raise ValueError("A break level or review date belongs to a thesis with a symbol")
         return self
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_retries(self, handler):
+        data = handler(self)
+        # Old saved operation hashes must still match identical pre-upgrade retries.
+        for key in ("break_below", "review_on"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
 
 
 class MemoryRedact(Strict):

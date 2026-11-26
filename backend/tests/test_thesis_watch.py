@@ -82,7 +82,7 @@ class Phone:
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
-    for name in ("THESIS_WATCH_ENABLED", "THESIS_WATCH_MOVE_PCT", "THESIS_WATCH_DAILY_CAP", "RESEARCH_QUEUE_ENABLED",
+    for name in ("THESIS_WATCH_ENABLED", "THESIS_PINGS", "THESIS_WATCH_MOVE_PCT", "THESIS_WATCH_DAILY_CAP", "RESEARCH_QUEUE_ENABLED",
                  "ALERT_POLICY_ENABLED", "PING_DAILY_CAP", "PING_QUIET_MINUTES", "PING_PREOPEN_ALLOWANCE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/trade-journal")
@@ -127,11 +127,11 @@ def investigate(engine, symbol, as_of=None, status="open"):
                           session=db)["id"]
 
 
-def thesis(engine, symbol, text="A two-year infrastructure thesis."):
+def thesis(engine, symbol, text="A two-year infrastructure thesis.", **tripwires):
     with Session(engine) as db:
         receipt = jo_briefing.save_memory(db, jo_briefing.MemorySave(
             operation_id=f"op-{symbol}-{next(n)}", kind="thesis", symbol=symbol, original_text=text,
-            source="owner_statement", status="active", owner_confirmed=True))
+            source="owner_statement", status="active", owner_confirmed=True, **tripwires))
         return receipt["memory_id"]
 
 
@@ -589,3 +589,86 @@ def test_the_watch_s_own_caps_still_hold_before_the_gate(engine, world, monkeypa
     result = watch.run_once()
     assert len(phone.sent) == 1 and [s["reason"] for s in result["skipped"]] == ["daily cap reached"]
     assert [p.decision for p in pings(engine)] == ["sent"]  # the capped one never reached the gate
+
+
+# --------------------------------------------------------------------------- the thesis's own tripwires (THESIS_PINGS)
+
+def test_break_level_and_review_date_are_off_unless_thesis_pings_is_on(engine, world, monkeypatch):
+    watch, readers, phone, clock = world
+    assert thesis_watch.thesis_pings() is False
+    thesis(engine, "NBIS", break_below=80, review_on=date(2026, 10, 20))
+    readers.quotes = {"NBIS": {"last": 78.5, "previous_close": 79}}
+    assert watch.run_once()["fired"] == [] and phone.sent == []
+    with Session(engine) as db:
+        [row] = thesis_watch.watched_set(db)
+    assert [(level, review) for _, level, review in row.tripwires] == [(80, date(2026, 10, 20))]
+
+
+def test_an_older_thesis_s_tripwire_still_counts_when_a_newer_one_on_the_ticker_has_none(engine, world, monkeypatch):
+    watch, readers, phone, clock = world
+    monkeypatch.setenv("THESIS_PINGS", "true")
+    older = thesis(engine, "NBIS", break_below=80)
+    thesis(engine, "NBIS", text="A newer note with no tripwire.")
+    readers.quotes = {"NBIS": {"last": 79, "previous_close": 81}}
+    result = watch.run_once()
+    assert [f["kind"] for f in result["fired"]] == ["break"]
+    assert triggers(engine)[0].dedupe_key == f"break:{older}:80"
+
+
+def test_a_break_under_the_thesis_level_pings_once_ahead_of_news_and_never_again_for_that_level(engine, world, monkeypatch):
+    watch, readers, phone, clock = world
+    monkeypatch.setenv("THESIS_PINGS", "true")
+    memory = thesis(engine, "NBIS", break_below=80)
+    readers.quotes = {"NBIS": {"last": 79.25, "previous_close": 80.1}}
+    readers.articles = [article("NBIS", "Nebius signs a deal", "https://benzinga.com/b/1", at("09:58"))]
+    result = watch.run_once()
+    assert [(f["kind"], f["text"]) for f in result["fired"]] == [("break", "NBIS 79.25 is at or under your thesis break level 80")]
+    assert phone.sent[0]["title"] == "NBIS hit your thesis break level"
+    assert [s["kind"] for s in result["skipped"]] == ["news"]  # the tripwire won the symbol's one ping today
+    [told, _] = triggers(engine)
+    assert told.dedupe_key == f"break:{memory}:80" and told.memory_id == UUID(memory)
+    clock.now = at("10:00", date(2026, 10, 23))  # another day, still under: told once per level
+    readers.articles = []
+    assert watch.run_once()["fired"] == [] and len(phone.sent) == 1
+
+
+def test_above_the_break_level_or_with_no_quote_there_is_no_break(engine, world, monkeypatch):
+    watch, readers, phone, clock = world
+    monkeypatch.setenv("THESIS_PINGS", "true")
+    thesis(engine, "NBIS", break_below=80)
+    thesis(engine, "CRWV", break_below=50)
+    readers.quotes = {"NBIS": {"last": 80.01, "previous_close": 80.5}}  # above; CRWV has no quote
+    result = watch.run_once()
+    assert result["fired"] == [] and result["skipped"] == []
+    readers.fail.add("quotes")
+    clock.now = at("10:15")
+    result = watch.run_once()
+    assert result["fired"] == [] and result["issues"] == ["quotes unavailable: RuntimeError"]
+    readers.fail.clear()
+    readers.quotes = {"NBIS": {"last": 79, "previous_close": 80.5, "stale": True}}  # the feed's cached fallback
+    clock.now = at("10:30")
+    assert watch.run_once()["fired"] == [] and triggers(engine) == []  # no break, and its key is not used up
+
+
+def test_read_quotes_marks_the_feed_s_stale_fallback(monkeypatch):
+    from app.engine import chart_feed
+    rows = [{"symbol": "NBIS", "last": 79.0, "previous_close": 80.0}]
+    monkeypatch.setattr(chart_feed.chart_feed, "quote_rows", lambda symbols: (rows, 1.0, "provider timed out; cached"))
+    assert thesis_watch.read_quotes(["NBIS"])["NBIS"]["stale"] is True
+    monkeypatch.setattr(chart_feed.chart_feed, "quote_rows", lambda symbols: (rows, 1.0, None))
+    assert thesis_watch.read_quotes(["NBIS"])["NBIS"]["stale"] is False
+
+
+def test_the_review_date_pings_once_when_it_comes_with_the_question_prepared(engine, world, monkeypatch):
+    watch, readers, phone, clock = world
+    monkeypatch.setenv("THESIS_PINGS", "true")
+    thesis(engine, "NBIS", review_on=date(2026, 10, 23))
+    assert watch.run_once()["fired"] == []  # not yet
+    clock.now = at("08:00", date(2026, 10, 23))
+    result = watch.run_once()
+    assert [(f["kind"], f["text"]) for f in result["fired"]] == [("review", "Review date Fri Oct 23 for your NBIS thesis")]
+    assert phone.sent[0]["title"] == "Time to review your NBIS thesis"
+    path, query = link(phone.sent[0]["path"])
+    assert query["symbol"] == "NBIS" and query["context"].endswith("Does it still hold?")
+    clock.now = at("08:00", date(2026, 10, 26))
+    assert watch.run_once()["fired"] == [] and len(phone.sent) == 1

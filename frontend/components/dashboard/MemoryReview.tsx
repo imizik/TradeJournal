@@ -21,6 +21,9 @@ const revisionOf = (m: BriefMemory, status: MemoryStatus, draft: Draft = draftOf
   memory_id: m.memory_id, base_revision: m.revision, kind: draft.kind, symbol: draft.symbol.trim() || null,
   original_text: draft.original_text.trim(), interpretation: draft.interpretation.trim() || null,
   source: m.body.source ?? "owner_statement", source_reference: m.body.source_reference ?? null, status, owner_confirmed: true,
+  // A thesis keeps its break level and review date (thesis watch pings on them) while it stays a thesis on the same ticker.
+  ...(draft.kind === "thesis" && draft.symbol.trim() && draft.symbol.trim() === m.symbol
+    ? { break_below: m.body.break_below ?? null, review_on: m.body.review_on ?? null } : {}),
 });
 function draftProblem(d: Draft) {
   if (!d.original_text.trim()) return "Write the belief in your own words.";
@@ -91,6 +94,7 @@ export default function MemoryReview() {
         <p className="whitespace-pre-wrap text-sm leading-relaxed">“{m.body.original_text}”</p>
         {m.body.interpretation && <p className="whitespace-pre-wrap text-sm text-muted-foreground">Interpretation: {m.body.interpretation}</p>}
         {m.body.source_reference && <p className="whitespace-pre-wrap text-xs text-muted-foreground">Reference: {m.body.source_reference}</p>}
+        {(m.body.break_below || m.body.review_on) && <p className="text-xs text-muted-foreground">{[m.body.break_below ? `Breaks under ${m.body.break_below}` : "", m.body.review_on ? `Review ${m.body.review_on}` : ""].filter(Boolean).join(" · ")}</p>}
       </>}
       <div className="flex flex-wrap items-center gap-2">
         {isEditing ? <>

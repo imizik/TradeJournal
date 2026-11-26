@@ -83,7 +83,9 @@ def register(server, config, authenticated, scopes, clock):
         """Submit a NEW proposed memory, preserving original wording separately from interpretation.
         source must be jo_proposal, status proposed, owner_confirmed false, memory_id absent,
         base_revision 0. Owner privately reviews/accepts; this tool cannot activate, revise,
-        retire or redact accepted memories. Use a stable operation_id. pending_import is NOT
+        retire or redact accepted memories. A long-term thesis (kind thesis, with symbol) may set
+        break_below (the price that breaks it, only if the owner named one) and review_on (the date
+        to re-read it); once accepted, the app pings on them. Use a stable operation_id. pending_import is NOT
         saved in the app. Check jo_receipt until saved/rejected; do not invent acceptance."""
         return await invoke("jo_memory_propose", lambda actor: exchange.submit(
             snapshots, outbox, actor, packet_id, "memory", memory.model_dump(mode="json"), clock()))

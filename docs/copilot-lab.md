@@ -6047,6 +6047,16 @@ day, and nothing runs when the flag is off.
   trigger today as its ticker's status line (kind and text); the ticker
   opens the investigation.
 
+- **A thesis's own tripwires:** a thesis memory may carry `break_below` (the
+  price that breaks it) and `review_on` (the day to re-read it), set through
+  the connector's `jo_memory_propose` and kept when the owner accepts or
+  corrects it in the memory review. With `THESIS_PINGS=true` (off by default)
+  a pass adds a `break` trigger when the last price is at or under the level
+  (`NBIS hit your thesis break level`, once per memory and level) and a
+  `review` trigger once the date comes (`Time to review your NBIS thesis`,
+  once per memory and date). They come ahead of the other triggers, so they
+  win the symbol's one ping that day, and share every cap and the policy gate.
+
 Tests: `backend/tests/test_thesis_watch.py` (seeded journal; stubbed news,
 quotes, bars and earnings).
 

@@ -15,6 +15,12 @@ only; nothing here is a market read the app does not already do. Three triggers:
   with no investigation;
 - ``earnings``: the next report inside two trading days.
 
+With ``THESIS_PINGS=true`` too, a thesis memory's own tripwires add two more, ahead of the rest so they win the
+symbol's one ping a day:
+
+- ``break``: the last price at or under the thesis's ``break_below``, once per memory and level;
+- ``review``: the thesis's ``review_on`` date has come, once per memory and date.
+
 A trigger is written once per dedupe key, so a restart never fires it twice; a skipped one is keyed to its day, so
 the same signal can still be told on a later day. One ping per symbol per day and ``THESIS_WATCH_DAILY_CAP``
 (default 4) a day; the rest are recorded ``skipped``. Right before the send, the app's notification policy
@@ -59,7 +65,7 @@ NEWS_LOOKBACK_REGULAR = timedelta(minutes=30)  # the first pass of a process; la
 NEWS_LOOKBACK_MORNING = timedelta(hours=16)  # overnight, back to the prior close
 CONTEXT_MAX = 300
 TEXT_MAX = 300
-KINDS = ("news", "move", "earnings")
+KINDS = ("break", "review", "news", "move", "earnings")
 
 # Control characters and bidirectional overrides never reach a notification or a prepared question.
 _UNSAFE = re.compile("[\x00-\x1f\x7f‪-‮⁦-⁩]")
@@ -87,6 +93,11 @@ def _number(name: str, default: float, cast=float) -> float:
         log.warning("%s=%r must be above zero; using %s", name, raw, default)
         return default
     return value
+
+
+def thesis_pings() -> bool:
+    """The thesis's own break level and review date; off by default (``THESIS_PINGS``)."""
+    return os.environ.get("THESIS_PINGS", "false").lower() in ("1", "true", "yes")
 
 
 def move_pct() -> float:
@@ -122,7 +133,8 @@ def read_quotes(symbols: list[str]) -> dict[str, dict]:
         raise RuntimeError(str(exc)) from exc
     if issue and not rows:
         raise RuntimeError(issue)
-    return {r["symbol"]: {"last": r.get("last"), "previous_close": r.get("previous_close")} for r in rows}
+    # ``stale``: the feed handed back its cached fallback after a failed read; a break never fires on it.
+    return {r["symbol"]: {"last": r.get("last"), "previous_close": r.get("previous_close"), "stale": bool(issue)} for r in rows}
 
 
 def read_bars(symbol: str, day: date) -> list[dict] | None:
@@ -149,6 +161,8 @@ class Watched:
     held: bool = False
     investigation: dict | None = None  # {"id", "as_of": aware datetime | None, "as_of_text"}
     memory_id: str | None = None
+    # Every active thesis memory's own tripwires on this symbol: (memory id, break_below, review_on).
+    tripwires: list[tuple[str, float | None, date | None]] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
 
 
@@ -219,6 +233,14 @@ def watched_set(db: Session, limit: int = MAX_SYMBOLS) -> list[Watched]:
         if row.memory_id is None:
             row.memory_id = memory["memory_id"]
             row.reasons.append("thesis")
+        level = body.get("break_below")
+        level = float(level) if isinstance(level, (int, float)) and level > 0 else None
+        try:
+            review = date.fromisoformat(body["review_on"]) if isinstance(body.get("review_on"), str) else None
+        except ValueError:
+            review = None
+        if level or review:
+            row.tripwires.append((memory["memory_id"], level, review))
     ordered = ([r for r in by_symbol.values() if r.held]
                + [r for r in by_symbol.values() if not r.held and r.investigation is not None]
                + [r for r in by_symbol.values() if not r.held and r.investigation is None])
@@ -247,7 +269,11 @@ def deep_link(row: Watched, text: str, trigger_id: uuid.UUID | None = None) -> s
     return "/copilot-lab?" + urlencode({"symbol": row.symbol, "context": question, **origin}, quote_via=quote)
 
 
-def title_for(symbol: str) -> str:
+def title_for(symbol: str, kind: str = "news") -> str:
+    if kind == "break":
+        return f"{symbol} hit your thesis break level"
+    if kind == "review":
+        return f"Time to review your {symbol} thesis"
     return f"New on {symbol} since your thesis"
 
 
@@ -318,9 +344,16 @@ class ThesisWatch:
         result = {"day": today.isoformat(), "watched": symbols, "fired": [], "skipped": [], "issues": []}
         if not rows:
             return result
+        try:
+            quotes = self.quotes(symbols)
+        except Exception as exc:  # noqa: BLE001 - no quotes, no move or break triggers this pass
+            result["issues"].append(f"quotes unavailable: {type(exc).__name__}")
+            quotes = None
         candidates: list[Candidate] = []
+        if thesis_pings():  # first, so a thesis's own tripwire wins the symbol's one ping today
+            candidates += self._tripwire_candidates(rows, quotes or {}, today)
         candidates += self._news_candidates(rows, since, now, result["issues"])
-        candidates += self._move_candidates(rows, today, result["issues"])
+        candidates += self._move_candidates(rows, quotes, today)
         candidates += self._earnings_candidates(rows, today, result["issues"])
         with Session(self.engine) as db:
             for candidate in candidates:
@@ -390,11 +423,26 @@ class ThesisWatch:
             return float(previous), f"close:{today.isoformat()}", "since the prior close"
         return None, "", ""
 
-    def _move_candidates(self, rows: list[Watched], today: date, issues: list) -> list[Candidate]:
-        try:
-            quotes = self.quotes([r.symbol for r in rows])
-        except Exception as exc:  # noqa: BLE001 - no quotes, no move triggers this pass
-            issues.append(f"quotes unavailable: {type(exc).__name__}")
+    def _tripwire_candidates(self, rows: list[Watched], quotes: dict, today: date) -> list[Candidate]:
+        """The thesis memory's own break level and review date. A break needs a live last price; the review
+        does not."""
+        found: list[Candidate] = []
+        for row in rows:
+            quote = quotes.get(row.symbol) or {}
+            last = None if quote.get("stale") else quote.get("last")  # a break needs a fresh price
+            for memory_id, level, review in row.tripwires:
+                if level and isinstance(last, (int, float)) and 0 < last <= level:
+                    text = f"{row.symbol} {float(last):g} is at or under your thesis break level {level:g}"
+                    found.append(Candidate(row, "break", f"break:{memory_id}:{level:g}", text,
+                                           {"last": float(last), "reference": level, "level": level, "memory_id": memory_id}))
+                if review and review <= today:
+                    text = f"Review date {review.strftime('%a %b %-d')} for your {row.symbol} thesis"
+                    found.append(Candidate(row, "review", f"review:{memory_id}:{review.isoformat()}", text,
+                                           {"date": review.isoformat(), "memory_id": memory_id}))
+        return found
+
+    def _move_candidates(self, rows: list[Watched], quotes: dict | None, today: date) -> list[Candidate]:
+        if quotes is None:
             return []
         threshold = move_pct()
         found: list[Candidate] = []
@@ -491,7 +539,7 @@ class ThesisWatch:
         from app.engine import notification_policy
         anchor, trade_id = notification_policy.symbol_anchor(db, row.symbol)
         ticket = notification_policy.decide(db, sender="thesis_watch", source_id=str(trigger.id), kind="thesis_watch",
-                                            title=title_for(row.symbol), body=candidate.text, now=now.timestamp(), anchor=anchor,
+                                            title=title_for(row.symbol, candidate.kind), body=candidate.text, now=now.timestamp(), anchor=anchor,
                                             symbol=row.symbol, trade_id=trade_id)
         if ticket.held:
             # Not told: keyed to the day like a skipped trigger, so the same signal can still be told tomorrow.
@@ -502,14 +550,15 @@ class ThesisWatch:
         from app.engine import ping_images
         try:
             if self._publish is not None:
-                trigger.message_id = self._publish(title_for(row.symbol), candidate.text + ticket.append, path=trigger.path, direct_click=True)
+                trigger.message_id = self._publish(title_for(row.symbol, candidate.kind), candidate.text + ticket.append, path=trigger.path, direct_click=True)
             else:
                 # The ping's chart: today with the price the move is measured from.
                 basis = str(candidate.detail.get("basis") or "")
+                wording = ("since evidence" if basis.startswith("evidence:") else "since close" if basis
+                           else "vs break level" if candidate.kind == "break" else "")
                 image = ping_images.picture(ping_images.thesis(
-                    title_for(row.symbol), row.symbol, candidate.detail.get("reference"),
-                    "since evidence" if basis.startswith("evidence:") else "since close" if basis else "", now.timestamp()))
-                trigger.message_id, image_state = phone.send(title_for(row.symbol), candidate.text + ticket.append, kind="thesis_watch",
+                    title_for(row.symbol, candidate.kind), row.symbol, candidate.detail.get("reference"), wording, now.timestamp()))
+                trigger.message_id, image_state = phone.send(title_for(row.symbol, candidate.kind), candidate.text + ticket.append, kind="thesis_watch",
                                                              image=image, path=trigger.path, direct_click=True)
                 ping_images.record(db, ticket, image_state)
             trigger.delivery = "sent"

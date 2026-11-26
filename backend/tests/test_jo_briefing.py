@@ -247,3 +247,17 @@ def test_opportunity_format_citations_freshness_and_legacy_hashes(client):
     assert client.post('/jo/briefings', json=bad).status_code == 422
     legacy = {k:v for k,v in body.items() if k not in ('opportunities', 'urgent_positions')}
     assert BriefingSave.model_validate(legacy).model_dump(mode='json') == legacy | {'model_id': None, 'supersedes_id': None}
+
+
+def test_a_thesis_carries_an_optional_break_level_and_review_date_and_older_saves_hash_as_before():
+    base = dict(operation_id="op-t", kind="thesis", symbol="NBIS", original_text="AI capex keeps compounding.",
+                source="jo_proposal")
+    plain = store.MemorySave(**base).model_dump(mode="json")
+    assert "break_below" not in plain and "review_on" not in plain  # an unset tripwire leaves the old hash alone
+    full = store.MemorySave(**base, break_below=72.5, review_on="2027-02-15").model_dump(mode="json")
+    assert full["break_below"] == 72.5 and full["review_on"] == "2027-02-15"
+    for bad in (dict(base, kind="lesson"), dict(base, symbol=None)):
+        with pytest.raises(ValueError, match="belongs to a thesis"):
+            store.MemorySave(**bad, break_below=10)
+    with pytest.raises(ValueError):
+        store.MemorySave(**base, break_below=0)
