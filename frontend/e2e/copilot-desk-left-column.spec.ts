@@ -86,6 +86,8 @@ async function open(page: Page, width: number, book: object = BOOK, folded: stri
     const body = reads[target.split("?")[0]];
     return body ? { status: 200, body } : { status: 404, body: { detail: "Not in this test." } };
   }) } }));
+  // The laptop folds Practice to one line; these tests read its lines, so this tab starts with it open.
+  await page.addInitScript(() => { if (!window.sessionStorage.getItem("desk.practice.v1")) window.sessionStorage.setItem("desk.practice.v1", JSON.stringify({ practice: true })); });
   await page.goto("/copilot-lab");
   if (width < 768) await page.getByTestId("desk-view-book").click();
   if (width < 768) { // a phone keeps Practice, paper, rules and the scorecard under More (November 26, 2026)
@@ -236,6 +238,22 @@ test("closing the last paper position keeps the open paper line open", async ({ 
   await expect(page.getByTestId("practice-line-paper")).toContainText("nothing open or working");
   await expect(page.getByTestId("practice-line-paper")).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByTestId("desk-paper").getByTestId("paper-account")).toBeVisible();
+});
+
+test("on the laptop Practice is one folded line until opened; the paper key still opens it", async ({ page }) => {
+  await page.addInitScript(() => { if (!window.sessionStorage.getItem("desk.practice.v1")) window.sessionStorage.setItem("desk.practice.v1", "{}"); }); // as a new tab: nothing kept open
+  await open(page, 1440);
+  const toggle = page.getByTestId("practice-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByTestId("practice-line-paper")).toHaveCount(0);
+  await toggle.click();
+  await expect(page.getByTestId("practice-line-paper")).toBeVisible();
+  await toggle.click();
+  await expect(page.getByTestId("practice-line-paper")).toHaveCount(0);
+  await page.reload(); // his choice holds for this tab
+  await expect(page.getByTestId("practice-toggle")).toHaveAttribute("aria-expanded", "false");
+  await page.keyboard.press("p"); // the paper key opens the block and its paper line
+  await expect(page.getByTestId("practice-line-paper")).toHaveAttribute("aria-expanded", "true");
 });
 
 test("with nothing open the paper line waits closed and opens on a tap", async ({ page }) => {

@@ -135,12 +135,12 @@ function orclChart() {
 const ALERT = { id: "i1", symbol: "ORCL", price: 240, created_on: "2026-11-12", condition: "crosses", interval: null, session: "regular", direction: "down",
   source_kind: "copilot", source_id: PLAN, label: "ORCL invalidation", state: "active", armed_at: epoch("2026-11-12T15:00:00Z"), event: null, plan_role: "invalidation" };
 
-async function open(page: Page, { width = 1440, height = 900 } = {}) {
+async function open(page: Page, { width = 1440, height = 900, threads = THREADS as object } = {}) {
   const writes: Request[] = [];
   await page.setViewportSize({ width, height });
   await page.clock.install({ time: NOW });
   await page.route("**/copilot/status", route => route.fulfill({ json: ON }));
-  await page.route("**/copilot/desk/threads", route => route.fulfill({ json: THREADS }));
+  await page.route("**/copilot/desk/threads", route => route.fulfill({ json: threads }));
   await page.route("**/copilot/desk/session", route => route.fulfill({ json: SESSION }));
   await page.route("**/copilot/desk/pings*", route => route.fulfill({ json: { day: "2026-11-13", since: "2026-11-12", alerts: { state: "ok", rows: [] }, radar: { state: "off", reason: null, rows: [] } } }));
   await page.route("**/copilot/desk/feed", route => route.fulfill({ json: { as_of: "2026-11-13T16:00:00Z", now: epoch("2026-11-13T16:00:00Z"), day: "2026-11-13", total: 0, sources: {}, unavailable: [], items: [] } }));
@@ -191,6 +191,22 @@ test("a real option: the panel shows the position and its plan, and the book row
   await expect(book(page).getByTestId("book-standing")).toBeVisible();
   for (const name of ["Close at target", "Close at stop", "Roll", "Trim", "Close"])
     await expect(book(page).getByRole("button", { name, exact: true })).toHaveCount(0);
+});
+
+test("a position with no plan: his cut line, how far the price is from it and his record in the ticker, not a prompt to plan", async ({ page }) => {
+  // Bought at 6.20 with three days or less left: the cut line is 30% under it (4.34 a share); the quote now is 4.10.
+  const bare = { ...ORCL, investigation_id: null, status: { text: "", tone: "muted" },
+    book: { ...ORCL.book, state: null, planned: false, plan_levels: null, cut_line: 434 } };
+  await page.route("**/charts/symbol/ORCL/you", route => route.fulfill({ json: { symbol: "ORCL", total_trades: 13, closed_trades: 12, missing_pnl: 0,
+    realized_pnl: -1240, win_rate: 5 / 12, average_hold_mins: 90, hold_samples: 12, best_trade: null, worst_trade: null, last_traded_at: null,
+    open_positions: [], recent_trades: [], source: "Journal · all accounts", as_of: "2026-11-13T16:00:00Z", time_zone: "America/New_York" } }));
+  await open(page, { threads: { ...THREADS, threads: [bare] } });
+  const p = panel(page);
+  await expect(p.getByTestId("position-cut")).toHaveText("Cut line 4.34 · past it");
+  await expect(p.getByTestId("position-record")).toHaveText("Your ORCL record 12 closed · 5 won · −$1,240");
+  await expect(p.getByTestId("position-plan")).not.toContainText("No saved plan");
+  // Plan it is still there, last and quiet.
+  await expect(p.getByTestId("position-actions").getByRole("button").last()).toHaveText("Plan it");
 });
 
 test("Stop / target re-arms the plan's stop alert at the new price from a fresh quote and saves the target", async ({ page }) => {

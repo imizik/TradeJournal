@@ -7,10 +7,12 @@
  *
  * It shows the REAL or PAPER mark, the contract and size, the P&L, the price now and the stock's change today, the plan's
  * entry, stop and target, break-even and days left (a real option's full standing, ``OptionStanding``), and any working
- * order; then one row of buttons:
+ * order. A real position with no plan levels shows what he goes by instead of a prompt to plan: his cut line and how far
+ * the price is from it (a short-dated long option, ``book.cut_line``), the time left, and his record in the ticker from
+ * closed trades (``YourRecord``). Then one row of buttons:
  * - **Stop / target**: two stock prices in place. Real: the plan's invalidation alert armed again at the new stop from a
  *   fresh quote (the copilot's ``plan_stop`` route) and its target saved on the plan (``savePlanLevels``); with no saved
- *   plan the button is "Plan it" (the plan flow). Paper: the position's stop and target after entry
+ *   plan a quiet "Plan it" ends the row (the plan flow). Paper: the position's stop and target after entry
  *   (``setPaperLevels``); a change never fills or closes anything, the close-automatically switch still decides.
  * - **Trim** (a count) and **Close** (all): real, the Ticket's close-now view at the mark (``panelCloseTicket``), copy
  *   only; paper, the paper book's own close row (``CloseRow``).
@@ -20,11 +22,12 @@
  * Nothing here sends anything to Robinhood or tells him what to do.
  */
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { money, signedPct, type DeskThread } from "@/lib/desk";
 import { tickFor, tickedBook, useDeskTicks } from "@/lib/deskTicks";
 import { price as priceText, todayNewYork } from "@/lib/charts";
 import { daysLeft } from "@/lib/optionStanding";
+import { fetchSymbolJournal, type SymbolJournal } from "@/lib/symbolInfo";
 import { CLOSING_LABEL, trimCount } from "@/lib/closingTicket";
 import {
   accountWords, heldContracts, levelsProblem, markNow, panelCloseTicket, paperBreakEven, planSide, savePlanLevels, type PanelPlan,
@@ -104,6 +107,32 @@ export function LevelsEditor({ symbol, side, last, stop, target, needStop, save,
 
 // ------------------------------------------------------------------------------------------------ real
 
+/** His closed trades in a ticker, every account (``GET /charts/symbol/{symbol}/you``): read once per ticker, null until
+ * it arrives or when it cannot be read (the panel then says nothing rather than a guess). */
+function useRecord(symbol: string): SymbolJournal | null {
+  const [read, setRead] = useState<{ symbol: string; data: SymbolJournal } | null>(null);
+  useEffect(() => {
+    if (!symbol) return;
+    const stop = new AbortController();
+    fetchSymbolJournal(symbol, stop.signal).then(data => setRead({ symbol, data }), () => { /* no record line */ });
+    return () => stop.abort();
+  }, [symbol]);
+  return read?.symbol === symbol ? read.data : null;
+}
+
+/** "Your TSLA record 12 closed · 5 won · −$1,240": facts from the journal, nothing when he has no closed trade in it. */
+function YourRecord({ symbol, record }: { symbol: string; record: SymbolJournal | null }) {
+  if (!record || record.closed_trades < 1) return null;
+  const won = record.win_rate != null ? Math.round(record.win_rate * record.closed_trades) : null;
+  const pnl = record.realized_pnl;
+  return (
+    <Fig label={`Your ${symbol} record`} testId="position-record">
+      {record.closed_trades} closed{won != null && ` · ${won} won`}
+      {pnl != null && <> · <span className={pnl > 0 ? "text-emerald-300" : pnl < 0 ? "text-rose-300" : "text-muted-foreground"}>{money(pnl)}</span></>}
+    </Fig>
+  );
+}
+
 type Open = "levels" | "trim" | "note" | null;
 
 /**
@@ -122,6 +151,7 @@ export function DeskPosition({ row, rows, fallback = null, change = null, plan, 
   const symbol = row.symbol ?? "";
   const ticks = useDeskTicks([row.symbol, book?.tick?.quote]);
   const read = useStanding(row, rows, fallback);
+  const record = useRecord(symbol);
   const [open, setOpen] = useState<Open>(null);
   const [said, setSaid] = useState<string | null>(null);
   const [trimText, setTrimText] = useState("");
@@ -151,6 +181,11 @@ export function DeskPosition({ row, rows, fallback = null, change = null, plan, 
   const side = planSide({ entry: current?.entry, stop: current?.stop }, { option: book.option, sign: book.tick?.sign });
   const trade = rowTrade(row);
   const working = ordersLive ? (book.orders ?? []).filter(o => o.working) : [];
+  // His cut line (dollars a contract; shown a share, as the quote reads) and how far the price now is above it.
+  const cut = book.cut_line != null ? book.cut_line / 100 : null;
+  const overCut = cut != null && cut > 0 && mark ? (mark.share - cut) / cut * 100 : null;
+  // Time left where the option's standing below does not already say it.
+  const days = !standing && book.option && book.expiry ? daysLeft(book.expiry, todayNewYork()) : null;
 
   const toggle = (next: Open) => { setSaid(null); setOpen(open === next ? null : next); };
   const openTrim = () => { setTrimText(half ? String(half) : ""); toggle("trim"); };
@@ -181,7 +216,17 @@ export function DeskPosition({ row, rows, fallback = null, change = null, plan, 
           <Fig label="Entry">{level(shown.entry)}</Fig>
           <Fig label="Stop" testId="position-stop">{level(shown.stop)}</Fig>
           <Fig label="Target" testId="position-target">{level(shown.target)}</Fig>
-        </> : <span className="text-muted-foreground">{book.planned ? "Planned with a time stop only: no stop or target price." : "No saved plan for this position."}</span>}
+        </> : book.planned ? <span className="text-muted-foreground">Planned with a time stop only: no stop or target price.</span> : null}
+        {!shown && cut != null && (
+          <Fig label="Cut line" testId="position-cut">
+            {priceText(cut)}
+            {overCut != null && (overCut <= 0
+              ? <span className="font-semibold text-rose-300"> · past it</span>
+              : <span className="text-muted-foreground"> · {overCut.toFixed(0)}% above it</span>)}
+          </Fig>
+        )}
+        {!shown && days != null && <Fig label="Expiry" testId="position-expiry"><span className={cn(days <= 2 && "text-amber-300")}>{days < 0 ? "Expired" : days === 0 ? "today" : `${days}d left`}</span></Fig>}
+        {!shown && <YourRecord symbol={symbol} record={record} />}
         {working.length > 0 && <span data-testid="position-orders" className="min-w-0"><OrderLines orders={working} /></span>}
       </div>
       {book.option && <OptionStanding row={row} rows={rows} fallback={fallback}
@@ -190,9 +235,6 @@ export function DeskPosition({ row, rows, fallback = null, change = null, plan, 
         {current && side ? (
           <button type="button" data-testid="position-levels" aria-expanded={open === "levels"} onClick={() => toggle("levels")}
             title="Move the plan's stop or target (stock prices). The stop's alert is armed again at the new price. Nothing is sent." className={BUTTON}>Stop / target</button>
-        ) : !book.planned && onPlan ? (
-          <button type="button" data-testid="position-plan-it" onClick={() => onPlan(symbol)}
-            title="This position has no saved plan: plan its stop and target. Nothing is sent." className={BUTTON}>Plan it</button>
         ) : null}
         {closeAll && held! >= 2 && (
           <button type="button" data-testid="position-trim" aria-expanded={open === "trim"} onClick={openTrim}
@@ -221,6 +263,10 @@ export function DeskPosition({ row, rows, fallback = null, change = null, plan, 
               </button>
             ))}
           </span>
+        )}
+        {!(current && side) && !book.planned && onPlan && (
+          <button type="button" data-testid="position-plan-it" onClick={() => onPlan(symbol)}
+            title="This position has no saved plan: plan its stop and target. Nothing is sent." className={QUIET}>Plan it</button>
         )}
       </div>
       {open === "levels" && current && side && (

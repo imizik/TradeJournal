@@ -46,6 +46,8 @@ async function open(page: Page, width: number, book: object = BOOK) {
   await page.route("**/copilot/main-chat/history*", route => route.fulfill({ json: { conversations: [] } }));
   await page.route(`**/copilot/investigations/${MAIN}`, route => route.fulfill({ json: MAIN_CHAT }));
   await page.route("**/copilot/chat", route => { chats.push(route.request().postDataJSON()); return route.abort(); });
+  // The laptop folds Practice to one line; these tests read its lines, so this tab starts with it open.
+  await page.addInitScript(() => { if (!window.sessionStorage.getItem("desk.practice.v1")) window.sessionStorage.setItem("desk.practice.v1", JSON.stringify({ practice: true })); });
   await page.goto("/copilot-lab");
   if (width < 768) await page.getByTestId("desk-view-book").click();
   if (width < 768) { // a phone keeps Practice, paper, rules and the scorecard under More (November 26, 2026)

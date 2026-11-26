@@ -106,6 +106,8 @@ async function open(page: Page, width: number, path = "/copilot-lab") {
       quantity: body.quantity, cash: -98.1 * body.quantity, quoted_at: NOW.getTime() / 1000 - 2, buying_power: 9924.5, need_each: 98.1 };
     return route.fulfill({ json: body.preview ? { preview: fill } : { filled: { ...fill, position_id: "p-new" } } });
   });
+  // The laptop folds Practice to one line; these tests read its lines, so this tab starts with it open.
+  await page.addInitScript(() => { if (!window.sessionStorage.getItem("desk.practice.v1")) window.sessionStorage.setItem("desk.practice.v1", JSON.stringify({ practice: true })); });
   await page.goto(path);
   if (width < 768 && path === "/copilot-lab") { // a phone keeps Practice, paper, rules and the scorecard under More (November 26, 2026)
     await page.getByTestId("desk-top-more").click();

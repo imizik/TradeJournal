@@ -103,6 +103,8 @@ async function open(page: Page, width: number, run: Partial<typeof RUN> & { opti
     return route.fulfill({ json: { ...view(body.at, { positions: [POSITION], account: { ...ACCOUNT, cash: 8999.7, buying_power: 8999.7 } }),
       filled: { ...quote, at: OPEN_AT + 59 }, working: null } });
   });
+  // The laptop folds Practice to one line; these tests read its lines, so this tab starts with it open.
+  await page.addInitScript(() => { if (!window.sessionStorage.getItem("desk.practice.v1")) window.sessionStorage.setItem("desk.practice.v1", JSON.stringify({ practice: true })); });
   await page.goto("/copilot-lab?symbol=NBIS");
   if (width < 768) {
     // A phone opens a ticker link on the copilot's sheet: he taps Desk, then the ticker's view, where the chart's Replay is.
