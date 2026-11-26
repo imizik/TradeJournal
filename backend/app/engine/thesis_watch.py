@@ -160,8 +160,8 @@ class Watched:
     held: bool = False
     investigation: dict | None = None  # {"id", "as_of": aware datetime | None, "as_of_text"}
     memory_id: str | None = None
-    break_below: float | None = None  # the thesis memory's tripwires, when it set them
-    review_on: date | None = None
+    # Every active thesis memory's own tripwires on this symbol: (memory id, break_below, review_on).
+    tripwires: list[tuple[str, float | None, date | None]] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
 
 
@@ -232,12 +232,14 @@ def watched_set(db: Session, limit: int = MAX_SYMBOLS) -> list[Watched]:
         if row.memory_id is None:
             row.memory_id = memory["memory_id"]
             row.reasons.append("thesis")
-            level = body.get("break_below")
-            row.break_below = float(level) if isinstance(level, (int, float)) and level > 0 else None
-            try:
-                row.review_on = date.fromisoformat(body["review_on"]) if isinstance(body.get("review_on"), str) else None
-            except ValueError:
-                row.review_on = None
+        level = body.get("break_below")
+        level = float(level) if isinstance(level, (int, float)) and level > 0 else None
+        try:
+            review = date.fromisoformat(body["review_on"]) if isinstance(body.get("review_on"), str) else None
+        except ValueError:
+            review = None
+        if level or review:
+            row.tripwires.append((memory["memory_id"], level, review))
     ordered = ([r for r in by_symbol.values() if r.held]
                + [r for r in by_symbol.values() if not r.held and r.investigation is not None]
                + [r for r in by_symbol.values() if not r.held and r.investigation is None])
@@ -425,17 +427,16 @@ class ThesisWatch:
         does not."""
         found: list[Candidate] = []
         for row in rows:
-            if row.memory_id is None:
-                continue
             last = (quotes.get(row.symbol) or {}).get("last")
-            if row.break_below and isinstance(last, (int, float)) and 0 < last <= row.break_below:
-                text = f"{row.symbol} {float(last):g} is at or under your thesis break level {row.break_below:g}"
-                found.append(Candidate(row, "break", f"break:{row.memory_id}:{row.break_below:g}", text,
-                                       {"last": float(last), "reference": row.break_below, "level": row.break_below}))
-            if row.review_on and row.review_on <= today:
-                text = f"Review date {row.review_on.strftime('%a %b %-d')} for your {row.symbol} thesis"
-                found.append(Candidate(row, "review", f"review:{row.memory_id}:{row.review_on.isoformat()}", text,
-                                       {"date": row.review_on.isoformat()}))
+            for memory_id, level, review in row.tripwires:
+                if level and isinstance(last, (int, float)) and 0 < last <= level:
+                    text = f"{row.symbol} {float(last):g} is at or under your thesis break level {level:g}"
+                    found.append(Candidate(row, "break", f"break:{memory_id}:{level:g}", text,
+                                           {"last": float(last), "reference": level, "level": level, "memory_id": memory_id}))
+                if review and review <= today:
+                    text = f"Review date {review.strftime('%a %b %-d')} for your {row.symbol} thesis"
+                    found.append(Candidate(row, "review", f"review:{memory_id}:{review.isoformat()}", text,
+                                           {"date": review.isoformat(), "memory_id": memory_id}))
         return found
 
     def _move_candidates(self, rows: list[Watched], quotes: dict | None, today: date) -> list[Candidate]:

@@ -601,7 +601,18 @@ def test_break_level_and_review_date_are_off_unless_thesis_pings_is_on(engine, w
     assert watch.run_once()["fired"] == [] and phone.sent == []
     with Session(engine) as db:
         [row] = thesis_watch.watched_set(db)
-    assert row.break_below == 80 and row.review_on == date(2026, 10, 20)
+    assert [(level, review) for _, level, review in row.tripwires] == [(80, date(2026, 10, 20))]
+
+
+def test_an_older_thesis_s_tripwire_still_counts_when_a_newer_one_on_the_ticker_has_none(engine, world, monkeypatch):
+    watch, readers, phone, clock = world
+    monkeypatch.setenv("THESIS_PINGS", "true")
+    older = thesis(engine, "NBIS", break_below=80)
+    thesis(engine, "NBIS", text="A newer note with no tripwire.")
+    readers.quotes = {"NBIS": {"last": 79, "previous_close": 81}}
+    result = watch.run_once()
+    assert [f["kind"] for f in result["fired"]] == ["break"]
+    assert triggers(engine)[0].dedupe_key == f"break:{older}:80"
 
 
 def test_a_break_under_the_thesis_level_pings_once_ahead_of_news_and_never_again_for_that_level(engine, world, monkeypatch):
