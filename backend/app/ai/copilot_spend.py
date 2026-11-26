@@ -22,8 +22,7 @@ from typing import AsyncIterator, Iterable, Sequence
 log = logging.getLogger(__name__)
 
 # "plan" only labels turns recorded before everything moved to the API.
-BILLING = {"anthropic": "api", "shadow": "api_background", "api_background": "api_background",
-           "plan": "claude_plan", "fake": "none"}
+BILLING = {"anthropic": "api", "shadow": "api_background", "plan": "claude_plan", "fake": "none"}
 KINDS = frozenset({"ask", "briefing", "plan", "review", "week_review", "moment", "changes", "compare", "pushback", "prep",
                    "companion", "shadow", "check_call", "desk_read", "day_read", "paper_review", "research",
                    "strategy_factory", "agent"})
@@ -61,7 +60,8 @@ def _naive_utc(value) -> datetime | None:
 
 def record(metrics: dict, symbol: str | None = None, session=None, *, turn_id: uuid.UUID | None = None, kind: str | None = None,
            source: str | None = None, investigation_id: uuid.UUID | str | None = None, tool_names: Sequence[str] | None = None,
-           error: str | None = None, effort: str | None = None, evidence: str | None = None) -> uuid.UUID | None:
+           error: str | None = None, effort: str | None = None, evidence: str | None = None,
+           billing: str | None = None) -> uuid.UUID | None:
     """One row for a turn; a failure to write never reaches the owner. Returns the row id, or None when nothing was
     written. ``metrics`` is the turn's ``done`` metrics (or what a stopped turn had so far)."""
     from sqlmodel import Session
@@ -70,7 +70,7 @@ def record(metrics: dict, symbol: str | None = None, session=None, *, turn_id: u
     usage = metrics.get("usage") or {}
     backend = str(metrics.get("backend") or "fake")
     names = [str(n)[:64] for n in (tool_names if tool_names is not None else _names(metrics)) if n][:MAX_TOOL_NAMES]
-    row = CopilotTurn(id=turn_id or uuid.uuid4(), backend=backend, billing=BILLING.get(backend, "none"), model=metrics.get("model"),
+    row = CopilotTurn(id=turn_id or uuid.uuid4(), backend=backend, billing=billing or BILLING.get(backend, "none"), model=metrics.get("model"),
                       symbol=symbol, rounds=int(metrics.get("rounds") or 0),
                       input_tokens=int(usage.get("input_tokens") or 0), output_tokens=int(usage.get("output_tokens") or 0),
                       cache_read_input_tokens=int(usage.get("cache_read_input_tokens") or 0),
@@ -90,10 +90,11 @@ def record(metrics: dict, symbol: str | None = None, session=None, *, turn_id: u
         return None
 
 
-def record_refused(*, kind: str, source: str, backend: str, code: str, symbol: str | None = None, session=None) -> uuid.UUID | None:
+def record_refused(*, kind: str, source: str, backend: str, code: str, symbol: str | None = None, session=None,
+                   billing: str | None = None) -> uuid.UUID | None:
     """A turn that never ran (the daily budget was spent): a zero-cost row with the refusal as its error."""
     return record({"backend": backend, "rounds": 0, "usage": {}, "cost_usd": 0.0, "total_ms": 0}, symbol, session,
-                  kind=kind, source=source, error=code)
+                  kind=kind, source=source, error=code, billing=billing)
 
 
 CALL_KEYS = ("name", "status", "ms", "queue_ms", "feed_wait_ms", "feed_ms")  # copilot.call_metrics' row

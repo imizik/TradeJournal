@@ -153,7 +153,7 @@ def test_api_runner_shadow_research_practice_and_factory_refuse_when_month_is_sp
 
     # Under budget: api_runner.ask succeeds and records its cost to copilot_turn (counted in spent_this_month).
     ok = api_runner.ask("s", "q", schema, client=FakeAnthropic([json_message({"verdict": "ok"}, input_tokens=1000, output_tokens=100)]))
-    assert ok.data == {"verdict": "ok"} and copilot_spend.spent_this_month() == pytest.approx(0.003)
+    assert ok.data == {"verdict": "ok"} and copilot_spend.spent_this_month() == pytest.approx(0.003) and copilot_spend.spent_today() == 0.0
 
     # Spend reaches the $1.00 monthly cap: every subsystem refuses before calling Anthropic.
     with Session(engine) as db:

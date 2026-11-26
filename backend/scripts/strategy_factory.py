@@ -331,8 +331,8 @@ def claude_proposer(system: str, text: str) -> tuple[dict[str, Any], str]:
 
     exceeded, monthly_spent, monthly_cap = copilot_spend.monthly_status()
     if exceeded:
-        copilot_spend.record_refused(kind="strategy_factory", source="strategy_factory", backend="api_background",
-                                     code="monthly_budget")
+        copilot_spend.record_refused(kind="strategy_factory", source="strategy_factory", backend="anthropic",
+                                     billing="api_background", code="monthly_budget")
         raise SystemExit(copilot_spend.monthly_budget_message(monthly_spent, monthly_cap))
 
     model = os.environ.get("FACTORY_MODEL", IDEA_MODEL)
@@ -364,9 +364,9 @@ def claude_proposer(system: str, text: str) -> tuple[dict[str, Any], str]:
                   for key in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}
     used_model = message.model or model
     copilot_spend.record(
-        {"backend": "api_background", "model": used_model, "rounds": 1, "usage": usage_dict,
+        {"backend": "anthropic", "model": used_model, "rounds": 1, "usage": usage_dict,
          "cost_usd": copilot.cost_usd(used_model, usage_dict)},
-        kind="strategy_factory", source="strategy_factory",
+        kind="strategy_factory", source="strategy_factory", billing="api_background",
         error=(None if message.stop_reason not in ("refusal", "max_tokens") else message.stop_reason),
     )
     if message.stop_reason == "refusal":

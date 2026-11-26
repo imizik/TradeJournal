@@ -115,7 +115,8 @@ def ask(system: str, message: str, schema: dict, *, model: str | None = None, ti
         raise ApiUnavailable(f"No {KEY_ENV} on the private backend.")
     exceeded, monthly_spent, monthly_cap = copilot_spend.monthly_status()
     if exceeded:
-        copilot_spend.record_refused(kind="ask", source="api_runner", backend="api_background", code="monthly_budget")
+        copilot_spend.record_refused(kind="ask", source="api_runner", backend="anthropic", billing="api_background",
+                                     code="monthly_budget")
         raise ApiUnavailable(copilot_spend.monthly_budget_message(monthly_spent, monthly_cap))
     model = copilot.model_id(model or os.environ.get("TJ_PLAN_REVIEW_MODEL") or DEFAULT_MODEL)
     limit = timeout or float(os.environ.get("TJ_PLAN_REVIEW_TIMEOUT") or DEFAULT_TIMEOUT)
@@ -136,9 +137,10 @@ def ask(system: str, message: str, schema: dict, *, model: str | None = None, ti
     used_model = final.model or model
     usd = copilot.cost_usd(used_model, usage)
     copilot_spend.record(
-        {"backend": "api_background", "model": used_model, "rounds": 1, "usage": usage, "cost_usd": usd,
+        {"backend": "anthropic", "model": used_model, "rounds": 1, "usage": usage, "cost_usd": usd,
          "total_ms": round(elapsed_s * 1000)},
-        kind="ask", source="api_runner", error=(None if final.stop_reason == "end_turn" else final.stop_reason),
+        kind="ask", source="api_runner", billing="api_background",
+        error=(None if final.stop_reason == "end_turn" else final.stop_reason),
     )
     if final.stop_reason != "end_turn":
         raise ApiCallFailed(f"Claude gave no answer (stopped: {final.stop_reason}).")
@@ -182,8 +184,8 @@ async def run_agent(run: AgentRun, system: str, prompt: str, schema: dict, *, to
         exceeded, monthly_spent, monthly_cap = copilot_spend.monthly_status()
         if exceeded:
             if record_spend:
-                copilot_spend.record_refused(kind=spend_kind, source=spend_source, backend="api_background",
-                                             code="monthly_budget")
+                copilot_spend.record_refused(kind=spend_kind, source=spend_source, backend="anthropic",
+                                             billing="api_background", code="monthly_budget")
             run.error = {"code": "monthly_budget",
                          "message": copilot_spend.monthly_budget_message(monthly_spent, monthly_cap)}
             return run
@@ -246,9 +248,10 @@ async def run_agent(run: AgentRun, system: str, prompt: str, schema: dict, *, to
     finally:
         if record_spend and (run.rounds > 0 or run.error):
             copilot_spend.record(
-                {"backend": "api_background", "model": run.model, "rounds": run.rounds, "usage": run.usage,
+                {"backend": "anthropic", "model": run.model, "rounds": run.rounds, "usage": run.usage,
                  "cost_usd": run.cost_usd},
-                kind=spend_kind, source=spend_source, error=(run.error or {}).get("code") if run.error else None,
+                kind=spend_kind, source=spend_source, billing="api_background",
+                error=(run.error or {}).get("code") if run.error else None,
             )
         if owned:
             await client.close()

@@ -319,7 +319,7 @@ async def run_job(question: str, symbols: list[str], evidence, *, now: datetime,
         exceeded, monthly_spent, monthly_cap = await asyncio.to_thread(copilot_spend.monthly_status)
         if exceeded:
             await asyncio.to_thread(copilot_spend.record_refused, kind="research", source="research_job",
-                                    backend="api_background", code="monthly_budget")
+                                    backend="anthropic", billing="api_background", code="monthly_budget")
             raise ResearchError("monthly_budget", copilot_spend.monthly_budget_message(monthly_spent, monthly_cap))
     model = copilot.model_id(model or os.environ.get("RESEARCH_MODEL") or copilot.DEFAULT_MODEL)
     cfg = copilot.Settings(enabled=True, backend="anthropic", evidence=getattr(evidence, "label", "live"), model=model,
