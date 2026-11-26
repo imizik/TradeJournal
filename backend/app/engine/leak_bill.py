@@ -185,23 +185,27 @@ def follow(expired: bool, fills: list[dict], bars: list[dict] | None) -> dict:
     found = marks(bars)
     if not entries or not found:
         return {"state": "unpriced"}
-    line = entries[0]["price"] * (1 - CUT_PCT)
+    # The pinged buy: the first entry as the ping chose it (time, then source identity, never the fill UUID).
+    first = min(entries, key=lambda f: (f["executed_at"], f.get("key") or str(f["id"])))
+    line = first["price"] * (1 - CUT_PCT)
     for at, price in found:
         # Fills carry minutes only: one in the cross's own minute is counted after it, so a sale then is acting on it.
         before = [f for f in ordered if f["executed_at"].replace(second=0, microsecond=0) < at]
         held = sum(f["contracts"] * (1 if f["role"] == "entry" else -1) for f in before)
-        if at < entries[0]["executed_at"] or held <= EPS or price > line + EPS:
+        if at < first["executed_at"] or held <= EPS or price > line + EPS:
             continue
         exits = [f for f in ordered if f["role"] == "exit" and f not in before]
         taken = proceeds = 0.0
+        rolled = False
         for fill in exits:  # first in, first out: the contracts open at the cross close first
             used = min(float(fill["contracts"]), held - taken)
             if used <= EPS:
                 break
+            rolled |= str(fill.get("key") or "").startswith("roll:")  # a derived roll close is not a sale price
             proceeds += used * float(fill["price"])
             taken += used
         acted = any(f["executed_at"] < at + timedelta(minutes=ACT_MINUTES + 1) for f in exits)
-        cost = price * held - proceeds if taken >= held - EPS or expired else None
+        cost = price * held - proceeds if not rolled and (taken >= held - EPS or expired) else None
         return {"state": "acted" if acted else "ignored", "at": at, "held": held,
                 "cost": None if cost is None else round(cost, 2)}
     return {"state": "not_hit"}

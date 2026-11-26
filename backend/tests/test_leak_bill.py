@@ -217,3 +217,15 @@ def test_the_bill_says_whether_the_cut_pings_were_followed(engine):
         "Cut line: 2 pinged, 1 traded through it, you sold within 15 min on 0. Holding past it cost $70. 1 had no minute prices.",
         "Held an hour ping: acted on 0 of 1. Ignoring 1 cost $140.",
     ]
+
+
+def test_the_cut_line_is_the_pinged_buys_and_a_roll_close_is_not_priced():
+    bars = [bar(10, 5, 1.60), bar(10, 10, 1.30)]
+    # Two buys in one minute: the ping chose the first by source identity, not fill UUID.
+    a = {**buy(1, 200, ny(10)), "id": uuid.UUID(int=2), "key": "a"}
+    b = {**buy(1, 100, ny(10)), "id": uuid.UUID(int=1), "key": "b"}
+    out = sell(2, 60, ny(14))
+    assert leak_bill.follow(False, [a, b, out], bars)["state"] == "ignored"  # $1.40 line, not $0.70
+    rolled = {**sell(1, 200, ny(14)), "key": "roll:x"}
+    found = leak_bill.follow(False, [buy(1, 200, ny(10)), rolled], bars)
+    assert found["state"] == "ignored" and found["cost"] is None
