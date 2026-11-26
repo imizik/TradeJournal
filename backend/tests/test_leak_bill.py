@@ -201,7 +201,7 @@ def test_the_bill_says_whether_the_cut_pings_were_followed(engine):
         for ticker, row in (("CRWV", cut), ("AMD", None)):
             db.add(FillInterrupt(account_id=ROTH, fill_key=f"{ticker}-0", position_key=f"{ticker}-0", trade_id=uuid.uuid4(),
                                  ticker=ticker, contract=ticker, kinds="cut_line", title="Cut line", body="", executed_at=ny(10),
-                                 delivery="sent"))
+                                 detected_at=datetime(2026, 11, 17, 15, 0), delivery="sent"))  # 10:00 New York
         mu = next(t for t in db.exec(select(Trade).where(Trade.ticker == "MU")))
         db.add(PositionAlert(account_id=ROTH, source_key="MU-0", kind="hold_hour", generation=0, trade_id=mu.id,
                              contract="MU 11/18/26 100C", contracts=2, avg_cost=200, bid=130, mark=130,
@@ -229,3 +229,11 @@ def test_the_cut_line_is_the_pinged_buys_and_a_roll_close_is_not_priced():
     rolled = {**sell(1, 200, ny(14)), "key": "roll:x"}
     found = leak_bill.follow(False, [buy(1, 200, ny(10)), rolled], bars)
     assert found["state"] == "ignored" and found["cost"] is None
+
+
+def test_a_cross_before_the_ping_went_out_is_not_judged():
+    late = [buy(1, 200, ny(10)), sell(1, 100, ny(10, 20))]
+    bars = [bar(10, 1, 1.30), bar(10, 15, 1.20)]
+    # Crossed at 10:01, the ping went out at 10:14: the cross he could act on is 10:15, and he sold five minutes later.
+    assert leak_bill.follow(False, late, bars, ny(10, 14)) == {"state": "acted", "at": ny(10, 15), "held": 1, "cost": 20.0}
+    assert leak_bill.follow(False, late, bars)["at"] == ny(10, 1)
