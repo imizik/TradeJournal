@@ -82,7 +82,7 @@ def due(db: Session, now: float) -> list[tuple[DayJournalEntry, dict]]:
 def _target(db: Session, found: dict):
     """(open, contract, what fired, anchor, trade id, desk path, Close/Trim links) for the pinged position; ``open``
     False when it is closed or cannot be found."""
-    from app.engine import alert_scorecard, fill_interrupts, position_alerts
+    from app.engine import alert_scorecard, fill_interrupts, position_alerts, telegram_replies
     if found.get("alert"):
         alert = db.get(PositionAlert, uuid.UUID(found["alert"]))
         if alert is None:
@@ -94,8 +94,10 @@ def _target(db: Session, found: dict):
         path, more = position_alerts._links(db, alert)
         if not path.startswith("/copilot-lab"):
             more = ()  # with the desk off the links are the alert's answers, which belong to the first ping
+        # With the desk on, the check-in carries the alert's Cut it / Holding reply buttons (since 2026-11-26).
+        buttons = telegram_replies.cut_buttons(alert.id) if path.startswith("/copilot-lab") else None
         return (alert.contract, f"{alert_scorecard.KIND.get(alert.kind, 'position')} ping".lower(),
-                notification_policy.anchor(alert.account_id, alert.source_key), trade.id, path, more, symbol)
+                notification_policy.anchor(alert.account_id, alert.source_key), trade.id, path, more, symbol, buttons)
     row = db.get(FillInterrupt, uuid.UUID(found["interrupt"]))
     if row is None:
         return None
@@ -104,7 +106,7 @@ def _target(db: Session, found: dict):
     if trade is None or trade.status != "open":
         return None
     path = phone.desk_link(fill_interrupts.path(row), symbol=row.ticker, card=f"interrupt:{row.id}")
-    return (row.contract, "fill-pattern ping", notification_policy.anchor(row.account_id, row.position_key), trade.id, path, (), row.ticker)
+    return (row.contract, "fill-pattern ping", notification_policy.anchor(row.account_id, row.position_key), trade.id, path, (), row.ticker, None)
 
 
 def message(contract: str, fired: str, row: DayJournalEntry, found: dict) -> tuple[str, str]:
@@ -152,7 +154,7 @@ class HoldCheckIns:
                 self._ping(db, row, found, target, now)
 
     def _ping(self, db: Session, row: DayJournalEntry, found: dict, target: tuple, now: float) -> None:
-        contract, fired, anchor, trade_id, path, more, symbol = target
+        contract, fired, anchor, trade_id, path, more, symbol, buttons = target
         title, body = message(contract, fired, row, found)
         ticket = notification_policy.decide(db, sender=SENDER, source_id=str(row.id), kind=KIND, title=title, body=body, now=now,
                                             anchor=anchor, symbol=symbol, trade_id=trade_id, new_only=True)
@@ -161,7 +163,7 @@ class HoldCheckIns:
             return
         try:
             phone.send(title, body + ticket.append, kind=KIND, path=path, priority=4, tags=("hourglass",), direct_click=True,
-                       more=more, keep_links=bool(more))
+                       more=more, keep_links=bool(more), **({"buttons": buttons} if buttons else {}))
         except phone.SendError as exc:
             log.warning("Hold check-in not sent: %s", exc)
             return

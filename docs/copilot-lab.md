@@ -3629,11 +3629,11 @@ otherwise. While the lab is on (`COPILOT_ENABLED=true`), a position alert's
 tap opens the desk on that position's decision (`position_alerts.desk_path`:
 the plan's conversation when a plan card saved the position's plan, else
 `/copilot-lab?symbol=…`, which opens on the decision bar); with the lab off the
-tap opens the trade page as before. With the lab on, a position alert
-carries **Close** and **Trim** instead of the survey answers: each opens the ping card
-(§ Where a ping opens) with `&do=close` or `&do=trim`, which rings and focuses that button;
-nothing is copied until he taps it, and on Telegram they ride beside Why? (`phone.send(keep_links=True)`).
-Whether he acted is still read from his fills and the alert scorecard, not from a tap. With the lab
+tap opens the trade page as before. With the lab on (since 2026-11-26), a position alert
+carries no answer links: on Telegram its reply buttons are **Cut it**, **Holding** and Why?
+(`telegram_replies.cut_buttons`), each saving one `decision` day-journal entry ("Exiting. …" / "Holding. …")
+that the alert scorecard reads as the desk's; ntfy keeps Open and Robinhood. The ping card's `&do=close|trim`
+still rings that button when an address carries it. With the lab
 off the push carries two answer
 actions next to Open app (ntfy shows three; all need `ALERT_APP_URL`):
 **Prompted review** and **Already aware** (`position_alerts.ANSWER_ACTIONS`)
@@ -4612,7 +4612,7 @@ the clipboard and logs an `Exiting. …` decision; a hold logs `Holding. …` wi
 that check-in on the entry (`check_in` on `POST /day-journal/{day}/entries`, kept in its `context_json`). With
 `HOLD_CHECK_IN_PINGS=true` (off by default; the card's body says which, `check_in_pings`) the card says "I'll ping you at
 …" and `engine/hold_check_ins.py` sends one loud ping at that time, in the regular session, if the pinged position is
-still open: "Check-in: <contract> still open", opening this same card (with Close and Trim while the desk is on). A newer
+still open: "Check-in: <contract> still open", opening this same card (with the alert's Cut it / Holding reply buttons while the desk is on). A newer
 hold on the same ping replaces it, an `Exiting` decision on the symbol after it cancels it, a check-in more than 10
 minutes late is dropped, and it is claimed once through the notification policy (sender `hold_check_in`, ranked with
 the one-hour alert, anchored to the position). Off, the hold is logged as before and nothing pings. On an interrupt's card any choice also records its Noted. Nothing is sent to Robinhood. The decision bar's
