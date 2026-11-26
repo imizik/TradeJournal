@@ -20,6 +20,7 @@ first buy) and its cross ``leak_bill.follow``'s, so the replay, the ping and the
 from __future__ import annotations
 
 import logging
+from bisect import bisect_left
 from collections import deque
 from datetime import UTC, date, datetime, timedelta
 from typing import Callable
@@ -198,7 +199,10 @@ def build(db: Session, trade: Trade, stock_bars: Callable = _stock_bars, option_
             vol += bar["volume"]
             bar["vwap"] = round(pv / vol, 4) if vol else None
 
-    contract, option_rows, option_note = None, {}, None
+    # Option minutes are kept whole for the rules (the stock feed's minutes need not match the option feed's); for the
+    # chart and the P&L each is folded into the first candle at or after it, so a candle's option close is the latest
+    # trade by then.
+    contract, option_rows, option_all, option_note = None, {}, [], None
     if option:
         contract = occ_symbol(ticker, expiration, option_type, float(strike)) if expiration and strike is not None and option_type else None
         if contract:
@@ -207,10 +211,14 @@ def build(db: Session, trade: Trade, stock_bars: Callable = _stock_bars, option_
             except Exception:  # noqa: BLE001 - the option pane says it has no prices; the candles still replay
                 log.warning("Replay: no option bars for %s", contract, exc_info=True)
                 found = []
-            for bar in found or ():
-                parsed = _parse(bar)
-                if parsed and parsed[0] in minutes:
-                    option_rows[parsed[0]] = parsed[1]
+            option_all = sorted(p for p in (_parse(bar) for bar in found or ()) if p and stamps[0] <= p[0] <= stamps[-1])
+            for at, row in option_all:
+                target = stamps[bisect_left(stamps, at)]
+                held = option_rows.get(target)
+                if held is None:
+                    option_rows[target] = dict(row)
+                else:
+                    held.update(high=max(held["high"], row["high"]), low=min(held["low"], row["low"]), close=row["close"])
         if not option_rows:
             option_note = "The feed has no minute trades for this contract, so P&L shows only once it is closed."
     marks = {at: row["close"] * 100 for at, row in option_rows.items()} if option \
@@ -220,8 +228,8 @@ def build(db: Session, trade: Trade, stock_bars: Callable = _stock_bars, option_
     # Rules: only for a long option (every entry a buy to open), as the leak bill judges.
     cut = cut_line = None
     long_option = option and expiration is not None and entries and all(f["side"] == "buy_to_open" for f in entries)
-    if long_option and option_rows:
-        raw = [{"t": at.replace(tzinfo=ET).isoformat(), "c": row["close"]} for at, row in sorted(option_rows.items())]
+    if long_option and option_all:
+        raw = [{"t": at.replace(tzinfo=ET).isoformat(), "c": row["close"]} for at, row in option_all]
         found_cut = leak_bill.bill_trade(expiration, status == "expired", fills, raw)["cut"]
         if found_cut:
             cut = {"rule": found_cut["rule"], "time": _epoch(found_cut["at"]), "price": round(found_cut["price"], 2)}
@@ -230,8 +238,8 @@ def build(db: Session, trade: Trade, stock_bars: Callable = _stock_bars, option_
         line = fill_interrupts.cut_line({**first, "instrument_type": "option", "expiration": expiration}, [])
         if line is not None:
             crossed = None
-            if option_rows:
-                raw = [{"t": at.replace(tzinfo=ET).isoformat(), "c": row["close"]} for at, row in sorted(option_rows.items())]
+            if option_all:
+                raw = [{"t": at.replace(tzinfo=ET).isoformat(), "c": row["close"]} for at, row in option_all]
                 seen = leak_bill.follow(status == "expired", fills, raw)
                 if seen.get("at") is not None:
                     crossed = {"time": _epoch(seen["at"]), "state": seen["state"], "held": seen["held"], "cost": seen["cost"]}

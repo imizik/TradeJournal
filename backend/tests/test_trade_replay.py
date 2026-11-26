@@ -177,3 +177,13 @@ def test_the_cut_line_and_its_cross_anchor_on_the_same_first_buy(db):
                             ("exit", "sell_to_close", 2, 60, ny(11))])
     body = trade_replay.build(db, trade, lambda *a: minutes((9, 30), 390, 50), lambda *a: [bar(10, 30, 0.65)])
     assert body["cut_line"]["price"] == 70.0 and body["cut_line"]["crossed"]["time"] == epoch(10, 30)
+
+
+def test_an_option_trade_in_a_minute_with_no_stock_candle_still_counts(db):
+    trade = make_trade(db, [("entry", "buy_to_open", 1, 200, ny(10)), ("exit", "sell_to_close", 1, 160, ny(10, 2))], pnl=-40.0)
+    stock = [bar(10, 0, 50), bar(10, 2, 50)]  # the stock feed has no 10:01 candle
+    option = [bar(10, 0, 2.00), bar(10, 1, 1.30, spread=0.05), bar(10, 2, 1.60)]
+    body = trade_replay.build(db, trade, lambda *a: stock, lambda *a: option)
+    assert body["cut_line"]["crossed"]["time"] == epoch(10, 1)  # the $1.30 trade crossed the $1.40 line
+    assert body["option_bars"][1] == {"time": epoch(10, 2), "open": 1.30, "high": 1.60, "low": 1.25, "close": 1.60}
+    assert len(body["option_bars"]) == 2
