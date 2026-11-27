@@ -280,3 +280,35 @@ def test_a_slow_calendar_falls_back_to_memory_inside_the_deadline(monkeypatch):
     finally:
         release.set()
     assert out["since"] == "11-26 21:00 ET" and set(out["sources"].values()) == {"ok"}  # the 18-hour fallback
+
+
+def test_concurrent_misses_share_one_halts_read(monkeypatch):
+    import threading
+    cat._cache.clear()
+    calls, gate = [], threading.Event()
+
+    def get(url, headers):
+        calls.append(url)
+        gate.wait(2)
+        return HALTS
+    monkeypatch.setattr(cat, "_get_text", get)
+    out = {}
+    threads = [threading.Thread(target=lambda s=s: out.__setitem__(s, cat.live_halts(s))) for s in ("NBIS", "CRWV")]
+    for t in threads:
+        t.start()
+    gate.set()
+    for t in threads:
+        t.join()
+    assert len(calls) == 1 and out["NBIS"]["items"][0]["reason"] == "LUDP" and out["CRWV"]["items"][0]["reason"] == "T1"
+    cat._cache.clear()
+
+
+def test_a_failed_last_session_read_keeps_todays_bars(monkeypatch):
+    from app.engine import chart_feed as feed
+    today = [{"time": _at("2026-11-27T09:30:00"), "close": 100.0, "volume": 10}]
+
+    def boom(*a, **k):
+        raise RuntimeError("provider down")
+    monkeypatch.setattr(feed.chart_feed, "read", boom)
+    monkeypatch.setattr(feed.chart_feed, "today_minutes", lambda symbol, now: today)
+    assert cat._bars("NBIS", _at("2026-11-26T16:00:00"), _at("2026-11-27T10:00:00")) == today

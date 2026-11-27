@@ -257,18 +257,27 @@ def timeline(symbol: str, since: float, now: float, *, filings: dict, halts: dic
 
 _lock = threading.Lock()
 _cache: dict[str, tuple[float, dict]] = {}
+_key_locks: dict[str, threading.Lock] = {}
 
 
 def _cached(key: str, ttl: float, read: Callable[[], dict]) -> dict:
-    now = time.monotonic()
+    """``read()`` at most once per ``ttl`` per key: callers that miss together share one read (a per-key lock), so two
+    symbols' turns never fetch the shared halts feed twice; other keys are never held up."""
+    def hit() -> dict | None:
+        with _lock:
+            found = _cache.get(key)
+        return found[1] if found and time.monotonic() - found[0] < ttl else None
+    if (value := hit()) is not None:
+        return value
     with _lock:
-        hit = _cache.get(key)
-    if hit and now - hit[0] < ttl:
-        return hit[1]
-    value = read()
-    with _lock:
-        _cache[key] = (now, value)
-    return value
+        key_lock = _key_locks.setdefault(key, threading.Lock())
+    with key_lock:
+        if (value := hit()) is not None:  # another caller read it while this one waited
+            return value
+        value = read()
+        with _lock:
+            _cache[key] = (time.monotonic(), value)
+        return value
 
 
 def _get_text(url: str, headers: dict) -> str:
@@ -343,21 +352,22 @@ def last_close(now: float, hours: Callable[[date], dict | None]) -> float:
 
 
 def _bars(symbol: str, since: float, now: float) -> list[dict] | None:
-    from app.engine.chart_feed import chart_feed
+    """The last session's minutes (when ``since`` is before today) and today's; each day's read stands on its own."""
+    from app.engine.chart_feed import _rows, chart_feed
+    from app.engine.chart_math import normalize_bars
     bars: list[dict] = []
-    try:
-        first = datetime.fromtimestamp(since, ET).date()
-        today = datetime.fromtimestamp(now, ET).date()
-        if first < today:  # the last session's after-hours, the same read the chart makes for that day
-            from app.engine.chart_feed import _rows
-            from app.engine.chart_math import normalize_bars
+    first = datetime.fromtimestamp(since, ET).date()
+    if first < datetime.fromtimestamp(now, ET).date():  # the last session's after-hours, the read the chart makes for that day
+        try:
             data, _, _ = chart_feed.read("/v1/markets/timesales", chart_feed._minutes_params(symbol, first), 300, low=True)
             bars += normalize_bars(_rows(data, "series", "data"))
+        except Exception as exc:  # noqa: BLE001 - today's bars still stand
+            log.info("catalysts: last session's bars unavailable for %s: %s", symbol, type(exc).__name__)
+    try:
         bars += chart_feed.today_minutes(symbol, now)
     except Exception as exc:  # noqa: BLE001 - items stand without their reactions
-        log.info("catalysts: minute bars unavailable for %s: %s", symbol, type(exc).__name__)
-        return bars or None
-    return bars
+        log.info("catalysts: today's bars unavailable for %s: %s", symbol, type(exc).__name__)
+    return bars or None
 
 
 def live_catalysts(symbol: str, now: datetime) -> dict:
