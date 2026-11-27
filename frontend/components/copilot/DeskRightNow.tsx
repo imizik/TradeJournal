@@ -11,6 +11,7 @@
 
 import { needRank, overCut, pastCut, positionRows, rowNow } from "@/components/copilot/Cockpit";
 import { daysTo, type DeskThread } from "@/lib/desk";
+import { closable } from "@/lib/deskPosition";
 import { useDeskTicks } from "@/lib/deskTicks";
 import { cn } from "@/lib/utils";
 
@@ -56,8 +57,12 @@ export function rightNowItem(row: DeskThread, day: string, ticks: ReturnType<typ
   return { row, rank: needRank(row, day, ticks), risk, what: parts.join(" · "), ask, button };
 }
 
-export function DeskRightNow({ rows, day, onOpen, onAsk }: {
+export function DeskRightNow({ rows, day, onOpen, onAsk, onClose, onlyNeeds = false }: {
   rows: DeskThread[]; day: string; onOpen(row: DeskThread): void; onAsk(text: string): void;
+  /** Past a cut line or stop: the closing ticket (copy only), the first button. */
+  onClose?(row: DeskThread): void;
+  /** Beside the Feed: nothing at all unless something needs a look. */
+  onlyNeeds?: boolean;
 }) {
   const open = positionRows(rows).filter(r => !r.hidden && r.book);
   const ticks = useDeskTicks(open.flatMap(r => [r.book?.tick?.quote, r.symbol]));
@@ -72,8 +77,9 @@ export function DeskRightNow({ rows, day, onOpen, onAsk }: {
       No price yet for {unchecked === 1 ? "1 position" : `${unchecked} positions`} with a cut line: not checked against it.
     </p>
   );
+  if (onlyNeeds && !items.length) return null;
   return (
-    <section aria-label="Right now" data-testid="right-now" className="rounded-lg border bg-card">
+    <section aria-label="Right now" data-testid="right-now" className={cn("rounded-lg border bg-card", onlyNeeds && "mb-2")}>
       <h2 className="px-3 pb-1 pt-2.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Right now</h2>
       {items.length ? (
         <ul>
@@ -84,6 +90,13 @@ export function DeskRightNow({ rows, day, onOpen, onAsk }: {
                 <span className="block truncate text-sm font-semibold text-foreground">{item.row.title}</span>
                 <span data-testid="right-now-what" className={cn("block text-xs tabular-nums", item.risk ? "text-rose-300" : "text-muted-foreground")}>{item.what}</span>
               </button>
+              {item.risk && item.button === "Cut or hold?" && onClose && closable(item.row, rows) && (
+                <button type="button" data-testid="right-now-close" onClick={() => onClose(item.row)}
+                  title="A closing ticket for all of it at the mark now, to copy into Robinhood. Nothing is sent."
+                  className="inline-flex min-h-11 shrink-0 items-center rounded-md border border-rose-400 bg-rose-500 px-2.5 text-xs font-semibold text-white hover:bg-rose-500/90 sm:min-h-8">
+                  Close ticket
+                </button>
+              )}
               <button type="button" data-testid="right-now-ask" onClick={() => onAsk(item.ask)}
                 className="inline-flex min-h-11 shrink-0 items-center rounded-md border px-2.5 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-8">
                 {item.button}

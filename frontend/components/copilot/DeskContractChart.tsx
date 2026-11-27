@@ -21,7 +21,7 @@ export function ContractChart({ held, data }: { held: HeldContract; data: DeskCo
   const host = useRef<HTMLDivElement>(null);
   const parts = useRef<{ chart: IChartApi; candles: ISeriesApi<"Candlestick">; line: ISeriesApi<"Line">; marks: ISeriesApi<"Line">;
     clock: ISeriesApi<"Line">; markers: ISeriesMarkersPluginApi<Time>[]; lines: { series: ISeriesApi<"Candlestick"> | ISeriesApi<"Line">; line: IPriceLine }[] } | null>(null);
-  const shown = useRef<{ fills: number[]; last: number | null }>({ fills: [], last: null });
+  const shown = useRef<{ fills: number[]; last: number | null; cut?: number | null }>({ fills: [], last: null });
   const fitted = useRef<string | null>(null);
   const [hover, setHover] = useState<Hover | null>(null);
   const ticks = useDeskTicks([held.occ]);
@@ -58,7 +58,8 @@ export function ContractChart({ held, data }: { held: HeldContract; data: DeskCo
       const found = original();
       const { fills: prices, last } = shown.current;
       if (!found?.priceRange || last === null) return found;
-      const near = prices.filter(p => Math.abs(p - last) / last <= FILL_REACH);
+      // The cut line always stays in view: it is the line he acts on.
+      const near = [...prices.filter(p => Math.abs(p - last) / last <= FILL_REACH), ...(shown.current.cut != null ? [shown.current.cut] : [])];
       return near.length ? { ...found, priceRange: { minValue: Math.min(found.priceRange.minValue, ...near), maxValue: Math.max(found.priceRange.maxValue, ...near) } } : found;
     };
     const clock = chart.addSeries(LineSeries, { visible: false, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: () => null });
@@ -117,8 +118,12 @@ export function ContractChart({ held, data }: { held: HeldContract; data: DeskCo
         axisLabelVisible: true, title: `${f.side === "buy" ? "Buy" : "Sell"} ${count} ${premium(f.price)}${f.provisional ? " prov." : ""}`,
       }) });
     }
+    // His cut line, the rule he goes by: a thick rose dashed line, always labelled.
+    if (held.cut != null) current.lines.push({ series: primary, line: primary.createPriceLine({
+      price: held.cut, color: "#fb7185", lineWidth: 2, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: `Cut ${premium(held.cut)}`,
+    }) });
     const last = priceAt(bars, marks, Infinity)?.price ?? null;
-    shown.current = { fills: groups.map(g => g[0].price), last };
+    shown.current = { fills: groups.map(g => g[0].price), last, cut: held.cut };
     // Arrows where each fill on the shown day happened, on the nearest slot of the price drawn.
     for (const plugin of current.markers) plugin.detach();
     const drawnTimes = (candlesOn || bars.length ? bars.map(b => b.time) : marks.map(m => m.time));
@@ -133,7 +138,7 @@ export function ContractChart({ held, data }: { held: HeldContract; data: DeskCo
     const key = `${held.occ}|${data.day}`;
     if (fitted.current !== key && slots.length) { chart.timeScale().fitContent(); fitted.current = key; }
     chart.priceScale("right").applyOptions({ autoScale: true });
-  }, [bars, marks, fills, style, step, held.occ, data.day]);
+  }, [bars, marks, fills, style, step, held.occ, held.cut, data.day]);
 
   const latest = priceAt(bars, marks, Infinity);
   const at = hover ? priceAt(bars, marks, hover.time) : null;

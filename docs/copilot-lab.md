@@ -611,7 +611,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   needs you · 3 open, none past a cut line or stop." A cut line with no price yet is never called clear: "No price yet
   for 1 position with a cut line: not checked against it." It reads nothing of its own (the thread list's rows and the shared
   live prices) and goes away with the first word of the conversation; the generic hint shows only without a book.
-  Never in Replay. Proof: `frontend/e2e/copilot-desk-right-now.spec.ts`.
+  Never in Replay. Past a cut line its first button is a red **Close ticket** (the strip's). Beside the Feed it stays on
+  top of the Feed while something needs a look, and is absent otherwise. Proof: `frontend/e2e/copilot-desk-right-now.spec.ts`.
 - **Status line** (from 768 px; a phone has its tab bar there): one thin row along the desk's bottom, under the
   cockpit and Replay alike, so it never covers them. The mode's mark and whose book ("Real · Roth IRA ••8267", "Paper ·
   real book unchanged", "Replay · real and paper books unchanged"), then only what is not fine, in words (§ Data
@@ -620,6 +621,12 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   there is none and the strip is absent. Nothing in it is dismissed and there is no Seen: the strip shows the single
   top item with its own answers, and **+N more** opens every other item at once, each with its own answers. The rules
   (`lib/desk.ts` `deskNeeds`), followed tickers only, in this order:
+  0. (since 2026-11-27, after the leak replay found the plain cut rule beat the copilot's calls) a position trading at
+     or under his cut line at the desk's live prices (the book's Past cut line test): "ORCL 11/14/26 250C: past your cut
+     line $3.78 · now $3.35", **Close ticket** (the Ticket's closing ticket for all of it at the mark now, copy only,
+     nothing sent) and **Open it**. While it leads, the strip is red and says **Cut line** instead of Needs you. Opening
+     the ticker does not clear it: only the price back over the line or the position closed does. A give-back or other
+     alert on the same position is left out while it shows;
   1. a position alert that fired today and is not answered yet (give-back, wrong way, held an hour; the session
      read's `to_answer.alerts` rows marked `today`; a rating on the phone or the desk counts as the decision): "NBIS 11/14/26 105C: give-back alert at 10:31 AM", **Open it**, **Ask why** (sends "Why is
      NBIS moving today?" in today's conversation);
@@ -687,7 +694,9 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   every working order was just read whole: the live view's `orders_read`, from the order-history pass the no-exit alert
   uses; otherwise nothing is said), and **N× usual size** when a long option's premium paid is at least
   2× his median long option position over 12 months (`book.size_x`, `fill_interrupts.usual_size`: the large-size
-  interrupt's usual, from 20 positions). A
+  interrupt's usual, from 20 positions). An option down 90% or more gets no No exit order badge (`NO_EXIT_FLOOR_PCT`)
+  and waits, unless picked, behind one grey line at the book's foot, "2 nearly worthless · −$1,140 ▾" (since
+  2026-11-27: three dead options led his live book). A
   position under its entry is never Giving back, however recently the alert fired. While the Robinhood feed is live,
   "in profit" is Robinhood's P&L. The row's facts wrap onto a second line rather than run under the P&L, at any
   width. Its pen (a note) and eye (Not following) show on the row's hover or keyboard focus with a mouse; a touch
@@ -1173,7 +1182,9 @@ The cockpit's panes in detail:
     **read-out** over the chart's top-left corner, under the headline dots: the candle's time and OHLC (pre-market or
     after hours said), then each study shown with its value (without the pointer it is gone: the header has the price).
     A **PAPER fills shown** chip sits there whenever paper marks are
-    drawn. It never takes the pointer, so values changing never move the chart. The choices are kept per timeframe in this browser
+    drawn; since 2026-11-27 they are drawn on the PAPER desk only (the REAL desk had paper squares among his real
+    fills). Off drawing, his Charts levels and drawings show only within 15% of the last price (`DeskDraw.tsx`
+    `NEAR_REACH`): his live desk stacked six old levels and their notes far above the price. Drawing shows every one. It never takes the pointer, so values changing never move the chart. The choices are kept per timeframe in this browser
     (`desk.chart.studies.v1`, localStorage), all on at first. `backend/tests/test_desk_chart_studies.py` holds the
     values against the workspace's for the same candles (VWAP exactly; EMA 9 and 21 within half a cent from the first
     15m candle shown; EMA 21 and SMA 50/200 against `indicators.py`'s pandas forms). One difference with Charts:
@@ -1764,7 +1775,9 @@ and a small P&L-at-expiry line with the stock now (white) and break-even (amber)
   Greeks older than 3 minutes, and the app's hourly ones always, are greyed with their time.
 - **Nothing rather than a wrong number.** A short contract, or a ticker that also holds a short option (a spread or a
   calendar the journal keeps as separate trades), shows a one-line note and no figures. A missing input leaves its
-  figure out and says so ("Greeks unavailable", in the chart's standing; the book row's one line leaves it out), never a zero. Stocks get no standing (their P&L and day change only).
+  figure out, never a zero; a partial set of Greeks names what is missing. With no Greeks at all, or no What if (no IV
+  or price), the standing shows nothing for them (since 2026-11-27: two grey "unavailable" lines under every position
+  read as clutter in both desk reviews). Stocks get no standing (their P&L and day change only).
 - **What if…** Folded by default under the standing (open or folded is remembered on the browser): a stock-price and
   a date slider (today to expiry) give the position's estimated value and P&L in $ and %, with the P&L across stock
   prices on that date (now, break-even and the plan's entry and stop marked; click or drag it to pick a price). Presets:
@@ -1795,9 +1808,10 @@ the standing (break-even, days left, …) and any working Robinhood order on it.
   record in the ticker** ("Your ORCL record 12 closed · 5 won · −$1,240", closed trades in every account from
   `GET /charts/symbol/{symbol}/you`; nothing with no closed trade or when the read fails). A quiet **Plan it** (the plan
   flow) ends the button row. Nothing is sent to Robinhood. Since the desk re-review of 2026-11-27 the panel reads in
-  the order he acts: the mark, P&L and cut line ("Cut line $3.78 · past it", "· 31% over it"), then the buttons, then
-  the option's details (break-even, at expiry, Greeks, What if). Past his cut line or the plan's stop, **Close** is the
-  button that stands out (rose); it still only opens the closing ticket.
+  the order he acts: one bold line, "Now $3.35 · Cut $3.78 · past it" (or "· 31% over it"), then the buttons, then his
+  record and the option's details (break-even, at expiry, Greeks, What if). Past his cut line or the plan's stop,
+  **Close** is a solid red button, larger than the rest; it still only opens the closing ticket. The contract's own
+  chart draws the cut line as a thick red dashed line labelled "Cut $3.78" and always keeps it in view.
 - **Trim** (a count, half by default) and **Close** (all): the Ticket's close-now view at the mark (`closeNowTicket`,
   as the copilot's close and trim cards). A single long call or put the book reads as one leg only.
 - **Roll**: the roll ticket. **Note**: the book row's note line (saved with the trade; it shows under the row at once).

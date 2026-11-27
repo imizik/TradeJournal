@@ -661,10 +661,13 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   const parts = useRef<Parts | null>(null);
   const painted = useRef<Painted>({ shown: null, byCandle: new Map(), applied: null, timeline: [], guides: [] });
   const latest = useRef<Read | null>(null);
-  const [read, setRead] = useState<Read | null>(null);
+  const [rawRead, setRead] = useState<Read | null>(null);
   const [tick, setTick] = useState(0);
   const [hover, setHover] = useState<Hover | null>(null);
   const deskMode = useDeskMode(); // Paper mode keeps the chart's key in view
+  // The REAL desk shows his real fills only: paper fills stay on the PAPER desk (his live desk had both on one chart).
+  const read = useMemo<Read | null>(() => deskMode === "real" && rawRead && "data" in rawRead && rawRead.data.marks?.some(m => m.kind === "paper")
+    ? { ...rawRead, data: { ...rawRead.data, marks: rawRead.data.marks.filter(m => m.kind !== "paper") } } : rawRead, [rawRead, deskMode]);
   const [chartApi, setChartApi] = useState<IChartApi | null>(null);  // for the event chips over the chart
   const [choices, setChoices] = useState<Choices>({});
   const [menu, setMenu] = useState<Menu | null>(null);
@@ -824,7 +827,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
   useEffect(() => { setMenu(null); setStatus(null); setSelected(null); setTool(null); }, [key]); // eslint-disable-line react-hooks/set-state-in-effect -- a new chart starts clean
 
   // His drawings for this symbol (the shared chart settings), the gestures' view of them, and the layer's.
-  const draw = useDeskDrawings(data?.symbol ?? null);
+  const draw = useDeskDrawings(data?.symbol ?? null, data?.bars.at(-1)?.close ?? null);
   const drawRef = useRef(draw);
   const editing = drawOn && draw.usable && !!data;
   useEffect(() => {
@@ -840,7 +843,7 @@ export function DeskChart({ id, timeframe, refreshKey = 0, label, onRead, action
       onPlace: (kind, points) => made(draw.place(kind, points)),
     };
   }, [draw, editing, tool, selected]);
-  useEffect(() => { parts.current?.layer.set(draw.shapes, editing ? selected : null, true); }, [draw.shapes, selected, editing, chartApi]);
+  useEffect(() => { parts.current?.layer.set(editing ? draw.shapes : draw.nearShapes, editing ? selected : null, true); }, [draw.shapes, draw.nearShapes, selected, editing, chartApi]);
   useEffect(() => {
     const current = parts.current;
     if (!current) return;

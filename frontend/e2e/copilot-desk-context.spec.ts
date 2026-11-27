@@ -119,6 +119,18 @@ test("the centre opens on the open thread's chart beside the conversation, and i
   await pane.screenshot({ path: test.info().outputPath("desk-centre-timeline.png") });
 });
 
+test("on the PAPER desk the chart draws the paper fill too, told apart by shape, with its chip", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("desk.mode.v1", "paper"));
+  const { pane } = await lab(page);
+  const canvas = pane.getByTestId("desk-chart-canvas");
+  await expect(canvas).toHaveAttribute("data-marks", "4");
+  // Real and paper are told apart by shape, not colour alone: his real fill a solid arrow, the paper fill a square (lettered P).
+  const shapes = (await canvas.getAttribute("data-mark-shapes"))!.split(",");
+  expect(shapes.sort()).toEqual(["fill:arrowUp", "paper:square", "ping:circle", "radar:square"]);
+  await expect(pane.getByLabel("Legend")).toContainText("■P paper");
+  await expect(pane.getByTestId("desk-chart-paper")).toHaveText("PAPER fills shown");
+});
+
 test("the chart draws the plan's lines, the fills, pings, Radar and the time stop, and its timeframe holds", async ({ page }) => {
   const { reads, timeframes, pane } = await lab(page);
   const group = pane.getByRole("group", { name: "Timeframe" });
@@ -126,10 +138,10 @@ test("the chart draws the plan's lines, the fills, pings, Radar and the time sto
   await expect(group.getByRole("button", { name: "2m" })).toHaveAttribute("aria-pressed", "true");
   await expect(pane.getByRole("img", { name: /NBIS today: 2-minute candles with .*pings and Radar hits/ })).toBeVisible();
   await expect(canvas).toHaveAttribute("data-bars", "60");
-  await expect(canvas).toHaveAttribute("data-marks", "4");
-  // Real and paper are told apart by shape, not colour alone: his real fill a solid arrow, the paper fill a square (lettered P).
+  // The REAL desk draws his real fills only: the paper fill stays on the PAPER desk (below).
+  await expect(canvas).toHaveAttribute("data-marks", "3");
   const shapes = (await canvas.getAttribute("data-mark-shapes"))!.split(",");
-  expect(shapes.sort()).toEqual(["fill:arrowUp", "paper:square", "ping:circle", "radar:square"]);
+  expect(shapes.sort()).toEqual(["fill:arrowUp", "ping:circle", "radar:square"]);
   await expect(canvas.locator("canvas").first()).toBeVisible(); // the library drew
   // The lines and the time stop are named above the chart; every mark, with its New York time, in the chart's own list.
   // The stop is 20 minutes ahead, so after about 23:40 New York it falls on the next day and carries that day's date.
@@ -137,16 +149,15 @@ test("the chart draws the plan's lines, the fills, pings, Radar and the time sto
   const marks = pane.getByRole("list", { name: "On the chart" }).getByRole("listitem");
   await expect(marks).toHaveText(["Entry 95.90", "Invalidation 92.30",
     /^Fill · Bought 2 NBIS 11\/20\/26 100C · NBIS at 94.40 · .*\d{1,2}:\d{2} [AP]M ET$/,
-    /^Paper · Paper: Bought 1 × NBIS \$100 Call 11\/20\/26 at 3.40 · NBIS 94.10 · .*ET$/,
     /^Ping · Give-back ping · NBIS · .*ET$/, /^Radar · Radar · NBIS volume burst · .*ET$/, /^Time stop .* · out by 15:30$/]);
   await expect(pane.getByTestId("desk-chart-readout")).toContainText(/ET · O \d+\.\d{2} H .* C /);
   const legend = pane.getByLabel("Legend");
   await expect(legend).toContainText("your fills");
-  await expect(legend).toContainText("■P paper"); // his paper fills, violet squares lettered P
+  await expect(legend).not.toContainText("paper");
   await expect(legend).toContainText("▲▼ your fills");
   await expect(legend).toContainText("pings");
   await expect(legend).toContainText("Radar");
-  await expect(pane.getByTestId("desk-chart-paper")).toHaveText("PAPER fills shown"); // a chip in the chart's corner
+  await expect(pane.getByTestId("desk-chart-paper")).toHaveCount(0);
   // One header row: the ticker, the timeframes and the chart's tools sit on one line above the candles.
   const head = (await pane.getByTestId("desk-chart-head").boundingBox())!;
   expect(head.height).toBeLessThanOrEqual(40);
@@ -239,7 +250,7 @@ test("a symbol opened with no saved conversation charts it by the symbol", async
   const pane = page.getByRole("region", { name: "Chart and tools" });
   await expect(pane.getByRole("img", { name: /NBIS today: 2-minute candles/ })).toBeVisible();
   await expect(pane.getByTestId("desk-chart-lines")).toHaveText("no plan lines saved"); // a symbol with no plan draws no lines and says so
-  await expect(pane.getByRole("list", { name: "On the chart" }).getByRole("listitem")).toHaveCount(4); // its fill, paper fill, ping and Radar marks
+  await expect(pane.getByRole("list", { name: "On the chart" }).getByRole("listitem")).toHaveCount(3); // its fill, ping and Radar marks (the paper fill is the PAPER desk's)
   await pane.getByTestId("desk-chart-more").click(); // Open in Charts is in the chart header's More
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
   await pane.getByRole("tab", { name: "Position" }).click(); // the Timeline sits in the dock's Position tab

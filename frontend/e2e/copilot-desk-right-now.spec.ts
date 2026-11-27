@@ -25,6 +25,8 @@ const THREADS = {
       { usd: -412, pct: -38.1, expiry: "2026-11-14", days_held: 1, track: null, state: "no_plan", planned: false, stop_pct: null, quantity: 2, mark: 335, cut_line: 378, ...opt("ORCL261114C00250000", "call", 250, "2026-11-14", 2, 541) }),
     T(NBIS, "NBIS", "11/20/26 100C", ["+$140.00", "win"], ["On plan", "muted"],
       { usd: 140, pct: 20.6, expiry: "2026-11-20", days_held: 0, track: null, state: "on_plan", planned: true, stop_pct: 3.1, quantity: 2, mark: 410, cut_line: 238, plan_levels: { stop: 95.5, target: 108 }, ...opt("NBIS261120C00100000", "call", 100, "2026-11-20", 2, 340) }),
+    T("44444444-4444-4444-8444-444444444444", "DRAM", "12/04/26 50C", ["−$292.00", "loss"], ["", "muted"],
+      { usd: -292, pct: -99.3, expiry: "2026-12-04", days_held: 20, track: null, state: "no_plan", planned: false, stop_pct: null, quantity: 2, mark: 1, cut_line: null, ...opt("DRAM261204C00050000", "call", 50, "2026-12-04", 2, 147) }),
     T(MU, "MU", "11/21/26 240P", ["−$65.00", "loss"], ["Giving back", "warn"],
       { usd: -65, pct: -8.1, expiry: "2026-11-21", days_held: 2, track: null, state: "giving_back", planned: false, stop_pct: null, quantity: 1, mark: 735, cut_line: 560, ...opt("MU261121P00240000", "put", 240, "2026-11-21", 1, 800) }),
   ],
@@ -171,4 +173,39 @@ test("with the day call off the column is as before", async ({ page }) => {
   await open(page, 1440, 900);
   await expect(rightNow(page).getByTestId("right-now-item")).toHaveCount(2);
   await expect(page.getByTestId("day-call")).toHaveCount(0);
+});
+
+test("past the cut line: a red strip on top with Close ticket, and Close ticket first in Right now", async ({ page }) => {
+  await open(page, 1440, 900);
+  const strip = page.getByTestId("needs-you");
+  await expect(strip).toHaveAttribute("data-kind", "cut");
+  await expect(strip.getByTestId("needs-you-title")).toHaveText("ORCL 11/14/26 250C: past your cut line $3.78 · now $3.35");
+  // The give-back alert on the same position gives way to it.
+  await expect(strip).not.toContainText("give-back");
+  await strip.getByTestId("needs-you-primary").click();
+  await expect(page.getByTestId("desk-dock").getByRole("tab", { name: "Ticket" })).toHaveAttribute("aria-selected", "true");
+  await expect(rightNow(page).getByTestId("right-now-item").first().getByTestId("right-now-close")).toHaveText("Close ticket");
+});
+
+test("options down 90% or more wait behind one grey line", async ({ page }) => {
+  await open(page, 1440, 900);
+  const book = page.getByTestId("desk-book");
+  await expect(book.getByRole("button", { name: /^DRAM / })).toHaveCount(0);
+  await expect(book.getByTestId("book-dead")).toContainText(/1 nearly worthless.*−\$292/);
+  await book.getByTestId("book-dead").click();
+  await expect(book.getByRole("button", { name: /^DRAM / })).toBeVisible();
+});
+
+test("one leg of a spread past its cut line: Open it only, never a ticket that closes the long leg alone", async ({ page }) => {
+  const orcl = THREADS.threads.find(t => t.symbol === "ORCL")!;
+  const short = T("55555555-5555-4555-8555-555555555555", "ORCL", "11/14/26 260C", ["+$80.00", "win"], ["", "muted"],
+    { usd: 80, pct: 40, expiry: "2026-11-14", days_held: 1, track: null, state: "no_plan", planned: false, stop_pct: null, quantity: 2, mark: 120, cut_line: null,
+      tick: { quote: "ORCL261114C00260000", scale: 100, cost: 200, quantity: 2, sign: -1 },
+      option: { side: "call", strike: 260, expiry: "2026-11-14", direction: "short", quantity: 2, multiplier: 100, cost: 200, greeks: null } });
+  await open(page, 1440, 900, { ...THREADS, threads: [orcl, short] });
+  const strip = page.getByTestId("needs-you");
+  await expect(strip).toHaveAttribute("data-kind", "cut");
+  await expect(strip.getByRole("button", { name: "Close ticket" })).toHaveCount(0);
+  await expect(strip.getByTestId("needs-you-primary")).toHaveText("Open it");
+  await expect(rightNow(page).getByTestId("right-now-close")).toHaveCount(0);
 });

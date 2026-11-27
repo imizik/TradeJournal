@@ -19,7 +19,7 @@ import { HowImDoing, Practice, RulesAndGoals, openDeskPlace, type DeskPlace } fr
 import DeskReplay from "@/components/copilot/DeskReplay";
 import ReplayLiveLine from "@/components/copilot/ReplayLiveLine";
 import PaperReviewCard from "@/components/copilot/PaperReview";
-import DeskTicket, { TICKET_EVENT, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
+import DeskTicket, { TICKET_EVENT, openClosingTicket, openTicket, useTicketPlans, type TicketPick } from "@/components/copilot/DeskTicket";
 const DeskRoll = dynamic(() => import("@/components/copilot/DeskRoll"), { ssr: false });
 import type { RollFrom } from "@/lib/rollTicket";
 import { useDeskActionHost } from "@/components/copilot/DeskActionCard";
@@ -41,7 +41,9 @@ import DeskFeed, { feedQuestion, useDeskFeed, useFeedNew, type FeedItem } from "
 import { useDeskUnusual } from "@/components/copilot/DeskUnusual";
 import { scannerGuides, useDeskScanner, type DeskScannerRow } from "@/components/copilot/DeskScanner";
 import { marketWords, useDeskSession } from "@/components/copilot/SessionTape";
-import { Book, CentreChart, DayFacts, NeedsStrip, RiskWord, SinceYouLooked, dayMoneyWords, positionRows, useSparks } from "@/components/copilot/Cockpit";
+import { Book, CentreChart, DayFacts, NeedsStrip, RiskWord, SinceYouLooked, dayMoneyWords, pastCut, positionRows, rowNow, useSparks } from "@/components/copilot/Cockpit";
+import { closable, heldContracts, panelCloseTicket } from "@/lib/deskPosition";
+import { useDeskTicks } from "@/lib/deskTicks";
 import type { DeskChartActions, DeskGuide } from "@/components/copilot/DeskChart";
 import MorningBrief from "@/components/copilot/MorningBrief";
 import Watching, { useWatching } from "@/components/copilot/Watching";
@@ -144,7 +146,7 @@ function Breadcrumb({ thread, link, saved, onMain }: { thread: DeskThreadRef | n
   const at = thread && saved.find(t => t.id === thread.id)?.updated_at;
   const leaf = thread ? thread.title : symbol ? (link?.radar ? "Radar hit" : "Decision") : null;
   return (
-    <nav aria-label="You are here" data-testid="desk-breadcrumb" className="z-10 mb-3 flex min-w-0 items-baseline gap-1.5 bg-background py-1 text-xs text-muted-foreground lg:sticky lg:top-0 lg:shadow-[0_-24px_0_0_hsl(var(--background))]">
+    <nav aria-label="You are here" data-testid="desk-breadcrumb" className="z-10 mb-3 flex min-w-0 items-baseline gap-1.5 bg-background py-1 text-xs text-muted-foreground lg:sticky lg:top-0 lg:shadow-[0_-24px_0_0_hsl(var(--background)),0_10px_8px_-4px_hsl(var(--background))]">
       {symbol ? <span className="shrink-0 font-semibold text-foreground">{symbol}</span> : (
         <button type="button" onClick={onMain} className="relative shrink-0 font-semibold after:absolute after:-inset-x-2 after:-inset-y-3.5 after:content-[''] hover:text-foreground hover:underline sm:after:hidden">Now</button>
       )}
@@ -1101,8 +1103,21 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
 
   // The strip: what needs a decision now (``deskNeeds``' documented order), each item clearing itself.
   const closingNow = dayPhase === "close";
+  // Past his cut line now, at the desk's live prices (the book's own test): row key to the price a share.
+  const cutTicks = useDeskTicks(positionRows(rows).map(r => r.book?.tick?.quote));
+  const pastCutNow = Object.fromEntries(positionRows(rows).flatMap(r => {
+    const price = rowNow(r.book, cutTicks).price;
+    return pastCut(r.book, cutTicks) && price != null ? [[r.key, price]] : [];
+  }));
   const needs = on && rowsRead ? deskNeeds({ rows, alerts: session.data?.to_answer?.alerts?.rows ?? [], plans, day: nyDay(), closing: closingNow,
-    fills: fills.waiting.length, opened }) : [];
+    fills: fills.waiting.length, opened, pastCut: pastCutNow }) : [];
+  // The closing ticket for all of a held long option, at the mark now (copy only: nothing is sent), on the desk's Ticket.
+  const closeTicketFor = (row: DeskThread) => {
+    const held = heldContracts(row.book);
+    const ticket = held ? panelCloseTicket(row, cutTicks, held) : null;
+    setPicked(row.symbol); setPickedKey(row.key); setGrid(false); showCentre();
+    if (ticket) openClosingTicket(ticket);
+  };
   // What the strip could not check: said in one quiet line instead of an empty strip that looks like "nothing waits".
   const unchecked = !on ? null : rowsFailed || sections?.positions === "unavailable" ? "positions"
     : sections?.plans === "unavailable" ? "plans" : session.error ? "today's alerts"
@@ -1116,6 +1131,11 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const needActions = (need: DeskNeed) => {
     const row = need.row;
     switch (need.kind) {
+      // One leg of a spread, or anything the panel's own Close would not offer: Open it only, and the panel says why.
+      case "cut": return row && closable(row, rows)
+        ? [{ label: "Close ticket", primary: true, run: () => closeTicketFor(row), title: "A closing ticket for all of it at the mark now, to copy into Robinhood. Nothing is sent." },
+          { label: "Open it", run: () => openSymbol(need) }]
+        : [{ label: "Open it", primary: true, run: () => openSymbol(need) }];
       case "alert": return [{ label: "Open it", primary: true, run: () => openSymbol(need) }, { label: "Ask why", run: () => askWhy(need) }];
       case "level": return [{ label: "Open the plan", primary: true, run: () => openSymbol(need) }, { label: "Ask why", run: () => askWhy(need) }];
       case "card": return [{ label: "Open the card", primary: true, run: () => { setPicked(row!.symbol); pick(row!); } }];
@@ -1417,6 +1437,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 <X size={14} aria-hidden />Desk
               </button>
             </div>
+            {/* Beside the Feed too, what needs a look stays in view (only while something does). */}
+            {!phone && !replay && <DeskRightNow rows={booked.rows} day={today} onOpen={select} onAsk={actions.ask} onClose={closeTicketFor} onlyNeeds />}
             <DeskFeed data={feed.data} failed={feed.failed} since={feedNew.since} onAsk={askFeed} onPlan={planFeed} onChart={openFeedChart} unusual={unusual} onUnusual={openUnusual}
               scanner={scanner} onScanner={openScanner} onScannerPlan={go} focus={feedLink} />
           </div>
@@ -1483,7 +1505,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
           <CopilotPanel variant="page" link={link} desk={hooks} daily={daily}
             rightNow={on && !replay && (dayCall?.enabled && dayCall.calls.length > 0 || positionRows(booked.rows).some(r => !r.hidden && r.book)) && <>
               {dayCall?.enabled && dayCall.calls.length > 0 && <DeskDayCall found={dayCall} />}
-              {positionRows(booked.rows).some(r => !r.hidden && r.book) && <DeskRightNow rows={booked.rows} day={today} onOpen={select} onAsk={actions.ask} />}
+              {positionRows(booked.rows).some(r => !r.hidden && r.book) && <DeskRightNow rows={booked.rows} day={today} onOpen={select} onAsk={actions.ask} onClose={closeTicketFor} />}
             </>} />
         </section>
         </div>

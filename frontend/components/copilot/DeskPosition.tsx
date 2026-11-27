@@ -213,22 +213,22 @@ export function DeskPosition({ row, rows, fallback = null, change = null, plan, 
         {mark && <Fig label="Now" testId="position-mark" className={cn(!mark.live && "opacity-60")}>{priceText(mark.share)}{book.option ? " a share" : ""}</Fig>}
         {stock && book.option && <StockNow symbol={symbol} last={stock.last} change={stock.change} live={stock.live} />}
       </div>
+      {/* The line he goes by, in one bold line: the price now against his cut line (a short-dated long option with no plan). */}
+      {!shown && cut != null && (
+        <p data-testid="position-cut" className={cn("text-sm font-semibold tabular-nums text-foreground md:text-base", pastLine && "text-rose-100")}>
+          {mark && <>Now ${priceText(mark.share)} · </>}<span className={pastLine ? "text-rose-300" : "text-muted-foreground"}>Cut</span> ${priceText(cut)}
+          {overCut != null && (overCut <= 0
+            ? <span className="text-rose-300"> · past it</span>
+            : <span className="font-normal text-muted-foreground"> · {overCut.toFixed(0)}% over it</span>)}
+        </p>
+      )}
       <div data-testid="position-plan" className="flex flex-wrap items-baseline gap-x-3 gap-y-1 tabular-nums">
         {shown ? <>
           <Fig label="Entry">{level(shown.entry)}</Fig>
           <Fig label="Stop" testId="position-stop">{level(shown.stop)}</Fig>
           <Fig label="Target" testId="position-target">{level(shown.target)}</Fig>
         </> : book.planned ? <span className="text-muted-foreground">Planned with a time stop only: no stop or target price.</span> : null}
-        {!shown && cut != null && (
-          <Fig label="Cut line" testId="position-cut">
-            ${priceText(cut)}
-            {overCut != null && (overCut <= 0
-              ? <span className="font-semibold text-rose-300"> · past it</span>
-              : <span className="text-muted-foreground"> · {overCut.toFixed(0)}% over it</span>)}
-          </Fig>
-        )}
         {!shown && days != null && <Fig label="Expiry" testId="position-expiry"><span className={cn(days <= 2 && "text-amber-300")}>{days < 0 ? "Expired" : days === 0 ? "today" : `${days}d left`}</span></Fig>}
-        {!shown && <YourRecord symbol={symbol} record={record} />}
         {working.length > 0 && <span data-testid="position-orders" className="min-w-0"><OrderLines orders={working} /></span>}
       </div>
       <div role="group" aria-label="Manage this position" data-testid="position-actions" className="flex flex-wrap items-center gap-1.5">
@@ -238,12 +238,12 @@ export function DeskPosition({ row, rows, fallback = null, change = null, plan, 
         ) : null}
         {closeAll && held! >= 2 && (
           <button type="button" data-testid="position-trim" aria-expanded={open === "trim"} onClick={openTrim}
-            title="Sell part of it: a closing ticket at the mark now, to copy into Robinhood. Nothing is sent." className={BUTTON}>Trim</button>
+            title="Sell part of it: a closing ticket at the mark now, to copy into Robinhood. Nothing is sent." className={cn(BUTTON, pastLine && "px-5 text-sm sm:min-h-9")}>Trim</button>
         )}
         {closeAll && (
           <button type="button" data-testid="position-close" onClick={() => { setOpen(null); openClosingTicket(closeAll); }}
             title={`Close all ${held}: a closing ticket at the mark now, to copy into Robinhood. Nothing is sent.`}
-            className={cn(BUTTON, pastLine && "border-rose-400/60 bg-rose-500/15 text-rose-100 hover:bg-rose-500/25")}>Close</button>
+            className={cn(BUTTON, pastLine && "border-rose-400 bg-rose-500 px-6 text-sm font-semibold text-white hover:bg-rose-500/90 sm:min-h-9")}>Close</button>
         )}
         {roll && (
           <button type="button" data-testid="roll-open" onClick={() => { setOpen(null); openRollTicket(roll); }}
@@ -293,6 +293,7 @@ export function DeskPosition({ row, rows, fallback = null, change = null, plan, 
       )}
       {open === "note" && trade && <NoteLines notes={notes} id={row.key} trade={null} target={{ trade_id: trade }} label="this position" />}
       {said && <p role="status" data-testid="position-said" className="text-emerald-300">{said}</p>}
+      {!shown && <p className="tabular-nums"><YourRecord symbol={symbol} record={record} /></p>}
       {/* The details (break-even, what it is worth at expiry, Greeks, What if) come after what he acts on. */}
       {book.option && <OptionStanding row={row} rows={rows} fallback={fallback}
         levels={current ? { entry: current.entry ?? levels.entry, stop: current.stop, target: current.target } : levels} earnings={earnings} />}
