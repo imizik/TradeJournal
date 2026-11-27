@@ -314,6 +314,8 @@ def fact_sheet(d: dict) -> str | None:
         return None
     price = d.get("price") or {}
     parts = [f"{d.get('symbol')} {price['last']:g}" + (f" {price['change_pct']:+g}%" if price.get("change_pct") is not None else "")]
+    if any(p.get("past_cut") for p in d.get("position") or []):
+        parts.append("past cut line")  # first: the line is cut at its length
     if price.get("gap_pct") is not None:
         parts.append(f"gap {price['gap_pct']:+g}%")
     volume = d.get("volume") or {}
@@ -324,14 +326,14 @@ def fact_sheet(d: dict) -> str | None:
     ready = [e for e in (d.get("implied_move") or {}).get("expirations") or [] if e.get("move_pct") is not None]
     if ready:
         parts.append(f"implied ±{ready[0]['move_pct']:g}% ({ready[0].get('days')}d)")
-    counts = (d.get("catalysts") or {}).get("counts") or {}
-    if counts:
+    found = d.get("catalysts") or {}
+    counts = found.get("counts") or {}
+    if found.get("unavailable"):  # a failed feed is never a count of zero
+        parts.append("catalysts partial")
+    elif counts:
         primary, heads = counts.get("filing", 0) + counts.get("halt", 0), counts.get("headline", 0)
         parts.append(f"{primary} filing{'' if primary == 1 else 's'} or halt{'' if primary == 1 else 's'}, "
                      f"{heads} headline{'' if heads == 1 else 's'}")
-    past = [p for p in d.get("position") or [] if p.get("past_cut")]
-    if past:
-        parts.append("past cut line")
     return ", ".join(parts)
 
 

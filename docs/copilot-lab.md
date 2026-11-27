@@ -5280,6 +5280,9 @@ distance from it and `short_dated_red` when it is 3 days or less to expiry
 and red. A section that cannot be read is named in `missing`. It carries the
 owner's book, so it is offered on the desk and Telegram only and never to a
 research job; the fixture's sheet is marked simulated and replay refuses it.
+The reads run side by side under one 8.5-second deadline inside the tool's
+10-second timeout (the implied move waits for the quote's price within it); a
+section still reading then is missing.
 The prompt reads it first for an in-the-moment question about one symbol, and
 never answers a `short_dated_red` position with hold or wait: it gives the
 mark against the cut line and leaves the call to him (the Nov 27 leak replay

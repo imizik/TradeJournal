@@ -105,3 +105,31 @@ def test_desk_and_phone_prompts_read_the_fact_sheet_first_and_shape_a_deep_read(
     for job in (cp.PREP, cp.COMPANION, cp.DESK_READ):
         assert "get_fact_sheet" not in cp.system_prompt(job)
     assert "get_fact_sheet" in copilot.DEEP_TOOLS  # the read itself opens the deep turn's room
+
+
+def test_the_fact_line_never_counts_a_failed_catalyst_feed_as_zero():
+    line = summarize("get_fact_sheet", _sheet())
+    assert line.startswith("NBIS 90 -5%, past cut line, gap -3.95%") and "catalysts partial" in line  # halts were down
+
+
+def test_live_reads_share_one_deadline_and_a_slow_one_is_only_missing(monkeypatch):
+    import threading
+    from app.ai import copilot_extended
+    from app.engine.options_feed import options_feed
+    release = threading.Event()
+    fixture = FixtureEvidence()
+
+    class Slow(FixtureEvidence):
+        def get_catalysts(self, symbol):  # a cold SEC ticker list
+            release.wait(5)
+            return fixture.get_catalysts(symbol)
+    monkeypatch.setattr(fs, "READ_DEADLINE", 0.3)
+    monkeypatch.setattr(fs, "live_cuts", lambda symbol: {})
+    monkeypatch.setattr(copilot_extended, "premarket_pace", lambda symbol, now: None)
+    monkeypatch.setattr(options_feed, "forecast", lambda symbol, spot, earnings: FORECAST if spot == 94.35 else None)
+    try:
+        out = fs.live_sheet(Slow(), "NBIS")
+    finally:
+        release.set()
+    assert out["missing"] == ["catalysts"] and out["implied_move"]["expirations"][0]["move_pct"] == 3.0
+    assert out["price"]["last"] == 94.35 and out["my_record"]["trades"] == 14
