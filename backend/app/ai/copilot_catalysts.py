@@ -41,7 +41,8 @@ HALTS_URL = "https://www.nasdaqtrader.com/rss.aspx?feed=tradehalts"
 SEC_TTL = 60.0
 HALTS_TTL = 60.0  # Nasdaq Trader asks for at most one read a minute
 TIMEOUT = 8.0
-READ_DEADLINE = 7.0  # all four reads, inside the copilot's 10 s tool timeout
+READ_DEADLINE = 7.0  # the calendar and all four reads, inside the copilot's 10 s tool timeout
+CALENDAR_WAIT = 2.0
 MAX_ITEMS = 15
 MAX_UNEXPLAINED = 3
 REACTION_MINUTES = 15
@@ -360,16 +361,22 @@ def _bars(symbol: str, since: float, now: float) -> list[dict] | None:
 
 
 def live_catalysts(symbol: str, now: datetime) -> dict:
-    """The four reads side by side under one deadline inside the tool's own timeout: a source that has not answered by
-    then reads as unavailable and never costs the others their results."""
+    """The calendar lookup and the four reads under one deadline inside the tool's own timeout. A calendar that cannot
+    answer within ``CALENDAR_WAIT`` gives way to what it holds in memory (or the 18-hour fallback); a source that has
+    not answered by the deadline reads as unavailable and never costs the others their results."""
+    import time
     from app.engine.chart_calendar import chart_calendar
     from concurrent.futures import ThreadPoolExecutor, wait
     at = now.timestamp()
-    since = last_close(at, chart_calendar.hours)
-    pool = ThreadPoolExecutor(max_workers=4)
+    until = time.monotonic() + READ_DEADLINE
+    pool = ThreadPoolExecutor(max_workers=5)
+    try:
+        since = pool.submit(last_close, at, chart_calendar.hours).result(timeout=CALENDAR_WAIT)
+    except Exception:  # noqa: BLE001 - a slow or failed calendar: memory only, never the provider
+        since = last_close(at, chart_calendar.cached)
     jobs = {"filings": pool.submit(live_filings, symbol), "halts": pool.submit(live_halts, symbol),
             "headlines": pool.submit(live_headlines, symbol, since), "bars": pool.submit(_bars, symbol, since, at)}
-    done, _ = wait(jobs.values(), timeout=READ_DEADLINE)
+    done, _ = wait(jobs.values(), timeout=max(0.0, until - time.monotonic()))
     pool.shutdown(wait=False, cancel_futures=True)  # a slow read finishes on its own; its cache still fills
     late = {"state": "unavailable", "reason": "did not answer in time"}
 

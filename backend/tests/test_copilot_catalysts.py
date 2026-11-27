@@ -261,3 +261,22 @@ def test_a_slow_source_reads_as_unavailable_and_the_rest_still_stand(monkeypatch
     finally:
         release.set()
     assert out["sources"] == {"sec_filings": "unavailable: did not answer in time", "halts": "ok", "headlines": "ok"}
+
+
+def test_a_slow_calendar_falls_back_to_memory_inside_the_deadline(monkeypatch):
+    import threading
+    from app.engine import chart_calendar as cal
+    release = threading.Event()
+    monkeypatch.setattr(cat, "CALENDAR_WAIT", 0.1)
+    monkeypatch.setattr(cal.chart_calendar, "hours", lambda d: (release.wait(5), None)[1])  # a calendar refresh hangs
+    monkeypatch.setattr(cal.chart_calendar, "cached", lambda d: None)
+    for name in ("live_filings", "live_halts"):
+        monkeypatch.setattr(cat, name, lambda s: _ok([]))
+    monkeypatch.setattr(cat, "live_headlines", lambda s, since: _ok([]))
+    monkeypatch.setattr(cat, "_bars", lambda s, since, at: None)
+    now = datetime(2026, 11, 27, 15, 0, tzinfo=ET)
+    try:
+        out = cat.live_catalysts("NBIS", now)
+    finally:
+        release.set()
+    assert out["since"] == "11-26 21:00 ET" and set(out["sources"].values()) == {"ok"}  # the 18-hour fallback
