@@ -2,6 +2,7 @@
 Alpaca news (Benzinga feed) fetcher.
 
 Returns cleaned headline dicts — HTML content stripped, deduped by article id.
+Items from ``DROPPED_SOURCES`` (machine-written summaries) are left out.
 Relevance filtering and market-moving/noise classification are deliberately
 NOT done here; the consumer (Claude via the market report) triages headlines.
 """
@@ -19,6 +20,10 @@ log = logging.getLogger(__name__)
 
 MAX_PAGE_LIMIT = 50
 MAX_CONTENT_CHARS = 8000
+# Alpaca's news API mixes Benzinga's wire with other publishers. fiscal.ai items are machine-written summaries that
+# cite no checkable source (an NBIS "HPE financing warning" summary reached a research job's citations on 2026-11-27
+# as if it were news). Every consumer reads through here, so they are dropped once, before paging counts them.
+DROPPED_SOURCES = frozenset({"fiscal.ai"})
 
 
 def fetch_news(
@@ -74,6 +79,8 @@ def fetch_news(
             if article_id in seen_ids:
                 continue
             seen_ids.add(article_id)
+            if str(item.get("source") or "").strip().lower() in DROPPED_SOURCES:
+                continue
             article = {
                 "id": article_id,
                 "headline": item.get("headline"),
