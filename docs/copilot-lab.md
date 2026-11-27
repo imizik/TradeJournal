@@ -5271,7 +5271,8 @@ its minutes instead, and no volume ratio; an overnight gap never stretches a
 window into the next session. Minutes with 5x volume and a 1%+ move by the
 fifth minute that no item in the window explains (an item in that bar or up
 to 10 minutes before, whether or not it made the 15 shown) are listed as
-unexplained moves, at most three. With every source read and no item, the
+unexplained moves, at most three (one still inside its five minutes shows
+`move_so_far_pct` with its minutes). With every source read and no item, the
 result says the move is not news-driven by these sources; "headlines only"
 needs the filings and halts read and a headline found; a failed source is
 named and never reads as "no news". Titles and headlines are third-party data. The fixture's

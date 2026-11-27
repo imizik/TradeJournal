@@ -201,8 +201,15 @@ def unexplained(bars: list[dict], explained_at: list[float], since: float = 0.0)
             continue
         if found and t - found[-1]["at"] < BURST_MINUTES * 60:  # one burst, one row
             continue
-        found.append({"at": t, "move_5m_pct": move, "volume_x": round(bars[i]["volume"] / typical, 1)})
-    return sorted(found, key=lambda r: -abs(r["move_5m_pct"]))[:MAX_UNEXPLAINED]
+        row = {"at": t, "volume_x": round(bars[i]["volume"] / typical, 1), "_move": move}
+        seen_until = bars[-1]["time"] + 60
+        if seen_until >= t + BURST_MINUTES * 60:
+            row["move_5m_pct"] = move
+        else:  # still forming: say how many minutes the move covers
+            row.update(move_so_far_pct=move, minutes_so_far=max(1, int((seen_until - t) // 60)))
+        found.append(row)
+    found.sort(key=lambda r: -abs(r["_move"]))
+    return [{k: v for k, v in r.items() if k != "_move"} for r in found[:MAX_UNEXPLAINED]]
 
 
 def _clock(at: float) -> str:

@@ -219,3 +219,9 @@ def test_headlines_only_needs_the_filings_and_halts_read_and_a_headline():
     nothing_read = cat.timeline("NBIS", since, now, filings=_ok([]), halts=_ok([]),
                                 headlines={"state": "unavailable", "reason": "r"}, bars=None)
     assert "note" not in halts_down and "note" not in nothing_read
+
+
+def test_a_spike_still_forming_is_not_called_a_five_minute_move():
+    start = _at("2026-11-27T09:00:00")
+    bars = _bars(start, 61, spike_at=60, jump=2.0)  # the spike is the last bar the feed holds
+    assert cat.unexplained(bars, []) == [{"at": start + 3600, "volume_x": 10.0, "move_so_far_pct": 2.0, "minutes_so_far": 1}]
