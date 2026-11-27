@@ -24,12 +24,16 @@ Spending: ``--dry-run`` (the default) builds every prompt and prints the count, 
 API call. ``--submit`` creates one batch (50% off; ``copilot.cost_usd`` halved) and refuses when the estimate is over
 ``--max-usd`` or over what is left of ``AI_MONTHLY_BUDGET_USD``. ``--collect BATCH_ID`` reads the results, records the
 batch's cost as one ``copilot_turn`` row so the monthly cap counts it, and prints the score. The key is
-``ANTHROPIC_API_KEY`` only. The submit manifest and the results are written under ``backend/reports/leak_replay/``
-(ignored by git; it maps answers back to trades). Read-only against the journal.
+``ANTHROPIC_API_KEY`` only. ``--retry BATCH_ID`` submits only the moments that collected batch left unanswered (an
+answer cut off or errored); collecting the retry scores them together with the earlier batch's answers. The submit
+manifest and the results are written under ``--out-dir`` (``backend/reports/leak_replay/`` by default, ignored by git;
+it maps answers back to trades; on the server, a folder outside the release, which each deploy replaces). Read-only
+against the journal.
 
     cd backend && python -m scripts.leak_replay                    # dry run
     cd backend && python -m scripts.leak_replay --submit --max-usd 20
     cd backend && python -m scripts.leak_replay --collect msgbatch_...
+    cd backend && python -m scripts.leak_replay --retry msgbatch_... --max-usd 1
 """
 from __future__ import annotations
 
@@ -53,7 +57,7 @@ from app.engine.position_alerts import DEEP_RED_PCT, HOLD_MINUTES, SHORT_DATED_D
 
 MODEL = "claude-sonnet-5-5"
 HOLDOUT = date(2026, 6, 1)  # moments on or after this are past the model's training data
-MAX_TOKENS = 400
+MAX_TOKENS = 1500  # 400 cut off 12 of 118 answers mid-JSON in the first run (Nov 27); the answer itself is ~100
 OUTPUT_ESTIMATE = 150  # tokens per answer, for the estimate
 CHARS_PER_TOKEN = 3.5
 DEFAULT_MAX_USD = 20.0
@@ -231,8 +235,10 @@ class Refused(Exception):
     pass
 
 
-def submit(client, found: list[dict], max_usd: float, *, budget_left: float | None = None, out_dir: Path = OUT_DIR) -> dict:
-    """Create the batch, or refuse (``Refused``) when the estimate is over ``max_usd`` or the month's remaining budget."""
+def submit(client, found: list[dict], max_usd: float, *, budget_left: float | None = None, out_dir: Path = OUT_DIR,
+           retry_of: str | None = None) -> dict:
+    """Create the batch, or refuse (``Refused``) when the estimate is over ``max_usd`` or the month's remaining budget.
+    ``retry_of``: an earlier batch whose unanswered moments these are; collecting this one scores them together."""
     reqs = requests(found)
     usd = estimate_usd(reqs)
     if not reqs:
@@ -243,12 +249,25 @@ def submit(client, found: list[dict], max_usd: float, *, budget_left: float | No
         raise Refused(f"Estimated ${usd:.2f} is over what is left of this month's AI budget (${budget_left:.2f}).")
     batch = client.messages.batches.create(requests=reqs)
     manifest = {"batch_id": batch.id, "model": MODEL, "estimate_usd": usd, "submitted_at": datetime.now().isoformat(),
+                "retry_of": retry_of,
                 "moments": {f"m{i}": {k: m[k] for k in ("trade_id", "saved", "realized_pnl")}
                             | {"at": m["at"].isoformat(), "days_to_expiry": m["facts"]["days_to_expiry"]}
                             for i, m in enumerate(found)}}
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{batch.id}.manifest.json").write_text(json.dumps(manifest, indent=2))
     return manifest
+
+
+def _key(moment: dict) -> tuple[str, str]:
+    at = moment["at"]
+    return str(moment["trade_id"]), at if isinstance(at, str) else at.isoformat()
+
+
+def unanswered(found: list[dict], batch_id: str, out_dir: Path = OUT_DIR) -> list[dict]:
+    """The moments a collected batch (and the batches it retried) left without an answer, from ``found``."""
+    rows = json.loads((out_dir / f"{batch_id}.results.json").read_text())["rows"]
+    missing = {_key(r) for r in rows if r["call"] is None}
+    return [m for m in found if _key(m) in missing]
 
 
 # --------------------------------------------------------------------------- collect and score
@@ -313,11 +332,16 @@ def collect(client, batch_id: str, *, out_dir: Path = OUT_DIR, record: Callable 
         rows.append({**moment, "call": data["call"] if data else None,
                      "confidence": data.get("confidence") if data else None, "reason": data.get("reason") if data else None})
     rows += [{**m, "call": None} for key, m in manifest["moments"].items() if key not in seen]
+    if manifest.get("retry_of"):  # the earlier batch's rows, with this batch's answers in place of its gaps
+        earlier = json.loads((out_dir / f"{manifest['retry_of']}.results.json").read_text())["rows"]
+        mine = {_key(r): r for r in rows}
+        rows = [mine.pop(_key(r), r) if r["call"] is None else r for r in earlier] + list(mine.values())
     usd = round(copilot.cost_usd(manifest["model"], total) / 2, 6)
     if record is not None:
         record({"backend": "api_background", "model": manifest["model"], "rounds": len(rows), "usage": total,
                 "cost_usd": usd}, kind="research", source="api_runner")
-    report = {"batch_id": batch_id, "cost_usd": usd, "score": score(rows)}
+    report = {"batch_id": batch_id, "retry_of": manifest.get("retry_of"), "cost_usd": usd,
+              "unanswered": sum(r["call"] is None for r in rows), "score": score(rows)}
     (out_dir / f"{batch_id}.results.json").write_text(json.dumps({**report, "rows": rows}, indent=2, default=str))
     return report
 
@@ -338,19 +362,24 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--dry-run", action="store_true", help="the default: build prompts and estimate, no API call")
     mode.add_argument("--submit", action="store_true", help="create the batch")
     mode.add_argument("--collect", metavar="BATCH_ID", help="fetch a finished batch and score it")
+    mode.add_argument("--retry", metavar="BATCH_ID", help="submit only the moments a collected batch left unanswered")
     parser.add_argument("--max-usd", type=float, default=DEFAULT_MAX_USD)
+    parser.add_argument("--out-dir", type=Path, default=OUT_DIR, help="where manifests and results are kept")
     args = parser.parse_args(argv)
     from app.ai import copilot_spend
     if args.collect:
-        print(json.dumps(collect(_client(), args.collect, record=copilot_spend.record), indent=2))
+        print(json.dumps(collect(_client(), args.collect, out_dir=args.out_dir, record=copilot_spend.record), indent=2))
         return 0
     from app.database import engine
     with Session(engine) as db:
         found = find_moments(db)
-    if args.submit:
+    if args.retry:
+        found = unanswered(found, args.retry, args.out_dir)
+    if args.submit or args.retry:
         exceeded, spent, cap = copilot_spend.monthly_status()
         try:
-            manifest = submit(_client(), found, args.max_usd, budget_left=0.0 if exceeded else cap - spent)
+            manifest = submit(_client(), found, args.max_usd, budget_left=0.0 if exceeded else cap - spent,
+                              out_dir=args.out_dir, retry_of=args.retry)
         except Refused as exc:
             print(str(exc), file=sys.stderr)
             return 2
