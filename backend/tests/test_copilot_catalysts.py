@@ -225,3 +225,12 @@ def test_a_spike_still_forming_is_not_called_a_five_minute_move():
     start = _at("2026-11-27T09:00:00")
     bars = _bars(start, 61, spike_at=60, jump=2.0)  # the spike is the last bar the feed holds
     assert cat.unexplained(bars, []) == [{"at": start + 3600, "volume_x": 10.0, "move_so_far_pct": 2.0, "minutes_so_far": 1}]
+
+
+def test_the_fact_line_names_a_failed_source_and_says_nothing_when_none_was_read():
+    since, now = _at("2026-11-26T16:00:00"), _at("2026-11-27T10:30:00")
+    down = {"state": "unavailable", "reason": "r"}
+    one_down = cat.timeline("NBIS", since, now, filings=_ok([]), halts=down, headlines=_ok([]), bars=None)
+    assert summarize("get_catalysts", one_down) == "Since 11-26 16:00 ET: 0 filings, halts unavailable, 0 headlines"
+    all_down = cat.timeline("NBIS", since, now, filings=down, halts=down, headlines=down, bars=None)
+    assert summarize("get_catalysts", all_down) is None

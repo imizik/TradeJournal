@@ -295,7 +295,12 @@ def catalysts(d: dict) -> str | None:
 
     def count(n: int, word: str) -> str:
         return f"{n} {word}{'' if n == 1 else 's'}"
-    parts = [count(sum(1 for i in items if i.get("type") == kind), kind) for kind in ("filing", "halt", "headline")]
+    sources = d.get("sources") or {}
+    read = {kind: sources.get(name) == "ok" for kind, name in (("filing", "sec_filings"), ("halt", "halts"), ("headline", "headlines"))}
+    if not any(read.values()):
+        return None  # nothing was read: an outage is never a count of zero
+    parts = [count(sum(1 for i in items if i.get("type") == kind), kind) if ok else f"{kind}s unavailable"
+             for kind, ok in read.items()]
     if d.get("unexplained_moves"):
         parts.append(count(len(d["unexplained_moves"]), "unexplained move"))
     return f"Since {d.get('since')}: " + ", ".join(parts)
