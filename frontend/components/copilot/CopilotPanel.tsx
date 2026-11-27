@@ -1313,7 +1313,13 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   );
   const research = current && <ResearchDeeper key={`research-${current.id}`} investigationId={current.id} symbol={symbol} topic={topic} link={!!desk}
     onFinished={refreshRecent} onOpenResult={id => void resume(id)} onDiscuss={id => void discuss(id)} />;
-  // The desk's answer row: the last answer that shows its rating carries Research deeper.
+  // Deep read: the same thread's next turn, on this symbol's fact sheet and catalysts, with the deep turn's room. Live,
+  // in the chat, in a minute; Research deeper beside it is the background job for questions that need minutes.
+  const deepRead = desk && symbol && (
+    <button type="button" onClick={() => void send(`Deep read ${symbol}`)} disabled={busy}
+      className="min-h-11 px-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-40 sm:min-h-7">Deep read</button>
+  );
+  // The desk's answer row: the last answer that shows its rating carries Deep read and Research deeper.
   const rated = (m: (typeof messages)[number], i: number) => m.role === "assistant" && !!m.content && !m.plan_context && (!current?.main_day || i < current.message_count)
     && !(busy && i === messages.length - 1);
   const lastRated = messages.reduce((last, m, i) => rated(m, i) ? i : last, -1);
@@ -1606,7 +1612,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             <Sources tools={message.tools ?? []} metrics={message.metrics} />
             {/* On the desk, one row under an answer: the rating as two small icons and, under the last one, Research deeper. */}
             {message.content && !message.plan_context && (!current?.main_day || i < current.message_count) && !(busy && i === messages.length - 1) && <RateAnswer ask={i === messages.length - 1} rating={message.rating} onRate={next => rateAnswer(i, next)} small={!!desk}>
-              {desk && i === lastRated && research}
+              {desk && i === lastRated && deepRead}{desk && i === lastRated && research}
             </RateAnswer>}
           </div>
         ))}
@@ -1636,7 +1642,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         </div>
       )}
       {/* No answer to sit under yet (a job queued from an earlier one still shows its status here). */}
-      {desk && lastRated < 0 && research}
+      {desk && lastRated < 0 && (deepRead || research) && <div className="flex flex-wrap items-center gap-x-1">{deepRead}{research}</div>}
       {look && (
         <button type="button" onClick={() => void lookAtChart()} data-testid="copilot-look"
           disabled={!enabled || busy || attaching?.state === "busy" || (!!pageSymbol && symbol !== pageSymbol)}

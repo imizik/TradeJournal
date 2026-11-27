@@ -94,3 +94,14 @@ def test_the_tool_is_listed_and_kept_off_research_jobs():
     assert "journal" in copilot_tools.PROVENANCE["get_fact_sheet"][0]
     assert "get_fact_sheet" not in research_job.JOB_TOOLS
     assert copilot_tools.validate("get_fact_sheet", {"symbol": "nbis"}) == {"symbol": "NBIS"}
+
+
+def test_desk_and_phone_prompts_read_the_fact_sheet_first_and_shape_a_deep_read():
+    from app.ai import copilot, copilot_prompt as cp
+    for job in (cp.DESK, cp.TELEGRAM):
+        prompt = " ".join(cp.system_prompt(job).split())
+        assert "call get_fact_sheet first" in prompt and 'is never answered with hold or wait' in prompt
+        assert '"Deep read <symbol>" asks for the full read now' in prompt and "may run to 250 words" in prompt
+    for job in (cp.PREP, cp.COMPANION, cp.DESK_READ):
+        assert "get_fact_sheet" not in cp.system_prompt(job)
+    assert "get_fact_sheet" in copilot.DEEP_TOOLS  # the read itself opens the deep turn's room

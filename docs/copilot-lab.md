@@ -5414,7 +5414,12 @@ which investigation was open. No follow-up, plan, decision, memory or
 monitoring is created or linked: a saved card is only a card.
 
 Under each finished answer the desk shows one row: Helped and Didn't as two small icons (named on hover and for a
-screen reader) and, under the last answer, **Research deeper** as a text link. The desk's suggestion chips show only
+screen reader) and, under the last answer, **Deep read** and **Research deeper** as text links. Deep read (on a
+thread with a ticker; above the box before the first answer, with no research queue needed) sends "Deep read <ticker>"
+as the thread's next question: the prompt reads [the fact sheet](#fact-sheet) first, searches the web only for a cause
+`get_catalysts` did not carry, and answers in up to 250 words labelled Cause, Tape, Options, Peers and You, with the
+deep turn's doubled budget once the fact sheet is read (`copilot.DEEP_TOOLS`). Research deeper stays the background
+job for a question that needs minutes of reading (e2e `frontend/e2e/copilot-desk-deep-read.spec.ts`). The desk's suggestion chips show only
 on an empty conversation; after the first answer the same steps (Why is it moving?, What changed since I looked?, What
 does my plan say?, Size it, More) are the thread's ⋯ menu's **Next steps**, beside Close with a lesson.
 A tap chooses, the other switches, the chosen one clears. The saved message

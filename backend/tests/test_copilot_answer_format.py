@@ -40,7 +40,7 @@ def test_the_prompt_keeps_answers_short_unless_more_is_asked_for():
     assert "The body is at most three bullets, each one sentence" in prompt
     assert "Then the body: at most three one-sentence bullets (the length rule above)." in prompt
     assert "do not repeat them in the text" in prompt
-    assert 'when they ask for more ("more", "why", "go deeper") or for a trade review or a week review' in prompt
+    assert 'when they ask for more ("more", "why", "go deeper", "deep read") or for a trade review or a week review' in prompt
 
 
 def test_the_prompt_asks_for_the_read_line_the_case_against_and_unsupported_claims():

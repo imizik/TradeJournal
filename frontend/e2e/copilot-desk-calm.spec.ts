@@ -286,12 +286,13 @@ test("one amber thing at a time; the book is one heading line; the chart is cand
   await chip.evaluate(el => { (el as HTMLElement).blur(); (el as HTMLElement).focus(); }); // the window coming back
   await expect(centre.getByTestId("desk-chart-event-tip")).toHaveCount(0);
 
-  // The copilot: one row under the answer (Helped / Didn't as icons, Research deeper); no suggestion chips mid-conversation.
+  // The copilot: one row under the answer (Helped / Didn't as icons, Deep read, Research deeper); no suggestion chips mid-conversation.
   const talk = page.getByRole("region", { name: "Conversation" });
   const rate = talk.getByRole("group", { name: "Rate this answer" });
   await expect(rate.getByRole("button")).toHaveCount(2);
   await expect(rate.getByRole("button", { name: "Helped" })).toBeVisible();
   await expect(talk.getByRole("button", { name: "Research deeper" })).toBeVisible();
+  await expect(talk.getByRole("button", { name: "Deep read" })).toBeVisible();
   await expect(talk.getByRole("group", { name: "Suggestions" })).toHaveCount(0);
 });
 
