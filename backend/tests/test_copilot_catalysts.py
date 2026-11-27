@@ -160,7 +160,7 @@ def test_headlines_only_are_called_out():
     since, now = _at("2026-11-26T16:00:00"), _at("2026-11-27T10:30:00")
     out = cat.timeline("NBIS", since, now, filings=_ok([]), halts=_ok([]),
                        headlines=_ok([{"at": _at("2026-11-27T09:00:00"), "headline": "x", "source": "benzinga"}]), bars=None)
-    assert out["note"] == "No SEC filing or halt since the close; headlines only."
+    assert out["note"] == "No SEC filing or halt since 11-26 16:00 ET; headlines only."
 
 
 def test_last_close_walks_back_over_closed_days():
@@ -312,3 +312,9 @@ def test_a_failed_last_session_read_keeps_todays_bars(monkeypatch):
     monkeypatch.setattr(feed.chart_feed, "read", boom)
     monkeypatch.setattr(feed.chart_feed, "today_minutes", lambda symbol, now: today)
     assert cat._bars("NBIS", _at("2026-11-26T16:00:00"), _at("2026-11-27T10:00:00")) == today
+
+
+def test_after_the_bell_the_window_still_holds_todays_session():
+    days = {date(2026, 11, 27): {"status": "open", "close": 13 * 60}, date(2026, 11, 26): {"status": "open", "close": 16 * 60}}
+    # 17:00 after a 13:00 early close: the window opens at the session before, so today's session is in it.
+    assert cat.last_close(_at("2026-11-27T17:00:00"), days.get) == _at("2026-11-26T16:00:00")

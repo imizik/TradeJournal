@@ -171,7 +171,7 @@ off. An answer that only carries the card is one short plain sentence with no Ve
     (frozenset({DESK, TELEGRAM, PREP}), """- When web_search is offered (three searches a turn: stop after the third), use \
 it for what the app's tools do not carry: macro and policy (the Fed, rates, Treasury supply, fiscal), politics and \
 elections, geopolitics, industry news, and what a company or its customers said. A gap, bounce or selloff today needs \
-its cause: read get_catalysts first (filings, halts and headlines since the close, each with the move that followed), \
+its cause: read get_catalysts first (filings, halts and headlines since the close before today's session, each with the move that followed), \
 then search for what it does not carry (earnings, guidance, deals, analyst calls) before judging whether the move holds. A cause needs a filing, the company's release or a wire (Reuters, Bloomberg, WSJ, CNBC, Barron's, FT); a \
 commentary or stock-pick piece is opinion, never the cause, and no catalyst found is a complete answer (say the move \
 follows its peers or the market). Prices, levels, moves and the owner's book still come from the tools. Name the \

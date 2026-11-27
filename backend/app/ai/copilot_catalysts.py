@@ -1,4 +1,7 @@
-"""What hit a symbol since the last close, lined up with the tape (the copilot's ``get_catalysts``).
+"""What hit a symbol since the close before today's session, lined up with the tape (the copilot's ``get_catalysts``).
+
+The window starts at the previous session's close on purpose: after the bell it still holds today's whole session and
+its after-hours, which is what "why did it move today" asks about. ``since`` names the moment, and so do the notes.
 
 Three free sources, newest first, each item with when it landed and how the stock traded in the 15 minutes after:
 
@@ -247,9 +250,10 @@ def timeline(symbol: str, since: float, now: float, *, filings: dict, halts: dic
            "unexplained_moves": [{**s, "at": _clock(s["at"])} for s in sharp],
            "minute_bars": "ok" if bars else "unavailable"}
     if not items and all(s == "ok" for s in sources.values()):
-        out["note"] = "No filing, halt or headline since the close: the move is not news-driven by these sources; check peers and the market."
+        out["note"] = (f"No filing, halt or headline since {out['since']}: the move is not news-driven by these sources; "
+                       "check peers and the market.")
     elif not primary and items and sources["sec_filings"] == sources["halts"] == "ok":
-        out["note"] = "No SEC filing or halt since the close; headlines only."
+        out["note"] = f"No SEC filing or halt since {out['since']}; headlines only."
     return out
 
 

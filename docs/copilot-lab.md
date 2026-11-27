@@ -5249,8 +5249,9 @@ Live only; replay and the fixture leave it out. Tests:
 
 `get_catalysts(symbol)` (`backend/app/ai/copilot_catalysts.py`, added
 2026-11-27) answers "why is it moving" from primary sources before the web is
-searched. It lines up everything since the last regular-session close (from
-the market calendar; 18 hours back when the calendar cannot say), newest
+searched. It lines up everything since the close before today's session (from
+the market calendar, so after the bell today's whole session and its
+after-hours are in; 18 hours back when the calendar cannot say), newest
 first, at most 15 items:
 
 - **SEC filings** from EDGAR's per-company Atom feed, stamped with acceptance

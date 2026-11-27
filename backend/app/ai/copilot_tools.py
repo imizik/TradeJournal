@@ -77,7 +77,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "get_catalysts",
-        "description": "What hit a symbol since the last close, newest first, each with how the stock traded right after: "
+        "description": "What hit a symbol since the close before today's session (so after the bell, today's whole session too), newest first, each with how the stock traded right after: "
                        "SEC filings (8-K/6-K, offerings S-1/S-3/424B, insider Form 4 and 144, 13D/13G, 10-Q/10-K) with "
                        "their acceptance time, Nasdaq trading halts and LULD pauses, and wire headlines; the move over the "
                        "next 15 minutes and the volume against the hour before. Also sharp minutes no item explains. Read "
