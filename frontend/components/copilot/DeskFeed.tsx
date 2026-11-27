@@ -42,6 +42,8 @@ export type DeskFeedBody = { as_of: string; now: number; day: string; items: Fee
   sources: Record<string, string>; unavailable: string[]; chatter?: DeskChatter; tradingview?: { last_at: number | null } };
 
 const SEEN_KEY = "desk.feed.seen.v1";
+/** The Feed row's secondary actions: a plain link, no box. */
+const QUIET = "inline-flex min-h-11 items-center gap-1 underline-offset-2 hover:text-foreground hover:underline sm:min-h-0";
 const ACTION = "inline-flex min-h-11 items-center gap-1 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-7";
 /** The Feed's four groups: what is his, ideas he could act on, the market's news, and everything. Ideas and Market each
  * carry a small second row (Radar, Scanner, Unusual options; News & calendar, Chatter) when there is more than one. */
@@ -339,9 +341,19 @@ function FeedRow({ item, day, fresh, ahead, now, onSymbol, onAsk, onPlan, onChar
   const chatter = !!item.chatter;
   const tradingView = item.source === "TradingView";
   const open = chatter ? null : item.source === "Radar" || (item.source === "Copilot note" && item.href && !item.href.includes("symbol=")) ? item.href : null;
+  // A row about a ticker leads with its chart; a row without one leads with the story itself (its source, Radar's card).
+  const charted = !!(item.symbol && !chatter && onChart);
+  const links = (style: string) => <>
+    {item.url && (
+      <a href={item.url} target="_blank" rel="noopener noreferrer nofollow" className={style}>
+        {item.source === "r/wallstreetbets" ? "Open on Reddit" : `Read at ${item.publisher ?? "the source"}`}<ExternalLink size={12} aria-hidden />
+      </a>
+    )}
+    {open && <Link href={open} className={style}>Open</Link>}
+  </>;
   return (
     <li ref={at} data-testid="feed-item" data-focused={focused || undefined} aria-current={focused || undefined}
-      className={cn("min-w-0 px-3 py-2.5", focused && FOCUSED)}>
+      className={cn("group/feed min-w-0 px-3 py-2.5", focused && FOCUSED)}>
       {ahead && <p className="-mt-0.5 mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Coming up</p>}
       <p className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
         <span data-testid="feed-source" className="whitespace-nowrap rounded border px-1.5 py-px text-[11px]">{item.source}</span>
@@ -366,24 +378,24 @@ function FeedRow({ item, day, fresh, ahead, now, onSymbol, onAsk, onPlan, onChar
           {item.setup.plan_state === "refused" && <p className="text-xs text-muted-foreground">Not planned.</p>}
         </div>
       )}
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        <button type="button" onClick={() => onAsk(item)} className={ACTION}>Ask the copilot</button>
-        {/* The same first step on every row about a ticker: its chart on the desk, in place, the Feed still beside it. */}
-        {item.symbol && !chatter && onChart && <button type="button" onClick={() => onChart(item.symbol!)} className={ACTION}>Show on chart</button>}
-        {item.symbol && !chatter && !tradingView && <Link href={`/charts?symbol=${encodeURIComponent(item.symbol)}`} className={ACTION}>Open in Charts</Link>}
-        {item.url && (
-          <a href={item.url} target="_blank" rel="noopener noreferrer nofollow" className={ACTION}>
-            {item.source === "r/wallstreetbets" ? "Open on Reddit" : `Read at ${item.publisher ?? "the source"}`}<ExternalLink size={12} aria-hidden />
-          </a>
-        )}
-        {open && <Link href={open} className={ACTION}>Open</Link>}
-        {tradingView && item.href && <Link href={item.href} className={ACTION}>On Signals</Link>}
+      {/* One first step in view: the ticker's chart in place (else the story itself), and Plan it or Paper it where the row
+          offers one. The rest (Ask the copilot, Open in Charts, the source's links) are quiet links that show on the row's
+          hover or keyboard focus with a mouse; a touch screen always shows them. */}
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        {charted && <button type="button" onClick={() => onChart!(item.symbol!)} className={ACTION}>Show on chart</button>}
+        {!charted && links(ACTION)}
         {item.plan && !chatter && <button type="button" onClick={() => onPlan(item)} className={ACTION}>Plan it</button>}
         {/* Today's setup only: an earlier day's level no longer applies. */}
         {item.setup && item.symbol && item.setup.invalidation != null && nyDate(item.at) === todayNewYork() && (
           <RadarPaperIt setup={{ id: item.setup.id, symbol: item.symbol, words: item.setup.words, levels_line: item.setup.levels_line,
             invalidation: item.setup.invalidation, contract: item.setup.contract ?? null }} />
         )}
+        <span data-testid="feed-more" className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs text-muted-foreground [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/feed:opacity-100 [@media(hover:hover)]:group-focus-within/feed:opacity-100">
+          <button type="button" onClick={() => onAsk(item)} className={QUIET}>Ask the copilot</button>
+          {item.symbol && !chatter && !tradingView && <Link href={`/charts?symbol=${encodeURIComponent(item.symbol)}`} className={QUIET}>Open in Charts</Link>}
+          {charted && links(QUIET)}
+          {tradingView && item.href && <Link href={item.href} className={QUIET}>On Signals</Link>}
+        </span>
       </div>
     </li>
   );
