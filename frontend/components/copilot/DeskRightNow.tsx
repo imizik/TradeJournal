@@ -1,0 +1,93 @@
+"use client";
+
+/**
+ * Right now (docs/copilot-lab.md § The desk, Right now): the copilot's column before a conversation has a word in it.
+ * Instead of an empty column with a hint, each open position that needs a look, most urgent first, in one line of what
+ * is true now (past its cut line or stop, near its stop, expiring today or tomorrow, giving back) and one question to
+ * ask about it. The line opens the position on the desk; the button asks the copilot. With nothing needing him, one
+ * quiet line says so. It reads nothing of its own: the thread list's rows and the shared live prices, as the book does.
+ * Nothing here tells him to buy, sell or hold.
+ */
+
+import { needRank, overCut, pastCut, positionRows, rowNow } from "@/components/copilot/Cockpit";
+import { daysTo, type DeskThread } from "@/lib/desk";
+import { useDeskTicks } from "@/lib/deskTicks";
+import { cn } from "@/lib/utils";
+
+const premium = (value: number) => `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+type Item = { row: DeskThread; rank: number; risk: boolean; what: string; ask: string; button: string };
+
+/** What is true now about one position, in words, and the question it raises; null when nothing about it needs a look. */
+export function rightNowItem(row: DeskThread, day: string, ticks: ReturnType<typeof useDeskTicks>): Item | null {
+  const book = row.book;
+  if (!book) return null;
+  const contract = row.title;
+  const option = row.instrument !== "stock" && !!book.expiry;
+  const left = option ? daysTo(book.expiry!, day) : null;
+  const expiring = left === 0 ? "expires today" : left === 1 ? "expires tomorrow" : null;
+  const now = rowNow(book, ticks).price;
+  const parts: string[] = [];
+  let risk = false;
+  let ask: string;
+  let button = "Ask";
+  if (pastCut(book, ticks)) {
+    risk = true;
+    parts.push(`past cut ${premium(book.cut_line! / 100)}${now != null ? ` · now ${premium(now)}` : ""}`);
+    ask = `${contract} is past my cut line ${premium(book.cut_line! / 100)}${now != null ? ` at ${premium(now)}` : ""}. Cut or hold?`;
+    button = "Cut or hold?";
+  } else if (book.state === "past_stop") {
+    risk = true;
+    parts.push("past its stop");
+    ask = `${contract} is past its plan's stop. Cut or hold?`;
+    button = "Cut or hold?";
+  } else if (book.state === "near_stop") {
+    risk = true;
+    parts.push(book.stop_pct != null ? `${Math.abs(book.stop_pct).toFixed(1)}% to stop` : "near its stop");
+    ask = `${contract} is near its stop. What would make me cut it?`;
+  } else if (book.state === "giving_back") {
+    const over = overCut(book, ticks);
+    parts.push(over != null ? `giving back · ${Math.round(over)}% over cut ${premium(book.cut_line! / 100)}` : "giving back");
+    ask = `${contract} is giving back its gain. Why, and what would make me cut it?`;
+  } else if (expiring) {
+    ask = `${contract} ${expiring}. What are my choices before the close?`;
+  } else return null;
+  if (expiring) parts.push(expiring);
+  return { row, rank: needRank(row, day, ticks), risk, what: parts.join(" · "), ask, button };
+}
+
+export function DeskRightNow({ rows, day, onOpen, onAsk }: {
+  rows: DeskThread[]; day: string; onOpen(row: DeskThread): void; onAsk(text: string): void;
+}) {
+  const open = positionRows(rows).filter(r => !r.hidden && r.book);
+  const ticks = useDeskTicks(open.flatMap(r => [r.book?.tick?.quote, r.symbol]));
+  if (!open.length) return null;
+  const items = open.flatMap(r => rightNowItem(r, day, ticks) ?? [])
+    .sort((a, b) => a.rank - b.rank || Number(b.risk) - Number(a.risk));
+  return (
+    <section aria-label="Right now" data-testid="right-now" className="rounded-lg border bg-card">
+      <h2 className="px-3 pb-1 pt-2.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Right now</h2>
+      {items.length ? (
+        <ul>
+          {items.map(item => (
+            <li key={item.row.key} data-testid="right-now-item" className="flex items-center gap-2 border-t px-3 py-2">
+              <button type="button" onClick={() => onOpen(item.row)} aria-label={`Open ${item.row.title}`}
+                className="min-w-0 flex-1 text-left hover:underline">
+                <span className="block truncate text-sm font-semibold text-foreground">{item.row.title}</span>
+                <span data-testid="right-now-what" className={cn("block text-xs tabular-nums", item.risk ? "text-rose-300" : "text-muted-foreground")}>{item.what}</span>
+              </button>
+              <button type="button" data-testid="right-now-ask" onClick={() => onAsk(item.ask)}
+                className="inline-flex min-h-11 shrink-0 items-center rounded-md border px-2.5 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-8">
+                {item.button}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p data-testid="right-now-calm" className="border-t px-3 py-2 text-sm text-muted-foreground">
+          Nothing needs you · {open.length} open, none past a cut line or stop.
+        </p>
+      )}
+    </section>
+  );
+}

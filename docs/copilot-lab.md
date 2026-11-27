@@ -602,6 +602,15 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   account line at all (on a phone the value block at the top of Positions takes its place, § Phone). Before it, **the day's value line**:
   total account value through the session (the tapped account's alone), change since the first reading, fills as dots,
   breaks as gaps; hover or tap for the high and low ([the feed § The value line](robinhood-read-feed.md#the-value-line)).
+- **Right now** (`components/copilot/DeskRightNow.tsx`, since 2026-11-27). Before a conversation has a word in it, the
+  copilot's column was an empty box with a hint. It now opens on what needs a look: each open position past its cut
+  line or stop, near its stop, giving back, or expiring today or tomorrow, most urgent first (the book's own order),
+  in one line of what is true now ("past cut $3.78 · now $3.35 · expires tomorrow", red while past a line or near a
+  stop) and one question for the copilot (**Cut or hold?** past a line, else **Ask**; asked across everything, as the
+  strip's Ask why is). The line opens that position on the desk. With nothing needing a look, one grey line: "Nothing
+  needs you · 3 open, none past a cut line or stop." It reads nothing of its own (the thread list's rows and the shared
+  live prices) and goes away with the first word of the conversation; the generic hint shows only without a book.
+  Never in Replay. Proof: `frontend/e2e/copilot-desk-right-now.spec.ts`.
 - **Status line** (from 768 px; a phone has its tab bar there): one thin row along the desk's bottom, under the
   cockpit and Replay alike, so it never covers them. The mode's mark and whose book ("Real · Roth IRA ••8267", "Paper ·
   real book unchanged", "Replay · real and paper books unchanged"), then only what is not fine, in words (§ Data
@@ -662,7 +671,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   on a phone, first on the screen.
 - **Left: the book** (`Book`). One dense row per open position the owner follows: ticker, contract, unrealized P&L in
   dollars and percent (no sparkline since the calm pass: the chart has the day), the bar placing it between the plan's invalidation (left)
-  and entry (the tick) (nothing without both: no bar, no plan), the distance to the stop ("4.3% to stop"), days to
+  and entry (the tick) (nothing without both: no bar, no plan), the distance to the stop ("4.3% to stop"), on a short-dated long option with no plan how far over his cut line it
+  trades ("31% over cut $5.60", `Cockpit.tsx` `overCut`; past it, the row's red Past cut line flag says so), days to
   expiry on every row and at most one tag (this year's expiry drops the year: "11/14 105C"). **The book's tag** says
   what is true now, and only when it tells him something. The backend's state, first match wins
   (`copilot_desk._book_state`): **Past stop** (the plan's invalidation was hit), **Near stop** (within Act now's 1% of
@@ -884,7 +894,11 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   there has never been one), so a quiet webhook reads as quiet. The sandbox (`COPILOT_EVIDENCE=fixture`) shows two
   invented alerts instead of stored ones. Nothing calls a model. Order: items on his book,
   plans and day first, then the rest, each newest first, then **Coming up**, soonest first; at most 40 rows (8 ahead),
-  with the total. A ticker set to not followed is left out of every source, including a headline, Radar event or
+  with the total. **A row's actions** (since 2026-11-27): one first step stays in view, Show on chart for a row about a
+  ticker (else its source: Read at the publisher, Radar's Open), with Plan it and Paper it where offered; Ask the
+  copilot, Open in Charts, the source's links and On Signals are quiet links that show on the row's hover or keyboard
+  focus with a mouse and always on a touch screen (`DeskFeed.tsx` `FeedRow`). A Radar row had six boxed buttons; the
+  Feed read as a toolbar. A ticker set to not followed is left out of every source, including a headline, Radar event or
   brief line that names it among others (if that setting cannot be read, only the macro calendar shows). Each source fails on its own and is left out quietly. Four groups
   (since 2026-11-13; they replaced Mine / Market / Mine + Market / Unusual options / Scanner / Chatter side by side):
   **Mine** (the default: his book, plans and day); **Ideas**, what he could act on that is not his yet, with a small

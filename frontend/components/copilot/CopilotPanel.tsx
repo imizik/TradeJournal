@@ -488,10 +488,12 @@ function savedFields(messages: LabMessage[], current: Current | null, symbol: st
  * ``desk`` (page only) is the Copilot desk's hand-off: its thread list opens investigations or asks through
  * ``command``, the open investigation goes up through ``onThread``, and its activity shows in the desk's inspector.
  */
-function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose, home, strip, look, desk, daily = false }: {
+function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose, home, strip, look, desk, daily = false, rightNow = null }: {
   link?: PanelLink | null; variant?: "page" | "panel"; pageSymbol?: string; pageContext?: string; onClose?(): void;
   home?: (actions: HomeActions) => ReactNode; strip?: (actions: PanelActions) => ReactNode; look?: () => Promise<ChartLook>;
   desk?: DeskHooks; daily?: boolean;
+  /** The desk's Right now (``DeskRightNow``): in place of the hint while the conversation has no word in it. */
+  rightNow?: ReactNode;
 }) {
   const panel = variant === "panel";
   const [openingMain, setOpeningMain] = useState(daily || !!link?.investigation);
@@ -1536,7 +1538,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           <DeskRead symbol={symbol} render={text => <Answer text={text} />}
             onAskMore={(text, at) => fill(`Context: the desk's read of ${symbol}${at ? ` at ${at} ET` : ""}:\n${text}\n\n`)} />
         )}
-        {!messages.length && !current?.findings && !openingMain && (
+        {!messages.length && !current?.findings && !openingMain && rightNow}
+        {!messages.length && !current?.findings && !openingMain && !rightNow && (
           <p className="text-sm text-muted-foreground">
             {current?.main_day ? "What’s on your mind today?" : <>Ask about an opportunity, push back on the read, then ask for a plan. Try: “{symbol || "NBIS"} looks like it might recover. Is the whole group confirming?”</>}
           </p>

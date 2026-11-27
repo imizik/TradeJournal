@@ -1,5 +1,6 @@
 "use client";
 
+import { DeskRightNow } from "@/components/copilot/DeskRightNow";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -1477,7 +1478,8 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
               <>{fills.bar(thread.symbol)}<DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} {...barFor(thread.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
                 <ThreadAlertAnswers symbol={thread.symbol ?? null} rows={alertRows} /></>} />
           ) : null)}
-          <CopilotPanel variant="page" link={link} desk={hooks} daily={daily} />
+          <CopilotPanel variant="page" link={link} desk={hooks} daily={daily}
+            rightNow={on && !replay && positionRows(booked.rows).some(r => !r.hidden && r.book) && <DeskRightNow rows={booked.rows} day={today} onOpen={select} onAsk={actions.ask} />} />
         </section>
         </div>
       </div>

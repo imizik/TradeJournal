@@ -229,6 +229,15 @@ export function pastCut(book: DeskThread["book"], ticks: ReturnType<typeof useDe
   return now != null && now * 100 <= book.cut_line + 1e-9;
 }
 
+/** How far over his cut line a short-dated long option trades now, in percent of the line (``book.cut_line``, dollars a
+ * contract), for a row with no plan (a plan's stop speaks for it); null when past it, without a line or without a price. */
+export function overCut(book: DeskThread["book"], ticks: ReturnType<typeof useDeskTicks>): number | null {
+  if (!book || book.cut_line == null || book.cut_line <= 0 || book.planned) return null;
+  const now = rowNow(book, ticks).price;
+  if (now == null || now * 100 <= book.cut_line + 1e-9) return null;
+  return (now * 100 - book.cut_line) / book.cut_line * 100;
+}
+
 /** How much a row needs him now, for the book's order: 0 past its stop or cut line, 1 near its stop or expiring today,
  * 2 the rest. A stable sort keeps the read's order within each. */
 export function needRank(row: DeskThread, day: string, ticks: ReturnType<typeof useDeskTicks>): number {
@@ -441,6 +450,9 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                       </span>}
                       {mixed && book?.account && <span data-testid="book-account" title={`${book.account.label} ${book.account.masked}`}>{book.account.label}</span>}
                       {book?.stop_pct != null && <span className="tabular-nums">{Math.abs(book.stop_pct).toFixed(1)}% to stop</span>}
+                      {/* No plan: his cut line and how far over it the price is, so the line he goes by is on the row. */}
+                      {(() => { const over = overCut(book, ticks); return over != null && <span data-testid="book-over-cut" className="tabular-nums" title="Your cut line: 30% under the first buy">
+                        {Math.round(over)}% over cut {premium(book!.cut_line! / 100)}</span>; })()}
                       {book && left(book.expiry, day) && state !== EXPIRES_TODAY && <span className="tabular-nums">{left(book.expiry, day)}</span>}
                       {/* Risk first: a same-day option's time left, no exit order working, a size well over his usual. */}
                       {book && zeroDte(row, day) && <ZeroDte now={nowS} />}
