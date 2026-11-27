@@ -142,8 +142,10 @@ def spy_facts(bars: list[dict], day: date, minute: int) -> dict:
 def metrics(facts: dict) -> dict:
     """The flip checks' inputs from the facts; None where unknown (a check on an unknown metric never trips)."""
     spy = facts.get("spy") or {}
-    radar = (facts.get("regime") or {}).get("radar") or {}
-    indices = radar.get("indices") or {} if radar.get("state") == "ok" else {}
+    regime = facts.get("regime") or {}
+    radar = regime.get("radar") or {}
+    # Radar falls back to its newest session when today's is not recorded: context for the prompt, never a check input.
+    indices = radar.get("indices") or {} if radar.get("state") == "ok" and not regime.get("prior_session") else {}
 
     def day(symbol):
         return _num((indices.get(symbol) or {}).get("day_pct"))
@@ -362,7 +364,7 @@ class DayCalls:
         state = load(today.isoformat())
         calls = state.get("calls") or []
         if minute >= closes:
-            if calls and not state.get("score") and minute < SCORE_UNTIL:
+            if calls and not state.get("score") and closes + 2 <= minute < SCORE_UNTIL:
                 self._score(state, now, closes)
             return
         if state.get("stopped") or minute < max(FIRST_CALL, opens + 15) or len(calls) >= MAX_CALLS or now < self._retry_at:
@@ -425,8 +427,9 @@ class DayCalls:
             log.warning("Day call close unreadable", exc_info=True)
             return
         spy = spy_facts(bars, day, closes)
-        if spy.get("state") != "ok":
-            return
+        last = datetime(day.year, day.month, day.day, (closes - 1) // 60, (closes - 1) % 60, tzinfo=ET).timestamp()
+        if spy.get("state") != "ok" or not any(b["time"] == last for b in bars):
+            return  # no closing minute yet (a cached or partial read): scored on a later pass
         state["score"] = score(state["calls"], spy["price"])
         save(state)
 

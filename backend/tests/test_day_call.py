@@ -34,6 +34,9 @@ def test_spy_facts_and_metrics_come_from_the_session_so_far():
     values = day_call.metrics({"spy": found, "regime": regime()})
     assert values["spy_price"] == 101.0 and values["rsp_minus_spy_pct"] == pytest.approx(-0.3) and values["vix"] == 15.0
     # Radar or VIX off: unknown, so no flip check on them can trip.
+    # Radar's newest session when today's is not recorded: yesterday's moves never drive today's checks.
+    stale = day_call.metrics({"spy": found, "regime": {**regime(), "prior_session": True}})
+    assert (stale["qqq_day_pct"], stale["rsp_minus_spy_pct"], stale["spy_price"]) == (None, None, 101.0)
     blank = day_call.metrics({"spy": {"state": "unavailable"}, "regime": {"radar": {"state": "off"}, "vix": {"state": "unavailable"}}})
     assert set(blank.values()) == {None}
     assert day_call.tripped({"flips": [{"metric": "vix", "op": "above", "value": 1, "why": ""}]}, blank) == []
@@ -88,8 +91,10 @@ class World:
             raise answer
         return answer, 0.03, "claude-sonnet-5-5"
 
+    minutes = None
+
     def today_minutes(self, symbol, now):
-        return bars([100.0] * 389 + [self.price])
+        return self.minutes or bars([100.0] * 389 + [self.price])
 
     def step(self, calls, minutes=1):
         self.t += 60 * minutes
@@ -213,6 +218,12 @@ def test_the_close_scores_the_day_and_the_view_carries_the_record(world, monkeyp
     world.price = 101.0
     world.t = at(16, 1)
     calls.run()
+    assert "score" not in day_call.load("2026-11-30")  # too soon after the close
+    world.minutes = bars([100.0] * 300)  # a cached read without the closing minute: not scored
+    world.step(calls, 2)
+    assert "score" not in day_call.load("2026-11-30")
+    world.minutes = None
+    world.step(calls)
     state = day_call.load("2026-11-30")
     assert state["score"]["right"] == 1 and state["score"]["close"] == 101.0
     monkeypatch.setenv("DAY_CALL_ENABLED", "true")
