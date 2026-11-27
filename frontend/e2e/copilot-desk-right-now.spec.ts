@@ -195,3 +195,17 @@ test("options down 90% or more wait behind one grey line", async ({ page }) => {
   await book.getByTestId("book-dead").click();
   await expect(book.getByRole("button", { name: /^DRAM / })).toBeVisible();
 });
+
+test("one leg of a spread past its cut line: Open it only, never a ticket that closes the long leg alone", async ({ page }) => {
+  const orcl = THREADS.threads.find(t => t.symbol === "ORCL")!;
+  const short = T("55555555-5555-4555-8555-555555555555", "ORCL", "11/14/26 260C", ["+$80.00", "win"], ["", "muted"],
+    { usd: 80, pct: 40, expiry: "2026-11-14", days_held: 1, track: null, state: "no_plan", planned: false, stop_pct: null, quantity: 2, mark: 120, cut_line: null,
+      tick: { quote: "ORCL261114C00260000", scale: 100, cost: 200, quantity: 2, sign: -1 },
+      option: { side: "call", strike: 260, expiry: "2026-11-14", direction: "short", quantity: 2, multiplier: 100, cost: 200, greeks: null } });
+  await open(page, 1440, 900, { ...THREADS, threads: [orcl, short] });
+  const strip = page.getByTestId("needs-you");
+  await expect(strip).toHaveAttribute("data-kind", "cut");
+  await expect(strip.getByRole("button", { name: "Close ticket" })).toHaveCount(0);
+  await expect(strip.getByTestId("needs-you-primary")).toHaveText("Open it");
+  await expect(rightNow(page).getByTestId("right-now-close")).toHaveCount(0);
+});

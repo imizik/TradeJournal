@@ -11,6 +11,7 @@
 
 import { needRank, overCut, pastCut, positionRows, rowNow } from "@/components/copilot/Cockpit";
 import { daysTo, type DeskThread } from "@/lib/desk";
+import { closable } from "@/lib/deskPosition";
 import { useDeskTicks } from "@/lib/deskTicks";
 import { cn } from "@/lib/utils";
 
@@ -89,7 +90,7 @@ export function DeskRightNow({ rows, day, onOpen, onAsk, onClose, onlyNeeds = fa
                 <span className="block truncate text-sm font-semibold text-foreground">{item.row.title}</span>
                 <span data-testid="right-now-what" className={cn("block text-xs tabular-nums", item.risk ? "text-rose-300" : "text-muted-foreground")}>{item.what}</span>
               </button>
-              {item.risk && item.button === "Cut or hold?" && onClose && (
+              {item.risk && item.button === "Cut or hold?" && onClose && closable(item.row, rows) && (
                 <button type="button" data-testid="right-now-close" onClick={() => onClose(item.row)}
                   title="A closing ticket for all of it at the mark now, to copy into Robinhood. Nothing is sent."
                   className="inline-flex min-h-11 shrink-0 items-center rounded-md border border-rose-400 bg-rose-500 px-2.5 text-xs font-semibold text-white hover:bg-rose-500/90 sm:min-h-8">

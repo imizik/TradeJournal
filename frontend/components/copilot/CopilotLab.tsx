@@ -42,7 +42,7 @@ import { useDeskUnusual } from "@/components/copilot/DeskUnusual";
 import { scannerGuides, useDeskScanner, type DeskScannerRow } from "@/components/copilot/DeskScanner";
 import { marketWords, useDeskSession } from "@/components/copilot/SessionTape";
 import { Book, CentreChart, DayFacts, NeedsStrip, RiskWord, SinceYouLooked, dayMoneyWords, pastCut, positionRows, rowNow, useSparks } from "@/components/copilot/Cockpit";
-import { heldContracts, panelCloseTicket } from "@/lib/deskPosition";
+import { closable, heldContracts, panelCloseTicket } from "@/lib/deskPosition";
 import { useDeskTicks } from "@/lib/deskTicks";
 import type { DeskChartActions, DeskGuide } from "@/components/copilot/DeskChart";
 import MorningBrief from "@/components/copilot/MorningBrief";
@@ -1131,8 +1131,11 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   const needActions = (need: DeskNeed) => {
     const row = need.row;
     switch (need.kind) {
-      case "cut": return [{ label: "Close ticket", primary: true, run: () => closeTicketFor(row!), title: "A closing ticket for all of it at the mark now, to copy into Robinhood. Nothing is sent." },
-        { label: "Open it", run: () => openSymbol(need) }];
+      // One leg of a spread, or anything the panel's own Close would not offer: Open it only, and the panel says why.
+      case "cut": return row && closable(row, rows)
+        ? [{ label: "Close ticket", primary: true, run: () => closeTicketFor(row), title: "A closing ticket for all of it at the mark now, to copy into Robinhood. Nothing is sent." },
+          { label: "Open it", run: () => openSymbol(need) }]
+        : [{ label: "Open it", primary: true, run: () => openSymbol(need) }];
       case "alert": return [{ label: "Open it", primary: true, run: () => openSymbol(need) }, { label: "Ask why", run: () => askWhy(need) }];
       case "level": return [{ label: "Open the plan", primary: true, run: () => openSymbol(need) }, { label: "Ask why", run: () => askWhy(need) }];
       case "card": return [{ label: "Open the card", primary: true, run: () => { setPicked(row!.symbol); pick(row!); } }];

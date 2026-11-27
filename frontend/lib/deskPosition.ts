@@ -20,6 +20,7 @@ import { freshQuote, listAlerts } from "@/lib/copilot";
 import { closeNowTicket, type CloseNowTicket } from "@/lib/closingTicket";
 import { DESK_CHANGED_EVENT, legWorth } from "@/lib/deskAction";
 import { tickFor, type DeskTicks } from "@/lib/deskTicks";
+import { mixedStructure } from "@/lib/optionStanding";
 import type { DeskBook, DeskThread } from "@/lib/desk";
 
 export type PlanSide = "long" | "short";
@@ -71,6 +72,16 @@ export const heldContracts = (book: DeskBook | undefined) => book?.quantity ?? b
 
 /** The close-now ticket for ``contracts`` of the selected row (a single long call or put), priced at the mark now from
  * the row's own worth (``legWorth``), as the copilot's close and trim cards price it; null when it cannot be honest. */
+/** Whether one tap may offer a closing ticket for all of a row: a held long option that is not one leg of a structure
+ * the book cannot read (``mixedStructure``: a spread's long leg closed alone would leave its short leg naked), as the
+ * Position panel's own Close requires. */
+export function closable(row: DeskThread, rows: readonly DeskThread[]): boolean {
+  const book = row.book;
+  const held = heldContracts(book);
+  return !!row.symbol && !!book?.option && book.option.direction === "long" && !!held && held > 0
+    && !mixedStructure(row.symbol, book.option, rows.map(r => ({ symbol: r.symbol, option: r.book?.option })));
+}
+
 export function panelCloseTicket(row: DeskThread, ticks: DeskTicks, contracts: number): CloseNowTicket | null {
   const book = row.book;
   const held = heldContracts(book);
