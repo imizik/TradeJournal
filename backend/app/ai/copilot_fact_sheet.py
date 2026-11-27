@@ -155,9 +155,10 @@ def record(d: dict) -> dict | None:
     return {k: v for k, v in out.items() if v is not None}
 
 
-def position(symbol: str, book: dict, cuts: dict[tuple, float], today: date) -> list[dict] | None:
+def position(symbol: str, book: dict, today: date) -> list[dict] | None:
     """The owner's open positions in ``symbol``; a long option within the cut-line window gets its cut line (dollars per
-    contract, as marks are) and the mark's distance from it. ``cuts`` maps (expiry ISO, strike, side) to the cut."""
+    contract, as marks are) and the mark's distance from it. A row's ``_cut`` is its own trade's cut line (``live_book``),
+    so the same contract held twice never borrows the other's."""
     if not _ok(book):
         return None
     out = []
@@ -173,7 +174,7 @@ def position(symbol: str, book: dict, cuts: dict[tuple, float], today: date) -> 
             except ValueError:
                 dte = None
             row["days_to_expiry"] = dte
-            cut = cuts.get((str(opt.get("expiry")), float(opt.get("strike") or 0), opt.get("side")))
+            cut = p.get("_cut")
             if cut is not None:
                 row["cut_line"] = round(cut, 2)
                 if isinstance(p.get("mark"), (int, float)):
@@ -187,7 +188,7 @@ def position(symbol: str, book: dict, cuts: dict[tuple, float], today: date) -> 
 
 
 def assemble(symbol: str, as_of: datetime, *, quotes: dict, chart: dict, forecast: dict | None, premarket: dict | None,
-             catalyst: dict, peer: dict, mine: dict, book: dict, cuts: dict[tuple, float]) -> dict:
+             catalyst: dict, peer: dict, mine: dict, book: dict) -> dict:
     tp = tape(chart)
     rvol = tp.pop("rvol", None) if tp else None
     volume = premarket or ({"kind": "regular session, time-of-day relative volume against 20 sessions", "rvol": rvol}
@@ -200,11 +201,14 @@ def assemble(symbol: str, as_of: datetime, *, quotes: dict, chart: dict, forecas
         "catalysts": catalysts(catalyst),
         "peers": peers(peer, quotes),
         "my_record": record(mine),
-        "position": position(symbol, book, cuts, as_of.astimezone(_et()).date()),
+        "position": position(symbol, book, as_of.astimezone(_et()).date()),
     }
     missing = [k for k, v in sections.items() if v is None]
-    return {"symbol": symbol, "state": "ok" if not missing else "partial", "as_of": as_of.astimezone(_et()).isoformat(timespec="minutes"),
-            **{k: v for k, v in sections.items() if v is not None}, "missing": missing}
+    out = {"symbol": symbol, "state": "ok" if not missing else "partial", "as_of": as_of.astimezone(_et()).isoformat(timespec="minutes"),
+           **{k: v for k, v in sections.items() if v is not None}, "missing": missing}
+    if sections["position"] is not None and book.get("incomplete"):
+        out["position_incomplete"] = book["incomplete"]
+    return out
 
 
 def _et():
@@ -222,21 +226,30 @@ def _safe(name: str, read: Callable[[], dict | None]) -> dict | None:
         return {"state": "unavailable"}
 
 
-def live_cuts(symbol: str) -> dict[tuple, float]:
-    """(expiry ISO, strike, side) to the cut line for each open long option in ``symbol`` the rule covers."""
+def live_book(symbol: str) -> dict:
+    """The owner's open positions in ``symbol``, read ahead of the book's limit (``first``), each long option with its own
+    trade's cut line under ``_cut``: the cut joins by trade, never by contract, so two accounts holding the same contract
+    at different entries keep their own lines."""
     from sqlmodel import Session
+    from app.ai import copilot_book
     from app.database import engine
     from app.engine.fill_interrupts import cut_line
     from app.engine.position_alerts import open_positions
-    out = {}
     with Session(engine) as db:
+        live = copilot_book.live_or_unavailable(db)
+        pairs, total = copilot_book.position_rows(db, first=symbol, live=live)
+        cuts = {}
         for p in open_positions(db):
             t = p["trade"]
-            if t.ticker != symbol or not p.get("first_entry"):
-                continue
-            cut = cut_line({**p["first_entry"], "instrument_type": "option", "expiration": p["expiration"]}, [])
-            if cut is not None:
-                out[(p["expiration"].isoformat(), float(t.strike), t.option_type)] = cut
+            if t.ticker == symbol and p.get("first_entry"):
+                cut = cut_line({**p["first_entry"], "instrument_type": "option", "expiration": p["expiration"]}, [])
+                if cut is not None:
+                    cuts[str(t.id)] = cut
+    rows = [{**row, "_cut": cuts.get(str(trade.id))} for trade, row in pairs if trade.ticker == symbol]
+    rows += [r for r in (live or {}).get("new", []) if r.get("symbol") == symbol]
+    out: dict = {"state": "ok", "positions": rows}
+    if len(pairs) == copilot_book.MAX_POSITIONS < total and all(trade.ticker == symbol for trade, _ in pairs):
+        out["incomplete"] = f"only the first {copilot_book.MAX_POSITIONS} of this symbol's open positions were read"
     return out
 
 
@@ -256,9 +269,8 @@ def live_sheet(evidence, symbol: str) -> dict:
         "catalyst": pool.submit(_safe, "catalysts", lambda: evidence.get_catalysts(symbol)),
         "peer": pool.submit(_safe, "peers", lambda: evidence.get_peer_moves(symbol)),
         "mine": pool.submit(_safe, "record", lambda: evidence.get_my_record(symbol=symbol)),
-        "book": pool.submit(_safe, "book", evidence.get_positions),
+        "book": pool.submit(_safe, "book", lambda: live_book(symbol)),
         "premarket": pool.submit(_safe, "premarket", lambda: copilot_extended.premarket_pace(symbol, now)),
-        "cuts": pool.submit(_safe, "cut lines", lambda: live_cuts(symbol)),
     }
 
     def forecast() -> dict | None:
@@ -270,11 +282,9 @@ def live_sheet(evidence, symbol: str) -> dict:
     pool.shutdown(wait=False, cancel_futures=True)  # a slow read finishes on its own
     got = {k: (f.result() if f in done else None) for k, f in jobs.items()}
     premarket = got["premarket"] if isinstance(got["premarket"], dict) and got["premarket"].get("state") == "ok" else None
-    cuts = got["cuts"] if isinstance(got["cuts"], dict) and "state" not in got["cuts"] else {}
     forecast_read = got["forecast"] if isinstance(got["forecast"], dict) and got["forecast"].get("moves") else None
     return assemble(symbol, now, quotes=got["quotes"] or {}, chart=got["chart"] or {}, forecast=forecast_read, premarket=premarket,
-                    catalyst=got["catalyst"] or {}, peer=got["peer"] or {}, mine=got["mine"] or {}, book=got["book"] or {},
-                    cuts=cuts)
+                    catalyst=got["catalyst"] or {}, peer=got["peer"] or {}, mine=got["mine"] or {}, book=got["book"] or {})
 
 
 def fixture_sheet(evidence, symbol: str, now: datetime) -> dict:
@@ -283,6 +293,5 @@ def fixture_sheet(evidence, symbol: str, now: datetime) -> dict:
          "percent": 0.0329, "iv": 0.84, "call": {"bid": 1.5, "ask": 1.65}, "put": {"bid": 1.4, "ask": 1.6}}]}
     out = assemble(symbol, now, quotes=evidence.get_quotes([symbol, "SPY", "QQQ"]), chart=evidence.get_chart_context(symbol, "5m"),
                    forecast=forecast, premarket=None, catalyst=evidence.get_catalysts(symbol), peer=evidence.get_peer_moves(symbol),
-                   mine=evidence.get_my_record(symbol=symbol), book=evidence.get_positions(),
-                   cuts={})
+                   mine=evidence.get_my_record(symbol=symbol), book=evidence.get_positions())
     return {**out, "simulated": True, "note": FIXTURE_NOTE}

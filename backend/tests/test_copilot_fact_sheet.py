@@ -27,14 +27,14 @@ RECORD = {"state": "ok", "trades": 20, "win_rate": 0.4, "total_pnl": -900.0, "me
           "top_mistakes": [{"mistake": "chased", "total_pnl": -200}, {"mistake": "held_past_cut", "total_pnl": -700}]}
 BOOK = {"state": "ok", "positions": [
     {"symbol": "NBIS", "instrument": "option", "direction": "long", "quantity": 3, "avg_entry": 200.0, "mark": 130.0,
-     "unrealized_usd": -210.0, "unrealized_pct": -35.0, "option": {"side": "call", "strike": 95.0, "expiry": "2026-11-28"}},
+     "unrealized_usd": -210.0, "unrealized_pct": -35.0, "option": {"side": "call", "strike": 95.0, "expiry": "2026-11-28"},
+     "_cut": 140.0},
     {"symbol": "CRWV", "instrument": "stock", "direction": "long", "quantity": 10}]}
-CUTS = {("2026-11-28", 95.0, "call"): 140.0}
 
 
 def _sheet(**over):
     parts = dict(quotes=QUOTES, chart=CHART, forecast=FORECAST, premarket=None, catalyst=CATALYSTS, peer=PEERS, mine=RECORD,
-                 book=BOOK, cuts=CUTS)
+                 book=BOOK)
     return fs.assemble("NBIS", NOW, **{**parts, **over})
 
 
@@ -63,9 +63,9 @@ def test_a_short_dated_red_option_carries_its_cut_line():
 
 
 def test_a_longer_dated_or_green_option_is_not_flagged():
-    book = {"state": "ok", "positions": [{**BOOK["positions"][0], "option": {"side": "call", "strike": 95.0, "expiry": "2026-12-18"}},
-                                         {**BOOK["positions"][0], "unrealized_pct": 4.0}]}
-    longer, green = _sheet(book=book, cuts={})["position"]
+    book = {"state": "ok", "positions": [{**BOOK["positions"][0], "option": {"side": "call", "strike": 95.0, "expiry": "2026-12-18"},
+                                          "_cut": None}, {**BOOK["positions"][0], "unrealized_pct": 4.0, "_cut": None}]}
+    longer, green = _sheet(book=book)["position"]
     assert "short_dated_red" not in longer and "cut_line" not in longer and "short_dated_red" not in green
 
 
@@ -124,7 +124,7 @@ def test_live_reads_share_one_deadline_and_a_slow_one_is_only_missing(monkeypatc
             release.wait(5)
             return fixture.get_catalysts(symbol)
     monkeypatch.setattr(fs, "READ_DEADLINE", 0.3)
-    monkeypatch.setattr(fs, "live_cuts", lambda symbol: {})
+    monkeypatch.setattr(fs, "live_book", lambda symbol: fixture.get_positions())
     monkeypatch.setattr(copilot_extended, "premarket_pace", lambda symbol, now: None)
     monkeypatch.setattr(options_feed, "forecast", lambda symbol, spot, earnings: FORECAST if spot == 94.35 else None)
     try:
@@ -133,3 +133,41 @@ def test_live_reads_share_one_deadline_and_a_slow_one_is_only_missing(monkeypatc
         release.set()
     assert out["missing"] == ["catalysts"] and out["implied_move"]["expirations"][0]["move_pct"] == 3.0
     assert out["price"]["last"] == 94.35 and out["my_record"]["trades"] == 14
+
+
+def test_each_position_keeps_its_own_cut_line_and_the_symbol_is_read_ahead_of_the_book_limit(monkeypatch):
+    """The same contract in two accounts at $100 and $200 keeps two cut lines, and 16 other open positions that sort
+    first never push the symbol out of the read."""
+    from datetime import date
+    from uuid import UUID
+    from sqlalchemy.pool import StaticPool
+    from sqlmodel import Session, SQLModel, create_engine
+    import app.database
+    from app.engine import quotes
+    from app.engine.quotes import OptionQuoteResult
+    from app.models import Account, Fill
+    from app.routers.fills import _rebuild_trades
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    SQLModel.metadata.create_all(engine)
+    one, two = UUID(int=1), UUID(int=2)
+    call = {"option_type": "call", "strike": 95, "expiration": date(2026, 11, 28)}
+    with Session(engine) as db:
+        db.add(Account(id=one, name="Robinhood 1111", type="individual", last4="1111", broker="robinhood"))
+        db.add(Account(id=two, name="Robinhood 2222", type="roth_ira", last4="2222", broker="robinhood"))
+        db.add_all([Fill(id=UUID(int=10), account_id=one, ticker="NBIS", instrument_type="option", side="buy_to_open", contracts=1,
+                         price=100, executed_at=datetime(2026, 11, 26, 10, 0), raw_email_id="fs:10", **call),
+                    Fill(id=UUID(int=11), account_id=two, ticker="NBIS", instrument_type="option", side="buy_to_open", contracts=1,
+                         price=200, executed_at=datetime(2026, 11, 26, 10, 5), raw_email_id="fs:11", **call)])
+        db.add_all([Fill(id=UUID(int=100 + i), account_id=one, ticker=f"A{i:02d}", instrument_type="stock", side="buy", contracts=1,
+                         price=10, executed_at=datetime(2026, 11, 20, 10, 0), raw_email_id=f"fs:{100 + i}") for i in range(16)])
+        db.commit()
+        _rebuild_trades(db, "test")
+        db.commit()
+    monkeypatch.setattr(app.database, "engine", engine)
+    monkeypatch.setattr(quotes, "get_stock_quotes", lambda symbols: {s: 10.0 for s in symbols})
+    monkeypatch.setattr(quotes, "option_mark", lambda req: (OptionQuoteResult(mid=1.0, last_price=1.0), 1792768320.0))
+    book = fs.live_book("NBIS")
+    assert sorted(p["_cut"] for p in book["positions"]) == [70.0, 140.0] and "incomplete" not in book
+    rows = fs.position("NBIS", book, date(2026, 11, 27))
+    assert {(r["avg_entry"], r["cut_line"], r["past_cut"]) for r in rows} == {(100.0, 70.0, False), (200.0, 140.0, True)}
+    engine.dispose()

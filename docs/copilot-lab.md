@@ -5275,9 +5275,11 @@ the nearest Friday) with each leg's bid-ask spread as a share of its mid;
 `get_catalysts` counted with its newest filing or halt and newest headline;
 peers up and down with SPY and QQQ; the owner's record in the symbol
 (`get_my_record`); and his open positions in it, a long option the cut-line
-rule covers (`fill_interrupts.cut_line`) with its cut line, the mark's
+rule covers (`fill_interrupts.cut_line`) with its own trade's cut line (joined
+by trade, so the same contract in two accounts keeps two lines), the mark's
 distance from it and `short_dated_red` when it is 3 days or less to expiry
-and red. A section that cannot be read is named in `missing`. It carries the
+and red. The symbol's positions are read ahead of the book's 15-position
+limit; past it, `position_incomplete` says so. A section that cannot be read is named in `missing`. It carries the
 owner's book, so it is offered on the desk and Telegram only and never to a
 research job; the fixture's sheet is marked simulated and replay refuses it.
 The reads run side by side under one 8.5-second deadline inside the tool's
