@@ -309,13 +309,39 @@ def catalysts(d: dict) -> str | None:
     return f"Since {d.get('since')}: " + ", ".join(parts)
 
 
+def fact_sheet(d: dict) -> str | None:
+    if d.get("state") not in ("ok", "partial"):
+        return None
+    price = d.get("price") or {}
+    parts = [f"{d.get('symbol')} {price['last']:g}" + (f" {price['change_pct']:+g}%" if price.get("change_pct") is not None else "")]
+    if price.get("gap_pct") is not None:
+        parts.append(f"gap {price['gap_pct']:+g}%")
+    volume = d.get("volume") or {}
+    if volume.get("rvol") is not None:
+        parts.append(f"RVOL {volume['rvol']:g}")
+    elif volume.get("pace_x") is not None:
+        parts.append(f"pre-market volume {volume['pace_x']:g}x")
+    ready = [e for e in (d.get("implied_move") or {}).get("expirations") or [] if e.get("move_pct") is not None]
+    if ready:
+        parts.append(f"implied ±{ready[0]['move_pct']:g}% ({ready[0].get('days')}d)")
+    counts = (d.get("catalysts") or {}).get("counts") or {}
+    if counts:
+        primary, heads = counts.get("filing", 0) + counts.get("halt", 0), counts.get("headline", 0)
+        parts.append(f"{primary} filing{'' if primary == 1 else 's'} or halt{'' if primary == 1 else 's'}, "
+                     f"{heads} headline{'' if heads == 1 else 's'}")
+    past = [p for p in d.get("position") or [] if p.get("past_cut")]
+    if past:
+        parts.append("past cut line")
+    return ", ".join(parts)
+
+
 SUMMARISERS: dict[str, Callable[[dict], str | None]] = {
     "get_group_comparison": group_comparison, "get_peer_moves": peer_moves, "get_symbol_news": symbol_news,
     "get_quotes": quotes, "get_option_candidates": option_candidates, "get_market_regime": market_regime,
     "get_radar_today": radar_today, "get_breadth": breadth, "get_positioning": positioning, "get_macro": macro,
     "get_base_rates": base_rates, "get_trade_review": trade_review, "get_symbol_profile": symbol_profile,
     "get_symbol_events": symbol_events, "get_my_record": my_record, "web_search": web_search,
-    "get_catalysts": catalysts,
+    "get_catalysts": catalysts, "get_fact_sheet": fact_sheet,
 }
 
 _UNSAFE = re.compile(r"\s+")

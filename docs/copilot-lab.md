@@ -5259,6 +5259,33 @@ prompt says to give the off-hours change with its last trade time and dollar
 volume and never to call a name flat from a regular-session quote off hours.
 Live only; replay and the fixture leave it out. Tests:
 `backend/tests/test_copilot_extended.py`.
+## Fact sheet
+
+`get_fact_sheet(symbol)` (`backend/app/ai/copilot_fact_sheet.py`, added
+2026-11-27) reads one symbol's facts side by side in one call, so a turn's
+four rounds and eight calls go to what it lacks rather than to collecting
+basics. Sections: price, day change and the gap from the prior close (off
+hours, the extended move); volume against normal (the regular session's
+time-of-day relative volume, or before the open the pre-market's volume
+through now's minute against the median of the same minutes in the last five
+sessions, `copilot_extended.premarket_pace`); VWAP, the nearest level each
+side and the ATR from the 5-minute chart context; the implied move from
+`options_feed.forecast` (the at-the-money straddle for the nearest expiry and
+the nearest Friday) with each leg's bid-ask spread as a share of its mid;
+`get_catalysts` counted with its newest filing or halt and newest headline;
+peers up and down with SPY and QQQ; the owner's record in the symbol
+(`get_my_record`); and his open positions in it, a long option the cut-line
+rule covers (`fill_interrupts.cut_line`) with its cut line, the mark's
+distance from it and `short_dated_red` when it is 3 days or less to expiry
+and red. A section that cannot be read is named in `missing`. It carries the
+owner's book, so it is offered on the desk and Telegram only and never to a
+research job; the fixture's sheet is marked simulated and replay refuses it.
+The prompt reads it first for an in-the-moment question about one symbol, and
+never answers a `short_dated_red` position with hold or wait: it gives the
+mark against the cut line and leaves the call to him (the Nov 27 leak replay
+found the plain rule beat model cut-or-hold calls). Tests:
+`backend/tests/test_copilot_fact_sheet.py`.
+
 ## Catalysts
 
 `get_catalysts(symbol)` (`backend/app/ai/copilot_catalysts.py`, added

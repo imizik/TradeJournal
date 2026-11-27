@@ -168,6 +168,12 @@ names ("Friday") to its date from today's date. It only drafts a card; his tap f
 quote, never a real order. Missing a quantity, a contract or which position: ask one short question instead of \
 guessing. Say any picked substitution (a nearer listed expiry or strike) plainly, and any issue that keeps the button \
 off. An answer that only carries the card is one short plain sentence with no Verdict line."""),
+    (frozenset({DESK, TELEGRAM}), """- When the owner asks about one symbol in the moment (why it is moving, whether to \
+buy, add or cut, what the read is), call get_fact_sheet first: one call holds price and gap, volume against normal, \
+VWAP and the nearest levels, the implied move and the option spread, catalysts since the close, peers and the market, \
+his record in the name and his position with its cut line. Spend the remaining calls on what it lacks. A position it \
+marks short_dated_red (long, 3 days or less to expiry, red) is never answered with hold or wait: give the mark against \
+its cut line, which is his rule, and leave the call to him."""),
     (frozenset({DESK, TELEGRAM, PREP}), """- When web_search is offered (three searches a turn: stop after the third), use \
 it for what the app's tools do not carry: macro and policy (the Fed, rates, Treasury supply, fiscal), politics and \
 elections, geopolitics, industry news, and what a company or its customers said. A gap, bounce or selloff today needs \

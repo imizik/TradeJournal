@@ -76,6 +76,19 @@ TOOLS: list[dict] = [
                                         "limit": {"type": "integer", "description": "1-8, default 6"}}},
     },
     {
+        "name": "get_fact_sheet",
+        "description": "One symbol's facts in one call, read side by side: price, day change and the gap from the prior "
+                       "close (off hours, the extended move); volume against normal (time-of-day relative volume, or "
+                       "before the open the pre-market's volume against the same minutes of five sessions); VWAP, the "
+                       "nearest level each side and the ATR; the implied move from the at-the-money straddle for the "
+                       "nearest expiry and Friday with each leg's bid-ask spread as a share of its mid; get_catalysts "
+                       "counted with its newest filing or halt and newest headline; peers up and down with SPY and QQQ; "
+                       "the owner's record in the symbol; and his open positions in it, a short-dated long option with "
+                       "its cut line and the mark's distance from it. Numbers only; `missing` names what could not be read.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol"],
+                         "properties": {"symbol": _SYMBOL_SCHEMA}},
+    },
+    {
         "name": "get_catalysts",
         "description": "What hit a symbol since the close before today's session (so after the bell, today's whole session too), newest first, each with how the stock traded right after: "
                        "SEC filings (8-K/6-K, offerings S-1/S-3/424B, insider Form 4 and 144, 13D/13G, 10-Q/10-K) with "
@@ -1120,6 +1133,10 @@ class LiveEvidence:
         from app.ai import copilot_catalysts
         return copilot_catalysts.live_catalysts(symbol, datetime.now(UTC))
 
+    def get_fact_sheet(self, symbol: str) -> dict:
+        from app.ai import copilot_fact_sheet
+        return copilot_fact_sheet.live_sheet(self, symbol)
+
     def get_symbol_events(self, symbol: str) -> dict:
         from app.engine.chart_math import ET
         from app.engine import symbol_info_tradier
@@ -1307,6 +1324,8 @@ PROVENANCE = {
     "get_macro": ("FRED, Federal Reserve Bank of St. Louis (daily and weekly series, cached 6 h)", "fetched"),
     "get_base_rates": ("Tradier daily history through the chart feed (split-adjusted); counts computed here", "fetched"),
     "get_breadth": ("Tradier quotes for the hand-kept S&P 500 list; counts computed here", "fetched"),
+    "get_fact_sheet": ("Tradier quotes, minute bars, chart levels and option chains · get_catalysts · peers · the owner's "
+                       "journal (record, positions, cut lines)", "fetched"),
     "get_catalysts": ("SEC EDGAR company filings (Atom) · Nasdaq Trader halts RSS · Alpaca news (Benzinga) · Tradier "
                       "minute bars for each item's reaction", "fetched"),
     "get_positioning": ("Tradier quotes (Cboe volatility indexes) · options feed chains (Tradier, ORATS IV hourly)", "fetched"),

@@ -156,6 +156,32 @@ def one(symbol: str, now: datetime, part: str) -> dict:
     return {"last_session": _after(*previous)}
 
 
+PACE_SESSIONS = 5
+
+
+def premarket_pace(symbol: str, now: datetime) -> dict | None:
+    """Before the open: today's pre-market volume so far against the median of the same minutes (04:00 to now's
+    minute) in the last ``PACE_SESSIONS`` sessions; None outside the pre-market. A past session is one cached read."""
+    from statistics import median
+    if phase(now) != "pre-market":
+        return None
+    et = now.astimezone(ET)
+    today, minute = et.date(), et.hour * 60 + et.minute
+    volume = int(sum(b["volume"] for b in _part(_bars(symbol, today, now), today, "pre")))
+    past: list[int] = []
+    for back in range(1, 3 * LOOKBACK_DAYS):
+        day = today - timedelta(days=back)
+        if not _windows(day).get("regular"):
+            continue
+        past.append(int(sum(b["volume"] for b in _part(_bars(symbol, day, now), day, "pre") if _minute(b) < minute)))
+        if len(past) == PACE_SESSIONS:
+            break
+    typical = median(past) if past else None
+    return {"state": "ok", "kind": f"pre-market volume 04:00-{et:%H:%M} against the same minutes of the last {len(past)} sessions",
+            "volume": volume, "typical": int(typical) if typical is not None else None,
+            "pace_x": round(volume / typical, 1) if typical else None}
+
+
 def extended(symbols: list[str], now: datetime) -> dict | None:
     """Off-hours pictures for up to ``MAX_SYMBOLS`` symbols; None during the regular session."""
     from app.engine.chart_feed import ChartFeedError
