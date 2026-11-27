@@ -146,39 +146,62 @@ def _index_at(bars: list[dict], at: float) -> int:
     return next((i for i, b in enumerate(bars) if b["time"] >= at - 59), len(bars))
 
 
+def _baseline(bars: list[dict], i: int, at: float) -> float | None:
+    """The median minute volume over the hour before ``at`` (bars before index ``i``); None with too few minutes."""
+    hour = [b["volume"] for b in bars[:i] if b["time"] >= at - BASELINE_MINUTES * 60]
+    typical = median(hour) if len(hour) >= MIN_BASELINE else None
+    return typical if typical else None
+
+
+def _pct(end: float, start: float) -> float | None:
+    return round((end / start - 1) * 100, 2) if start else None
+
+
 def reaction(bars: list[dict], at: float) -> dict | None:
-    """The move from the last price before ``at`` to the close 15 minutes on, and the next five minutes' volume against
-    the hour before (None without enough bars on each side). Bars are sorted minute bars with time, close, volume."""
+    """How the stock traded after ``at``, measured by the clock: the move from the last price before it to the last
+    close inside the next 15 minutes, and those 5 minutes' volume (a minute with no trade counts as none) against the
+    median minute of the hour before. A window the bars do not reach yet is no number: ``move_so_far_pct`` with its
+    minutes stands in for the move, and the volume is left out. None with no price before ``at``. Bars are sorted
+    minute bars with time, close, volume."""
     i = _index_at(bars, at)
-    if i == 0 or i >= len(bars):
+    if i == 0:
         return None
     before = bars[i - 1]["close"]
-    end = next((b for b in bars[i:] if b["time"] >= at + REACTION_MINUTES * 60 - 59), bars[-1])
-    out = {"move_15m_pct": round((end["close"] / before - 1) * 100, 2) if before else None, "volume_x": None}
-    baseline = [b["volume"] for b in bars[max(0, i - BASELINE_MINUTES):i]]
-    if len(baseline) >= MIN_BASELINE and (typical := median(baseline)) > 0:
-        burst = [b["volume"] for b in bars[i:i + BURST_MINUTES]]
-        out["volume_x"] = round(sum(burst) / (len(burst) * typical), 1)
+    out: dict = {"move_15m_pct": None, "volume_x": None}
+    after = [b for b in bars[i:] if b["time"] < at + REACTION_MINUTES * 60]
+    seen_until = bars[-1]["time"] + 60  # the end of the last minute the bars hold
+    if after and seen_until >= at + REACTION_MINUTES * 60:
+        out["move_15m_pct"] = _pct(after[-1]["close"], before)
+    elif after:
+        out["move_so_far_pct"] = _pct(after[-1]["close"], before)
+        out["minutes_so_far"] = max(1, int((seen_until - at) // 60))
+    typical = _baseline(bars, i, at)
+    if typical and seen_until >= at + BURST_MINUTES * 60:
+        burst = sum(b["volume"] for b in after if b["time"] < at + BURST_MINUTES * 60)
+        out["volume_x"] = round(burst / (BURST_MINUTES * typical), 1)
     return out
 
 
-def unexplained(bars: list[dict], explained_at: list[float]) -> list[dict]:
-    """Sharp minutes (volume 5x the hour before and a 1%+ move over five minutes) no item explains, largest first."""
+def unexplained(bars: list[dict], explained_at: list[float], since: float = 0.0) -> list[dict]:
+    """Sharp minutes from ``since`` on (volume 5x the hour before's median minute and a 1%+ move by the close of the
+    fifth minute, by the clock) no item explains, largest first. Bars before ``since`` serve as the baseline only."""
     found = []
-    for i in range(MIN_BASELINE, len(bars) - 1):
-        typical = median(b["volume"] for b in bars[max(0, i - BASELINE_MINUTES):i])
-        if typical <= 0 or bars[i]["volume"] < SPIKE_VOLUME_X * typical:
+    for i in range(1, len(bars)):
+        t = bars[i]["time"]
+        if t < since:
             continue
-        start, end = bars[i - 1]["close"], bars[min(i + BURST_MINUTES - 1, len(bars) - 1)]["close"]
-        move = (end / start - 1) * 100 if start else 0.0
+        typical = _baseline(bars, i, t)
+        if not typical or bars[i]["volume"] < SPIKE_VOLUME_X * typical:
+            continue
+        window = [b for b in bars[i:] if b["time"] < t + BURST_MINUTES * 60]
+        move = _pct(window[-1]["close"], bars[i - 1]["close"]) or 0.0
         if abs(move) < SPIKE_MOVE_PCT:
             continue
-        t = bars[i]["time"]
         if any(-60 < t - at <= EXPLAINED_WITHIN for at in explained_at):  # the bar the item landed in counts
             continue
         if found and t - found[-1]["at"] < BURST_MINUTES * 60:  # one burst, one row
             continue
-        found.append({"at": t, "move_5m_pct": round(move, 2), "volume_x": round(bars[i]["volume"] / typical, 1)})
+        found.append({"at": t, "move_5m_pct": move, "volume_x": round(bars[i]["volume"] / typical, 1)})
     return sorted(found, key=lambda r: -abs(r["move_5m_pct"]))[:MAX_UNEXPLAINED]
 
 
@@ -201,20 +224,21 @@ def timeline(symbol: str, since: float, now: float, *, filings: dict, halts: dic
     for n in headlines.get("items") or []:
         items.append({"at": n["at"], "type": "headline", "title": n["headline"], "url": n.get("url"),
                       "source": n.get("source") or "Alpaca news"})
-    items = sorted((i for i in items if since <= i["at"] <= now), key=lambda i: -i["at"])[:MAX_ITEMS]
+    in_window = sorted((i for i in items if since <= i["at"] <= now), key=lambda i: -i["at"])
+    items = in_window[:MAX_ITEMS]  # the display cap; every item in the window still explains a move
     for item in items:
         item["reaction"] = reaction(bars, item["at"]) if bars else None
-    sharp = unexplained([b for b in bars if b["time"] >= since], [i["at"] for i in items]) if bars else []
+    sharp = unexplained(bars, [i["at"] for i in in_window], since) if bars else []
     sources = {name: src.get("state", "unavailable") if src.get("state") == "ok" else f"unavailable: {src.get('reason') or 'no read'}"
                for name, src in (("sec_filings", filings), ("halts", halts), ("headlines", headlines))}
-    primary = [i for i in items if i["type"] in ("filing", "halt")]
+    primary = [i for i in in_window if i["type"] in ("filing", "halt")]
     out = {"symbol": symbol, "state": "ok", "since": _clock(since), "as_of": _clock(now), "sources": sources,
            "items": [{**i, "at": _clock(i["at"])} for i in items],
            "unexplained_moves": [{**s, "at": _clock(s["at"])} for s in sharp],
            "minute_bars": "ok" if bars else "unavailable"}
     if not items and all(s == "ok" for s in sources.values()):
         out["note"] = "No filing, halt or headline since the close: the move is not news-driven by these sources; check peers and the market."
-    elif not primary and sources["sec_filings"] == "ok":
+    elif not primary and items and sources["sec_filings"] == sources["halts"] == "ok":
         out["note"] = "No SEC filing or halt since the close; headlines only."
     return out
 

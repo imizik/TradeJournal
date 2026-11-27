@@ -180,3 +180,42 @@ def test_the_tool_is_listed_with_its_provenance_and_validates_a_symbol():
     assert "get_catalysts" in {t["name"] for t in copilot_tools.TOOLS}
     assert "SEC EDGAR" in copilot_tools.PROVENANCE["get_catalysts"][0]
     assert copilot_tools.validate("get_catalysts", {"symbol": "nbis"}) == {"symbol": "NBIS"}
+
+
+def test_a_window_the_bars_have_not_reached_is_not_called_a_15_minute_reaction():
+    start = _at("2026-11-27T09:00:00")
+    bars = _bars(start, 62, spike_at=60, jump=1.0)  # the item lands at minute 60; the bars end two minutes later
+    r = cat.reaction(bars, start + 60 * 60)
+    assert r["move_15m_pct"] is None and r["volume_x"] is None
+    assert (r["move_so_far_pct"], r["minutes_so_far"]) == (1.0, 2)
+
+
+def test_the_reaction_is_measured_by_the_clock_across_an_overnight_gap():
+    evening = _at("2026-11-26T19:00:00")
+    bars = _bars(evening, 60)  # 19:00-19:59 at 100, volume 100
+    morning = _at("2026-11-27T04:00:00")
+    bars += [{"time": morning + 60 * i, "close": 110.0, "volume": 5000} for i in range(30)]
+    r = cat.reaction(bars, _at("2026-11-26T19:58:00"))
+    # Only 19:58 and 19:59 fall inside the next 15 (and 5) minutes; the morning's bars are not part of the reaction.
+    assert r["move_15m_pct"] == 0.0 and r["volume_x"] == 0.4  # 200 over 5 minutes of a 100 typical minute
+
+
+def test_an_item_past_the_display_cap_still_explains_its_spike():
+    since, now = _at("2026-11-27T08:00:00"), _at("2026-11-27T10:30:00")
+    spike = _at("2026-11-27T09:00:00")
+    bars = _bars(_at("2026-11-27T08:00:00"), 150, spike_at=60, jump=2.0)
+    heads = [{"at": spike, "headline": "cause", "source": "benzinga"}]
+    heads += [{"at": spike + 300 * (k + 1), "headline": f"later {k}", "source": "benzinga"} for k in range(cat.MAX_ITEMS)]
+    out = cat.timeline("NBIS", since, now, filings=_ok([]), halts=_ok([]), headlines=_ok(heads), bars=bars)
+    assert len(out["items"]) == cat.MAX_ITEMS and all(i["title"] != "cause" for i in out["items"])
+    assert out["unexplained_moves"] == []
+
+
+def test_headlines_only_needs_the_filings_and_halts_read_and_a_headline():
+    since, now = _at("2026-11-26T16:00:00"), _at("2026-11-27T10:30:00")
+    head = _ok([{"at": _at("2026-11-27T09:00:00"), "headline": "x", "source": "benzinga"}])
+    halts_down = cat.timeline("NBIS", since, now, filings=_ok([]), halts={"state": "unavailable", "reason": "r"},
+                              headlines=head, bars=None)
+    nothing_read = cat.timeline("NBIS", since, now, filings=_ok([]), halts=_ok([]),
+                                headlines={"state": "unavailable", "reason": "r"}, bars=None)
+    assert "note" not in halts_down and "note" not in nothing_read

@@ -5263,13 +5263,18 @@ first, at most 15 items:
 - **Headlines** from the Alpaca news feed, fiscal.ai summaries dropped.
 
 Each item carries the tape's reaction from the chart feed's minute bars
-(Tradier time and sales, extended hours): the move over the next 15 minutes
-and the next five minutes' volume against the median of the hour before.
-Minutes with 5x volume and a 1%+ move over five minutes that no item explains
-(an item in that bar or up to 10 minutes before) are listed as unexplained
-moves, at most three. With every source read and no item, the result says the
-move is not news-driven by these sources; a failed source is named and never
-reads as "no news". Titles and headlines are third-party data. The fixture's
+(Tradier time and sales, extended hours), measured by the clock: the move to
+the last close inside the next 15 minutes and those 5 minutes' volume (a
+minute with no trade counts as none) against the median minute of the hour
+before. A window the bars have not reached yet gives `move_so_far_pct` with
+its minutes instead, and no volume ratio; an overnight gap never stretches a
+window into the next session. Minutes with 5x volume and a 1%+ move by the
+fifth minute that no item in the window explains (an item in that bar or up
+to 10 minutes before, whether or not it made the 15 shown) are listed as
+unexplained moves, at most three. With every source read and no item, the
+result says the move is not news-driven by these sources; "headlines only"
+needs the filings and halts read and a headline found; a failed source is
+named and never reads as "no news". Titles and headlines are third-party data. The fixture's
 timeline is marked simulated, and replay refuses it (a live read would mix in
 later filings). Offered to the desk, Telegram, the morning brief, the
 companion, the desk read and research jobs. The prompt reads it before
