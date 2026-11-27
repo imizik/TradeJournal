@@ -5279,7 +5279,11 @@ rule covers (`fill_interrupts.cut_line`) with its own trade's cut line (joined
 by trade, so the same contract in two accounts keeps two lines), the mark's
 distance from it and `short_dated_red` when it is 3 days or less to expiry
 and red. The symbol's positions are read ahead of the book's 15-position
-limit; past it, `position_incomplete` says so. A section that cannot be read is named in `missing`. It carries the
+limit; past it, `position_incomplete` says so. At most 6 are shown, those
+past or nearest their cut and short-dated red ones first, with
+`position_omitted` counting the rest, so the sheet fits the 6,000-character
+tool result; positions come right after price. When the chart is the delayed
+Alpaca fallback, a top-level `delayed` names the provider before any number. A section that cannot be read is named in `missing`. It carries the
 owner's book, so it is offered on the desk and Telegram only and never to a
 research job; the fixture's sheet is marked simulated and replay refuses it.
 The reads run side by side under one 8.5-second deadline inside the tool's

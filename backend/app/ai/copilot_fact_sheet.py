@@ -29,6 +29,7 @@ from typing import Callable
 
 log = logging.getLogger(__name__)
 
+MAX_POSITIONS_SHOWN = 6  # the sheet stays inside the tool result's 6,000 characters
 READ_DEADLINE = 8.5  # every read, inside the copilot's 10 s tool timeout (get_catalysts keeps its own 7 s)
 SHORT_DATED_DAYS = 3  # the cut-line rule's own window (fill_interrupts.BUILT_DAYS)
 FIXTURE_NOTE = "SIMULATED demo fact sheet: the fixture's numbers, not live data."
@@ -193,21 +194,32 @@ def assemble(symbol: str, as_of: datetime, *, quotes: dict, chart: dict, forecas
     rvol = tp.pop("rvol", None) if tp else None
     volume = premarket or ({"kind": "regular session, time-of-day relative volume against 20 sessions", "rvol": rvol}
                            if rvol is not None else None)
+    held = position(symbol, book, as_of.astimezone(_et()).date())
+    omitted = 0
+    if held and len(held) > MAX_POSITIONS_SHOWN:  # the ones near or past their cut first; the count of the rest is said
+        held.sort(key=lambda r: (not r.get("past_cut"), not r.get("short_dated_red"), r.get("mark_vs_cut_pct") or 999))
+        held, omitted = held[:MAX_POSITIONS_SHOWN], len(held) - MAX_POSITIONS_SHOWN
     sections = {
         "price": price(symbol, quotes, chart),
+        "position": held,  # second: the risk is never what a long result loses to the size cap
         "volume": volume,
         "tape": tp,
         "implied_move": implied(forecast),
         "catalysts": catalysts(catalyst),
         "peers": peers(peer, quotes),
         "my_record": record(mine),
-        "position": position(symbol, book, as_of.astimezone(_et()).date()),
     }
     missing = [k for k, v in sections.items() if v is None]
-    out = {"symbol": symbol, "state": "ok" if not missing else "partial", "as_of": as_of.astimezone(_et()).isoformat(timespec="minutes"),
-           **{k: v for k, v in sections.items() if v is not None}, "missing": missing}
-    if sections["position"] is not None and book.get("incomplete"):
+    out: dict = {"symbol": symbol, "state": "ok" if not missing else "partial",
+                 "as_of": as_of.astimezone(_et()).isoformat(timespec="minutes"), "missing": missing}
+    if _ok(chart) and chart.get("delayed"):  # the chart's fallback: say so before any number it gave
+        out["delayed"] = {"provider": chart.get("provider"),
+                          "note": "The chart (tape, levels, VWAP, volume) is a delayed fallback, about 15 minutes behind; not live."}
+    if held is not None and book.get("incomplete"):
         out["position_incomplete"] = book["incomplete"]
+    if omitted:
+        out["position_omitted"] = f"{omitted} more open position{'' if omitted == 1 else 's'} in {symbol} not shown"
+    out.update({k: v for k, v in sections.items() if v is not None})
     return out
 
 

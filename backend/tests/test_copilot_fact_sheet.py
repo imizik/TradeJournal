@@ -71,7 +71,7 @@ def test_a_longer_dated_or_green_option_is_not_flagged():
 
 def test_a_failed_section_is_named_and_never_hides_the_rest():
     out = _sheet(forecast=None, catalyst={"state": "unavailable"}, book={"state": "unavailable"})
-    assert out["state"] == "partial" and out["missing"] == ["implied_move", "catalysts", "position"]
+    assert out["state"] == "partial" and out["missing"] == ["position", "implied_move", "catalysts"]
     assert out["price"]["last"] == 90.0
 
 
@@ -171,3 +171,23 @@ def test_each_position_keeps_its_own_cut_line_and_the_symbol_is_read_ahead_of_th
     rows = fs.position("NBIS", book, date(2026, 11, 27))
     assert {(r["avg_entry"], r["cut_line"], r["past_cut"]) for r in rows} == {(100.0, 70.0, False), (200.0, 140.0, True)}
     engine.dispose()
+
+
+def test_a_large_book_fits_the_result_with_the_risky_positions_first():
+    risky = BOOK["positions"][0]
+    calm = {**risky, "unrealized_pct": 5.0, "mark": 210.0, "_cut": None,
+            "option": {"side": "put", "strike": 80.0, "expiry": "2027-01-15"}}
+    book = {"state": "ok", "positions": [calm] * 14 + [risky]}
+    long_title = "T" * 200
+    catalyst = {**CATALYSTS, "items": [{"type": "headline", "title": long_title, "url": "https://x/" + "u" * 150,
+                                        "reaction": {"move_15m_pct": 1.0, "volume_x": 2.0}},
+                                       {"type": "filing", "form": "8-K", "title": long_title, "detail": "Item 2.02, Item 9.01",
+                                        "url": "https://y/" + "u" * 150, "reaction": {"move_15m_pct": 1.0, "volume_x": 2.0}}],
+                "unexplained_moves": [{"at": "11-27 09:31 ET", "move_5m_pct": 2.0, "volume_x": 9.0}] * 3,
+                "note": "n" * 120, "headlines_from": "11-27 08:00 ET"}
+    out = _sheet(book=book, catalyst=catalyst, chart={**CHART, "delayed": True, "provider": "Alpaca SIP"})
+    text = copilot_tools.bounded(out)
+    assert "[truncated]" not in text and len(text) <= copilot_tools.MAX_RESULT_CHARS
+    assert len(out["position"]) == fs.MAX_POSITIONS_SHOWN and out["position"][0]["past_cut"] is True
+    assert out["position_omitted"] == "9 more open positions in NBIS not shown"
+    assert out["delayed"]["provider"] == "Alpaca SIP" and list(out)[:4] == ["symbol", "state", "as_of", "missing"]
