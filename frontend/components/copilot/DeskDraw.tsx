@@ -139,7 +139,12 @@ export function useDeskDrawings(symbol: string | null, last: number | null = nul
   const nearShapes = useMemo(() => {
     if (last == null || last <= 0) return shapes;
     const near = (price: number) => Math.abs(price - last) / last <= NEAR_REACH;
-    return deskShapes(levels.filter(l => near(l.price)), drawings.filter(d => d.points.some(p => near(p.price))), hidden);
+    // A drawing stays when any part of its price span reaches the band (a zone around the price, a trend line across it).
+    const reaches = (d: Drawing) => {
+      const prices = d.points.map(p => p.price);
+      return prices.length > 0 && Math.max(...prices) >= last * (1 - NEAR_REACH) && Math.min(...prices) <= last * (1 + NEAR_REACH);
+    };
+    return deskShapes(levels.filter(l => near(l.price)), drawings.filter(reaches), hidden);
   }, [shapes, levels, drawings, hidden, last]);
   return {
     ready, usable, levels, drawings, shapes, nearShapes, far: shapes.length - nearShapes.length, magnet: settings.magnet, toolStyles: settings.toolStyles, error, setError,
