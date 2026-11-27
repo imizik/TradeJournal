@@ -29,6 +29,7 @@ from typing import Callable
 
 log = logging.getLogger(__name__)
 
+STALE_CHAIN_MINUTES = 15  # an option chain older than this is said to be stale
 MAX_POSITIONS_SHOWN = 6  # the sheet stays inside the tool result's 6,000 characters
 READ_DEADLINE = 8.5  # every read, inside the copilot's 10 s tool timeout (get_catalysts keeps its own 7 s)
 SHORT_DATED_DAYS = 3  # the cut-line rule's own window (fill_interrupts.BUILT_DAYS)
@@ -95,8 +96,9 @@ def tape(chart: dict) -> dict | None:
     return {k: v for k, v in out.items() if v is not None}
 
 
-def implied(forecast: dict | None) -> dict | None:
-    """The straddles ``options_feed.forecast`` priced, with each leg's spread over its mid."""
+def implied(forecast: dict | None, now: datetime | None = None) -> dict | None:
+    """The straddles ``options_feed.forecast`` priced, with each leg's spread over its mid and the chain's age: a failed
+    refresh can serve an older same-day chain, which is marked ``stale`` past ``STALE_CHAIN_MINUTES``."""
     if not isinstance(forecast, dict) or not forecast.get("moves"):
         return None
 
@@ -112,6 +114,10 @@ def implied(forecast: dict | None) -> dict | None:
             row.update(move=_num(m.get("move")), move_pct=_num((m.get("percent") or 0) * 100), strike=m.get("strike"),
                        call_spread_pct=spread(m.get("call")), put_spread_pct=spread(m.get("put")),
                        iv=_num((m.get("iv") or 0) * 100, 1) if m.get("iv") else None)
+            fetched = m.get("fetched_at")
+            if isinstance(fetched, (int, float)) and now is not None:
+                age = max(0, int((now.timestamp() - fetched) // 60))
+                row.update(chain_age_min=age, stale=True if age > STALE_CHAIN_MINUTES else None)
         elif m.get("reason"):
             row["reason"] = m["reason"]
         rows.append({k: v for k, v in row.items() if v is not None})
@@ -211,7 +217,7 @@ def assemble(symbol: str, as_of: datetime, *, quotes: dict, chart: dict, forecas
         "position": held,  # second: the risk is never what a long result loses to the size cap
         "volume": volume,
         "tape": tp,
-        "implied_move": implied(forecast),
+        "implied_move": implied(forecast, as_of),
         "catalysts": catalysts(catalyst),
         "peers": peers(peer, quotes),
         "my_record": record(mine),

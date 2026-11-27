@@ -205,3 +205,12 @@ def test_a_tradier_outage_still_gives_the_quote_engines_price():
     fallback = {"state": "ok", "quotes": {}, "prices": {"NBIS": 88.5}, "source_note": "quote engine (60 s cache), price only: x"}
     out = _sheet(quotes=fallback, chart={"state": "unavailable"})
     assert out["price"] == {"last": 88.5, "source": "quote engine (60 s cache), price only: x"}
+
+
+def test_an_old_option_chain_is_marked_stale_with_its_age():
+    fresh, old = NOW.timestamp() - 120, NOW.timestamp() - 3600
+    forecast = {**FORECAST, "moves": [{**FORECAST["moves"][0], "fetched_at": int(fresh)},
+                                      {**FORECAST["moves"][0], "tags": ["friday"], "fetched_at": int(old)}]}
+    near, friday = _sheet(forecast=forecast)["implied_move"]["expirations"]
+    assert near["chain_age_min"] == 2 and "stale" not in near
+    assert friday["chain_age_min"] == 60 and friday["stale"] is True
