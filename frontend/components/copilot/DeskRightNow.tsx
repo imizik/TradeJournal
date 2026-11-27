@@ -5,7 +5,7 @@
  * Instead of an empty column with a hint, each open position that needs a look, most urgent first, in one line of what
  * is true now (past its cut line or stop, near its stop, expiring today or tomorrow, giving back) and one question to
  * ask about it. The line opens the position on the desk; the button asks the copilot. With nothing needing him, one
- * quiet line says so. It reads nothing of its own: the thread list's rows and the shared live prices, as the book does.
+ * quiet line says so; a cut line with no price yet is never called clear. It reads nothing of its own: the thread list's rows and the shared live prices, as the book does.
  * Nothing here tells him to buy, sell or hold.
  */
 
@@ -64,6 +64,14 @@ export function DeskRightNow({ rows, day, onOpen, onAsk }: {
   if (!open.length) return null;
   const items = open.flatMap(r => rightNowItem(r, day, ticks) ?? [])
     .sort((a, b) => a.rank - b.rank || Number(b.risk) - Number(a.risk));
+  // A cut line with no price to hold it against cannot be checked: never an all-clear for it.
+  const listed = new Set(items.map(i => i.row.key));
+  const unchecked = open.filter(r => !listed.has(r.key) && r.book!.cut_line != null && !r.book!.planned && rowNow(r.book, ticks).price == null).length;
+  const uncheckedLine = unchecked > 0 && (
+    <p data-testid="right-now-unchecked" className="border-t px-3 py-2 text-xs text-muted-foreground">
+      No price yet for {unchecked === 1 ? "1 position" : `${unchecked} positions`} with a cut line: not checked against it.
+    </p>
+  );
   return (
     <section aria-label="Right now" data-testid="right-now" className="rounded-lg border bg-card">
       <h2 className="px-3 pb-1 pt-2.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Right now</h2>
@@ -83,11 +91,12 @@ export function DeskRightNow({ rows, day, onOpen, onAsk }: {
             </li>
           ))}
         </ul>
-      ) : (
+      ) : unchecked > 0 ? null : (
         <p data-testid="right-now-calm" className="border-t px-3 py-2 text-sm text-muted-foreground">
           Nothing needs you · {open.length} open, none past a cut line or stop.
         </p>
       )}
+      {uncheckedLine}
     </section>
   );
 }

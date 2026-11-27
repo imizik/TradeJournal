@@ -56,7 +56,7 @@ function chart(symbol: string) {
   return { symbol, timeframe: "2m", step: 120, as_of: last, live: false, state: "ok", reason: null, bars, studies: {}, reference: [],
     reading: { last: 102, at: last, daily: false, prev_close: 100.5, vwap: null, vwap_at: null, rvol: null }, levels: [], alerts: [], marks: [], time_stop: null, events: { earnings: null, macro: [], note: null } };
 }
-async function open(page: Page, width: number, height: number, threads: object = THREADS) {
+async function open(page: Page, width: number, height: number, threads: object = THREADS, priced = true) {
   const reads: Record<string, unknown> = { ...READS, "/copilot/desk/threads": threads };
   await page.setViewportSize({ width, height });
   await page.clock.install({ time: NOW });
@@ -66,7 +66,7 @@ async function open(page: Page, width: number, height: number, threads: object =
   for (const [p, body] of Object.entries(reads)) await page.route(u => u.pathname.endsWith(p), r => r.fulfill({ json: body }));
   await page.route("**/charts/symbol/*/you*", r => r.fulfill({ json: { symbol: "ORCL", closed_trades: 9, win_rate: 0.33, realized_pnl: -1240 } }));
   await page.route("**/copilot/desk/*/chart*", r => { const id = decodeURIComponent(new URL(r.request().url()).pathname.split("/").at(-2) ?? ""); return r.fulfill({ json: chart(id.includes(":") ? id.split(":").pop()! : "QQQ") }); });
-  await page.route("**/copilot/desk/ticks?*", r => { const at = epoch("2026-11-13T15:59:30Z"); const L: Record<string, [number, number]> = {
+  await page.route("**/copilot/desk/ticks?*", r => { if (!priced) return r.fulfill({ status: 503, json: { detail: "off" } }); const at = epoch("2026-11-13T15:59:30Z"); const L: Record<string, [number, number]> = {
     ORCL261114C00250000: [3.35, 249.1], NBIS261120C00100000: [4.1, 101.8], MU261121P00240000: [7.35, 236.2], ORCL: [249.1, 252.9], NBIS: [101.8, 99.6], MU: [236.2, 234.0], NVDA: [199.3, 197.9], CRWV: [96.4, 92.1], TSLA: [402.5, 405.0] };
     return r.fulfill({ json: { open: true, checked: at, rows: Object.fromEntries(Object.entries(L).map(([k, [last, prev]]) => [k, { last, prev_close: k.length > 6 ? null : prev, change_pct: k.length > 6 ? null : (last - prev) / prev * 100, at }])) } }); });
   await page.route("**/copilot/desk/minute?*", r => r.fulfill({ json: { reads: new URL(r.request().url()).searchParams.getAll("read").map(t => { const b = reads[t.split("?")[0]]; return b ? { status: 200, body: b } : { status: 404, body: { detail: "x" } }; }) } }));
@@ -125,4 +125,12 @@ test("a Feed row keeps one first step in view and the rest as quiet links on hov
 test("nothing needing a look is one quiet line", async ({ page }) => {
   await open(page, 1440, 900, { ...THREADS, threads: THREADS.threads.filter(t => t.symbol === "NBIS") });
   await expect(rightNow(page).getByTestId("right-now-calm")).toHaveText("Nothing needs you · 1 open, none past a cut line or stop.");
+});
+
+test("a cut line with no price yet is never called clear", async ({ page }) => {
+  const quiet = THREADS.threads.filter(t => t.symbol !== "ORCL").map(t => t.symbol === "MU" ? { ...t, book: { ...t.book, state: "no_plan" } } : t);
+  await open(page, 1440, 900, { ...THREADS, threads: quiet }, false);
+  // MU has a cut line and no plan, but no price: it cannot be checked. NBIS is planned.
+  await expect(rightNow(page).getByTestId("right-now-unchecked")).toHaveText("No price yet for 1 position with a cut line: not checked against it.");
+  await expect(rightNow(page).getByTestId("right-now-calm")).toHaveCount(0);
 });

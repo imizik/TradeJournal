@@ -608,7 +608,8 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   in one line of what is true now ("past cut $3.78 · now $3.35 · expires tomorrow", red while past a line or near a
   stop) and one question for the copilot (**Cut or hold?** past a line, else **Ask**; asked across everything, as the
   strip's Ask why is). The line opens that position on the desk. With nothing needing a look, one grey line: "Nothing
-  needs you · 3 open, none past a cut line or stop." It reads nothing of its own (the thread list's rows and the shared
+  needs you · 3 open, none past a cut line or stop." A cut line with no price yet is never called clear: "No price yet
+  for 1 position with a cut line: not checked against it." It reads nothing of its own (the thread list's rows and the shared
   live prices) and goes away with the first word of the conversation; the generic hint shows only without a book.
   Never in Replay. Proof: `frontend/e2e/copilot-desk-right-now.spec.ts`.
 - **Status line** (from 768 px; a phone has its tab bar there): one thin row along the desk's bottom, under the
