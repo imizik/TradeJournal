@@ -5245,6 +5245,36 @@ prompt says to give the off-hours change with its last trade time and dollar
 volume and never to call a name flat from a regular-session quote off hours.
 Live only; replay and the fixture leave it out. Tests:
 `backend/tests/test_copilot_extended.py`.
+## Catalysts
+
+`get_catalysts(symbol)` (`backend/app/ai/copilot_catalysts.py`, added
+2026-11-27) answers "why is it moving" from primary sources before the web is
+searched. It lines up everything since the last regular-session close (from
+the market calendar; 18 hours back when the calendar cannot say), newest
+first, at most 15 items:
+
+- **SEC filings** from EDGAR's per-company Atom feed, stamped with acceptance
+  time and offset, with the `SEC_USER_AGENT` contact and pacing the Financials
+  tab uses. Kept forms: current reports (8-K, 6-K, with their Item numbers),
+  offerings (S-1, S-3, F-1, F-3, FWP, 424B*), insider Form 4 and 144,
+  13D/13G and periodic reports; an amendment counts as its base form.
+- **Halts** from Nasdaq Trader's halts RSS (LULD pauses included), read at
+  most once a minute, in New York time with the resumption time.
+- **Headlines** from the Alpaca news feed, fiscal.ai summaries dropped.
+
+Each item carries the tape's reaction from the chart feed's minute bars
+(Tradier time and sales, extended hours): the move over the next 15 minutes
+and the next five minutes' volume against the median of the hour before.
+Minutes with 5x volume and a 1%+ move over five minutes that no item explains
+(an item in that bar or up to 10 minutes before) are listed as unexplained
+moves, at most three. With every source read and no item, the result says the
+move is not news-driven by these sources; a failed source is named and never
+reads as "no news". Titles and headlines are third-party data. The fixture's
+timeline is marked simulated, and replay refuses it (a live read would mix in
+later filings). Offered to the desk, Telegram, the morning brief, the
+companion, the desk read and research jobs. The prompt reads it before
+searching the web for a cause. Tests: `backend/tests/test_copilot_catalysts.py`.
+
 ## Web search
 
 A turn the owner asked (the desk's `POST /copilot/chat` and a typed or tapped

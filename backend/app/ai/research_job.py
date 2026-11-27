@@ -30,7 +30,7 @@ from app.ai import api_runner, copilot, copilot_tools
 JOB_TOOLS = ("get_group_comparison", "get_peer_moves", "get_symbol_news", "get_symbol_events", "get_quotes",
              "get_saved_research", "get_chart_context", "get_market_regime", "get_radar_today", "get_symbol_profile",
              "get_macro", "get_base_rates",
-             "get_breadth", "get_positioning")
+             "get_breadth", "get_positioning", "get_catalysts")
 
 
 def same_url(url: str) -> str:
