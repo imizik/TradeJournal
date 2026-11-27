@@ -1,5 +1,6 @@
 "use client";
 
+import { DeskDayCall, useDayCall } from "@/components/copilot/DeskDayCall";
 import { DeskRightNow } from "@/components/copilot/DeskRightNow";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
@@ -243,6 +244,7 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
   // Replay (DeskReplay): paper trading on a past day. While it runs the live desk stays mounted but hidden, so leaving
   // puts it back exactly as it was; of its live pieces only the REAL line in Replay's header shows beside a replayed price.
   const [replay, setReplay] = useState(false);
+  const dayCall = useDayCall(on && !replay);
   // The desk's mode (DeskMode.tsx): Real or Paper as kept for this browser, Replay whenever a replay is open, however it
   // opened. A view only: nothing is sent and no order or account behaves differently.
   const viewMode = useDeskMode();
@@ -1479,7 +1481,10 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
                 <ThreadAlertAnswers symbol={thread.symbol ?? null} rows={alertRows} /></>} />
           ) : null)}
           <CopilotPanel variant="page" link={link} desk={hooks} daily={daily}
-            rightNow={on && !replay && positionRows(booked.rows).some(r => !r.hidden && r.book) && <DeskRightNow rows={booked.rows} day={today} onOpen={select} onAsk={actions.ask} />} />
+            rightNow={on && !replay && (dayCall?.enabled && dayCall.calls.length > 0 || positionRows(booked.rows).some(r => !r.hidden && r.book)) && <>
+              {dayCall?.enabled && dayCall.calls.length > 0 && <DeskDayCall found={dayCall} />}
+              {positionRows(booked.rows).some(r => !r.hidden && r.book) && <DeskRightNow rows={booked.rows} day={today} onOpen={select} onAsk={actions.ask} />}
+            </>} />
         </section>
         </div>
       </div>

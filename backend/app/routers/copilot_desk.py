@@ -1630,6 +1630,14 @@ def desk_day_plan(db: Session = Depends(get_session)):
     return {"day": _today_ny().isoformat(), "plan": day_plan.plan_for(db, _today_ny()), "pings": day_plan.enabled()}
 
 
+@router.get("/desk/day-call")
+def desk_day_call():
+    """The day call (``app/engine/day_call.py``): today's risk-on/off calls with their flip checks, the day's paper score
+    once the close is in, and the paper record over every saved day. Files only; never a model call."""
+    from app.engine import day_call
+    return day_call.view(today._now())
+
+
 @router.post("/desk/day-plan")
 def desk_day_plan_save(body: DayPlanBody, db: Session = Depends(get_session)):
     """Save today's plan as a ``day_plan`` day-journal entry (the day's newest wins); never an order, never Robinhood."""
