@@ -373,7 +373,8 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
   const folded = isLive ? shown.filter(r => r.instrument === "stock" && !r.book?.planned && !r.book?.orders?.length) : [];
   // An option down 90% or more (``NO_EXIT_FLOOR_PCT``) waits behind one grey "Nearly worthless" line, unless it is the
   // one picked: on his live desk three dead options filled the top of the book and pushed the live ones down.
-  const dead = shown.filter(r => r.instrument !== "stock" && r.book?.option && r.book.pct != null && r.book.pct <= NO_EXIT_FLOOR_PCT && r.key !== selectedKey);
+  // Long options only: a short one down 90% has a growing buyback, not little left.
+  const dead = shown.filter(r => r.instrument !== "stock" && r.book?.option?.direction === "long" && r.book.pct != null && r.book.pct <= NO_EXIT_FLOOR_PCT && r.key !== selectedKey);
   const followed = (isLive ? [...shown.filter(r => r.instrument !== "stock"), ...shown.filter(r => r.instrument === "stock" && !folded.includes(r)),
     ...(stocksOpen ? folded : [])] : [...shown]).filter(r => deadOpen || !dead.includes(r));
   // The account tag only when the book spans accounts: one account is the top bar's chip, not a word on every row.
