@@ -1794,7 +1794,10 @@ the standing (break-even, days left, …) and any working Robinhood order on it.
   (`book.cut_line`, a short-dated long option only), the time left when the standing does not say it, and **his
   record in the ticker** ("Your ORCL record 12 closed · 5 won · −$1,240", closed trades in every account from
   `GET /charts/symbol/{symbol}/you`; nothing with no closed trade or when the read fails). A quiet **Plan it** (the plan
-  flow) ends the button row. Nothing is sent to Robinhood.
+  flow) ends the button row. Nothing is sent to Robinhood. Since the desk re-review of 2026-11-27 the panel reads in
+  the order he acts: the mark, P&L and cut line ("Cut line $3.78 · past it", "· 31% over it"), then the buttons, then
+  the option's details (break-even, at expiry, Greeks, What if). Past his cut line or the plan's stop, **Close** is the
+  button that stands out (rose); it still only opens the closing ticket.
 - **Trim** (a count, half by default) and **Close** (all): the Ticket's close-now view at the mark (`closeNowTicket`,
   as the copilot's close and trim cards). A single long call or put the book reads as one leg only.
 - **Roll**: the roll ticket. **Note**: the book row's note line (saved with the trade; it shows under the row at once).

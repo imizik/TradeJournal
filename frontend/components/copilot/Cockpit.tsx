@@ -448,6 +448,8 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
                         {now.price != null && now.today != null && " · "}
                         {now.today != null && <>today <span data-testid="book-today" className={tone(now.today)}>{money(now.today)}</span></>}
                       </span>}
+                      {/* On a phone the price leads the line: a dot keeps it from running into what follows. */}
+                      {book && (now.price != null || now.today != null) && (book.expiry || book.stop_pct != null) && <span aria-hidden className="md:hidden">·</span>}
                       {mixed && book?.account && <span data-testid="book-account" title={`${book.account.label} ${book.account.masked}`}>{book.account.label}</span>}
                       {book?.stop_pct != null && <span className="tabular-nums">{Math.abs(book.stop_pct).toFixed(1)}% to stop</span>}
                       {/* No plan: his cut line and how far over it the price is, so the line he goes by is on the row. */}

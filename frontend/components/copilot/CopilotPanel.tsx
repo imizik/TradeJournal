@@ -1655,13 +1655,14 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           ))}
         </div>
       )}
-      {/* One box: (on the desk, what the conversation is about,) the text, then a toolbar inside it. The text area gets the
+      {/* One box: (on the desk, what the conversation is about,) the text, then a toolbar inside it. Idle, what it is about
+          takes its own slim row, so the text and Send keep the width (a 1280 px desk had cut both to a sliver). The text area gets the
           full width at every size, even in a narrow dock; a phone desk keeps attach and read-aloud behind "+". */}
       {lookOnSend.current && !look && <p className="text-xs text-muted-foreground">Your chart context is in the draft. Send from Charts to include its image.</p>}
       <form onSubmit={e => { e.preventDefault(); void send(draft); }}
-        className={cn("rounded-xl border bg-background transition-colors focus-within:border-primary/50", small && "flex items-center")}>
+        className={cn("rounded-xl border bg-background transition-colors focus-within:border-primary/50", small && "flex flex-wrap items-center")}>
         {desk && !current?.main_day && (
-            <div className={cn("flex min-h-7 items-center px-2 text-xs", small ? cn("shrink-0", !symbol && !scoping && "max-md:hidden") : "pt-1.5")}>
+            <div className={cn("flex min-h-7 items-center px-2 text-xs", small ? cn("basis-full pt-1", !symbol && !scoping && "max-md:hidden") : "pt-1.5")}>
               {symbol ? (
                 <span className="inline-flex items-center gap-0.5 rounded-full bg-muted py-0.5 pl-2 pr-0.5 text-foreground" data-testid="copilot-scope">
                   About {symbol}
