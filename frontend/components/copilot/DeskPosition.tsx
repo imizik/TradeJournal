@@ -184,6 +184,8 @@ export function DeskPosition({ row, rows, fallback = null, change = null, plan, 
   // His cut line (dollars a contract; shown a share, as the quote reads) and how far the price now is above it.
   const cut = book.cut_line != null ? book.cut_line / 100 : null;
   const overCut = cut != null && cut > 0 && mark ? (mark.share - cut) / cut * 100 : null;
+  // Past his cut line (or the plan's stop): Close is the button that stands out. Still only a ticket to copy.
+  const pastLine = (!shown && overCut != null && overCut <= 0) || book.state === "past_stop";
   // Time left where the option's standing below does not already say it.
   const days = !standing && book.option && book.expiry ? daysLeft(book.expiry, todayNewYork()) : null;
 
@@ -219,18 +221,16 @@ export function DeskPosition({ row, rows, fallback = null, change = null, plan, 
         </> : book.planned ? <span className="text-muted-foreground">Planned with a time stop only: no stop or target price.</span> : null}
         {!shown && cut != null && (
           <Fig label="Cut line" testId="position-cut">
-            {priceText(cut)}
+            ${priceText(cut)}
             {overCut != null && (overCut <= 0
               ? <span className="font-semibold text-rose-300"> · past it</span>
-              : <span className="text-muted-foreground"> · {overCut.toFixed(0)}% above it</span>)}
+              : <span className="text-muted-foreground"> · {overCut.toFixed(0)}% over it</span>)}
           </Fig>
         )}
         {!shown && days != null && <Fig label="Expiry" testId="position-expiry"><span className={cn(days <= 2 && "text-amber-300")}>{days < 0 ? "Expired" : days === 0 ? "today" : `${days}d left`}</span></Fig>}
         {!shown && <YourRecord symbol={symbol} record={record} />}
         {working.length > 0 && <span data-testid="position-orders" className="min-w-0"><OrderLines orders={working} /></span>}
       </div>
-      {book.option && <OptionStanding row={row} rows={rows} fallback={fallback}
-        levels={current ? { entry: current.entry ?? levels.entry, stop: current.stop, target: current.target } : levels} earnings={earnings} />}
       <div role="group" aria-label="Manage this position" data-testid="position-actions" className="flex flex-wrap items-center gap-1.5">
         {current && side ? (
           <button type="button" data-testid="position-levels" aria-expanded={open === "levels"} onClick={() => toggle("levels")}
@@ -242,7 +242,8 @@ export function DeskPosition({ row, rows, fallback = null, change = null, plan, 
         )}
         {closeAll && (
           <button type="button" data-testid="position-close" onClick={() => { setOpen(null); openClosingTicket(closeAll); }}
-            title={`Close all ${held}: a closing ticket at the mark now, to copy into Robinhood. Nothing is sent.`} className={BUTTON}>Close</button>
+            title={`Close all ${held}: a closing ticket at the mark now, to copy into Robinhood. Nothing is sent.`}
+            className={cn(BUTTON, pastLine && "border-rose-400/60 bg-rose-500/15 text-rose-100 hover:bg-rose-500/25")}>Close</button>
         )}
         {roll && (
           <button type="button" data-testid="roll-open" onClick={() => { setOpen(null); openRollTicket(roll); }}
@@ -292,6 +293,9 @@ export function DeskPosition({ row, rows, fallback = null, change = null, plan, 
       )}
       {open === "note" && trade && <NoteLines notes={notes} id={row.key} trade={null} target={{ trade_id: trade }} label="this position" />}
       {said && <p role="status" data-testid="position-said" className="text-emerald-300">{said}</p>}
+      {/* The details (break-even, what it is worth at expiry, Greeks, What if) come after what he acts on. */}
+      {book.option && <OptionStanding row={row} rows={rows} fallback={fallback}
+        levels={current ? { entry: current.entry ?? levels.entry, stop: current.stop, target: current.target } : levels} earnings={earnings} />}
     </section>
   );
 }

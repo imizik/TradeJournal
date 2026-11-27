@@ -202,7 +202,9 @@ test("a position with no plan: his cut line, how far the price is from it and hi
     open_positions: [], recent_trades: [], source: "Journal · all accounts", as_of: "2026-11-13T16:00:00Z", time_zone: "America/New_York" } }));
   await open(page, { threads: { ...THREADS, threads: [bare] } });
   const p = panel(page);
-  await expect(p.getByTestId("position-cut")).toHaveText("Cut line 4.34 · past it");
+  await expect(p.getByTestId("position-cut")).toHaveText("Cut line $4.34 · past it");
+  // Past the cut line, Close is the button that stands out.
+  await expect(p.getByTestId("position-close")).toHaveClass(/rose/);
   await expect(p.getByTestId("position-record")).toHaveText("Your ORCL record 12 closed · 5 won · −$1,240");
   await expect(p.getByTestId("position-plan")).not.toContainText("No saved plan");
   // Plan it is still there, last and quiet.
