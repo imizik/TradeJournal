@@ -302,6 +302,8 @@ def catalysts(d: dict) -> str | None:
     totals = d.get("counts") or {}  # the whole window's, not only the items shown
     parts = [count(totals.get(kind, sum(1 for i in items if i.get("type") == kind)), kind) if ok else f"{kind}s unavailable"
              for kind, ok in read.items()]
+    if read["headline"] and d.get("headlines_from"):  # only the feed's newest page was read: the count is a floor
+        parts[2] = parts[2].replace(" ", "+ ", 1)
     if d.get("unexplained_moves"):
         parts.append(count(len(d["unexplained_moves"]), "unexplained move"))
     return f"Since {d.get('since')}: " + ", ".join(parts)

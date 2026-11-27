@@ -318,3 +318,28 @@ def test_after_the_bell_the_window_still_holds_todays_session():
     days = {date(2026, 11, 27): {"status": "open", "close": 13 * 60}, date(2026, 11, 26): {"status": "open", "close": 16 * 60}}
     # 17:00 after a 13:00 early close: the window opens at the session before, so today's session is in it.
     assert cat.last_close(_at("2026-11-27T17:00:00"), days.get) == _at("2026-11-26T16:00:00")
+
+
+def test_a_full_headline_page_says_where_its_coverage_starts(monkeypatch):
+    from app.engine import news
+    start = _at("2026-11-27T09:00:00")
+    page = [{"created_at": datetime.fromtimestamp(start + 60 * (100 - i), ET).isoformat(), "headline": f"h{i}"}
+            for i in range(cat.HEADLINE_PAGE)]
+    monkeypatch.setattr(news, "fetch_news", lambda **kw: page[:kw["limit"]])
+    full = cat.live_headlines("NBIS", start - 3600)
+    assert full["covered_from"] == start + 60 * (100 - cat.HEADLINE_PAGE + 1)  # the page's oldest headline
+    monkeypatch.setattr(news, "fetch_news", lambda **kw: page[:3])
+    assert "covered_from" not in cat.live_headlines("NBIS", start - 3600)  # a short page is the whole window
+
+
+def test_moves_before_a_cut_off_headline_page_are_never_called_unexplained():
+    since, now = _at("2026-11-26T16:00:00"), _at("2026-11-27T11:30:00")
+    start = _at("2026-11-27T08:00:00")
+    bars = _bars(start, 210, spike_at=60, jump=-1.5)  # a sharp minute at 09:00 with no headline read before 10:00
+    later = [{"at": _at("2026-11-27T10:00:00") + 60 * i, "headline": f"h{i}", "source": "x"} for i in range(20)]
+    headlines = {"state": "ok", "items": later, "covered_from": _at("2026-11-27T10:00:00")}
+    out = cat.timeline("NBIS", since, now, filings=_ok([]), halts=_ok([]), headlines=headlines, bars=bars)
+    assert out["unexplained_moves"] == [] and out["headlines_from"] == "11-27 10:00 ET"
+    assert summarize("get_catalysts", out) == "Since 11-26 16:00 ET: 0 filings, 0 halts, 20+ headlines"
+    whole = cat.timeline("NBIS", since, now, filings=_ok([]), halts=_ok([]), headlines=_ok(later), bars=bars)
+    assert len(whole["unexplained_moves"]) == 1 and "headlines_from" not in whole  # a complete feed still judges it

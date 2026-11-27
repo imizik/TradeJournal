@@ -5261,7 +5261,10 @@ first, at most 15 items:
   13D/13G and periodic reports; an amendment counts as its base form.
 - **Halts** from Nasdaq Trader's halts RSS (LULD pauses included), read at
   most once a minute, in New York time with the resumption time.
-- **Headlines** from the Alpaca news feed, fiscal.ai summaries dropped.
+- **Headlines** from the Alpaca news feed, fiscal.ai summaries dropped. One
+  page of the newest 50 is read; a near-full page reports `headlines_from`
+  (its oldest headline), the headline count is then a floor ("20+"), and no
+  move before that time is called unexplained.
 
 Each item carries the tape's reaction from the chart feed's minute bars
 (Tradier time and sales, extended hours), measured by the clock: the move to

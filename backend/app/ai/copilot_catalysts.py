@@ -47,6 +47,8 @@ TIMEOUT = 8.0
 READ_DEADLINE = 7.0  # the calendar and all four reads, inside the copilot's 10 s tool timeout
 CALENDAR_WAIT = 2.0
 MAX_ITEMS = 15
+HEADLINE_PAGE = 50  # Alpaca's largest page; a fast read takes one page only
+NEAR_FULL = 45  # this many back and older headlines may be cut off (a few dropped sources keep a full page under 50)
 MAX_UNEXPLAINED = 3
 REACTION_MINUTES = 15
 BURST_MINUTES = 5
@@ -240,7 +242,10 @@ def timeline(symbol: str, since: float, now: float, *, filings: dict, halts: dic
     items = in_window[:MAX_ITEMS]  # the display cap; every item in the window still explains a move
     for item in items:
         item["reaction"] = reaction(bars, item["at"]) if bars else None
-    sharp = unexplained(bars, [i["at"] for i in in_window], since) if bars else []
+    covered_from = headlines.get("covered_from") if headlines.get("state") == "ok" else None
+    cut_off = covered_from is not None and covered_from > since
+    # before the headline page's oldest item a missing headline proves nothing: no move there is called unexplained
+    sharp = unexplained(bars, [i["at"] for i in in_window], covered_from if cut_off else since) if bars else []
     sources = {name: src.get("state", "unavailable") if src.get("state") == "ok" else f"unavailable: {src.get('reason') or 'no read'}"
                for name, src in (("sec_filings", filings), ("halts", halts), ("headlines", headlines))}
     primary = [i for i in in_window if i["type"] in ("filing", "halt")]
@@ -249,6 +254,8 @@ def timeline(symbol: str, since: float, now: float, *, filings: dict, halts: dic
            "items": [{**i, "at": _clock(i["at"])} for i in items],
            "unexplained_moves": [{**s, "at": _clock(s["at"])} for s in sharp],
            "minute_bars": "ok" if bars else "unavailable"}
+    if cut_off:
+        out["headlines_from"] = _clock(covered_from)  # the count is a floor; earlier headlines were not read
     if not items and all(s == "ok" for s in sources.values()):
         out["note"] = (f"No filing, halt or headline since {out['since']}: the move is not news-driven by these sources; "
                        "check peers and the market.")
@@ -327,7 +334,8 @@ def live_halts(symbol: str) -> dict:
 def live_headlines(symbol: str, since: float) -> dict:
     from app.engine import news
     try:
-        found = news.fetch_news(symbols=[symbol], start=datetime.fromtimestamp(since, ET), limit=20, fast=True, strict=True)
+        found = news.fetch_news(symbols=[symbol], start=datetime.fromtimestamp(since, ET), limit=HEADLINE_PAGE, fast=True,
+                                strict=True)
     except Exception as exc:  # noqa: BLE001
         log.info("catalysts: headlines unavailable for %s: %s", symbol, type(exc).__name__)
         return {"state": "unavailable", "reason": "Alpaca news could not be read"}
@@ -338,7 +346,10 @@ def live_headlines(symbol: str, since: float) -> dict:
         except ValueError:
             continue
         items.append({"at": at, "headline": _plain(a.get("headline") or "", 200), "source": a.get("source"), "url": a.get("url")})
-    return {"state": "ok", "items": items}
+    out: dict = {"state": "ok", "items": items}
+    if len(found) >= NEAR_FULL and items:  # the newest page only: say where its coverage starts
+        out["covered_from"] = min(i["at"] for i in items)
+    return out
 
 
 def last_close(now: float, hours: Callable[[date], dict | None]) -> float:
