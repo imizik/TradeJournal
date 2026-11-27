@@ -171,8 +171,8 @@ off. An answer that only carries the card is one short plain sentence with no Ve
     (frozenset({DESK, TELEGRAM, PREP}), """- When web_search is offered (three searches a turn: stop after the third), use \
 it for what the app's tools do not carry: macro and policy (the Fed, rates, Treasury supply, fiscal), politics and \
 elections, geopolitics, industry news, and what a company or its customers said. A gap, bounce or selloff today needs \
-its cause: search for the catalyst (earnings, guidance, deals, analyst calls, headlines) before judging whether the move \
-holds. A cause needs a filing, the company's release or a wire (Reuters, Bloomberg, WSJ, CNBC, Barron's, FT); a \
+its cause: read get_catalysts first (filings, halts and headlines since the close before today's session, each with the move that followed), \
+then search for what it does not carry (earnings, guidance, deals, analyst calls) before judging whether the move holds. A cause needs a filing, the company's release or a wire (Reuters, Bloomberg, WSJ, CNBC, Barron's, FT); a \
 commentary or stock-pick piece is opinion, never the cause, and no catalyst found is a complete answer (say the move \
 follows its peers or the market). Prices, levels, moves and the owner's book still come from the tools. Name the \
 publisher and date of what you use, say when a search found nothing current, and never put the owner's positions, sizes, trades or account labels in a \
@@ -432,15 +432,15 @@ SHAPE = {DESK: copilot_answer.ANSWER_SHAPE, TELEGRAM: copilot_answer.TELEGRAM_SH
 
 # --------------------------------------------------------------------------- tools by job
 
-PREP_TOOLS = ("get_quotes", "get_market_regime", "get_radar_today", "get_symbol_news", "get_symbol_events",
+PREP_TOOLS = ("get_quotes", "get_market_regime", "get_radar_today", "get_symbol_news", "get_catalysts", "get_symbol_events",
               "get_group_comparison", "get_symbol_profile", "get_macro", "get_base_rates", "get_breadth", "get_positioning")
-COMPANION_TOOLS = ("get_trade_review", "get_chart_context", "get_group_comparison", "get_peer_moves", "get_symbol_news",
+COMPANION_TOOLS = ("get_trade_review", "get_chart_context", "get_group_comparison", "get_peer_moves", "get_symbol_news", "get_catalysts",
                    "get_symbol_events", "get_quotes", "get_market_regime", "get_radar_today", "get_level_history",
                    "get_option_candidates", "get_trades")
 WEEK_TOOLS = ("get_week_review", "get_trade_review", "get_trades", "get_proof", "propose_plan")
 CHECK_TOOLS = ("get_call_facts", "get_quotes", "get_chart_context", "get_level_history", "get_trades")
 # The desk read: a glance, so the reads that say where a name is and what moved it today; none that proposes or reviews.
-DESK_READ_TOOLS = ("get_group_comparison", "get_symbol_news", "get_symbol_events", "get_quotes", "get_chart_context",
+DESK_READ_TOOLS = ("get_group_comparison", "get_symbol_news", "get_catalysts", "get_symbol_events", "get_quotes", "get_chart_context",
                    "get_market_regime", "get_radar_today")
 JOB_ONLY = frozenset({"get_call_facts"})  # offered to its own job alone, never in "every tool"
 DESK_ONLY = frozenset({"desk_action", "draft_paper_order"})  # acts on the desk page, so only a desk turn gets it (never the phone chat)

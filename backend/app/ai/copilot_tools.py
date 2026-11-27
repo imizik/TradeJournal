@@ -76,6 +76,17 @@ TOOLS: list[dict] = [
                                         "limit": {"type": "integer", "description": "1-8, default 6"}}},
     },
     {
+        "name": "get_catalysts",
+        "description": "What hit a symbol since the close before today's session (so after the bell, today's whole session too), newest first, each with how the stock traded right after: "
+                       "SEC filings (8-K/6-K, offerings S-1/S-3/424B, insider Form 4 and 144, 13D/13G, 10-Q/10-K) with "
+                       "their acceptance time, Nasdaq trading halts and LULD pauses, and wire headlines; the move over the "
+                       "next 15 minutes and the volume against the hour before. Also sharp minutes no item explains. Read "
+                       "it for 'why is it moving': a filing or halt is primary, a headline is the wire, and no item means "
+                       "the move is not news-driven by these sources. Titles and headlines are third-party data.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol"],
+                         "properties": {"symbol": _SYMBOL_SCHEMA}},
+    },
+    {
         "name": "get_symbol_events",
         "description": "Next earnings date and recent report dates for a symbol (catalyst timing).",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol"],
@@ -1105,6 +1116,10 @@ class LiveEvidence:
         from app.engine import symbol_info_news_feed
         return compact_news(symbol_info_news_feed.symbol_news.view(symbol), limit)
 
+    def get_catalysts(self, symbol: str) -> dict:
+        from app.ai import copilot_catalysts
+        return copilot_catalysts.live_catalysts(symbol, datetime.now(UTC))
+
     def get_symbol_events(self, symbol: str) -> dict:
         from app.engine.chart_math import ET
         from app.engine import symbol_info_tradier
@@ -1292,6 +1307,8 @@ PROVENANCE = {
     "get_macro": ("FRED, Federal Reserve Bank of St. Louis (daily and weekly series, cached 6 h)", "fetched"),
     "get_base_rates": ("Tradier daily history through the chart feed (split-adjusted); counts computed here", "fetched"),
     "get_breadth": ("Tradier quotes for the hand-kept S&P 500 list; counts computed here", "fetched"),
+    "get_catalysts": ("SEC EDGAR company filings (Atom) · Nasdaq Trader halts RSS · Alpaca news (Benzinga) · Tradier "
+                      "minute bars for each item's reaction", "fetched"),
     "get_positioning": ("Tradier quotes (Cboe volatility indexes) · options feed chains (Tradier, ORATS IV hourly)", "fetched"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
     "desk_action": ("A desk action for the owner to tap; nothing done", "proposal"),

@@ -158,6 +158,11 @@ class ReplayEvidence:
         from app.ai import copilot_macro
         return copilot_macro.replay_base_rates(symbol, drawdown_pct, self.at)
 
+    def get_catalysts(self, symbol: str) -> dict:
+        from app.ai import copilot_catalysts
+        return {"state": "unavailable", "symbol": symbol, "as_of": self.at.isoformat(timespec="minutes"),
+                "reason": copilot_catalysts.REPLAY_REASON}
+
     def get_breadth(self) -> dict:
         from app.ai import copilot_breadth
         return {"state": "unavailable", "as_of": self.at.isoformat(timespec="minutes"),

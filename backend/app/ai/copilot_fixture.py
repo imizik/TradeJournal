@@ -5,6 +5,8 @@ UI can be exercised without providers. The neocloud scenario is deliberately
 mixed: NBIS is bouncing but lags CRWV and APLD, so a pushback has something real
 to revisit.
 """
+from datetime import datetime
+
 from app.ai.copilot_tools import compact_comparison
 
 SESSION = "2026-10-23"
@@ -108,6 +110,10 @@ class FixtureEvidence:
     def get_breadth(self) -> dict:
         from app.ai import copilot_breadth
         return copilot_breadth.fixture_breadth()
+
+    def get_catalysts(self, symbol: str) -> dict:
+        from app.ai import copilot_catalysts
+        return copilot_catalysts.fixture_catalysts(symbol, datetime.fromisoformat(AT.replace("Z", "+00:00")))
 
     def get_positioning(self, symbol: str = "SPY") -> dict:
         from app.ai import copilot_breadth

@@ -5259,6 +5259,50 @@ prompt says to give the off-hours change with its last trade time and dollar
 volume and never to call a name flat from a regular-session quote off hours.
 Live only; replay and the fixture leave it out. Tests:
 `backend/tests/test_copilot_extended.py`.
+## Catalysts
+
+`get_catalysts(symbol)` (`backend/app/ai/copilot_catalysts.py`, added
+2026-11-27) answers "why is it moving" from primary sources before the web is
+searched. It lines up everything since the close before today's session (from
+the market calendar, so after the bell today's whole session and its
+after-hours are in; 18 hours back when the calendar cannot say), newest
+first, at most 15 items:
+
+- **SEC filings** from EDGAR's per-company Atom feed, stamped with acceptance
+  time and offset, with the `SEC_USER_AGENT` contact and pacing the Financials
+  tab uses. Kept forms: current reports (8-K, 6-K, with their Item numbers),
+  offerings (S-1, S-3, F-1, F-3, FWP, 424B*), insider Form 4 and 144,
+  13D/13G and periodic reports; an amendment counts as its base form.
+- **Halts** from Nasdaq Trader's halts RSS (LULD pauses included), read at
+  most once a minute, in New York time with the resumption time.
+- **Headlines** from the Alpaca news feed, fiscal.ai summaries dropped. One
+  page of the newest 50 is read; a near-full page reports `headlines_from`
+  (its oldest headline), the headline count is then a floor ("20+"), and no
+  move before that time is called unexplained.
+
+Each item carries the tape's reaction from the chart feed's minute bars
+(Tradier time and sales, extended hours), measured by the clock in whole minutes from the minute the item landed in: the
+move to the last close inside the next 15 minutes and the first 5 minute bars' volume (a
+minute with no trade counts as none) against the median minute of the hour
+before. A window the bars have not reached yet gives `move_so_far_pct` with
+its minutes instead, and no volume ratio; an overnight gap never stretches a
+window into the next session. Minutes with 5x volume and a 1%+ move by the
+fifth minute that no item in the window explains (an item in that bar or up
+to 10 minutes before, whether or not it made the 15 shown) are listed as
+unexplained moves, at most three (one still inside its five minutes shows
+`move_so_far_pct` with its minutes). With every source read and no item, the
+result says the move is not news-driven by these sources; "headlines only"
+needs the filings and halts read and a headline found; a failed source is
+named and never reads as "no news". `counts` covers every item in the window,
+shown or not. The calendar lookup and the four reads share one 7-second deadline
+inside the tool's 10-second timeout: a calendar that cannot answer in 2
+seconds gives way to what it holds in memory (or the 18-hour fallback), and a
+source still reading at the deadline is unavailable while the others stand. Titles and headlines are third-party data. The fixture's
+timeline is marked simulated, and replay refuses it (a live read would mix in
+later filings). Offered to the desk, Telegram, the morning brief, the
+companion, the desk read and research jobs. The prompt reads it before
+searching the web for a cause. Tests: `backend/tests/test_copilot_catalysts.py`.
+
 ## Web search
 
 A turn the owner asked (the desk's `POST /copilot/chat` and a typed or tapped

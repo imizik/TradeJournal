@@ -288,12 +288,34 @@ def my_record(d: dict) -> str | None:
     return f"Record ({label}): " + ", ".join(parts)
 
 
+def catalysts(d: dict) -> str | None:
+    if d.get("state") != "ok":
+        return None
+    items = d.get("items") or []
+
+    def count(n: int, word: str) -> str:
+        return f"{n} {word}{'' if n == 1 else 's'}"
+    sources = d.get("sources") or {}
+    read = {kind: sources.get(name) == "ok" for kind, name in (("filing", "sec_filings"), ("halt", "halts"), ("headline", "headlines"))}
+    if not any(read.values()):
+        return None  # nothing was read: an outage is never a count of zero
+    totals = d.get("counts") or {}  # the whole window's, not only the items shown
+    parts = [count(totals.get(kind, sum(1 for i in items if i.get("type") == kind)), kind) if ok else f"{kind}s unavailable"
+             for kind, ok in read.items()]
+    if read["headline"] and d.get("headlines_from"):  # only the feed's newest page was read: the count is a floor
+        parts[2] = parts[2].replace(" ", "+ ", 1)
+    if d.get("unexplained_moves"):
+        parts.append(count(len(d["unexplained_moves"]), "unexplained move"))
+    return f"Since {d.get('since')}: " + ", ".join(parts)
+
+
 SUMMARISERS: dict[str, Callable[[dict], str | None]] = {
     "get_group_comparison": group_comparison, "get_peer_moves": peer_moves, "get_symbol_news": symbol_news,
     "get_quotes": quotes, "get_option_candidates": option_candidates, "get_market_regime": market_regime,
     "get_radar_today": radar_today, "get_breadth": breadth, "get_positioning": positioning, "get_macro": macro,
     "get_base_rates": base_rates, "get_trade_review": trade_review, "get_symbol_profile": symbol_profile,
     "get_symbol_events": symbol_events, "get_my_record": my_record, "web_search": web_search,
+    "get_catalysts": catalysts,
 }
 
 _UNSAFE = re.compile(r"\s+")
