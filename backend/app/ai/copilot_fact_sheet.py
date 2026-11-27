@@ -53,8 +53,11 @@ def _ok(d) -> bool:
 def price(symbol: str, quotes: dict, chart: dict) -> dict | None:
     q = (quotes.get("quotes") or {}).get(symbol) if _ok(quotes) else None
     cq = chart.get("quote") if _ok(chart) else None
-    if not q and not cq:
+    fallback = (quotes.get("prices") or {}).get(symbol) if _ok(quotes) and not q else None
+    if not q and not cq and fallback is None:
         return None
+    if not q and not cq:  # the quote engine's price only (a Tradier outage): the price, with where it came from
+        return {"last": _num(fallback), "source": quotes.get("source_note") or "quote engine, price only"}
     q, cq = q or {}, cq or {}
     last = q.get("last") if q.get("last") is not None else cq.get("last")
     prev = cq.get("previous_close") or q.get("prev_close")
@@ -150,9 +153,13 @@ def record(d: dict) -> dict | None:
         return None
     setups = sorted(d.get("setups") or [], key=lambda s: -(s.get("total_pnl") or 0))
     mistakes = sorted(d.get("top_mistakes") or [], key=lambda m: m.get("total_pnl") or 0)
-    out = {"trades": d.get("trades"), "win_rate": d.get("win_rate"), "total_pnl": d.get("total_pnl"),
-           "median_pnl": d.get("median_pnl"), "broke_cut_rule": d.get("broke_cut_rule"), "small_sample": d.get("small_sample"),
-           "best_setup": setups[0] if setups else None, "worst_mistake": mistakes[0] if mistakes else None}
+    tagged = d.get("tagged_trades")
+    measured = tagged is None or tagged > 0  # with no tagged trade, cut-rule breaks and mistakes were never measured
+    out = {"trades": d.get("trades"), "tagged_trades": tagged, "win_rate": d.get("win_rate"), "total_pnl": d.get("total_pnl"),
+           "median_pnl": d.get("median_pnl"), "broke_cut_rule": d.get("broke_cut_rule") if measured else None,
+           "small_sample": d.get("small_sample"),
+           "best_setup": setups[0] if setups else None, "worst_mistake": mistakes[0] if mistakes else None,
+           "note": d.get("note")}  # carries "broke_cut_rule covers tagged trades only" when some are untagged
     return {k: v for k, v in out.items() if v is not None}
 
 
@@ -287,7 +294,8 @@ def live_sheet(evidence, symbol: str) -> dict:
 
     def forecast() -> dict | None:
         quotes = jobs["quotes"].result(timeout=max(0.0, until - time.monotonic()))
-        spot = ((quotes or {}).get("quotes") or {}).get(symbol, {}).get("last") if _ok(quotes) else None
+        spot = (((quotes or {}).get("quotes") or {}).get(symbol, {}).get("last")
+                or ((quotes or {}).get("prices") or {}).get(symbol)) if _ok(quotes) else None  # the price-only fallback too
         return options_feed.forecast(symbol, spot, None) if spot else None
     jobs["forecast"] = pool.submit(_safe, "implied move", forecast)
     done, _ = wait(jobs.values(), timeout=READ_DEADLINE)

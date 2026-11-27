@@ -191,3 +191,17 @@ def test_a_large_book_fits_the_result_with_the_risky_positions_first():
     assert len(out["position"]) == fs.MAX_POSITIONS_SHOWN and out["position"][0]["past_cut"] is True
     assert out["position_omitted"] == "9 more open positions in NBIS not shown"
     assert out["delayed"]["provider"] == "Alpaca SIP" and list(out)[:4] == ["symbol", "state", "as_of", "missing"]
+
+
+def test_an_untagged_record_never_reads_as_zero_cut_rule_breaks():
+    untagged = {**RECORD, "trades": 100, "tagged_trades": 0, "broke_cut_rule": 0, "top_mistakes": [],
+                "note": "100 matching closed trade(s) have no AI tag; top_mistakes and broke_cut_rule cover tagged trades only."}
+    rec = _sheet(mine=untagged)["my_record"]
+    assert "broke_cut_rule" not in rec and rec["tagged_trades"] == 0 and "tagged trades only" in rec["note"]
+    assert _sheet(mine={**RECORD, "tagged_trades": 20})["my_record"]["broke_cut_rule"] == 6
+
+
+def test_a_tradier_outage_still_gives_the_quote_engines_price():
+    fallback = {"state": "ok", "quotes": {}, "prices": {"NBIS": 88.5}, "source_note": "quote engine (60 s cache), price only: x"}
+    out = _sheet(quotes=fallback, chart={"state": "unavailable"})
+    assert out["price"] == {"last": 88.5, "source": "quote engine (60 s cache), price only: x"}
