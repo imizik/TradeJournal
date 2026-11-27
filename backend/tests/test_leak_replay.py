@@ -198,3 +198,24 @@ def test_the_dry_run_is_the_default_and_spends_nothing(monkeypatch, capsys, engi
     assert leak_replay.main([]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["moments"] == 0 and out["estimate_usd"] == 0
+
+
+def test_retry_resubmits_only_the_unanswered_moments_and_scores_them_with_the_first_batch(tmp_path):
+    found = _moments(3)
+    first, _ = _fake_client([_result("m0", "cut"), _result("m1", ok=False), _result("m2", "hold")])
+    first.messages.batches.create = lambda requests: SimpleNamespace(id="msgbatch_first")
+    leak_replay.submit(first, found, max_usd=20, out_dir=tmp_path)
+    assert leak_replay.collect(first, "msgbatch_first", out_dir=tmp_path)["unanswered"] == 1
+    again = leak_replay.unanswered(found, "msgbatch_first", tmp_path)
+    assert again == [found[1]]
+    retry, created = _fake_client([_result("m0", "cut")])
+    manifest = leak_replay.submit(retry, again, max_usd=20, out_dir=tmp_path, retry_of="msgbatch_first")
+    assert len(created[0]) == 1 and manifest["retry_of"] == "msgbatch_first"
+    report = leak_replay.collect(retry, "msgbatch_test", out_dir=tmp_path)
+    assert report["unanswered"] == 0 and report["score"]["all"]["answered"] == 3
+    assert (report["score"]["all"]["cut"], report["score"]["all"]["hold"]) == (2, 1)
+    assert report["cost_usd"] == pytest.approx((500 * 2 + 60 * 10) / 1e6 / 2)  # only the retry's own tokens
+
+
+def test_answers_have_room_past_the_first_runs_cutoff():
+    assert leak_replay.requests(_moments(1))[0]["params"]["max_tokens"] >= 1000
