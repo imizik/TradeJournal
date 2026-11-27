@@ -2445,6 +2445,37 @@ and the answer about 150 words, so a read is about $0.02–0.04 on Sonnet 5.5 (e
 yet). One read a day is under $1 a month; each Refresh adds one. Proof: `backend/tests/test_day_read.py`,
 `frontend/e2e/copilot-day-read.spec.ts`.
 
+### The day call
+
+Claude's read of the session, kept as a thread it follows through the day: **risk on**, **risk off** or **mixed**, why,
+and what would flip it (`backend/app/engine/day_call.py`, `GET /copilot/desk/day-call`,
+`frontend/components/copilot/DeskDayCall.tsx`). It sits at the top of the copilot's column, above Right now, before a
+conversation starts. A paper call: it tells him nothing to buy or sell, and it is scored before it earns more.
+
+- **The opening call** at 09:45 New York (once the opening range and VWAP exist): one structured question through the
+  Anthropic API (`api_runner.ask`, `kind="day_call"`, Sonnet 5.5 by default) from facts the server builds: SPY's regular
+  minutes so far (price, VWAP, open, high, low, the 15-minute opening range, the last 30 minutes) from the chart feed,
+  and the copilot's regime read (the indices' day from Radar, VIX, the 10-year, today's macro calendar). The answer
+  carries one to three **flip checks**, each a number the code can test: SPY's price, SPY against VWAP, SPY from the
+  open, SPY, QQQ or IWM on the day, RSP minus SPY (breadth) or VIX, above or below a value.
+- **Following its thread** with no model: every minute in the regular session the code checks the latest call's flip
+  checks. One that holds for two checks in a row, or SPY moving 0.5% from the last call's price, asks Claude again with
+  the day's whole thread (each earlier call, what it said would flip it, and what just tripped); it holds or changes the
+  call and writes fresh checks. At most five calls a day, at least 20 minutes apart. The ask runs on a thread of its
+  own, so a slow answer never holds the level-alert monitor's pass.
+- **Paper score.** After the close each call is scored on SPY from that call to the next (or the close): risk on is
+  right when SPY rose, risk off when it fell, mixed is not scored. The line under the call shows the record over every
+  saved day ("7 of 11 right over 4 days").
+- **Pings.** With `DAY_CALL_PINGS=true` a call that changes sends one silent ping (kind `day_call`, through the
+  notification policy). Off by default.
+- **Cost and stops.** Every call is a `copilot_turn` row on `AI_MONTHLY_BUDGET_USD`; no key, or a spent month, stops
+  the day's calls, and a failed ask waits ten minutes. Expected cost about $0.02–0.08 a call, so at most about $0.40 a
+  day (estimated; no live call measured yet).
+- **Storage.** One file a day, `backend/data/day_call/<day>.json` (its calls and its score); no table.
+
+Off unless `DAY_CALL_ENABLED=true` (the owner's switch; the server also needs `ANTHROPIC_API_KEY`). Proof:
+`backend/tests/test_day_call.py`, `frontend/e2e/copilot-desk-right-now.spec.ts`.
+
 ### Notes on a trade
 
 Each followed position row in the book has a small pen beside its eye, and so does a fresh fill in the book's Orders

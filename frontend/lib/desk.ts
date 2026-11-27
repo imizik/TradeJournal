@@ -830,6 +830,26 @@ export async function getDayRead(refresh = false, signal?: AbortSignal): Promise
   return body as DayRead;
 }
 
+// --------------------------------------------------------------------------- the day call
+
+/** One flip check the server runs on the live numbers (``day_call.FLIP_METRICS``). */
+export type DayCallFlip = { metric: string; op: "above" | "below"; value: number; why: string };
+export type DayCallEntry = {
+  call: "risk_on" | "risk_off" | "mixed"; confidence: number; read: string; changed: string | null; flips: DayCallFlip[];
+  at: number; time_et: string; trigger: string | null; spy_price: number | null; cost_usd: number;
+};
+export type DayCallRecord = { days: number; scored: number; right: number; hit_rate: number | null; opening_calls: number; opening_right: number };
+/** ``GET /copilot/desk/day-call`` (docs/copilot-lab.md § The day call): today's calls, oldest first, and the paper record. */
+export type DayCall = {
+  enabled: boolean; day: string; calls: DayCallEntry[]; stopped: string | null; record: DayCallRecord;
+  score: { close: number | null; scored: number; right: number; opening_right: boolean | null } | null;
+};
+export async function getDayCall(signal?: AbortSignal): Promise<DayCall> {
+  const response = await fetch(apiUrl("/copilot/desk/day-call"), { cache: "no-store", signal });
+  if (!response.ok) throw new Error(`Request failed (${response.status}).`);
+  return await response.json() as DayCall;
+}
+
 // --------------------------------------------------------------------------- earnings on the book and Watching rows
 
 /** One symbol's earnings tag (``desk_events.tag``): ``grey`` within ``window`` trading days, ``amber`` when a held option

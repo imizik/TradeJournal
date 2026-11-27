@@ -108,14 +108,14 @@ def _api_error(exc: Exception) -> tuple[str, str]:
 
 
 def ask(system: str, message: str, schema: dict, *, model: str | None = None, timeout: float | None = None,
-        client=None) -> ApiAnswer:
-    """One question, one structured answer. Raises ApiUnavailable or ApiCallFailed."""
+        client=None, kind: str = "ask") -> ApiAnswer:
+    """One question, one structured answer. Raises ApiUnavailable or ApiCallFailed. ``kind`` labels its spend row."""
     from app.ai import copilot_spend
     if client is None and not configured():
         raise ApiUnavailable(f"No {KEY_ENV} on the private backend.")
     exceeded, monthly_spent, monthly_cap = copilot_spend.monthly_status()
     if exceeded:
-        copilot_spend.record_refused(kind="ask", source="api_runner", backend="api_background", code="monthly_budget")
+        copilot_spend.record_refused(kind=kind, source="api_runner", backend="api_background", code="monthly_budget")
         raise ApiUnavailable(copilot_spend.monthly_budget_message(monthly_spent, monthly_cap))
     model = copilot.model_id(model or os.environ.get("TJ_PLAN_REVIEW_MODEL") or DEFAULT_MODEL)
     limit = timeout or float(os.environ.get("TJ_PLAN_REVIEW_TIMEOUT") or DEFAULT_TIMEOUT)
@@ -138,7 +138,7 @@ def ask(system: str, message: str, schema: dict, *, model: str | None = None, ti
     copilot_spend.record(
         {"backend": "api_background", "model": used_model, "rounds": 1, "usage": usage, "cost_usd": usd,
          "total_ms": round(elapsed_s * 1000)},
-        kind="ask", source="api_runner", error=(None if final.stop_reason == "end_turn" else final.stop_reason),
+        kind=kind, source="api_runner", error=(None if final.stop_reason == "end_turn" else final.stop_reason),
     )
     if final.stop_reason != "end_turn":
         raise ApiCallFailed(f"Claude gave no answer (stopped: {final.stop_reason}).")

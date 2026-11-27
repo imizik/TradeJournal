@@ -33,7 +33,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import day_lock, day_plan, hold_check_ins, expression_recorder, fill_interrupts, intraday_momentum_book, level_alerts, notification_policy, overnight_book, phone, ping_images, practice_goal
+from app.engine import day_call, day_lock, day_plan, hold_check_ins, expression_recorder, fill_interrupts, intraday_momentum_book, level_alerts, notification_policy, overnight_book, phone, ping_images, practice_goal
 from app.engine.chart_feed import ChartFeedError
 from app.engine.chart_math import ET, chart_bars, normalize_bars, session_windows
 from app.models import LevelAlert, LevelAlertEvent
@@ -69,7 +69,7 @@ class LevelAlertMonitor:
                  clock: Callable[[], float] = time.time, sweep_seconds: float = SWEEP_SECONDS, paper=None, scanner=None,
                  positions=None, nudges=None, time_stops=None, prep=None, week_review=None, day_replay=None, evening_review=None,
                  follow_ups=None, interrupts=None, expressions=None, paper_review=None, overnight=None, momentum=None,
-                 day_locks=None, day_plans=None, check_ins=None):
+                 day_locks=None, day_plans=None, check_ins=None, day_calls=None):
         self.engine = engine
         self.paper = paper  # Practice paper plans (A2), judged on the same pass and the same feed
         self.scanner = scanner  # Paper S1 and/or stock-only awareness; each retains its own enable flag.
@@ -85,6 +85,9 @@ class LevelAlertMonitor:
         if day_plans is None and day_plan.enabled():
             day_plans = day_plan.DayPlanPings(engine, calendar, clock=clock)
         self.day_plans = day_plans  # The pre-market plan's max-size and exit-time pings, when DAY_PLAN_ALERTS
+        if day_calls is None and day_call.enabled():
+            day_calls = day_call.DayCalls(calendar, feed, clock=clock)
+        self.day_calls = day_calls  # Claude's risk-on/off day call and its flip checks, when DAY_CALL_ENABLED
         if check_ins is None and hold_check_ins.enabled():
             check_ins = hold_check_ins.HoldCheckIns(engine, calendar, clock=clock)
         self.check_ins = check_ins  # The ping card's Keep holding check-in pings, when HOLD_CHECK_IN_PINGS
@@ -253,6 +256,8 @@ class LevelAlertMonitor:
                                                             await asyncio.to_thread(self.day_locks.run)  # never raises
                                                         if self.day_plans is not None:
                                                             await asyncio.to_thread(self.day_plans.run)  # never raises
+                                                        if self.day_calls is not None:
+                                                            await asyncio.to_thread(self.day_calls.run)  # never raises; asks on its own thread
                                                         if self.check_ins is not None:
                                                             await asyncio.to_thread(self.check_ins.run)  # never raises
                                                         if self.follow_ups is not None:

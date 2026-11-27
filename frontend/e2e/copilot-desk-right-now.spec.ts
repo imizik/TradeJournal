@@ -48,6 +48,8 @@ const READS: Record<string, unknown> = {
   "/copilot/desk/feed": FEED, "/copilot/investigations": { investigations: [] }, "/copilot/tickets": { plans: [] },
   "/copilot/unusual": { state: "ok", rows: [], tickers: [], unread: [], no_history: [], stale: [], rule: "" },
   "/copilot/scanner": { state: "off", rows: [] },
+  "/copilot/desk/day-call": { enabled: false, day: "2026-11-13", calls: [], score: null, stopped: null,
+    record: { days: 0, scored: 0, right: 0, hit_rate: null, opening_calls: 0, opening_right: 0 } },
   "/copilot/exposure": { state: "ok", at_risk_usd: 2112, positions: 3, usual_day_usd: 2100, sample_days: 60, as_of: "2026-11-13T16:00:00Z", line: "At risk now: $2,112 in 3 options · usual day $2,100" },
 };
 function chart(symbol: string) {
@@ -56,8 +58,8 @@ function chart(symbol: string) {
   return { symbol, timeframe: "2m", step: 120, as_of: last, live: false, state: "ok", reason: null, bars, studies: {}, reference: [],
     reading: { last: 102, at: last, daily: false, prev_close: 100.5, vwap: null, vwap_at: null, rvol: null }, levels: [], alerts: [], marks: [], time_stop: null, events: { earnings: null, macro: [], note: null } };
 }
-async function open(page: Page, width: number, height: number, threads: object = THREADS, priced = true) {
-  const reads: Record<string, unknown> = { ...READS, "/copilot/desk/threads": threads };
+async function open(page: Page, width: number, height: number, threads: object = THREADS, priced = true, extra: Record<string, unknown> = {}) {
+  const reads: Record<string, unknown> = { ...READS, "/copilot/desk/threads": threads, ...extra };
   await page.setViewportSize({ width, height });
   await page.clock.install({ time: NOW });
   await page.route("**/api/backend/**", r => r.fulfill({ status: 404, json: { detail: "Not in this test." } }));
@@ -133,4 +135,40 @@ test("a cut line with no price yet is never called clear", async ({ page }) => {
   // MU has a cut line and no plan, but no price: it cannot be checked. NBIS is planned.
   await expect(rightNow(page).getByTestId("right-now-unchecked")).toHaveText("No price yet for 1 position with a cut line: not checked against it.");
   await expect(rightNow(page).getByTestId("right-now-calm")).toHaveCount(0);
+});
+
+// The day call (docs/copilot-lab.md § The day call): Claude's paper risk-on/off read sits above Right now.
+const CALL = (call: string, time_et: string, o: Record<string, unknown> = {}) => ({ call, confidence: 0.6, read: `${call} read`, changed: null,
+  flips: [], at: epoch("2026-11-13T15:00:00Z"), time_et, trigger: null, spy_price: 600, cost_usd: 0.03, ...o });
+const DAY_CALL = { enabled: true, day: "2026-11-13", stopped: null, score: null,
+  record: { days: 4, scored: 11, right: 7, hit_rate: 0.636, opening_calls: 4, opening_right: 3 },
+  calls: [CALL("risk_on", "09:45"), CALL("risk_off", "10:31", { changed: "SPY lost VWAP and the open; IWM rolled over.",
+    flips: [{ metric: "spy_vs_vwap_pct", op: "above", value: 0.2, why: "reclaims VWAP" }, { metric: "vix", op: "below", value: 16.5, why: "fear fades" }] })] };
+
+test("the day call leads the empty column: the call, what it flipped from, what would flip it, and its paper record", async ({ page }) => {
+  await open(page, 1440, 900, THREADS, true, { "/copilot/desk/day-call": DAY_CALL });
+  const column = page.getByRole("region", { name: "Conversation" });
+  const call = column.getByTestId("day-call");
+  await expect(call.getByTestId("day-call-call")).toHaveText("Risk off");
+  await expect(call).toContainText("since 10:31, was risk on");
+  await expect(call.getByTestId("day-call-read")).toHaveText("SPY lost VWAP and the open; IWM rolled over.");
+  await expect(call.getByTestId("day-call-flips")).toHaveText("Flips if SPY vs VWAP above +0.20% · VIX below 16.50");
+  await expect(call.getByTestId("day-call-record")).toHaveText("Paper call · 2 calls today · 7 of 11 right over 4 days");
+  await expect(column.getByTestId("right-now-item")).toHaveCount(2); // Right now still follows it
+});
+
+test("the day call shows with no open positions, and an off or empty day call shows nothing", async ({ page }) => {
+  const flat = { ...THREADS, threads: [] };
+  await open(page, 1440, 900, flat, true, { "/copilot/desk/day-call": { ...DAY_CALL, calls: [CALL("mixed", "09:45")],
+    record: { days: 0, scored: 0, right: 0, hit_rate: null, opening_calls: 0, opening_right: 0 } } });
+  const column = page.getByRole("region", { name: "Conversation" });
+  await expect(column.getByTestId("day-call-call")).toHaveText("Mixed");
+  await expect(column.getByTestId("day-call-record")).toHaveText("Paper call · no scored days yet");
+  await expect(column.getByTestId("right-now")).toHaveCount(0);
+});
+
+test("with the day call off the column is as before", async ({ page }) => {
+  await open(page, 1440, 900);
+  await expect(rightNow(page).getByTestId("right-now-item")).toHaveCount(2);
+  await expect(page.getByTestId("day-call")).toHaveCount(0);
 });
