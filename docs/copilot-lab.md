@@ -5275,7 +5275,10 @@ unexplained moves, at most three (one still inside its five minutes shows
 `move_so_far_pct` with its minutes). With every source read and no item, the
 result says the move is not news-driven by these sources; "headlines only"
 needs the filings and halts read and a headline found; a failed source is
-named and never reads as "no news". Titles and headlines are third-party data. The fixture's
+named and never reads as "no news". `counts` covers every item in the window,
+shown or not. The four reads run side by side under one 7-second deadline
+inside the tool's 10-second timeout; a source still reading by then is
+unavailable and the others stand. Titles and headlines are third-party data. The fixture's
 timeline is marked simulated, and replay refuses it (a live read would mix in
 later filings). Offered to the desk, Telegram, the morning brief, the
 companion, the desk read and research jobs. The prompt reads it before

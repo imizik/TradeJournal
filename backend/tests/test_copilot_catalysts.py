@@ -234,3 +234,30 @@ def test_the_fact_line_names_a_failed_source_and_says_nothing_when_none_was_read
     assert summarize("get_catalysts", one_down) == "Since 11-26 16:00 ET: 0 filings, halts unavailable, 0 headlines"
     all_down = cat.timeline("NBIS", since, now, filings=down, halts=down, headlines=down, bars=None)
     assert summarize("get_catalysts", all_down) is None
+
+
+def test_counts_cover_the_whole_window_not_only_the_items_shown():
+    since, now = _at("2026-11-27T08:00:00"), _at("2026-11-27T10:30:00")
+    filing = {"at": _at("2026-11-27T08:30:00"), "form": "8-K", "kind": "current_report", "title": "8-K", "url": None}
+    heads = [{"at": _at("2026-11-27T09:00:00") + 60 * k, "headline": f"h{k}", "source": "benzinga"} for k in range(cat.MAX_ITEMS)]
+    out = cat.timeline("NBIS", since, now, filings=_ok([filing]), halts=_ok([]), headlines=_ok(heads), bars=None)
+    assert all(i["type"] == "headline" for i in out["items"]) and out["counts"] == {"filing": 1, "halt": 0, "headline": 15}
+    assert summarize("get_catalysts", out) == "Since 11-27 08:00 ET: 1 filing, 0 halts, 15 headlines"
+    assert "note" not in out  # a filing in the window, shown or not, is not "headlines only"
+
+
+def test_a_slow_source_reads_as_unavailable_and_the_rest_still_stand(monkeypatch):
+    import threading
+    from app.engine import chart_calendar as cal
+    release = threading.Event()
+    monkeypatch.setattr(cat, "READ_DEADLINE", 0.2)
+    monkeypatch.setattr(cal.chart_calendar, "hours", lambda d: None)
+    monkeypatch.setattr(cat, "live_filings", lambda s: (release.wait(5), _ok([]))[1])  # a cold SEC ticker list
+    monkeypatch.setattr(cat, "live_halts", lambda s: _ok([]))
+    monkeypatch.setattr(cat, "live_headlines", lambda s, since: _ok([]))
+    monkeypatch.setattr(cat, "_bars", lambda s, since, at: None)
+    try:
+        out = cat.live_catalysts("NBIS", datetime(2026, 11, 27, 15, 0, tzinfo=ET))
+    finally:
+        release.set()
+    assert out["sources"] == {"sec_filings": "unavailable: did not answer in time", "halts": "ok", "headlines": "ok"}

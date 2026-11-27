@@ -41,6 +41,7 @@ HALTS_URL = "https://www.nasdaqtrader.com/rss.aspx?feed=tradehalts"
 SEC_TTL = 60.0
 HALTS_TTL = 60.0  # Nasdaq Trader asks for at most one read a minute
 TIMEOUT = 8.0
+READ_DEADLINE = 7.0  # all four reads, inside the copilot's 10 s tool timeout
 MAX_ITEMS = 15
 MAX_UNEXPLAINED = 3
 REACTION_MINUTES = 15
@@ -240,6 +241,7 @@ def timeline(symbol: str, since: float, now: float, *, filings: dict, halts: dic
                for name, src in (("sec_filings", filings), ("halts", halts), ("headlines", headlines))}
     primary = [i for i in in_window if i["type"] in ("filing", "halt")]
     out = {"symbol": symbol, "state": "ok", "since": _clock(since), "as_of": _clock(now), "sources": sources,
+           "counts": {t: sum(1 for i in in_window if i["type"] == t) for t in ("filing", "halt", "headline")},
            "items": [{**i, "at": _clock(i["at"])} for i in items],
            "unexplained_moves": [{**s, "at": _clock(s["at"])} for s in sharp],
            "minute_bars": "ok" if bars else "unavailable"}
@@ -358,15 +360,23 @@ def _bars(symbol: str, since: float, now: float) -> list[dict] | None:
 
 
 def live_catalysts(symbol: str, now: datetime) -> dict:
+    """The four reads side by side under one deadline inside the tool's own timeout: a source that has not answered by
+    then reads as unavailable and never costs the others their results."""
     from app.engine.chart_calendar import chart_calendar
-    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor, wait
     at = now.timestamp()
     since = last_close(at, chart_calendar.hours)
-    with ThreadPoolExecutor(max_workers=4) as pool:  # four independent reads side by side, inside the tool's timeout
-        filings, halts = pool.submit(live_filings, symbol), pool.submit(live_halts, symbol)
-        headlines, bars = pool.submit(live_headlines, symbol, since), pool.submit(_bars, symbol, since, at)
-        return timeline(symbol, since, at, filings=filings.result(), halts=halts.result(),
-                        headlines=headlines.result(), bars=bars.result())
+    pool = ThreadPoolExecutor(max_workers=4)
+    jobs = {"filings": pool.submit(live_filings, symbol), "halts": pool.submit(live_halts, symbol),
+            "headlines": pool.submit(live_headlines, symbol, since), "bars": pool.submit(_bars, symbol, since, at)}
+    done, _ = wait(jobs.values(), timeout=READ_DEADLINE)
+    pool.shutdown(wait=False, cancel_futures=True)  # a slow read finishes on its own; its cache still fills
+    late = {"state": "unavailable", "reason": "did not answer in time"}
+
+    def got(name: str, fallback):
+        return jobs[name].result() if jobs[name] in done else fallback
+    return timeline(symbol, since, at, filings=got("filings", late), halts=got("halts", late),
+                    headlines=got("headlines", late), bars=got("bars", None))
 
 
 def fixture_catalysts(symbol: str, now: datetime) -> dict:
