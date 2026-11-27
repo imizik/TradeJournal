@@ -115,6 +115,10 @@ class FixtureEvidence:
         from app.ai import copilot_catalysts
         return copilot_catalysts.fixture_catalysts(symbol, datetime.fromisoformat(AT.replace("Z", "+00:00")))
 
+    def get_fact_sheet(self, symbol: str) -> dict:
+        from app.ai import copilot_fact_sheet
+        return copilot_fact_sheet.fixture_sheet(self, symbol, datetime.fromisoformat(AT.replace("Z", "+00:00")))
+
     def get_positioning(self, symbol: str = "SPY") -> dict:
         from app.ai import copilot_breadth
         return copilot_breadth.fixture_positioning(symbol)

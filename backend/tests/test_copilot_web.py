@@ -296,7 +296,8 @@ def test_plan_and_review_turns_get_more_room_than_an_ordinary_question():
     assert copilot.turn_cap(_cfg(model="claude-fable-5-2"), web=False, deep=True) == pytest.approx(1.00)
     assert copilot.turn_cap(_cfg(model="claude-opus-5-5"), web=True, deep=True) == pytest.approx(0.65)
     assert copilot.DEEP_JOBS == {"companion", "week_review"}
-    assert copilot.DEEP_TOOLS == {"get_trade_review", "get_week_review", "get_level_history", "get_option_candidates"}
+    assert copilot.DEEP_TOOLS == {"get_trade_review", "get_week_review", "get_level_history", "get_option_candidates",
+                                  "get_fact_sheet"}
 
 
 def _spend(read, text="Answer.", tokens=30_000, **kw):

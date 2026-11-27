@@ -1830,7 +1830,7 @@ WEB_BLOCKED_DOMAINS = ("fool.com", "investorplace.com", "zacks.com", "247wallst.
 # has asked for one of these reads, gets the turn budget times this (twice: $0.50 at the default). Other turns keep it.
 DEEP_TURN_FACTOR = 2.0
 DEEP_JOBS = frozenset({copilot_prompt.COMPANION, copilot_prompt.WEEK_REVIEW})
-DEEP_TOOLS = frozenset({"get_trade_review", "get_week_review", "get_level_history", "get_option_candidates"})
+DEEP_TOOLS = frozenset({"get_trade_review", "get_week_review", "get_level_history", "get_option_candidates", "get_fact_sheet"})
 
 
 def turn_cap(cfg: Settings, web: bool, deep: bool = False) -> float:

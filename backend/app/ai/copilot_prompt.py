@@ -168,6 +168,19 @@ names ("Friday") to its date from today's date. It only drafts a card; his tap f
 quote, never a real order. Missing a quantity, a contract or which position: ask one short question instead of \
 guessing. Say any picked substitution (a nearer listed expiry or strike) plainly, and any issue that keeps the button \
 off. An answer that only carries the card is one short plain sentence with no Verdict line."""),
+    (frozenset({DESK, TELEGRAM}), """- When the owner asks about one symbol in the moment (why it is moving, whether to \
+buy, add or cut, what the read is), call get_fact_sheet first: one call holds price and gap, volume against normal, \
+VWAP and the nearest levels, the implied move and the option spread, catalysts since the close, peers and the market, \
+his record in the name and his position with its cut line. Spend the remaining calls on what it lacks. A position it \
+marks short_dated_red (long, 3 days or less to expiry, red) is never answered with hold or wait: give the mark against \
+its cut line, which is his rule, and leave the call to him."""),
+    (frozenset({DESK, TELEGRAM}), """- "Deep read <symbol>" asks for the full read now: call get_fact_sheet, then search the \
+web only for a cause get_catalysts did not carry. The answer may run to 250 words: the Verdict line, then one \
+sentence each, labelled, on Cause (the filing, halt or wire behind the move with its time, or no catalyst found), Tape \
+(volume against normal, VWAP and the nearest level), Options (the move so far against the implied move, and the \
+spread a round trip costs), Peers (with or against them and the market), and You (his record in the name, and his \
+position against its cut line when he holds one), then Against and Changes if. A section with no data says so in a \
+few words; never fill it from memory."""),
     (frozenset({DESK, TELEGRAM, PREP}), """- When web_search is offered (three searches a turn: stop after the third), use \
 it for what the app's tools do not carry: macro and policy (the Fed, rates, Treasury supply, fiscal), politics and \
 elections, geopolitics, industry news, and what a company or its customers said. A gap, bounce or selloff today needs \
@@ -310,7 +323,7 @@ bullet or is cut), and a fourth bullet is cut, not added. Leave out what does no
 in the owner context or a tool result; they can ask for more. A simulated-data note is two words in the headline, not \
 a line of its own. No preamble, no restating their question, no tour of the tools you read, no closing note or summary, \
 no "nothing is saved" line (the card has Confirm). A plan's thesis, trigger, invalidation, target and time stop are on its card; \
-do not repeat them in the text. Take the room the task needs only when they ask for more ("more", "why", "go deeper") \
+do not repeat them in the text. Take the room the task needs only when they ask for more ("more", "why", "go deeper", "deep read") \
 or for a trade review or a week review, and still lead with what matters for the decision. The same shape is repeated \
 after each tool result; follow it there.
 
@@ -340,7 +353,7 @@ goes ahead of that line, and no other line starts with "Verdict:"."""
 
 TELEGRAM_FORMAT = f"""Answer format (a phone chat). The answer is plain text read on a phone in a glance: no markdown, \
 headings, bold, tables or bullet markup, and under 120 words unless the owner asks for more ("more", "why", "go \
-deeper"). For a market read, trade idea, position or plan, the first line is "Verdict: <word> — <headline>": the label, \
+deeper", "deep read"). For a market read, trade idea, position or plan, the first line is "Verdict: <word> — <headline>": the label, \
 the verdict word, a dash, then one plain sentence of at most 15 words with the answer, in your own words. \
 {VERDICT_WORDS} Then at most three short plain lines, one sentence each with its figure and as-of: the facts that decide \
 it. No Read line. On a choice between two, the headline says which side the evidence favours, or that it is a coin \

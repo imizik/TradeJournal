@@ -5259,6 +5259,42 @@ prompt says to give the off-hours change with its last trade time and dollar
 volume and never to call a name flat from a regular-session quote off hours.
 Live only; replay and the fixture leave it out. Tests:
 `backend/tests/test_copilot_extended.py`.
+## Fact sheet
+
+`get_fact_sheet(symbol)` (`backend/app/ai/copilot_fact_sheet.py`, added
+2026-11-27) reads one symbol's facts side by side in one call, so a turn's
+four rounds and eight calls go to what it lacks rather than to collecting
+basics. Sections: price, day change and the gap from the prior close (off
+hours, the extended move); volume against normal (the regular session's
+time-of-day relative volume, or before the open the pre-market's volume
+through now's minute against the median of the same minutes in the last five
+sessions, `copilot_extended.premarket_pace`); VWAP, the nearest level each
+side and the ATR from the 5-minute chart context; the implied move from
+`options_feed.forecast` (the at-the-money straddle for the nearest expiry and
+the nearest Friday) with each leg's bid-ask spread as a share of its mid;
+`get_catalysts` counted with its newest filing or halt and newest headline;
+peers up and down with SPY and QQQ; the owner's record in the symbol
+(`get_my_record`); and his open positions in it, a long option the cut-line
+rule covers (`fill_interrupts.cut_line`) with its own trade's cut line (joined
+by trade, so the same contract in two accounts keeps two lines), the mark's
+distance from it and `short_dated_red` when it is 3 days or less to expiry
+and red. The symbol's positions are read ahead of the book's 15-position
+limit; past it, `position_incomplete` says so. At most 6 are shown, those
+past or nearest their cut and short-dated red ones first, with
+`position_omitted` counting the rest, so the sheet fits the 6,000-character
+tool result; positions come right after price. When the chart is the delayed
+Alpaca fallback, a top-level `delayed` names the provider before any number. A section that cannot be read is named in `missing`. It carries the
+owner's book, so it is offered on the desk and Telegram only and never to a
+research job; the fixture's sheet is marked simulated and replay refuses it.
+The reads run side by side under one 8.5-second deadline inside the tool's
+10-second timeout (the implied move waits for the quote's price within it); a
+section still reading then is missing.
+The prompt reads it first for an in-the-moment question about one symbol, and
+never answers a `short_dated_red` position with hold or wait: it gives the
+mark against the cut line and leaves the call to him (the Nov 27 leak replay
+found the plain rule beat model cut-or-hold calls). Tests:
+`backend/tests/test_copilot_fact_sheet.py`.
+
 ## Catalysts
 
 `get_catalysts(symbol)` (`backend/app/ai/copilot_catalysts.py`, added
@@ -5387,7 +5423,12 @@ which investigation was open. No follow-up, plan, decision, memory or
 monitoring is created or linked: a saved card is only a card.
 
 Under each finished answer the desk shows one row: Helped and Didn't as two small icons (named on hover and for a
-screen reader) and, under the last answer, **Research deeper** as a text link. The desk's suggestion chips show only
+screen reader) and, under the last answer, **Deep read** and **Research deeper** as text links. Deep read (on a
+thread with a ticker; above the box before the first answer, with no research queue needed) sends "Deep read <ticker>"
+as the thread's next question: the prompt reads [the fact sheet](#fact-sheet) first, searches the web only for a cause
+`get_catalysts` did not carry, and answers in up to 250 words labelled Cause, Tape, Options, Peers and You, with the
+deep turn's doubled budget once the fact sheet is read (`copilot.DEEP_TOOLS`). Research deeper stays the background
+job for a question that needs minutes of reading (e2e `frontend/e2e/copilot-desk-deep-read.spec.ts`). The desk's suggestion chips show only
 on an empty conversation; after the first answer the same steps (Why is it moving?, What changed since I looked?, What
 does my plan say?, Size it, More) are the thread's ⋯ menu's **Next steps**, beside Close with a lesson.
 A tap chooses, the other switches, the chosen one clears. The saved message

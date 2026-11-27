@@ -179,3 +179,17 @@ def test_a_long_result_sheds_detail_instead_of_being_cut_mid_json(feed):
         seen.add(fitted["extended"].get("trimmed") or fitted["extended"].get("state"))
     assert {"left_out", "previous_session, ranges and the last symbols left out to fit"} <= seen
     assert x.fit({"a": 1}, 10) == {"a": 1}
+
+
+def test_premarket_pace_compares_the_same_minutes_of_past_sessions(feed):
+    WED = date(2026, 11, 4)
+    feed["days"][("NBIS", MON)] = rows(MON, ("07:00", 10.0, 100), ("08:30", 10.0, 900))  # 08:30 is after now's minute
+    feed["days"][("NBIS", TUE)] = rows(TUE, ("07:00", 10.0, 300))
+    for day in (FRI, date(2026, 10, 29), date(2026, 10, 28)):
+        feed["days"][("NBIS", day)] = rows(day, ("05:00", 10.0, 200))
+    feed["days"][("NBIS", WED)] = rows(WED, ("06:00", 11.0, 1000), ("07:30", 11.0, 1000))
+    out = x.premarket_pace("NBIS", at(WED, "08:00"))
+    # Sessions before Wednesday through 08:00, over the weekend: Tue 300, Mon 100, Fri, Thu and Wed 200 each.
+    assert out["state"] == "ok" and out["volume"] == 2000 and out["typical"] == 200 and out["pace_x"] == 10.0
+    assert "last 5 sessions" in out["kind"]
+    assert x.premarket_pace("NBIS", at(WED, "10:00")) is None  # the regular session has its own RVOL
