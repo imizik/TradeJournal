@@ -1,5 +1,5 @@
 """get_fact_sheet: one symbol's price, volume, tape, implied move, catalysts, peers, record and position. Pure; no network."""
-from datetime import date, datetime
+from datetime import datetime
 
 from app.ai import copilot_fact_sheet as fs, copilot_tools
 from app.ai.copilot_fixture import FixtureEvidence
