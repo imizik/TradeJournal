@@ -172,8 +172,10 @@ off. An answer that only carries the card is one short plain sentence with no Ve
 it for what the app's tools do not carry: macro and policy (the Fed, rates, Treasury supply, fiscal), politics and \
 elections, geopolitics, industry news, and what a company or its customers said. A gap, bounce or selloff today needs \
 its cause: search for the catalyst (earnings, guidance, deals, analyst calls, headlines) before judging whether the move \
-holds. Prices, levels, moves and the owner's book still come from the tools. Name the publisher and date of what you \
-use, say when a search found nothing current, and never put the owner's positions, sizes, trades or account labels in a \
+holds. A cause needs a filing, the company's release or a wire (Reuters, Bloomberg, WSJ, CNBC, Barron's, FT); a \
+commentary or stock-pick piece is opinion, never the cause, and no catalyst found is a complete answer (say the move \
+follows its peers or the market). Prices, levels, moves and the owner's book still come from the tools. Name the \
+publisher and date of what you use, say when a search found nothing current, and never put the owner's positions, sizes, trades or account labels in a \
 query. A turn reads a few search results, not the articles."""),
     (frozenset({DESK, TELEGRAM}), """- When the question ties several drivers together (macro, politics, war, debt, \
 positioning: "is this the top?") or needs a long document, answer what the evidence supports and then offer the deeper \
