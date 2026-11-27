@@ -343,3 +343,10 @@ def test_moves_before_a_cut_off_headline_page_are_never_called_unexplained():
     assert summarize("get_catalysts", out) == "Since 11-26 16:00 ET: 0 filings, 0 halts, 20+ headlines"
     whole = cat.timeline("NBIS", since, now, filings=_ok([]), halts=_ok([]), headlines=_ok(later), bars=bars)
     assert len(whole["unexplained_moves"]) == 1 and "headlines_from" not in whole  # a complete feed still judges it
+
+
+def test_an_item_inside_a_minute_measures_exactly_five_minute_bars():
+    start = _at("2026-11-27T09:00:00")
+    flat = _bars(start, 120)
+    assert cat.reaction(flat, start + 3600)["volume_x"] == 1.0
+    assert cat.reaction(flat, start + 3630)["volume_x"] == 1.0  # 10:00:30 counts 10:00-10:04, not six minutes

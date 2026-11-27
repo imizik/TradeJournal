@@ -5267,8 +5267,8 @@ first, at most 15 items:
   move before that time is called unexplained.
 
 Each item carries the tape's reaction from the chart feed's minute bars
-(Tradier time and sales, extended hours), measured by the clock: the move to
-the last close inside the next 15 minutes and those 5 minutes' volume (a
+(Tradier time and sales, extended hours), measured by the clock in whole minutes from the minute the item landed in: the
+move to the last close inside the next 15 minutes and the first 5 minute bars' volume (a
 minute with no trade counts as none) against the median minute of the hour
 before. A window the bars have not reached yet gives `move_so_far_pct` with
 its minutes instead, and no volume ratio; an overnight gap never stretches a

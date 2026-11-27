@@ -175,16 +175,17 @@ def reaction(bars: list[dict], at: float) -> dict | None:
         return None
     before = bars[i - 1]["close"]
     out: dict = {"move_15m_pct": None, "volume_x": None}
-    after = [b for b in bars[i:] if b["time"] < at + REACTION_MINUTES * 60]
+    start = at - at % 60  # windows run in whole minutes from the minute the item landed in
+    after = [b for b in bars[i:] if b["time"] < start + REACTION_MINUTES * 60]
     seen_until = bars[-1]["time"] + 60  # the end of the last minute the bars hold
-    if after and seen_until >= at + REACTION_MINUTES * 60:
+    if after and seen_until >= start + REACTION_MINUTES * 60:
         out["move_15m_pct"] = _pct(after[-1]["close"], before)
     elif after:
         out["move_so_far_pct"] = _pct(after[-1]["close"], before)
-        out["minutes_so_far"] = max(1, int((seen_until - at) // 60))
+        out["minutes_so_far"] = max(1, int((seen_until - start) // 60))
     typical = _baseline(bars, i, at)
-    if typical and seen_until >= at + BURST_MINUTES * 60:
-        burst = sum(b["volume"] for b in after if b["time"] < at + BURST_MINUTES * 60)
+    if typical and seen_until >= start + BURST_MINUTES * 60:
+        burst = sum(b["volume"] for b in after if b["time"] < start + BURST_MINUTES * 60)  # exactly five minute bars
         out["volume_x"] = round(burst / (BURST_MINUTES * typical), 1)
     return out
 
