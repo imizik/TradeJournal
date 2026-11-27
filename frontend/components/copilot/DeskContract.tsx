@@ -38,6 +38,8 @@ export type HeldContract = {
   /** The book's P&L terms (``book.tick``): cost a contract, contracts, side. */
   cost: number; quantity: number; sign: 1 | -1; scale: number;
   orders: DeskOrder[];
+  /** His cut line, a share's premium (``book.cut_line`` / 100); null where the rule does not apply. */
+  cut?: number | null;
 };
 
 /** The selected row as a held single-leg option the Contract view can draw, or null: a stock, a row without the book's
@@ -49,7 +51,8 @@ export function heldContract(row: DeskThread | null | undefined, rows: readonly 
   if (legs.some(r => r.book?.option?.direction !== option.direction)) return null;
   const what = row.instrument && row.instrument !== row.symbol ? row.instrument : row.title;
   return { occ: tick.quote, symbol: row.symbol, label: what.startsWith(`${row.symbol} `) ? what : `${row.symbol} ${what}`,
-    cost: tick.cost, quantity: tick.quantity, sign: tick.sign, scale: tick.scale, orders: book.orders ?? NO_ORDERS };
+    cost: tick.cost, quantity: tick.quantity, sign: tick.sign, scale: tick.scale, orders: book.orders ?? NO_ORDERS,
+    cut: book.cut_line != null && book.cut_line > 0 ? book.cut_line / 100 : null };
 }
 
 /** His P&L in dollars at a per-share premium, by the book's own formula (``tickedBook``). */

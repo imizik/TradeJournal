@@ -902,7 +902,7 @@ export const importWatchLists = (lists: string[]) => watchCall<WatchImported>("/
 
 /** One thing waiting on the owner's decision now, for the strip: ``rank`` is its place in the strip's order
  * (``deskNeeds``); ``at`` (epoch seconds) is when it started, when known. */
-export type DeskNeedKind = "alert" | "level" | "card" | "expiring" | "fill";
+export type DeskNeedKind = "cut" | "alert" | "level" | "card" | "expiring" | "fill";
 export type DeskNeed = { key: string; kind: DeskNeedKind; rank: number; symbol: string | null; title: string; detail: string | null;
   row: DeskThread | null; at: number | null };
 
@@ -930,9 +930,11 @@ const nyClock = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString
  * Within a rank the thread list's order holds. An item about a ticker the owner opened today (``opened``: symbol to
  * epoch seconds of the latest open) clears itself: an alert or a level hit before that open, anything else for the day.
  */
-export function deskNeeds({ rows, alerts = [], plans = [], day, closing, fills, opened = {} }: {
+export function deskNeeds({ rows, alerts = [], plans = [], day, closing, fills, opened = {}, pastCut = {} }: {
   rows: DeskThread[]; alerts?: DeskAlertToAnswer[]; plans?: DeskPlan[]; day: string; closing: boolean; fills: number;
   opened?: Readonly<Record<string, number>>;
+  /** Positions trading at or under his cut line now: row key to the price a share (the desk's live prices decide it). */
+  pastCut?: Readonly<Record<string, number>>;
 }): DeskNeed[] {
   const followed = rows.filter(r => r.symbol && !r.hidden && r.group !== "pinned" && !r.key.startsWith("radar:"));
   const hidden = new Set(rows.filter(r => r.hidden && r.symbol).map(r => r.symbol!));
@@ -945,7 +947,19 @@ export function deskNeeds({ rows, alerts = [], plans = [], day, closing, fills, 
   const add = (need: DeskNeed) => { if (!seen.has(need.key) && !cleared(need)) { seen.add(need.key); needs.push(need); } };
   const positionOf = (symbol: string, tradeId?: string) =>
     followed.find(r => tradeId && r.key === `trade:${tradeId}`) ?? followed.find(r => r.symbol === symbol && r.book) ?? followed.find(r => r.symbol === symbol) ?? null;
+  // First of all, a position past his cut line (2026-11-27: the leak replay found the plain cut rule beat the copilot's
+  // calls). Opening the ticker does not clear it: only the price back over the line, or the position closed, does.
+  const cutKeys = new Set<string>();
+  for (const row of followed) {
+    const now = pastCut[row.key];
+    if (now === undefined || row.book?.cut_line == null) continue;
+    cutKeys.add(row.key);
+    needs.push({ key: `cut:${row.key}`, kind: "cut", rank: 0, symbol: row.symbol, row, at: null,
+      title: `${row.title}: past your cut line $${(row.book.cut_line / 100).toFixed(2)} · now $${now.toFixed(2)}`, detail: null });
+    seen.add(`cut:${row.key}`);
+  }
   for (const alert of alerts) {
+    if (cutKeys.has(positionOf(alert.symbol, alert.trade_id)?.key ?? "")) continue; // the cut line says more than the alert
     if (!alert.today || alert.feedback || EXPIRY_ALERTS.has(alert.kind) || hidden.has(alert.symbol)) continue; // answered: decided
     const row = positionOf(alert.symbol, alert.trade_id);
     if (!row) continue; // no longer held, or a ticker not followed

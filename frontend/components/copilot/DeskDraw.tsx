@@ -49,7 +49,10 @@ export function itemName(item: PriceLevel | Drawing): string {
  * The symbol's levels and drawings from the shared chart settings, and the edits the desk makes to them: each one an
  * undo step (Charts' ``applyEdit``), saved through the same sync as the workspace's.
  */
-export function useDeskDrawings(symbol: string | null) {
+/** How far from the price now a saved level or drawing still shows on the desk chart when not editing. */
+export const NEAR_REACH = 0.15;
+
+export function useDeskDrawings(symbol: string | null, last: number | null = null) {
   const { settings, setSettings, ready } = useChartSettings(undefined, { borrowed: true });
   const usable = !!symbol && validSymbol(symbol) && !isMacroSymbol(symbol);
   const levels = (usable && settings.levels[symbol!]) || NO_LEVELS;
@@ -131,8 +134,15 @@ export function useDeskDrawings(symbol: string | null) {
     id ? levels.find(row => row.id === id) ?? drawings.find(row => row.id === id) ?? null : null, [levels, drawings]);
 
   const shapes = useMemo(() => deskShapes(levels, drawings, hidden), [levels, drawings, hidden]);
+  // Off editing, only what sits near the price now (``NEAR_REACH``): his live desk stacked six old levels and a pile of
+  // notes far above the price, and squeezed the candles to make room for their labels. Editing shows every one.
+  const nearShapes = useMemo(() => {
+    if (last == null || last <= 0) return shapes;
+    const near = (price: number) => Math.abs(price - last) / last <= NEAR_REACH;
+    return deskShapes(levels.filter(l => near(l.price)), drawings.filter(d => d.points.some(p => near(p.price))), hidden);
+  }, [shapes, levels, drawings, hidden, last]);
   return {
-    ready, usable, levels, drawings, shapes, magnet: settings.magnet, toolStyles: settings.toolStyles, error, setError,
+    ready, usable, levels, drawings, shapes, nearShapes, far: shapes.length - nearShapes.length, magnet: settings.magnet, toolStyles: settings.toolStyles, error, setError,
     addLevel, place, moveLevel, editDrawing, remove, find,
     undo: () => replay("before"), redo: () => replay("after"),
     canUndo: history.undo.length > 0, undoName: history.undo.length ? editName(history.undo.at(-1)!) : null,

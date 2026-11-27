@@ -203,15 +203,16 @@ test("What if…: folded by default and remembered; presets, sliders and the est
   await expect(pane.getByTestId("what-if")).toHaveCount(0);
 });
 
-test("What if… needs an IV: a plain grey line instead, and nothing for one leg of a spread", async ({ page }) => {
+test("What if… needs an IV: nothing without one, and nothing for one leg of a spread", async ({ page }) => {
   await open(page, { orcl: 247, orclMark: 4.1 });
-  // The same ORCL call with no IV in its Greeks: one grey line, no toggle.
+  // The same ORCL call with no IV in its Greeks: no toggle and no "unavailable" line.
   const noIv = structuredClone(THREADS) as { threads: { book: { option: { greeks: { iv: number | null } } } }[] };
   noIv.threads[0].book.option.greeks.iv = null;
   await page.route("**/copilot/desk/threads", route => route.fulfill({ json: noIv }));
   await page.reload();
   await book(page).getByRole("button", { name: "ORCL 11/20/26 250C" }).click();
-  await expect(page.getByTestId("desk-chart").getByTestId("what-if-off")).toHaveText("What if… unavailable: no IV for this contract");
+  await expect(page.getByTestId("desk-chart").getByTestId("option-standing")).toBeVisible();
+  await expect(page.getByTestId("desk-chart").getByTestId("what-if-off")).toHaveCount(0);
   await expect(page.getByTestId("desk-chart").getByTestId("what-if-toggle")).toHaveCount(0);
   await book(page).getByRole("button", { name: "NBIS 11/20/26 100C" }).click();
   await expect(page.getByTestId("desk-chart").getByTestId("what-if-toggle")).toHaveCount(0);

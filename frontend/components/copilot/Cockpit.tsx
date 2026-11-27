@@ -115,7 +115,7 @@ function LiveLine({ live, onRefresh }: { live: DeskLive | null; onRefresh?(): vo
 
 // ------------------------------------------------------------------------------------------------ the strip
 
-type StripAction = { label: string; run(): void; primary?: boolean };
+type StripAction = { label: string; run(): void; primary?: boolean; title?: string };
 
 /**
  * The Needs-you strip: one card for the most urgent decision (``deskNeeds``' order) with its own answers, and "+N more"
@@ -127,16 +127,19 @@ export function NeedsStrip({ needs, actions }: { needs: DeskNeed[]; actions(need
   const [first, ...rest] = needs;
   if (!first) return null;
   const buttons = (need: DeskNeed, small = false) => actions(need).map(b => (
-    <button key={b.label} type="button" onClick={b.run}
+    <button key={b.label} type="button" onClick={b.run} data-testid={b.primary ? "needs-you-primary" : undefined}
       className={cn("inline-flex min-h-11 items-center rounded-md border px-3 text-xs sm:min-h-8", small && "sm:min-h-7 px-2",
-        b.primary && !small ? "border-primary bg-primary font-semibold text-primary-foreground hover:bg-primary/90" : "text-muted-foreground hover:bg-secondary hover:text-foreground")}>
+        b.primary && need.kind === "cut" ? "border-rose-400 bg-rose-500 font-semibold text-white hover:bg-rose-500/90"
+          : b.primary && !small ? "border-primary bg-primary font-semibold text-primary-foreground hover:bg-primary/90" : "text-muted-foreground hover:bg-secondary hover:text-foreground")}
+      title={b.title}>
       {b.label}
     </button>
   ));
   return (
-    <section aria-label="Needs you" data-testid="needs-you" className="rounded-lg border border-primary/45 bg-primary/[0.07] px-3 py-2.5">
+    <section aria-label="Needs you" data-testid="needs-you" data-kind={first.kind}
+      className={cn("rounded-lg border px-3 py-2.5", first.kind === "cut" ? "border-rose-400/70 bg-rose-500/[0.12]" : "border-primary/45 bg-primary/[0.07]")}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className={cn(LABEL, "text-primary")}>Needs you</span>
+        <span className={cn(LABEL, first.kind === "cut" ? "text-rose-300" : "text-primary")}>{first.kind === "cut" ? "Cut line" : "Needs you"}</span>
         <div className="min-w-0 flex-1 basis-60">
           <p data-testid="needs-you-title" className="text-sm font-semibold text-foreground">{first.title}</p>
           {first.detail && <p className="text-xs text-muted-foreground">{first.detail}</p>}
@@ -326,8 +329,12 @@ function ZeroDte({ now }: { now: number }) {
     className={cn("rounded border px-1 font-semibold tabular-nums", left < 60 ? "border-rose-400/70 text-rose-300" : "border-amber-400/60 text-amber-300")}>0DTE · {words}</span>;
 }
 
-/** A long option with no sell-to-close order working (a working buy to open is a scale-in, not an exit), said only when every working order was just read (``orders_read``). */
+/** A long option with no sell-to-close order working (a working buy to open is a scale-in, not an exit), said only when every working order was just read (``orders_read``).
+ * Not on one down 90% or more: nearly nothing is left to protect, and on his live desk the badge sat on every dead
+ * option and drowned out the ones that matter. */
+export const NO_EXIT_FLOOR_PCT = -90;
 export const noExit = (row: DeskThread, read: boolean) => read && row.book?.option?.direction === "long"
+  && !(row.book.pct != null && row.book.pct <= NO_EXIT_FLOOR_PCT)
   && (row.book.live === "matched" || row.book.live === "new") // Robinhood holds it now (not a row its close has yet to reach)
   && !(row.book.orders ?? []).some(o => o.working && /^sell to close$/i.test(o.action));
 
@@ -357,14 +364,18 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
 }) {
   const [failed, setFailed] = useState<string | null>(null);
   const [stocksOpen, setStocksOpen] = useState(false);
+  const [deadOpen, setDeadOpen] = useState(false);
   const held = positionRows(rows);
   const shown = held.filter(r => !r.hidden);
   // Live from Robinhood: options first; a stock without a plan (a long-term holding) waits behind "N stock positions".
   const isLive = liveOn(live);
   // A stock with a Robinhood order working or filled today stays out in the open.
   const folded = isLive ? shown.filter(r => r.instrument === "stock" && !r.book?.planned && !r.book?.orders?.length) : [];
-  const followed = isLive ? [...shown.filter(r => r.instrument !== "stock"), ...shown.filter(r => r.instrument === "stock" && !folded.includes(r)),
-    ...(stocksOpen ? folded : [])] : shown;
+  // An option down 90% or more (``NO_EXIT_FLOOR_PCT``) waits behind one grey "Nearly worthless" line, unless it is the
+  // one picked: on his live desk three dead options filled the top of the book and pushed the live ones down.
+  const dead = shown.filter(r => r.instrument !== "stock" && r.book?.option && r.book.pct != null && r.book.pct <= NO_EXIT_FLOOR_PCT && r.key !== selectedKey);
+  const followed = (isLive ? [...shown.filter(r => r.instrument !== "stock"), ...shown.filter(r => r.instrument === "stock" && !folded.includes(r)),
+    ...(stocksOpen ? folded : [])] : [...shown]).filter(r => deadOpen || !dead.includes(r));
   // The account tag only when the book spans accounts: one account is the top bar's chip, not a word on every row.
   const mixed = new Set(followed.flatMap(r => r.book?.account ? [r.book.account.masked] : [])).size > 1;
   // One row is marked: the one tapped, else the first on the centre's ticker (two contracts can share a ticker).
@@ -496,6 +507,15 @@ export function Book({ rows, sparks, selected, selectedKey = null, day, read, up
           })}
         </ul>
       ) : <p className="border-t px-3 py-2.5 text-xs text-muted-foreground">{!read ? "Reading positions…" : held.length ? "Only positions you don't follow are open." : "No open positions."}</p>}
+      {dead.length > 0 && (
+        <button type="button" aria-expanded={deadOpen} onClick={() => setDeadOpen(open => !open)} data-testid="book-dead"
+          title="Options down 90% or more: little is left to protect"
+          className="flex min-h-11 w-full items-center gap-1.5 border-t px-3 text-left text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">
+          {deadOpen ? "Hide" : <span className="tabular-nums">{dead.length}</span>} nearly worthless
+          {!deadOpen && (() => { const usd = dead.reduce((sum, r) => sum + (r.book?.usd ?? 0), 0); return usd ? <span className="tabular-nums">· {money(usd)}</span> : null; })()}
+          {deadOpen ? " ▴" : " ▾"}
+        </button>
+      )}
       {folded.length > 0 && (
         <button type="button" aria-expanded={stocksOpen} onClick={() => setStocksOpen(open => !open)} data-testid="book-stocks"
           className="flex min-h-11 w-full items-center gap-1 border-t px-3 text-left text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">

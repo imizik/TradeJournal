@@ -157,15 +157,19 @@ export function OptionStanding({ row, rows, fallback = null, levels = {}, earnin
       {s.perDollar !== null && <Fig label="Moves" testId="standing-delta" dim={greeks.stale}>about {dollars(s.perDollar, true)} per $1 up in {row.symbol}</Fig>}
       {s.ivPct !== null && <Fig label="IV" testId="standing-iv" dim={greeks.stale}>{s.ivPct.toFixed(0)}%</Fig>}
       {s.curve && s.breakEven !== null && stock && <ExpiryLine curve={s.curve} now={stock.last} breakEven={s.breakEven} dim={dim} />}
-      <span data-testid="standing-greeks" className={cn("text-[11px]", greeks.stale ? "text-muted-foreground/70" : "text-muted-foreground")}>
-        {missing.length === 3 ? "Greeks unavailable" : missing.length ? `${greeks.text} · ${missing.join(", ")} unavailable` : greeks.text}
-      </span>
-      {what && ("reason" in what
-        ? <span data-testid="what-if-off" className="text-[11px] text-muted-foreground">What if… unavailable: {what.reason}</span>
-        : <button type="button" data-testid="what-if-toggle" aria-expanded={open} onClick={() => setOpen(!open)}
+      {/* With no Greeks at all, and with no What if (no IV, no price), nothing: two grey "unavailable" lines under every
+          position read as clutter to both desk reviews (2026-11-27). A partial set still names what is missing. */}
+      {missing.length < 3 && (
+        <span data-testid="standing-greeks" className={cn("text-[11px]", greeks.stale ? "text-muted-foreground/70" : "text-muted-foreground")}>
+          {missing.length ? `${greeks.text} · ${missing.join(", ")} unavailable` : greeks.text}
+        </span>
+      )}
+      {what && !("reason" in what) && (
+        <button type="button" data-testid="what-if-toggle" aria-expanded={open} onClick={() => setOpen(!open)}
             className="min-h-11 rounded px-1 text-[11px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground sm:min-h-0">
             What if…{open ? " ▴" : " ▾"}
-          </button>)}
+          </button>
+      )}
     </div>
     {open && what && !("reason" in what) && (
       <OptionWhatIf key={`${row.key}:${read.terms.strike}:${read.terms.expiry}`} model={what} symbol={row.symbol ?? ""}

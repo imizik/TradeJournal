@@ -8,7 +8,7 @@
  */
 
 import { useState, useSyncExternalStore, type ReactNode } from "react";
-import { LABEL, LIVE_WORDS, bookTag, pastCut, positionRows, tone } from "@/components/copilot/Cockpit";
+import { LABEL, LIVE_WORDS, bookTag, positionRows, tone } from "@/components/copilot/Cockpit";
 import { tickedAccount } from "@/components/copilot/DeskAccounts";
 import { Line } from "@/components/copilot/DeskOrders";
 import ModeMark from "@/components/copilot/ModeMark";
@@ -49,7 +49,7 @@ export function bookRead(rows: DeskThread[], live: DeskLive | null, ticks: Retur
     open: open.length,
     pnl: pnl.length ? Math.round(pnl.reduce((a, b) => a + b, 0) * 100) / 100 : null,
     flags: [
-      [open.filter(r => pastCut(r.book, ticks)).length, "past cut line", "past cut line", true],
+      // Past a cut line is the red Cut line strip's, right under this block (2026-11-27): not counted twice.
       [count("Past stop"), "past stop", "past stop", true],
       [count("Near stop"), "near stop", "near stop", true],
       [count("Giving back"), "giving back", "giving back", false],
