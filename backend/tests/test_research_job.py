@@ -101,8 +101,10 @@ def test_only_web_and_lab_tools_with_caps_and_structured_output(saved):
     # or sees the owner's book (positions, trades, memories), which a crafted link could carry out. The chart is market data.
     assert not set(kept_out) & set(offered) and "get_chart_context" in offered
     server = [t for t in req["tools"] if t.get("type", "").startswith("web_")]
-    assert server == [{"type": "web_search_20260209", "name": "web_search", "max_uses": 8},
-                      {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": 10, "max_content_tokens": 20000}]
+    blocked = list(copilot.WEB_BLOCKED_DOMAINS)
+    assert server == [{"type": "web_search_20260209", "name": "web_search", "max_uses": 8, "blocked_domains": blocked},
+                      {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": 10, "max_content_tokens": 20000,
+                       "blocked_domains": blocked}]
     assert not [t for t in req["tools"] if t["name"] in ("Bash", "Read", "Write", "Task")]
     answer_tool = req["tools"][-1]
     assert answer_tool["strict"] is True and answer_tool["input_schema"] == api_runner.api_schema(research_job.ASSESSMENT_SCHEMA)

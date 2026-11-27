@@ -5254,7 +5254,13 @@ evidence, and so does the [morning brief](#pre-market-prep) since 2026-11-03
 week review, the position companion) never do, and neither do replay (the web is hindsight) or the
 fixture. `copilot.run_turn(..., web=True)` adds Anthropic's server-side
 `web_search` tool (`web_search_20260209`) once a round may call tools, with
-`max_uses` set to `copilot.WEB_SEARCHES` (3). Once offered it stays in every
+`max_uses` set to `copilot.WEB_SEARCHES` (3) and `blocked_domains` set to
+`copilot.WEB_BLOCKED_DOMAINS`: opinion, stock-pick and repost sites (Motley
+Fool, Zacks, InvestorPlace, Seeking Alpha, Yahoo Finance, Nasdaq.com and
+similar), which an open search ranked first. Research jobs block the same list
+on search and fetch. The prompts add that a move's cause needs a filing, the
+company's release or a wire, that commentary is opinion and never the cause,
+and that "no catalyst found" is a complete answer. Once offered it stays in every
 later round, the last included, and byte for byte the same: a search's result
 (and its code-execution filtering) can arrive a round later, and the API binds
 each thinking block to the tools it was written under, so a later round whose

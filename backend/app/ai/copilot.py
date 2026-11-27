@@ -1816,6 +1816,13 @@ WEB_SEARCH_TOOL = "web_search_20260209"
 WEB_LINKS = 8
 WEB_SEARCH_USD = 0.01  # per search, as api_runner prices it
 WEB_TURN_EXTRA_USD = 0.15  # a turn that may search reads pages of results: its cap is the turn budget plus this
+# Sites whose market pages are opinion, listicles or reposts of them: an open search ranked them first (a Motley Fool
+# piece and an aggregator's summary were a research job's two citations on 2026-11-27). Wires, company releases,
+# filings and the major financial press stay reachable. Subdomains are covered; the API takes at most 64 names.
+WEB_BLOCKED_DOMAINS = ("fool.com", "investorplace.com", "zacks.com", "247wallst.com", "seekingalpha.com",
+                       "marketbeat.com", "tipranks.com", "insidermonkey.com", "gurufocus.com", "simplywall.st",
+                       "finance.yahoo.com", "nasdaq.com", "thestreet.com", "barchart.com", "kiplinger.com",
+                       "fiscal.ai", "ainvest.com", "stocktwits.com", "msn.com", "aol.com")
 
 
 # Plan and review turns read more before they answer (a plan's level history and option candidates, a trade or week review):
@@ -1841,7 +1848,8 @@ def web_tool() -> list[dict]:
     block to the tools it was written under, so a later round that drops the tool or changes its ``max_uses`` is
     refused with a 400. ``max_uses`` is per request; the prompt's three-a-turn rule, the turn's rounds and its spend cap
     bound the rest."""
-    return [{"type": WEB_SEARCH_TOOL, "name": "web_search", "max_uses": WEB_SEARCHES}]
+    return [{"type": WEB_SEARCH_TOOL, "name": "web_search", "max_uses": WEB_SEARCHES,
+             "blocked_domains": list(WEB_BLOCKED_DOMAINS)}]
 
 
 def _host(url: str) -> str:

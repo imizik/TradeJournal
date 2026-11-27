@@ -54,7 +54,11 @@ def turn(adapter, evidence=None, cfg=None, web=True):
 def test_a_live_api_turn_offers_three_searches():
     adapter = Rounds((search(0) + search(1, "midterm polls"), "end_turn"), ([{"type": "text", "text": "Answer."}], "end_turn"))
     events = turn(adapter)
-    assert adapter.offered[0] == [{"type": copilot.WEB_SEARCH_TOOL, "name": "web_search", "max_uses": 3}]
+    assert adapter.offered[0] == [{"type": copilot.WEB_SEARCH_TOOL, "name": "web_search", "max_uses": 3,
+                                   "blocked_domains": list(copilot.WEB_BLOCKED_DOMAINS)}]
+    # Opinion and repost sites stay out of every search; the API takes 1-64 plain hostnames.
+    assert "fool.com" in copilot.WEB_BLOCKED_DOMAINS and 1 <= len(copilot.WEB_BLOCKED_DOMAINS) <= 64
+    assert all("/" not in d and "." in d for d in copilot.WEB_BLOCKED_DOMAINS)
     rows = [e for e in events if e["type"] == "tool" and e["name"] == "web_search"]
     assert [r["input"] for r in rows] == [{"query": "fed rate cut odds december"}, {"query": "midterm polls"}]
     first = rows[0]
@@ -189,7 +193,7 @@ def test_the_api_request_sends_a_server_tool_as_is():
     adapter = copilot.AnthropicAdapter(_cfg(backend="anthropic", key_configured=True), client=object())
     kwargs = adapter.request("s", [], copilot_tools.TOOLS[:1] + copilot.web_tool(), True)
     assert kwargs["tools"][0]["eager_input_streaming"] is True
-    assert kwargs["tools"][1] == {"type": copilot.WEB_SEARCH_TOOL, "name": "web_search", "max_uses": 3}
+    assert kwargs["tools"][1] == copilot.web_tool()[0]
 
 
 def test_research_now_is_a_revisit_due_today():
