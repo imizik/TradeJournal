@@ -77,9 +77,15 @@ CUTOFF = datetime(2026, 10, 9, 10, 20)
 IDEA = {"ticker": "SPY", "side": "long"}
 
 
-def test_extended_entry_shows_the_chase_record_and_a_fresh_reclaim_shows_the_reclaim_record():
+def test_extended_entry_shows_the_price_measured_chase_record_and_a_fresh_reclaim_shows_the_reclaim_record():
     rows = [_hist(i, -300.0) for i in range(10)] + [_hist(10 + i, 200.0) for i in range(9)]
     rows.append(_hist(99, -5000.0, closed="2026-10-10T11:00:00"))  # closed after the check: never counted
+    # The chase record comes from the fill-time price flag, not the hindsight tag: entries 0-1 were tagged chases
+    # but were not chase-shaped at the fill; 10-17 were winners the tags never called chases.
+    for row in rows:
+        i = int(row["source_fill_key"], 16)
+        row["chase"] = 2 <= i < 18 or i == 99
+    rows.append({**_hist(50, 900.0), "chase": None})  # no fill context: in neither group
     tags = ([_tag(i, "momentum_chase") for i in range(5)] + [_tag(5 + i, "breakout", mistakes=["chased_extended_entry"])
             for i in range(5)] + [_tag(10 + i, "vwap_reclaim") for i in range(9)] + [_tag(99, "momentum_chase")])
     extended = {"data": {"market_state": "rth", "intraday": {"price_vs_vwap_pct": 3.1, "price": 103.1, "vwap": 100.0,
@@ -88,8 +94,10 @@ def test_extended_entry_shows_the_chase_record_and_a_fresh_reclaim_shows_the_rec
     assert card["matched_setup"] == "momentum_chase" and card["stated_record"]["trades"] == 5
     assert card["lines"][0] == "You called this momentum_chase: your 5 trades tagged momentum_chase lost $1,500 (0 won)."
     chase = next(read for read in card["reads"] if read["read"] == "extended_like_a_chase")
-    assert chase["trades"] == 10 and chase["total_pnl"] == -3000.0 and chase["enough"] is True
-    assert card["lines"][1].startswith("Price is 3.1% past VWAP, the shape of a chase: your 10 trades tagged as a chase lost $3,000")
+    assert (chase["trades"], chase["wins"], chase["total_pnl"], chase["enough"]) == (16, 8, -800.0, True)
+    assert (chase["rest"]["trades"], chase["rest"]["wins"], chase["measured"]) == (3, 1, "price_at_fill")
+    assert card["lines"][1] == ("Price is 3.1% past VWAP. Measured from prices at the fill, your 16 chase-shaped entries "
+                                "won 50% (-$800); your other entries won 33%.")
     assert card["similar"][0]["setup"] == "momentum_chase" and card["similar"][0]["trades"] == 3
     assert [item["setup"] for item in card["setups"]] == ["breakout", "momentum_chase", "vwap_reclaim"]
     assert card["tagged_trades"] == 19

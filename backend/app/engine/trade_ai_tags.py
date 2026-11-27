@@ -118,6 +118,14 @@ def _record(trades: list[tuple[dict, dict]]) -> dict:
     return out
 
 
+def _price_record(rows: list[dict]) -> dict:
+    """Count, wins and dollars of history rows alone (no tags)."""
+    pnl = [row["realized_pnl"] for row in rows]
+    wins = sum(1 for v in pnl if v > 0)
+    return {"trades": len(rows), "enough": len(rows) >= MIN_TAGGED, "total_pnl": round(sum(pnl), 2), "wins": wins,
+            "win_rate": round(wins / len(pnl), 3) if pnl else None}
+
+
 def _dollars(value: float) -> str:
     return f"-${-value:,.0f}" if value < 0 else f"+${value:,.0f}"
 
@@ -158,10 +166,11 @@ def match_setup(stated: Optional[str], known: Iterable[str]) -> Optional[str]:
 def pretrade_setup_record(idea: dict, analysis: dict, rows: Iterable[dict], tags: Optional[Iterable[dict]],
                           cutoff_ny: datetime, similar_keys: Iterable[str], stated: Optional[str] = None) -> dict:
     """His tagged record for the entry being checked: the setup he names (or the no-setup record when he names
-    none), what the live tape looks like (extended past VWAP like a chase, or a fresh VWAP reclaim) and how his
-    similar entries were tagged. Context beside the rules verdict; it never changes it."""
+    none), what the live tape looks like (extended past VWAP, with his price-measured chase record, or a fresh VWAP
+    reclaim) and how his similar entries were tagged. Context beside the rules verdict; it never changes it."""
     if tags is None:
         return {"available": False, "lines": [], "note": "trade tags are not published yet; nothing was invented"}
+    rows = list(rows)
     tagged = tagged_history(rows, tags, cutoff_ny)
     table = setups(tagged)
     lines, reads = [], []
@@ -187,12 +196,17 @@ def pretrade_setup_record(idea: dict, analysis: dict, rows: Iterable[dict], tags
     long = idea["side"] != "short"
     vs_vwap, price, vwap, prev = (intraday.get(k) for k in ("price_vs_vwap_pct", "price", "vwap", "prev_bar_close"))
     if vs_vwap is not None and (vs_vwap if long else -vs_vwap) >= EXTENDED_PCT:
-        chased = [(row, tag) for row, tag in tagged if _is_chase(tag)]
-        record = _record(chased)
-        reads.append({"read": "extended_like_a_chase", "beyond_vwap_pct": round(abs(vs_vwap), 2), **record})
-        if chased:
-            lines.append(f"Price is {abs(vs_vwap):.1f}% past VWAP, the shape of a chase: your "
-                         f"{_said('as a chase', record)}.")
+        # Measured from prices at each past fill (FillMarketContext.is_chase_entry), not the after-the-fact chase
+        # tag: that tag mostly marked losers (scripts/chase_check.py, Nov 2026), so it overstated the warning.
+        before = [row for row in rows if row.get("chase") is not None and row["realized_pnl"] is not None
+                  and datetime.fromisoformat(row["closed_at"]) < cutoff_ny]
+        chased, rest = _price_record([r for r in before if r["chase"]]), _price_record([r for r in before if not r["chase"]])
+        reads.append({"read": "extended_like_a_chase", "beyond_vwap_pct": round(abs(vs_vwap), 2), "measured": "price_at_fill",
+                      **chased, "rest": rest})
+        if chased["enough"] and rest["trades"]:
+            lines.append(f"Price is {abs(vs_vwap):.1f}% past VWAP. Measured from prices at the fill, your "
+                         f"{chased['trades']} chase-shaped entries won {chased['win_rate']:.0%} ({_dollars(chased['total_pnl'])}); "
+                         f"your other entries won {rest['win_rate']:.0%}.")
     if None not in (price, vwap, prev) and (prev < vwap < price if long else prev > vwap > price):
         reclaims = [(row, tag) for row, tag in tagged if "reclaim" in tag["setup"]]
         record = _record(reclaims)

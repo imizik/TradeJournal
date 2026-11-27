@@ -1,8 +1,8 @@
 """Do extended entries really do worse? A read-only check of the "chasing" tag against prices.
 
-The pre-trade check says "Price is X% past VWAP, the shape of a chase" and quotes the record of trades a model tagged
-as chases after the fact (``trade_ai_tags.pretrade_setup_record``). That record is hindsight: a losing trade is easier
-to call a chase. This measures the same thing from prices instead. For each closed long option trade (entries all
+The pre-trade check used to say "Price is X% past VWAP, the shape of a chase" and quote the record of trades a model
+tagged as chases after the fact (``trade_ai_tags.pretrade_setup_record``). That record is hindsight: a losing trade is
+easier to call a chase. The Nov 2026 run found exactly that, so the line now quotes the fill-time price flag instead. This measures the same thing from prices instead. For each closed long option trade (entries all
 ``buy_to_open``, Webull left out), the first entry fill's ``FillMarketContext`` (from minute bars at the fill, current ``CONTEXT_VERSION`` only; older
 calculations are counted apart, never mixed in) gives how
 far the stock was past VWAP in the trade's direction (calls above, puts below) and where it sat in the day's range so
