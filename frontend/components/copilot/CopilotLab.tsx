@@ -1312,8 +1312,9 @@ export default function CopilotLab({ link: linkProp = null, close = false, daily
             {!phoneLean && <Fold id="scorecard"><HowImDoing book={paper.book} /></Fold>}
             {/* His rules and goals: one neutral line, outside the paper frame, since they cover real trades too. */}
             {!phoneLean && <RulesAndGoals book={paper.book} />}
-            {/* Practice: his paper book, the QQQ overnight and momentum paper books and Replay, one line each. Never real money. */}
-            {!phoneLean && <Practice on={on} paper={paper} symbol={centreSymbol} review={<PaperReviewCard review={paper.book?.review} onAsk={actions.ask} />} onReplay={() => setReplay(true)}
+            {/* Practice: his paper book, the QQQ overnight and momentum paper books and Replay, one line each. Never real money.
+                On the laptop it is one folded line until opened, so the real book leads the column. */}
+            {!phoneLean && <Practice startOpen={phone} on={on} paper={paper} symbol={centreSymbol} review={<PaperReviewCard review={paper.book?.review} onAsk={actions.ask} />} onReplay={() => setReplay(true)}
               onPick={selectWatched} />}
           </div>
         )}

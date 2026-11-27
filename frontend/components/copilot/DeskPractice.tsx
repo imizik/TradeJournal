@@ -5,7 +5,6 @@ import { useSearchParams } from "next/navigation";
 import { api, type DecisionRecord } from "@/lib/api";
 import { useDeskTicks } from "@/lib/deskTicks";
 import { paperPnl, paperSymbols, type PaperBook, type PaperStats } from "@/lib/paperBook";
-import { cn } from "@/lib/utils";
 import DeskMomentum, { momentumShown, useMomentumBook } from "./DeskMomentum";
 import DeskOvernight, { overnightShown, useOvernightBook } from "./DeskOvernight";
 import DeskPaper from "./DeskPaper";
@@ -236,7 +235,9 @@ function DeskPracticeDecisions({ focusId }: { focusId?: string }) {
  * (``paper``, ``strategy.overnight``, ``strategy.momentum``, ``replay.practice``), so a piece he folded away is still
  * a slim stub here.
  */
-export function Practice({ on, paper, symbol, review, onReplay, onPick }: {
+export function Practice({ on, paper, symbol, review, onReplay, onPick, startOpen = false }: {
+  /** A phone keeps the whole block under More already, so there it starts open. */
+  startOpen?: boolean;
   on: boolean; paper: { book: PaperBook | null; failed: boolean }; symbol: string | null;
   /** The newest Friday paper review, at the top of the paper section. */
   review?: ReactNode;
@@ -256,19 +257,20 @@ export function Practice({ on, paper, symbol, review, onReplay, onPick }: {
   const replay = useReplayPractice();
   const [kept, set, openAll] = useKeptOpen();
   useEffect(() => {
+    // A link into a line opens the block too, whatever he last chose for it.
     if (urlDecision) {
       setDecisionFocus(urlDecision); // eslint-disable-line react-hooks/set-state-in-effect -- preserve focus if CopilotLab updates query params
-      set("saved-decisions", true);
+      openAll(["practice", "practice.risk", "saved-decisions"]);
     }
     if (urlPracticeRun) {
       setPracticeRunFocus(urlPracticeRun);
-      set("daily", true);
+      openAll(["practice", "practice.risk", "daily"]);
     }
     if (window.location.hash === "#scalp-shortlist") {
-      set("scalp", true);
+      openAll(["practice", "practice.risk", "scalp"]);
       requestAnimationFrame(() => document.getElementById("scalp-shortlist")?.scrollIntoView({ block: "nearest" }));
     }
-  }, [urlDecision, urlPracticeRun, set]);
+  }, [urlDecision, urlPracticeRun, openAll]);
   const book = paper.book;
   const positions = book?.positions ?? [];
   const orders = book?.orders ?? [];
@@ -283,11 +285,18 @@ export function Practice({ on, paper, symbol, review, onReplay, onPick }: {
   if (riskWas !== risk) {
     setRiskWas(risk);
     if (riskWas && !risk && isOpen("paper.risk", true)) set("paper", true);
+    if (riskWas && !risk && isOpen("practice.risk", true)) set("practice", true); // and the block around it stays open with it
   }
   useOpenPlace(useCallback((place: DeskPlace) => {
-    if (place === "paper") openAll(["paper", "paper.risk"]);
-    else if (place !== "rules") openAll([place]);
+    if (place === "paper") openAll(["practice", "practice.risk", "paper", "paper.risk"]);
+    else if (place !== "rules") openAll(["practice", "practice.risk", place]);
   }, [openAll]));
+  // On the laptop the whole block is one line until he opens it (November 27, 2026: it took more of the left column
+  // than his real book). Open paper risk, a line he left open, or a link into one shows it without asking.
+  // As the paper line does, his choice while paper risk is open is kept apart from his choice while none is, so folding
+  // it on a quiet day never hides tomorrow's open position.
+  const practiceKey = risk ? "practice.risk" : "practice";
+  const shown = kept[practiceKey] ?? (startOpen || risk || !!urlDecision || !!urlPracticeRun || Object.entries(kept).some(([key, open]) => !key.startsWith("practice") && open));
   const ticks = useDeskTicks(paperSymbols(book?.positions)); // the same prices the paper section asks for: no read of its own
 
   const pnls = positions.map(p => paperPnl(p, ticks)).filter(p => p !== null);
@@ -312,7 +321,14 @@ export function Practice({ on, paper, symbol, review, onReplay, onPick }: {
 
   return (
     <section aria-label="Practice" data-testid="desk-practice" className="rounded-lg border bg-card">
-      <h2 className={cn(LABEL, "px-3 pb-1.5 pt-2")}>Practice<span className="font-normal normal-case tracking-normal"> · not real money</span></h2>
+      <h2 className={LABEL}>
+        <button type="button" data-testid="practice-toggle" aria-expanded={shown} onClick={() => set(practiceKey, !shown)}
+          className="flex min-h-11 w-full items-center px-3 text-left uppercase tracking-wide hover:bg-secondary sm:min-h-8">
+          Practice<span className="font-normal normal-case tracking-normal">&nbsp;· not real money</span>
+          <span aria-hidden className="ml-auto pl-1">{shown ? "▾" : "▸"}</span>
+        </button>
+      </h2>
+      {shown && <>
       <Fold id="paper">
         <Line id="paper" mode="paper" name="Mine" open={isOpen(paperKey, risk)} onToggle={() => set(paperKey, !isOpen(paperKey, risk))}
           section={<DeskPaper book={book} failed={paper.failed} symbol={symbol} top={review} onPick={onPick} />}>{paperWords}</Line>
@@ -371,6 +387,7 @@ export function Practice({ on, paper, symbol, review, onReplay, onPick }: {
         section={<PersonalReplay embedded />}>
         <span>· two frozen moments</span>
       </Line>
+      </>}
     </section>
   );
 }

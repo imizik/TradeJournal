@@ -712,7 +712,10 @@ plus one small one for the book's sparklines (`GET /copilot/desk/sparks`) and on
   carries its mark and opens its full section in place (`DeskPaper`, `DeskOvernight`, `DeskMomentum`,
   `ReplayPractice`); which are open is kept for the browser tab (`sessionStorage` `desk.practice.v1`). The paper line
   opens by itself while a paper position or working paper order exists, and closing it then is kept apart from closing
-  it on a quiet day, so open paper risk never starts hidden. Each line keeps its fold id (`paper`,
+  it on a quiet day, so open paper risk never starts hidden. On the laptop (since 2026-11-27) the whole block is one
+  folded line, "Practice · not real money ▸", until he opens it (`practice-toggle`, kept for the tab under `practice`, or `practice.risk` while paper risk is open,
+  in the same store), so the real book leads the column; open paper risk, a line left open, a link into a line and
+  ⌘K's places open it without asking, and a phone, which already keeps it under More, starts it open. Each line keeps its fold id (`paper`,
   `strategy.overnight`, `strategy.momentum`, `replay.practice`); the rules checklist at entry stays on the paper
   confirm and the Ticket. Reads are unchanged: the lines use the reads their sections already made.
 - **Watching** (`components/copilot/Watching.tsx`, `GET /copilot/desk/watching`, `app/engine/desk_watch.py`), under
@@ -1771,8 +1774,12 @@ the standing (break-even, days left, …) and any working Robinhood order on it.
   again at the new price from a fresh quote (`POST /charts/alerts/{id}/rearm`, the route the copilot's `plan_stop`
   card taps; the alert must still be at the stop the panel shows, a stale quote or a stop already past the price is
   refused) and its target through `PUT /copilot/plans/{investigation_id}/target` (the plan capture's target price, a
-  line with no alert; on the winning side of the stop). A position with no saved plan shows **Plan it** (the plan flow)
-  instead. Nothing is sent to Robinhood.
+  line with no alert; on the winning side of the stop). A position with no plan levels shows no prompt to plan (since
+  2026-11-27): its plan line gives his **cut line** a share and whether the price now is past it or how far above
+  (`book.cut_line`, a short-dated long option only), the time left when the standing does not say it, and **his
+  record in the ticker** ("Your ORCL record 12 closed · 5 won · −$1,240", closed trades in every account from
+  `GET /charts/symbol/{symbol}/you`; nothing with no closed trade or when the read fails). A quiet **Plan it** (the plan
+  flow) ends the button row. Nothing is sent to Robinhood.
 - **Trim** (a count, half by default) and **Close** (all): the Ticket's close-now view at the mark (`closeNowTicket`,
   as the copilot's close and trim cards). A single long call or put the book reads as one leg only.
 - **Roll**: the roll ticket. **Note**: the book row's note line (saved with the trade; it shows under the row at once).
